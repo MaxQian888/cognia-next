@@ -48,6 +48,24 @@ export function capabilityAvailable(
 }
 
 /**
+ * Is this shell currently driving ANOTHER Cognia host?
+ *
+ * Distinct from the host profile, which describes what this shell is. A
+ * desktop is `desktop` whether or not it has taken over a remote host, and
+ * some surfaces care about the difference: anything whose commands are
+ * classified `target: "client"` still runs against the LOCAL process while the
+ * rest of the app is pointed elsewhere, so it has to say so rather than
+ * silently acting on the wrong machine.
+ */
+export function useRemoteHostActive(): boolean {
+  return useSyncExternalStore(
+    (notify) => subscribeActiveRemoteTransport(() => notify()),
+    isRemoteHostActive,
+    () => false
+  )
+}
+
+/**
  * A `capabilityAvailable` closure bound to the current host profile and
  * remote-transport state — for callers that gate on a *set* of capabilities
  * (settings-section reachability) rather than one, without a hook per id.
@@ -56,11 +74,7 @@ export function capabilityAvailable(
  */
 export function useCapabilityChecker(): (cap: CapabilityId) => boolean {
   const profile = useHostProfile()
-  const remoteHostActive = useSyncExternalStore(
-    (notify) => subscribeActiveRemoteTransport(() => notify()),
-    isRemoteHostActive,
-    () => false
-  )
+  const remoteHostActive = useRemoteHostActive()
   return useCallback(
     (cap: CapabilityId) => capabilityAvailable(cap, profile, remoteHostActive),
     [profile, remoteHostActive]

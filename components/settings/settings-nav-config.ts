@@ -522,7 +522,17 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "proIde",
     group: "interface",
     icon: SquareCodeIcon,
-    // code-server is brokered on the execution host (ADR-0088).
+    // Deliberately LOOSER than the section's own gate, and that is the point.
+    //
+    // The card manages the local install, whose four commands are
+    // `target: "client"`, so a companion genuinely cannot drive them. Gating
+    // the nav on that would delete the entry from a paired phone or browser
+    // instead of letting the section say why it is limited there, which is the
+    // exact "hiding collapses three answers into one silence" failure. It also
+    // has to stay reachable for the companion controls that follow: starting
+    // and stopping the HOST's workbench is already remotely reachable
+    // (`codeserver_ensure` / `codeserver_status` / `codeserver_stop` are
+    // `target: "execution"`), it simply has no UI yet.
     requires: ["shell"],
   },
   {

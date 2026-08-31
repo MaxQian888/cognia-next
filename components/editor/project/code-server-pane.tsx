@@ -18,6 +18,7 @@ import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-ed
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
+import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { createCodeServerOpenQueue } from "@/lib/codeserver/open-file-queue"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
@@ -81,6 +82,26 @@ export function CodeServerPane({
   })
   const percent = progress != null ? Math.round(progress * 100) : null
 
+  /**
+   * Whether the workbench on screen is the one this process owns.
+   *
+   * The IDE renders and is fully usable against a remote host: `ensure`,
+   * the opaque relay path and the desktop loopback relay are all remote-aware,
+   * so the user types, saves and runs terminals in the remote workspace.
+   *
+   * The APP-to-IDE half is not. Every `codeserver_agent_*` command, plus
+   * `open_file` and the settings / argv readers and writers, is classified
+   * `target: "client"` in `protocol/companion-commands.json`, so it stays on
+   * the local process no matter which host the rest of the app is driving.
+   * Left running they do not fail loudly: agent drive reaches a local
+   * `CodeServerState` that has no instance for this root and silently does
+   * nothing, and the theme sync rewrites the LOCAL `settings.json` while the
+   * remote workbench keeps stock VS Code colours. Turning them off is the only
+   * honest state until those commands become `execution`-targeted, and
+   * `editor-engine-toggle` says so on screen.
+   */
+  const localWorkbench = !useRemoteHostActive()
+
   const cancelDownload = useCallback(() => {
     // Fire-and-forget: the backend drops the streaming future and deletes the
     // partial archive, and the in-flight `ensure` rejects on its own. Swallow
@@ -91,7 +112,7 @@ export function CodeServerPane({
   // Paint + configure code-server from the app's own appearance and editor
   // preferences. Kept outside the phase gate so the very first spawn already
   // reads a synced settings.json rather than booting stock and repainting.
-  useCodeServerSettingsSync(true, profile)
+  useCodeServerSettingsSync(localWorkbench, profile)
   // Display language is a *runtime argument*, not a setting: it needs argv.json
   // plus a workbench restart (which is also what installs the language pack), so
   // it gets its own sync rather than riding along with the hot-applied ones.
@@ -108,7 +129,7 @@ export function CodeServerPane({
     [t]
   )
   useCodeServerLocaleSync(
-    true,
+    localWorkbench,
     {
       restart: handleLocaleChanged,
       onUntranslated: handleUntranslated,
@@ -117,14 +138,14 @@ export function CodeServerPane({
   )
   // Republish the extension's pushed editor changes as the app's active-editor
   // signal, so "what the user is looking at" stays live without anyone polling.
-  useCodeServerEditorEvents(phase === "ready", root)
+  useCodeServerEditorEvents(phase === "ready" && localWorkbench, root)
   // Bridge the extension's context-menu actions (Add to Chat, Explain, Fix…)
   // into the app's chat composer so they appear as staged context chips.
-  useCodeServerChatBridge(phase === "ready", root)
+  useCodeServerChatBridge(phase === "ready" && localWorkbench, root)
   // Feeds the extension's status bar item and side-bar trees. Gated on the
   // same `ready` phase as the chat bridge: pushing before the workbench is up
   // just fails, and the live queries re-push as soon as it is.
-  useCodeServerWorkspaceSync(phase === "ready", root)
+  useCodeServerWorkspaceSync(phase === "ready" && localWorkbench, root)
   // `ready` only means code-server answers; the native webview lands a beat
   // later. Holding the placeholder until it is actually mounted removes the
   // flash of bare background in between.
@@ -135,7 +156,11 @@ export function CodeServerPane({
   // running" toast for any jump that lands mid-download; the bridge holds a
   // deferred request instead and replays it when we register.
   useEffect(() => {
-    if (phase !== "ready") return
+    // `localWorkbench` for the same reason the sync hooks carry it: registering
+    // as the opener while a remote host is active would accept every jump and
+    // route it into a local instance that has no window for this root, which
+    // reads to the user as the editor ignoring them.
+    if (phase !== "ready" || !localWorkbench) return
     const onError = (cause: unknown) =>
       toast.error(t("proIde.openFileFailed", { error: String(cause) }))
     // Prefer the companion extension: it opens in the live window with no CLI
@@ -211,7 +236,7 @@ export function CodeServerPane({
       openQueue.dispose()
       editQueue.dispose()
     }
-  }, [beforeOpen, phase, root, t])
+  }, [beforeOpen, localWorkbench, phase, root, t])
 
   return (
     <div className="relative h-full w-full overflow-hidden" data-testid="code-server-pane">

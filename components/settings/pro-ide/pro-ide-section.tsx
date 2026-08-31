@@ -27,13 +27,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
+import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import {
   CODESERVER_EVENTS,
   type CodeServerDiskUsage,
   type CodeServerDownloadProgress,
+  type CodeServerStatus,
   codeServerClient,
 } from "@/lib/codeserver/client"
-import { destroyCodeServerPane } from "@/lib/codeserver/pane-manager"
+import { destroyCodeServerPane, getActiveProIdeRoot } from "@/lib/codeserver/pane-manager"
 import { formatBytes } from "@/lib/perf/backend/format"
 import { isTauri } from "@/lib/tauri"
 import { onTauriEvent } from "@/lib/tauri/events"
@@ -43,9 +46,33 @@ type Busy = "download" | "clean" | "uninstall" | null
 
 export function ProIdeSection() {
   const t = useTranslations("settings.proIde")
+  /**
+   * This card manages the LOCAL install: the pinned version, the on-disk
+   * footprint, the pre-fetch, and reclaiming the space afterwards. All four of
+   * its commands are `target: "client"` in `protocol/companion-commands.json`,
+   * so they act on this machine and nowhere else. A paired companion has no
+   * local code-server to manage, which is a different statement from "Pro IDE
+   * is unavailable to you" and the reason this resolves a reach rather than
+   * calling `isTauri()`.
+   *
+   * The settings-nav gate is deliberately looser than this one, so the section
+   * stays reachable and can say the above instead of disappearing.
+   */
+  const reach = useSurfaceReach({ capability: "pro-ide", requirement: "desktop-shell" })
   // Outside the desktop shell there is nothing to probe — settle it up front
   // rather than round-tripping through an effect.
   const [supported, setSupported] = useState<boolean | null>(() => (isTauri() ? null : false))
+  /**
+   * The running instance, if any.
+   *
+   * `codeserver_status` had zero production callers, which is the one entry
+   * from ADR-0088's own "zero callers" list that was never closed. The card
+   * that owns the install is the right place to answer "is it running, and for
+   * which workspace": the process registry shows a child process, but only the
+   * bound root says which workspace the user is looking at.
+   */
+  const [running, setRunning] = useState<CodeServerStatus | null>(null)
+  const [activeRoot, setActiveRoot] = useState<string | null>(null)
   const [usage, setUsage] = useState<CodeServerDiskUsage | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
   const [progress, setProgress] = useState<number | null>(null)
@@ -62,6 +89,13 @@ export function ProIdeSection() {
   const refresh = useCallback(async () => {
     const next = await codeServerClient.diskUsage().catch(() => null)
     setUsage(next)
+    // `getActiveProIdeRoot()` survives a pane release on purpose, so this
+    // answers for the workspace the user last opened even while the editor is
+    // not on screen. A null root simply means nothing has been claimed yet.
+    const root = getActiveProIdeRoot()
+    const status = root ? await codeServerClient.status(root).catch(() => null) : null
+    setActiveRoot(root)
+    setRunning(status?.running ? status : null)
   }, [])
 
   useEffect(() => {
@@ -163,7 +197,26 @@ export function ProIdeSection() {
     })
   }
 
+  if (!reach.available) {
+    // Render, disable, explain. The old branch printed one sentence that said
+    // "unsupported" whether the user was on Windows, on a phone, or in a
+    // browser with nothing paired, which are three different situations with
+    // three different next steps.
+    return (
+      <Card data-testid="pro-ide-unsupported">
+        <CardHeader>
+          <CardTitle>{t("title")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SurfaceUnavailableNotice reach={reach} />
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (supported === false) {
+    // Reachable and still not possible: this IS the desktop, and there is no
+    // prebuilt code-server for its platform or architecture.
     return (
       <Card data-testid="pro-ide-unsupported">
         <CardHeader>
@@ -210,6 +263,19 @@ export function ProIdeSection() {
           <dt className="text-muted-foreground">{t("location")}</dt>
           <dd className="truncate font-mono text-xs" data-testid="pro-ide-root">
             {usage?.root ?? "—"}
+          </dd>
+
+          {/* The install answers "what is on disk". This answers "is any of it
+              running, and for which workspace" — the question the managed-process
+              tab cannot answer, because a child process does not carry a
+              workspace root. */}
+          <dt className="text-muted-foreground">{t("runningLabel")}</dt>
+          <dd className="truncate text-xs" data-testid="pro-ide-running">
+            {running ? (
+              <span className="font-mono">{t("runningFor", { root: activeRoot ?? "" })}</span>
+            ) : (
+              t("runningNone")
+            )}
           </dd>
         </dl>
 

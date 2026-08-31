@@ -80,8 +80,17 @@ WAN 机制的前提下,获得外向"连接远程 Cognia 主机"模式。
    - **远程 external agent** —— `spawn/send/kill/get_external_agent_status` 臂是
      SERVICE_ONLY,device JWT 永不可达。启用它需要一套 service-token 凭据模型
      **以及**无头 external-agent initializer 抽取(ADR-0059)。两者落地前推迟。
-   - **远程 code-server / LSP** —— `codeserver_*` 是 Tauri 命令,且不存在 `lsp_*`
-     companion 臂;把它们提上来是 VS Code Remote-SSH 量级的活。推迟(v3)。
+   - **远程 code-server / LSP** —— code-server 这一半已被推翻。本段写在 relay
+     之前:`codeserver_supported/ensure/status/stop/stop_all` 现在是
+     `target: "execution"`,可经 http、websocket、webrtc 抵达主机;
+     `src-tauri/src/codeserver/remote.rs` 持有主机侧实例,`relay.rs` 与
+     `lib/codeserver/remote-relay.ts` 在它前面架起桌面自己的固定回环 relay。
+     上方的头部修订已经这么写了。仍然推迟的是「应用驱动编辑器」的那一半:
+     所有 `codeserver_agent_*`、`codeserver_open_file` 以及 settings / argv
+     的读写仍是 `target: "client"`,所以接管远程主机时工作台可以照常手工使用,
+     而 Agent 驱动、主题同步与语言同步会主动停下
+     (`components/editor/project/code-server-pane.tsx` 关掉它们,引擎切换器
+     在界面上说明原因)。`lsp_*` companion 臂同样仍不存在。推迟(v3)。
    - **SSH provisioning** —— 自动 provisioning 仍推迟(v3)。下述显式 SSH 终端
      profile 不属于 provisioning。*隐式*建隧道同样仍推迟;§9 中逐条显式启用的
      端口转发恰恰是"隐式"的反面,不构成对本条的推翻。

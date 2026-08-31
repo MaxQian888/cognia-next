@@ -1,9 +1,22 @@
 # Pro IDE — Phase 2: Agent-drive (implemented via shared editor bridge)
 
-Status: **auto-follow and conversation navigation built.** Phase 0/1 (the
-human-usable embedded code-server) and the shared editor-driving path are
-shipped and unit-tested. The custom WebSocket/VSIX sections below remain a
-reference for future generic editor control methods beyond open/reveal.
+Status: **HISTORICAL. Read the code, not this document.** Phase 2 shipped, and
+Phase 3 after it. Two things below are now wrong and are left in place only so
+the reasoning is recoverable:
+
+- The channel is described as a **WebSocket**. It is plain TCP with
+  `Content-Length` framing (`agent_channel.rs`), and ADR-0088's "Alternatives
+  considered" records the change.
+- `applyEdit` and `readActive` are listed under "Deferred extensions". Both
+  shipped: `codeserver_agent_apply_edit` and `codeserver_agent_read_active` in
+  `commands.rs`, alongside seven more `codeserver_agent_*` commands.
+
+One limit is real and current: every `codeserver_agent_*` command is
+`target: "client"` in `protocol/companion-commands.json`, so agent drive acts
+on the LOCAL process. Against a remote host the workbench is fully usable by
+hand while the app-to-editor half stands down, which
+`components/editor/project/code-server-pane.tsx` enforces and the engine toggle
+explains on screen.
 
 > **Implementation update (2026-07-20):** bridge-driven file open/reveal is now
 > built without the custom extension described below. The pinned code-server
@@ -176,7 +189,10 @@ so `applyEdit` / `readActive` can be added later without a protocol change.
 - End-to-end (open+reveal actually happening in code-server) is only verifiable
   in `pnpm tauri dev` — document it as a manual smoke step.
 
-## Deferred extensions (out of scope for this phase)
+## Deferred extensions (out of scope for this phase) — BOTH SHIPPED
+
+> Kept for the reasoning, not the status. See the header: `applyEdit` and
+> `readActive` are both live commands now.
 
 - **Live `applyEdit`**: map the agent's file-write into a VS Code `WorkspaceEdit`
   so edits enter the undo stack / show as live diffs instead of disk reloads.

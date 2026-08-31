@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import {
   CodeIcon,
   ExternalLinkIcon,
+  InfoIcon,
   PuzzleIcon,
   ShieldCheckIcon,
   SquareCodeIcon,
@@ -21,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
+import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 
@@ -93,6 +95,12 @@ export function EditorEngineToggle({
       .openInLocalVsCode(projectRoot)
       .catch((cause) => toast.error(t("proIde.localVsCodeFailed", { error: String(cause) })))
 
+  // Driving a remote host means the workbench on screen belongs to that host,
+  // while every app-to-editor command stays local-only. `CodeServerPane` turns
+  // those off; this is where the user is told, next to the switch that put
+  // them in this state.
+  const remoteWorkbench = useRemoteHostActive() && value === "codeserver" && proIdeSupported
+
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
       <ToggleGroup
@@ -162,6 +170,28 @@ export function EditorEngineToggle({
         )}
       </ToggleGroup>
 
+      {/* An icon chip rather than a paragraph: this row is a tight strip of
+          controls, and a banner here would push the editor down every time the
+          user drives a remote host. The tooltip carries the whole explanation. */}
+      {remoteWorkbench ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex h-7 items-center gap-1 rounded-pill border border-warning/40 bg-warning/10 px-2 text-xs text-muted-foreground"
+                data-testid="pro-ide-remote-workbench"
+              >
+                <InfoIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
+                {t("proIde.remoteWorkbenchLabel")}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-sm">
+              {t("proIde.remoteWorkbenchTooltip")}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : null}
+
       {/* The two profiles are separate processes with separate extension and
           user-data directories, and only the managed one holds Cognia broker
           credentials — so this is a trust-domain switch, not a preference.
@@ -174,7 +204,15 @@ export function EditorEngineToggle({
             type="single"
             value={proIdeProfile}
             onValueChange={(next) => {
-              if (next) onProIdeProfileChange(next as CodeServerProfile)
+              if (!next || next === proIdeProfile) return
+              // The consequence is worth stating at the moment it happens
+              // rather than in a tooltip nobody opens: the two profiles are
+              // separate processes with separate user-data and extension
+              // directories, so switching does not reconfigure the workbench,
+              // it replaces it and leaves the open editors and terminals
+              // behind in the other one.
+              toast.info(t("proIde.profileSwitchRestarts"))
+              onProIdeProfileChange(next as CodeServerProfile)
             }}
             variant="outline"
             size="sm"

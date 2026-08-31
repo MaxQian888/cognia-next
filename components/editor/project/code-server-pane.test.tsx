@@ -17,6 +17,13 @@ jest.mock("@/hooks/codeserver/use-code-server-editor-events", () => ({
 jest.mock("@/hooks/codeserver/use-code-server-chat-bridge", () => ({
   useCodeServerChatBridge: jest.fn(),
 }))
+// Whether this shell is driving another Cognia host. The app-to-editor half of
+// Pro IDE is `target: "client"`, so it stays on THIS machine while the
+// workbench on screen belongs to the remote one.
+let mockRemoteHostActive = false
+jest.mock("@/hooks/use-host-profile", () => ({
+  useRemoteHostActive: () => mockRemoteHostActive,
+}))
 
 const paneState = {
   phase: "starting" as "unsupported" | "starting" | "downloading" | "ready" | "error",
@@ -94,6 +101,10 @@ jest.mock("@/lib/files/project-editor-bridge", () => ({
   },
 }))
 
+import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
+import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
+import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
+import { useCodeServerChatBridge } from "@/hooks/codeserver/use-code-server-chat-bridge"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
 import { CodeServerPane, joinProjectPath } from "./code-server-pane"
 
@@ -481,5 +492,69 @@ describe("bridge capabilities registered once ready", () => {
     renderPane()
 
     expect(registeredOpener).toBeUndefined()
+  })
+})
+
+describe("<CodeServerPane /> against a remote host", () => {
+  const settingsSync = useCodeServerSettingsSync as jest.Mock
+  const localeSync = useCodeServerLocaleSync as jest.Mock
+  const editorEvents = useCodeServerEditorEvents as jest.Mock
+  const chatBridge = useCodeServerChatBridge as jest.Mock
+
+  beforeEach(() => {
+    settingsSync.mockClear()
+    localeSync.mockClear()
+    editorEvents.mockClear()
+    chatBridge.mockClear()
+    registeredOpener = undefined
+  })
+
+  afterEach(() => {
+    mockRemoteHostActive = false
+  })
+
+  it("drives the local workbench when there is no remote host", () => {
+    paneState.phase = "ready"
+    paneState.mounted = true
+    renderPane()
+    expect(settingsSync).toHaveBeenCalledWith(true, "managed")
+    expect(localeSync.mock.calls[0][0]).toBe(true)
+    expect(editorEvents).toHaveBeenCalledWith(true, "/repo")
+    expect(chatBridge).toHaveBeenCalledWith(true, "/repo")
+    expect(registeredOpener).toBeDefined()
+  })
+
+  it("stands down the app-to-editor half while a remote host is active", () => {
+    // Left running, these do not fail loudly. Agent drive reaches a local
+    // `CodeServerState` with no instance for this root and silently does
+    // nothing, and the theme sync repaints the LOCAL settings.json while the
+    // remote workbench keeps stock VS Code colours.
+    mockRemoteHostActive = true
+    paneState.phase = "ready"
+    paneState.mounted = true
+    renderPane()
+    expect(settingsSync).toHaveBeenCalledWith(false, "managed")
+    expect(localeSync.mock.calls[0][0]).toBe(false)
+    expect(editorEvents).toHaveBeenCalledWith(false, "/repo")
+    expect(chatBridge).toHaveBeenCalledWith(false, "/repo")
+  })
+
+  it("does not register as the project-editor opener against a remote host", () => {
+    // Registering would accept every jump and route it into a local instance
+    // that has no window for this root, which reads as the editor ignoring the
+    // user rather than as an error.
+    mockRemoteHostActive = true
+    paneState.phase = "ready"
+    paneState.mounted = true
+    renderPane()
+    expect(registeredOpener).toBeUndefined()
+  })
+
+  it("still renders the workbench region, because the IDE itself works", () => {
+    mockRemoteHostActive = true
+    paneState.phase = "ready"
+    paneState.mounted = true
+    const { container } = renderPane()
+    expect(container.querySelector(`[${PRO_IDE_REGION_ATTR}]`)).not.toBeNull()
   })
 })

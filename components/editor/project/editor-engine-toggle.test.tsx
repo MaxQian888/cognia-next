@@ -4,7 +4,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
-jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn() } }))
+
+// Driving a remote host is a per-test fact: it decides whether the workbench on
+// screen belongs to this machine.
+let mockRemoteHostActive = false
+jest.mock("@/hooks/use-host-profile", () => ({
+  useRemoteHostActive: () => mockRemoteHostActive,
+}))
 
 let mockIsTauri = true
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri }))
@@ -18,7 +25,7 @@ import { EditorEngineToggle } from "./editor-engine-toggle"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
 
 const client = codeServerClient as jest.Mocked<typeof codeServerClient>
-const toasts = toast as unknown as { error: jest.Mock }
+const toasts = toast as unknown as { error: jest.Mock; info: jest.Mock }
 
 const renderToggle = (
   props: Partial<{
@@ -229,5 +236,60 @@ describe("trust-domain profile selector", () => {
     })
     fireEvent.click(screen.getByTestId("pro-ide-profile-native"))
     expect(onProIdeProfileChange).not.toHaveBeenCalled()
+  })
+})
+
+describe("<EditorEngineToggle /> against a remote host", () => {
+  afterEach(() => {
+    mockRemoteHostActive = false
+  })
+
+  it("says the local half is paused while a remote host drives the workbench", () => {
+    // The workbench itself stays usable. What stops is agent drive, theme sync
+    // and locale sync, because those commands are `target: "client"` and would
+    // act on this machine instead of the one on screen.
+    mockRemoteHostActive = true
+    renderToggle({ value: "codeserver" })
+    expect(screen.getByTestId("pro-ide-remote-workbench")).toBeInTheDocument()
+  })
+
+  it("stays quiet when the workbench is this machine's", () => {
+    renderToggle({ value: "codeserver" })
+    expect(screen.queryByTestId("pro-ide-remote-workbench")).not.toBeInTheDocument()
+  })
+
+  it("stays quiet on Monaco, which has no remote workbench to confuse", () => {
+    mockRemoteHostActive = true
+    renderToggle({ value: "monaco" })
+    expect(screen.queryByTestId("pro-ide-remote-workbench")).not.toBeInTheDocument()
+  })
+
+  it("stays quiet where Pro IDE is not supported at all", () => {
+    mockRemoteHostActive = true
+    renderToggle({ value: "codeserver", proIdeSupport: "unsupported" })
+    expect(screen.queryByTestId("pro-ide-remote-workbench")).not.toBeInTheDocument()
+  })
+})
+
+describe("profile switch warning", () => {
+  it("warns that switching replaces the workbench rather than reconfiguring it", () => {
+    // The copy existed in both locales and was rendered nowhere. It belongs at
+    // the moment of the switch, which is when open editors and terminals are
+    // actually left behind.
+    toasts.info.mockClear()
+    const { onProIdeProfileChange } = renderToggle({
+      value: "codeserver",
+      proIdeProfile: "managed",
+    })
+    fireEvent.click(screen.getByTestId("pro-ide-profile-native"))
+    expect(toasts.info).toHaveBeenCalledWith("proIde.profileSwitchRestarts")
+    expect(onProIdeProfileChange).toHaveBeenCalledWith("native")
+  })
+
+  it("does not warn when the click lands on the profile already active", () => {
+    toasts.info.mockClear()
+    renderToggle({ value: "codeserver", proIdeProfile: "native" })
+    fireEvent.click(screen.getByTestId("pro-ide-profile-native"))
+    expect(toasts.info).not.toHaveBeenCalled()
   })
 })

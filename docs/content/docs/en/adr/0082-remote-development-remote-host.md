@@ -102,9 +102,19 @@ the implementation plan):
      arms are SERVICE_ONLY; a device JWT can never reach them. Enabling them
      needs a service-token credential model *and* the headless external-agent
      initializer extraction (ADR-0059). Deferred until both land.
-   - **Remote code-server / LSP** — `codeserver_*` are Tauri commands and no
-     `lsp_*` companion arm exists; promoting them is VS Code Remote-SSH-scale
-     work. Deferred (v3).
+   - **Remote code-server / LSP** — SUPERSEDED for the code-server half. This
+     paragraph predates the relay: `codeserver_supported/ensure/status/stop/
+     stop_all` are `target: "execution"` and reach a host over http, websocket
+     and webrtc, `src-tauri/src/codeserver/remote.rs` owns the host-side
+     instance, and `relay.rs` plus `lib/codeserver/remote-relay.ts` put the
+     desktop's pinned loopback relay in front of it. The header amendment above
+     already says so. What remains deferred is the APP-to-IDE half: every
+     `codeserver_agent_*`, `codeserver_open_file`, and the settings / argv
+     readers and writers are still `target: "client"`, so against a remote host
+     the workbench is fully usable by hand while agent drive, theme sync and
+     locale sync stand down (`components/editor/project/code-server-pane.tsx`
+     turns them off and the engine toggle says why). No `lsp_*` companion arm
+     exists either. Deferred (v3).
    - **SSH provisioning** — automated provisioning remains deferred (v3). The
      explicit SSH terminal profile described below is not a provisioning
      mechanism. *Implicit* tunnel creation stays deferred too; the explicit,

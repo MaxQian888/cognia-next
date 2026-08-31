@@ -25,10 +25,22 @@ jest.mock("@/lib/codeserver/client", () => ({
     download: jest.fn(),
     cancelDownload: jest.fn(),
     uninstall: jest.fn(),
+    status: jest.fn(),
   },
 }))
+let mockActiveRoot: string | null = null
 jest.mock("@/lib/codeserver/pane-manager", () => ({
   destroyCodeServerPane: jest.fn().mockResolvedValue(undefined),
+  getActiveProIdeRoot: () => mockActiveRoot,
+}))
+
+// "Can this card manage an install from here". Desktop by default; the phone
+// and standalone-browser branches are exercised on their own below.
+let mockReach: { available: boolean; block?: string; remedy?: string | null } = {
+  available: true,
+}
+jest.mock("@/hooks/platform/use-surface-reach", () => ({
+  useSurfaceReach: () => mockReach,
 }))
 
 import { type CodeServerInstallInfo, codeServerClient } from "@/lib/codeserver/client"
@@ -51,7 +63,14 @@ const USAGE = {
 
 beforeEach(() => {
   mockIsTauri = true
+  mockReach = { available: true }
+  mockActiveRoot = null
   progressCb = undefined
+  client.status.mockReset().mockResolvedValue({
+    running: false,
+    port: null,
+    version: "4.128.0",
+  })
   client.supported.mockReset().mockResolvedValue(true)
   client.diskUsage.mockReset().mockResolvedValue(USAGE)
   client.download.mockReset().mockResolvedValue({
@@ -229,4 +248,66 @@ it("keeps reporting a genuine pre-fetch failure as a failure", async () => {
 
   await waitFor(() => expect(toasts.error).toHaveBeenCalledWith("failed"))
   expect(toasts.info).not.toHaveBeenCalled()
+})
+
+describe("reach", () => {
+  it("explains itself on a companion instead of saying 'unsupported'", () => {
+    // The old branch printed one sentence whether the user was on Windows, on a
+    // phone, or in a browser with nothing paired. Those are three situations
+    // with three different next steps.
+    mockReach = { available: false, block: "needs-desktop-shell", remedy: null }
+    render(<ProIdeSection />)
+    expect(screen.getByTestId("pro-ide-unsupported")).toBeInTheDocument()
+    expect(screen.getByTestId("surface-unavailable-notice")).toHaveAttribute(
+      "data-cause",
+      "needs-desktop-shell"
+    )
+  })
+
+  it("names a different cause for a standalone browser", () => {
+    mockReach = { available: false, block: "no-host", remedy: "/pair" }
+    render(<ProIdeSection />)
+    expect(screen.getByTestId("surface-unavailable-notice")).toHaveAttribute(
+      "data-cause",
+      "no-host"
+    )
+  })
+
+  it("keeps the platform message for a desktop with no prebuilt binary", () => {
+    // Reachable and still impossible: this IS the desktop, and code-server has
+    // no build for its platform or architecture.
+    client.supported.mockResolvedValue(false)
+    render(<ProIdeSection />)
+    return waitFor(() => {
+      expect(screen.getByTestId("pro-ide-unsupported")).toBeInTheDocument()
+      expect(screen.queryByTestId("surface-unavailable-notice")).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe("running state", () => {
+  it("reports no running workbench when nothing has been claimed", async () => {
+    render(<ProIdeSection />)
+    await waitFor(() => expect(screen.getByTestId("pro-ide-running")).toBeInTheDocument())
+    expect(screen.getByTestId("pro-ide-running")).toHaveTextContent("runningNone")
+    expect(client.status).not.toHaveBeenCalled()
+  })
+
+  it("names the workspace the bound instance is serving", async () => {
+    // `codeserver_status` had no production caller at all, which is the one
+    // entry from ADR-0088's own "zero callers" list that was never closed.
+    mockActiveRoot = "/work/repo"
+    client.status.mockResolvedValue({ running: true, port: 41234, version: "4.128.0" })
+    render(<ProIdeSection />)
+    await waitFor(() => expect(client.status).toHaveBeenCalledWith("/work/repo"))
+    expect(screen.getByTestId("pro-ide-running")).toHaveTextContent("runningFor")
+  })
+
+  it("treats a status probe failure as 'not running' rather than crashing", async () => {
+    mockActiveRoot = "/work/repo"
+    client.status.mockRejectedValue(new Error("instance exited"))
+    render(<ProIdeSection />)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    expect(screen.getByTestId("pro-ide-running")).toHaveTextContent("runningNone")
+  })
 })
