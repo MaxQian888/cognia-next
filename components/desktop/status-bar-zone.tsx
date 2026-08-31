@@ -16,6 +16,7 @@ import { AccountBarButton } from "@/components/account/account-bar-button"
 import { AttentionPanel } from "@/components/attention/attention-panel"
 import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { StatusBarConnectivity } from "@/components/desktop/status-bar-connectivity"
+import { StatusBarExecutionHost } from "@/components/devices/execution-host-switcher"
 import { StatusBarPerf } from "@/components/desktop/status-bar-perf"
 import { StatusBarRunState } from "@/components/desktop/status-bar-run-state"
 import { StatusBarSync } from "@/components/desktop/status-bar-sync"
@@ -43,6 +44,8 @@ function StatusBarSegment({ id }: { id: string }) {
   switch (id) {
     case "connectivity":
       return <StatusBarConnectivity />
+    case "executionHost":
+      return <StatusBarExecutionHost />
     case "branch":
       return <StatusBarBranch />
     case "sync":

@@ -35,6 +35,7 @@ import type { RemoteHost } from "@/stores/remote-host/remote-host-store"
 
 import { AddHostSheet } from "./add-host-sheet"
 import { DeviceDetail } from "./device-detail"
+import { ExecutionHostChip } from "./execution-host-switcher"
 import { DeviceListPane } from "./device-list-pane"
 
 export function DeviceConsole() {
@@ -139,6 +140,10 @@ export function DeviceConsole() {
           title={t("title")}
           description={t("description")}
           summary={t("summary", { online: summary.online, total: summary.total })}
+          /* Where this window's calls land, on the page that is about
+             machines. The desktop status bar carries the same control; this is
+             the copy a browser or a phone can see. */
+          context={<ExecutionHostChip onAddHost={() => setAddHostOpen(true)} />}
           status={
             /**
              * The one number a fleet is actually scanned for. It was computed

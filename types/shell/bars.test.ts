@@ -67,6 +67,9 @@ describe("bar item catalogs", () => {
       ["workspace", "lg"],
       ["commandCenter", "lg"],
       ["quickActions", "xl"],
+      // The execution-host segment carries a host label, so it is the widest
+      // thing in the start cluster. It drops before the row can clip.
+      ["executionHost", "lg"],
     ])
   })
 })

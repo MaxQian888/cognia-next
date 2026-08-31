@@ -132,6 +132,18 @@ export const TITLE_BAR_ITEMS: readonly BarItemMeta[] = [
  */
 export const STATUS_BAR_ITEMS: readonly BarItemMeta[] = [
   { id: "connectivity", bar: "status", zone: "start", i18nKey: "connectivity" },
+  // Which machine this window's `target: "execution"` calls land on. Beside
+  // connectivity because it is the same class of fact (where am I talking to),
+  // and `minWidth: "lg"` so a narrow window drops it rather than overflowing
+  // the row. The segment renders nothing until a remote host exists, so on a
+  // machine that has never had one it costs no width at all.
+  {
+    id: "executionHost",
+    bar: "status",
+    zone: "start",
+    i18nKey: "executionHost",
+    minWidth: "lg",
+  },
   { id: "branch", bar: "status", zone: "start", i18nKey: "branch" },
   { id: "sync", bar: "status", zone: "start", i18nKey: "sync", desktopOnly: true },
   // Workbench state, so it sits beside connectivity / branch rather than in the

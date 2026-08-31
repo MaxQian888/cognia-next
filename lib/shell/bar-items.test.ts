@@ -61,7 +61,7 @@ describe("resolveBarLayout", () => {
 
   it("buckets the shipped default into zones, perf hidden", () => {
     const resolved = resolveBarLayout(catalog, DEFAULT_STATUS_BAR_LAYOUT)
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "branch", "sync"])
+    expect(ids(resolved.zones.start)).toEqual(["connectivity", "executionHost", "branch", "sync"])
     expect(ids(resolved.zones.end)).toEqual([
       "notifications",
       "attention",
@@ -80,7 +80,13 @@ describe("resolveBarLayout", () => {
       order: ["sync", "branch", "connectivity", ...DEFAULT_STATUS_BAR_LAYOUT.order],
       hidden: [],
     })
-    expect(ids(resolved.zones.start)).toEqual(["sync", "branch", "connectivity", "terminal"])
+    expect(ids(resolved.zones.start)).toEqual([
+      "sync",
+      "branch",
+      "connectivity",
+      "executionHost",
+      "terminal",
+    ])
   })
 
   it("normalises a cross-zone drag back into the item's own zone", () => {
@@ -90,7 +96,13 @@ describe("resolveBarLayout", () => {
       order: ["runStatus", ...DEFAULT_STATUS_BAR_LAYOUT.order.filter((id) => id !== "runStatus")],
       hidden: [],
     })
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "branch", "sync", "terminal"])
+    expect(ids(resolved.zones.start)).toEqual([
+      "connectivity",
+      "executionHost",
+      "branch",
+      "sync",
+      "terminal",
+    ])
     expect(ids(resolved.zones.end)[0]).toBe("runStatus")
     // …and the customizer list reads in exactly the render sequence.
     expect(ids(resolved.order)).toEqual([...ids(resolved.zones.start), ...ids(resolved.zones.end)])
@@ -102,7 +114,7 @@ describe("resolveBarLayout", () => {
       hidden: ["branch"],
     })
     expect(ids(resolved.order)).toContain("branch")
-    expect(ids(resolved.zones.start)).toEqual(["connectivity", "sync", "terminal"])
+    expect(ids(resolved.zones.start)).toEqual(["connectivity", "executionHost", "sync", "terminal"])
   })
 
   it("surfaces a catalog item the stored order never mentioned", () => {

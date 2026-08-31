@@ -8016,6 +8016,7 @@
         "branch": "Git 分支",
         "commandCenter": "命令中心",
         "connectivity": "连接状态",
+        "executionHost": "执行主机",
         "jobs": "运行中的任务",
         "layoutControls": "视图菜单",
         "navArrows": "前进 / 后退",
@@ -8833,6 +8834,26 @@
       "connecting": "连接中",
       "ready": "就绪",
       "replaying": "回放中"
+    },
+    "executionHost": {
+      "addHost": "添加主机",
+      "aria": "执行主机：{label}",
+      "confirmBody": "当前有回合正在进行。切到 {label} 会立刻改变文件、Git 与 Agent 调用的落点，而正在运行的回合仍留在它启动时的那台机器上。",
+      "confirmCancel": "留在当前主机",
+      "confirmSwitch": "仍然切换",
+      "confirmTitle": "有任务在运行，仍要切换执行主机吗？",
+      "hint": "这个窗口的文件、Git 与 Agent 调用会落在哪台机器上。",
+      "local": "本机",
+      "localDetail": "终端、文件与 Git 都在这里运行。",
+      "manage": "管理设备",
+      "state": {
+        "connecting": "连接中",
+        "degraded": "降级",
+        "disconnected": "未连接",
+        "ready": "就绪",
+        "revoked": "已吊销",
+        "versionMismatch": "需要升级"
+      }
     },
     "grantState": {
       "denied": "未授权",

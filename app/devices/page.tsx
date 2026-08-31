@@ -1,23 +1,25 @@
+"use client"
+
 import { Suspense } from "react"
 
 import { DeviceConsole } from "@/components/devices/device-console"
+import { DevicesMobileBody } from "@/components/mobile/devices/devices-mobile-body"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 /**
- * `/devices` — the device and runtime console.
+ * `/devices`, the device and runtime console.
  *
- * Thin by design, like `app/servers/page.tsx`: the route owns nothing but the
- * mount point, so the console can also be rendered from the mobile shell
- * without a second copy of the layout.
+ * Thin by design: the route owns nothing but which body to mount. The compact
+ * branch is not a smaller console but an inverted one. On a phone the fleet
+ * list IS the page and the detail arrives as a drawer, where `FeaturePageShell`
+ * would have put the list behind a Sheet trigger.
  *
- * `DeviceConsole` reads `useSearchParams()` for the `?device=<ref>` deep link
- * that ⌘K and the Settings entry points hand it. The static export pre-renders
- * this page server-side, where that hook throws unless a Suspense boundary
- * lets it bail out to client rendering.
+ * Both bodies read `useSearchParams()` (the `?device=` deep link that ⌘K and
+ * Settings hand over, and `?addHost=` from `/servers`). The static export
+ * pre-renders this page server-side, where that hook throws unless a Suspense
+ * boundary lets it bail out to client rendering.
  */
 export default function DevicesPage() {
-  return (
-    <Suspense fallback={null}>
-      <DeviceConsole />
-    </Suspense>
-  )
+  const compact = useCompactLayout()
+  return <Suspense fallback={null}>{compact ? <DevicesMobileBody /> : <DeviceConsole />}</Suspense>
 }

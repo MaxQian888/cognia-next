@@ -42,6 +42,9 @@ jest.mock("@/components/account/account-bar-button", () => ({
 jest.mock("@/components/agent/agent-thread-browser", () => ({
   AgentThreadBrowser: () => <div data-testid="seg-agentThreads" />,
 }))
+jest.mock("@/components/devices/execution-host-switcher", () => ({
+  StatusBarExecutionHost: () => <div data-testid="seg-executionHost" />,
+}))
 
 import { StatusBarZone } from "./status-bar-zone"
 import { getBarCatalog } from "@/lib/shell/bar-items"

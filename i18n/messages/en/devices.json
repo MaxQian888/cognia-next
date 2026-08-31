@@ -1,4 +1,24 @@
 {
+  "executionHost": {
+    "addHost": "Add a host",
+    "aria": "Execution host: {label}",
+    "confirmBody": "A turn is in flight. Switching to {label} repoints file, git and agent calls at once, and the running turn stays on the machine it started on.",
+    "confirmCancel": "Stay here",
+    "confirmSwitch": "Switch anyway",
+    "confirmTitle": "Switch execution host while work is running?",
+    "hint": "Where this window's file, git and agent calls run.",
+    "local": "This machine",
+    "localDetail": "Terminals, files and git run here.",
+    "manage": "Manage devices",
+    "state": {
+      "connecting": "Connecting",
+      "degraded": "Degraded",
+      "disconnected": "Disconnected",
+      "ready": "Ready",
+      "revoked": "Revoked",
+      "versionMismatch": "Upgrade required"
+    }
+  },
   "reachability": {
     "online": "Online",
     "recently-active": "Recently active",

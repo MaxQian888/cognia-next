@@ -15,6 +15,7 @@
       "branch": "Git 分支",
       "commandCenter": "命令中心",
       "connectivity": "连接状态",
+      "executionHost": "执行主机",
       "jobs": "运行中的任务",
       "layoutControls": "视图菜单",
       "navArrows": "前进 / 后退",
