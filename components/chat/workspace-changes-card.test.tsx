@@ -76,6 +76,15 @@ beforeEach(() => {
 })
 
 describe("WorkspaceChangesCard", () => {
+  it("shows the per-file discard button on touch instead of hiding it invisibly", async () => {
+    // `opacity-0` hides but does not disable: without a coarse-pointer reveal
+    // this destructive control was invisible AND tappable on a phone.
+    render(<WorkspaceChangesCard session={session} />)
+    fireEvent.click(screen.getByTestId("workspace-changes-toggle"))
+    const discard = await screen.findByTestId("workspace-change-discard-src/a.ts")
+    expect(discard.className).toContain("pointer-coarse:opacity-100")
+  })
+
   it("discards a single file only after confirmation", async () => {
     render(<WorkspaceChangesCard session={session} />)
     fireEvent.click(screen.getByTestId("workspace-changes-toggle"))

@@ -1,129 +1,198 @@
 "use client"
 
 /**
- * ADR-0020 W3 — inline renderer for the `computer_use` Plugin MCP tool.
+ * Inline renderer for the app-session Computer Use tools (ADR-0020).
  *
- * Pre-W3 the model returned a base64-encoded PNG from a `screenshot`
- * action as a generic tool_result; the chat only showed a collapsible
- * "tool output" block with the raw text. Operators couldn't see what
- * the model was seeing without scraping the encoded bytes from the
+ * This card used to be registered for a `computer_use` tool that no longer
+ * exists, and parsed a payload shape (`{action, coordinate, display_width_px}`)
+ * that no tool has produced since the app-session rewrite. It therefore never
+ * rendered: every computer-use call in chat fell through to the generic JSON
  * tool block.
  *
- * W3 renders the screenshot inline via the existing
- * `<ImageBlock>` (zoom / download / copy / fullscreen all reused).
- * Non-screenshot actions (click / type / scroll / …) fall through to a
- * compact action chip + status badge so the chat history stays
- * scannable. Errors render with a destructive Badge so the operator
- * can spot consent-decline / backend failures at a glance.
+ * The screenshot now arrives as a real MCP image block rather than base64
+ * inside `output`, so the card reads `part.mcpContent` and is registered as
+ * rich-content aware.
  */
 
-import { MousePointerClickIcon, ScreenShareIcon } from "lucide-react"
+import { useMemo } from "react"
+import { MousePointerClickIcon, ScanSearchIcon, ScreenShareIcon, TypeIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 import type { ToolUIPart } from "ai"
-import { McpCardShell, useParsedOutput } from "./common"
-import { Badge } from "@/components/ui/badge"
-import { ImageBlock } from "@/components/chat/renderers/image-block"
 
-interface ComputerUseInput {
-  action?: string
-  coordinate?: [number, number]
-  start_coordinate?: [number, number]
-  text?: string
-  scroll_direction?: "up" | "down" | "left" | "right"
-  scroll_amount?: number
-  duration?: number
+import { hasMcpContent } from "@/lib/claude/parts-extensions"
+import { ImageBlock } from "@/components/chat/renderers/image-block"
+import { Badge } from "@/components/ui/badge"
+import { McpCardShell, blockMediaSrc, useParsedOutput } from "./common"
+
+/** The JSON half of a `get_app_state` / `zoom` result. */
+interface RevisionOutput {
+  app?: { displayName?: string }
+  revision?: number
+  screenshot?: { width?: number; height?: number } | null
+  screenshotUnchanged?: boolean
+  screenshotNote?: string
+  region?: { x: number; y: number; width: number; height: number }
+  tree?: { nodes?: unknown[] }
 }
 
-interface ComputerUseOutput {
+/** `perform_action` returns an ActionResult. */
+interface ActionOutput {
+  status?: "delivered" | "notDelivered" | "refused" | "unknown"
+  method?: "ax" | "synthetic"
+  beforeRevision?: number
+  afterRevision?: number | null
+}
+
+interface OcrOutput {
   ok?: boolean
-  output?: string
-  error?: string
-  display_width_px?: number
-  display_height_px?: number
-  cursor?: { x: number; y: number }
+  matches?: { text: string }[]
+  clicked?: { text: string }
+}
+
+interface ActionInput {
+  request?: {
+    action?: { kind?: string }
+    strategy?: string
+    target?: { kind?: string }
+  }
+  query?: string
+  durationMs?: number
+}
+
+/** Short tool name regardless of which rail the call arrived on. */
+function bareName(part: ToolUIPart): string {
+  const raw = (part as unknown as { type?: string }).type ?? ""
+  const name = raw.startsWith("tool-") ? raw.slice(5) : raw
+  return name.split("__").pop() ?? name
 }
 
 export function ComputerUseCard({ part }: { part: ToolUIPart }) {
-  const input = (part.input ?? {}) as ComputerUseInput
-  const parsed = useParsedOutput<ComputerUseOutput>(part.output)
-  const action = input.action ?? "unknown"
+  const t = useTranslations("chat.mcp.computerUse")
+  const tool = bareName(part)
+  const input = (part.input ?? {}) as ActionInput
+  const parsed = useParsedOutput<RevisionOutput & ActionOutput & OcrOutput>(part.output)
 
-  // Screenshot path — render the inline image. `output` is a base64
-  // PNG when `ok && display_width_px` are present.
-  if (parsed?.ok && parsed?.output && parsed.display_width_px && parsed.display_height_px) {
-    const src = `data:image/png;base64,${parsed.output}`
+  const images = useMemo(() => {
+    if (!hasMcpContent(part)) return []
+    return part.mcpContent
+      .filter((block) => block.type === "image")
+      .map((block) => blockMediaSrc(block, "image/png"))
+      .filter((src): src is string => src !== null)
+  }, [part])
+
+  // Frame-bearing tools: get_app_state and zoom.
+  if (images.length > 0) {
+    const width = parsed?.screenshot?.width
+    const height = parsed?.screenshot?.height
+    const region = parsed?.region
     return (
       <McpCardShell
-        title={`computer_use · ${action}`}
-        badge={`${parsed.display_width_px}×${parsed.display_height_px}`}
-        testId="computer-use-card-screenshot"
+        title={`${tool}${parsed?.app?.displayName ? ` · ${parsed.app.displayName}` : ""}`}
+        badge={
+          width && height
+            ? `${width}×${height}${parsed?.revision ? ` · r${parsed.revision}` : ""}`
+            : undefined
+        }
+        testId="computer-use-card-frame"
       >
-        <ImageBlock
-          src={src}
-          alt={`Computer Use ${action}`}
-          width={parsed.display_width_px}
-          height={parsed.display_height_px}
-        />
+        {region && (
+          <Badge variant="secondary" className="mb-1 text-[10px]">
+            {t("region", region)}
+          </Badge>
+        )}
+        {images.map((src, index) => (
+          <ImageBlock
+            key={src.slice(0, 64) + String(index)}
+            src={src}
+            alt={t("frameAlt", { tool })}
+            width={width}
+            height={height}
+          />
+        ))}
       </McpCardShell>
     )
   }
 
-  // Cursor-position path — render the coordinate plainly.
-  if (parsed?.ok && parsed?.cursor) {
-    return (
-      <McpCardShell title={`computer_use · ${action}`} badge="ok" testId="computer-use-card-cursor">
-        <code className="font-mono text-[11px]">
-          ({parsed.cursor.x}, {parsed.cursor.y})
-        </code>
-      </McpCardShell>
-    )
-  }
-
-  // Error path — surface the message so the operator can spot
-  // consent-decline or backend failures without expanding the raw tool
-  // block.
-  if (parsed && parsed.ok === false) {
+  // A withheld frame is not an error: the screen did not change since the last
+  // revision, and saying so is the point.
+  if (parsed?.screenshotUnchanged) {
     return (
       <McpCardShell
-        title={`computer_use · ${action}`}
-        badge="error"
-        testId="computer-use-card-error"
+        title={tool}
+        badge={parsed.revision ? `r${parsed.revision}` : undefined}
+        testId="computer-use-card-unchanged"
       >
-        <p className="text-destructive text-[11px]">{parsed.error ?? "unknown error"}</p>
+        <p className="text-muted-foreground text-[11px]">
+          {parsed.screenshotNote ?? t("screenUnchanged")}
+        </p>
       </McpCardShell>
     )
   }
 
-  // Non-screenshot driving actions (click / type / scroll / …) —
-  // compact chip showing the action + relevant fields.
+  // perform_action.
+  if (parsed?.status) {
+    const delivered = parsed.status === "delivered"
+    return (
+      <McpCardShell
+        title={`${tool} · ${input.request?.action?.kind ?? t("actionFallback")}`}
+        badge={parsed.status}
+        testId="computer-use-card-action"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {delivered ? (
+            <MousePointerClickIcon className="size-3 text-muted-foreground" />
+          ) : (
+            <TypeIcon className="text-destructive size-3" />
+          )}
+          {input.request?.target?.kind && (
+            <Badge variant="secondary" className="text-[10px]">
+              {input.request.target.kind}
+            </Badge>
+          )}
+          {parsed.method && (
+            <Badge variant="secondary" className="text-[10px]">
+              {parsed.method}
+            </Badge>
+          )}
+          {typeof parsed.afterRevision === "number" && (
+            <Badge variant="secondary" className="text-[10px]">
+              r{parsed.beforeRevision} → r{parsed.afterRevision}
+            </Badge>
+          )}
+        </div>
+      </McpCardShell>
+    )
+  }
+
+  // find_text / click_text.
+  if (parsed?.matches || parsed?.clicked) {
+    const label = parsed.clicked
+      ? parsed.clicked.text
+      : t("matches", { count: parsed.matches?.length ?? 0 })
+    return (
+      <McpCardShell title={tool} badge={input.query} testId="computer-use-card-ocr">
+        <div className="flex items-center gap-2">
+          <ScanSearchIcon className="size-3 text-muted-foreground" />
+          <code className="max-w-[40ch] truncate font-mono text-[10px]">{label}</code>
+        </div>
+      </McpCardShell>
+    )
+  }
+
+  // Everything else: list_apps / query_elements / expand_element / wait.
+  const nodeCount = parsed?.tree?.nodes?.length
   return (
     <McpCardShell
-      title={`computer_use · ${action}`}
-      badge={parsed?.ok === true ? "ok" : undefined}
-      testId="computer-use-card-action"
+      title={tool}
+      badge={typeof nodeCount === "number" ? t("nodes", { count: nodeCount }) : undefined}
+      testId="computer-use-card-generic"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {action === "screenshot" ? (
-          <ScreenShareIcon className="size-3 text-muted-foreground" />
-        ) : (
-          <MousePointerClickIcon className="size-3 text-muted-foreground" />
-        )}
-        {input.coordinate && (
+      <div className="flex items-center gap-2">
+        <ScreenShareIcon className="size-3 text-muted-foreground" />
+        {typeof input.durationMs === "number" && (
           <Badge variant="secondary" className="text-[10px]">
-            ({input.coordinate[0]}, {input.coordinate[1]})
+            {input.durationMs}ms
           </Badge>
-        )}
-        {input.start_coordinate && (
-          <Badge variant="secondary" className="text-[10px]">
-            from ({input.start_coordinate[0]}, {input.start_coordinate[1]})
-          </Badge>
-        )}
-        {input.scroll_direction && (
-          <Badge variant="secondary" className="text-[10px]">
-            {input.scroll_direction} × {input.scroll_amount ?? 1}
-          </Badge>
-        )}
-        {input.text && (
-          <code className="font-mono text-[10px] max-w-[40ch] truncate">{input.text}</code>
         )}
       </div>
     </McpCardShell>

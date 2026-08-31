@@ -99,12 +99,29 @@ const REGISTRY: Record<string, CardComponent> = {
   wf_apply_template: WorkflowProposalCard,
   "mcp__cognia-plugin-tools__wf_propose_batch": WorkflowProposalCard,
   "mcp__cognia-plugin-tools__wf_apply_template": WorkflowProposalCard,
-  // ADR-0020 W3 — Computer Use plugin MCP tool. Inline screenshot
-  // rendering + compact action chip. Registered under both the bare
-  // `computer_use` name and the cognia-plugin-tools-prefixed name so
-  // both sidecar bridge variants land on the same card.
-  computer_use: ComputerUseCard,
-  "mcp__cognia-plugin-tools__computer_use": ComputerUseCard,
+  // ADR-0020 — app-session Computer Use tools. Registered under both the bare
+  // names and the cognia-plugin-tools-prefixed ones so both sidecar bridge
+  // variants land on the same card.
+  //
+  // These replaced a single `computer_use` registration that had outlived its
+  // tool: nothing produced that name any more, so every computer-use call fell
+  // through to the generic JSON block, base64 screenshot and all.
+  get_app_state: ComputerUseCard,
+  list_apps: ComputerUseCard,
+  query_elements: ComputerUseCard,
+  expand_element: ComputerUseCard,
+  perform_action: ComputerUseCard,
+  zoom: ComputerUseCard,
+  find_text: ComputerUseCard,
+  click_text: ComputerUseCard,
+  "mcp__cognia-plugin-tools__get_app_state": ComputerUseCard,
+  "mcp__cognia-plugin-tools__list_apps": ComputerUseCard,
+  "mcp__cognia-plugin-tools__query_elements": ComputerUseCard,
+  "mcp__cognia-plugin-tools__expand_element": ComputerUseCard,
+  "mcp__cognia-plugin-tools__perform_action": ComputerUseCard,
+  "mcp__cognia-plugin-tools__zoom": ComputerUseCard,
+  "mcp__cognia-plugin-tools__find_text": ComputerUseCard,
+  "mcp__cognia-plugin-tools__click_text": ComputerUseCard,
 }
 
 /**
@@ -113,7 +130,16 @@ const REGISTRY: Record<string, CardComponent> = {
  * bypass it (see `McpCardWithFallback`) — otherwise the card silently drops the
  * image / resource it never knew to look for.
  */
-const RICH_CONTENT_AWARE = new Set(["Read", "read"])
+const RICH_CONTENT_AWARE = new Set([
+  "Read",
+  "read",
+  // The Computer Use frame IS an MCP image block now, so the card must be
+  // allowed to see it rather than being bypassed for carrying rich content.
+  "get_app_state",
+  "zoom",
+  "mcp__cognia-plugin-tools__get_app_state",
+  "mcp__cognia-plugin-tools__zoom",
+])
 
 /**
  * Fold namespaced cognia-tools names onto their bare registry keys so the

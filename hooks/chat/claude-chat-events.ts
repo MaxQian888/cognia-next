@@ -46,6 +46,7 @@ import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-
 import { approveTool, toolResultDecision } from "@/lib/claude/ipc"
 import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
 import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
+import { attachTwinProvenanceToLastAssistant } from "@/lib/twin/export-provenance"
 import {
   armApprovalBackstop,
   clearApprovalBackstops,
@@ -161,6 +162,12 @@ export interface StreamCoalescing {
  * wedged utility-LLM call from freezing a turn with no visible dialog.
  */
 export const AUTO_MODE_DECISION_TIMEOUT_MS = 12_000
+
+export function isArtifactAutoCreateEnabled(
+  artifacts: { autoCreate?: boolean; agentAuthoring?: boolean } | null | undefined
+): boolean {
+  return artifacts?.autoCreate !== false && artifacts?.agentAuthoring !== false
+}
 
 /** Read a session's current slice messages (its streaming base). */
 export function sliceMessages(sessionId: string): UIMessage[] {
@@ -922,6 +929,7 @@ export async function handleEvent(
           if (withTwin !== nextMessages) {
             nextMessages = withTwin
           }
+          nextMessages = attachTwinProvenanceToLastAssistant(nextMessages, twinCtx.twinId)
         }
         // Long-term memory sources — same lastSend-cache read as twin, stashed
         // by `resolveSendOptions` onto `options.memoryContext`.
@@ -1383,7 +1391,7 @@ export async function handleEvent(
               // Auto-detect artifacts in the assistant turn that just sealed.
               // Honors the artifacts settings block; off by default for
               // power-users that flip the toggle.
-              if (!routedToReview && artifactsCfg?.autoCreate !== false) {
+              if (!routedToReview && isArtifactAutoCreateEnabled(artifactsCfg)) {
                 void useArtifactStore.getState().autoCreateFromContent({
                   sessionId,
                   messageId: lastAssistant.id,

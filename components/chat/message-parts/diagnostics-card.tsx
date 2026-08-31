@@ -20,7 +20,10 @@ import { useTranslations } from "next-intl"
 import { CoinsIcon, MessagesSquareIcon } from "lucide-react"
 import { Surface } from "@/components/surface/surface"
 import { ContextWindowHeader, UsageRow } from "@/components/chat/context-usage-indicator"
-import { UsageDiagnosticsCard } from "@/components/chat/message-parts/usage-diagnostics-card"
+import {
+  DIAGNOSTICS_TINT,
+  UsageDiagnosticsCard,
+} from "@/components/chat/message-parts/usage-diagnostics-card"
 import type {
   ContextDiagnosticsBlock,
   CostDiagnosticsBlock,
@@ -54,7 +57,8 @@ function CardShell({
       layer="raised"
       radius="stage"
       data-testid="diagnostics-card"
-      className="not-prose my-1 w-full max-w-md space-y-3 border p-3 [--surface-bg:color-mix(in_oklch,var(--muted)_30%,transparent)]"
+      style={DIAGNOSTICS_TINT}
+      className="not-prose my-1 w-full max-w-md space-y-3 border p-3"
     >
       <div className="flex items-center gap-2 text-sm font-medium">
         <span className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary">

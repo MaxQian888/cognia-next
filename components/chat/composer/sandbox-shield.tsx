@@ -26,6 +26,7 @@ import { updateSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SandboxShellTier } from "@/types/sandbox"
+import { useSandboxRuntimeAvailability } from "@/hooks/sandbox/use-sandbox-runtime-availability"
 
 export type ShieldState = "os" | "microvm" | "cua-desktop" | "off"
 
@@ -55,6 +56,7 @@ export function resolveShieldState(args: {
 export function SandboxShield({ session, forceState, className }: SandboxShieldProps) {
   const t = useTranslations("chat.composer.sandboxShield")
   const settings = useSettingsStore((s) => s.settings)
+  const availability = useSandboxRuntimeAvailability()
   const characterId = session?.characterId
   const character = useLiveQuery(
     () => (characterId ? getCharacter(characterId) : Promise.resolve(undefined)),
@@ -79,8 +81,22 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
     settings?.sandboxTier,
   ])
 
-  const ariaLabel = t(`label.${state}`)
-  const tooltip = t(`tooltip.${state}`)
+  const runtimeAvailable =
+    state === "os"
+      ? availability.os.available
+      : state === "microvm"
+        ? availability.microvm.available
+        : state === "off"
+          ? true
+          : false
+  const ariaLabel = runtimeAvailable ? t(`label.${state}`) : t(`unavailableLabel.${state}`)
+  const tooltip = runtimeAvailable
+    ? t(`tooltip.${state}`)
+    : state === "os"
+      ? availability.os.reason === "probe-failed"
+        ? t("unavailableDetail.osProbeFailed")
+        : t("unavailableDetail.os")
+      : t(`unavailableDetail.${state}`)
 
   const icon =
     state === "off" ? (
@@ -101,8 +117,11 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       <Shield
         className={cn(
           "size-3.5",
-          state === "os" && "text-emerald-500",
-          state === "microvm" && "text-sky-500 [stroke-dasharray:3_2] [stroke-linejoin:round]",
+          runtimeAvailable && state === "os" && "text-emerald-500",
+          runtimeAvailable &&
+            state === "microvm" &&
+            "text-sky-500 [stroke-dasharray:3_2] [stroke-linejoin:round]",
+          !runtimeAvailable && "text-muted-foreground",
           className
         )}
         aria-hidden="true"
@@ -125,6 +144,7 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
           data-testid="sandbox-shield"
           data-state={state}
           data-pinned={pinned ? "true" : "false"}
+          data-available={runtimeAvailable ? "true" : "false"}
           aria-label={ariaLabel}
           title={tooltip}
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent"

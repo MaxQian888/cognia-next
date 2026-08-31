@@ -62,6 +62,10 @@ export function PluginQuickActionsMenu({ disabled }: { disabled?: boolean }) {
               pluginId={action.pluginId}
               surfaceId={`quick-action:${action.fullId}`}
               formFactor="icon"
+              // The menu item owns the row layout. Inline-size containment here
+              // collapses the surface's intrinsic width to zero, leaving the
+              // action accessible but visually hidden in the Radix portal.
+              container={false}
             >
               <div className="flex min-w-0 flex-col">
                 <span className="truncate">

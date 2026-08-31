@@ -94,6 +94,7 @@ import {
 } from "./steer-runtime"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { getExecutionBroker } from "@/lib/execution/broker"
+import { runWithExecutionLease } from "@/lib/execution/admit"
 import { slotKeyForTurn } from "@/lib/execution/slot-key"
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
@@ -1236,8 +1237,22 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
         resolvers.set(sub, { resolve, reject })
       })
       try {
-        await sendPrompt(sub, sendContent, opts)
-        await done
+        await runWithExecutionLease(
+          {
+            kind: "team",
+            label: `${character.name} · ${opts.model ?? opts.provider ?? "provider"}`,
+            sessionId,
+            providerId: opts.provider,
+            providerLimit: opts.providerConcurrencyLimit,
+            // The outer team-turn lease already owns the global permit and
+            // working-tree slot; this nested attempt only owns a provider lane.
+            exempt: true,
+          },
+          async () => {
+            await sendPrompt(sub, sendContent, opts)
+            await done
+          }
+        )
         controller?.complete()
         return
       } catch (error) {
@@ -1259,6 +1274,7 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
           providerCredentials: attempt.providerCredentials,
           protocolAdapterSpec: attempt.protocolAdapterSpec,
           modelParams: attempt.modelParams,
+          providerConcurrencyLimit: attempt.concurrentLimit,
           fallbackModel: undefined,
           aliasResolution: opts.aliasResolution
             ? {

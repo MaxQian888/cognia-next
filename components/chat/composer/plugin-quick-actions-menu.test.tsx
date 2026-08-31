@@ -61,7 +61,9 @@ describe("PluginQuickActionsMenu", () => {
 
     await user.click(screen.getByRole("button", { name: "Plugin quick actions" }))
     expect(screen.queryByText("Tray only")).not.toBeInTheDocument()
-    await user.click(await screen.findByText("Summarize chat"))
+    const actionLabel = await screen.findByText("Summarize chat")
+    expect(actionLabel.closest("[data-plugin-surface]")).toHaveStyle({ display: "contents" })
+    await user.click(actionLabel)
 
     expect(run).toHaveBeenCalled()
   })

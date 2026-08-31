@@ -1162,7 +1162,7 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("hello", undefined, { attachmentManifest: manifest })
     })
-    expect(makeUserMessage).toHaveBeenCalledWith("hello", undefined, manifest)
+    expect(makeUserMessage).toHaveBeenCalledWith("hello", expect.any(String), manifest)
   })
 
   it("send() routes through the standalone engine (not the sidecar) in BYOK mode", async () => {

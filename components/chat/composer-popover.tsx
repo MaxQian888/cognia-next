@@ -39,7 +39,6 @@ import {
   FileCode2Icon,
   GitBranchIcon,
   FileIcon,
-  FolderIcon,
   ListPlusIcon,
   MessageCircleMoreIcon,
   MessagesSquareIcon,
@@ -90,6 +89,7 @@ import {
   slashGroupLabel,
   type SlashGroup,
 } from "./composer-popover-groups"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
 import { commandArgumentOptions, hasSlashCompletion } from "./composer/slash-completion"
 import {
@@ -553,12 +553,20 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       }
       if (!docSearch.hostSupported) {
         // Intentional dormancy (project rule 7, UI axis): say WHY, never show
-        // an empty list that reads like "you have no documents".
+        // an empty list that reads like "you have no documents". The reason is
+        // per-host, not one flat "desktop only": a companion's paired host
+        // holds these accounts and can open the document, which is a different
+        // sentence from a standalone browser's dead end.
+        const block = docSearch.reach.block
         return {
           items: [],
           loading: false,
           error: null,
-          emptyMessage: tDocs("picker.hostUnsupported"),
+          emptyMessage: block
+            ? `${tDocs(`reach.block.${block}` as "reach.block.no-runtime")} ${tDocs(
+                `reach.nextStep.${block}` as "reach.nextStep.no-runtime"
+              )}`
+            : "",
         }
       }
       const accountId = docSearch.accountId
@@ -1253,11 +1261,7 @@ const ItemRow = memo(function ItemRow({
     const e = item.entry
     return (
       <>
-        {e.isDir ? (
-          <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-        )}
+        <FileTypeIcon path={e.relPath} isDir={e.isDir} className="size-4" />
         <span className="truncate font-mono text-xs">{e.relPath}</span>
         {!e.isDir && e.size > 0 ? (
           <span className="ml-auto text-[10px] text-muted-foreground">{formatBytes(e.size)}</span>

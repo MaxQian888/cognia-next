@@ -15,7 +15,7 @@ jest.mock("@/lib/claude/adapter", () => {
   }
 })
 
-import { handleEvent, isTeamSubSession } from "./claude-chat-events"
+import { handleEvent, isArtifactAutoCreateEnabled, isTeamSubSession } from "./claude-chat-events"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { useChatStore } from "@/stores/chat"
 import { clearSidecarLogTrail } from "@/lib/chat/sidecar-log-trail"
@@ -29,6 +29,14 @@ describe("Claude chat event seam", () => {
   it("exports event routing and filters team sub-sessions", () => {
     expect(typeof handleEvent).toBe("function")
     expect(isTeamSubSession("team::char::member")).toBe(true)
+  })
+})
+
+describe("artifact turn-complete policy", () => {
+  it("requires both auto-create and agent authoring to remain enabled", () => {
+    expect(isArtifactAutoCreateEnabled(undefined)).toBe(true)
+    expect(isArtifactAutoCreateEnabled({ autoCreate: false })).toBe(false)
+    expect(isArtifactAutoCreateEnabled({ agentAuthoring: false })).toBe(false)
   })
 })
 

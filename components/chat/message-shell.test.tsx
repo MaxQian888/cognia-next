@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { UIMessage } from "ai"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
-import { MessageShell } from "./message-shell"
+import { METADATA_FIELDS, MessageShell } from "./message-shell"
 
 const message: UIMessage = {
   id: "a1",
@@ -37,6 +37,37 @@ describe("MessageShell", () => {
     expect(screen.getByText("anthropic")).toBeInTheDocument()
     expect(screen.getByText("↑10 ↓20")).toBeInTheDocument()
     expect(screen.getByText("$0.0123")).toBeInTheDocument()
+  })
+
+  it("puts usage and cost in the header when that is the chosen placement", () => {
+    // Every metadata field offers the same three placements, but the header
+    // list used to be hand-written and omitted these two — so picking "header"
+    // for usage or cost silently rendered nothing. Asserting on the header
+    // element is what proves the placement, not just that the text appears.
+    render(
+      <MessageShell
+        message={message}
+        display={resolveMessageDisplayOptions(undefined, {
+          preset: "balanced",
+          overrides: {
+            metadata: { usage: "header", cost: "header", model: "hidden", provider: "hidden" },
+          },
+        })}
+      >
+        <p>Hello</p>
+      </MessageShell>
+    )
+    const header = screen.getByTestId("message-shell-header")
+    expect(header).toHaveTextContent("↑10 ↓20")
+    expect(header).toHaveTextContent("$0.0123")
+  })
+
+  it("keeps the metadata catalogue in step with the settings type", () => {
+    // A field missing from METADATA_FIELDS is unrenderable in BOTH placements,
+    // which is exactly how the usage/cost header gap survived: nothing pointed
+    // at the mismatch.
+    const resolved = resolveMessageDisplayOptions()
+    expect([...METADATA_FIELDS].sort()).toEqual(Object.keys(resolved.metadata).sort())
   })
 
   it("omits unavailable historical metadata instead of guessing", () => {

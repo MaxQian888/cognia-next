@@ -32,6 +32,14 @@ import { isTauri } from "@/lib/tauri"
 import { renderWorkingSetForCompaction } from "@/lib/chat/working-set"
 import { loadCapturedCompactionCheckpoint } from "@/lib/rag/compaction-runtime"
 import { renderCompactionCheckpointForRecovery } from "@/lib/rag/compaction-checkpoint"
+import { inferBuiltInSkillIntents } from "@/lib/skills/intent-resolver"
+import { readOnboardingRequest } from "@/lib/onboarding/request"
+
+export interface ChatTurnSkillIdentity {
+  runId: string
+  turnId: string
+  attemptId: string
+}
 
 export function buildWorkingSetPostCompaction(
   phaseNumber: number | null,
@@ -52,7 +60,8 @@ export function buildWorkingSetPostCompaction(
 export async function buildSendOptions(
   session: ChatSession | null | undefined,
   userMessage?: string,
-  onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
+  onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void,
+  turnIdentity?: ChatTurnSkillIdentity
 ): Promise<SendOptions> {
   const appSettings = useSettingsStore.getState().settings
   // The composer keeps @-referenced files/folders in the chat store. Hand
@@ -189,6 +198,15 @@ export async function buildSendOptions(
   // split pane attached the other pane's skills and never its own.
   const ephemeralSkillIds =
     selectComposerEphemeralSkillIds(useChatStore.getState(), session?.id ?? null) ?? []
+  const onboardingRequest = session?.id ? readOnboardingRequest(session.id) : null
+  const onboardingIntent =
+    onboardingRequest && onboardingRequest.state !== "succeeded"
+      ? `onboarding.${onboardingRequest.cardId}`
+      : undefined
+  const skillIntents = [
+    ...inferBuiltInSkillIntents(userMessage),
+    ...(onboardingIntent ? [onboardingIntent] : []),
+  ]
 
   // ADR-0019 — when this session has an active goal, hand it to the resolver
   // so the goal's `<objective>` system section is appended to this turn. The
@@ -303,6 +321,11 @@ export async function buildSendOptions(
     routingContextHint: userMessage ? { promptText: userMessage } : undefined,
     routingSurface: "chat",
     ephemeralSkillIds,
+    skillIntents,
+    requestScopedSkillIds:
+      onboardingRequest && onboardingRequest.state !== "succeeded"
+        ? [onboardingRequest.skillId]
+        : undefined,
     skillRenderMode: "hybrid",
     activeGoal,
     activePlan,
@@ -314,6 +337,15 @@ export async function buildSendOptions(
     // and thus this resolver — is skipped.
     emitTrace: true,
     traceSurface: "chat",
+    turnId: turnIdentity?.turnId,
+    executionIdentity: turnIdentity
+      ? {
+          sessionId: session?.id ?? "",
+          runId: turnIdentity.runId,
+          turnId: turnIdentity.turnId,
+          attemptId: turnIdentity.attemptId,
+        }
+      : undefined,
     onResolvedExecutionSpec,
   })
 }

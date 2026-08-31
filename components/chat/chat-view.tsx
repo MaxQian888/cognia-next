@@ -70,7 +70,17 @@ import { useIsMobile } from "@/hooks/ui/use-mobile"
 import { WorkspaceChangesCard } from "./workspace-changes-card"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
-import { consumePendingChatPrompt } from "@/lib/chat/pending-prompt"
+import { acknowledgePendingChatPrompt, peekPendingChatPrompt } from "@/lib/chat/pending-prompt"
+import {
+  beginOnboardingRequestAttempt,
+  failOnboardingRequest,
+  hasPersistedInitialOnboardingPrompt,
+  hasPersistedPromptMessage,
+  readOnboardingRequest,
+  reconcileOnboardingRequestMessages,
+  type OnboardingRequestRecord,
+} from "@/lib/onboarding/request"
+import { listMessages } from "@/lib/db/messages"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { useFlowMotion } from "./motion/motion-reveal"
@@ -92,6 +102,27 @@ import {
 function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
   if (typeof ref === "function") ref(node)
   else if (ref) (ref as { current: T | null }).current = node
+}
+
+/** Add request-scoped skills to one composer's next send without touching a sibling pane. */
+function stageSessionSkillIds(sessionId: string, skillIds: readonly string[]): void {
+  if (skillIds.length === 0) return
+  const state = useChatStore.getState()
+  const current =
+    state.sessions?.[sessionId]?.ephemeralSkillIds ??
+    (state.activeSessionId === sessionId ? state.ephemeralSkillIds : [])
+  const next = Array.from(new Set([...current, ...skillIds]))
+  if (next.length === current.length && next.every((id, index) => id === current[index])) return
+  state.setEphemeralSkillIds(next, sessionId)
+}
+
+/** Project terminal request evidence onto the existing onboarding progress record. */
+function settleOnboardingProgress(record: OnboardingRequestRecord | null): void {
+  if (record?.state === "succeeded") {
+    void useSettingsStore.getState().completeOnboarding()
+  } else if (record?.state === "failed") {
+    void useSettingsStore.getState().skipOnboarding("task_failed", "first-run")
+  }
 }
 
 function HistoryLoadingIndicator({ label }: { label: string }) {
@@ -435,22 +466,92 @@ export function ChatPane({
       templateRun?: ChatTemplateRun | null,
       turnMetadata?: ComposerTurnMetadata
     ) => {
-      await onSend(content, manifest, templateRun, turnMetadata)
+      if (boundId) {
+        const request = readOnboardingRequest(boundId)
+        if (request && request.state !== "succeeded") {
+          stageSessionSkillIds(boundId, [request.skillId])
+          beginOnboardingRequestAttempt(boundId)
+        }
+      }
+      try {
+        await onSend(content, manifest, templateRun, turnMetadata)
+      } catch (error) {
+        if (boundId) {
+          settleOnboardingProgress(
+            failOnboardingRequest(
+              boundId,
+              error instanceof Error ? error.message : "onboarding-dispatch-failed"
+            )
+          )
+        }
+        throw error
+      }
     },
-    [onSend]
+    [boundId, onSend]
   )
 
+  const pendingDispatchRef = useRef<string | null>(null)
   useEffect(() => {
     if (!boundId || status !== "idle" || messagesLoading || activeSession?.kind === "subagent") {
       return
     }
-    const pendingPrompt = consumePendingChatPrompt(boundId)
+    const pendingPrompt = peekPendingChatPrompt(boundId)
     if (!pendingPrompt) return
-    if (!hasNoLeakingPii(pendingPrompt)) {
+    if (!hasNoLeakingPii(pendingPrompt.prompt)) {
+      acknowledgePendingChatPrompt(boundId, pendingPrompt.id)
+      settleOnboardingProgress(failOnboardingRequest(boundId, "pending-prompt-pii-blocked"))
       toast.error(tInlineErr("pendingPromptPiiBlocked"))
       return
     }
-    void handleSend(pendingPrompt)
+    if (pendingDispatchRef.current === pendingPrompt.id) return
+    pendingDispatchRef.current = pendingPrompt.id
+
+    // A reload can land between the durable user-message write and clearing
+    // the handoff. Check the transcript first so the fixed prompt is never
+    // replayed merely because navigation interrupted the acknowledgement.
+    void listMessages(boundId)
+      .then((persisted) => {
+        const request = readOnboardingRequest(boundId)
+        // Transcript evidence, not the onboarding record, is what proves the
+        // prompt already went out. A non-onboarding handoff has no record, and
+        // gating the check on one let a reload between the durable write and
+        // the acknowledgement resend the prompt on every launch until the TTL.
+        if (hasPersistedPromptMessage(pendingPrompt.prompt, persisted)) {
+          acknowledgePendingChatPrompt(boundId, pendingPrompt.id)
+          if (request) {
+            settleOnboardingProgress(reconcileOnboardingRequestMessages(boundId, persisted))
+          }
+          return
+        }
+        stageSessionSkillIds(boundId, pendingPrompt.skillIds)
+        return handleSend(pendingPrompt.prompt).then(() => {
+          // Legacy/non-onboarding handoffs have no transcript state machine;
+          // their sender promise remains the dispatch acknowledgement.
+          if (!request) acknowledgePendingChatPrompt(boundId, pendingPrompt.id)
+        })
+      })
+      .catch((error) => {
+        const request = readOnboardingRequest(boundId)
+        if (!request) {
+          // A legacy handoff has no terminal request state to surface. Release
+          // the in-memory guard so the durable record can be retried after the
+          // next relevant idle/loading transition.
+          pendingDispatchRef.current = null
+          return
+        }
+
+        if (request.state !== "failed") {
+          settleOnboardingProgress(
+            failOnboardingRequest(
+              boundId,
+              error instanceof Error ? error.message : "onboarding-dispatch-failed"
+            )
+          )
+        }
+        // Onboarding failures are terminal and visible in progress state. Do
+        // not retain a 24-hour handoff that would resend after the next reload.
+        acknowledgePendingChatPrompt(boundId, pendingPrompt.id)
+      })
   }, [activeSession?.kind, boundId, handleSend, messagesLoading, status, tInlineErr])
 
   const handleRetry = useCallback(async () => {
@@ -854,6 +955,28 @@ function ChatMessages({
 }) {
   const messages = useSessionMessages(sessionId)
   const status = useSessionStatus(sessionId)
+  useEffect(() => {
+    if (!sessionId || status !== "idle") return
+    const request = readOnboardingRequest(sessionId)
+    if (!request || request.state === "succeeded") return
+    let cancelled = false
+    void listMessages(sessionId)
+      .then((persisted) => {
+        if (cancelled) return
+        const pending = peekPendingChatPrompt(sessionId)
+        if (pending && hasPersistedInitialOnboardingPrompt(request, persisted)) {
+          acknowledgePendingChatPrompt(sessionId, pending.id)
+        }
+        settleOnboardingProgress(reconcileOnboardingRequestMessages(sessionId, persisted))
+      })
+      .catch(() => {
+        // The durable transcript remains authoritative. A later idle render or
+        // reload retries reconciliation without changing request state.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [messages, sessionId, status])
   if (sessionId && useCompanionTranscript) {
     return (
       <CompanionTranscriptMessages

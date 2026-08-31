@@ -7,7 +7,8 @@
 
 import { memo, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, PaperclipIcon } from "lucide-react"
+import { Loader2Icon } from "lucide-react"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { languageFromPath } from "@/components/chat/message-parts/mcp-renderers/common"
@@ -58,7 +59,7 @@ function DownloadLink({ url, displayName }: { url: string; displayName: string }
       data-testid="file-download-link"
       title={displayName}
     >
-      <PaperclipIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <FileTypeIcon path={displayName} />
       <span className="truncate">{displayName}</span>
     </a>
   )

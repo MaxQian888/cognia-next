@@ -25,8 +25,8 @@ export function RagSearchCard({ part }: { part: ToolUIPart }) {
 
   return (
     <McpCardShell
-      title="rag_search"
-      badge={`${parsed.hits.length} chunks`}
+      title={t("title")}
+      badge={t("hitCount", { count: parsed.hits.length })}
       testId="mcp-rag-search-card"
     >
       {parsed.hits.length === 0 ? (
@@ -36,31 +36,36 @@ export function RagSearchCard({ part }: { part: ToolUIPart }) {
           {parsed.hits.map((hit, i) => (
             <li
               key={hit.id || i}
-              className="flex items-start gap-2"
+              className="flex min-w-0 items-start gap-2"
               data-testid="mcp-rag-search-row"
               data-id={hit.id}
             >
               <FileSearchIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   {hit.sourceTitle && (
-                    <span className="truncate font-medium">{hit.sourceTitle}</span>
+                    <span className="min-w-0 max-w-full truncate font-medium">
+                      {hit.sourceTitle}
+                    </span>
                   )}
                   {hit.scope && (
-                    <Badge variant="secondary" className="text-[10px]">
+                    <Badge variant="secondary" className="max-w-full truncate text-[10px]">
                       {hit.scope}
                     </Badge>
                   )}
-                  {typeof hit.score === "number" && (
+                  {typeof hit.score === "number" && Number.isFinite(hit.score) && (
                     <span
-                      className="ml-auto font-mono text-[10px] text-muted-foreground"
+                      className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground"
                       data-testid="mcp-rag-search-score"
+                      aria-label={t("scoreLabel", { score: hit.score.toFixed(2) })}
                     >
                       {hit.score.toFixed(2)}
                     </span>
                   )}
                 </div>
-                {hit.content && <p className="line-clamp-3 text-muted-foreground">{hit.content}</p>}
+                {hit.content && (
+                  <p className="line-clamp-3 break-words text-muted-foreground">{hit.content}</p>
+                )}
               </div>
             </li>
           ))}

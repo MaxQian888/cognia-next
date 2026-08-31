@@ -39,6 +39,17 @@ describe("DiagnosticsCard", () => {
     expect(screen.getByText("write 200 · read 100")).toBeInTheDocument()
   })
 
+  it("carries the muted tint as an inline style, not an arbitrary-property class", () => {
+    // `[data-surface-layer="raised"] { --surface-bg: … }` is unlayered in
+    // globals.css and beats any `@layer utilities` class, so the tint has to
+    // be inline or the card paints the opaque tier value.
+    const block: ContextDiagnosticsBlock = { kind: "context", userTurns: 1, assistantTurns: 0 }
+    render(<DiagnosticsCard block={block} />)
+    const card = screen.getByTestId("diagnostics-card")
+    expect(card.style.getPropertyValue("--surface-bg")).toContain("color-mix")
+    expect(card.className).not.toContain("[--surface-bg:")
+  })
+
   it("renders the fresh-window hint when no window is present", () => {
     const block: ContextDiagnosticsBlock = {
       kind: "context",

@@ -32,7 +32,11 @@ describe("SharedSessionPanel", () => {
 
   it("marks legacy and local sessions private by default", () => {
     render(<SharedSessionPanel session={session()} />)
-    expect(screen.getByRole("button", { name: "openPrivateSession" })).toHaveTextContent("private")
+    // Icon-only in the header: the state word lives in `title`, not in the row.
+    expect(screen.getByRole("button", { name: "openPrivateSession" })).toHaveAttribute(
+      "title",
+      "private"
+    )
   })
 
   it("marks a server-bound session shared and exposes a configured-state explanation", async () => {

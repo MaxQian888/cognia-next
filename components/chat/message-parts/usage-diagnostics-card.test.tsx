@@ -116,6 +116,16 @@ describe("UsageDiagnosticsCard — plan limits", () => {
     expect(screen.getByText("Current week (Opus only)")).toBeInTheDocument()
   })
 
+  it("carries the muted tint as an inline style, not an arbitrary-property class", () => {
+    // `[data-surface-layer="raised"] { --surface-bg: … }` is unlayered in
+    // globals.css and beats any `@layer utilities` class, so the tint has to
+    // be inline or the card paints the opaque tier value.
+    render(<UsageDiagnosticsCard block={block()} />)
+    const card = screen.getByTestId("diagnostics-card")
+    expect(card.style.getPropertyValue("--surface-bg")).toContain("color-mix")
+    expect(card.className).not.toContain("[--surface-bg:")
+  })
+
   it("counts a near reset down and states a far one as a weekday and time", () => {
     render(<UsageDiagnosticsCard block={block()} />)
     expect(screen.getByText("Resets in 2h 41m")).toBeInTheDocument()

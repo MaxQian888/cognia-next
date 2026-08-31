@@ -1,6 +1,7 @@
 import { buildSendOptions, buildWorkingSetPostCompaction } from "./claude-chat-send-options"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useProjectStore } from "@/stores/project/project-store"
+import { createOnboardingRequest } from "@/lib/onboarding/request"
 
 jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: jest.fn(async () => ({})),
@@ -61,6 +62,15 @@ const PROJECT_B = {
 }
 
 describe("Claude chat send-option seam", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    jest.mocked(resolveSendOptions).mockClear()
+    jest.mocked(useProjectStore.getState).mockReturnValue({
+      projects: [PROJECT_A, PROJECT_B],
+      activeProjectId: "proj-a",
+    } as never)
+  })
+
   it("exports the send-option resolver", () => {
     expect(typeof buildSendOptions).toBe("function")
   })
@@ -147,6 +157,37 @@ describe("Claude chat send-option seam", () => {
     )
     expect(recovery?.durableInstructions?.indexOf("Compaction checkpoint")).toBeLessThan(
       recovery?.durableInstructions?.indexOf("Active run working set") ?? 0
+    )
+  })
+
+  it("forwards inferred contextual intents and a frozen turn identity", async () => {
+    await buildSendOptions({ id: "s1" } as never, "Plot a doughnut chart", undefined, {
+      runId: "r1",
+      turnId: "t1",
+      attemptId: "a2",
+    })
+    expect(jest.mocked(resolveSendOptions)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillIntents: ["chart"],
+        turnId: "t1",
+        executionIdentity: expect.objectContaining({ runId: "r1", turnId: "t1", attemptId: "a2" }),
+      })
+    )
+  })
+
+  it("forwards the durable onboarding request as request-scoped authorization", async () => {
+    createOnboardingRequest({
+      cardId: "summarize-web",
+      sessionId: "onboarding-session",
+      skillId: "skill_builtin_cognia_onboarding",
+      prompt: "Summarize a web page.",
+    })
+    await buildSendOptions({ id: "onboarding-session" } as never, "Summarize a web page.")
+    expect(jest.mocked(resolveSendOptions)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skillIntents: expect.arrayContaining(["onboarding.summarize-web"]),
+        requestScopedSkillIds: ["skill_builtin_cognia_onboarding"],
+      })
     )
   })
   describe("workspace attribution", () => {

@@ -12,6 +12,13 @@ jest.mock("@/stores/settings", () => ({
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn(),
 }))
+const mockAvailability = {
+  os: { available: true, backend: "mock", detail: "ok", reason: "available" },
+  microvm: { available: true, reason: "workspace-required", requiresWorkspace: true },
+}
+jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
+  useSandboxRuntimeAvailability: () => mockAvailability,
+}))
 
 // The shield is a Popover trigger (the repo's `status-bar-usage` pattern: a
 // `title` for the hover hint, no nested Radix triggers). Render the content
@@ -47,6 +54,19 @@ const MESSAGES = {
           microvm: "microVM tooltip",
           off: "Off tooltip",
         },
+        unavailableDetail: {
+          os: "Verify OS confinement",
+          microvm: "Enable E2B",
+          "cua-desktop": "No desktop workspace adapter",
+        },
+        unavailableLabel: {
+          os: "OS unavailable",
+          microvm: "microVM unavailable",
+          "cua-desktop": "Desktop unavailable",
+        },
+        inheritedDetail: "Inherited",
+        pinnedDetail: "Pinned",
+        unpin: "Unpin",
       },
     },
   },
@@ -183,6 +203,15 @@ describe("SandboxShield component", () => {
     const shield = screen.getByTestId("sandbox-shield")
     expect(shield).toHaveAttribute("data-state", "microvm")
     expect(shield).toHaveAttribute("aria-label", expect.stringMatching(/microVM/))
+  })
+
+  it("does not claim an unavailable persisted microVM tier is active", () => {
+    mockAvailability.microvm.available = false
+    withIntl(<SandboxShield session={session} forceState="microvm" />)
+    const shield = screen.getByTestId("sandbox-shield")
+    expect(shield).toHaveAttribute("data-available", "false")
+    expect(shield).toHaveAttribute("aria-label", expect.stringMatching(/unavailable.*microVM/i))
+    mockAvailability.microvm.available = true
   })
 
   it("renders the 'cua-desktop' state with a distinct glyph, not a shield", () => {

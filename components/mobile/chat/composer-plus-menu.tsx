@@ -23,10 +23,15 @@
  *
  * What is NOT here, and why: folder references, screen capture and the smart
  * snapshot need a real filesystem/desktop screen, and the skill recorder is
- * native desktop automation. Cloud documents are not special-cased at all —
- * `listAvailableDocsProviders()` filters by host, so the built-in `hosts:
- * ["tauri"]` providers drop out on their own and a mobile-capable provider
- * would appear here the day one is registered.
+ * native desktop automation.
+ *
+ * Cloud documents used to drop out silently. The sheet read the host-filtered
+ * `listAvailableDocsProviders()`, both built-ins declare `hosts: ["tauri"]`,
+ * so on a phone that list was always empty and the "Cloud docs" row hid
+ * itself. A mobile user could not tell the feature existed, let alone that
+ * their paired desktop could do it. It now reads the full registry and asks
+ * `docsProviderReach` per provider, rendering a blocked one as a disabled row
+ * whose hint says where it does work.
  *
  * Attachment branches (unchanged):
  *
@@ -73,7 +78,9 @@ import {
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { useChatStore, useComposerPermissionMode } from "@/stores/chat"
 import { useComposerSessionId } from "@/components/chat/composer/composer-session-context"
-import { listAvailableDocsProviders } from "@/lib/docs-providers/registry"
+import { listDocsProviders } from "@/lib/docs-providers/registry"
+import { docsProviderReach } from "@/lib/docs-providers/reach"
+import { useHostProfile } from "@/hooks/use-host-profile"
 import { listEntityMentionSources } from "@/lib/chat/mentions/entity-sources"
 import { listExternalCapabilities } from "@/lib/external-services/catalog"
 import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
@@ -186,9 +193,15 @@ export function ComposerPlusMenu({
 
   // Read at render, not at module load: all three registries are populated by
   // initializers and by plugins, so a snapshot taken once would leave a sheet
-  // that never grows a provider the user just connected. `listAvailable…` is
-  // the host-filtered read — see the header note on cloud documents.
-  const docsProviders = listAvailableDocsProviders()
+  // that never grows a provider the user just connected.
+  //
+  // EVERY registered provider, not the host-filtered read. Both built-ins are
+  // desktop-only, so filtering by host emptied this list on every phone and
+  // the "Cloud docs" row below then hid itself — the feature simply did not
+  // exist as far as a mobile user could tell. A blocked provider now renders
+  // as a disabled row that says where it does work.
+  const hostProfile = useHostProfile()
+  const docsProviders = listDocsProviders()
   const entitySources = listEntityMentionSources()
   const chatServices = listExternalCapabilities({ surface: "chat" })
 
@@ -374,19 +387,29 @@ export function ComposerPlusMenu({
           <div className="min-h-0 overflow-y-auto px-2 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
             {view === "docs" ? (
               <SubPanel title={tMenu("cloudDocs")} onBack={() => setView("root")}>
-                {docsProviders.map((provider) => (
-                  <PlusRow
-                    key={provider.id}
-                    icon={<CloudIcon className="size-4" />}
-                    // Keyed by provider id so a newly registered provider needs
-                    // one message, not a branch here; `registry-i18n.test.ts`
-                    // pins the catalogue against the registry because
-                    // `lint:i18n` cannot follow a template key.
-                    label={tDocs(`name.${provider.id}` as "name.lark")}
-                    onSelect={() => insertAndClose(`@${provider.mentionPrefix}`)}
-                    testId={`composer-plus-docs-${provider.id}`}
-                  />
-                ))}
+                {docsProviders.map((provider) => {
+                  const reach = docsProviderReach(provider, hostProfile)
+                  return (
+                    <PlusRow
+                      key={provider.id}
+                      icon={<CloudIcon className="size-4" />}
+                      // Keyed by provider id so a newly registered provider
+                      // needs one message, not a branch here.
+                      // `registry-i18n.test.ts` pins the catalogue against the
+                      // registry because `lint:i18n` cannot follow a template
+                      // key.
+                      label={tDocs(`name.${provider.id}` as "name.lark")}
+                      hint={
+                        reach.block
+                          ? tDocs(`reach.short.${reach.block}` as "reach.short.no-runtime")
+                          : undefined
+                      }
+                      disabled={!reach.available}
+                      onSelect={() => insertAndClose(`@${provider.mentionPrefix}`)}
+                      testId={`composer-plus-docs-${provider.id}`}
+                    />
+                  )
+                })}
               </SubPanel>
             ) : view === "records" ? (
               <SubPanel title={tMenu("records")} onBack={() => setView("root")}>
@@ -620,17 +643,25 @@ function PlusTile({
 function PlusRow({
   icon,
   label,
+  hint,
   onSelect,
   active,
   chevron,
+  disabled,
   testId,
 }: {
   icon: React.ReactNode
   label: string
+  /**
+   * Secondary line under the label. Carries the reason a disabled row is
+   * disabled, so "unavailable" never has to be inferred from a grey pixel.
+   */
+  hint?: string
   onSelect: () => void
   active?: boolean
   /** Renders the "opens a submenu" affordance. */
   chevron?: boolean
+  disabled?: boolean
   testId?: string
 }) {
   // A row that carries state is a checkable menu item, not a pressed button:
@@ -642,12 +673,19 @@ function PlusRow({
       type="button"
       role={checkable ? "menuitemcheckbox" : "menuitem"}
       aria-checked={checkable ? active : undefined}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       onClick={onSelect}
       data-testid={testId}
       className={ROW_CLASS}
     >
       <span className="text-muted-foreground">{icon}</span>
-      <span className="flex-1 truncate">{label}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{label}</span>
+        {hint ? (
+          <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+        ) : null}
+      </span>
       {active ? <span aria-hidden className="size-1.5 rounded-full bg-primary" /> : null}
       {chevron ? <ChevronRightIcon aria-hidden className="size-4 text-muted-foreground" /> : null}
     </button>

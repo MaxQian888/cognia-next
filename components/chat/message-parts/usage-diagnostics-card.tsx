@@ -41,7 +41,6 @@ import { Button } from "@/components/ui/button"
 import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 import { MeterRow } from "@/components/settings/subscription/limits-meters-card"
-import { QuotaBar } from "@/components/settings/subscription/quota-bar"
 import { UsageRow } from "@/components/chat/context-usage-indicator"
 import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { useCountUp } from "@/hooks/usage/use-count-up"
@@ -57,12 +56,33 @@ import {
   type UsageScopeReport,
   type UsageSpendTotals,
 } from "@/lib/usage/usage-report"
+import { formatBucketCost } from "@/lib/usage/session-analytics"
 import { surfaceLabelKey } from "@/lib/usage/usage-surface-labels"
+import { UsageAttributionRow } from "@/components/usage/usage-attribution-row"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
-import { formatCost, formatDuration, formatTokens } from "@/types/system/usage"
+import { formatDuration, formatTokens } from "@/types/system/usage"
 import type { UsageDiagnosticsBlock, UsageWindowStat } from "@/lib/slash-commands/system-blocks"
 import type { LimitsMeter, UsageStatus } from "@/types/subscription"
 import type { UsageDisplayMode } from "@/types/appearance"
+
+/**
+ * The wash both diagnostics cards sit on, inline rather than as a
+ * `[--surface-bg:…]` class.
+ *
+ * `[data-surface-layer="raised"] { --surface-bg: … }` in globals.css is
+ * UNLAYERED, and Tailwind's arbitrary-property utilities live in
+ * `@layer utilities`. An unlayered declaration beats every layered one whatever
+ * its specificity, so the class form silently loses and the card paints the
+ * opaque tier value instead of this muted wash. An inline style is in no layer
+ * at all, so it wins — the same seam `SELECTION_GLASS_TINT` uses.
+ *
+ * It lives here rather than in `diagnostics-card.tsx` only because that is the
+ * direction the import already runs: that file renders this one. One shared
+ * constant beats two that have to stay in step.
+ */
+export const DIAGNOSTICS_TINT = {
+  "--surface-bg": "color-mix(in oklch, var(--muted) 30%, transparent)",
+} as React.CSSProperties
 
 /** Em dash for "we do not know", never for a measured zero. */
 const UNKNOWN = "—"
@@ -115,17 +135,6 @@ export function legacyWindowsToMeters(
 /** Percent string for a 0–1 share, or the em dash when the share is unknown. */
 function formatShare(share: number | null): string {
   return share == null ? UNKNOWN : `${Math.round(share * 100)}%`
-}
-
-/**
- * Money for a bucket, honest about provenance: a bucket containing turns no
- * pricing layer knew is a LOWER bound, so it renders with a `≥`. A bucket that
- * is entirely unpriced has no figure at all — "$0.00" would read as free.
- */
-function formatBucketCost(costUsd: number, unpricedTurns: number, turns: number): string {
-  if (turns > 0 && unpricedTurns >= turns) return UNKNOWN
-  const base = formatCost(costUsd)
-  return unpricedTurns > 0 ? `≥ ${base}` : base
 }
 
 export function UsageDiagnosticsCard({ block }: { block: UsageDiagnosticsBlock }) {
@@ -192,7 +201,8 @@ export function UsageDiagnosticsCard({ block }: { block: UsageDiagnosticsBlock }
       radius="stage"
       data-testid="diagnostics-card"
       data-usage-card="true"
-      className="@container not-prose my-1 w-full max-w-lg space-y-3 border p-3 [--surface-bg:color-mix(in_oklch,var(--muted)_30%,transparent)]"
+      style={DIAGNOSTICS_TINT}
+      className="@container not-prose my-1 w-full max-w-lg space-y-3 border p-3"
     >
       <header className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -579,6 +589,12 @@ function AttributionSection({
   )
 }
 
+/**
+ * Share + money for one bucket. The markup lives in `UsageAttributionRow`,
+ * shared with the Usage dashboard. What stays here is the transcript card's own
+ * policy: rank by cost where cost is known and fall back to tokens where it is
+ * not, and only spell out the turn/token detail line in detailed mode.
+ */
 function AttributionRow({
   id,
   label,
@@ -603,39 +619,34 @@ function AttributionRow({
   reduce: boolean
 }) {
   const t = useTranslations("chat.diagnostics")
-  // Share by cost where cost is known, else by tokens — a free/local model can
+  // Share by cost where cost is known, else by tokens. A free/local model can
   // dominate the plan's token budget while contributing $0, and ranking it at
   // "0%" would hide exactly the thing the user is looking for.
-  const costShare = shareOfCost(bucket, totals)
-  const share = costShare ?? shareOfTokens(bucket, totals)
-  const pct = share == null ? null : Math.round(share * 100)
-  const animated = Math.round(useCountUp(pct ?? 0, { disabled: reduce, durationMs: 400 }))
+  const share = shareOfCost(bucket, totals) ?? shareOfTokens(bucket, totals)
 
   return (
-    <li className="space-y-1" data-testid={`usage-attribution-${id}`}>
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="min-w-0 truncate">{label}</span>
-        <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
-          {pct == null ? UNKNOWN : `${animated}%`}
-          {" · "}
-          {formatBucketCost(bucket.costUsd, bucket.unpricedTurns, bucket.turns)}
-        </span>
-      </div>
-      <QuotaBar pct={pct} status="ok" label={label} className="h-1.5" />
-      {mode === "detailed" ? (
-        <p className="text-[10px] text-muted-foreground">
-          {t("bucketDetail", {
-            turns: bucket.turns,
-            tokens: formatTokens(
-              bucket.inputTokens +
-                bucket.outputTokens +
-                bucket.cacheReadTokens +
-                bucket.cacheCreationTokens
-            ),
-          })}
-        </p>
-      ) : null}
-    </li>
+    <UsageAttributionRow
+      id={id}
+      label={label}
+      pct={share == null ? null : Math.round(share * 100)}
+      costUsd={bucket.costUsd}
+      unpricedTurns={bucket.unpricedTurns}
+      turns={bucket.turns}
+      reduce={reduce}
+      detail={
+        mode === "detailed"
+          ? t("bucketDetail", {
+              turns: bucket.turns,
+              tokens: formatTokens(
+                bucket.inputTokens +
+                  bucket.outputTokens +
+                  bucket.cacheReadTokens +
+                  bucket.cacheCreationTokens
+              ),
+            })
+          : undefined
+      }
+    />
   )
 }
 

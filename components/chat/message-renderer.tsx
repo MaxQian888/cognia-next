@@ -20,6 +20,7 @@ import {
   FinalizedLongTextPart,
   StreamingTextPart,
   createStreamingComponents,
+  mathScaleClass,
 } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
@@ -163,6 +164,21 @@ import { PerfBoundary } from "@/lib/perf"
 import { useAgentFileAutoFollow } from "@/hooks/agent/use-agent-file-auto-follow"
 import { CheckpointAction } from "@/components/chat/checkpoint-action"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
+
+/**
+ * Reveal policy for a control group that is hidden until hover.
+ *
+ * Hover alone is not a reveal path on a touch device — where this app ships
+ * through Capacitor — and it leaves keyboard focus sitting on a control the
+ * user cannot see. Every hover-revealed group in the repo pairs `group-hover`
+ * with `focus-within` and `pointer-coarse` for exactly that reason
+ * (code-block, mermaid-block, math-block, image-block, video-block); this
+ * constant is that triple for the message surface, shared so the three groups
+ * here cannot drift apart. The strings, not the DOM, are what is shared: two of
+ * the three only render once a plugin contributes to them.
+ */
+export const HOVER_REVEAL_CLASS =
+  "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
 
 interface Props {
   message: UIMessage
@@ -772,10 +788,15 @@ function MessageRendererInner({
               only right-aligns them when the row is `w-fit` — a block-level
               flex row with auto width ignores auto margins and pins to the
               left under the right-aligned bubble. */}
+          {/* Unlike the host action bar above, this slot is hover-revealed
+              unconditionally — so it needs the focus/touch reveals even more:
+              without them a plugin that contributes a message action has NO
+              way to be reached on a touch device, and none by keyboard. */}
           <PluginExtensionSlot
             point="chat.message.actions"
             className={cn(
-              "mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
+              "mt-1 flex items-center gap-1 empty:hidden",
+              HOVER_REVEAL_CLASS,
               message.role === "user" ? "ml-auto w-fit" : ""
             )}
           />
@@ -785,7 +806,8 @@ function MessageRendererInner({
             nothing when no plugin contributed items. */}
           <div
             className={cn(
-              "opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
+              "empty:hidden",
+              HOVER_REVEAL_CLASS,
               message.role === "user" ? "ml-auto w-fit" : ""
             )}
           >
@@ -805,7 +827,15 @@ function MessageRendererInner({
             <MessageActions
               className={cn(
                 "text-xs text-muted-foreground transition-opacity",
-                display.actions === "hover" && "opacity-0 group-hover:opacity-100",
+                // `focus-within` and `pointer-coarse` are not decoration: hover
+                // is the ONLY reveal a bare `group-hover` offers, so without
+                // them this whole bar (copy / edit / retry / branch / plugin
+                // actions) is permanently invisible on touch — where the app
+                // ships through Capacitor — and a keyboard user lands focus on
+                // a control they cannot see. Same triple every other
+                // hover-revealed group in the repo carries (code-block,
+                // mermaid-block, math-block, image-block, video-block).
+                display.actions === "hover" && HOVER_REVEAL_CLASS,
                 message.role === "user" ? "ml-auto w-fit" : ""
               )}
             >
@@ -862,6 +892,26 @@ function MessageRendererInner({
                 </MessageAction>
               )}
 
+              {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
+                stay reachable under every preset, not only `inspector` — the
+                `all` branch below is the only place it used to render. */}
+              {hasActionCommand("readAloud") && (
+                <ReadAloudButton
+                  messageId={message.id}
+                  text={extractText(message)}
+                  character={speaker ?? directCharacter ?? null}
+                />
+              )}
+
+              {/* IM cross-links: forward this text to an IM conversation, or
+                  lift an inbound IM message into a fresh main chat. Self-hide
+                  when they do not apply. */}
+              <MessageImActions message={message} text={messageText} sessionId={branchSessionId} />
+
+              {/* Overflow LAST. Everything above is a single-purpose button;
+                  this one is the drawer the rest of the actions live in, and a
+                  drawer sitting mid-row reads as just another action while
+                  pushing the real ones past it. */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -927,22 +977,6 @@ function MessageRendererInner({
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
-
-              {/* ADR-0127: read-aloud is a host command (`readAloud`) and must
-                stay reachable under every preset, not only `inspector` — the
-                `all` branch below is the only place it used to render. */}
-              {hasActionCommand("readAloud") && (
-                <ReadAloudButton
-                  messageId={message.id}
-                  text={extractText(message)}
-                  character={speaker ?? directCharacter ?? null}
-                />
-              )}
-
-              {/* IM cross-links: forward this text to an IM conversation, or
-                  lift an inbound IM message into a fresh main chat. Self-hide
-                  when they do not apply. */}
-              <MessageImActions message={message} text={messageText} sessionId={branchSessionId} />
 
               <BranchNavigator message={message} className="mx-1" />
               {branchSessionId && (
@@ -1610,7 +1644,12 @@ function renderPart(
           streamdownProps={{
             className: cn(
               "typeset typeset-chat",
-              display.markdown.codeWrap && "[&_pre]:whitespace-pre-wrap"
+              display.markdown.codeWrap && "[&_pre]:whitespace-pre-wrap",
+              // Same seam as the answer body: Streamdown forwards `className`
+              // and drops anything it does not declare, so the math knobs have
+              // to be classes here too (see `mathScaleClass`).
+              mathScaleClass(display.markdown.mathFontScale),
+              display.markdown.mathAlign === "left" && "chat-math-left"
             ),
             components: createStreamingComponents(projectRoot, stillStreaming),
             controls: { table: false },

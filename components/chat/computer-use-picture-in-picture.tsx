@@ -52,6 +52,15 @@ const PILL_SIZE = { width: 190, height: 36 }
 const mountedSessionCounts = new Map<string, number>()
 const pendingSessionCleanup = new Map<string, ReturnType<typeof setTimeout>>()
 const ACTION_TRANSLATION_KEYS = {
+  // App-session surface. These are the names the tools actually publish today;
+  // the map previously held only the pre-app-session action vocabulary, so a
+  // live run showed raw tool ids where a label belonged.
+  get_app_state: "getAppState",
+  list_apps: "listApps",
+  query_elements: "queryElements",
+  expand_element: "expandElement",
+  perform_action: "performAction",
+  zoom: "zoom",
   screenshot: "screenshot",
   left_click: "leftClick",
   right_click: "rightClick",

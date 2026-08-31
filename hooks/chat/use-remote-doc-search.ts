@@ -19,15 +19,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { loggers } from "@cognia/logging"
+import { useHostProfile } from "@/hooks/use-host-profile"
+import { docsProviderReach, type DocsProviderReach } from "@/lib/docs-providers/reach"
 import {
   DocsProviderError,
   getDocsProviderByPrefix,
-  isDocsProviderHostSupported,
   type DocsProvider,
   type DocsProviderAccount,
   type DocsProviderErrorCode,
   type RemoteDocRef,
 } from "@/lib/docs-providers"
+
+/**
+ * Reach when no namespace is active at all. Not a block the user can act on:
+ * the panel is closed, so nothing renders it.
+ */
+const UNAVAILABLE_NO_PROVIDER: DocsProviderReach = Object.freeze({ available: false })
 
 /** Debounce before a keyword search leaves the device. */
 export const DOC_SEARCH_DEBOUNCE_MS = 250
@@ -44,8 +51,15 @@ export interface RemoteDocSearchInput {
 
 export interface RemoteDocSearchState {
   provider: DocsProvider | null
-  /** False on web/mobile — the panel renders an explanatory empty state. */
+  /** False on web/mobile. The panel renders an explanatory empty state. */
   hostSupported: boolean
+  /**
+   * WHY the panel is unavailable, when it is. `hostSupported` alone cannot
+   * distinguish a standalone browser (nothing anywhere can read this) from a
+   * companion (the paired host can, this client has no route to it), and the
+   * two deserve different sentences.
+   */
+  reach: DocsProviderReach
   /** `null` while the account list is loading. */
   accounts: readonly DocsProviderAccount[] | null
   accountId: string | null
@@ -71,7 +85,12 @@ export function useRemoteDocSearch({
     () => (namespace ? (getDocsProviderByPrefix(namespace) ?? null) : null),
     [namespace]
   )
-  const hostSupported = provider ? isDocsProviderHostSupported(provider) : false
+  const hostProfile = useHostProfile()
+  const reach = useMemo<DocsProviderReach>(
+    () => (provider ? docsProviderReach(provider, hostProfile) : UNAVAILABLE_NO_PROVIDER),
+    [provider, hostProfile]
+  )
+  const hostSupported = reach.available
 
   const [accounts, setAccounts] = useState<readonly DocsProviderAccount[] | null>(null)
   const [accountId, setAccountId] = useState<string | null>(null)
@@ -179,6 +198,7 @@ export function useRemoteDocSearch({
     () => ({
       provider,
       hostSupported,
+      reach,
       accounts,
       accountId,
       setAccountId: chooseAccount,
@@ -187,6 +207,17 @@ export function useRemoteDocSearch({
       error,
       linkOnly: Boolean(provider) && hostSupported && !searchable,
     }),
-    [provider, hostSupported, accounts, accountId, chooseAccount, items, loading, error, searchable]
+    [
+      provider,
+      hostSupported,
+      reach,
+      accounts,
+      accountId,
+      chooseAccount,
+      items,
+      loading,
+      error,
+      searchable,
+    ]
   )
 }

@@ -34,13 +34,17 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 // Controllable registry reads. Both are module-level maps seeded by their own
 // module load, so `requireActual` + a spy on the one function keeps every other
 // consumer in the graph untouched.
-const availableDocsMock = jest.fn((): unknown[] => [])
+// EVERY registered provider, not the host-filtered read: the menu now renders
+// a provider its host cannot use as a disabled row that says where it works.
+const docsProvidersMock = jest.fn((): unknown[] => [])
 jest.mock("@/lib/docs-providers/registry", () => ({
   ...jest.requireActual<typeof import("@/lib/docs-providers/registry")>(
     "@/lib/docs-providers/registry"
   ),
-  listAvailableDocsProviders: () => availableDocsMock(),
+  listDocsProviders: () => docsProvidersMock(),
 }))
+const hostProfileMock = jest.fn(() => "desktop")
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => hostProfileMock() }))
 const chatCapabilitiesMock = jest.fn((): unknown[] => [])
 jest.mock("@/lib/external-services/catalog", () => ({
   ...jest.requireActual<typeof import("@/lib/external-services/catalog")>(
@@ -117,7 +121,8 @@ beforeEach(() => {
   pickMultipleMock.mockReset()
   showToastMock.mockReset().mockResolvedValue({ kind: "ok" })
   selectionFeedbackMock.mockReset().mockResolvedValue({ kind: "ok" })
-  availableDocsMock.mockReset().mockReturnValue([])
+  docsProvidersMock.mockReset().mockReturnValue([])
+  hostProfileMock.mockReset().mockReturnValue("desktop")
   chatCapabilitiesMock.mockReset().mockReturnValue([])
   useChatStore.getState().setPermissionMode(null)
 })
@@ -374,14 +379,27 @@ describe("<ComposerPlusMenu /> groups", () => {
     expect(screen.getByTestId("composer-plus-plan-mode")).toBeInTheDocument()
   })
 
-  it("hides cloud documents on a host with no available provider", async () => {
+  it("hides cloud documents only when no provider is registered at all", async () => {
     await openMenu({ onInsert: jest.fn() })
-    expect(availableDocsMock).toHaveBeenCalled()
+    expect(docsProvidersMock).toHaveBeenCalled()
     expect(screen.queryByTestId("composer-plus-cloud-docs")).not.toBeInTheDocument()
   })
 
+  it("keeps the row on a phone and says where the provider does work", async () => {
+    // The defect this replaces: both built-ins are `hosts: ["tauri"]`, the menu
+    // read the host-filtered list, and so the whole Cloud docs row vanished on
+    // every phone. A mobile user could not tell the feature existed.
+    docsProvidersMock.mockReturnValue([{ id: "lark", mentionPrefix: "lark:", hosts: ["tauri"] }])
+    hostProfileMock.mockReturnValue("mobile-companion")
+    const user = await openMenu({ onInsert: jest.fn() })
+    await user.click(screen.getByTestId("composer-plus-cloud-docs"))
+    const row = screen.getByTestId("composer-plus-docs-lark")
+    expect(row).toBeDisabled()
+    expect(row).toHaveTextContent("reach.short.runs-on-host")
+  })
+
   it("drills into cloud documents and types the provider prefix", async () => {
-    availableDocsMock.mockReturnValue([{ id: "lark", mentionPrefix: "lark:" }])
+    docsProvidersMock.mockReturnValue([{ id: "lark", mentionPrefix: "lark:", hosts: ["tauri"] }])
     const onInsert = jest.fn()
     const user = await openMenu({ onInsert })
     await user.click(screen.getByTestId("composer-plus-cloud-docs"))

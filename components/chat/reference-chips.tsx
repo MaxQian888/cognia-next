@@ -6,9 +6,10 @@
 // is left alone (the user can edit/remove the text manually).
 
 import { useTranslations } from "next-intl"
-import { FileIcon, FolderIcon, XIcon } from "lucide-react"
+import { XIcon } from "lucide-react"
 import { useChatStore, useComposerReferencedPaths } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
 import { useComposerSessionId } from "./composer/composer-session-context"
 
@@ -41,11 +42,7 @@ export function ReferenceChips({ bare = false }: ReferenceChipsProps = {}) {
           )}
           title={r.absolute}
         >
-          {r.isDir ? (
-            <FolderIcon className="size-3.5 text-muted-foreground" />
-          ) : (
-            <FileIcon className="size-3.5 text-muted-foreground" />
-          )}
+          <FileTypeIcon path={r.relative} isDir={r.isDir} />
           <span className="max-w-[min(280px,calc(100vw-6rem))] truncate font-mono">
             {r.relative}
           </span>

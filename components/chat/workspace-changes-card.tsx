@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDownIcon,
   ChevronRightIcon,
-  FileCode2Icon,
   GitCompareArrowsIcon,
   RotateCcwIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { ChatSession } from "@cognia/agent-config-types"
+import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { Button } from "@/components/ui/button"
 import { useBreakpoint } from "@/hooks/ui"
 import {
@@ -195,7 +195,7 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
                     data-testid={`workspace-change-${file.path}`}
                     onClick={() => revealFile(file.path)}
                   >
-                    <FileCode2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <FileTypeIcon path={file.path} />
                     <span className="min-w-0 flex-1 truncate" title={file.path}>
                       {file.path}
                     </span>
@@ -211,7 +211,11 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className="size-7 shrink-0 text-muted-foreground opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    // `pointer-coarse` matters more than the hover reveal here:
+                    // `opacity-0` hides the button but leaves it tappable, so on
+                    // touch this was an invisible destructive control sitting
+                    // beside every row. Coarse pointers get it outright.
+                    className="size-7 shrink-0 text-muted-foreground opacity-0 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
                     aria-label={t("discardFile")}
                     title={t("discardFile")}
                     data-testid={`workspace-change-discard-${file.path}`}

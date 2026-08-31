@@ -84,6 +84,10 @@ const storeState = {
   messagesLoading: false,
   messagesLoadError: null as string | null,
   atCapacity: false,
+  ephemeralSkillIds: [] as string[],
+  setEphemeralSkillIds: jest.fn((ids: string[]) => {
+    storeState.ephemeralSkillIds = ids
+  }),
   // Raw-selector consumers (RunPanel's usage signature) read per-session
   // slices directly off the state object.
   sessions: {} as Record<string, { messages: unknown[] }>,
@@ -122,6 +126,8 @@ jest.mock("@/stores/settings", () => {
       userName?: string
     } | null,
     save: jest.fn(),
+    completeOnboarding: jest.fn().mockResolvedValue(undefined),
+    skipOnboarding: jest.fn().mockResolvedValue(undefined),
   }
   const useSettingsStore = Object.assign((sel: (s: typeof state) => unknown) => sel(state), {
     getState: () => state,
@@ -142,9 +148,47 @@ jest.mock("@/hooks/chat/use-effective-cwd", () => ({
   useEffectiveCwd: () => "/repo",
 }))
 
-const consumePendingChatPromptMock = jest.fn<string | null, [string]>(() => null)
+interface PendingPromptMockRecord {
+  id: string
+  sessionId: string
+  prompt: string
+  skillIds: string[]
+  requestId?: string
+}
+
+const peekPendingChatPromptMock = jest.fn<PendingPromptMockRecord | null, [string]>(() => null)
+const acknowledgePendingChatPromptMock = jest.fn<boolean, [string, string]>(() => true)
 jest.mock("@/lib/chat/pending-prompt", () => ({
-  consumePendingChatPrompt: (sessionId: string) => consumePendingChatPromptMock(sessionId),
+  peekPendingChatPrompt: (sessionId: string) => peekPendingChatPromptMock(sessionId),
+  acknowledgePendingChatPrompt: (sessionId: string, id: string) =>
+    acknowledgePendingChatPromptMock(sessionId, id),
+}))
+
+type OnboardingRequestMockRecord = null | { state: string; skillId: string }
+
+const readOnboardingRequestMock = jest.fn<OnboardingRequestMockRecord, [string]>(() => null)
+const beginOnboardingRequestAttemptMock = jest.fn<unknown, [string]>()
+const failOnboardingRequestMock = jest.fn<unknown, [string, string]>()
+const reconcileOnboardingRequestMessagesMock = jest.fn<unknown, [string, unknown[]]>()
+const hasPersistedInitialOnboardingPromptMock = jest.fn<boolean, [unknown, unknown[]]>(() => false)
+const hasPersistedPromptMessageMock = jest.fn<boolean, [string, unknown[]]>(() => false)
+jest.mock("@/lib/onboarding/request", () => ({
+  readOnboardingRequest: (sessionId: string) => readOnboardingRequestMock(sessionId),
+  beginOnboardingRequestAttempt: (sessionId: string) =>
+    beginOnboardingRequestAttemptMock(sessionId),
+  failOnboardingRequest: (sessionId: string, error: string) =>
+    failOnboardingRequestMock(sessionId, error),
+  reconcileOnboardingRequestMessages: (sessionId: string, messages: unknown[]) =>
+    reconcileOnboardingRequestMessagesMock(sessionId, messages),
+  hasPersistedInitialOnboardingPrompt: (request: unknown, messages: unknown[]) =>
+    hasPersistedInitialOnboardingPromptMock(request, messages),
+  hasPersistedPromptMessage: (prompt: string, messages: unknown[]) =>
+    hasPersistedPromptMessageMock(prompt, messages),
+}))
+
+const listMessagesMock = jest.fn().mockResolvedValue([])
+jest.mock("@/lib/db/messages", () => ({
+  listMessages: (sessionId: string) => listMessagesMock(sessionId),
 }))
 
 import { act, render, screen, waitFor } from "@testing-library/react"
@@ -163,7 +207,17 @@ import {
   publishComputerUseActivity,
 } from "@/lib/automation/computer-use-pip"
 import { EmptyChatState } from "./empty-state"
-import { __settingsState as settingsState } from "@/stores/settings"
+import { useSettingsStore } from "@/stores/settings"
+
+const settingsState = useSettingsStore.getState() as unknown as {
+  settings: {
+    welcomeHidden?: { tryPrompt?: boolean }
+    welcomeStyle?: "rich" | "minimal"
+    userName?: string
+  } | null
+  completeOnboarding: jest.Mock<Promise<void>, []>
+  skipOnboarding: jest.Mock<Promise<void>, [string, string]>
+}
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 const hasWebCompanionTargetMock = jest.mocked(hasWebCompanionTarget)
@@ -183,7 +237,23 @@ function makeProps() {
 
 describe("ChatPane", () => {
   beforeEach(() => {
-    consumePendingChatPromptMock.mockReset().mockReturnValue(null)
+    peekPendingChatPromptMock.mockReset().mockReturnValue(null)
+    acknowledgePendingChatPromptMock.mockReset().mockReturnValue(true)
+    readOnboardingRequestMock.mockReset().mockReturnValue(null)
+    beginOnboardingRequestAttemptMock.mockReset()
+    failOnboardingRequestMock.mockReset().mockReturnValue({
+      state: "failed",
+      skillId: "skill-onboarding",
+    })
+    reconcileOnboardingRequestMessagesMock.mockReset()
+    hasPersistedInitialOnboardingPromptMock.mockReset().mockReturnValue(false)
+    hasPersistedPromptMessageMock.mockReset().mockReturnValue(false)
+    listMessagesMock.mockReset().mockResolvedValue([])
+    storeState.messagesLoading = false
+    storeState.ephemeralSkillIds = []
+    storeState.setEphemeralSkillIds.mockClear()
+    settingsState.completeOnboarding.mockClear()
+    settingsState.skipOnboarding.mockClear()
     hasWebCompanionTargetMock.mockReset().mockReturnValue(false)
     historyModeMock = null
     companionTranscriptMessagesMock.mockClear()
@@ -213,26 +283,148 @@ describe("ChatPane", () => {
   })
 
   it("sends a queued configuration prompt once through the normal sender", async () => {
-    consumePendingChatPromptMock.mockReturnValueOnce("Configure WebDAV")
+    peekPendingChatPromptMock.mockReturnValue({
+      id: "dispatch-1",
+      sessionId: "s1",
+      prompt: "Configure WebDAV",
+      skillIds: ["skill-onboarding"],
+      requestId: "request-1",
+    })
+    readOnboardingRequestMock.mockReturnValue({
+      state: "awaiting-input",
+      skillId: "skill-onboarding",
+    })
     const props = makeProps()
     const { rerender } = render(<ChatPane {...props} />)
 
     await waitFor(() =>
       expect(props.onSend).toHaveBeenCalledWith("Configure WebDAV", undefined, undefined, undefined)
     )
-    expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1")
+    expect(peekPendingChatPromptMock).toHaveBeenCalledWith("s1")
+    expect(storeState.setEphemeralSkillIds).toHaveBeenCalledWith(["skill-onboarding"], "s1")
+    expect(beginOnboardingRequestAttemptMock).toHaveBeenCalledWith("s1")
+    // A resolved sender promise is not a durable dispatch receipt.
+    expect(acknowledgePendingChatPromptMock).not.toHaveBeenCalled()
 
     rerender(<ChatPane {...props} />)
     expect(props.onSend).toHaveBeenCalledTimes(1)
   })
 
-  it("fails closed before sending a queued prompt that contains PII", async () => {
-    consumePendingChatPromptMock.mockReturnValueOnce("Configure alice@example.com")
+  it("stages skill ids carried by a durable handoff even without request metadata", async () => {
+    peekPendingChatPromptMock.mockReturnValue({
+      id: "dispatch-skill",
+      sessionId: "s1",
+      prompt: "Run with the scoped skill",
+      skillIds: ["skill-scoped"],
+    })
     const props = makeProps()
     render(<ChatPane {...props} />)
 
-    await waitFor(() => expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1"))
+    await waitFor(() => expect(props.onSend).toHaveBeenCalled())
+    expect(storeState.setEphemeralSkillIds).toHaveBeenCalledWith(["skill-scoped"], "s1")
+    expect(acknowledgePendingChatPromptMock).toHaveBeenCalledWith("s1", "dispatch-skill")
+  })
+
+  it("never resends a non-onboarding handoff the transcript already carries", async () => {
+    // The record now outlives the tab (localStorage, 24h), so a reload between
+    // the durable write and the acknowledgement must not dispatch it twice.
+    // A legacy handoff has no onboarding record, which is exactly why the
+    // transcript, not the record, has to be what proves it already went out.
+    readOnboardingRequestMock.mockReturnValue(undefined)
+    hasPersistedPromptMessageMock.mockReturnValue(true)
+    peekPendingChatPromptMock.mockReturnValue({
+      id: "dispatch-replay",
+      sessionId: "s1",
+      prompt: "Configure the WebDAV target",
+      skillIds: [],
+    })
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+
+    await waitFor(() =>
+      expect(acknowledgePendingChatPromptMock).toHaveBeenCalledWith("s1", "dispatch-replay")
+    )
     expect(props.onSend).not.toHaveBeenCalled()
+    expect(reconcileOnboardingRequestMessagesMock).not.toHaveBeenCalled()
+  })
+
+  it("retries a durable handoff after a transient transcript read failure", async () => {
+    peekPendingChatPromptMock.mockReturnValue({
+      id: "dispatch-retry",
+      sessionId: "s1",
+      prompt: "Resume the queued task",
+      skillIds: [],
+    })
+    listMessagesMock
+      .mockRejectedValueOnce(new Error("temporary IndexedDB read failure"))
+      .mockResolvedValueOnce([])
+    const props = makeProps()
+    const { rerender } = render(<ChatPane {...props} />)
+
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledTimes(1))
+
+    storeState.messagesLoading = true
+    rerender(<ChatPane {...props} />)
+    storeState.messagesLoading = false
+    rerender(<ChatPane {...props} />)
+
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(props.onSend).toHaveBeenCalledWith(
+        "Resume the queued task",
+        undefined,
+        undefined,
+        undefined
+      )
+    )
+    expect(acknowledgePendingChatPromptMock).toHaveBeenCalledWith("s1", "dispatch-retry")
+  })
+
+  it("fails closed before sending a queued prompt that contains PII", async () => {
+    peekPendingChatPromptMock.mockReturnValue({
+      id: "dispatch-pii",
+      sessionId: "s1",
+      prompt: "Configure alice@example.com",
+      skillIds: [],
+    })
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+
+    await waitFor(() => expect(peekPendingChatPromptMock).toHaveBeenCalledWith("s1"))
+    expect(props.onSend).not.toHaveBeenCalled()
+    expect(acknowledgePendingChatPromptMock).toHaveBeenCalledWith("s1", "dispatch-pii")
+    expect(failOnboardingRequestMock).toHaveBeenCalledWith("s1", "pending-prompt-pii-blocked")
+    expect(settingsState.skipOnboarding).toHaveBeenCalledWith("task_failed", "first-run")
+  })
+
+  it("acknowledges dispatch and settles only from the persisted transcript", async () => {
+    const request = { state: "in-flight", skillId: "skill-onboarding" }
+    readOnboardingRequestMock.mockReturnValue(request)
+    peekPendingChatPromptMock.mockReturnValue({
+      id: "dispatch-1",
+      sessionId: "s1",
+      prompt: "Summarize a web page",
+      skillIds: ["skill-onboarding"],
+      requestId: "request-1",
+    })
+    const persisted = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "Summarize a web page" }] },
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "Which URL?" }] },
+    ]
+    listMessagesMock.mockResolvedValue(persisted)
+    hasPersistedInitialOnboardingPromptMock.mockReturnValue(true)
+    reconcileOnboardingRequestMessagesMock.mockReturnValue({
+      ...request,
+      state: "succeeded",
+      resultMessageId: "a1",
+    })
+
+    render(<ChatPane {...makeProps()} />)
+
+    await waitFor(() => expect(listMessagesMock).toHaveBeenCalledWith("s1"))
+    expect(acknowledgePendingChatPromptMock).toHaveBeenCalledWith("s1", "dispatch-1")
+    expect(reconcileOnboardingRequestMessagesMock).toHaveBeenCalledWith("s1", persisted)
+    expect(settingsState.completeOnboarding).toHaveBeenCalled()
   })
 
   it("forwards the attachment manifest from Composer to the workspace sender", async () => {
@@ -874,7 +1066,9 @@ describe("ChatPane — welcome personalization reaches the welcome page", () => 
   function renderWelcome() {
     // No active session → the welcome branch.
     render(<ChatPane {...makeProps()} activeSession={null} />)
-    return emptyStateMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    const props = emptyStateMock.mock.calls.at(-1)?.[0]
+    if (!props) throw new Error("EmptyChatState was not rendered")
+    return props
   }
 
   beforeEach(() => {
@@ -902,8 +1096,7 @@ describe("ChatPane — welcome personalization reaches the welcome page", () => 
 
   it("supplies a hero composer when the shell can dispatch a first turn", () => {
     render(<ChatPane {...makeProps()} activeSession={null} onHeroSend={jest.fn()} />)
-    const props = emptyStateMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
-    expect(props.composerSlot).toBeTruthy()
+    expect(emptyStateMock.mock.calls.at(-1)?.[0].composerSlot).toBeTruthy()
   })
 
   it("omits the hero composer when the shell cannot create a session", () => {

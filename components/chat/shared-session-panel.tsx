@@ -366,11 +366,21 @@ export function SharedSessionPanel({ session }: Props) {
       }}
     >
       <SheetTrigger asChild>
+        {/* Icon-only. This trigger sits in the conversation header, which on
+            desktop is projected into the title bar next to the workspace pill
+            and the route history — and it was the one control there carrying a
+            permanent text label. In the default state that label is the word
+            for "nothing is shared", and with the collaboration client switched
+            off it grew to a whole disabled sentence, so the bar's widest chunk
+            of chrome was also its least informative. The lock / users icon
+            already carries the state; the words moved to `title`, which is
+            where every other control in that row keeps them. */}
         <Button
           variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+          size="icon"
+          className="size-7 shrink-0 text-muted-foreground"
           disabled={!featureEnabled}
+          title={featureEnabled ? (isShared ? t("shared") : t("private")) : t("featureDisabled")}
           aria-label={
             featureEnabled
               ? isShared
@@ -380,7 +390,6 @@ export function SharedSessionPanel({ session }: Props) {
           }
         >
           {isShared ? <UsersIcon className="size-3.5" /> : <LockIcon className="size-3.5" />}
-          {featureEnabled ? (isShared ? t("shared") : t("private")) : t("featureDisabled")}
         </Button>
       </SheetTrigger>
       <SheetContent className="sm:max-w-lg">

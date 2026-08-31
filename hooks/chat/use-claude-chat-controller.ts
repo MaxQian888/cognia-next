@@ -189,6 +189,24 @@ import type { SendFn } from "./claude-chat-turn-tasks"
 import { buildSendOptions } from "./claude-chat-send-options"
 import { drainSteerVia, handleEvent } from "./claude-chat-events"
 
+export function resolveChatTurnAttemptIdentity(input: {
+  sessionId: string
+  runId: string
+  messages: readonly UIMessage[]
+  reuseLastUserTurn: boolean
+  attempts: Map<string, number>
+  mintTurnId?: () => string
+}): { runId: string; turnId: string; attemptId: string } {
+  const anchor = input.reuseLastUserTurn
+    ? [...input.messages].reverse().find((message) => message.role === "user")
+    : undefined
+  const turnId = anchor?.id ?? (input.mintTurnId ?? (() => `user-${crypto.randomUUID()}`))()
+  const attemptKey = `${input.sessionId}:${turnId}`
+  const ordinal = (input.attempts.get(attemptKey) ?? 0) + 1
+  input.attempts.set(attemptKey, ordinal)
+  return { runId: input.runId, turnId, attemptId: `a${ordinal}` }
+}
+
 /**
  * Wires the Claude sidecar IPC into the React store. Mount this hook once at
  * the top of the chat page; do not invoke it per-message.
@@ -275,6 +293,8 @@ export function useClaudeChat() {
   // Private resource context is kept outside the message log. It is reused for
   // regenerate/edit-resend, but is only attached after plugin prompt hooks.
   const lastResourceContextRef = useRef<Map<string, string>>(new Map())
+  /** Retry/regenerate keeps turnId stable and advances only attemptId. */
+  const skillAttemptByTurnRef = useRef<Map<string, number>>(new Map())
   /**
    * Pending branch tag set by `regenerate` and consumed by the first
    * assistant message that arrives afterward. Keyed by sessionId so a regen
@@ -760,6 +780,18 @@ export function useClaudeChat() {
       }
 
       const session = await getSession(sessionId)
+      const identityMessages = store.getState().sessions[sessionId]?.messages ?? []
+      const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
+      const executionRunId = runIdForTurn(sessionId, chatRunId)
+      const turnIdentity = resolveChatTurnAttemptIdentity({
+        sessionId,
+        runId: executionRunId,
+        messages: identityMessages,
+        reuseLastUserTurn: Boolean(callOptions?.skipUserAppend || callOptions?.steerDrain),
+        attempts: skillAttemptByTurnRef.current,
+      })
+      const frozenTurnId = turnIdentity.turnId
+      const frozenAttemptId = turnIdentity.attemptId
 
       // ADR-0019 — a fresh user message while a goal is self-driving is
       // mid-course guidance: PAUSE the goal (rotates generationId + fires the
@@ -793,16 +825,25 @@ export function useClaudeChat() {
       try {
         sendOptions =
           opts ??
-          (await buildSendOptions(session, userMessageText, (spec) => {
-            const existingHandle = getExecutionHandle(sessionId)
-            if (existingHandle) {
-              executionHandlesRef.current.set(sessionId, existingHandle)
-              return
+          (await buildSendOptions(
+            session,
+            userMessageText,
+            (spec) => {
+              const existingHandle = getExecutionHandle(sessionId)
+              if (existingHandle) {
+                executionHandlesRef.current.set(sessionId, existingHandle)
+                return
+              }
+              const handle = createAgentExecutionHandle(sessionId, spec)
+              executionHandlesRef.current.set(sessionId, handle)
+              executionHandleDirectory.register(handle)
+            },
+            {
+              runId: executionRunId,
+              turnId: frozenTurnId,
+              attemptId: frozenAttemptId,
             }
-            const handle = createAgentExecutionHandle(sessionId, spec)
-            executionHandlesRef.current.set(sessionId, handle)
-            executionHandleDirectory.register(handle)
-          }))
+          ))
       } catch (err) {
         // RoutingNoCandidatesError (alias matched, every deployment down)
         // and any other resolver failure surface as the chat error instead
@@ -814,6 +855,44 @@ export function useClaudeChat() {
             sessionId,
             toDiagnostic(error, { source: "chat", meta: { sessionId } })
           )
+        throw error
+      }
+      sendOptions = {
+        ...sendOptions,
+        turnId: frozenTurnId,
+        ...(sendOptions.execution
+          ? {
+              execution: {
+                ...sendOptions.execution,
+                identity: {
+                  ...(sendOptions.execution.identity ?? {}),
+                  sessionId,
+                  runId: executionRunId,
+                  turnId: frozenTurnId,
+                  attemptId: frozenAttemptId,
+                },
+              },
+            }
+          : {}),
+      }
+
+      // Second half of the cap backstop above, run here because the provider is
+      // only known once the send options resolve. The lane is a separate
+      // admission dimension from the shared pool, so a pool with room says
+      // nothing about it. Checked BEFORE the optimistic user append: without
+      // this the send proceeds, posts the message, and then parks inside
+      // `acquireChatLease` with no status flip, no explanation, and no cancel.
+      if (
+        getExecutionBroker().isAtCapacity("ai-turn", sessionId, sendOptions.provider) &&
+        !getExecutionBroker().isAtCapacity("ai-turn", sessionId)
+      ) {
+        console.warn("send blocked: provider concurrency cap reached", {
+          sessionId,
+          provider: sendOptions.provider,
+        })
+        useChatStore
+          .getState()
+          .setSessionError(sessionId, tInlineErr("providerConcurrencyCapReached"))
         return
       }
 
@@ -964,7 +1043,11 @@ export function useClaudeChat() {
       // existing user anchor stays the single source of truth for that turn.
       // Base off this session's own slice — never the focused projection.
       const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
-      const userMsg = makeUserMessage(effectiveContent, undefined, callOptions?.attachmentManifest)
+      const userMsg = makeUserMessage(
+        effectiveContent,
+        frozenTurnId,
+        callOptions?.attachmentManifest
+      )
       // Structured mention capture: persist the message's inline `@…` tokens
       // as `metadata.mentions: ContextRef[]` so mentions are queryable without
       // regex re-parsing. Known subagent handles resolve to their kind; other
@@ -1096,9 +1179,10 @@ export function useClaudeChat() {
       // Register this chat turn with the global execution broker so it counts
       // toward — and is observable / cancellable via — the same governor as
       // every headless leg. Acquired before the `streaming` flip so the broker
-      // watcher releases it on settle; gated by the `isAtCapacity` check above,
-      // so it admits immediately. Best-effort: a broker hiccup never blocks the
-      // turn the user already committed to.
+      // watcher releases it on settle. Gated by BOTH `isAtCapacity` checks above
+      // (shared pool, then the provider lane once the provider resolved), so it
+      // admits immediately. Best-effort: a broker hiccup never blocks the turn
+      // the user already committed to.
       // Resolved before the lease so the slot names the directory this turn
       // actually writes into. Best-effort: an unresolvable cwd means no slot,
       // which is what it was before any of this existed.
@@ -1121,6 +1205,8 @@ export function useClaudeChat() {
             executionContext: session?.executionContext,
             effectiveCwd: turnCwd,
           }),
+          providerId: sendOptions.provider,
+          providerLimit: sendOptions.providerConcurrencyLimit,
         })
       } catch (leaseErr) {
         console.warn("chat lease acquire failed; sending without admission", leaseErr)
@@ -1263,7 +1349,6 @@ export function useClaudeChat() {
       // Repeated turns create versioned TaskRuns inside that same managed
       // worktree. The developer flag remains a compatibility path for sessions
       // created before execution contexts existed.
-      const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
       // Repair a pre-existing managed context that was persisted with an empty
       // projectId before the creation path started stamping the real one. Doing
       // it here rather than in a Dexie upgrade covers the connector and
@@ -1316,8 +1401,6 @@ export function useClaudeChat() {
       if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
       }
-      const executionRunId = runIdForTurn(sessionId, chatRunId)
-
       // ADR-0130 hard cost ceiling. Evaluated BEFORE any durable acceptance so
       // a refused overrun leaves no half-open run behind. Fails open on any
       // infrastructure error — the user asked for a spending limit, not for
@@ -1428,6 +1511,7 @@ export function useClaudeChat() {
           outcome: "failed",
           errorCode: input.errorCode,
         })
+        releaseSkillLoadContext(sessionId)
         stopAssemblyHeartbeat()
         const durationMs = finishBehaviorTurn(sessionId)
         if (durationMs !== undefined) {
@@ -1582,7 +1666,7 @@ export function useClaudeChat() {
           runId: executionRunId,
           executionRunId,
           turnId: anchorMessage?.id ?? userMsg.id,
-          attemptId: "a1",
+          attemptId: frozenAttemptId,
           surface: "chat",
           agentId: routedExternalAgentId ?? "built-in",
           agentKind: adoptionAgentKind,

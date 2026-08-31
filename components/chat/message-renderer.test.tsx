@@ -28,8 +28,13 @@ jest.mock("@/components/ai-elements/message", () => ({
     children: ReactForMocks.ReactNode
     className?: string
   }) => ReactForMocks.createElement("div", { "data-test": "message-content", className }, children),
-  MessageActions: ({ children }: { children: ReactForMocks.ReactNode }) =>
-    ReactForMocks.createElement("div", { "data-test": "message-actions" }, children),
+  MessageActions: ({
+    children,
+    className,
+  }: {
+    children: ReactForMocks.ReactNode
+    className?: string
+  }) => ReactForMocks.createElement("div", { "data-test": "message-actions", className }, children),
   MessageAction: ({
     children,
     onClick,
@@ -270,6 +275,19 @@ jest.mock("@cognia/logging", () => {
 // Agent-flow display mode + grouping (covered in depth by their own suites;
 // here we only assert MessageRenderer's dispatch wiring).
 let mockFlowMode = "standard"
+let mockActions: "hover" | "core" | "all" = "all"
+// Mutable so a test can move a markdown knob off its default; every other
+// field stays at the resolved default the presets ship.
+const mockMarkdown = {
+  math: true,
+  mermaid: true,
+  diff: true,
+  codeLineNumbers: true,
+  codeWrap: false,
+  mathFontScale: 1 as number,
+  mathAlign: "center" as "center" | "left",
+  mathCopy: true,
+}
 jest.mock("@/hooks/chat/use-agent-flow-mode", () => ({
   useAgentFlowMode: () => ({ mode: mockFlowMode, setMode: jest.fn() }),
 }))
@@ -287,23 +305,14 @@ jest.mock("@/hooks/chat/use-message-display", () => ({
       cost: "details",
       finishState: "details",
     },
-    actions: "all",
+    actions: mockActions,
     agentFlowMode: mockFlowMode,
     reasoning: "auto",
     tools: "auto",
     sources: "collapsed",
     richControls: "hover",
     motion: "off",
-    markdown: {
-      math: true,
-      mermaid: true,
-      diff: true,
-      codeLineNumbers: true,
-      codeWrap: false,
-      mathFontScale: 1,
-      mathAlign: "center",
-      mathCopy: true,
-    },
+    markdown: mockMarkdown,
     bodyFont: "sans",
   }),
 }))
@@ -357,7 +366,7 @@ jest.mock("@/components/chat/message-parts/tool-call-row", () => ({
 
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { UIMessage } from "ai"
-import { MessageRenderer } from "./message-renderer"
+import { HOVER_REVEAL_CLASS, MessageRenderer } from "./message-renderer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useChatStore } from "@/stores/chat"
 import { resolveMessageDisplayOptions } from "@/lib/chat/message-display"
@@ -373,6 +382,63 @@ function userMsg(id = "u1", text = "Hi"): UIMessage {
 }
 
 describe("message display actions", () => {
+  it("reveals the hover action bar on focus and on touch, not hover alone", () => {
+    // `hover` is a user-selectable value for `messageDisplay.actions`. With a
+    // bare `group-hover` it hides copy / edit / retry / branch behind an event
+    // a touch device never fires — the app ships to iOS/Android through
+    // Capacitor — and drops keyboard focus onto an invisible control. Every
+    // other hover-revealed group in the repo carries the same triple.
+    mockActions = "hover"
+    try {
+      render(
+        <MessageRenderer
+          message={{ id: "m-hover", role: "assistant", parts: [{ type: "text", text: "hi" }] }}
+        />
+      )
+      const bar = document.querySelector("[data-test='message-actions']")
+      expect(bar).toBeTruthy()
+      const cls = bar?.getAttribute("class") ?? ""
+      expect(cls).toContain("opacity-0")
+      expect(cls).toContain("group-hover:opacity-100")
+      expect(cls).toContain("focus-within:opacity-100")
+      expect(cls).toContain("pointer-coarse:opacity-100")
+    } finally {
+      mockActions = "all"
+    }
+  })
+
+  it("keeps one reveal policy for every hover-hidden group on the message", () => {
+    // The other two groups — the `chat.message.actions` plugin slot and the
+    // plugin context menu — are hover-revealed in EVERY actions mode, and each
+    // renders only once a plugin contributes to it, so there is no DOM to
+    // assert against here. They share this string instead: a plugin action
+    // that is reachable by pointer only is not reachable at all on a phone.
+    for (const cls of [
+      "opacity-0",
+      "group-hover:opacity-100",
+      "focus-within:opacity-100",
+      "pointer-coarse:opacity-100",
+    ]) {
+      expect(HOVER_REVEAL_CLASS).toContain(cls)
+    }
+  })
+
+  it("does not dim the action bar in core mode", () => {
+    mockActions = "core"
+    try {
+      render(
+        <MessageRenderer
+          message={{ id: "m-core", role: "assistant", parts: [{ type: "text", text: "hi" }] }}
+        />
+      )
+      const cls =
+        document.querySelector("[data-test='message-actions']")?.getAttribute("class") ?? ""
+      expect(cls).not.toContain("opacity-0")
+    } finally {
+      mockActions = "all"
+    }
+  })
+
   it("mounts the IM cross-link actions in both the hover bar and the full bar", () => {
     useChatStore.setState({ activeSessionId: "sess-im" })
     const message = assistantMsg("im1", "Forward me")
@@ -535,6 +601,30 @@ describe("reasoning parts", () => {
     }
     expect(trigger.getThinkingMessage(true)).toBe("reasoning.streaming")
     expect(trigger.getThinkingMessage(false, 2)).toBe("reasoning.completedSeconds")
+  })
+
+  it("gives reasoning bodies the same math classes as the answer body", () => {
+    // ADR-0127 — the reasoning body is a second Streamdown surface reading the
+    // same resolved knobs. It already carried code wrap / line numbers /
+    // plugins; the math pair was missing, so scaled or left-aligned math held
+    // in the answer and reverted inside the thinking block.
+    mockMarkdown.mathFontScale = 1.2
+    mockMarkdown.mathAlign = "left"
+    try {
+      const msg: UIMessage = {
+        id: "r-math",
+        role: "assistant",
+        parts: [{ type: "reasoning", text: "$$x^2$$", state: "done" }],
+      }
+      render(<MessageRenderer message={msg} />)
+      const className = mockReasoningContent.mock.calls.at(-1)?.[0].streamdownProps
+        .className as string
+      expect(className).toContain("chat-math-lg")
+      expect(className).toContain("chat-math-left")
+    } finally {
+      mockMarkdown.mathFontScale = 1
+      mockMarkdown.mathAlign = "center"
+    }
   })
 
   it("switches completed reasoning to static Streamdown mode", () => {

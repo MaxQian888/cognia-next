@@ -156,6 +156,14 @@ jest.mock("@/lib/execution/broker", () => ({
   getExecutionBroker: () => ({ isAtCapacity: (...a: unknown[]) => isAtCapacityMock(...a) }),
 }))
 
+const runWithExecutionLeaseMock = jest.fn(
+  async (_request: unknown, run: (lease: { signal: AbortSignal }) => Promise<unknown>) =>
+    run({ signal: new AbortController().signal })
+)
+jest.mock("@/lib/execution/admit", () => ({
+  runWithExecutionLease: (...args: unknown[]) => runWithExecutionLeaseMock(...args),
+}))
+
 const acquireChatLeaseMock = jest.fn().mockResolvedValue(undefined)
 const releaseChatLeaseMock = jest.fn()
 jest.mock("@/lib/execution/chat-lease", () => ({
@@ -357,6 +365,7 @@ beforeEach(() => {
   chatState.steerQueue = []
   chatState.statusBySession = {}
   isAtCapacityMock.mockReset().mockReturnValue(false)
+  runWithExecutionLeaseMock.mockClear()
   acquireChatLeaseMock.mockReset().mockResolvedValue(undefined)
   releaseChatLeaseMock.mockClear()
   chatState.replaceSessionMessages.mockClear()

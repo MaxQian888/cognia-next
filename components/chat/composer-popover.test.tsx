@@ -16,6 +16,7 @@ function docSearchState(overrides: Partial<RemoteDocSearchState> = {}): RemoteDo
   return {
     provider: null,
     hostSupported: false,
+    reach: { available: false },
     accounts: null,
     accountId: null,
     setAccountId: jest.fn(),
@@ -713,11 +714,33 @@ describe("ComposerPopover — remote documents", () => {
     })
   })
 
-  it("explains the desktop-only limitation instead of showing an empty list", () => {
-    useRemoteDocSearchMock.mockReturnValue(docSearchState({ provider, hostSupported: false }))
+  it("names the reason this host cannot read documents, not an empty list", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: false,
+        reach: { available: false, block: "runs-on-host" },
+      })
+    )
     setup(docTrigger("spec"))
     expect(screen.queryAllByRole("listitem")).toHaveLength(0)
-    expect(screen.getByText("picker.hostUnsupported")).toBeInTheDocument()
+    // Reason AND next step: a companion is told its paired host can do this,
+    // which is a different answer from a standalone browser's dead end.
+    expect(
+      screen.getByText(/reach\.block\.runs-on-host reach\.nextStep\.runs-on-host/)
+    ).toBeInTheDocument()
+  })
+
+  it("distinguishes a standalone browser from a companion", () => {
+    useRemoteDocSearchMock.mockReturnValue(
+      docSearchState({
+        provider,
+        hostSupported: false,
+        reach: { available: false, block: "no-runtime" },
+      })
+    )
+    setup(docTrigger("spec"))
+    expect(screen.getByText(/reach\.block\.no-runtime/)).toBeInTheDocument()
   })
 
   it("asks the user to connect an account when none is selected", () => {

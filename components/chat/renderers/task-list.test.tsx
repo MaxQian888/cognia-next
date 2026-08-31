@@ -3,8 +3,8 @@
  */
 import React from "react"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import { TaskList, TaskListItem } from "./task-list"
+import * as taskListModule from "./task-list"
+import { TaskListItem } from "./task-list"
 
 describe("TaskListItem", () => {
   it("renders an unchecked item with its label", () => {
@@ -17,58 +17,19 @@ describe("TaskListItem", () => {
     const label = screen.getByText("Done thing")
     expect(label).toHaveClass("line-through")
   })
-})
 
-describe("TaskList", () => {
-  const items = [
-    {
-      id: "a",
-      text: "Parent",
-      checked: true,
-      children: [
-        { id: "a1", text: "Child done", checked: true },
-        { id: "a2", text: "Child todo", checked: false },
-      ],
-    },
-    { id: "b", text: "Sibling", checked: false },
-  ]
-
-  it("renders nested items and a progress summary counting all leaves", () => {
-    render(<TaskList items={items} showProgress />)
-    expect(screen.getByText("Parent")).toBeInTheDocument()
-    expect(screen.getByText("Child done")).toBeInTheDocument()
-    expect(screen.getByText("Sibling")).toBeInTheDocument()
-    // 2 of 4 flattened items are checked → 50%.
-    expect(screen.getByText("Progress")).toBeInTheDocument()
-    expect(screen.getByText("2 / 4 (50%)")).toBeInTheDocument()
+  it("takes itself out of the list flow so the markdown `ul` marker does not double up", () => {
+    // react-markdown still emits the `ul`; the glyph IS the marker here.
+    const { container } = render(<TaskListItem checked={false}>Item</TaskListItem>)
+    expect(container.querySelector("li")).toHaveClass("list-none")
   })
 
-  it("omits the progress bar when showProgress is false", () => {
-    render(<TaskList items={items} />)
-    expect(screen.queryByText("Progress")).not.toBeInTheDocument()
-  })
-
-  it("is non-interactive by default — no checkbox role, no toggle", async () => {
-    const onToggle = jest.fn()
-    render(<TaskList items={[{ id: "x", text: "X", checked: false }]} onToggle={onToggle} />)
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-  })
-
-  it("toggles via onToggle when interactive", async () => {
-    const user = userEvent.setup()
-    const onToggle = jest.fn()
-    render(
-      <TaskList items={[{ id: "x", text: "X", checked: false }]} interactive onToggle={onToggle} />
-    )
-    await user.click(screen.getByRole("checkbox"))
-    expect(onToggle).toHaveBeenCalledWith("x", true)
-  })
-
-  it("supports the circle variant", () => {
-    const { container } = render(
-      <TaskList items={[{ id: "x", text: "X", checked: true }]} variant="circle" />
-    )
-    // circle variant uses lucide CheckCircle2 (an svg), not the square glyph.
-    expect(container.querySelector("svg")).toBeInTheDocument()
+  it("exports no interactive checklist — TodoWrite's renderer owns that", () => {
+    // Pins the removal of the unreachable `TaskList`: it duplicated
+    // `components/chat/todo-list.tsx`, its options had no caller, and its row
+    // was a `div[role=checkbox]` with no keyboard path. Re-adding a list-level
+    // export here should be a deliberate act with a real consumer, not a
+    // silent second checklist.
+    expect(Object.keys(taskListModule)).toEqual(["TaskListItem"])
   })
 })

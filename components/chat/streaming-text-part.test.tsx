@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { act, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 
@@ -42,12 +44,17 @@ jest.mock("./markdown/rendering-policy", () => ({
   chatStreamdownRehypePlugins: ["shared-rehype"],
 }))
 
-import { FinalizedLongTextPart, StreamingTextPart, blockRendersCode } from "./streaming-text-part"
+import {
+  FinalizedLongTextPart,
+  StreamingTextPart,
+  blockRendersCode,
+  mathScaleClass,
+} from "./streaming-text-part"
 import {
   selectStreamdownPlugins,
   streamdownPlugins,
 } from "@/components/ai-elements/streamdown-plugins"
-import type { MessageMarkdownOptions } from "@/types/appearance"
+import { MESSAGE_MATH_FONT_SCALES, type MessageMarkdownOptions } from "@/types/appearance"
 
 const MARKDOWN_DEFAULTS: MessageMarkdownOptions = {
   math: true,
@@ -340,6 +347,50 @@ describe("markdown knobs (ADR-0127)", () => {
     expect(props.plugins).toHaveProperty("math")
     expect(props.lineNumbers).toBe(false)
     expect(props.className).toContain("[&_pre]:whitespace-pre-wrap")
+  })
+
+  it("carries mathFontScale and mathAlign into the streaming class list", () => {
+    // ADR-0127: both renderers read the SAME resolved knobs. This branch has no
+    // per-expression wrapper to style, so the pair rides down as classes
+    // `app/globals.css` resolves against KaTeX's elements. Before this, moving
+    // either knob only took effect once the turn sealed — and the math visibly
+    // jumped at that moment.
+    render(
+      <StreamingTextPart
+        text="$$x^2$$"
+        isStreaming
+        markdown={{ ...MARKDOWN_DEFAULTS, mathFontScale: 1.2, mathAlign: "left" }}
+      />
+    )
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as { className: string }
+    expect(props.className).toContain("chat-math-lg")
+    expect(props.className).toContain("chat-math-left")
+  })
+
+  it("adds no math class at the default scale and alignment", () => {
+    render(<StreamingTextPart text="$$x^2$$" isStreaming markdown={MARKDOWN_DEFAULTS} />)
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as { className: string }
+    expect(props.className).not.toContain("chat-math-")
+  })
+
+  it("gives every declared math scale a class backed by a globals.css rule", () => {
+    // The scale cannot ride down as a style/`data-*` attribute — Streamdown
+    // spreads anything it does not declare onto the inner react-markdown, which
+    // drops it — so the closed scale set and the stylesheet have to stay in
+    // step. Without this a new scale renders at 1x while the finalized branch
+    // scales, which is exactly the silent divergence ADR-0127 forbids.
+    const css = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8")
+    for (const scale of MESSAGE_MATH_FONT_SCALES) {
+      const className = mathScaleClass(scale)
+      if (scale === 1) {
+        expect(className).toBeUndefined()
+        continue
+      }
+      expect(className).toBeDefined()
+      expect(css).toContain(`.${className} .katex-display {`)
+      expect(css).toContain(`.${className} .katex {`)
+    }
+    expect(css).toContain(".chat-math-left .katex-display {")
   })
 
   it("defaults to the full plugin set with line numbers and no wrap when no knobs are given", () => {

@@ -1,47 +1,39 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
-import { fn } from "storybook/test"
 
-import { TaskList } from "./task-list"
-
-const ITEMS = [
-  { id: "1", text: "Research existing implementation", checked: true },
-  { id: "2", text: "Write a failing repro test", checked: true },
-  {
-    id: "3",
-    text: "Implement the fix",
-    checked: false,
-    children: [
-      { id: "3a", text: "Patch the redaction gate", checked: false },
-      { id: "3b", text: "Wire it into build-options", checked: false },
-    ],
-  },
-  { id: "4", text: "Run pnpm test:coverage", checked: false },
-]
+import { TaskListItem } from "./task-list"
 
 const meta = {
-  title: "Chat/Renderers/TaskList",
-  component: TaskList,
+  title: "Chat/Renderers/TaskListItem",
+  component: TaskListItem,
   parameters: { layout: "padded" },
-  args: { items: ITEMS, onToggle: fn() },
-} satisfies Meta<typeof TaskList>
+  decorators: [
+    (Story) => (
+      <ul className="typeset typeset-chat max-w-prose">
+        <Story />
+      </ul>
+    ),
+  ],
+} satisfies Meta<typeof TaskListItem>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Read-only checklist with nested sub-tasks.
-export const Default: Story = {}
-
-// Progress bar summarising completed / total across the flattened tree.
-export const WithProgress: Story = {
-  args: { showProgress: true },
+// `- [ ] …` in an assistant reply.
+export const Unchecked: Story = {
+  args: { checked: false, children: "Write a failing repro test" },
 }
 
-// Interactive — rows are clickable and fire onToggle.
-export const Interactive: Story = {
-  args: { interactive: true, showProgress: true },
+// `- [x] …` — struck through and muted.
+export const Checked: Story = {
+  args: { checked: true, children: "Research the existing implementation" },
 }
 
-// Circle glyph variant instead of square checkboxes.
-export const CircleVariant: Story = {
-  args: { variant: "circle", showProgress: true },
+// The label wraps under the glyph rather than beside it, so a long item keeps
+// its hanging indent.
+export const LongLabel: Story = {
+  args: {
+    checked: false,
+    children:
+      "Confirm the redaction gate runs before every outbound embedding call, including the connector auto-reply path and the twin distillation job",
+  },
 }

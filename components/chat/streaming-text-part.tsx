@@ -30,7 +30,11 @@ import { parseProjectFileReference } from "@/lib/files/project-file-reference"
 import { cn } from "@/lib/utils"
 import { MarkdownRenderer } from "./markdown-renderer"
 import { chatMarkdownUrlTransform, chatStreamdownRehypePlugins } from "./markdown/rendering-policy"
-import type { MessageMarkdownOptions, MessageRichControls } from "@/types/appearance"
+import type {
+  MessageMarkdownOptions,
+  MessageMathFontScale,
+  MessageRichControls,
+} from "@/types/appearance"
 import { selectStreamdownPlugins } from "@/components/ai-elements/streamdown-plugins"
 import {
   createIncrementalMarkdownBlockParser,
@@ -241,6 +245,22 @@ export function createStreamingComponents(
   }
 }
 
+/**
+ * Scale class for the streaming branch's KaTeX output. Keyed by the closed
+ * {@link MESSAGE_MATH_FONT_SCALES} set because a class is the only thing that
+ * reaches the DOM here (see the note in `StreamingTextPartInner`); the default
+ * scale needs no rule, so it maps to `undefined`.
+ *
+ * Exported for the test that pins every declared scale to a class, so adding a
+ * scale without a `app/globals.css` rule fails instead of silently rendering at
+ * 1x while the finalized branch scales.
+ */
+export function mathScaleClass(scale: MessageMathFontScale | number): string | undefined {
+  if (scale === 0.8) return "chat-math-sm"
+  if (scale === 1.2) return "chat-math-lg"
+  return undefined
+}
+
 function StreamingTextPartInner({
   text,
   isStreaming,
@@ -262,6 +282,28 @@ function StreamingTextPartInner({
   const plugins = selectStreamdownPlugins(markdown)
   const lineNumbers = markdown?.codeLineNumbers ?? true
   const codeWrap = markdown?.codeWrap ?? false
+  // ADR-0127 requires BOTH branches to honour the same resolved knobs. The
+  // finalized branch hangs `mathFontScale` / `mathAlign` on its own
+  // `<MathBlock>` / `<MathInline>` wrappers; `@streamdown/math` writes KaTeX
+  // straight into the block, so there is no wrapper here to style and the two
+  // knobs have to ride down as classes `app/globals.css` resolves against
+  // KaTeX's own elements. Until this they applied only once a turn sealed, and
+  // math visibly jumped size/alignment at that moment for anyone who had moved
+  // either knob off its default.
+  //
+  // Classes, not a style/`data-*` attribute: `className` is the only prop
+  // Streamdown forwards to a DOM node in block mode — everything else it does
+  // not declare is spread onto the inner react-markdown, which drops it. That
+  // is also why the scale is a closed set of classes rather than a CSS
+  // variable; `mathScaleClass` is pinned against `MESSAGE_MATH_FONT_SCALES` so
+  // a new scale cannot land without its rule.
+  //
+  // `mathCopy` deliberately does NOT cross over: it is the click-to-copy
+  // affordance on `<MathInline>`, a React element this branch never mounts.
+  // Neither does `diff` — Streamdown has no diff plugin, so a ```diff fence
+  // streams as a code block and becomes the diff viewer when the turn seals.
+  const mathScale = markdown?.mathFontScale ?? 1
+  const mathAlign = markdown?.mathAlign ?? "center"
   // ADR-0138 — the caret is Streamdown's own (`caret="block"`), not a hand-rolled
   // element. Ours was a sibling of `<MessageResponse>` inside `MessageContent`'s
   // flex column, so it held a permanent 16px row plus an 8px gap under the reply
@@ -281,6 +323,8 @@ function StreamingTextPartInner({
       className={cn(
         "typeset typeset-chat",
         codeWrap && "[&_pre]:whitespace-pre-wrap",
+        mathScaleClass(mathScale),
+        mathAlign === "left" && "chat-math-left",
         !reduce && "[&>*:last-child]:after:animate-pulse"
       )}
       components={components}
