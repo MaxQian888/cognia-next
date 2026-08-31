@@ -5,6 +5,7 @@
 
 import type { SkillResource, SkillResourceKind } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
+import { loadBuiltInResourceOverlay } from "@/lib/skills/built-in-resource-overlay"
 
 function newId() {
   return "skres_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -17,6 +18,8 @@ export type SkillResourceDraft = Pick<
   Partial<Pick<SkillResource, "encoding" | "mimeType" | "size" | "inline">>
 
 export async function listResourcesForSkill(skillId: string): Promise<SkillResource[]> {
+  const builtIn = await loadBuiltInResourceOverlay(skillId)
+  if (builtIn) return builtIn
   return getDb().skillResources.where("skillId").equals(skillId).sortBy("path")
 }
 

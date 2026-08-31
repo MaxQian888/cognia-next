@@ -126,6 +126,21 @@ describe("createResource", () => {
 })
 
 describe("listResourcesForSkill / listResourcesByKind / getResource", () => {
+  it("uses the generated built-in overlay instead of stale Dexie payloads", async () => {
+    await getDb().skillResources.put({
+      id: "stale",
+      skillId: "skill_builtin_web_research",
+      kind: "reference",
+      name: "stale.md",
+      path: "references/stale.md",
+      content: "stale",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const rows = await listResourcesForSkill("builtin:web-research")
+    expect(rows.map((row) => row.path)).toEqual(["references/source-evaluation.md"])
+  })
+
   it("listResourcesForSkill orders by path", async () => {
     await createResource({
       skillId: "s",

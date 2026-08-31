@@ -38,6 +38,8 @@ describe("database boot coordination", () => {
       restorePluginSchema,
       recreateDatabase,
       verifySchema: jest.fn(() => undefined),
+      assertLayoutSupported: jest.fn(async () => undefined),
+      markLayout: jest.fn(async () => undefined),
       seed: jest.fn(async () => order.push("seed")),
     } as never)
 
@@ -51,6 +53,41 @@ describe("database boot coordination", () => {
       recreateDatabase,
     })
     expect(order).toEqual(["lock", "open", "restore", "seed", "unlock"])
+  })
+
+  it("refuses an unsupported storage layout before the database is opened", async () => {
+    // Ordering is the whole point. Opening is what upgrades an older database
+    // past the version where its layout can still be identified, so a check
+    // that ran afterwards would always find a database that looks current.
+    const order: string[] = []
+    const database = {
+      name: "cognia-account-refused",
+      tables: [],
+      open: jest.fn(async () => {
+        order.push("open")
+      }),
+      plugins: { toArray: jest.fn(async () => []) },
+    }
+    const refusal = new Error("Local database was not written by this build (missing-marker).")
+
+    await expect(
+      ensureActiveDatabaseReady({
+        getDatabase: () => database,
+        getBuiltinPluginManifests: () => new Map(),
+        restorePluginSchema: jest.fn(async () => []),
+        recreateDatabase: jest.fn(() => database),
+        verifySchema: jest.fn(() => undefined),
+        assertLayoutSupported: jest.fn(async () => {
+          order.push("assert")
+          throw refusal
+        }),
+        markLayout: jest.fn(async () => undefined),
+        seed: jest.fn(async () => undefined),
+      } as never)
+    ).rejects.toThrow(refusal)
+
+    expect(order).toEqual(["assert"])
+    expect(database.open).not.toHaveBeenCalled()
   })
 
   it("opens, restores plugin schema, then seeds exactly once for concurrent callers", async () => {
@@ -84,6 +121,8 @@ describe("database boot coordination", () => {
       getBuiltinPluginManifests: () => new Map(),
       restorePluginSchema,
       verifySchema: jest.fn(() => undefined),
+      assertLayoutSupported: jest.fn(async () => undefined),
+      markLayout: jest.fn(async () => undefined),
       seed,
     }
 
@@ -109,6 +148,8 @@ describe("database boot coordination", () => {
       getBuiltinPluginManifests: () => new Map(),
       restorePluginSchema: jest.fn(async () => []),
       verifySchema: jest.fn(() => undefined),
+      assertLayoutSupported: jest.fn(async () => undefined),
+      markLayout: jest.fn(async () => undefined),
       seed: jest.fn(async () => undefined),
     }
 

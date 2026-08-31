@@ -14,6 +14,8 @@ import { getDb } from "./schema"
 import { isTauri } from "@/lib/tauri"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS, type TwinRuntimeSettings } from "@/types/twin"
 import { createKeyringStore } from "@/lib/credentials/keyring-store"
+import { persistTwinVectorCredentials } from "@/lib/twin/runtime/vector-credentials"
+import { useVectorStore, type VectorSettings } from "@/stores/vector/vector-store"
 
 const TWIN_RUNTIME_ID = "twin-runtime"
 
@@ -82,8 +84,9 @@ export async function getTwinRuntimeSettings(): Promise<TwinRuntimeSettings> {
       embedding: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.embedding, ...row.payload.embedding },
       llm: { ...DEFAULT_TWIN_RUNTIME_SETTINGS.llm, ...row.payload.llm },
     }
-    if (row.secretRefs) await hydrateSecretReferences(merged, row.secretRefs)
-    else if (hasInlineSecrets(merged) && secretStore.isPersistent?.()) {
+    if (row.secretRefs) {
+      await hydrateSecretReferences(merged, row.secretRefs)
+    } else if (hasInlineSecrets(merged) && secretStore.isPersistent?.()) {
       // A durable adapter is available, so migrate the legacy row only after
       // the keyring/Vault writes complete. A failure leaves the old row intact
       // and the next read can retry safely.
@@ -100,7 +103,29 @@ export async function getTwinRuntimeSettings(): Promise<TwinRuntimeSettings> {
   }
 }
 
+/**
+ * Register a pre-existing Twin vector backend with the Rust credential
+ * registry once per app start.
+ *
+ * Settings saved before that registry existed carry either Twin secret
+ * references or a no-auth cloud endpoint with no references at all, and either
+ * shape needs registering for the backend to work without a manual re-save.
+ *
+ * This is a boot step, not part of reading settings: `getTwinRuntimeSettings`
+ * is called by the startup probe and by every runtime-adapter build, and doing
+ * a keyring write plus a global vector-store mutation on each of those made a
+ * plain read silently reconfigure the app. Transient failures stay retryable
+ * on the next start and must never surface to the settings form.
+ */
+export async function registerExistingTwinVectorBackend(): Promise<void> {
+  if (!isTauri()) return
+  const settings = await getTwinRuntimeSettings()
+  const vectorConfigId = await persistTwinVectorCredentials(settings).catch(() => undefined)
+  if (vectorConfigId) syncSharedVectorSettings(settings, vectorConfigId)
+}
+
 export async function saveTwinRuntimeSettings(payload: TwinRuntimeSettings): Promise<void> {
+  const desktop = isTauri()
   const existing = await settingsTable().get(TWIN_RUNTIME_ID)
   const previousRefs = isTwinRuntimeRow(existing) ? existing.secretRefs : undefined
   const values = secretValues(payload)
@@ -129,6 +154,43 @@ export async function saveTwinRuntimeSettings(payload: TwinRuntimeSettings): Pro
     ...(Object.keys(secretRefs).length > 0 ? { secretRefs } : {}),
   }
   await settingsTable().put(row)
+  if (!desktop) return
+  // Registering the backend with the Rust credential registry is a SEPARATE
+  // durable step and runs only once the row has landed. Doing it first meant a
+  // locked keyring or a failed Tauri command threw before anything was written,
+  // so the user could not even turn the worker off to escape the broken
+  // configuration. The failure still propagates, so the settings form reports
+  // it rather than pretending the backend is registered.
+  try {
+    syncSharedVectorSettings(payload, await persistTwinVectorCredentials(payload))
+  } catch (cause) {
+    syncSharedVectorSettings(payload, undefined)
+    throw cause
+  }
+}
+
+function syncSharedVectorSettings(
+  payload: TwinRuntimeSettings,
+  vectorConfigId: string | undefined
+): void {
+  const backend = payload.storage.vectorBackend
+  const patch: Partial<VectorSettings> = {
+    provider: backend,
+    embeddingProvider: payload.embedding.provider,
+    embeddingModel: payload.embedding.model,
+  }
+  if (vectorConfigId) {
+    const configKey = `${backend}ConfigId` as keyof Pick<
+      VectorSettings,
+      | "pineconeConfigId"
+      | "qdrantConfigId"
+      | "chromaConfigId"
+      | "milvusConfigId"
+      | "weaviateConfigId"
+    >
+    patch[configKey] = vectorConfigId
+  }
+  useVectorStore.getState().setSettings(patch)
 }
 
 function secretValues(payload: TwinRuntimeSettings): Record<TwinRuntimeSecretSlot, string> {

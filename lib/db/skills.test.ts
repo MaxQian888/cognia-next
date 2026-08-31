@@ -688,14 +688,15 @@ describe("seedBuiltInSkills", () => {
     expect(after.filter((s) => s.isBuiltIn).length).toBe(5 + BUILT_IN_SKILL_CATALOG.length)
   })
 
-  it("seeds functional catalog skills disabled by default, keyed by canonical id", async () => {
+  it("seeds contextual catalog skills enabled by default, keyed by canonical id", async () => {
     await seedBuiltInSkills()
     const im = await getSkill("skill_builtin_im_auto_reply")
     expect(im).toBeDefined()
     expect(im?.isBuiltIn).toBe(true)
-    expect(im?.status).toBe("disabled")
+    expect(im?.status).toBe("enabled")
     expect(im?.canonicalId).toBe("builtin:im-auto-reply")
     expect(im?.content.length).toBeGreaterThan(0)
+    expect((await getSkill("skill_builtin_plugin_authoring"))?.status).toBe("disabled")
     // The generic style skills stay enabled.
     expect((await getSkill("skill_builtin_concise"))?.status).toBe("enabled")
   })
@@ -715,7 +716,7 @@ describe("seedBuiltInSkills", () => {
     expect((await getSkill(diagram!.id))?.status).toBe("disabled")
   })
 
-  it("persists the curated diagram references and examples for progressive loading", async () => {
+  it("serves curated diagram resources from the read-only overlay without seeding Dexie", async () => {
     await seedBuiltInSkills()
     const resources = await listResourcesForSkill("skill_builtin_diagram_design")
     expect(
@@ -725,9 +726,12 @@ describe("seedBuiltInSkills", () => {
       resources.filter((resource) => /^assets\/example-.*\.html$/.test(resource.path))
     ).toHaveLength(27)
     expect(resources.some((resource) => resource.path === "assets/template.html")).toBe(true)
+    expect(
+      await getDb().skillResources.where("skillId").equals("skill_builtin_diagram_design").count()
+    ).toBe(0)
   })
 
-  it("persists each functional skill's reference resources, idempotently", async () => {
+  it("serves each functional skill's resources deterministically across reseeds", async () => {
     await seedBuiltInSkills()
     const refs = await listResourcesForSkill("skill_builtin_im_auto_reply")
     expect(refs.length).toBeGreaterThan(0)

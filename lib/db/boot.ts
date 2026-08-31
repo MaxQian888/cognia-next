@@ -5,6 +5,7 @@ import { restorePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getBuiltinPluginDexieManifests } from "@/lib/plugin/dexie/builtin-manifests"
 import { toNamespacedTableName } from "@/lib/plugin/dexie/namespace"
 import { getDb, recreateActiveDatabaseForSchemaUpgrade, type CogniaDB, whenSeeded } from "./schema"
+import { assertStorageLayoutSupported, writeStorageLayoutMarker } from "./storage-layout"
 
 interface PersistedPluginManifestRow {
   manifest?: unknown
@@ -29,6 +30,9 @@ export interface DatabaseBootDependencies {
   ) => Promise<string[]>
   recreateDatabase: () => CogniaDB
   verifySchema: (database: CogniaDB, manifests: Map<string, PluginManifestDexieBlock>) => void
+  /** Refuses a database written by an older storage layout. See `storage-layout.ts`. */
+  assertLayoutSupported: (databaseName: string) => Promise<void>
+  markLayout: (database: CogniaDB) => Promise<void>
   seed: () => Promise<void>
 }
 
@@ -38,6 +42,8 @@ const defaultDependencies: DatabaseBootDependencies = {
   restorePluginSchema: restorePluginTables,
   recreateDatabase: recreateActiveDatabaseForSchemaUpgrade,
   verifySchema: assertPluginSchemaReady,
+  assertLayoutSupported: assertStorageLayoutSupported,
+  markLayout: writeStorageLayoutMarker,
   seed: whenSeeded,
 }
 
@@ -86,7 +92,11 @@ export function ensureActiveDatabaseReady(
     // from its live table list. The recovery bridge needs this pre-open snapshot
     // to force one explicit version bump that materializes those stores.
     const requiredStoreNames = database.tables.map((table) => table.name)
+    // BEFORE the open, not after: opening is what would upgrade an older
+    // database past the point where its layout can still be identified.
+    await dependencies.assertLayoutSupported(database.name)
     await database.open()
+    await dependencies.markLayout(database)
     const pluginRows = await database.plugins.toArray()
     const manifests = collectPersistedPluginDexieManifests(pluginRows)
     for (const [pluginId, dexie] of dependencies.getBuiltinPluginManifests()) {

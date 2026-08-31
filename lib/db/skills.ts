@@ -796,28 +796,4 @@ export async function seedBuiltInSkills(): Promise<void> {
     if (sameStoredRow(merged, existing)) continue
     await db.skills.put(merged)
   }
-
-  // Persist each functional skill's bundled reference resources into the
-  // `skillResources` table so the Skills UI can browse/preview them and they
-  // export with the skill. Idempotent: only rewrite when the on-disk-derived
-  // set differs from what's stored, so reseeding on every boot is a no-op once
-  // settled (and a built-in content update propagates on the next launch).
-  for (const entry of BUILT_IN_SKILL_CATALOG) {
-    if (!entry.resources || entry.resources.length === 0) continue
-    const skillId = builtinSkillId(entry)
-    const desired = entry.resources.map((r) => ({
-      kind: r.kind,
-      name: r.name,
-      path: r.path,
-      content: r.content,
-    }))
-    const existing = await listResourcesForSkill(skillId)
-    const sig = (rs: Array<{ path: string; content: string }>) =>
-      JSON.stringify(
-        [...rs].sort((a, b) => a.path.localeCompare(b.path)).map((r) => [r.path, r.content])
-      )
-    if (sig(existing) !== sig(desired)) {
-      await replaceResourcesForSkill(skillId, desired)
-    }
-  }
 }

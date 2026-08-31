@@ -42,21 +42,19 @@ jest.mock("@/lib/platform/detect", () => {
   return { __esModule: true, ...actual, isTauri: jest.fn(actual.isTauri) }
 })
 
-const schemaTestRuntime = globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }
-
-function fullSchemaIt(name: string, run: () => Promise<void>, timeout = 30_000): void {
-  it(
-    name,
-    async () => {
-      schemaTestRuntime.__COGNIA_DB_FULL_SCHEMA__ = true
-      try {
-        await run()
-      } finally {
-        delete schemaTestRuntime.__COGNIA_DB_FULL_SCHEMA__
-      }
-    },
-    timeout
-  )
+/**
+ * These tests each seed a legacy-versioned database and reopen it as a
+ * `CogniaDB`, so they pay a real fake-indexeddb open plus an upgrade. 30s
+ * covers that under a loaded parallel run; the default 5s does not.
+ *
+ * They assert the CURRENT schema: that the store and its indexes exist, and
+ * that rows written before the upgrade survive it. They deliberately do NOT
+ * assert data transformation — `lib/db/schema.ts` declares one cumulative
+ * version and runs no `upgrade()` hooks, so a test asserting a backfill would
+ * be testing nothing.
+ */
+function schemaIt(name: string, run: () => Promise<void>, timeout = 30_000): void {
+  it(name, run, timeout)
 }
 
 /** Minimal valid `outboundQueue` row for index-behaviour tests. */
@@ -87,7 +85,7 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
-  fullSchemaIt("v203 adds the Sites build-log table", async () => {
+  schemaIt("v203 adds the Sites build-log table", async () => {
     const name = `cognia-site-build-logs-v203-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(202).stores({ sessions: "id, updatedAt" })
@@ -111,84 +109,7 @@ describe("getDb", () => {
     upgraded.close()
   })
 
-  fullSchemaIt("v202 backfills the Sites artifact summary onto version rows", async () => {
-    const name = `cognia-site-artifact-summary-v202-${Date.now()}`
-    const legacy = new Dexie(name)
-    legacy.version(201).stores({
-      siteVersions: "&id, siteId, status, createdAt, artifactDigest",
-      siteArtifacts: "&digest, createdAt",
-    })
-    await legacy.open()
-    await legacy.table("siteArtifacts").put({
-      digest: "a".repeat(64),
-      bytes: new Uint8Array([1, 2, 3]),
-      mediaType: "application/zip",
-      size: 3,
-      fileCount: 7,
-      createdAt: 1,
-    })
-    // Two versions share one digest — the backfill must read the archive once,
-    // not once per version.
-    for (const id of ["ver_1", "ver_2"]) {
-      await legacy.table("siteVersions").put({
-        id,
-        siteId: "site_1",
-        sequence: id === "ver_1" ? 1 : 2,
-        status: "ready",
-        environmentRevisionId: "env_1",
-        source: { commitSha: "abc", dirty: false, lockfileDigest: "l", inputDigest: "i" },
-        build: {
-          command: "[]",
-          runtime: "node@24",
-          packageManager: "pnpm@10",
-          compatibilityDate: "2026-01-01",
-          compatibilityFlags: [],
-          routes: [],
-          bindings: [],
-        },
-        artifactDigest: "a".repeat(64),
-        createdAt: 1,
-      })
-    }
-    // A version whose archive is already gone must stay honestly summary-less
-    // rather than gaining a fabricated zero.
-    await legacy.table("siteVersions").put({
-      id: "ver_pruned",
-      siteId: "site_1",
-      sequence: 3,
-      status: "ready",
-      environmentRevisionId: "env_1",
-      source: { commitSha: "abc", dirty: false, lockfileDigest: "l", inputDigest: "i" },
-      build: {
-        command: "[]",
-        runtime: "node@24",
-        packageManager: "pnpm@10",
-        compatibilityDate: "2026-01-01",
-        compatibilityFlags: [],
-        routes: [],
-        bindings: [],
-      },
-      artifactDigest: "b".repeat(64),
-      createdAt: 1,
-    })
-    legacy.close()
-
-    const upgraded = new CogniaDB(name)
-    await upgraded.open()
-    expect(upgraded.verno).toBeGreaterThanOrEqual(202)
-
-    for (const id of ["ver_1", "ver_2"]) {
-      const row = await upgraded.siteVersions.get(id)
-      expect(row?.artifactSize).toBe(3)
-      expect(row?.artifactFileCount).toBe(7)
-    }
-    const pruned = await upgraded.siteVersions.get("ver_pruned")
-    expect(pruned?.artifactSize).toBeUndefined()
-    expect(pruned?.artifactFileCount).toBeUndefined()
-    upgraded.close()
-  })
-
-  fullSchemaIt("v210 indexes project-claim and evidence lookup without touching data", async () => {
+  schemaIt("v210 indexes project-claim and evidence lookup without touching data", async () => {
     const name = `cognia-project-context-v210-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(209).stores({
@@ -261,7 +182,7 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
-  fullSchemaIt("v211 adds the online-evaluation tables without touching data", async () => {
+  schemaIt("v211 adds the online-evaluation tables without touching data", async () => {
     const name = `cognia-online-eval-v211-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(210).stores({
@@ -313,7 +234,7 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
-  fullSchemaIt("v212 adds the backfill run table and the session keyset index", async () => {
+  schemaIt("v212 adds the backfill run table and the session keyset index", async () => {
     const name = `cognia-project-mining-v212-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(211).stores({ sessions: "id, updatedAt, projectId" })
@@ -343,7 +264,7 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
-  fullSchemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
+  schemaIt("v201 adds host-owned external-agent config heads and revisions", async () => {
     const name = `cognia-external-agent-configs-v201-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(200).stores({ sessions: "id, updatedAt" })
@@ -371,7 +292,7 @@ describe("getDb", () => {
     upgraded.close()
   })
 
-  fullSchemaIt("v200 adds compound source/target thread handoff tickets", async () => {
+  schemaIt("v200 adds compound source/target thread handoff tickets", async () => {
     const name = `cognia-thread-handoff-v200-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(199).stores({ sessions: "id, updatedAt" })
@@ -396,7 +317,7 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
-  fullSchemaIt(
+  schemaIt(
     "v156 adds durable workflow waitpoint and event tables",
     async () => {
       const name = `cognia-session-peer-message-v155-${Date.now()}`
@@ -422,7 +343,7 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt(
+  schemaIt(
     "v157 adds the cross-domain governance ledger tables and indexes",
     async () => {
       const name = `cognia-governance-v157-${Date.now()}`
@@ -453,75 +374,6 @@ describe("getDb", () => {
         expect.arrayContaining(["decisionRefs", "evidenceRefs"])
       )
       expect(await upgraded.sessions.get("session-1")).toEqual({ id: "session-1", updatedAt: 1 })
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
-    "v158 adds generic run retrospectives and migrates legacy team learning",
-    async () => {
-      const name = `cognia-run-retrospective-v158-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(157).stores({
-        agentTeamRuns: "&id, teamId",
-        agentTeamRetrospectives: "&id, runId, status, createdAt, updatedAt",
-      })
-      await legacy.open()
-      await legacy.table("agentTeamRuns").put({ id: "run-legacy", teamId: "team-1" })
-      await legacy.table("agentTeamRetrospectives").put({
-        id: "retro-legacy",
-        runId: "run-legacy",
-        status: "pending_approval",
-        issueTimeline: [{ at: 10, summary: "A child failed", childRunId: "child-1" }],
-        proposals: [
-          {
-            id: "proposal-useful",
-            kind: "memory_useful",
-            title: "Keep this",
-            after: "safe",
-            status: "approved",
-            resolvedAt: 20,
-          },
-          {
-            id: "proposal-misleading",
-            kind: "memory_misleading",
-            title: "Observe this",
-            after: "safe",
-            status: "pending",
-          },
-        ],
-        contentHash: "hash-1",
-        createdAt: 10,
-        updatedAt: 20,
-      })
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      expect(upgraded.verno).toBeGreaterThanOrEqual(158)
-      expect(upgraded.tables.map((table) => table.name)).toEqual(
-        expect.arrayContaining(["runRetrospectives", "runLearningProposals"])
-      )
-      expect(await upgraded.runRetrospectives.get("retro-legacy")).toMatchObject({
-        id: "retro-legacy",
-        runId: "run-legacy",
-        analysisVersion: 0,
-        status: "pending_review",
-      })
-      expect(await upgraded.runLearningProposals.get("proposal-useful")).toMatchObject({
-        id: "proposal-useful",
-        targetKind: "memory-candidate",
-        targetId: "team-1",
-        status: "applied",
-      })
-      expect(await upgraded.runLearningProposals.get("proposal-misleading")).toMatchObject({
-        targetKind: "observation",
-        status: "pending",
-      })
 
       upgraded.close()
       await Dexie.delete(name)
@@ -1379,33 +1231,6 @@ describe("getDb", () => {
     )
   })
 
-  fullSchemaIt("v192 backfills both workflow app review defaults in one upgrade pass", async () => {
-    const dbName = "cognia-v191-workflow-app-defaults-test"
-    await Dexie.delete(dbName)
-    const legacy = new Dexie(dbName)
-    legacy.version(191).stores({ workflowApps: "&id" })
-    await legacy.open()
-    await legacy.table("workflowApps").put({ id: "app-1", draft: {} })
-    legacy.close()
-
-    const db = new CogniaDB(dbName)
-    await db.open()
-    await expect(db.workflowApps.get("app-1")).resolves.toMatchObject({
-      draft: {
-        annotationReply: { enabled: false, threshold: 0.85 },
-        reviewGate: {
-          enabled: false,
-          requiredApprovals: 1,
-          reviewerSubjectIds: [],
-          reviewerGroupIds: [],
-          requireNoBlockingComments: true,
-        },
-      },
-    })
-    db.close()
-    await Dexie.delete(dbName)
-  })
-
   it("v178 makes the attachment cache accountable and defaults the media policy", async () => {
     // Three defects are pinned here, because each one was silently wrong:
     // the cache had no access stamp to evict by, deleting a row left its
@@ -1433,250 +1258,6 @@ describe("getDb", () => {
     // Due-job lookup is index-driven, not a full scan.
     expect(await db.connectorCleanupJobs.where("nextAttemptAt").belowOrEqual(now).count()).toBe(1)
   })
-
-  fullSchemaIt(
-    "v178 upgrade backfills the media policy, seeds the access stamp, and drops dead fields",
-    async () => {
-      const name = `cognia-v178-attachments-${Date.now()}`
-      const legacy = new Dexie(name)
-      // v177-shaped tables: attachments keyed by fetch time with a plaintext
-      // path, adapter instances carrying the write-only OAuth flag.
-      legacy.version(177).stores({
-        connectorAttachments:
-          "&id, [adapterId+remoteRef], adapterId, mimeType, fetchedAt, expiresAt",
-        adapterInstances: "&id, type, enabled",
-      })
-      await legacy.open()
-      await legacy.table("connectorAttachments").bulkPut([
-        {
-          id: "att-old",
-          adapterId: "tg-1",
-          remoteRef: "file-1",
-          localPath: "/tmp/decrypted.png",
-          mimeType: "image/png",
-          sizeBytes: 1024,
-          fetchedAt: 5_000,
-          expiresAt: 9_000,
-        },
-        // A row that never carried a fetch time either — it must still land on
-        // a usable stamp rather than `undefined`, which no index can order.
-        {
-          id: "att-undated",
-          adapterId: "tg-1",
-          remoteRef: "file-2",
-          localPath: "/tmp/other.png",
-          mimeType: "image/png",
-          sizeBytes: 2048,
-        },
-      ])
-      await legacy.table("adapterInstances").bulkPut([
-        {
-          id: "adp-legacy",
-          type: "telegram",
-          displayName: "Legacy bot",
-          enabled: false,
-          transportMode: "longpoll",
-          settings: {},
-          credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
-          trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
-          defaultMode: "auto",
-          userTokenStoredAt: 1234,
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        // An instance someone had already opted into cloud binaries for must
-        // keep that choice — the backfill fills gaps, it does not overwrite.
-        {
-          id: "adp-optedin",
-          type: "lark",
-          displayName: "Opted in",
-          enabled: true,
-          transportMode: "webhook",
-          settings: {},
-          credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
-          trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
-          defaultMode: "auto",
-          mediaModelPolicy: "allow_cloud_binary",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-      expect(upgraded.verno).toBeGreaterThanOrEqual(178)
-
-      // (1) The path to the decrypted copy is gone — the Rust migration
-      // deletes that file, and a stale path only invites someone to read it.
-      const migrated = (await upgraded.connectorAttachments.get("att-old")) as
-        (Record<string, unknown> & { lastAccessedAt?: number }) | undefined
-      expect(migrated?.localPath).toBeUndefined()
-      // The access stamp is seeded from the old fetch time so a freshly
-      // migrated cache is not uniformly "coldest" to the LRU.
-      expect(migrated?.lastAccessedAt).toBe(5_000)
-      const undated = await upgraded.connectorAttachments.get("att-undated")
-      expect(typeof undated?.lastAccessedAt).toBe("number")
-
-      // (2) The new indexes are reachable — proof the backfill populated them.
-      expect(
-        await upgraded.connectorAttachments.where("lastAccessedAt").belowOrEqual(5_000).count()
-      ).toBeGreaterThanOrEqual(1)
-
-      // (3) Media policy: gaps get the safe value, explicit choices survive.
-      const legacyInstance = (await upgraded.adapterInstances.get("adp-legacy")) as
-        (Record<string, unknown> & { mediaModelPolicy?: string }) | undefined
-      expect(legacyInstance?.mediaModelPolicy).toBe("local_extract_only")
-      expect(legacyInstance?.userTokenStoredAt).toBeUndefined()
-      expect((await upgraded.adapterInstances.get("adp-optedin"))?.mediaModelPolicy).toBe(
-        "allow_cloud_binary"
-      )
-
-      upgraded.close()
-    }
-  )
-
-  fullSchemaIt(
-    "v179 clears the HostState ledger and rewrites queued rows instead of losing them",
-    async () => {
-      // The ledger is a cache of live coordination, rebuilt from sessions /
-      // messages / chatDrafts on the next Host start. The queue is the user's
-      // unsent work, so nothing there is dropped: the only thing wrong with a
-      // HostState row is the removed version field, and stripping it is a
-      // complete translation.
-      const name = `cognia-v179-hoststate-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(178).stores({
-        hostStateChannels: "&channel, hostGeneration, hostSeq, revision, updatedAt",
-        hostStateActions:
-          "&[hostGeneration+actionId], channel, hostSeq, outcome, dispatchState, broadcastState, createdAt, updatedAt",
-        hostStateMeta: "&id, hostGeneration, leaseExpiresAt, migrationStage, updatedAt",
-        mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
-      })
-      await legacy.open()
-      await legacy.table("hostStateChannels").put({
-        channel: "cognia://target/t/sessions/s",
-        hostGeneration: 1,
-        hostSeq: 4,
-        revision: 4,
-        digest: "hsv1-0000000000000000",
-        // The shape the guards now reject: one status enum, two decision
-        // buckets, no operations.
-        state: {
-          kind: "session",
-          channel: "cognia://target/t/sessions/s",
-          sessionId: "s",
-          revision: 4,
-          transcriptRevision: 2,
-          status: "awaiting_approval",
-          archived: false,
-          draft: { text: "", attachments: [], revision: 0 },
-          queue: [],
-          activeTurn: null,
-          pendingApprovals: [{ requestId: "req-1" }],
-          pendingElicitations: [],
-        },
-        updatedAt: 1,
-      })
-      await legacy.table("hostStateActions").put({
-        hostGeneration: 1,
-        actionId: "a-1",
-        channel: "cognia://target/t/sessions/s",
-        hostSeq: 4,
-        outcome: "applied",
-        payloadDigest: "d",
-        event: { protocolVersion: 1, channel: "c", hostId: "h", hostGeneration: 1, hostSeq: 4 },
-        dispatchState: "completed",
-        broadcastState: "completed",
-        summaryState: "completed",
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      await legacy.table("hostStateMeta").put({
-        id: "singleton",
-        hostId: "host-a",
-        hostGeneration: 1,
-        hostSeq: 4,
-        leaseOwnerId: "owner",
-        leaseExpiresAt: 9,
-        updatedAt: 1,
-      })
-      await legacy.table("mobileOutboundQueue").bulkPut([
-        {
-          id: "q-hoststate",
-          command: "host_state_submit",
-          protocol: "host-state-v1",
-          payload: { protocolVersion: 1, actions: [] },
-          status: "pending",
-          attempts: 0,
-          createdAt: 1,
-        },
-        {
-          id: "q-legacy-shape",
-          command: "host_state_submit",
-          payload: { protocolVersion: 1, actions: [] },
-          status: "pending",
-          attempts: 0,
-          createdAt: 1,
-        },
-        {
-          id: "q-rpc",
-          command: "connector_send",
-          protocol: "legacy-rpc",
-          payload: { conversationId: "c-1", text: "still mine" },
-          status: "pending",
-          attempts: 0,
-          createdAt: 1,
-        },
-        {
-          // A legacy RPC job whose own payload happens to use the same key.
-          // Matching on `protocolVersion` alone swept rows like this one.
-          id: "q-rpc-versioned",
-          command: "connector_send",
-          protocol: "legacy-rpc",
-          payload: { conversationId: "c-2", protocolVersion: 3 },
-          status: "pending",
-          attempts: 0,
-          createdAt: 1,
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-      expect(upgraded.verno).toBeGreaterThanOrEqual(179)
-
-      await expect(upgraded.hostStateChannels.count()).resolves.toBe(0)
-      await expect(upgraded.hostStateActions.count()).resolves.toBe(0)
-      await expect(upgraded.hostStateMeta.count()).resolves.toBe(0)
-
-      // Nothing is lost. Both HostState rows are rewritten into the new shape,
-      // and both RPC jobs are untouched — including the one whose payload
-      // happens to carry a `protocolVersion` of its own.
-      const remaining = await upgraded.mobileOutboundQueue.orderBy("id").toArray()
-      expect(remaining.map((row) => row.id)).toEqual([
-        "q-hoststate",
-        "q-legacy-shape",
-        "q-rpc",
-        "q-rpc-versioned",
-      ])
-      for (const id of ["q-hoststate", "q-legacy-shape"]) {
-        const row = remaining.find((candidate) => candidate.id === id)!
-        expect(row.protocol).toBe("host-state")
-        expect(row.payload).toEqual({ actions: [] })
-      }
-      expect(remaining.find((row) => row.id === "q-rpc")!.payload).toEqual({
-        conversationId: "c-1",
-        text: "still mine",
-      })
-      expect(remaining.find((row) => row.id === "q-rpc-versioned")!.payload).toEqual({
-        conversationId: "c-2",
-        protocolVersion: 3,
-      })
-
-      upgraded.close()
-    }
-  )
 
   it("v177 indexes the Squad a conversation runs on, separately from its team", async () => {
     // `squadId` (executor) and `teamId` (conversation shape) are different
@@ -1987,192 +1568,7 @@ describe("getDb", () => {
     )
   })
 
-  fullSchemaIt(
-    "v142 backfills corpusId, copies manifests, and renames discarded → rejected",
-    async () => {
-      const name = `cognia-v142-corpora-${Date.now()}`
-      const legacy = new Dexie(name)
-      // v141-shaped wiki tables: `&slug` unique, manifest keyed by scope, and an
-      // inboundDrafts status union that still spells rejection "discarded".
-      legacy.version(141).stores({
-        wikiArticles: "&id, &slug, scope, module, pageRank, generatedAt, [scope+module]",
-        wikiSections: "&id, articleId, [articleId+sectionIndex]",
-        wikiManifest: "&scope, lastBuildAt",
-        inboundDrafts: "&id, kind, status, createdAt",
-      })
-      await legacy.open()
-      await legacy.table("wikiArticles").bulkPut([
-        { id: "wka_1", slug: "lib-foo", scope: "cognia-self", module: "lib/foo", pageRank: 0.4 },
-        // Predates the `scope` field entirely — must still land somewhere reachable.
-        { id: "wka_2", slug: "lib-bar", module: "lib/bar", pageRank: 0.1 },
-      ])
-      await legacy.table("wikiSections").bulkPut([
-        { id: "wks_1", articleId: "wka_1", sectionIndex: 0 },
-        // Orphan: its article is already gone. Must not end up with an
-        // undefined corpusId that no query can reach.
-        { id: "wks_orphan", articleId: "wka_missing", sectionIndex: 0 },
-      ])
-      await legacy.table("wikiManifest").put({
-        scope: "cognia-self",
-        fileHashes: { "lib/foo/index.ts": "sha-foo" },
-        lastBuildAt: 1234,
-        articleCount: 2,
-        generatorVersion: "v1",
-      })
-      await legacy.table("inboundDrafts").bulkPut([
-        { id: "d_old", kind: "note", status: "discarded", title: "t", body: "b", createdAt: 1 },
-        { id: "d_ok", kind: "note", status: "accepted", title: "t", body: "b", createdAt: 2 },
-        { id: "d_new", kind: "note", status: "pending", title: "t", body: "b", createdAt: 3 },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      // (1) Every article carries a corpus, and the scope-less row falls back to
-      // the self corpus rather than to an unindexable `undefined`.
-      expect((await upgraded.wikiArticles.get("wka_1"))?.corpusId).toBe("cognia-self")
-      expect((await upgraded.wikiArticles.get("wka_2"))?.corpusId).toBe("cognia-self")
-      expect((await upgraded.wikiSections.get("wks_1"))?.corpusId).toBe("cognia-self")
-      expect((await upgraded.wikiSections.get("wks_orphan"))?.corpusId).toBe("cognia-self")
-
-      // The new unique index is reachable — proof the backfill actually populated it.
-      expect(
-        (
-          await upgraded.wikiArticles
-            .where("[corpusId+slug]")
-            .equals(["cognia-self", "lib-foo"])
-            .first()
-        )?.id
-      ).toBe("wka_1")
-
-      // (2) Manifests are COPIED, not moved: a rollback to v141 must still find
-      // its rows where it left them.
-      const corpusManifest = await upgraded.wikiCorpusManifest.get("cognia-self")
-      expect(corpusManifest).toMatchObject({
-        corpusId: "cognia-self",
-        scope: "cognia-self",
-        fileHashes: { "lib/foo/index.ts": "sha-foo" },
-        lastBuildAt: 1234,
-        generatorVersion: "v1",
-      })
-      expect(corpusManifest?.manifestHash).toMatch(/^[0-9a-f]{8}$/)
-      expect(await upgraded.wikiManifest.get("cognia-self")).toBeDefined()
-
-      // (3) One spelling for "the operator said no"; other statuses untouched.
-      expect((await upgraded.inboundDrafts.get("d_old"))?.status).toBe("rejected")
-      expect((await upgraded.inboundDrafts.get("d_ok"))?.status).toBe("accepted")
-      expect((await upgraded.inboundDrafts.get("d_new"))?.status).toBe("pending")
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
-    "v148 backfills immutable versions and deployments for legacy publications",
-    async () => {
-      const name = `cognia-account-acct_v148_${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(147).stores({ workflows: "&id, name, updatedAt" })
-      await legacy.open()
-      await legacy.table("workflows").bulkPut([
-        {
-          id: "wf_published",
-          schemaVersion: 2,
-          name: "Published",
-          createdAt: 1,
-          updatedAt: 2,
-          nodes: [],
-          edges: [],
-          settings: { maxConcurrency: 4 },
-          interface: { inputSchema: { type: "object" } },
-          published: { at: 10, toolName: "wf_published" },
-        },
-        {
-          id: "wf_draft",
-          schemaVersion: 2,
-          name: "Draft",
-          createdAt: 1,
-          updatedAt: 2,
-          nodes: [],
-          edges: [],
-          settings: { maxConcurrency: 4 },
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      const versions = await upgraded.workflowVersions.toArray()
-      const deployments = await upgraded.workflowDeployments.toArray()
-      expect(versions).toHaveLength(1)
-      expect(versions[0]).toMatchObject({
-        workflowId: "wf_published",
-        sequence: 1,
-        accountId: expect.stringContaining("acct_v148_"),
-      })
-      expect(deployments).toHaveLength(1)
-      expect(deployments[0]).toMatchObject({
-        workflowId: "wf_published",
-        versionId: versions[0].id,
-        environment: "production",
-        revision: 1,
-        status: "active",
-      })
-      expect((await upgraded.workflows.get("wf_published"))?.published).toMatchObject({
-        versionId: versions[0].id,
-        deploymentId: deployments[0].id,
-        deploymentRevision: 1,
-      })
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
-    "v149 backfills deterministic per-run workflow event sequences",
-    async () => {
-      const name = `cognia-event-sequence-v149-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(148).stores({
-        workflowRunEvents: "&id, runId, [runId+ts], stepId, [runId+stepId], type, projectId",
-      })
-      await legacy.open()
-      await legacy.table("workflowRunEvents").bulkPut([
-        { id: "event-b", runId: "run-1", ts: 10, type: "run_completed" },
-        { id: "event-a", runId: "run-1", ts: 10, type: "run_started" },
-        { id: "event-c", runId: "run-2", ts: 5, type: "run_started" },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      expect(
-        (
-          await upgraded.workflowRunEvents
-            .where("[runId+sequence]")
-            .between(["run-1", 0], ["run-1", 9])
-            .toArray()
-        ).map((event) => [event.id, event.sequence])
-      ).toEqual([
-        ["event-a", 1],
-        ["event-b", 2],
-      ])
-      expect((await upgraded.workflowRunEvents.get("event-c"))?.sequence).toBe(1)
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
+  schemaIt(
     "v150 adds the global agent trace time index without rewriting rows",
     async () => {
       const name = `cognia-agent-trace-v150-${Date.now()}`
@@ -2203,58 +1599,7 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt(
-    "v151 governs legacy MCP rows and blocks duplicate namespaces",
-    async () => {
-      const name = `cognia-mcp-control-v151-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(150).stores({ mcpServers: "id, name, enabled" })
-      await legacy.open()
-      await legacy.table("mcpServers").bulkPut([
-        {
-          id: "mcp_first",
-          name: "GitHub",
-          transport: "stdio",
-          config: { command: "node" },
-          enabled: true,
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        {
-          id: "mcp_duplicate",
-          name: "github",
-          transport: "stdio",
-          config: { command: "node" },
-          enabled: true,
-          createdAt: 2,
-          updatedAt: 2,
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-      expect(upgraded.verno).toBeGreaterThanOrEqual(151)
-      expect(await upgraded.mcpServers.get("mcp_first")).toMatchObject({
-        schemaVersion: 1,
-        revision: 1,
-        credentialVersion: 0,
-        trust: { state: "legacy" },
-        enabled: true,
-      })
-      expect(await upgraded.mcpServers.get("mcp_duplicate")).toMatchObject({
-        trust: { state: "blocked" },
-        enabled: false,
-      })
-      expect(await upgraded.mcpServerSummaries.count()).toBe(2)
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
+  schemaIt(
     "v152 adds the message media reference ledger and turn indexes",
     async () => {
       const name = `cognia-message-media-refs-v152-${Date.now()}`
@@ -2293,220 +1638,7 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt(
-    "v154 backfills stable unique portable skill slugs",
-    async () => {
-      const name = `cognia-skill-slug-v154-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(153).stores({ skills: "id, name, updatedAt, isBuiltIn" })
-      await legacy.open()
-      await legacy.table("skills").bulkPut([
-        {
-          id: "skill_native",
-          name: "显示名",
-          nativeDirectory: "/tmp/native-skill",
-          content: "body",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        {
-          id: "skill_native_priority",
-          slug: "frontmatter-name",
-          name: "Display Name",
-          nativeDirectory: "/tmp/native-priority",
-          content: "body",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        {
-          id: "skill_ascii",
-          name: "Native Skill",
-          content: "body",
-          createdAt: 2,
-          updatedAt: 2,
-        },
-        {
-          id: "skill_中文abcdef",
-          name: "中文技能",
-          content: "body",
-          createdAt: 3,
-          updatedAt: 3,
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-      expect(upgraded.verno).toBeGreaterThanOrEqual(154)
-      expect((await upgraded.skills.get("skill_native"))?.slug).toBe("native-skill")
-      expect((await upgraded.skills.get("skill_native_priority"))?.slug).toBe("native-priority")
-      expect((await upgraded.skills.get("skill_ascii"))?.slug).toBe("native-skill-2")
-      expect((await upgraded.skills.get("skill_中文abcdef"))?.slug).toBe("skill-abcdef")
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
-    "v173 indexes updatedAt on the two relay-synced tables and backfills legacy rows",
-    async () => {
-      // ADR-0131 §2.3: `outboundQueue` and `connectorDrafts` join the companion
-      // sync whitelist, and companion sync is an `updatedAt`-cursor delta. A
-      // legacy row with no `updatedAt` would never appear in any delta, so the
-      // upgrade backfills it from `createdAt` — the only timestamp it carries.
-      const name = `cognia-inbox-relay-v173-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(172).stores({
-        outboundQueue:
-          "&id, conversationKey, [conversationKey+createdAt], [conversationKey+orderSeq], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], [status+claimedAt], projectId, [projectId+status]",
-        connectorDrafts:
-          "&id, conversationKey, sessionId, [conversationKey+createdAt], status, expiresAt, projectId",
-      })
-      await legacy.open()
-      await legacy.table("outboundQueue").bulkPut([
-        {
-          id: "job-legacy",
-          adapterId: "adapter-1",
-          conversationKey: "slack:adapter-1:C1",
-          request: {
-            conversationRef: { platform: "slack", adapterId: "adapter-1" },
-            segments: [{ type: "text", text: "hello" }],
-            metadata: { idempotencyKey: "legacy" },
-          },
-          status: "pending",
-          attempts: 0,
-          createdAt: 4242,
-          nextAttemptAt: 0,
-          idempotencyKey: "legacy",
-          source: "manual",
-        },
-        {
-          // Already stamped by a newer writer — the upgrade must not rewrite it.
-          id: "job-fresh",
-          adapterId: "adapter-1",
-          conversationKey: "slack:adapter-1:C1",
-          request: {
-            conversationRef: { platform: "slack", adapterId: "adapter-1" },
-            segments: [{ type: "text", text: "hi" }],
-            metadata: { idempotencyKey: "fresh" },
-          },
-          status: "pending",
-          attempts: 0,
-          createdAt: 1,
-          updatedAt: 9999,
-          nextAttemptAt: 0,
-          idempotencyKey: "fresh",
-          source: "manual",
-        },
-      ])
-      await legacy.table("connectorDrafts").put({
-        id: "draft-legacy",
-        conversationKey: "slack:adapter-1:C1",
-        sessionId: "s-1",
-        segments: [{ type: "text", text: "draft" }],
-        status: "pending",
-        createdAt: 777,
-      })
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      expect(upgraded.verno).toBeGreaterThanOrEqual(173)
-      expect(upgraded.outboundQueue.schema.indexes.map((index) => index.name)).toContain(
-        "updatedAt"
-      )
-      expect(upgraded.connectorDrafts.schema.indexes.map((index) => index.name)).toContain(
-        "updatedAt"
-      )
-
-      expect((await upgraded.outboundQueue.get("job-legacy"))?.updatedAt).toBe(4242)
-      expect((await upgraded.outboundQueue.get("job-fresh"))?.updatedAt).toBe(9999)
-      expect((await upgraded.connectorDrafts.get("draft-legacy"))?.updatedAt).toBe(777)
-
-      // The backfilled rows are reachable through the cursor query the host
-      // delta actually runs — an unindexed column would make this throw.
-      expect(
-        (await upgraded.outboundQueue.where("updatedAt").above(0).toArray()).map((r) => r.id).sort()
-      ).toEqual(["job-fresh", "job-legacy"])
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt(
-    "v159 backfills stable outbound order and connector retention indexes",
-    async () => {
-      const name = `cognia-connector-queue-v159-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(158).stores({
-        outboundQueue:
-          "&id, conversationKey, [conversationKey+createdAt], status, nextAttemptAt, idempotencyKey, [adapterId+status], createdAt, [status+nextAttemptAt], projectId, [projectId+status]",
-        connectorInboundJobs:
-          "&id, &[adapterId+platformMessageId], [conversationKey+status+receivedAt], adapterId, conversationKey, status, leaseExpiresAt, executionRunId, receivedAt",
-      })
-      await legacy.open()
-      const base = {
-        adapterId: "adapter-1",
-        conversationKey: "slack:adapter-1:C1",
-        request: {
-          conversationRef: { platform: "slack", adapterId: "adapter-1" },
-          segments: [{ type: "text", text: "hello" }],
-          metadata: { idempotencyKey: "legacy" },
-        },
-        status: "pending",
-        attempts: 0,
-        createdAt: 10,
-        nextAttemptAt: 10,
-        source: "ai-run",
-      }
-      await legacy.table("outboundQueue").bulkPut([
-        { ...base, id: "job-b", idempotencyKey: "b" },
-        { ...base, id: "job-a", idempotencyKey: "a" },
-        {
-          ...base,
-          id: "job-c",
-          conversationKey: "slack:adapter-1:C2",
-          idempotencyKey: "c",
-          status: "sending",
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      expect(upgraded.verno).toBeGreaterThanOrEqual(159)
-      expect(upgraded.outboundQueue.schema.indexes.map((index) => index.name)).toEqual(
-        expect.arrayContaining(["[conversationKey+orderSeq]", "[status+claimedAt]"])
-      )
-      expect(upgraded.connectorInboundJobs.schema.indexes.map((index) => index.name)).toContain(
-        "[status+updatedAt]"
-      )
-      expect(
-        (
-          await upgraded.outboundQueue
-            .where("[conversationKey+orderSeq]")
-            .between(["slack:adapter-1:C1", 0], ["slack:adapter-1:C1", Infinity])
-            .toArray()
-        ).map((row) => [row.id, row.orderSeq])
-      ).toEqual([
-        ["job-a", 1],
-        ["job-b", 2],
-      ])
-      expect((await upgraded.outboundQueue.get("job-c"))?.claimedAt).toBe(10)
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
-
-  fullSchemaIt("v160 opens encrypted performance evidence tables", async () => {
+  schemaIt("v160 opens encrypted performance evidence tables", async () => {
     const name = `cognia-performance-captures-v160-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(159).stores({ sessions: "&id" })
@@ -2550,71 +1682,7 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
-  fullSchemaIt(
-    "v161 normalizes QQ Official transportMode and removes the legacy setting",
-    async () => {
-      const name = `cognia-qq-transport-v161-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(160).stores({ adapterInstances: "&id, type, enabled" })
-      await legacy.open()
-      await legacy.table("adapterInstances").bulkPut([
-        {
-          id: "qq-webhook",
-          type: "qq-official",
-          enabled: true,
-          transportMode: "gateway",
-          settings: { transport: "webhook", keep: "value" },
-        },
-        {
-          id: "qq-gateway",
-          type: "qq-official",
-          enabled: true,
-          transportMode: "webhook",
-          settings: { transport: "gateway" },
-        },
-        {
-          id: "qq-invalid",
-          type: "qq-official",
-          enabled: true,
-          transportMode: "gateway",
-          settings: { transport: "legacy-invalid", keep: true },
-        },
-        {
-          id: "slack-legacy",
-          type: "slack",
-          enabled: true,
-          transportMode: "gateway",
-          settings: { transport: "socket-mode" },
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      expect(upgraded.verno).toBeGreaterThanOrEqual(161)
-      expect(await upgraded.adapterInstances.get("qq-webhook")).toMatchObject({
-        transportMode: "webhook",
-        settings: { keep: "value" },
-      })
-      expect(await upgraded.adapterInstances.get("qq-gateway")).toMatchObject({
-        transportMode: "gateway",
-        settings: {},
-      })
-      expect(await upgraded.adapterInstances.get("qq-invalid")).toMatchObject({
-        transportMode: "gateway",
-        settings: { keep: true },
-      })
-      expect(await upgraded.adapterInstances.get("slack-legacy")).toMatchObject({
-        settings: { transport: "socket-mode" },
-      })
-
-      upgraded.close()
-      await Dexie.delete(name)
-    }
-  )
-
-  fullSchemaIt("v162 adds the local Matrix encrypted-event recovery queue", async () => {
+  schemaIt("v162 adds the local Matrix encrypted-event recovery queue", async () => {
     const name = `cognia-matrix-pending-v162-${Date.now()}`
     const legacy = new Dexie(name)
     legacy.version(161).stores({ adapterInstances: "&id, type" })
@@ -2633,103 +1701,6 @@ describe("getDb", () => {
     upgraded.close()
     await Dexie.delete(name)
   })
-
-  fullSchemaIt(
-    "v143 splits sandbox connections into provider/driver, keeping legacy mirrors",
-    async () => {
-      const name = `cognia-v143-sandbox-${Date.now()}`
-      const legacy = new Dexie(name)
-      // v142-shaped: Docker fields at the top level, no provider/driver split.
-      legacy.version(142).stores({ sandboxConnections: "&id, name, createdAt, updatedAt" })
-      await legacy.open()
-      await legacy.table("sandboxConnections").bulkPut([
-        {
-          id: "conn_running",
-          name: "home-docker",
-          provider: "docker",
-          image: "ghcr.io/trycua/cua-xfce:latest",
-          host: "127.0.0.1",
-          port: 49201,
-          containerId: "abc123",
-          lastHealthStatus: "ok",
-          createdAt: 1,
-          updatedAt: 2,
-        },
-        {
-          // Never started: no container id at all.
-          id: "conn_fresh",
-          name: "unused",
-          provider: "docker",
-          image: "",
-          host: "127.0.0.1",
-          port: 0,
-          lastHealthStatus: "unknown",
-          createdAt: 3,
-          updatedAt: 3,
-        },
-        {
-          // Had a container but could not be reached — must NOT claim "running".
-          id: "conn_unreachable",
-          name: "flaky",
-          provider: "docker",
-          image: "img:1",
-          host: "127.0.0.1",
-          port: 5000,
-          containerId: "def456",
-          lastHealthStatus: "unreachable",
-          lastHealthError: "connection refused",
-          createdAt: 4,
-          updatedAt: 5,
-        },
-      ])
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-      expect(upgraded.verno).toBeGreaterThanOrEqual(143)
-
-      // (1) Docker fields move into a discriminated `config`.
-      const running = await upgraded.sandboxConnections.get("conn_running")
-      expect(running).toMatchObject({
-        provider: "docker",
-        driver: "computer-server",
-        state: "running",
-        config: {
-          provider: "docker",
-          image: "ghcr.io/trycua/cua-xfce:latest",
-          host: "127.0.0.1",
-          port: 49201,
-          containerId: "abc123",
-        },
-      })
-      expect(running?.capabilities?.start).toBe(true)
-      // Docker has no suspend/resume — the matrix must say so, not stay silent.
-      expect(running?.capabilities?.suspend).toBe(false)
-
-      // (2) Lifecycle state is reconstructed conservatively.
-      expect((await upgraded.sandboxConnections.get("conn_fresh"))?.state).toBe("uninitialized")
-      expect((await upgraded.sandboxConnections.get("conn_unreachable"))?.state).toBe("stopped")
-      expect((await upgraded.sandboxConnections.get("conn_unreachable"))?.lastHealthError).toBe(
-        "connection refused"
-      )
-
-      // (3) The legacy top-level fields survive for one release, so a downgrade
-      // to the v142 build still finds a working Docker row.
-      expect(running?.image).toBe("ghcr.io/trycua/cua-xfce:latest")
-      expect(running?.host).toBe("127.0.0.1")
-      expect(running?.port).toBe(49201)
-      expect(running?.containerId).toBe("abc123")
-
-      // (4) The new `provider` index is reachable — proof the write landed.
-      expect(
-        (await upgraded.sandboxConnections.where("provider").equals("docker").toArray()).length
-      ).toBe(3)
-
-      upgraded.close()
-      await Dexie.delete(name)
-    },
-    30_000
-  )
 
   it("v143 leaves an already-migrated sandbox row untouched", async () => {
     const name = `cognia-v143-idempotent-${Date.now()}`
@@ -2777,7 +1748,7 @@ describe("getDb", () => {
     await Dexie.delete(name)
   }, 30_000)
 
-  fullSchemaIt(
+  schemaIt(
     "v144 adds device-local project environment and CDP metadata indexes",
     async () => {
       const name = `cognia-v144-codex-workflows-${Date.now()}`
@@ -2845,7 +1816,7 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt(
+  schemaIt(
     "v145 adds device-local durable AgentTeam runtime tables",
     async () => {
       const name = `cognia-v145-agent-team-runtime-${Date.now()}`
@@ -2894,7 +1865,7 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt(
+  schemaIt(
     "v146 adds reusable Knowledge Base ownership and ingest tables",
     async () => {
       const name = `cognia-v146-knowledge-bases-${Date.now()}`
@@ -2965,7 +1936,7 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt(
+  schemaIt(
     "v147 adds portable single-Agent tasks and append-only attempts",
     async () => {
       const name = `cognia-v147-agent-tasks-${Date.now()}`
@@ -3022,80 +1993,6 @@ describe("getDb", () => {
     30_000
   )
 
-  fullSchemaIt("v135 upgrades v1 deployment model references and profile metadata", async () => {
-    const name = `cognia-v135-provider-catalog-${Date.now()}`
-    const legacy = new Dexie(name)
-    legacy.version(134).stores({
-      deploymentProfiles: "&id, providerRef, legacyProviderId",
-      profileStoreMeta: "&id",
-    })
-    await legacy.open()
-    await legacy.table("deploymentProfiles").put({
-      id: "openrouter-main",
-      providerRef: "openrouter",
-      endpoint: "https://openrouter.ai/api/v1",
-      transportProfileRef: "tp-openai-bearer",
-      models: [{ id: "openai/gpt-test" }],
-    })
-    await legacy.table("profileStoreMeta").put({
-      id: "singleton",
-      profileVersion: 4,
-      schemaVersion: 1,
-    })
-    legacy.close()
-
-    const upgraded = new CogniaDB(name)
-    await upgraded.open()
-
-    expect((await upgraded.deploymentProfiles.get("openrouter-main"))?.models[0]).toEqual({
-      id: "openai/gpt-test",
-      upstreamId: "openai/gpt-test",
-      offeringRef: "openrouter-main:openai/gpt-test",
-      canonicalModelRef: "openai:gpt-test",
-    })
-    expect((await upgraded.profileStoreMeta.get("singleton"))?.schemaVersion).toBe(2)
-    expect((await upgraded.profileStoreMeta.get("singleton"))?.profileVersion).toBe(4)
-
-    upgraded.close()
-    await Dexie.delete(name)
-  })
-
-  fullSchemaIt(
-    "v136 quarantines unscoped outbound rows instead of replaying them to an arbitrary target",
-    async () => {
-      const name = `cognia-account-acct_queue_${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(135).stores({
-        mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
-      })
-      await legacy.open()
-      await legacy.table("mobileOutboundQueue").put({
-        id: "legacy-pending",
-        command: "workflow_trigger_manual",
-        payload: { workflowId: "wf-1" },
-        status: "pending",
-        attempts: 0,
-        createdAt: 100,
-        nextAttemptAt: 100,
-        idempotencyKey: "legacy-key",
-      })
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-
-      await expect(upgraded.mobileOutboundQueue.get("legacy-pending")).resolves.toMatchObject({
-        accountId: expect.stringMatching(/^acct_queue_/),
-        targetId: "legacy-mixed",
-        status: "deadlettered",
-        lastError: expect.stringMatching(/could not be safely attributed/i),
-      })
-
-      upgraded.close()
-      await Dexie.delete(name)
-    }
-  )
-
   it("v128 opens the content-addressed chat media store", async () => {
     const db = getDb()
     await db.open()
@@ -3136,56 +2033,6 @@ describe("getDb", () => {
     // appears on the first derived write, not at open time. Accessors treat
     // a missing row as profileVersion 0.
     expect(await db.profileStoreMeta.get("singleton")).toBeUndefined()
-  })
-
-  fullSchemaIt("v121 upgrade derives profiles from an old-shape settings row", async () => {
-    // Seed a pre-121 database whose settings hold a vendor + relay + custom
-    // provider, then open at the current version and assert the derivation.
-    const name = `cognia-v121-provider-profiles-${Date.now()}`
-    const legacy = new Dexie(name)
-    legacy.version(108).stores({ settings: "&id" })
-    await legacy.open()
-    await legacy.table("settings").put({
-      id: "singleton",
-      providerSettings: {
-        zhipu: { providerId: "zhipu", enabled: true, apiKey: "sk-secret-zhipu" },
-        "glm-anthropic": { providerId: "glm-anthropic", enabled: true },
-      },
-      customProviders: [
-        {
-          id: "my-relay",
-          name: "My Relay",
-          enabled: true,
-          protocol: "anthropic",
-          baseURL: "https://relay.example/anthropic",
-          defaultModel: "claude-sonnet-5",
-        },
-      ],
-    })
-    legacy.close()
-
-    const upgraded = new CogniaDB(name)
-    await upgraded.open()
-    expect(upgraded.verno).toBeGreaterThanOrEqual(121)
-
-    const zhipu = await upgraded.providerProfiles.get("zhipu")
-    expect(zhipu?.deploymentRefs).toEqual(["glm-anthropic", "zhipu"])
-    const glm = await upgraded.deploymentProfiles.get("glm-anthropic")
-    expect(glm?.providerRef).toBe("zhipu")
-    expect(glm?.legacyProviderId).toBe("glm-anthropic")
-    const custom = await upgraded.deploymentProfiles.get("my-relay")
-    expect(custom?.endpoint).toBe("https://relay.example/anthropic")
-    // The derivation must not copy secret material.
-    const all = JSON.stringify({
-      p: await upgraded.providerProfiles.toArray(),
-      d: await upgraded.deploymentProfiles.toArray(),
-      t: await upgraded.transportProfiles.toArray(),
-    })
-    expect(all).not.toContain("sk-secret-zhipu")
-    expect(await upgraded.profileStoreMeta.get("singleton")).toMatchObject({ profileVersion: 1 })
-
-    await upgraded.delete()
-    upgraded.close()
   })
 
   it("v120 opens durable connector conversation and inbound job tables", async () => {
@@ -3273,59 +2120,6 @@ describe("getDb", () => {
     )
   })
 
-  fullSchemaIt("v115 backfills Canvas comments into generalized context comments", async () => {
-    const name = `cognia-v115-context-comments-${Date.now()}`
-    const legacy = new Dexie(name)
-    legacy.version(114).stores({
-      canvasComments: "&id, documentId, [documentId+createdAt], parentId, resolvedAt, projectId",
-    })
-    await legacy.open()
-    await legacy.table("canvasComments").bulkPut([
-      {
-        id: "canvas-new",
-        documentId: "doc-1",
-        projectId: "project-1",
-        authorId: "user-1",
-        authorName: "Maya",
-        content: "Backfill me",
-        range: { startLine: 2, startColumn: 1, endLine: 2, endColumn: 5 },
-        reactions: [],
-        createdAt: 100,
-      },
-      {
-        id: "canvas-existing",
-        documentId: "doc-1",
-        authorId: "user-1",
-        authorName: "Maya",
-        content: "Do not overwrite",
-        range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 2 },
-        reactions: [],
-        createdAt: 90,
-      },
-    ])
-    legacy.close()
-
-    const upgraded = new CogniaDB(name)
-    await upgraded.open()
-
-    expect(upgraded.verno).toBeGreaterThanOrEqual(115)
-    expect(await upgraded.contextComments.count()).toBe(2)
-    expect(await upgraded.contextComments.get("canvas-new")).toEqual(
-      expect.objectContaining({
-        resourceKind: "canvas-document",
-        resourceId: "doc-1",
-        projectId: "project-1",
-        anchor: expect.objectContaining({ kind: "text-range" }),
-      })
-    )
-    expect((await upgraded.contextComments.get("canvas-existing"))?.content).toBe(
-      "Do not overwrite"
-    )
-
-    await upgraded.delete()
-    upgraded.close()
-  })
-
   it("v108 stores a code-adoption turn and resolves its indexes", async () => {
     const db = getDb()
     await db.open()
@@ -3407,52 +2201,6 @@ describe("getDb", () => {
     expect(await db.approvedBinaries.where("pluginId").equals("acme.ext").count()).toBe(2)
     expect(await db.approvedBinaries.where("sha256").equals("c".repeat(64)).count()).toBe(1)
     expect(await db.approvedBinaries.where("approvedAt").above(150).count()).toBe(2)
-  })
-
-  fullSchemaIt("v109_removes_placeholder_trusted_publishers", async () => {
-    const name = `cognia-v109-placeholder-purge-${Date.now()}`
-    const legacy = new Dexie(name)
-    legacy.version(108).stores({
-      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
-    })
-    await legacy.open()
-    // Exactly the shape the v39 seed wrote — the strings that were checked
-    // into this repo and that any hostile .vsix could self-declare.
-    await legacy.table("trustedPublishers").bulkPut([
-      {
-        publicKey: "placeholder:microsoft.vscode",
-        fingerprint: "placeholder:microsoft.vscode",
-        authorName: "Microsoft",
-        firstTrustedAt: 0,
-        lastSeenAt: 0,
-        installCount: 0,
-      },
-      {
-        publicKey: "placeholder:openvsx.root",
-        fingerprint: "placeholder:openvsx.root",
-        authorName: "Open VSX Registry",
-        firstTrustedAt: 0,
-        lastSeenAt: 0,
-        installCount: 0,
-      },
-    ])
-    legacy.close()
-
-    const upgraded = new CogniaDB(name)
-    await upgraded.open()
-    expect(upgraded.verno).toBeGreaterThanOrEqual(109)
-
-    // Hop 1 of the exploit chain is gone: nothing is left to match against.
-    expect(await upgraded.trustedPublishers.count()).toBe(0)
-    expect(
-      await upgraded.trustedPublishers
-        .where("fingerprint")
-        .equals("placeholder:microsoft.vscode")
-        .first()
-    ).toBeUndefined()
-
-    await upgraded.delete()
-    upgraded.close()
   })
 
   // v110 — recorded browser flows (ADR-0072). Pure additive: no upgrade hook,
@@ -3576,87 +2324,6 @@ describe("getDb", () => {
     expect(db.tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
     db.close()
   })
-
-  fullSchemaIt("v109_preserves_user_accepted_rows", async () => {
-    const name = `cognia-v109-preserve-user-${Date.now()}`
-    const legacy = new Dexie(name)
-    legacy.version(108).stores({
-      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
-    })
-    await legacy.open()
-    await legacy.table("trustedPublishers").bulkPut([
-      // Seeded placeholder — must go.
-      {
-        publicKey: "placeholder:rust-lang.rust-analyzer",
-        fingerprint: "placeholder:rust-lang.rust-analyzer",
-        authorName: "rust-lang",
-        firstTrustedAt: 0,
-        lastSeenAt: 0,
-        installCount: 0,
-      },
-      // A row the user populated themselves — their data, must survive.
-      {
-        publicKey: "MCowBQYDK2VwAyEA-user-supplied-key",
-        fingerprint: "9f3a1c8e4b7d2f605a1938e7c4b0d6f2938475610badc0ffee1234567890abcd",
-        authorName: "A publisher the user added by hand",
-        firstTrustedAt: 111,
-        lastSeenAt: 222,
-        installCount: 7,
-      },
-    ])
-    legacy.close()
-
-    const upgraded = new CogniaDB(name)
-    await upgraded.open()
-
-    expect(await upgraded.trustedPublishers.count()).toBe(1)
-    const survivor = await upgraded.trustedPublishers.get("MCowBQYDK2VwAyEA-user-supplied-key")
-    expect(survivor).toEqual(
-      expect.objectContaining({
-        authorName: "A publisher the user added by hand",
-        firstTrustedAt: 111,
-        lastSeenAt: 222,
-        installCount: 7,
-      })
-    )
-    // The purge is keyed on the fingerprint marker, not on "everything".
-    expect(
-      await upgraded.trustedPublishers
-        .where("publicKey")
-        .equals("placeholder:rust-lang.rust-analyzer")
-        .first()
-    ).toBeUndefined()
-
-    await upgraded.delete()
-    upgraded.close()
-  })
-
-  fullSchemaIt(
-    "v109 placeholder purge is idempotent on a database with no placeholders",
-    async () => {
-      const name = `cognia-v109-idempotent-${Date.now()}`
-      const legacy = new Dexie(name)
-      legacy.version(108).stores({
-        trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
-      })
-      await legacy.open()
-      await legacy.table("trustedPublishers").put({
-        publicKey: "real-key",
-        fingerprint: "deadbeef".repeat(8),
-        authorName: "Real",
-        firstTrustedAt: 1,
-        lastSeenAt: 2,
-        installCount: 0,
-      })
-      legacy.close()
-
-      const upgraded = new CogniaDB(name)
-      await upgraded.open()
-      expect(await upgraded.trustedPublishers.count()).toBe(1)
-      await upgraded.delete()
-      upgraded.close()
-    }
-  )
 
   // v49 — Inbox optimization pass: messages.platformMessageId index + new
   // telemetry table. Verify the messages table accepts a row with the
@@ -3849,326 +2516,26 @@ describe("getDb", () => {
 
   // v49 upgrade hook backfills platformMessageId from
   // metadata.platformMessage.messageId on pre-existing rows.
-  fullSchemaIt("v49 upgrade hook backfills platformMessageId on legacy messages", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    // Open at v48 — last pre-bump version that already had senderId column.
-    legacy.version(48).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-    })
-    await legacy.open()
-    await legacy.table("messages").put({
-      id: "m-legacy",
-      sessionId: "s-legacy",
-      role: "user",
-      parts: [{ type: "text", text: "old" }],
-      metadata: {
-        platformMessage: {
-          messageId: "discord:msg-7",
-          platform: "discord",
-          sender: { remoteUserId: "u7", displayName: "Bob" },
-        },
-      },
-      createdAt: 0,
-    })
-    // Row that never went through a connector — no platformMessage metadata.
-    await legacy.table("messages").put({
-      id: "m-legacy-direct",
-      sessionId: "s-legacy",
-      role: "assistant",
-      parts: [{ type: "text", text: "direct" }],
-      createdAt: 0,
-    })
-    legacy.close()
-
-    // Re-open through production schema — v49 upgrade hook fires.
-    const db = getDb()
-    await db.open()
-    const backfilled = await db.messages.get("m-legacy")
-    expect(backfilled?.platformMessageId).toBe("discord:msg-7")
-    const direct = await db.messages.get("m-legacy-direct")
-    expect(direct?.platformMessageId).toBeUndefined()
-
-    // The new index can locate the backfilled row.
-    const byIndex = await db.messages.where("platformMessageId").equals("discord:msg-7").first()
-    expect(byIndex?.id).toBe("m-legacy")
-  })
-
   // v85 upgrade hook backfills the denormalized platformConversationKey index
   // column from each session's existing platformBinding.conversationKey, so
   // multi-session enumeration (control-plane /new /switch /sessions) can query
   // the index instead of full-scanning.
-  fullSchemaIt(
-    "v85 upgrade hook backfills platformConversationKey on legacy sessions",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      // Open at v84 — the last version before the platformConversationKey index.
-      legacy.version(84).stores({
-        sessions: "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId",
-      })
-      await legacy.open()
-      await legacy.table("sessions").put({
-        id: "s-im-legacy",
-        title: "TG chat",
-        kind: "direct",
-        platformBinding: {
-          platform: "telegram",
-          adapterId: "tg-1",
-          conversationKey: "telegram:tg-1:42",
-          conversationRef: { platform: "telegram", adapterId: "tg-1" },
-        },
-        createdAt: 0,
-        updatedAt: 0,
-      })
-      // Direct (non-IM) session — no platformBinding, must stay undefined.
-      await legacy.table("sessions").put({
-        id: "s-direct-legacy",
-        title: "Direct",
-        kind: "direct",
-        createdAt: 0,
-        updatedAt: 0,
-      })
-      legacy.close()
-
-      // Re-open through production schema — v85 upgrade hook fires.
-      const db = getDb()
-      await db.open()
-      const im = await db.sessions.get("s-im-legacy")
-      expect(im?.platformConversationKey).toBe("telegram:tg-1:42")
-      const direct = await db.sessions.get("s-direct-legacy")
-      expect(direct?.platformConversationKey).toBeUndefined()
-
-      // The new index can locate the backfilled row.
-      const byIndex = await db.sessions
-        .where("platformConversationKey")
-        .equals("telegram:tg-1:42")
-        .first()
-      expect(byIndex?.id).toBe("s-im-legacy")
-    }
-  )
-
   // v86 — Workspace (Project) isolation. The upgrade backfills `projectId`
   // across every runtime table, attributing sessions via the legacy
   // `Project.sessionIds[]` reverse map and falling back to an auto-created
   // Default workspace when no project is active. End-to-end through the
   // production schema (v85 → v86), exercising the real index + upgrade hook.
-  fullSchemaIt(
-    "v86 upgrade backfills projectId across runtime tables via the reverse map",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      // Open at v85 — the last version before the projectId columns.
-      legacy.version(85).stores({
-        sessions:
-          "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey",
-        messages:
-          "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id]",
-        chatGoals: "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt",
-        projects: "&id, lastAccessedAt",
-        settings: "id",
-      })
-      await legacy.open()
-      // One project owning s-owned; s-orphan is referenced by no project.
-      await legacy.table("projects").put({
-        id: "proj-A",
-        name: "A",
-        roots: [],
-        knowledgeBase: [],
-        sessionIds: ["s-owned"],
-        sessionCount: 1,
-        messageCount: 1,
-        createdAt: new Date(0),
-        updatedAt: new Date(0),
-        lastAccessedAt: new Date(0),
-      })
-      await legacy.table("settings").put({ id: "singleton", activeProjectId: "proj-A" })
-      await legacy.table("sessions").bulkPut([
-        { id: "s-owned", title: "owned", kind: "direct", createdAt: 0, updatedAt: 0 },
-        { id: "s-orphan", title: "orphan", kind: "direct", createdAt: 0, updatedAt: 0 },
-      ])
-      await legacy.table("messages").put({
-        id: "m1",
-        sessionId: "s-owned",
-        role: "user",
-        parts: [],
-        createdAt: 0,
-      })
-      await legacy.table("chatGoals").put({
-        id: "g1",
-        sessionId: "s-orphan",
-        status: "active",
-        createdAt: 0,
-        updatedAt: 0,
-      })
-      legacy.close()
-
-      // Re-open through production schema — v86 upgrade hook fires.
-      const db = getDb()
-      await db.open()
-      expect(db.verno).toBeGreaterThanOrEqual(86)
-
-      expect((await db.sessions.get("s-owned"))?.projectId).toBe("proj-A")
-      // Orphan session → fallback active project.
-      expect((await db.sessions.get("s-orphan"))?.projectId).toBe("proj-A")
-      expect((await db.messages.get("m1"))?.projectId).toBe("proj-A")
-      expect((await db.chatGoals.get("g1"))?.projectId).toBe("proj-A")
-
-      // The new compound index resolves the backfilled rows.
-      const scoped = await db.sessions.where("projectId").equals("proj-A").primaryKeys()
-      expect(scoped.sort()).toEqual(["s-orphan", "s-owned"])
-    }
-  )
-
   // v131 — Session lineage repair. Branch sessions and workbench sidechats were
   // written straight to Dexie without a `projectId`, which does not merely
   // mis-scope them: `[projectId+updatedAt]` omits any row whose key path
   // contains `undefined`, so they were absent from every scoped read (the
   // sidebar) and from `deleteProjectCascade`. End-to-end through the production
   // schema (v130 → v131), exercising the real index + upgrade hook.
-  fullSchemaIt(
-    "v131 upgrade rescues orphaned branch + sidechat rows into the scoped index",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      // Open at v130 with the pre-v131 sessions index (no surfaceBindingKey).
-      legacy.version(130).stores({
-        sessions:
-          "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt]",
-        messages:
-          "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt]",
-        projects: "&id, lastAccessedAt",
-        settings: "id",
-      })
-      await legacy.open()
-      await legacy.table("projects").put({
-        id: "proj-A",
-        name: "A",
-        roots: [],
-        knowledgeBase: [],
-        sessionIds: [],
-        sessionCount: 0,
-        messageCount: 0,
-        createdAt: new Date(0),
-        updatedAt: new Date(0),
-        lastAccessedAt: new Date(0),
-      })
-      await legacy.table("settings").put({ id: "singleton", activeProjectId: "proj-A" })
-      await legacy.table("sessions").bulkPut([
-        {
-          id: "s-parent",
-          title: "parent",
-          kind: "direct",
-          projectId: "proj-A",
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        // Written by `buildChildRow` — no projectId, so invisible to the sidebar.
-        {
-          id: "s-branch",
-          title: "parent (branch)",
-          kind: "direct",
-          parentSessionId: "s-parent",
-          createdAt: 1,
-          updatedAt: 1,
-        },
-        // Written by `ensureResourceWorkbenchSession` — no projectId either, so
-        // it also escaped the workspace cascade.
-        {
-          id: "resource-workbench:session:s-parent",
-          title: "aside",
-          kind: "resource-workbench",
-          visibility: "embedded",
-          surfaceBinding: { kind: "session", sessionId: "s-parent" },
-          createdAt: 2,
-          updatedAt: 2,
-        },
-      ])
-      await legacy
-        .table("messages")
-        .put({ id: "m-branch", sessionId: "s-branch", role: "user", parts: [], createdAt: 1 })
-      legacy.close()
-
-      // Re-open through production schema — v131 upgrade hook fires.
-      const db = getDb()
-      await db.open()
-      expect(db.verno).toBeGreaterThanOrEqual(131)
-
-      // Both orphans land in the PARENT's workspace, not merely the active one.
-      expect((await db.sessions.get("s-branch"))?.projectId).toBe("proj-A")
-      expect((await db.sessions.get("resource-workbench:session:s-parent"))?.projectId).toBe(
-        "proj-A"
-      )
-      expect((await db.messages.get("m-branch"))?.projectId).toBe("proj-A")
-
-      // The acceptance criterion for the whole migration: the branch is now
-      // reachable through the compound index the sidebar actually reads.
-      const scoped = await db.sessions
-        .where("[projectId+updatedAt]")
-        .between(["proj-A", Dexie.minKey], ["proj-A", Dexie.maxKey])
-        .primaryKeys()
-      expect(scoped).toContain("s-branch")
-
-      // And the sidechat is findable by binding without a full table scan.
-      expect(
-        (await db.sessions.where("surfaceBindingKey").equals("session:s-parent").first())?.id
-      ).toBe("resource-workbench:session:s-parent")
-    }
-  )
-
   // v91 — Denormalised `triggeredBySource` index on `workflowRuns`. The upgrade
   // backfills the new top-level column from `triggeredBy.source` (legacy rows
   // with no `triggeredBy` default to "ui"), and the new index resolves only the
   // IM-triggered runs the progress-runner cares about. End-to-end through the
   // production schema (v90 → v91), exercising the real index + upgrade hook.
-  fullSchemaIt(
-    "v91 upgrade backfills triggeredBySource and indexes IM-triggered runs",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      // Open at v90 with the pre-v91 workflowRuns index (no triggeredBySource).
-      legacy.version(90).stores({
-        workflowRuns:
-          "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt]",
-      })
-      await legacy.open()
-      await legacy.table("workflowRuns").bulkPut([
-        {
-          id: "run-im",
-          workflowId: "wf-1",
-          status: "running",
-          startedAt: 1,
-          triggeredBy: { source: "im", adapterId: "tg-1", conversationKey: "telegram:tg-1:42" },
-        },
-        {
-          id: "run-ui",
-          workflowId: "wf-1",
-          status: "succeeded",
-          startedAt: 2,
-          triggeredBy: { source: "ui" },
-        },
-        // Legacy run with no triggeredBy at all → defaults to "ui".
-        { id: "run-legacy", workflowId: "wf-2", status: "succeeded", startedAt: 3 },
-      ])
-      legacy.close()
-
-      // Re-open through production schema — v91 upgrade hook fires.
-      const db = getDb()
-      await db.open()
-      expect(db.verno).toBeGreaterThanOrEqual(91)
-
-      expect((await db.workflowRuns.get("run-im"))?.triggeredBySource).toBe("im")
-      expect((await db.workflowRuns.get("run-ui"))?.triggeredBySource).toBe("ui")
-      expect((await db.workflowRuns.get("run-legacy"))?.triggeredBySource).toBe("ui")
-
-      // The new index resolves only the IM-triggered run.
-      const imRuns = await db.workflowRuns.where("triggeredBySource").equals("im").primaryKeys()
-      expect(imRuns).toEqual(["run-im"])
-    }
-  )
-
   // v102 — `triggerKind` index on `workflowRuns`. The Agent-Team runs list
   // (`components/agent/team/runs-list.tsx`) and the CLI status projection
   // (`lib/cli-bridge/handlers/agent-team.ts`) both resolve team runs via
@@ -4178,7 +2545,7 @@ describe("getDb", () => {
   // `triggerKind` is a required top-level column stamped at run creation, so
   // (unlike v91's derived `triggeredBySource`) no backfill runs — the new index
   // simply resolves existing rows. Opens v101 → production schema end-to-end.
-  fullSchemaIt(
+  schemaIt(
     "v102 indexes workflowRuns.triggerKind so team runs resolve without a SchemaError",
     async () => {
       const Dexie = (await import("dexie")).default
@@ -4372,168 +2739,9 @@ describe("getDb", () => {
   // `packVersionAtClone` so the new clone-hides-overlay dedupe rule
   // treats them as user clones of the overlay. User customisations
   // (e.g. a tampered systemPrompt) must survive verbatim.
-  fullSchemaIt(
-    "v50 upgrade hook tags legacy built-in character rows with overlay attribution",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      legacy.version(48).stores({
-        characters: "id, name, updatedAt, isBuiltIn",
-      })
-      await legacy.open()
-      await legacy.table("characters").bulkPut([
-        {
-          id: "char_builtin_coding",
-          name: "Coding Assistant",
-          avatarColor: "x",
-          systemPrompt: "USER TAMPERED",
-          isBuiltIn: true,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        {
-          id: "char_builtin_writer",
-          name: "Writing Editor",
-          avatarColor: "x",
-          systemPrompt: "y",
-          isBuiltIn: true,
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        // A user-created character — must not be tagged.
-        {
-          id: "char_user_demo",
-          name: "User",
-          avatarColor: "x",
-          systemPrompt: "z",
-          createdAt: 0,
-          updatedAt: 0,
-        },
-      ])
-      legacy.close()
-
-      const db = getDb()
-      await db.open()
-      const coding = await db.characters.get("char_builtin_coding")
-      expect(coding?.sourcePluginId).toBe("cognia-builtin-characters")
-      expect(coding?.sourcePackId).toBe("builtin")
-      expect(coding?.clonedFromPackCharacterId).toBe(
-        "cognia-pack:cognia-builtin-characters:builtin:coding"
-      )
-      expect(coding?.packVersionAtClone).toBe("1.0.0")
-      // The systemPrompt the user had tampered with must not be touched by
-      // the upgrade hook itself — the seeder may re-stamp on next open, but
-      // the upgrade hook's job is attribution-only.
-      expect(coding?.systemPrompt).toBe("USER TAMPERED")
-
-      const writer = await db.characters.get("char_builtin_writer")
-      expect(writer?.clonedFromPackCharacterId).toBe(
-        "cognia-pack:cognia-builtin-characters:builtin:writer"
-      )
-
-      // Non-builtin rows are left strictly alone.
-      const user = await db.characters.get("char_user_demo")
-      expect(user?.sourcePluginId).toBeUndefined()
-      expect(user?.clonedFromPackCharacterId).toBeUndefined()
-    }
-  )
-
-  fullSchemaIt(
-    "v50 upgrade hook is idempotent — rows already tagged are not re-tagged",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      legacy.version(48).stores({
-        characters: "id, name, updatedAt, isBuiltIn",
-      })
-      await legacy.open()
-      // Already-tagged row (simulates a previous v50 run + manual edit).
-      await legacy.table("characters").put({
-        id: "char_builtin_coding",
-        name: "Coding Assistant",
-        avatarColor: "x",
-        systemPrompt: "y",
-        isBuiltIn: true,
-        sourcePluginId: "third-party-imposter",
-        sourcePackId: "evil",
-        clonedFromPackCharacterId: "cognia-pack:third-party-imposter:evil:coding",
-        packVersionAtClone: "9.9.9",
-        createdAt: 0,
-        updatedAt: 0,
-      })
-      legacy.close()
-
-      const db = getDb()
-      await db.open()
-      const coding = await db.characters.get("char_builtin_coding")
-      // The pre-existing attribution must survive verbatim — the upgrade
-      // hook's `if (row.sourcePluginId) return` clause protects rows that
-      // were already attributed (whether by this hook or a manual edit).
-      expect(coding?.sourcePluginId).toBe("third-party-imposter")
-      expect(coding?.packVersionAtClone).toBe("9.9.9")
-    }
-  )
-
   // v78 — Skills installed from the defunct SkillsMP marketplace lose their
   // provenance fields (canonicalId / marketplaceSkillId) and survive as
   // plain local skills; everything else is untouched.
-  fullSchemaIt(
-    "v78 upgrade hook detaches skillsmp:* installs and leaves others alone",
-    async () => {
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      legacy.version(77).stores({
-        skills:
-          "&id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
-      })
-      await legacy.open()
-      await legacy.table("skills").bulkPut([
-        {
-          id: "skill-mp",
-          name: "Old SkillsMP install",
-          content: "x",
-          source: "marketplace",
-          canonicalId: "skillsmp:42",
-          marketplaceSkillId: "42",
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        {
-          id: "skill-registry",
-          name: "Registry install",
-          content: "y",
-          source: "marketplace",
-          canonicalId: "registry:ai-elements",
-          marketplaceSkillId: "ai-elements",
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        {
-          id: "skill-local",
-          name: "Local skill",
-          content: "z",
-          source: "custom",
-          createdAt: 0,
-          updatedAt: 0,
-        },
-      ])
-      legacy.close()
-
-      const db = getDb()
-      await db.open()
-      const detached = await db.skills.get("skill-mp")
-      expect(detached?.canonicalId).toBeUndefined()
-      expect(detached?.marketplaceSkillId).toBeUndefined()
-      expect(detached?.name).toBe("Old SkillsMP install")
-      // Registry installs and plain local skills survive verbatim.
-      const registry = await db.skills.get("skill-registry")
-      expect(registry?.canonicalId).toBe("registry:ai-elements")
-      expect(registry?.marketplaceSkillId).toBe("ai-elements")
-      const local = await db.skills.get("skill-local")
-      expect(local?.canonicalId).toBeUndefined()
-    }
-  )
-
   it("opens at schema v41 (IM connector complete gap closure)", async () => {
     const db = getDb()
     await db.open()
@@ -5554,234 +3762,6 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(ordered.find((p) => p.id === "p_test")?.sortOrder).toBe(5)
   })
 
-  fullSchemaIt(
-    "v5 upgrade hook normalises legacy team rows (memberCharacterIds → members[])",
-    async () => {
-      // Open Dexie at v4 (before the team-shape change), write a legacy row,
-      // close, then re-open through the cached `getDb()` which routes through
-      // every version up to v12.
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      legacy.version(4).stores({
-        sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-        messages: "id, sessionId, [sessionId+createdAt], senderId",
-        settings: "id",
-        promptPresets: "id, updatedAt",
-        mcpServers: "id, name, enabled",
-        characters: "id, name, updatedAt, isBuiltIn",
-        skills: "id, name, updatedAt, isBuiltIn",
-        teams: "id, name, updatedAt, isBuiltIn",
-        sessionState: "sessionId, lastReadAt",
-      })
-      await legacy.open()
-      // Wrap the three puts in one explicit transaction so they all commit
-      // atomically before `legacy.close()` runs. Under fake-indexeddb the
-      // implicit per-put auto-commit transactions can race with the close
-      // and lose rows; this transaction guarantees the rows land before
-      // the connection is torn down for the v28 reopen below.
-      await legacy.transaction(
-        "rw",
-        legacy.table("teams"),
-        legacy.table("mcpServers"),
-        legacy.table("skills"),
-        async () => {
-          await legacy.table("teams").put({
-            id: "team_legacy",
-            name: "Legacy",
-            memberCharacterIds: ["c1", "c2"],
-            orchestration: "round_robin",
-            avatarColor: "x",
-            createdAt: 0,
-            updatedAt: 0,
-          })
-          // Legacy mcpServers row missing appsEnabled — v7 hook should backfill {}
-          await legacy.table("mcpServers").put({
-            id: "mcp_legacy",
-            name: "old",
-            enabled: true,
-            transport: "stdio",
-            config: {},
-          })
-          // Legacy skills row missing source/status/category — v8 hook backfills.
-          await legacy.table("skills").put({
-            id: "skill_legacy",
-            name: "old",
-            content: "x",
-            isBuiltIn: false,
-            createdAt: 0,
-            updatedAt: 0,
-          })
-          await legacy.table("skills").put({
-            id: "skill_builtin_legacy",
-            name: "builtin old",
-            content: "x",
-            isBuiltIn: true,
-            createdAt: 0,
-            updatedAt: 0,
-          })
-        }
-      )
-      legacy.close()
-
-      // Now open through the production schema: every upgrade hook runs.
-      const db = getDb()
-      await db.open()
-      const team = await db.teams.get("team_legacy")
-      expect(Array.isArray(team?.members)).toBe(true)
-      expect(team?.members.map((m) => m.characterId)).toEqual(["c1", "c2"])
-      // memberCharacterIds was deleted by the upgrade hook.
-      expect(
-        (team as unknown as { memberCharacterIds?: unknown }).memberCharacterIds
-      ).toBeUndefined()
-
-      const mcp = await db.mcpServers.get("mcp_legacy")
-      expect(mcp?.appsEnabled).toEqual({})
-
-      const skill = await db.skills.get("skill_legacy")
-      expect(skill?.source).toBe("custom")
-      expect(skill?.status).toBe("enabled")
-      expect(skill?.category).toBe("custom")
-      expect(skill?.usageCount).toBe(0)
-
-      const builtInSkill = await db.skills.get("skill_builtin_legacy")
-      expect(builtInSkill?.source).toBe("builtin")
-      expect(builtInSkill?.category).toBe("meta")
-    }
-  )
-
-  fullSchemaIt("v5 hook defaults to [] when memberCharacterIds is missing entirely", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(4).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets: "id, updatedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-    })
-    await legacy.open()
-    await legacy.table("teams").put({
-      id: "team_no_members_field",
-      name: "Bare",
-      // Neither memberCharacterIds nor members.
-      orchestration: "manual",
-      avatarColor: "x",
-      createdAt: 0,
-      updatedAt: 0,
-    })
-    legacy.close()
-    const db = getDb()
-    await db.open()
-    const team = await db.teams.get("team_no_members_field")
-    expect(team?.members).toEqual([])
-  })
-
-  fullSchemaIt("v5 hook leaves rows that already use members[] alone", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(4).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets: "id, updatedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-    })
-    await legacy.open()
-    await legacy.table("teams").put({
-      id: "team_already_modern",
-      name: "Modern",
-      // Already has members[] — hook must short-circuit.
-      members: [{ characterId: "x" }],
-      orchestration: "manual",
-      avatarColor: "x",
-      createdAt: 0,
-      updatedAt: 0,
-    })
-    legacy.close()
-    const db = getDb()
-    await db.open()
-    const team = await db.teams.get("team_already_modern")
-    expect(team?.members).toEqual([{ characterId: "x" }])
-  })
-
-  fullSchemaIt("v7 hook leaves mcpServers rows that already have appsEnabled alone", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(6).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets: "id, updatedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-      trustedWorkspaces: "path, trustedAt",
-    })
-    await legacy.open()
-    await legacy.table("mcpServers").put({
-      id: "mcp_modern",
-      name: "modern",
-      enabled: true,
-      transport: "stdio",
-      config: {},
-      appsEnabled: { codex: true },
-    })
-    legacy.close()
-    const db = getDb()
-    await db.open()
-    const mcp = await db.mcpServers.get("mcp_modern")
-    expect(mcp?.appsEnabled).toEqual({ codex: true })
-  })
-
-  fullSchemaIt("v8 hook respects existing skill source/status/category fields", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(7).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets: "id, updatedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-      trustedWorkspaces: "path, trustedAt",
-    })
-    await legacy.open()
-    await legacy.table("skills").put({
-      id: "skill_with_meta",
-      name: "withmeta",
-      content: "x",
-      isBuiltIn: true,
-      source: "marketplace",
-      status: "disabled",
-      category: "development",
-      usageCount: 7,
-      createdAt: 0,
-      updatedAt: 0,
-    })
-    legacy.close()
-    const db = getDb()
-    await db.open()
-    const skill = await db.skills.get("skill_with_meta")
-    // None of those fields should be overwritten by the upgrade hook.
-    expect(skill?.source).toBe("marketplace")
-    expect(skill?.status).toBe("disabled")
-    expect(skill?.category).toBe("development")
-    expect(skill?.usageCount).toBe(7)
-  })
-
   it("seed catch handler swallows DatabaseClosedError silently", async () => {
     // Trigger the .catch(...) branch in getDb's seed kickoff. We do this by
     // racing a db.delete() against the inflight seed; Dexie throws
@@ -5837,378 +3817,6 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       fresh.__resetDbForTesting()
     })
     jest.dontMock("./seed")
-  })
-
-  fullSchemaIt(
-    "v16 upgrade hook migrates customThemes[].colors to tokens.{light,dark}",
-    async () => {
-      // Open Dexie at v15 (before the dual-variant rewrite), seed the singleton
-      // settings row with a legacy customTheme, close, then re-open through the
-      // production schema. The v16 upgrade hook should walk the blob and
-      // promote the legacy `{colors, isDark}` pair to `{tokens, baseVariant}`
-      // while leaving the legacy fields in place for rollback safety.
-      const Dexie = (await import("dexie")).default
-      const legacy = new Dexie("cognia-claude")
-      legacy.version(15).stores({
-        sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-        messages: "id, sessionId, [sessionId+createdAt], senderId",
-        settings: "id",
-        promptPresets:
-          "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
-        mcpServers: "id, name, enabled",
-        characters: "id, name, updatedAt, isBuiltIn",
-        skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
-        skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
-        teams: "id, name, updatedAt, isBuiltIn",
-        sessionState: "sessionId, lastReadAt",
-        trustedWorkspaces: "path, trustedAt",
-        tts_provider_keys: "id",
-        backupHistory: "id, completedAt, type, success",
-        canvasDocuments: "id, title, language, type, updatedAt, createdAt",
-        canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
-        canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
-        canvasSessions: "id, documentId, ownerId, createdAt",
-        a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
-        a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
-        a2uiTemplates: "id, name, category, updatedAt, source",
-        a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
-        twinSources:
-          "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
-        twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
-        twinProfile: "&id, twinId",
-        twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
-        twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
-        plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
-        pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
-        pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
-        pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
-        pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
-      })
-      await legacy.open()
-      await legacy.table("settings").put({
-        id: "singleton",
-        customThemes: [
-          {
-            id: "legacy-1",
-            name: "Legacy Theme",
-            isDark: true,
-            colors: {
-              background: "#0b0b0b",
-              foreground: "#ffffff",
-              primary: "#ff00ff",
-              primaryForeground: "#000000",
-              secondary: "#222222",
-              secondaryForeground: "#dddddd",
-              accent: "#00ffff",
-              accentForeground: "#000000",
-              muted: "#1a1a1a",
-              mutedForeground: "#aaaaaa",
-              card: "#101010",
-              cardForeground: "#fafafa",
-              popover: "#0d0d0d",
-              popoverForeground: "#fafafa",
-              input: "#222222",
-              border: "#333333",
-              ring: "#ff00ff",
-              destructive: "#ff4040",
-              destructiveForeground: "#ffffff",
-              sidebar: "#0a0a0a",
-              sidebarForeground: "#fafafa",
-              sidebarPrimary: "#ff00ff",
-              sidebarBorder: "#222222",
-            },
-          },
-          {
-            id: "legacy-light",
-            name: "Legacy Light Theme",
-            isDark: false,
-            colors: {
-              background: "#ffffff",
-              foreground: "#111111",
-              primary: "#0055cc",
-            },
-          },
-          {
-            id: "legacy-no-colors",
-            name: "Legacy Theme Without Colors",
-          },
-        ],
-      })
-      legacy.close()
-
-      // Re-open through the production schema — v16 upgrade hook fires.
-      const db = getDb()
-      await db.open()
-      const row = (await db.settings.get("singleton" as never)) as unknown as {
-        customThemes?: Array<Record<string, unknown>>
-      }
-      const t = row?.customThemes?.find((theme) => theme.id === "legacy-1") as
-        Record<string, unknown> | undefined
-      expect(t).toBeDefined()
-      expect(t?.baseVariant).toBe("dark")
-      expect(t?.derivedVariant).toBe("light")
-      const tokens = t?.tokens as { light: Record<string, string>; dark: Record<string, string> }
-      expect(tokens).toBeDefined()
-      // The dark side carries the original palette verbatim.
-      expect(tokens.dark.primary).toBe("#ff00ff")
-      expect(tokens.dark.background).toBe("#0b0b0b")
-      // The light side was synthesized via OKLCH derivation; we don't pin a
-      // specific value (Task 6 owns the algorithm), only that something was
-      // produced for each of the originally-defined keys.
-      expect(typeof tokens.light.primary).toBe("string")
-      expect(tokens.light.primary.length).toBeGreaterThan(0)
-      expect(typeof tokens.light.background).toBe("string")
-      // Legacy fields preserved for one-release rollback safety.
-      expect(t?.colors).toBeDefined()
-      expect(t?.isDark).toBe(true)
-
-      const light = row?.customThemes?.find((theme) => theme.id === "legacy-light") as
-        Record<string, unknown> | undefined
-      expect(light?.baseVariant).toBe("light")
-      expect(light?.derivedVariant).toBe("dark")
-      expect((light?.tokens as { light?: Record<string, string> })?.light?.primary).toBe("#0055cc")
-
-      const noColors = row?.customThemes?.find((theme) => theme.id === "legacy-no-colors") as
-        Record<string, unknown> | undefined
-      expect(noColors?.tokens).toBeUndefined()
-    }
-  )
-
-  fullSchemaIt("v16 upgrade hook is idempotent — already-migrated rows untouched", async () => {
-    // A row that already carries the dual-variant shape must be left alone
-    // (no re-derivation, no overwriting hand-edited tokens). We seed with
-    // a sentinel `light.primary` value the OKLCH derivation would never
-    // produce, then assert it survives intact.
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(15).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets:
-        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
-      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-      trustedWorkspaces: "path, trustedAt",
-      tts_provider_keys: "id",
-      backupHistory: "id, completedAt, type, success",
-      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
-      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
-      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
-      canvasSessions: "id, documentId, ownerId, createdAt",
-      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
-      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
-      a2uiTemplates: "id, name, category, updatedAt, source",
-      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
-      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
-      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
-      twinProfile: "&id, twinId",
-      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
-      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
-      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
-      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
-      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
-      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
-      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
-    })
-    await legacy.open()
-    await legacy.table("settings").put({
-      id: "singleton",
-      customThemes: [
-        {
-          id: "already-migrated",
-          name: "Modern",
-          baseVariant: "light",
-          derivedVariant: "dark",
-          tokens: {
-            light: { primary: "#sentinel-light", background: "#fff" },
-            dark: { primary: "#sentinel-dark", background: "#000" },
-          },
-          // No `colors`/`isDark` — already on the new shape.
-        },
-      ],
-    })
-    legacy.close()
-
-    const db = getDb()
-    await db.open()
-    const row = (await db.settings.get("singleton" as never)) as unknown as {
-      customThemes?: Array<Record<string, unknown>>
-    }
-    const t = row?.customThemes?.[0] as Record<string, unknown> | undefined
-    const tokens = t?.tokens as { light: Record<string, string>; dark: Record<string, string> }
-    // Sentinel values must survive — proves the hook short-circuited.
-    expect(tokens.light.primary).toBe("#sentinel-light")
-    expect(tokens.dark.primary).toBe("#sentinel-dark")
-    expect(t?.baseVariant).toBe("light")
-    expect(t?.derivedVariant).toBe("dark")
-  })
-
-  fullSchemaIt("v16 upgrade hook tolerates a settings row with no customThemes field", async () => {
-    // Defensive: the singleton row may exist before any custom theme has
-    // been created. The hook must not crash on `customThemes === undefined`.
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(15).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets:
-        "id, updatedAt, isBuiltIn, isDefault, isFavorite, sortOrder, category, lastUsedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
-      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-      trustedWorkspaces: "path, trustedAt",
-      tts_provider_keys: "id",
-      backupHistory: "id, completedAt, type, success",
-      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
-      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
-      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
-      canvasSessions: "id, documentId, ownerId, createdAt",
-      a2uiApps: "id, name, updatedAt, createdAt, isBuiltIn, category, isFavorite, sortOrder",
-      a2uiSurfaces: "id, appId, sessionId, updatedAt, createdAt, type",
-      a2uiTemplates: "id, name, category, updatedAt, source",
-      a2uiEventHistory: "id, surfaceId, [surfaceId+timestamp], timestamp, type",
-      twinSources: "&id, twinId, kind, format, status, fingerprint, [twinId+kind], [twinId+status]",
-      twinChunks: "&id, twinId, sourceId, vectorDocId, [twinId+sourceId], [twinId+createdAt]",
-      twinProfile: "&id, twinId",
-      twinDrafts: "&id, twinId, jobId, kind, status, [twinId+status], [twinId+kind]",
-      twinJobs: "&id, twinId, status, queuedAt, [twinId+status], [twinId+kind]",
-      plugins: "id, name, version, status, source, type, enabled, lastUsedAt, *capabilities",
-      pluginPermissions: "[pluginId+permission], pluginId, permission, decision, expiresAt",
-      pluginReviews: "[pluginId+id], pluginId, rating, createdAt",
-      pluginAnalytics: "[pluginId+key], pluginId, key, lastEventAt",
-      pluginScheduledJobs: "id, pluginId, cron, lastRunAt, nextRunAt, status",
-    })
-    await legacy.open()
-    await legacy.table("settings").put({ id: "singleton", colorTheme: "default" })
-    legacy.close()
-
-    const db = getDb()
-    await expect(db.open()).resolves.toBeDefined()
-    const row = (await db.settings.get("singleton" as never)) as unknown as {
-      customThemes?: unknown
-      colorTheme?: string
-    }
-    expect(row?.colorTheme).toBe("default")
-    // No customThemes field was created; the hook should leave the row alone.
-    expect(row?.customThemes).toBeUndefined()
-  })
-
-  fullSchemaIt("v12 upgrade hook fills preset defaults on legacy rows", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(11).stores({
-      sessions: "id, updatedAt, createdAt, kind, characterId, teamId",
-      messages: "id, sessionId, [sessionId+createdAt], senderId",
-      settings: "id",
-      promptPresets: "id, updatedAt",
-      mcpServers: "id, name, enabled",
-      characters: "id, name, updatedAt, isBuiltIn",
-      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
-      skillResources: "id, skillId, [skillId+kind], [skillId+path], updatedAt",
-      teams: "id, name, updatedAt, isBuiltIn",
-      sessionState: "sessionId, lastReadAt",
-      trustedWorkspaces: "path, trustedAt",
-      tts_provider_keys: "id",
-      backupHistory: "id, completedAt, type, success",
-      canvasDocuments: "id, title, language, type, updatedAt, createdAt",
-      canvasVersions: "id, documentId, [documentId+createdAt], isAutoSave",
-      canvasComments: "id, documentId, [documentId+createdAt], parentId, resolvedAt",
-      canvasSessions: "id, documentId, ownerId, createdAt",
-    })
-    await legacy.open()
-    await legacy.table("promptPresets").put({
-      id: "p_legacy",
-      name: "Legacy",
-      content: "x",
-      createdAt: 0,
-      updatedAt: 0,
-    })
-    legacy.close()
-    const db = getDb()
-    await db.open()
-    const p = await db.promptPresets.get("p_legacy")
-    expect(p?.isBuiltIn).toBe(false)
-    expect(p?.isFavorite).toBe(false)
-    expect(p?.usageCount).toBe(0)
-    expect(p?.sortOrder).toBe(0)
-  })
-
-  fullSchemaIt("v34 upgrade hook creates twin rows from legacy twin references", async () => {
-    const Dexie = (await import("dexie")).default
-    const legacy = new Dexie("cognia-claude")
-    legacy.version(33).stores({
-      twinSources: "&id, twinId",
-      twinChunks: "&id, twinId, sourceId",
-      twinProfile: "&id, twinId",
-      twinDrafts: "&id, twinId, jobId",
-      twinJobs: "&id, twinId, status",
-      characters: "id, name, updatedAt, isBuiltIn",
-      inboundLedger: "&id, adapterId, receivedAt",
-      outboundQueue: "&id, adapterId, status, nextAttemptAt, source",
-      connectorCallbackBindings: "&id, adapterId, actionId",
-      workflows: "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion",
-      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
-    })
-    await legacy.open()
-    await legacy.transaction(
-      "rw",
-      [
-        legacy.table("twinSources"),
-        legacy.table("twinChunks"),
-        legacy.table("twinProfile"),
-        legacy.table("twinDrafts"),
-        legacy.table("twinJobs"),
-        legacy.table("characters"),
-      ],
-      async () => {
-        await legacy.table("twinSources").put({ id: "src-1", twinId: "twin-source" })
-        await legacy.table("twinChunks").put({
-          id: "chunk-1",
-          twinId: "twin-chunk",
-          sourceId: "src-1",
-        })
-        await legacy.table("twinProfile").put({ id: "profile-1", twinId: "twin-profile" })
-        await legacy.table("twinDrafts").put({
-          id: "draft-1",
-          twinId: "twin-draft",
-          jobId: "job-1",
-        })
-        await legacy.table("twinJobs").put({ id: "job-1", twinId: "twin-job", status: "done" })
-        await legacy.table("characters").put({
-          id: "char-with-twin",
-          name: "Readable Twin",
-          twinId: "twin-character",
-          createdAt: 0,
-          updatedAt: 0,
-          isBuiltIn: false,
-        })
-      }
-    )
-    legacy.close()
-
-    const db = getDb()
-    await db.open()
-
-    await expect(db.twins.get("twin-source")).resolves.toMatchObject({
-      id: "twin-source",
-      name: "twin-source",
-    })
-    await expect(db.twins.get("twin-character")).resolves.toMatchObject({
-      id: "twin-character",
-      name: "Readable Twin",
-    })
-    await expect(
-      db.twins.bulkGet(["twin-chunk", "twin-profile", "twin-draft", "twin-job"])
-    ).resolves.toHaveLength(4)
   })
 
   it("v68 notifications table exposes the dedupeKey/groupKey + compound indexes", async () => {
@@ -6628,58 +4236,6 @@ describe("withDbReopenRetry", () => {
     // burns every attempt inside the close→open window it is waiting out.
     expect(Date.now() - started).toBeGreaterThanOrEqual(40)
   })
-})
-
-describe("schema v138 remote-terminal grant migration", () => {
-  const databaseName = "cognia-schema-v138-terminal-grant"
-
-  afterEach(async () => {
-    await Dexie.delete(databaseName)
-  })
-
-  fullSchemaIt(
-    "seeds historical paired devices to false and preserves explicit grants",
-    async () => {
-      const legacy = new Dexie(databaseName)
-      legacy.version(137).stores({
-        pairedDevices: "&deviceId, lastSeenAt, revokedAt, platform",
-      })
-      await legacy.open()
-      await legacy.table("pairedDevices").bulkPut([
-        {
-          deviceId: "historical-device",
-          label: "Old phone",
-          platform: "ios",
-          pubkey: "pk-old",
-          appVersion: "0.1.0",
-          pairedAt: 1,
-          lastSeenAt: 1,
-          allowRemoteControl: true,
-        },
-        {
-          deviceId: "explicit-terminal-device",
-          label: "Current phone",
-          platform: "android",
-          pubkey: "pk-current",
-          appVersion: "0.1.0",
-          pairedAt: 2,
-          lastSeenAt: 2,
-          allowRemoteTerminal: true,
-        },
-      ])
-      legacy.close()
-
-      const current = new CogniaDB(databaseName)
-      await current.open()
-      expect((await current.pairedDevices.get("historical-device"))?.allowRemoteTerminal).toBe(
-        false
-      )
-      expect(
-        (await current.pairedDevices.get("explicit-terminal-device"))?.allowRemoteTerminal
-      ).toBe(true)
-      current.close()
-    }
-  )
 })
 
 describe("startBlockedYieldRetry", () => {

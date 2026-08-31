@@ -256,6 +256,7 @@ export const CORE_TABLE_NAMES = [
   "projectChunks",
   "projectEnvironmentVersions",
   "projectEnvironments",
+  "projectMiningRuns",
   "projects",
   "promptPresets",
   "providerBalanceSnapshots",
@@ -310,6 +311,7 @@ export const CORE_TABLE_NAMES = [
   "skillRecordings",
   "skillResources",
   "skills",
+  "storageLayout",
   "subscriptionBalance",
   "subscriptionUsage",
   "syncTombstones",
@@ -651,6 +653,10 @@ QUEUE_TABLES.add("matrixPendingEncryptedEvents")
 // Named for the work it carries rather than the queue it is, so the suffix
 // heuristic above misses it. The row tracks dispatch responsibility only.
 QUEUE_TABLES.add("workSubmissions")
+// A history-backfill run is a lease, a keyset cursor and three counters, held
+// under the same protocol `claimMemoryJob` uses. The claims it produces are
+// ordinary portable memories, so the run row itself is recoverable work state.
+QUEUE_TABLES.add("projectMiningRuns")
 
 const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 
