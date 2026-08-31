@@ -62,11 +62,27 @@ export function PluginDevSessionWorkbench() {
   const projectDir = useDevProjectStore((state) => state.projectDir)
   const sessions = usePluginDevSessionStore((state) => state.sessions)
   const [actionPending, setActionPending] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const session = sessions[0]
   const attempt = session?.attempts[0]
   const isAppSession = Boolean(session?.terminalSessionId)
 
   const stageSet = useMemo(() => new Set(attempt?.stages ?? []), [attempt?.stages])
+
+  async function restartApp(): Promise<void> {
+    setRestarting(true)
+    try {
+      const { relaunchApp } = await import("@/lib/tauri/updater")
+      await relaunchApp()
+    } catch (error) {
+      setRestarting(false)
+      toast.error(
+        t("actions.restartFailed", {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+  }
 
   async function stopSession(): Promise<void> {
     if (!session?.terminalSessionId || session.state === "stopping") return
@@ -156,6 +172,25 @@ export function PluginDevSessionWorkbench() {
                   {t("current.attempt", { attempt: attempt.attempt })} ·{" "}
                   {t(`attemptState.${attempt.state}`)}
                 </Badge>
+              )}
+              {/*
+                `resolvePluginDevCapability` has always returned an `action`
+                string for a dirty runtime, and the workbench rendered it as
+                prose telling the user to restart. The one thing only the app
+                can do was the one thing it did not offer.
+              */}
+              {attempt?.state === "restart_required" && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={restarting}
+                  title={t("actions.restartRequired")}
+                  onClick={() => void restartApp()}
+                  data-testid="dev-session-restart-app"
+                >
+                  <RotateCcwIcon aria-hidden="true" />
+                  {t("actions.restartApp")}
+                </Button>
               )}
             </div>
             <p className="truncate text-xs text-muted-foreground">

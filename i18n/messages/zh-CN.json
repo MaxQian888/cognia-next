@@ -20961,6 +20961,7 @@
       "launchDenied": "终端启动被拒绝。",
       "launchFailed": "无法启动命令：{message}",
       "needsCli": "请先在上方安装 cognia CLI 以启用这些命令。",
+      "newScaffolded": "`plugin new` 正在终端里跑。跑完后选中它创建的目录，再按「启动」就能进入开发循环。",
       "noProject": "尚未选择项目。",
       "pickBundleTitle": "选择要安装的插件包",
       "pickProject": "选择项目…",
@@ -21325,6 +21326,9 @@
         "launchFailed": "无法重启会话：{message}",
         "openTerminal": "打开终端",
         "restart": "重新启动",
+        "restartApp": "重启 Cognia",
+        "restartFailed": "无法重启：{message}",
+        "restartRequired": "该插件的运行时处于 dirty 状态，只有重启能清掉。其他面板里未保存的内容会丢失。",
         "stop": "停止",
         "terminalUnavailable": "该终端会话已不可用。"
       },
@@ -21930,8 +21934,11 @@
     },
     "source": {
       "builtin": "内置",
+      "dev": "开发版",
+      "git": "Git",
       "local": "本地",
-      "marketplace": "市场"
+      "marketplace": "应用市场",
+      "shadowing": "这个构建覆盖了已安装的{sources}版本。卸载或重新加载即可切回。"
     },
     "surface": {
       "description": "{error}",

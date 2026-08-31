@@ -11,6 +11,26 @@ description: "弥补了ADR 0006 留下的桌面运行时空白。审计接口 82
 
 Plugin Media TypeScript 接口现已具备 concatenate、effect、transition 与 export 的已注册原生处理器。实现复用 `cognia-media` 现有 ffmpeg 参数校验、timeout、临时路径与错误模型，没有新增第二套 JavaScript media API。已降级的 hook family 继续延期。
 
+
+## 当前状态修订（2026-08-31）
+
+P1-7 的 devtools 线已退役。它底下的文件监听器留了下来，围绕它建起来的东西没有。
+
+`plugin_dev_server_start` 与 `plugin_dev_server_stop` 已删除。它们只是把内存里的
+`running` 置为 `true` 然后返回：没有绑定端口，也不存在服务器，而渲染端却在其上建了
+`getUrl()`、`getWebSocketUrl()` 与 `connectedClients`。`plugin_reload` 也一并删除，因为它发出的
+`plugin-hot-reload:<id>` 事件只有一个监听者，而那个模块已经没了。三者都已从
+`protocol/companion-commands.json`、`protocol/headless-command-dispositions.json` 以及生成的
+`all-app-commands.toml` 中移除。
+
+TypeScript 一侧，`dev-server.ts`、`profiler.ts`、`console-tap.ts`、`dev-tools.ts`、
+`dev-extension-controller.ts`、`managed-ide-dev-mode.ts`、`hot-reload.ts`，以及那个让它们看起来
+被引用的 barrel，全部删除；连同它们唯一的预期消费者、且没有生产挂载点的九标签页
+`PluginDevtoolsPanel`。因此下表中 `hot-reload.ts:372-376` 那一行静默 catch 指向的文件已不存在。
+
+`plugin_watch_start` / `plugin_watch_stop` 持有真实的 `notify` 监听器，予以保留。它们现在由
+`lib/plugin/devtools/file-watch.ts` 驱动，走已验证的 cli-bridge 路径重载，而不是发一个事件然后
+祈祷。
 ---
 
 ## 背景

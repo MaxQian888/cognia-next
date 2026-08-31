@@ -26,10 +26,27 @@ an external CLI remain observable without fake controls.
 
 The workbench does not infer reload success from install or discovery events. It displays success
 only after the renderer bridge records an `activationProof` whose lifecycle state is active,
-generation increased, and artifact revision matches the Rust-installed artifact. Activity,
-attempt diagnostics, and structured runtime logs share that session/attempt identity. Advanced
-diagnostics contains the implemented lifecycle, trigger-audit, and extension-point surfaces; the
-old Hook/Profiler/Bus tabs are not part of the Dev Session flow.
+generation increased, and artifact revision matches the Rust-installed artifact. Activity and
+attempt diagnostics share that session/attempt identity.
+
+Runtime logs no longer require it. With a proof they are filtered to that generation, and without
+one they show every generation and say so, because a reload that keeps failing never produces a
+proof, and that is exactly when an author needs the output. They come from
+`lib/plugin/devtools/runtime-log-stream.ts`, which merges the frontend `ctx.logger` ring with the
+Python host's buffer and tags each line with the host that produced it. `wasm` and
+`vscode-extension` have no per-plugin output channel at all, and the card names which and why
+rather than rendering an empty list.
+
+Advanced diagnostics holds the plugin API call inspector (every `ctx.*` call with its permission
+verdict, read unsampled from the audit ring), the lifecycle table, the trigger audit, and
+extension-point diagnostics. The nine-tab panel that used to sit here, with its Hook, Profiler and
+Bus tabs, was deleted along with the modules behind it: none of it had a production mount.
+
+Beside the workbench, the pane also carries the **watch card** and **hot-reload activity**. The
+watch card drives `lib/plugin/devtools/file-watch.ts`, which reloads a locally-sourced plugin when
+its files change without the CLI running, through the same verified path. Hot-reload activity is
+one row per install, uninstall and reload attempt, saying which driver did it and, on failure,
+why.
 
 ## The status hook
 

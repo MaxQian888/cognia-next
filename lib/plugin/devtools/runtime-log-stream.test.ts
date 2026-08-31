@@ -6,6 +6,7 @@ import { getPluginDebugger, resetPluginDebugger } from "./debugger"
 import { __resetPythonLogBufferForTesting, appendPythonEvent } from "@/lib/plugin/python/log-buffer"
 import {
   RUNTIMES_WITHOUT_LOG_CHANNEL,
+  isPluginType,
   clearPluginRuntimeLogs,
   getPluginRuntimeLogs,
   logSourcesFor,
@@ -41,6 +42,18 @@ describe("logSourcesFor", () => {
       runtimes: [],
       missingReason: RUNTIMES_WITHOUT_LOG_CHANNEL["vscode-extension"],
     })
+  })
+})
+
+describe("isPluginType", () => {
+  it.each(["frontend", "python", "hybrid", "wasm", "vscode-extension"])("accepts %s", (value) => {
+    expect(isPluginType(value)).toBe(true)
+  })
+
+  it("rejects a value the Dexie row could still hold", () => {
+    // `PluginRow.type` is a loose string, and the Logs tab decides whether to
+    // exist from it. An unrecognised runtime gets no tab.
+    expect(isPluginType("something-new")).toBe(false)
   })
 })
 

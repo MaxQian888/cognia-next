@@ -13,6 +13,28 @@ description: "Closes the desktop-runtime gap left by ADR 0006. Audits surface 82
 
 The Plugin Media TypeScript surface now has registered native handlers for concatenate, effect, transition, and export. They reuse `cognia-media`'s validated ffmpeg process boundary, timeouts, temporary-path handling, and error model; no second JavaScript media API was introduced. Demoted hook families remain deferred.
 
+## Current state amendment (2026-08-31)
+
+The P1-7 devtools track is retired. Its file watcher survives, everything built around it does
+not.
+
+`plugin_dev_server_start` and `plugin_dev_server_stop` were removed. They set an in-memory
+`running = true` and returned: no port was bound and no server existed, while the renderer built
+`getUrl()`, `getWebSocketUrl()` and `connectedClients` on top of them. `plugin_reload` went too,
+because the `plugin-hot-reload:<id>` event it emitted had exactly one listener and that module is
+gone. All three are out of `protocol/companion-commands.json`,
+`protocol/headless-command-dispositions.json` and the generated `all-app-commands.toml`.
+
+On the TypeScript side, `dev-server.ts`, `profiler.ts`, `console-tap.ts`, `dev-tools.ts`,
+`dev-extension-controller.ts`, `managed-ide-dev-mode.ts`, `hot-reload.ts` and the barrel that made
+them look referenced were deleted, along with the nine-tab `PluginDevtoolsPanel` that was their
+only intended consumer and had no production mount. The `hot-reload.ts:372-376` silent-catch row
+in the table below therefore names a file that no longer exists.
+
+`plugin_watch_start` / `plugin_watch_stop` hold a real `notify` watcher and are kept. They are now
+driven by `lib/plugin/devtools/file-watch.ts`, which reloads through the verified cli-bridge path
+rather than by emitting an event and hoping.
+
 ---
 
 ## Context

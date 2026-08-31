@@ -45,10 +45,12 @@ const isTauriMock = jest.requireMock("@/lib/tauri").isTauri as jest.Mock
 
 const toastWarning = jest.fn()
 const toastError = jest.fn()
+const toastInfo = jest.fn()
 jest.mock("sonner", () => ({
   toast: {
     warning: (...a: unknown[]) => toastWarning(...a),
     error: (...a: unknown[]) => toastError(...a),
+    info: (...a: unknown[]) => toastInfo(...a),
   },
 }))
 
@@ -184,5 +186,19 @@ describe("CogniaCliLauncher", () => {
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute("title")
     expect(pickDirectoryMock).not.toHaveBeenCalled()
+  })
+
+  it("points at the next step after scaffolding instead of guessing a directory", async () => {
+    // `plugin new` is interactive and creates a subdirectory whose name it
+    // asks for, so auto-chaining into `plugin dev` would start a dev loop in
+    // the wrong place.
+    useDevProjectStore.getState().setProject("/proj", "Demo")
+    renderLauncher()
+    await userEvent.click(screen.getByTestId("cognia-cli-run-new"))
+    expect(launchCognia).toHaveBeenCalledWith(expect.objectContaining({ command: "plugin new" }))
+    expect(launchCognia).not.toHaveBeenCalledWith(
+      expect.objectContaining({ command: expect.stringContaining("plugin dev") })
+    )
+    expect(toastInfo).toHaveBeenCalled()
   })
 })

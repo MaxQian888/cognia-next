@@ -34,7 +34,7 @@ import { PluginDetailConfigure } from "./plugin-detail-configure"
 import { PluginDetailPermissions } from "./plugin-detail-permissions"
 import { PluginDetailData } from "./plugin-detail-data"
 import { PluginDetailLogs } from "./plugin-detail-logs"
-import { logSourcesFor } from "@/lib/plugin/devtools/runtime-log-stream"
+import { isPluginType, logSourcesFor } from "@/lib/plugin/devtools/runtime-log-stream"
 
 interface SectionDef {
   value: Exclude<PluginDetailSubTab, "overview">
@@ -124,7 +124,7 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
   // hybrid plugin's output. It now follows whatever the merged runtime-log
   // stream can actually read, so wasm and vscode-extension still get no tab
   // rather than an empty one.
-  const hasLogChannel = logSourcesFor(plugin.type).runtimes.length > 0
+  const hasLogChannel = isPluginType(plugin.type) && logSourcesFor(plugin.type).runtimes.length > 0
   const sections = SECTIONS.filter((s) => !s.requiresLogChannel || hasLogChannel)
 
   return (

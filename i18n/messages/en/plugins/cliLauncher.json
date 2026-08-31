@@ -14,10 +14,11 @@
   "launchDenied": "Terminal launch was denied.",
   "launchFailed": "Couldn't start the command: {message}",
   "needsCli": "Install the cognia CLI above to enable these commands.",
+  "newScaffolded": "`plugin new` is running in the terminal. When it finishes, pick the folder it created and press Start to enter the dev loop.",
   "noProject": "No project selected.",
   "pickBundleTitle": "Select a plugin bundle to install",
   "pickProject": "Choose project…",
-  "pickProjectTitle": "Select a plugin project directory",
   "pickProjectDesktopOnly": "Choosing a project folder needs the desktop app.",
+  "pickProjectTitle": "Select a plugin project directory",
   "title": "Run cognia commands"
 }

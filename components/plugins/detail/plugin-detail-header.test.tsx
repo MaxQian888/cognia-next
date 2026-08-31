@@ -33,6 +33,7 @@ jest.mock("@/hooks/plugins", () => ({
   usePluginDiagnostics: () => mockDiagnostics,
 }))
 
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { PluginDetailHeader } from "./plugin-detail-header"
 import { usePluginsStore } from "@/stores/plugins"
 
@@ -77,7 +78,36 @@ describe("PluginDetailHeader", () => {
     expect(screen.getByText("Alpha")).toBeInTheDocument()
     expect(screen.getByText("v1.2.3")).toBeInTheDocument()
     expect(screen.getByText("An alpha plugin.")).toBeInTheDocument()
-    expect(screen.getByText("marketplace")).toBeInTheDocument()
+    // Asserting the testid, not the text: the intl mock echoes the key, so
+    // `t("marketplace")` and the old raw `{plugin.source}` render identically
+    // and a text assertion could not tell them apart.
+    expect(screen.getByTestId("plugin-source-badge-marketplace")).toBeInTheDocument()
+  })
+
+  it("marks a dev build that is standing in front of the installed one", () => {
+    usePluginStore.setState({
+      plugins: {
+        alpha: {
+          manifest: { id: "alpha", name: "Alpha", version: "1.2.3", type: "frontend" },
+          status: "enabled",
+          source: "dev",
+          path: "/p/alpha",
+          config: {},
+          descriptor: {
+            identity: {
+              canonicalId: "alpha",
+              observedSources: ["marketplace", "dev"],
+              activeSource: "dev",
+            },
+          },
+        },
+      },
+    } as never)
+    render(<PluginDetailHeader plugin={makePlugin({ source: "dev" })} />)
+    expect(screen.getByTestId("plugin-source-badge-dev")).toHaveAttribute(
+      "data-shadowing",
+      "marketplace"
+    )
   })
 
   it("flipping the enable toggle routes through the plugin manager, not a bare Dexie write", () => {

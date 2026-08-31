@@ -27,6 +27,8 @@ import { usePluginDiagnostics } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { PluginCompatibilityBadge } from "../_shared/plugin-compatibility-badge"
+import { PluginSourceBadge } from "../plugin-source-badge"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginActivationProgress } from "../plugin-activation-progress"
 import { PluginRuntimeWarnings, PluginStatusPill } from "../plugin-status-badge"
@@ -43,6 +45,11 @@ export function PluginDetailHeader({ plugin }: Props) {
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
   const diagnostics = usePluginDiagnostics(plugin.id)
+  // `PluginRow` is the Dexie projection and carries no descriptor, so the
+  // shadowing check reads the live runtime record instead.
+  const observedSources = usePluginStore(
+    (state) => state.plugins[plugin.id]?.descriptor?.identity.observedSources
+  )
   const [recovering, setRecovering] = useState(false)
   const [recoveryFailed, setRecoveryFailed] = useState(false)
 
@@ -108,9 +115,12 @@ export function PluginDetailHeader({ plugin }: Props) {
               variant="detail"
             />
             <PluginSignatureBadge state={signatureState} compact />
-            <Badge variant="outline" className="text-xs">
-              {plugin.source}
-            </Badge>
+            {/*
+              This used to render `plugin.source` raw, so the header read
+              "dev" / "marketplace" in English regardless of locale, and a dev
+              build looked no different from a released one.
+            */}
+            <PluginSourceBadge source={plugin.source} observedSources={observedSources} />
             {/* Both of these were being produced and shown nowhere: the
                 compatibility diagnostic had no reader at all, and the loader's
                 degraded-runtime markers were rendered only by the card grid. */}

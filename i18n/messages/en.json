@@ -20961,6 +20961,7 @@
       "launchDenied": "Terminal launch was denied.",
       "launchFailed": "Couldn't start the command: {message}",
       "needsCli": "Install the cognia CLI above to enable these commands.",
+      "newScaffolded": "`plugin new` is running in the terminal. When it finishes, pick the folder it created and press Start to enter the dev loop.",
       "noProject": "No project selected.",
       "pickBundleTitle": "Select a plugin bundle to install",
       "pickProject": "Choose project…",
@@ -21325,6 +21326,9 @@
         "launchFailed": "Couldn't restart the session: {message}",
         "openTerminal": "Open terminal",
         "restart": "Restart",
+        "restartApp": "Restart Cognia",
+        "restartFailed": "Could not restart: {message}",
+        "restartRequired": "This plugin's runtime is left dirty and only a restart can clear it. Unsaved work in other panes is lost.",
         "stop": "Stop",
         "terminalUnavailable": "The terminal session is no longer available."
       },
@@ -21930,8 +21934,11 @@
     },
     "source": {
       "builtin": "Built-in",
+      "dev": "Development",
+      "git": "Git",
       "local": "Local",
-      "marketplace": "Marketplace"
+      "marketplace": "Marketplace",
+      "shadowing": "This build replaces the installed {sources} copy. Uninstall or reload it to go back."
     },
     "surface": {
       "description": "{error}",

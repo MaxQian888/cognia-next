@@ -132,6 +132,18 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
       return
     }
     if (!projectDir || !cmd.argv) return
+    if (cmd.key === "new") {
+      await run(cmd.argv, cmd.key, cmd.needsBridge)
+      // Deliberately not chained into `plugin dev`. `plugin new` is
+      // interactive and scaffolds into a subdirectory whose name it asks for,
+      // so the app cannot know where the project landed. Pointing at the next
+      // step is honest; guessing a path and starting a dev loop in the wrong
+      // directory is not.
+      toast.info(t("newScaffolded"), {
+        action: { label: t("pickProject"), onClick: () => void handlePickProject() },
+      })
+      return
+    }
     if (cmd.key === "dev") {
       const sessionId = crypto.randomUUID()
       await run(`${cmd.argv} --session-id ${sessionId}`, cmd.key, cmd.needsBridge, sessionId)

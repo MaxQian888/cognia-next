@@ -4,7 +4,7 @@ import { PluginSourceBadge } from "./plugin-source-badge"
 import type { PluginSource } from "@/types/plugin"
 
 // Only these sources have labels in plugins.source.*; `git` is intentionally omitted.
-const SOURCES: PluginSource[] = ["builtin", "local", "marketplace"]
+const SOURCES: PluginSource[] = ["builtin", "local", "marketplace", "git", "dev"]
 
 const meta = {
   title: "Plugins/PluginSourceBadge",
@@ -25,4 +25,9 @@ export const AllSources: Story = {
       ))}
     </div>
   ),
+}
+
+/** A dev build standing in front of the installed marketplace copy. */
+export const ShadowingAnInstalledBuild: Story = {
+  render: () => <PluginSourceBadge source="dev" observedSources={["marketplace", "dev"]} />,
 }

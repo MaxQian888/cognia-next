@@ -1,5 +1,8 @@
 {
   "builtin": "Built-in",
+  "dev": "Development",
+  "git": "Git",
   "local": "Local",
-  "marketplace": "Marketplace"
+  "marketplace": "Marketplace",
+  "shadowing": "This build replaces the installed {sources} copy. Uninstall or reload it to go back."
 }

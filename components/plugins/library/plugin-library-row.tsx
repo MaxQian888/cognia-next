@@ -37,6 +37,7 @@ import { getAllContributions } from "@/lib/plugin/contracts/capability-contribut
 import { PluginCompatibilityBadge } from "../_shared/plugin-compatibility-badge"
 import { PluginRowActionsMenu } from "../plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
+import { PluginSourceBadge, isDevelopmentSource, parsePluginSource } from "../plugin-source-badge"
 import { PluginActivationProgress } from "../plugin-activation-progress"
 import { PluginRuntimeWarnings, PluginStatusPill } from "../plugin-status-badge"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
@@ -89,6 +90,8 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
     return "unverified"
   })()
   const updateAvailable = !!(plugin.manifest as { updateAvailable?: boolean })?.updateAvailable
+  const parsedSource = parsePluginSource(plugin.source)
+  const developmentSource = parsedSource !== null && isDevelopmentSource(parsedSource)
   const permissionCount = (plugin.manifest as { permissions?: string[] })?.permissions?.length ?? 0
   const author = readAuthor(plugin.manifest)
   const contributions = useMemo(
@@ -143,6 +146,12 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
             {plugin.name}
           </button>
           <PluginVersionBadge version={plugin.version} className="shrink-0" />
+          {/*
+            Only development origins are badged here. Every row saying
+            "Marketplace" is noise, but a dev or local build sitting in the
+            list unmarked is how an author ends up debugging the wrong copy.
+          */}
+          {developmentSource && <PluginSourceBadge source={plugin.source} className="shrink-0" />}
           {updateAvailable && (
             <Badge variant="secondary" className="shrink-0 text-xs">
               {t("updateBadge")}

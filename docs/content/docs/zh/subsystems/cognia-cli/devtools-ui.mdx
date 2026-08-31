@@ -24,9 +24,21 @@ session。只有 App 启动的 session 提供终端操作；外部 CLI 的事件
 
 工作台不会根据安装或发现事件推断 reload 成功。只有 renderer bridge 记录的
 `activationProof` 同时证明 lifecycle 为 active、generation 已递增且 artifact revision 对应 Rust
-实际安装的 artifact 时，才展示成功。Activity、attempt diagnostics 与结构化 runtime 日志共用同一
-session/attempt 身份。Advanced diagnostics 只包含已实现的 lifecycle、trigger audit 与
-extension-point 诊断；旧 Hook/Profiler/Bus tab 不再属于 Dev Session 主流程。
+实际安装的 artifact 时，才展示成功。Activity 与 attempt diagnostics 共用同一 session/attempt 身份。
+
+运行时日志不再需要它。有证明时按该 generation 过滤，没有证明时显示全部 generation 并明说这一点：
+因为一直失败的重载永远产不出证明，而那恰恰是作者最需要看输出的时候。日志来自
+`lib/plugin/devtools/runtime-log-stream.ts`，它把前端 `ctx.logger` 环与 Python 宿主缓冲合并，
+并为每一行标出产生它的宿主。`wasm` 与 `vscode-extension` 根本没有 per-plugin 输出通道，卡片会
+点名是哪个、为什么，而不是渲染一个空列表。
+
+Advanced diagnostics 里放着插件 API 调用检查器（每次 `ctx.*` 调用及其权限判定，不采样地读审计
+环）、lifecycle 表、trigger audit 与 extension-point 诊断。曾经占据这里的九标签页面板，连同它的
+Hook、Profiler、Bus 标签，已随其背后的模块一起删除：它们没有任何一个有生产挂载点。
+
+工作台旁边，该面板还带着**监听卡片**与**热重载活动**。监听卡片驱动
+`lib/plugin/devtools/file-watch.ts`：不开 CLI 也能在本地来源插件的文件变化时，走同一条已验证
+路径重载。热重载活动是安装、卸载、重载尝试各一行，标出是谁驱动的，失败时还标出原因。
 
 ## 状态 hook
 

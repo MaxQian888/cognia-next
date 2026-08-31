@@ -4,6 +4,9 @@
     "launchFailed": "Couldn't restart the session: {message}",
     "openTerminal": "Open terminal",
     "restart": "Restart",
+    "restartApp": "Restart Cognia",
+    "restartFailed": "Could not restart: {message}",
+    "restartRequired": "This plugin's runtime is left dirty and only a restart can clear it. Unsaved work in other panes is lost.",
     "stop": "Stop",
     "terminalUnavailable": "The terminal session is no longer available."
   },

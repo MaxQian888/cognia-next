@@ -345,8 +345,14 @@ export interface InstallUpdateOptions {
   relaunch?: boolean
 }
 
-/** Relaunch after a previously installed update. */
-export async function relaunchAfterUpdate(): Promise<void> {
+/**
+ * Restart the app, saving window geometry first so it comes back where it was.
+ *
+ * Not update-specific despite living here: a plugin runtime left dirty can
+ * only be cleared by a restart, and DevTools offers that as an action rather
+ * than as a sentence telling the user to do it themselves.
+ */
+export async function relaunchApp(): Promise<void> {
   if (!isTauri()) return
   try {
     try {
@@ -422,4 +428,9 @@ export function __resetPendingUpdate(): void {
   downloadInFlight = null
   installInFlight = null
   void closeHandle(handle)
+}
+
+/** Relaunch after a previously installed update. */
+export async function relaunchAfterUpdate(): Promise<void> {
+  return relaunchApp()
 }

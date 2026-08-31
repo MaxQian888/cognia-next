@@ -1,6 +1,6 @@
 ---
 title: 存储与 devtools
-description: 在共享的 CogniaDB Dexie 实例中为插件提供命名空间化的 IndexedDB 表，以及仅用于开发的热重载、dev-server、profiler、debugger 与 console-tap 工具链。
+description: 在共享的 CogniaDB Dexie 实例中为插件提供命名空间化的 IndexedDB 表，以及监听插件目录、验证每次重载、合并其运行时日志的开发者模式界面。
 ---
 
 # 存储与 devtools
@@ -8,19 +8,19 @@ description: 在共享的 CogniaDB Dexie 实例中为插件提供命名空间化
 <Status variant="experimental" />
 
 <TLDR>
-插件在唯一共享的 `CogniaDB` Dexie 实例中获得不会冲突的 IndexedDB 表——表名以 `<pluginId>:<tableName>` 形式存储（`namespace.ts:11`），任何改变表集合的 enable/disable 都会递增全局 Dexie schema 版本（`bridge.ts:60`）。另有一套仅用于开发的能力（`hot-reload.ts:63`、`dev-server.ts:77`、`profiler.ts:71`、`debugger.ts:80`、`console-tap.ts:87`），可在不重启应用的情况下对正在开发的插件进行监听、构建、热重载与插桩。
+插件在唯一共享的 `CogniaDB` Dexie 实例中获得不会冲突的 IndexedDB 表。表名以 `<pluginId>:<tableName>` 形式存储（`namespace.ts:11`），任何改变表集合的 enable/disable 都会递增全局 Dexie schema 版本（`bridge.ts:60`）。另有一套开发者模式界面：监听本地来源插件的目录（`file-watch.ts`），走与 CLI 相同的那一条已验证路径重载（`plugin-dev-reload.ts`），并把它打出的日志合成一条流（`runtime-log-stream.ts`）。应用自己从不构建，那是 `cognia plugin dev` 的活。
 </TLDR>
 
 <StatGrid>
   <Stat label="每插件表数上限" value="≤ 20" hint="MAX_TABLES_PER_PLUGIN — namespace.ts:14" />
   <Stat label="命名空间分隔符" value=":" hint="PLUGIN_TABLE_NAMESPACE_SEPARATOR — namespace.ts:11" />
-  <Stat label="dev server 端口" value="9527" hint="默认值 — dev-server.ts:100" />
-  <Stat label="热重载防抖" value="300 ms" hint="debounceMs 默认 — hot-reload.ts" />
-  <Stat label="调试日志环" value="1000 / 500" hint="debugger.ts:317 / dev-server.ts:284" />
-  <Stat label="重连尝试" value="5（退避）" hint="dev-server.ts:261" />
+  <Stat label="监听防抖" value="300 ms" hint="DEFAULT_DEBOUNCE_MS — file-watch.ts" />
+  <Stat label="重载验证超时" value="20 s" hint="timeoutMs — plugin-dev-reload.ts" />
+  <Stat label="每插件日志环" value="1000 / 500" hint="debugger.ts / python log-buffer.ts" />
+  <Stat label="API 审计环" value="500" hint="MAX_RECENT_AUDIT_EVENTS — interface-catalog.ts" />
 </StatGrid>
 
-本模块分为两半。**Part A（Dexie）** 是生产路径：它在唯一共享的 Dexie 数据库内为每个插件提供私有的、命名空间化的表，因此两个插件永远不会在表名上冲突。**Part B（devtools）** 是仅用于开发的路径：一个 Tauri 托管的 dev server、热重载、console tap、debugger 与 profiler，仅会为你正在开发的插件点亮。
+本模块分为两半。**Part A（Dexie）** 是生产路径：它在唯一共享的 Dexie 数据库内为每个插件提供私有的、命名空间化的表，因此两个插件永远不会在表名上冲突。**Part B（devtools）** 是开发者模式路径：一个文件监听器、一条已验证的重载，以及展示开发中插件到底在做什么的那几个读取面。
 
 ---
 
@@ -138,117 +138,100 @@ flowchart LR
 ---
 
 ## Part B — devtools
-
 ### 目的
 
-为正在开发的插件提供的仅开发能力：
+面向正在开发中的插件的开发者模式界面。它刻意做得很小：构建、安装、重载的权威在
+`cognia plugin dev` CLI，应用的职责是验证与呈现。
 
-- 一个 Tauri **dev server**（`dev-server.ts`），通过 WebSocket 监听、构建并提供服务；
-- **热重载**（`hot-reload.ts`），在不重启应用的情况下重新实例化已变更的插件；
-- 一个 **console tap**（`console-tap.ts`），将浏览器 `console.*` 捕获进调试环；
-- 一个 **debugger**（`debugger.ts`），含断点、监视、调用栈与日志；
-- 一个 **profiler**（`profiler.ts`），含计时、内存与火焰图；
-- 一个 **DevExtensionController**（`dev-extension-controller.ts`），为解包的插件目录编排 `build → reload → rollback`。
-
-`dev-tools.ts` 持有共享的内存原语（调试环、hook 检查器、manifest 校验器、mock 上下文）。
+- **开发者模式**（`developer-mode.ts`）是唯一的门。构建模式与遗留的
+  `localStorage` 标记在启动时被折叠成一个持久化值，所以 devtools 区块和 Creator
+  不可能对「开发者界面是否存在」给出不同答案。
+- **文件监听**（`file-watch.ts`）监听本地来源插件的安装目录，300 ms 防抖后走与
+  CLI 相同的已验证重载路径。
+- **日志环**（`debugger.ts`）保留插件经 `ctx.logger` 写出的每一行，并打上它来自
+  哪个生命周期 generation。
+- **运行时日志流**（`runtime-log-stream.ts`）把这个环与 Python 宿主的缓冲合成
+  一条按时间排序的视图，并点名那些根本没有输出通道的运行时。
 
 ### 逐文件映射
 
-| 文件 | 用途 | 关键导出 `:line` |
+| 文件 | 用途 | 关键导出 |
 | --- | --- | --- |
-| `index.ts` | 桶式再导出 | `index.ts:5-61` |
-| `dev-tools.ts` | 内存原语：调试日志环、hook 调用检查器、插件检查器、mock ctx、严格 manifest 校验器 | `setDebugMode` / `isDebugEnabled` / `debugLog` / `getDebugLogs` `:33,43,50,96`；`inspectPlugin` / `inspectAllPlugins` `:228,256`；`createMockPluginContext` `:368`；`validateManifestStrict` `:481`；`PluginDevTools` `:612` |
-| `console-tap.ts` | 将 `console.{log,info,warn,error,debug}` 打补丁进 `debugLog` 环；仅安装一次 | `installConsoleTap` `:87`；`uninstallConsoleTap` `:120`；`isConsoleTapInstalled` `:131` |
-| `debugger.ts` | 运行时调试：会话、断点、调用帧、监视表达式、日志环 + 处理器；`createDebugContext` 包裹 `ctx.logger` | `PluginDebugger` `:80`；`getPluginDebugger` / `resetPluginDebugger` `:509,516`；`log` `:317`；`createDebugContext` `:441` |
-| `profiler.ts` | 性能/内存分析：开始/结束 profile、会话、汇总、热点、火焰图 | `PluginProfiler` `:71`；`getPluginProfiler` / `resetPluginProfiler` `:452,459`；`withProfiling` `:467`；`startProfile` / `endProfile` `:118,144` |
-| `hot-reload.ts` | HMR 管理器：Tauri 文件监听、防抖、状态保存/恢复、经 loader+reloader 或 Tauri 命令重载 | `PluginHotReload` `:63`；`getPluginHotReload` / `resetPluginHotReload` `:503,512`；`reloadPlugin` `:247`；`startWatching` `:125` |
-| `hot-reload.client.ts` | 基于单例的 `"use client"` React hook | `usePluginHotReload` `:6` |
-| `reload-extension-runtime.ts` | 经 manager 的 disable→enable 周期重新实例化 | `reloadExtensionRuntime` `:8` |
-| `dev-server.ts` | Tauri dev server 客户端：WS 连接+重连、构建、console-log 缓冲、命令 | `PluginDevServer` `:77`；`getPluginDevServer` / `resetPluginDevServer` `:614,621`；`buildPlugin` `:333`；`start` / `stop` `:123,170` |
-| `dev-server.client.ts` | 基于单例的 `"use client"` React hook | `usePluginDevServer` `:6` |
-| `dev-extension-controller.ts` | 编排 `build → hot-reload → re-enable` 回滚，按插件记录 | `DevExtensionController` `:47`；`DevExtensionRecord` `:27`；`registerExtension` `:113`；`handleBuildResult` `:163` |
+| `developer-mode.ts` | 唯一持久化的开发者模式标记，以及从遗留信号单向迁移的启动逻辑 | `isDeveloperModeEnabled`、`useDeveloperMode`、`setDeveloperModeEnabled`、`migrateDeveloperMode` |
+| `debugger.ts` | 每插件、每 generation 的日志环，上限 1000 条。`createDebugContext` 包住 `ctx.logger`，让插件的每条日志都镜像进来 | `getPluginDebugger`、`startSession`、`log` / `getLogs` / `onLog`、`createDebugContext` |
+| `file-watch.ts` | 应用内监听器：按运行时判定资格、精确路径归属、防抖、走已验证路径重载 | `startPluginFileWatch`、`watchEligibility`、`resolveWatchedPluginId` |
+| `runtime-log-stream.ts` | 合并前端日志环与 Python 缓冲的读取面，按运行时打标 | `getPluginRuntimeLogs`、`subscribePluginRuntimeLogs`、`logSourcesFor` |
 
-### 热重载深入
+### 重载的权威在哪里
 
-`PluginHotReload.startWatching` 仅为 `source` 是 `"dev"` 或 `"local"` 的插件收集路径，调用 Tauri 的 `plugin_watch_start` 命令，并监听 `plugin:file-change`（`hot-reload.ts:139`）。`handleFileChange` 按插件防抖（`debounceMs` 默认 300），然后触发 `reloadPlugin`（`hot-reload.ts:201`）。
+应用不做构建。`cognia plugin dev` 负责构建与安装，然后经回环桥请求渲染端重载并
+自证。该请求落在 `lib/cli-bridge/handlers/plugin-dev-reload.ts`：它先让插件静默，
+再重新启用，然后等待生命周期协调器报出一个**新的 active generation**，才返回
+`activationProof`。只有这个算成功。安装事件、文件变化、发出一个重载信号，都不算。
 
-```ts
-// hot-reload.ts:247-268 — re-instantiation core
-if (this.config.preserveState) await this.preservePluginState(pluginId)
-await this.invalidateModuleCache(pluginId)
-if (this.pluginLoader && this.pluginReloader) {
-  const definition = await this.pluginLoader(pluginId)
-  await this.pluginReloader(pluginId, definition)
-} else {
-  await invoke("plugin_reload", { pluginId })
-}
-```
+`file-watch.ts` 用的是同一个 handler，所以应用内重载与 CLI 重载受同一份证据约束。
+它做不到的是构建：`wasm` 与 `vscode-extension` 会被报为 `needs-build`，因为改源码
+不会产生新产物，重载只会把同一份字节重新激活，看起来却像成功了。
 
-状态经 `localStorage` 键 `cognia-plugin-storage:<id>` 加上 Tauri 的 `plugin_get_state` / `plugin_set_state` 命令往返（`hot-reload.ts:336`）。缓存失效会递增 `__plugin_cache_<id>` 的 window 时间戳并调用 `plugin_invalidate_cache`（`hot-reload.ts:400`）。
+### 各个面板展示什么
 
-`reload-extension-runtime.ts` 是交给控制器的具体 reloader：
+`components/plugins/devtools/plugin-devtools-pane.tsx` 挂三样东西：**Dev Session
+工作台**（阶段时间线、激活证明、尝试诊断、合并后的运行时日志）、**监听卡片**
+（哪些插件在被监听，以及每个没被监听的为什么），以及**热重载活动**（安装、卸载、
+已验证重载各一行，并标出是谁驱动的）。
 
-```ts
-// reload-extension-runtime.ts:8-16
-if (plugin.status === "enabled") {
-  await manager.disablePlugin(plugin.manifest.id, "dev-reload")
-}
-await manager.enablePlugin(plugin.manifest.id, "dev-reload")
-```
-
-`DevExtensionController.handleBuildResult`：构建成功时调用 `hotReload.reloadPlugin`；若失败则回退到注入的 `reloadHandler`（disable→enable），将 `fallbackMode` 翻转为 `"re-enable"`，并记录一个 `"rollback"` 生命周期阶段（`dev-extension-controller.ts:199`）。
-
-### dev server
-
-`PluginDevServer` 是 Tauri 托管 dev server 的**客户端**——静态导出中不存在 Node HTTP 服务器。`start()` 调用 `plugin_dev_server_start`，打开一个 `ws(s)://host:port/ws` WebSocket，并监听 Tauri 的 `plugin:dev-server` 事件（`dev-server.ts:131`）。默认端口为 `9527`（`dev-server.ts:100`）。
-
-它提供构建结果（`plugin_build`，`dev-server.ts:333`），以及 reload / update / inspect / command 消息，并带有一个上限 500 的 `DevConsoleMessage` 日志缓冲（`dev-server.ts:284`）。自动重连采用指数退避，最多 5 次尝试（`dev-server.ts:261`）。React 客户端 `dev-server.client.ts:6` 通过 `onConsoleLog`（保留最近 100 条）加 `onMessage` 订阅。
-
-### console tap、profiler、debugger
-
-**console-tap**（`console-tap.ts:87`）仅限浏览器。它将每个 console 级别包裹进 `debugLog(pluginId, level, "console", message, data)`（`console-tap.ts:105`），自动启用调试模式（`console-tap.ts:97`）。仅安装一次；disposer 恢复原始实现（`console-tap.ts:120`）。
-
-**profiler**：`startProfile` / `endProfile` 捕获 `performance.now()` 增量与 `usedJSHeapSize` 内存增量（`profiler.ts:118`、`profiler.ts:394`），经 `profileStack` 嵌套。`getSummary` 汇总每操作统计与前 10 名热点（`profiler.ts:247`）；`getFlameGraphData` 构建火焰树（`profiler.ts:330`）。`withProfiling` 包裹同步与异步函数（`profiler.ts:467`）。
-
-```ts
-// profiler.ts:467-483 — wrap any fn with timing + memory capture
-const result = withProfiling(profiler, "render", () => renderHeavyView())
-const async = await withProfiling(profiler, "ingest", () => ingestBatch(rows))
-```
-
-**debugger**：按插件维护一个单例 `LogEntry` 环，上限 `maxLogEntries = 1000`（`debugger.ts:317`）；`error` 级别捕获 `new Error().stack`（`debugger.ts:330`）。断点按位置 glob 加可选条件匹配，条件经 `new Function` 编译（`debugger.ts:398`）；监视在受限作用域内求值表达式（`debugger.ts:284`）。`createDebugContext` 包裹 `ctx.logger`，使每条插件日志镜像进调试环（`debugger.ts:441`）。`dev-tools.ts` 另外提供一个正交的 hook 调用检查器（`recordHookCall` / `getHookCalls`，`dev-tools.ts:149,177`）以及轻量的 `startMeasure` / `endMeasure`（`dev-tools.ts:281,295`）。
-
-### dev-extension 热路径
+工作台的 Advanced 标签另有 **API 调用检查器**（每一次 `ctx.*` 调用及其权限判定，
+不采样地直接读审计环）、**生命周期表**、**触发器审计**与**扩展点诊断**。
 
 ```mermaid
 flowchart TD
-  DIR["Dev plugin dir<br/>registerExtension dev-extension-controller.ts:113"] --> DS["PluginDevServer.watchPlugin<br/>dev-server.ts:501"]
-  DS --"onBuild"--> CTRL["handleBuildResult<br/>dev-extension-controller.ts:163"]
-  CTRL --> HR["hotReload.reloadPlugin<br/>hot-reload.ts:247"]
-  HR --"fallback fail"--> RE["reloadExtensionRuntime<br/>reload-extension-runtime.ts:8"]
-  HR --> SBX["sandbox re-init<br/>pluginReloader / plugin_reload"]
-  TAP["installConsoleTap<br/>console-tap.ts:87"] --> RING["debugLog ring<br/>dev-tools.ts:50"]
-  PROF["PluginProfiler<br/>profiler.ts:71"] --> UI["DevTools UI"]
-  DBG["PluginDebugger<br/>debugger.ts:80"] --> UI
-  RING --> UI
-  CTRL --"records/lastError"--> UI
+  CLI["cognia plugin dev<br/>构建 + 安装"] --> BR["回环桥"]
+  WATCH["file-watch.ts<br/>plugin_watch_start"] --> RELOAD
+  BR --> RELOAD["pluginDevReload<br/>静默, 启用, 验证"]
+  RELOAD --"新的 active generation"--> PROOF["activationProof"]
+  RELOAD --> HIST["热重载历史"]
+  PROOF --> WB["Dev Session 工作台"]
+  HIST --> DIAG["热重载活动"]
+  LOGGER["ctx.logger"] --> RING["debugger 日志环"]
+  PYHOST["python 宿主"] --> PYBUF["python 日志缓冲"]
+  RING --> STREAM["runtime-log-stream"]
+  PYBUF --> STREAM
+  STREAM --> WB
+  CTX["ctx.* 调用"] --> AUDIT["插件 API 审计环"]
+  AUDIT --> API["API 调用检查器"]
 
   classDef dev fill:#1e3a5f,stroke:#3b82f6,color:#e0f2fe
   classDef reload fill:#3f2d52,stroke:#a855f7,color:#f3e8ff
   classDef instrument fill:#4a3410,stroke:#f59e0b,color:#fef3c7
   classDef sink fill:#1f3d2e,stroke:#22c55e,color:#dcfce7
-  class DIR,DS dev
-  class CTRL,HR,RE,SBX reload
-  class TAP,PROF,DBG instrument
-  class RING,UI sink
+  class CLI,BR,WATCH dev
+  class RELOAD,PROOF reload
+  class LOGGER,PYHOST,RING,PYBUF,STREAM,CTX,AUDIT instrument
+  class WB,DIAG,API,HIST sink
 ```
+
+### 这里曾经有过什么
+
+记下来是为了别再重建。这个界面的上一代曾经有 `PluginDevServer`、`PluginProfiler`、
+`DevExtensionController`、`ManagedIdeDevMode`、一个 console tap，以及一个
+`PluginHotReload` 管理器，由一个九标签页的 `PluginDevtoolsPanel` 驱动。它们全都没有
+生产调用方：那个面板没有挂载点，那些模块只被彼此、以及一个没人导入的 barrel 引用。
+
+`PluginDevServer` 值得单独点名。它提供了 `getUrl()`、`getWebSocketUrl()` 和
+`connectedClients`，而那个服务器并不存在：`plugin_dev_server_start` 只是把内存里的
+`running` 置为 `true` 然后返回。debugger 的断点同样是名义上的，它的条件求值器还会用
+用户字符串构造 `new Function`。
+
+它们连同各自的 Tauri 命令一起被删除了。底下那个文件监听器是真的，现在由
+`file-watch.ts` 驱动。
 
 ---
 
 ## 陷阱
 
-- **`.client.ts` 与 `.ts` 的拆分** —— `dev-server.ts` 与 `hot-reload.ts` 是环境无关的单例管理器，调用 Tauri；`.client.ts` 变体带有 `"use client"`，是 React hook 包装器（`dev-server.client.ts:1`、`hot-reload.client.ts:1`）。只能从 React 组件导入 `.client` 文件。
-- **仅开发的门控** —— 热重载仅监听 `source` 为 `"dev"` 或 `"local"` 的插件（`hot-reload.ts:140`），且 `HotReloadConfig.enabled` 默认为 `false`（`hot-reload.ts:77`）。`DevExtensionController.registerExtension` 在非桌面环境下短路返回 `unsupported_env`（`dev-extension-controller.ts:114`）。dev server 完全由 Tauri 支撑，因此浏览器内的 Logs / Bus 标签页为空——这正是 console tap 存在的原因。
+- **结构体参数放在 `args` 下** —— `plugin_watch_start(app, args: WatchStartArgs)` 只收一个结构体，Tauri 会从 `args` 键读取。`file-watch.ts` 取代的那个模块传的是扁平的 `{ paths }`，`args` 永远缺失，命令在创建任何监听器之前就被拒。`lib/plugin/core/context.ts` 里已经为 `plugin_show_notification` 记过同一个坑。
+- **只有新的 active generation 才算成功** —— 安装事件说明产物落盘了，文件变化说明字节动了，两者都不说明插件激活了。任何在没有 `activationProof` 的情况下报成功的东西，报的是别的事。
+- **监听资格按运行时判定，并且理由要显示出来** —— `dev` 与 `local` 来源的 `frontend`、`python`、`hybrid` 会被监听。`wasm` 与 `vscode-extension` 在界面上被报为 `needs-build`，而不是悄悄跳过：否则一个永远不重载的插件，和一个坏掉的监听器长得一模一样。
 - **命名空间冲突规避** —— 每个表操作都经过 `namespace.ts` 辅助函数作为唯一事实来源（`namespace.ts:6`）。`dexie-api` 在 `table()` 与 `rawDb()` 的 Proxy 中均拒绝对核心表或其他插件表的裸访问（`dexie-api.ts:48`、`dexie-api.ts:67`）。`applyPluginTables` 对未变化的集合幂等，但超过 `MAX_TABLES_PER_PLUGIN = 20` 会抛错（`bridge.ts:37`）；改变后的集合需先调用 `removePluginTables`（`bridge.ts:28`）。
 
 ---

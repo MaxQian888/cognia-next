@@ -49,6 +49,9 @@ jest.mock("@/lib/terminal/run-cognia", () => ({
 }))
 const mockToastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
+
+const relaunchAppMock = jest.fn(async () => {})
+jest.mock("@/lib/tauri/updater", () => ({ relaunchApp: () => relaunchAppMock() }))
 const mockGetLogs = jest.fn()
 const mockOnLog = jest.fn()
 jest.mock("@/lib/plugin/devtools/runtime-log-stream", () => ({
@@ -82,6 +85,7 @@ beforeEach(() => {
   usePluginDevSessionStore.getState().clear()
   useDevProjectStore.getState().clearProject()
   mockStatus.mockReturnValue({ supported: true })
+  relaunchAppMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe("PluginDevSessionWorkbench", () => {
@@ -355,5 +359,61 @@ describe("PluginDevSessionWorkbench", () => {
     expect(screen.getByTestId("lifecycle")).toBeInTheDocument()
     expect(screen.getByTestId("triggers")).toBeInTheDocument()
     expect(screen.getByTestId("point-diagnostics")).toBeInTheDocument()
+  })
+
+  describe("restart-required", () => {
+    function seedRestartRequired() {
+      usePluginDevSessionStore.getState().recordReloadResult({
+        schemaVersion: 1,
+        ok: false,
+        outcome: "restart_required",
+        stage: "quiesce",
+        sessionId: "session-a",
+        attempt: 1,
+        pluginId: "demo.plugin",
+        pluginType: "frontend",
+        error: {
+          code: "runtime_dirty",
+          message: "runtime is dirty",
+          action: "Restart Cognia before retrying the development session",
+          retriable: false,
+        },
+      })
+    }
+
+    it("offers a restart instead of only telling the user to restart", async () => {
+      // `resolvePluginDevCapability` always returned this action as a string,
+      // and the workbench rendered it as prose. The one thing only the app can
+      // do was the one thing it did not offer.
+      seedRestartRequired()
+      renderWorkbench()
+      await userEvent.click(screen.getByTestId("dev-session-restart-app"))
+      await waitFor(() => expect(relaunchAppMock).toHaveBeenCalled())
+    })
+
+    it("does not offer a restart for an ordinary failed attempt", () => {
+      usePluginDevSessionStore.getState().recordReloadResult({
+        schemaVersion: 1,
+        ok: false,
+        outcome: "failed",
+        stage: "verify",
+        sessionId: "session-a",
+        attempt: 1,
+        pluginId: "demo.plugin",
+        pluginType: "frontend",
+        error: { code: "activation_failed", message: "boom", action: "retry", retriable: true },
+      })
+      renderWorkbench()
+      expect(screen.queryByTestId("dev-session-restart-app")).not.toBeInTheDocument()
+    })
+
+    it("re-enables the button and reports a restart that could not start", async () => {
+      relaunchAppMock.mockRejectedValueOnce(new Error("process plugin unavailable"))
+      seedRestartRequired()
+      renderWorkbench()
+      await userEvent.click(screen.getByTestId("dev-session-restart-app"))
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+      expect(screen.getByTestId("dev-session-restart-app")).not.toBeDisabled()
+    })
   })
 })

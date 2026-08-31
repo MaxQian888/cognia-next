@@ -66,6 +66,20 @@ export const RUNTIMES_WITHOUT_LOG_CHANNEL = {
 export type MissingLogChannelReason =
   (typeof RUNTIMES_WITHOUT_LOG_CHANNEL)[keyof typeof RUNTIMES_WITHOUT_LOG_CHANNEL]
 
+/** Every member of `PluginType`, so the switch below cannot silently miss one. */
+const PLUGIN_TYPES: PluginType[] = ["frontend", "python", "hybrid", "wasm", "vscode-extension"]
+
+/**
+ * Narrow a stored value to a known runtime.
+ *
+ * `PluginRow.type` is a loose `string` out of Dexie, and the Logs tab decides
+ * whether to exist from it. An unrecognised value gets no tab, which is the
+ * conservative direction.
+ */
+export function isPluginType(value: string): value is PluginType {
+  return (PLUGIN_TYPES as string[]).includes(value)
+}
+
 /** Which sources a plugin type can produce, and why it produces none. Pure. */
 export function logSourcesFor(type: PluginType): {
   runtimes: PluginLogRuntime[]

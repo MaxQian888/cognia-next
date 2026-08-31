@@ -4,6 +4,9 @@
     "launchFailed": "无法重启会话：{message}",
     "openTerminal": "打开终端",
     "restart": "重新启动",
+    "restartApp": "重启 Cognia",
+    "restartFailed": "无法重启：{message}",
+    "restartRequired": "该插件的运行时处于 dirty 状态，只有重启能清掉。其他面板里未保存的内容会丢失。",
     "stop": "停止",
     "terminalUnavailable": "该终端会话已不可用。"
   },

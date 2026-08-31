@@ -1,5 +1,8 @@
 {
   "builtin": "内置",
+  "dev": "开发版",
+  "git": "Git",
   "local": "本地",
-  "marketplace": "市场"
+  "marketplace": "应用市场",
+  "shadowing": "这个构建覆盖了已安装的{sources}版本。卸载或重新加载即可切回。"
 }

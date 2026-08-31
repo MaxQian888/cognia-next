@@ -27,7 +27,7 @@ function event(overrides: Partial<PluginApiAuditEvent> = {}): PluginApiAuditEven
     runtime: "frontend",
     outcome: "allowed",
     durationMs: 3.4,
-    dataClassification: "workspace",
+    dataClassification: "internal",
     ...overrides,
   }
 }

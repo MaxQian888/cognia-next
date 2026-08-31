@@ -252,4 +252,32 @@ describe("PluginLibraryRow", () => {
     )
     expect(screen.getByText("+2")).toBeInTheDocument()
   })
+
+  it.each(["dev", "local"] as const)("badges a %s build, which is not a released one", (source) => {
+    // An unmarked dev build in the list is how an author ends up debugging a
+    // copy they are not running.
+    render(
+      <PluginLibraryRow
+        plugin={{ ...baseRow, source }}
+        selected={false}
+        active={false}
+        {...handlers()}
+      />
+    )
+    expect(screen.getByTestId(`plugin-source-badge-${source}`)).toBeInTheDocument()
+  })
+
+  it.each(["marketplace", "builtin"] as const)("does not badge a released %s build", (source) => {
+    // Every row saying "Marketplace" would be noise, and noise is what makes
+    // the dev badge stop being a signal.
+    render(
+      <PluginLibraryRow
+        plugin={{ ...baseRow, source }}
+        selected={false}
+        active={false}
+        {...handlers()}
+      />
+    )
+    expect(screen.queryByTestId(`plugin-source-badge-${source}`)).not.toBeInTheDocument()
+  })
 })

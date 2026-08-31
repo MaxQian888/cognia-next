@@ -1,6 +1,6 @@
 ---
 title: Storage & devtools
-description: Namespaced plugin IndexedDB tables in the shared CogniaDB Dexie instance, plus the dev-only hot-reload, dev-server, profiler, debugger, and console-tap toolchain.
+description: Namespaced plugin IndexedDB tables in the shared CogniaDB Dexie instance, plus the developer-mode surface that watches a plugin directory, verifies each reload, and merges its runtime logs.
 ---
 
 # Storage & devtools
@@ -8,19 +8,19 @@ description: Namespaced plugin IndexedDB tables in the shared CogniaDB Dexie ins
 <Status variant="experimental" />
 
 <TLDR>
-Plugins get collision-proof IndexedDB tables in the single shared `CogniaDB` Dexie instance — table names are stored as `<pluginId>:<tableName>` (`namespace.ts:11`) and every enable/disable that changes the table set bumps the global Dexie schema version (`bridge.ts:60`). A separate dev-only surface (`hot-reload.ts:63`, `dev-server.ts:77`, `profiler.ts:71`, `debugger.ts:80`, `console-tap.ts:87`) watches, builds, hot-reloads, and instruments a plugin under active development without restarting the app.
+Plugins get collision-proof IndexedDB tables in the single shared `CogniaDB` Dexie instance. Table names are stored as `<pluginId>:<tableName>` (`namespace.ts:11`), and every enable/disable that changes the table set bumps the global Dexie schema version (`bridge.ts:60`). A separate developer-mode surface watches a locally-sourced plugin's directory (`file-watch.ts`), reloads it through the one verified path the CLI also uses (`plugin-dev-reload.ts`), and merges what it logs into one stream (`runtime-log-stream.ts`). The app never builds: `cognia plugin dev` does that.
 </TLDR>
 
 <StatGrid>
   <Stat label="Tables per plugin" value="≤ 20" hint="MAX_TABLES_PER_PLUGIN — namespace.ts:14" />
   <Stat label="Namespace separator" value=":" hint="PLUGIN_TABLE_NAMESPACE_SEPARATOR — namespace.ts:11" />
-  <Stat label="Dev server port" value="9527" hint="default — dev-server.ts:100" />
-  <Stat label="Hot-reload debounce" value="300 ms" hint="debounceMs default — hot-reload.ts" />
-  <Stat label="Debug log ring" value="1000 / 500" hint="debugger.ts:317 / dev-server.ts:284" />
-  <Stat label="Reconnect attempts" value="5 (backoff)" hint="dev-server.ts:261" />
+  <Stat label="Watch debounce" value="300 ms" hint="DEFAULT_DEBOUNCE_MS — file-watch.ts" />
+  <Stat label="Reload verify timeout" value="20 s" hint="timeoutMs — plugin-dev-reload.ts" />
+  <Stat label="Log ring per plugin" value="1000 / 500" hint="debugger.ts / python log-buffer.ts" />
+  <Stat label="API audit ring" value="500" hint="MAX_RECENT_AUDIT_EVENTS — interface-catalog.ts" />
 </StatGrid>
 
-The module has two halves. **Part A (Dexie)** is a production path: it gives every plugin private, namespaced tables inside the one shared Dexie database so two plugins can never collide on a table name. **Part B (devtools)** is a dev-only path: a Tauri-hosted dev server, hot reload, console tap, debugger, and profiler that only light up for a plugin you are actively developing.
+The module has two halves. **Part A (Dexie)** is a production path: it gives every plugin private, namespaced tables inside the one shared Dexie database so two plugins can never collide on a table name. **Part B (devtools)** is a developer-mode path: a file watcher, a verified reload, and the readouts that show what a plugin under development is actually doing.
 
 ---
 
@@ -141,114 +141,110 @@ flowchart LR
 
 ### Purpose
 
-A dev-only surface for a plugin under active development:
+A developer-mode surface for a plugin under active development. It is small on
+purpose: the authority for building, installing and reloading is the
+`cognia plugin dev` CLI, and the app's job is to verify and to show.
 
-- a Tauri **dev server** (`dev-server.ts`) that watches, builds, and serves over a WebSocket;
-- **hot reload** (`hot-reload.ts`) that re-instantiates a changed plugin without an app restart;
-- a **console tap** (`console-tap.ts`) capturing browser `console.*` into the debug ring;
-- a **debugger** (`debugger.ts`) with breakpoints, watches, call stack, and logs;
-- a **profiler** (`profiler.ts`) with timings, memory, and a flame graph;
-- a **DevExtensionController** (`dev-extension-controller.ts`) orchestrating `build → reload → rollback` for an unpacked plugin dir.
-
-`dev-tools.ts` holds the shared in-memory primitives (debug ring, hook inspector, manifest validator, mock context).
+- **developer mode** (`developer-mode.ts`) is the single gate. Build mode and a
+  legacy `localStorage` flag are folded into one persisted value at boot, so the
+  devtools section and Creator can never disagree about whether developer
+  surfaces exist.
+- **file watch** (`file-watch.ts`) watches a locally-sourced plugin's install
+  directory and, after a 300 ms debounce, puts it through the same verified
+  reload the CLI uses.
+- **the log ring** (`debugger.ts`) keeps every line a plugin writes through
+  `ctx.logger`, tagged with the lifecycle generation it came from.
+- **the runtime log stream** (`runtime-log-stream.ts`) merges that ring with the
+  Python host's buffer into one time-ordered view, and names the runtimes that
+  have no output channel at all.
 
 ### Per-file map
 
-| File | Purpose | Key exports `:line` |
+| File | Purpose | Key exports |
 | --- | --- | --- |
-| `index.ts` | Barrel re-export | `index.ts:5-61` |
-| `dev-tools.ts` | In-memory primitives: debug-log ring, hook-call inspector, plugin inspector, mock ctx, strict manifest validator | `setDebugMode` / `isDebugEnabled` / `debugLog` / `getDebugLogs` `:33,43,50,96`; `inspectPlugin` / `inspectAllPlugins` `:228,256`; `createMockPluginContext` `:368`; `validateManifestStrict` `:481`; `PluginDevTools` `:612` |
-| `console-tap.ts` | Patches `console.{log,info,warn,error,debug}` into the `debugLog` ring; install-once | `installConsoleTap` `:87`; `uninstallConsoleTap` `:120`; `isConsoleTapInstalled` `:131` |
-| `debugger.ts` | Runtime debug: sessions, breakpoints, call frames, watch exprs, log ring + handlers; `createDebugContext` wraps `ctx.logger` | `PluginDebugger` `:80`; `getPluginDebugger` / `resetPluginDebugger` `:509,516`; `log` `:317`; `createDebugContext` `:441` |
-| `profiler.ts` | Perf/memory profiling: start/end profile, sessions, summaries, hotspots, flame graph | `PluginProfiler` `:71`; `getPluginProfiler` / `resetPluginProfiler` `:452,459`; `withProfiling` `:467`; `startProfile` / `endProfile` `:118,144` |
-| `hot-reload.ts` | HMR manager: Tauri file-watch, debounce, state preserve/restore, reload via loader+reloader or Tauri cmd | `PluginHotReload` `:63`; `getPluginHotReload` / `resetPluginHotReload` `:503,512`; `reloadPlugin` `:247`; `startWatching` `:125` |
-| `hot-reload.client.ts` | `"use client"` React hook over the singleton | `usePluginHotReload` `:6` |
-| `reload-extension-runtime.ts` | Disable→enable cycle to re-instantiate via manager | `reloadExtensionRuntime` `:8` |
-| `dev-server.ts` | Tauri dev server client: WS connect+reconnect, build, console-log buffer, commands | `PluginDevServer` `:77`; `getPluginDevServer` / `resetPluginDevServer` `:614,621`; `buildPlugin` `:333`; `start` / `stop` `:123,170` |
-| `dev-server.client.ts` | `"use client"` React hook over the singleton | `usePluginDevServer` `:6` |
-| `dev-extension-controller.ts` | Orchestrates `build → hot-reload → re-enable` rollback, per-plugin records | `DevExtensionController` `:47`; `DevExtensionRecord` `:27`; `registerExtension` `:113`; `handleBuildResult` `:163` |
+| `developer-mode.ts` | The one persisted developer-mode flag, plus the one-way boot migration off the legacy signals | `isDeveloperModeEnabled`, `useDeveloperMode`, `setDeveloperModeEnabled`, `migrateDeveloperMode` |
+| `debugger.ts` | Per-plugin, per-generation log ring capped at 1000 entries. `createDebugContext` wraps `ctx.logger` so every plugin log mirrors into it | `getPluginDebugger`, `startSession`, `log` / `getLogs` / `onLog`, `createDebugContext` |
+| `file-watch.ts` | In-app watcher: eligibility per runtime, exact path attribution, debounce, reload through the verified path | `startPluginFileWatch`, `watchEligibility`, `resolveWatchedPluginId` |
+| `runtime-log-stream.ts` | Merged reader over the frontend ring and the Python buffer, tagged by runtime | `getPluginRuntimeLogs`, `subscribePluginRuntimeLogs`, `logSourcesFor` |
 
-### Hot reload, deep dive
+### Where the reload authority lives
 
-`PluginHotReload.startWatching` collects paths only for plugins whose `source` is `"dev"` or `"local"`, calls the Tauri `plugin_watch_start` command, and listens for `plugin:file-change` (`hot-reload.ts:139`). `handleFileChange` debounces per plugin (`debounceMs` default 300) and then fires `reloadPlugin` (`hot-reload.ts:201`).
+The app does not build. `cognia plugin dev` builds and installs, then asks the
+renderer to reload and prove it, over the loopback bridge. That request lands in
+`lib/cli-bridge/handlers/plugin-dev-reload.ts`, which quiesces the plugin,
+re-enables it, and waits for the lifecycle coordinator to report a **new active
+generation** before returning an `activationProof`. Only that counts as success.
+An install event, a file change, or an emitted reload signal do not.
 
-```ts
-// hot-reload.ts:247-268 — re-instantiation core
-if (this.config.preserveState) await this.preservePluginState(pluginId)
-await this.invalidateModuleCache(pluginId)
-if (this.pluginLoader && this.pluginReloader) {
-  const definition = await this.pluginLoader(pluginId)
-  await this.pluginReloader(pluginId, definition)
-} else {
-  await invoke("plugin_reload", { pluginId })
-}
-```
+`file-watch.ts` uses the same handler, so an in-app reload is held to the same
+proof as a CLI one. What it cannot do is build. `wasm` and `vscode-extension`
+plugins report `needs-build`, because editing their source produces no new
+artifact and reloading would re-activate the same bytes while appearing to work.
 
-State is round-tripped via the `localStorage` key `cognia-plugin-storage:<id>` plus the Tauri `plugin_get_state` / `plugin_set_state` commands (`hot-reload.ts:336`). Cache invalidation bumps the `__plugin_cache_<id>` window stamp and calls `plugin_invalidate_cache` (`hot-reload.ts:400`).
+### What the panes show
 
-`reload-extension-runtime.ts` is the concrete reloader handed to the controller:
+`components/plugins/devtools/plugin-devtools-pane.tsx` mounts three things: the
+**Dev Session workbench** (stage timeline, activation proof, attempt
+diagnostics, merged runtime logs), the **watch card** (which plugins are
+watched, and for each one that is not, why), and **hot-reload activity** (one row
+per install, uninstall and verified reload, saying which driver did it).
 
-```ts
-// reload-extension-runtime.ts:8-16
-if (plugin.status === "enabled") {
-  await manager.disablePlugin(plugin.manifest.id, "dev-reload")
-}
-await manager.enablePlugin(plugin.manifest.id, "dev-reload")
-```
-
-`DevExtensionController.handleBuildResult`: on a successful build it calls `hotReload.reloadPlugin`; if that fails it falls back to the injected `reloadHandler` (disable→enable), flips `fallbackMode` to `"re-enable"`, and records a `"rollback"` lifecycle stage (`dev-extension-controller.ts:199`).
-
-### Dev server
-
-`PluginDevServer` is a **client** to a Tauri-hosted dev server — there is no Node HTTP server in the static export. `start()` invokes `plugin_dev_server_start`, opens a `ws(s)://host:port/ws` WebSocket, and listens to the Tauri `plugin:dev-server` event (`dev-server.ts:131`). The default port is `9527` (`dev-server.ts:100`).
-
-It serves build results (`plugin_build`, `dev-server.ts:333`), plus reload / update / inspect / command messages, with a `DevConsoleMessage` log buffer capped at 500 (`dev-server.ts:284`). Auto-reconnect uses exponential backoff up to 5 attempts (`dev-server.ts:261`). The React client `dev-server.client.ts:6` subscribes via `onConsoleLog` (keeping the last 100) plus `onMessage`.
-
-### Console tap, profiler, debugger
-
-**console-tap** (`console-tap.ts:87`) is browser-only. It wraps each console level into `debugLog(pluginId, level, "console", message, data)` (`console-tap.ts:105`), auto-enabling debug mode (`console-tap.ts:97`). It installs once; the disposer restores the originals (`console-tap.ts:120`).
-
-**profiler**: `startProfile` / `endProfile` capture `performance.now()` deltas plus `usedJSHeapSize` memory deltas (`profiler.ts:118`, `profiler.ts:394`), nesting via a `profileStack`. `getSummary` aggregates per-operation stats and the top-10 hotspots (`profiler.ts:247`); `getFlameGraphData` builds the flame tree (`profiler.ts:330`). `withProfiling` wraps sync and async functions (`profiler.ts:467`).
-
-```ts
-// profiler.ts:467-483 — wrap any fn with timing + memory capture
-const result = withProfiling(profiler, "render", () => renderHeavyView())
-const async = await withProfiling(profiler, "ingest", () => ingestBatch(rows))
-```
-
-**debugger**: a singleton ring of `LogEntry` per plugin, capped at `maxLogEntries = 1000` (`debugger.ts:317`); the `error` level captures `new Error().stack` (`debugger.ts:330`). Breakpoints match by a location glob plus an optional condition compiled with `new Function` (`debugger.ts:398`); watches evaluate expressions in a limited scope (`debugger.ts:284`). `createDebugContext` wraps `ctx.logger` so every plugin log mirrors into the debug ring (`debugger.ts:441`). `dev-tools.ts` adds an orthogonal hook-call inspector (`recordHookCall` / `getHookCalls`, `dev-tools.ts:149,177`) plus lightweight `startMeasure` / `endMeasure` (`dev-tools.ts:281,295`).
-
-### Dev-extension hot path
+The workbench's Advanced tab adds the **API call inspector** (every `ctx.*` call
+with its permission verdict, read unsampled from the audit ring), the
+**lifecycle table**, the **trigger audit**, and **extension-point diagnostics**.
 
 ```mermaid
 flowchart TD
-  DIR["Dev plugin dir<br/>registerExtension dev-extension-controller.ts:113"] --> DS["PluginDevServer.watchPlugin<br/>dev-server.ts:501"]
-  DS --"onBuild"--> CTRL["handleBuildResult<br/>dev-extension-controller.ts:163"]
-  CTRL --> HR["hotReload.reloadPlugin<br/>hot-reload.ts:247"]
-  HR --"fallback fail"--> RE["reloadExtensionRuntime<br/>reload-extension-runtime.ts:8"]
-  HR --> SBX["sandbox re-init<br/>pluginReloader / plugin_reload"]
-  TAP["installConsoleTap<br/>console-tap.ts:87"] --> RING["debugLog ring<br/>dev-tools.ts:50"]
-  PROF["PluginProfiler<br/>profiler.ts:71"] --> UI["DevTools UI"]
-  DBG["PluginDebugger<br/>debugger.ts:80"] --> UI
-  RING --> UI
-  CTRL --"records/lastError"--> UI
+  CLI["cognia plugin dev<br/>builds + installs"] --> BR["loopback bridge"]
+  WATCH["file-watch.ts<br/>plugin_watch_start"] --> RELOAD
+  BR --> RELOAD["pluginDevReload<br/>quiesce, enable, verify"]
+  RELOAD --"new active generation"--> PROOF["activationProof"]
+  RELOAD --> HIST["hot-reload history"]
+  PROOF --> WB["Dev Session workbench"]
+  HIST --> DIAG["Hot-reload activity"]
+  LOGGER["ctx.logger"] --> RING["debugger ring"]
+  PYHOST["python host"] --> PYBUF["python log buffer"]
+  RING --> STREAM["runtime-log-stream"]
+  PYBUF --> STREAM
+  STREAM --> WB
+  CTX["ctx.* calls"] --> AUDIT["plugin API audit ring"]
+  AUDIT --> API["API call inspector"]
 
   classDef dev fill:#1e3a5f,stroke:#3b82f6,color:#e0f2fe
   classDef reload fill:#3f2d52,stroke:#a855f7,color:#f3e8ff
   classDef instrument fill:#4a3410,stroke:#f59e0b,color:#fef3c7
   classDef sink fill:#1f3d2e,stroke:#22c55e,color:#dcfce7
-  class DIR,DS dev
-  class CTRL,HR,RE,SBX reload
-  class TAP,PROF,DBG instrument
-  class RING,UI sink
+  class CLI,BR,WATCH dev
+  class RELOAD,PROOF reload
+  class LOGGER,PYHOST,RING,PYBUF,STREAM,CTX,AUDIT instrument
+  class WB,DIAG,API,HIST sink
 ```
+
+### What used to be here
+
+Recorded so it is not rebuilt. A previous generation of this surface shipped a
+`PluginDevServer`, a `PluginProfiler`, a `DevExtensionController`, a
+`ManagedIdeDevMode`, a console tap, and a `PluginHotReload` manager, driven by a
+nine-tab `PluginDevtoolsPanel`. None of it had a production caller. The panel had
+no mount, and the modules were reachable only from each other and from a barrel
+nothing imported.
+
+`PluginDevServer` is worth naming. It exposed `getUrl()`, `getWebSocketUrl()`
+and `connectedClients` for a server that did not exist:
+`plugin_dev_server_start` set an in-memory `running = true` and returned. The
+debugger's breakpoints were equally notional, and their condition evaluator
+built a `new Function` from a user string.
+
+They were removed along with their Tauri commands. The file watcher underneath
+was real, and is what `file-watch.ts` now drives.
 
 ---
 
 ## Gotchas
 
-- **`.client.ts` vs `.ts` split** — `dev-server.ts` and `hot-reload.ts` are env-agnostic singleton managers that invoke Tauri; the `.client.ts` variants carry `"use client"` and are React-hook wrappers (`dev-server.client.ts:1`, `hot-reload.client.ts:1`). Import the `.client` files only from React components.
-- **Dev-only gating** — hot reload watches only plugins where `source` is `"dev"` or `"local"` (`hot-reload.ts:140`), and `HotReloadConfig.enabled` defaults to `false` (`hot-reload.ts:77`). `DevExtensionController.registerExtension` short-circuits to `unsupported_env` when not on desktop (`dev-extension-controller.ts:114`). The dev server is entirely Tauri-backed, so in-browser Logs / Bus tabs stay empty — which is exactly why the console tap exists.
+- **Struct arguments live under `args`** — `plugin_watch_start(app, args: WatchStartArgs)` takes one struct, so Tauri reads it from the `args` key. The module `file-watch.ts` replaced sent a flat `{ paths }`, which leaves `args` absent and the command rejects before any watcher exists. `lib/plugin/core/context.ts` documents the same trap for `plugin_show_notification`.
+- **Only a new active generation is success** — an install event says a bundle landed on disk, a file change says bytes moved, and neither says the plugin activated. Anything that reports success without an `activationProof` is reporting something else.
+- **Watch eligibility is per runtime, and the reason is shown** — `dev` and `local` sources are watched for `frontend`, `python` and `hybrid`. `wasm` and `vscode-extension` are reported `needs-build` in the UI rather than silently skipped, because a plugin that never reloads is otherwise indistinguishable from a broken watcher.
 - **Namespace collision avoidance** — every table operation goes through the `namespace.ts` helpers as a single source of truth (`namespace.ts:6`). `dexie-api` rejects bare access to core tables or other plugins' tables in both `table()` and the `rawDb()` Proxy (`dexie-api.ts:48`, `dexie-api.ts:67`). `applyPluginTables` is idempotent on unchanged sets but throws above `MAX_TABLES_PER_PLUGIN = 20` (`bridge.ts:37`); a changed set requires `removePluginTables` first (`bridge.ts:28`).
 
 ---
