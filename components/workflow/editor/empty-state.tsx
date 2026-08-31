@@ -5,7 +5,14 @@ import { WorkflowIcon } from "lucide-react"
 import Link from "next/link"
 import { useTranslations } from "next-intl"
 
-export function EditorEmptyState({ onAddNode }: { onAddNode?: () => void }) {
+export function EditorEmptyState({
+  onAddNode,
+  onAskCopilot,
+}: {
+  onAddNode?: () => void
+  /** Open the AI panel. Natural-language authoring had no entry point here. */
+  onAskCopilot?: () => void
+}) {
   const t = useTranslations("workflows.empty")
   return (
     <Empty className="absolute inset-0 m-auto h-fit max-w-md pointer-events-none">
@@ -16,7 +23,17 @@ export function EditorEmptyState({ onAddNode }: { onAddNode?: () => void }) {
       </EmptyHeader>
       <EmptyTitle>{t("title")}</EmptyTitle>
       <EmptyDescription>{t("description")}</EmptyDescription>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {onAskCopilot ? (
+          <button
+            type="button"
+            onClick={onAskCopilot}
+            className="pointer-events-auto rounded-md border bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+            data-testid="wf-empty-ask-copilot"
+          >
+            {t("askCopilot")}
+          </button>
+        ) : null}
         {onAddNode ? (
           <button
             type="button"

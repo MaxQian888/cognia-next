@@ -3,6 +3,7 @@ jest.mock("@/lib/db/characters", () => ({
 }))
 jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn(async () => []) }))
 jest.mock("@/lib/db/skills", () => ({ listSkills: jest.fn(async () => []) }))
+jest.mock("@/lib/db/teams", () => ({ listTeams: jest.fn(async () => []) }))
 jest.mock("@/lib/db/adapter-instances", () => ({
   listAdapterInstances: jest.fn(async () => []),
 }))
@@ -29,6 +30,7 @@ describe("createResourcesAPI", () => {
         "listMcpServers",
         "listPlugins",
         "listSkills",
+        "listTeams",
         "listTwins",
       ].sort()
     )

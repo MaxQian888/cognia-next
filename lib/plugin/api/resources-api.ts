@@ -3,11 +3,13 @@ import { listCharacters } from "@/lib/db/characters"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listPlugins } from "@/lib/db/plugins"
 import { listSkills } from "@/lib/db/skills"
+import { listTeams } from "@/lib/db/teams"
 import { listTwins } from "@/lib/db/twins"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 
 export interface PluginResourcesAPI {
   listCharacters: typeof listCharacters
+  listTeams: typeof listTeams
   listTwins: typeof listTwins
   listSkills: typeof listSkills
   listAdapterInstances: typeof listAdapterInstances
@@ -27,6 +29,7 @@ export interface PluginResourcesAPI {
 export function createResourcesAPI(pluginId: string): PluginResourcesAPI {
   const api: PluginResourcesAPI = {
     listCharacters,
+    listTeams,
     listTwins,
     listSkills,
     listAdapterInstances,
@@ -36,6 +39,7 @@ export function createResourcesAPI(pluginId: string): PluginResourcesAPI {
 
   return createGuardedAPI(pluginId, api, {
     listCharacters: "database:read",
+    listTeams: "database:read",
     listTwins: "database:read",
     listSkills: "database:read",
     listAdapterInstances: "database:read",

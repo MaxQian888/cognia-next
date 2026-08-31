@@ -32,6 +32,41 @@ export function buildQuickActionPrompt(
   return null
 }
 
+/**
+ * Open the conversation scoped to the current canvas selection.
+ *
+ * Coze calls this "Reference": pick nodes, and what you ask next applies to
+ * that subgraph rather than the whole canvas. Without it every request is
+ * whole-graph, so changing three nodes in a fifty-node workflow starts with
+ * describing which three.
+ *
+ * It is a complete turn rather than a composer prefill on purpose: the panel's
+ * composer has no draft seam, and establishing the scope in the transcript is
+ * what makes it hold for the follow-up turns too. Returns null when nothing is
+ * selected, so the caller can fall back to just opening the panel.
+ */
+export function buildSelectionReferencePrompt(state: EditorState): string | null {
+  const selected = state.selectedNodeIds
+  if (selected.length === 0) return null
+  const byId = new Map(state.nodes.map((n) => [n.id, n]))
+  const lines: string[] = [
+    `I have **${selected.length} node(s)** selected on the canvas and want to work on just those:`,
+    "",
+  ]
+  for (const id of selected) {
+    const node = byId.get(id)
+    if (!node) continue
+    const label = node.data.label?.trim() || "(no label)"
+    lines.push(`- \`${id}\` — **${label}** (kind: \`${node.data.kind}\`)`)
+  }
+  lines.push(
+    "",
+    "Read them, tell me in one or two sentences what this part of the graph does, then ask me what I want changed.",
+    "Scope every proposal that follows to these nodes and their edges unless I say otherwise."
+  )
+  return lines.join("\n")
+}
+
 function buildValidatePrompt(state: EditorState): string {
   const nodesForValidator = state.nodes.map((n) => ({
     id: n.id,

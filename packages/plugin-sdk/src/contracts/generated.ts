@@ -1667,6 +1667,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.resources.listCharacters": {
     kind: "none",
   },
+  "ctx.resources.listTeams": {
+    kind: "none",
+  },
   "ctx.resources.listMcpServers": {
     kind: "none",
   },

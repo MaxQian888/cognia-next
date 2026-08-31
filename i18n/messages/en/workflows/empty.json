@@ -1,5 +1,6 @@
 {
   "addManualTrigger": "Add manual trigger",
+  "askCopilot": "Build it with AI",
   "browseTemplates": "Browse templates",
   "description": "Drop a trigger node from the left sidebar to start, then connect it to actions.",
   "title": "Empty workflow"

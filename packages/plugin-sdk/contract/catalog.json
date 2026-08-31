@@ -8320,6 +8320,18 @@
           }
         },
         {
+          "id": "resources.listTeams",
+          "name": "listTeams",
+          "requiredPermissions": ["database:read"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "resources.listMcpServers",
           "name": "listMcpServers",
           "requiredPermissions": ["database:read"],

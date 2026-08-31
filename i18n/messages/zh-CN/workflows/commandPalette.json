@@ -10,6 +10,8 @@
     "trigger": "触发器"
   },
   "commands": {
+    "aiCreate": "用 AI 搭建这个工作流",
+    "aiRefine": "用 AI 修改这个工作流",
     "autoLayout": "自动布局",
     "backToLibrary": "返回工作流库",
     "exportJson": "导出工作流 JSON",

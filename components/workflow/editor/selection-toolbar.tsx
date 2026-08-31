@@ -37,6 +37,7 @@ import {
   Trash2,
   Combine,
   PackagePlus,
+  Sparkles,
 } from "lucide-react"
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Button } from "@/components/ui/button"
@@ -45,6 +46,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
+import { buildSelectionReferencePrompt } from "@/lib/workflow/editor/quick-action-prompts"
 import { groupChildIds, groupEntryChildIds } from "@/lib/workflow/editor/group-utils"
 import {
   computeAlign,
@@ -305,6 +307,11 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const canGroup = count >= 2
   const canDistribute = count >= 3
 
+  const handleAskCopilot = () => {
+    const state = store.getState()
+    state.requestCopilot(buildSelectionReferencePrompt(state) ?? "")
+  }
+
   return (
     <Surface
       layer="overlay"
@@ -320,6 +327,16 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         {t("selected", { count })}
       </span>
       <VSep />
+      {/* Coze's "Reference": scope the conversation to what is selected, so a
+          request about three nodes in a fifty-node graph does not start with
+          describing which three. */}
+      <ToolbarButton
+        icon={Sparkles}
+        label={t("askCopilot")}
+        onClick={handleAskCopilot}
+        side="bottom"
+        testid="wf-sel-ask-copilot"
+      />
       <ToolbarButton
         icon={Copy}
         label={t("duplicate")}

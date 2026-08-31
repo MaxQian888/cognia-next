@@ -28,6 +28,8 @@ import {
 import {
   Save as SaveIcon,
   Play as PlayIcon,
+  Sparkles as SparklesIcon,
+  Wand2 as WandIcon,
   Undo2 as UndoIcon,
   Redo2 as RedoIcon,
   LayoutGrid as LayoutIcon,
@@ -53,6 +55,8 @@ export interface CommandPaletteProps {
   onUndo?: () => void
   onRedo?: () => void
   onAutoLayout?: () => void
+  /** Open the AI panel, either empty ("create") or scoped to the graph ("refine"). */
+  onAskCopilot?: (mode: "create" | "refine") => void
   onExportJson?: () => void
   onImportJsonRequest?: () => void
 }
@@ -67,6 +71,7 @@ export function CommandPalette({
   onUndo,
   onRedo,
   onAutoLayout,
+  onAskCopilot,
   onExportJson,
   onImportJsonRequest,
 }: CommandPaletteProps) {
@@ -111,6 +116,35 @@ export function CommandPalette({
         <CommandEmpty>{t("empty")}</CommandEmpty>
 
         <CommandGroup heading={t("headings.editorActions")}>
+          {/* Dify puts natural-language authoring behind `⌘K → /create`. The
+              proposal flow already existed here; the only entry point was the
+              AI panel's own composer, which an author had to find first. */}
+          {onAskCopilot ? (
+            <>
+              <CommandItem
+                value="create generate ai copilot"
+                onSelect={() => {
+                  onAskCopilot("create")
+                  close()
+                }}
+                data-testid="wf-palette-create"
+              >
+                <SparklesIcon className="size-4 mr-2" />
+                {t("commands.aiCreate")}
+              </CommandItem>
+              <CommandItem
+                value="refine change ai copilot"
+                onSelect={() => {
+                  onAskCopilot("refine")
+                  close()
+                }}
+                data-testid="wf-palette-refine"
+              >
+                <WandIcon className="size-4 mr-2" />
+                {t("commands.aiRefine")}
+              </CommandItem>
+            </>
+          ) : null}
           <CommandItem
             onSelect={() => {
               onSave()

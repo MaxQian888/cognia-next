@@ -336,6 +336,21 @@ export interface EditorState extends EditorStateSnapshot {
   requestedRunsPanelStepId: string | null
   requestRunsPanel: (stepId: string) => void
   clearRequestedRunsPanel: () => void
+  /**
+   * Signal → right sidebar to reveal the AI panel, optionally with a prompt to
+   * send once it mounts.
+   *
+   * Natural-language authoring only had one entry point, the AI panel's own
+   * composer, so the library's create dialog and an empty canvas both left the
+   * user to discover it. The panel is lazily mounted, which is why this is a
+   * store signal rather than a direct call: the sidebar reveals the panel, and
+   * the panel consumes and clears the prompt when it mounts.
+   *
+   * An empty string means "just open it".
+   */
+  requestedCopilotPrompt: string | null
+  requestCopilot: (prompt?: string) => void
+  clearRequestedCopilot: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -675,6 +690,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         requestedRunSingleStepId: null,
         requestedProblemsPanel: false,
         requestedRunsPanelStepId: null,
+        requestedCopilotPrompt: null,
         requestedInspectorPanel: false,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
@@ -747,6 +763,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedProblemsPanel: () => set({ requestedProblemsPanel: false }),
         requestRunsPanel: (stepId: string) => set({ requestedRunsPanelStepId: stepId }),
         clearRequestedRunsPanel: () => set({ requestedRunsPanelStepId: null }),
+        requestCopilot: (prompt = "") => set({ requestedCopilotPrompt: prompt }),
+        clearRequestedCopilot: () => set({ requestedCopilotPrompt: null }),
         requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
         clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
 

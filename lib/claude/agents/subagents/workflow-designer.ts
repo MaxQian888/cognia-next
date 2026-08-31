@@ -30,21 +30,29 @@ GROUND RULES
 8. After the user applies your proposal, you MAY call wf_auto_layout (LR) to tidy the result.
 9. End your reply with a brief 1-3 sentence summary describing what you authored: how many nodes, the high-level flow, and the new node ids the user can inspect.
 
-CATALOG REFERENCE (most common kinds)
-- Triggers: trigger.manual / trigger.cron / trigger.webhook / trigger.integration.event / trigger.chat.message / trigger.connector.inbound / trigger.connector.system
-- AI: ai.prompt / ai.classify / ai.extract / ai.embed
-- Flow: flow.branch / flow.switch / flow.split / flow.join / flow.loop / flow.wait / flow.set
-- Data: data.transform / data.code / data.template
-- I/O: io.http / io.webhook.respond
-- Actions: action.character.send / action.team.task.dispatch / action.connector.send / action.twin.rag / action.mcp.invokeTool / <plugin-id>.action.*
+CATALOG
+Call wf_list_node_kinds for the live catalog and wf_describe_node_kind for one
+kind's params before you author with it. Do NOT work from memory: the catalog
+carries 177 kinds across triggers, AI, flow, data, I/O and actions, it grows,
+and some kinds are marked hidden precisely because they cannot be hand-placed.
+For team, character, twin, skill, MCP and plugin ids, call the matching
+wf_list_* resource tool rather than inventing an id.
 
 NEVER ASK THE USER TO REPEAT THEMSELVES. If the spec is ambiguous, pick the most useful interpretation and document it in your summary. The user can Discard the proposal or Ctrl+Z if they disagree.`
 
 export const workflowDesignerAgent: AgentDefinition = {
   description:
-    "Authors and refactors visual workflows from a natural-language spec by calling the wf_* MCP tools (wf_read_graph, wf_add_node, wf_connect_edge, wf_configure_node, wf_propose_batch, wf_list_templates, wf_apply_template, wf_auto_layout). Use when the user asks to build, extend, or restructure a workflow.",
+    "Authors and refactors visual workflows from a natural-language spec by calling the wf_* MCP tools (wf_list_node_kinds, wf_read_graph, wf_add_node, wf_connect_edge, wf_configure_node, wf_propose_batch, wf_list_templates, wf_apply_template, wf_auto_layout). Use when the user asks to build, extend, or restructure a workflow.",
   prompt: SYSTEM_PROMPT,
   tools: [
+    // The prompt used to carry a hand-maintained catalog excerpt, which had
+    // gone stale: it omitted action.agent.turn, every action.plan.*, every
+    // action.goal.*, and it recommended action.team.task.dispatch, a kind that
+    // cannot run outside a team lifecycle. The editor copilot has read the
+    // real catalog through these two tools all along.
+    "mcp__cognia-plugin-tools__wf_list_node_kinds",
+    "mcp__cognia-plugin-tools__wf_list_teams",
+    "mcp__cognia-plugin-tools__wf_describe_node_kind",
     "mcp__cognia-plugin-tools__wf_read_graph",
     "mcp__cognia-plugin-tools__wf_read_selection",
     "mcp__cognia-plugin-tools__wf_read_node",

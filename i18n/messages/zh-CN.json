@@ -16780,6 +16780,7 @@
     },
     "home": {
       "actions": {
+        "agentTeams": "智能体团队",
         "devices": "设备",
         "discover": "发现",
         "fleet": "智能体队列",
@@ -16788,7 +16789,6 @@
         "newChat": "新建会话",
         "search": "搜索",
         "servers": "服务器",
-        "squads": "小队",
         "twin": "数字分身",
         "workflows": "工作流"
       },
@@ -41694,6 +41694,8 @@
         "trigger": "触发器"
       },
       "commands": {
+        "aiCreate": "用 AI 搭建这个工作流",
+        "aiRefine": "用 AI 修改这个工作流",
         "autoLayout": "自动布局",
         "backToLibrary": "返回工作流库",
         "exportJson": "导出工作流 JSON",
@@ -41992,6 +41994,7 @@
         "alignLeft": "左对齐",
         "alignRight": "右对齐",
         "alignTop": "顶部对齐",
+        "askCopilot": "就这些节点问 AI",
         "createNodeGroup": "创建 Node Group",
         "delete": "删除",
         "distributeH": "水平均分",
@@ -42016,6 +42019,7 @@
     },
     "empty": {
       "addManualTrigger": "添加手动触发",
+      "askCopilot": "让 AI 搭一个",
       "browseTemplates": "浏览模板",
       "description": "从左侧拖入一个触发节点开始，然后连接到操作节点。",
       "title": "空工作流"

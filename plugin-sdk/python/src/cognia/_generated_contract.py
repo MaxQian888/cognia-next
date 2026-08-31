@@ -11684,6 +11684,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "resources.listTeams",
+                "name": "listTeams",
+                "requiredPermissions": [
+                    "database:read",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "resources.listMcpServers",
                 "name": "listMcpServers",
                 "requiredPermissions": [

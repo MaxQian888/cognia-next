@@ -37,6 +37,7 @@ import {
 } from "@/lib/workflow/editor/clipboard"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import { paneCenterScreenPoint } from "@/lib/workflow/editor/pane-center"
+import { buildSelectionReferencePrompt } from "@/lib/workflow/editor/quick-action-prompts"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
 import { useWorkflowCommandPaletteShortcut } from "@/hooks/workflow/use-workflow-command-palette-shortcut"
 import { CanvasContextMenu, type ContextTarget } from "./canvas-context-menu"
@@ -251,6 +252,17 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   // recreated per workflow, so these reset on navigation) — see canvas-toolbar.
   // `interactive` mirrors React Flow's native lock; `minimapVisible` and
   // `backgroundVariant` were previously fixed and are now user-toggleable.
+  /**
+   * Open the AI panel. `refine` carries the current selection so the request is
+   * scoped to it (Coze's Reference); `create` opens it empty for a fresh graph.
+   */
+  const handleAskCopilot = useCallback(
+    (mode: "create" | "refine") => {
+      const state = useStore.getState()
+      state.requestCopilot(mode === "refine" ? (buildSelectionReferencePrompt(state) ?? "") : "")
+    },
+    [useStore]
+  )
   const [interactive, setInteractive] = useState(true)
   const [minimapVisible, setMinimapVisible] = useState(true)
   const [backgroundVariant, setBackgroundVariant] = useState<CanvasBackgroundVariant>("dots")
@@ -1194,7 +1206,12 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
                   currentViewport={viewport}
                   onRestoreViewport={handleRestoreViewport}
                 />
-                {showEmpty ? <EditorEmptyState onAddNode={addManualTrigger} /> : null}
+                {showEmpty ? (
+                  <EditorEmptyState
+                    onAddNode={addManualTrigger}
+                    onAskCopilot={() => useStore.getState().requestCopilot()}
+                  />
+                ) : null}
               </>
             }
           />
@@ -1249,6 +1266,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         onAutoLayout={handleAutoLayout}
         onExportJson={handleExportJson}
         onImportJsonRequest={handleImportRequest}
+        onAskCopilot={handleAskCopilot}
       />
       <ShortcutsCheatsheet open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <SpotlightSearch

@@ -16780,6 +16780,7 @@
     },
     "home": {
       "actions": {
+        "agentTeams": "Agent teams",
         "devices": "Devices",
         "discover": "Discover",
         "fleet": "Agent fleet",
@@ -16788,7 +16789,6 @@
         "newChat": "New chat",
         "search": "Search",
         "servers": "Servers",
-        "squads": "Squads",
         "twin": "Digital twin",
         "workflows": "Workflows"
       },
@@ -41694,6 +41694,8 @@
         "trigger": "trigger"
       },
       "commands": {
+        "aiCreate": "Build this workflow with AI",
+        "aiRefine": "Change this workflow with AI",
         "autoLayout": "Auto-layout",
         "backToLibrary": "Back to library",
         "exportJson": "Export workflow JSON",
@@ -41992,6 +41994,7 @@
         "alignLeft": "Align left",
         "alignRight": "Align right",
         "alignTop": "Align top",
+        "askCopilot": "Ask AI about these nodes",
         "createNodeGroup": "Create Node Group",
         "delete": "Delete",
         "distributeH": "Distribute horizontally",
@@ -42016,6 +42019,7 @@
     },
     "empty": {
       "addManualTrigger": "Add manual trigger",
+      "askCopilot": "Build it with AI",
       "browseTemplates": "Browse templates",
       "description": "Drop a trigger node from the left sidebar to start, then connect it to actions.",
       "title": "Empty workflow"

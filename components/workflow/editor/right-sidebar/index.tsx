@@ -276,6 +276,7 @@ function WorkflowContextWorkbench({
     requestedProblemsPanel,
     requestedInspectorPanel,
     requestedRunsPanelStepId,
+    requestedCopilotPrompt,
   } = useStore(
     useShallow((state: EditorState) => ({
       selectedNodeIds: state.selectedNodeIds,
@@ -288,6 +289,7 @@ function WorkflowContextWorkbench({
       requestedProblemsPanel: state.requestedProblemsPanel ?? false,
       requestedInspectorPanel: state.requestedInspectorPanel ?? false,
       requestedRunsPanelStepId: state.requestedRunsPanelStepId ?? null,
+      requestedCopilotPrompt: state.requestedCopilotPrompt ?? null,
     }))
   )
   const scopeKey = `${workbenchInstanceId}::workflow:${workflowId}`
@@ -327,6 +329,13 @@ function WorkflowContextWorkbench({
     smartReveal(scopeKey, "runs", "wide")
     useStore.getState().clearRequestedRunsPanel()
   }, [requestedRunsPanelStepId, scopeKey, smartReveal, useStore])
+
+  // Reveal only. The AI panel is lazily mounted, so IT clears the prompt once
+  // it exists — clearing here would drop the prompt before anything read it.
+  useEffect(() => {
+    if (requestedCopilotPrompt === null) return
+    smartReveal(scopeKey, "chat", "wide")
+  }, [requestedCopilotPrompt, scopeKey, smartReveal])
 
   const handleOpenSettings = useCallback(
     (tab?: string) => {

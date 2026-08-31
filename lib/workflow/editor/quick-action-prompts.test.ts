@@ -1,5 +1,5 @@
 import type { EditorState } from "./store"
-import { buildQuickActionPrompt } from "./quick-action-prompts"
+import { buildQuickActionPrompt, buildSelectionReferencePrompt } from "./quick-action-prompts"
 
 function makeState(overrides: Partial<EditorState> = {}): EditorState {
   return {
@@ -113,5 +113,36 @@ describe("buildQuickActionPrompt", () => {
     // @ts-expect-error testing the defensive branch
     const out = buildQuickActionPrompt("frobnicate", makeState())
     expect(out).toBeNull()
+  })
+})
+
+describe("buildSelectionReferencePrompt", () => {
+  it("returns null when nothing is selected, so the caller just opens the panel", () => {
+    expect(buildSelectionReferencePrompt(makeState())).toBeNull()
+  })
+
+  it("names every selected node so the request is scoped to them", () => {
+    // Without this every request is whole-graph, so changing three nodes in a
+    // fifty-node workflow starts with describing which three.
+    const out = buildSelectionReferencePrompt(
+      makeState({
+        nodes: [makeNode("n1", "ai.prompt", "Draft"), makeNode("n2", "flow.branch", "Route")],
+        selectedNodeIds: ["n1", "n2"],
+      })
+    )
+    expect(out).toContain("**2 node(s)**")
+    expect(out).toContain("`n1`")
+    expect(out).toContain("Draft")
+    expect(out).toContain("`n2`")
+    expect(out).toContain("ai.prompt")
+    expect(out).toContain("Scope every proposal that follows to these nodes")
+  })
+
+  it("skips a selected id that is no longer on the canvas", () => {
+    const out = buildSelectionReferencePrompt(
+      makeState({ nodes: [makeNode("n1", "ai.prompt", "Draft")], selectedNodeIds: ["n1", "gone"] })
+    )
+    expect(out).toContain("`n1`")
+    expect(out).not.toContain("`gone`")
   })
 })

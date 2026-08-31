@@ -1,8 +1,8 @@
 /**
  * Workflow-AI plugin — index-level resource list tools.
  *
- * Six read-only `wf_list_*` tools that let the workflow copilot ground
- * its proposals in the user's actual project resources (characters,
+ * Seven read-only `wf_list_*` tools that let the workflow copilot ground
+ * its proposals in the user's actual project resources (characters, teams,
  * twins, skills, connectors, MCP servers, plugins) before referencing
  * any id. Returns are deliberately at the **index level**: id + label +
  * a few capability tags. Credentials, raw system prompts, free-form
@@ -82,6 +82,35 @@ export function buildResourceTools(resources: PluginContext["resources"]): Plugi
               name: t.name,
               description: t.description,
               archived: t.archived ?? false,
+            })),
+          }
+        } catch (err) {
+          return formatToolError(err)
+        }
+      },
+    },
+    {
+      name: "wf_list_teams",
+      pluginId: PLUGIN_ID,
+      definition: {
+        name: "wf_list_teams",
+        description:
+          "List every agent team as { id, name, description?, memberCount, orchestration? }. Call BEFORE referencing a teamId: nine action.team.* node kinds require one, and there was previously no way to ground it, so proposals invented ids that matched nothing.",
+        category: "workflow",
+        requiresApproval: false,
+        parametersSchema: EMPTY_PARAMS,
+      },
+      execute: async () => {
+        try {
+          const rows = await resources.listTeams()
+          return {
+            ok: true,
+            teams: rows.map((t) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+              memberCount: t.members?.length ?? 0,
+              orchestration: t.orchestration,
             })),
           }
         } catch (err) {

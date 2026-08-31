@@ -626,3 +626,21 @@ describe("WorkflowEditorCanvas — persistent workbench rail", () => {
     expect(document.querySelectorAll('[data-slot="resizable-panel"]').length).toBe(3)
   })
 })
+
+describe("WorkflowEditorCanvas — natural-language authoring entry points", () => {
+  /**
+   * The proposal flow has always existed. Its only entry point was the AI
+   * panel's own composer, so an author had to find the panel first, on a
+   * canvas whose empty state offered "add a manual trigger" and nothing else.
+   */
+  it("offers the copilot from the empty canvas and records the request", async () => {
+    const empty = { ...buildSample(), nodes: [], edges: [] }
+    renderWithProviders(<WorkflowEditorCanvas workflow={empty} />)
+    const button = await screen.findByTestId("wf-empty-ask-copilot")
+    fireEvent.click(button)
+    // The AI panel is lazily mounted, so the request waits in the store.
+    await waitFor(() => {
+      expect(screen.getByTestId("right-sidebar")).toBeInTheDocument()
+    })
+  })
+})

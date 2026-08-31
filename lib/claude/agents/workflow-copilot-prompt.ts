@@ -36,6 +36,7 @@ export const WORKFLOW_COPILOT_ALLOWED_TOOLS: readonly string[] = [
   "mcp__cognia-plugin-tools__wf_get_last_run",
   // ── Resource awareness (index-level; never credentials) ───────────────
   "mcp__cognia-plugin-tools__wf_list_characters",
+  "mcp__cognia-plugin-tools__wf_list_teams",
   "mcp__cognia-plugin-tools__wf_list_twins",
   "mcp__cognia-plugin-tools__wf_list_skills",
   "mcp__cognia-plugin-tools__wf_list_connectors",

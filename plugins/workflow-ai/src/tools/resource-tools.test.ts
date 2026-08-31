@@ -11,6 +11,7 @@ const mList = {
   characters: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listCharacters"]>,
   twins: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listTwins"]>,
   skills: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listSkills"]>,
+  teams: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listTeams"]>,
   connectors: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listAdapterInstances"]>,
   mcp: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listMcpServers"]>,
   plugins: jest.fn() as jest.MockedFunction<PluginContext["resources"]["listPlugins"]>,
@@ -20,6 +21,7 @@ const resources = {
   listCharacters: mList.characters,
   listTwins: mList.twins,
   listSkills: mList.skills,
+  listTeams: mList.teams,
   listAdapterInstances: mList.connectors,
   listMcpServers: mList.mcp,
   listPlugins: mList.plugins,
@@ -240,5 +242,44 @@ describe("resource tools — empty + error", () => {
     expect(result.ok).toBe(false)
     expect(result.error.code).toBe("tool-execution-failed")
     expect(result.error.message).toContain("db offline")
+  })
+})
+
+describe("wf_list_teams", () => {
+  /**
+   * Nine `action.team.*` node kinds require a `teamId` and there was no tool
+   * that could ground one, so a proposal either invented an id that matched
+   * nothing or the copilot had to ask the user to read it off a settings page.
+   */
+  it("returns index-level team rows", async () => {
+    mList.teams.mockResolvedValueOnce([
+      {
+        id: "team_1",
+        name: "Reviewers",
+        description: "Reviews PRs",
+        members: [{ characterId: "c1" }, { characterId: "c2" }],
+        orchestration: "round_robin",
+      },
+    ] as never)
+    const tool = findTool(buildResourceTools(), "wf_list_teams")
+    const out = (await tool.execute({}, EMPTY_CTX)) as {
+      ok: boolean
+      teams: Array<Record<string, unknown>>
+    }
+    expect(out.ok).toBe(true)
+    expect(out.teams).toEqual([
+      {
+        id: "team_1",
+        name: "Reviewers",
+        description: "Reviews PRs",
+        memberCount: 2,
+        orchestration: "round_robin",
+      },
+    ])
+  })
+
+  it("needs no approval, because it only reads an index", () => {
+    const tool = findTool(buildResourceTools(), "wf_list_teams")
+    expect(tool.definition.requiresApproval).toBe(false)
   })
 })

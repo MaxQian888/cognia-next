@@ -90,6 +90,9 @@ export function WorkflowEditorChatTab({
   // pulses the picker's active node on the canvas via the store's transient
   // highlight channel.
   const wfElements = useMentionableWorkflowElements(useStore)
+  // Subscribed, not read once: the request can arrive after this panel mounts
+  // (a selection reference sent while the panel is already open).
+  const requestedCopilotPrompt = useStore((s) => s.requestedCopilotPrompt)
   const workflowMention = useMemo(
     () => ({
       elements: wfElements,
@@ -242,6 +245,20 @@ export function WorkflowEditorChatTab({
     },
     [useStore, handleSend]
   )
+
+  // A prompt handed in from outside the panel: the library's "describe it"
+  // create flow, the empty canvas, the command palette, or a selection
+  // reference. The panel is lazily mounted, so the request waits in the store
+  // until this effect runs, and clearing it here is what marks it consumed.
+  useEffect(() => {
+    const pending = useStore.getState().requestedCopilotPrompt
+    if (pending === null || pending === undefined) return
+    useStore.getState().clearRequestedCopilot()
+    const trimmed = pending.trim()
+    // An empty request means "just open the panel" — revealing it is the whole
+    // action, and sending a blank turn would be worse than doing nothing.
+    if (trimmed) void handleSend(trimmed)
+  }, [useStore, handleSend, requestedCopilotPrompt])
 
   // Listen for slash-command dispatches from anywhere in the app. The
   // event is fired by `lib/slash-commands/actions/workflow.ts` when the

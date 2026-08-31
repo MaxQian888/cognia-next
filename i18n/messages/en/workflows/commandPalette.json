@@ -10,6 +10,8 @@
     "trigger": "trigger"
   },
   "commands": {
+    "aiCreate": "Build this workflow with AI",
+    "aiRefine": "Change this workflow with AI",
     "autoLayout": "Auto-layout",
     "backToLibrary": "Back to library",
     "exportJson": "Export workflow JSON",

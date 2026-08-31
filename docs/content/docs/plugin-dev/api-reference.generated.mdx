@@ -58,7 +58,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.project` | 20 | `project:write`, `project:read`, `project:delete` | frontend, hybrid | sensitive |
 | `ctx.python` | 3 | None | frontend, hybrid | internal |
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
-| `ctx.resources` | 6 | `database:read` | frontend, hybrid | sensitive |
+| `ctx.resources` | 7 | `database:read` | frontend, hybrid | sensitive |
 | `ctx.recorder` | 19 | `media:image:write`, `native:input`, `native:screen`, `media:image:read` | frontend, hybrid | sensitive |
 | `ctx.sandbox` | 6 | `session:read`, `native:filesystem`, `native:process`, `native:input` | frontend, hybrid | sensitive |
 | `ctx.scheduler` | 16 | None | frontend, hybrid | internal |
@@ -846,6 +846,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | --- | --- | --- | --- |
 | `resources.listAdapterInstances` | `database:read` | medium | Yes |
 | `resources.listCharacters` | `database:read` | medium | Yes |
+| `resources.listTeams` | `database:read` | medium | Yes |
 | `resources.listMcpServers` | `database:read` | medium | Yes |
 | `resources.listPlugins` | `database:read` | medium | Yes |
 | `resources.listSkills` | `database:read` | medium | Yes |
