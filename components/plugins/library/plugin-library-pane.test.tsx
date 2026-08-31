@@ -12,6 +12,10 @@ jest.mock("../plugin-category-sidebar", () => ({
   PluginCategorySidebar: () => <div data-testid="plugin-category-sidebar-stub" />,
 }))
 
+jest.mock("../dialogs/plugin-category-sheet", () => ({
+  PluginCategorySheet: () => <div data-testid="plugin-category-sheet-stub" />,
+}))
+
 import { PluginLibraryPane } from "./plugin-library-pane"
 
 describe("PluginLibraryPane", () => {
@@ -27,9 +31,26 @@ describe("PluginLibraryPane", () => {
     render(<PluginLibraryPane />)
     const rail = screen.getByTestId("plugin-library-capability-rail")
     expect(rail.className).toContain("hidden")
-    // Container-relative, not viewport-relative — the pane is only a slice
-    // of the window, so the rail keys off the pane's own width.
-    expect(rail.className).toContain("@3xl/plugin-pane:block")
+    // Container-relative, not viewport-relative: the pane is only a slice of
+    // the window, so the rail keys off the pane's own width. The gate is
+    // `@xl` (576px) rather than the original `@3xl` (768px) because the
+    // center pane never reached 768px at the default split, which made the
+    // rail unreachable on an ordinary 1440px desktop.
+    expect(rail.className).toContain("@xl/plugin-pane:block")
+    expect(rail.className).not.toContain("@3xl/plugin-pane:block")
+  })
+
+  // The rail and its Sheet fallback must be gated on the SAME container so
+  // exactly one of them is present at every width. Before this, the fallback
+  // sat in the page header behind a `lg:` viewport rule and the two could
+  // both be hidden at once.
+  it("renders the capability sheet fallback under the rail's own container gate", () => {
+    render(<PluginLibraryPane />)
+    const trigger = screen.getByTestId("plugin-category-sheet-stub")
+    const gate = trigger.parentElement as HTMLElement
+    expect(gate.className).toContain("@xl/plugin-pane:hidden")
+    const rail = screen.getByTestId("plugin-library-capability-rail")
+    expect(rail.className).toContain("@xl/plugin-pane:block")
   })
 
   it("scopes the list body to its own container so cards/rows size to the pane", () => {

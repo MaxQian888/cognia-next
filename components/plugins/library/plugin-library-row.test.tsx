@@ -25,7 +25,7 @@ const baseRow: PluginRow = {
   enabled: true,
   capabilities: ["tools", "modes"],
   path: "/p/test",
-  manifest: { id: "p1", permissions: ["clipboard:read"] },
+  manifest: { id: "p1", author: { name: "Acme Labs" }, permissions: ["clipboard:read"] },
   createdAt: 0,
   updatedAt: 0,
 }
@@ -40,12 +40,59 @@ const handlers = () => ({
 })
 
 describe("PluginLibraryRow", () => {
-  it("renders the plugin name, version and id", () => {
+  it("renders the plugin name, version and author", () => {
     const h = handlers()
     render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
     expect(screen.getByText("Test Plugin")).toBeInTheDocument()
     expect(screen.getByText("v1.0.0")).toBeInTheDocument()
-    expect(screen.getByText("p1")).toBeInTheDocument()
+    expect(screen.getByText("Acme Labs")).toBeInTheDocument()
+  })
+
+  it("accepts a plain-string author as well as the object form", () => {
+    const h = handlers()
+    render(
+      <PluginLibraryRow
+        plugin={{ ...baseRow, manifest: { ...baseRow.manifest, author: "Solo Dev" } }}
+        selected={false}
+        active={false}
+        {...h}
+      />
+    )
+    expect(screen.getByText("Solo Dev")).toBeInTheDocument()
+  })
+
+  // The row id used to occupy the second line, which is where the capability
+  // chips now live. The id stays available on the detail pane and as a data
+  // attribute, so nothing that needs it lost its source.
+  it("no longer prints the raw plugin id in the row body", () => {
+    const h = handlers()
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+    expect(screen.queryByText("p1")).not.toBeInTheDocument()
+  })
+
+  // Regression guard for the a11y defect this row used to carry: the avatar,
+  // title, capability chips and the activation-progress control all lived
+  // inside ONE <button>, so the focusable chips were unreachable and the
+  // markup was invalid. The open affordance must wrap the name only.
+  it("keeps focusable controls out of the open button", () => {
+    const h = handlers()
+    render(
+      <PluginLibraryRow
+        plugin={{
+          ...baseRow,
+          manifest: { ...baseRow.manifest, tools: [{ id: "tool-a" }] },
+        }}
+        selected={false}
+        active={false}
+        {...h}
+      />
+    )
+    const openButton = screen.getByTestId("plugin-library-row-p1")
+    expect(openButton.querySelector("button, [tabindex]")).toBeNull()
+    expect(openButton.textContent).toBe("Test Plugin")
+    // The stretched hit area is what keeps the whole row clickable.
+    expect(openButton.className).toContain("after:absolute")
+    expect(openButton.className).toContain("after:inset-0")
   })
 
   it("clicking the row body invokes onOpen", () => {

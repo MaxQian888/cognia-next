@@ -6,6 +6,24 @@
 // content into a single horizontal row so users can browse 50+ plugins
 // without scrolling forever. Action set is shared with PluginCard via
 // PluginRowActionsMenu so the two views can't drift.
+//
+// Two structural rules this file exists to hold:
+//
+//   1. **No nested interactive elements.** The row used to wrap the avatar,
+//      title, capability chips (focusable HoverCard triggers) and the
+//      activation-progress control in ONE <button>. Putting focusable
+//      descendants inside a button is invalid and leaves the chips
+//      unreachable by keyboard. The open affordance is now a button around
+//      the *name only*, stretched over the row by an `after:`
+//      pseudo-element. Every sibling that needs its own pointer or focus
+//      target sits above that overlay with `relative z-10`.
+//
+//   2. **Capability chips live on the second line and are gated at
+//      `@sm/plugin-list`.** They used to share line one behind
+//      `@2xl/plugin-list` (672px). The library list is a fraction of the
+//      window, so at the default split that gate never opened and the row
+//      degraded to name / version / status on an ordinary desktop. Line two
+//      has the whole row width, so 384px is enough for three chips.
 
 import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
@@ -36,9 +54,16 @@ interface Props {
   onRollback?: (id: string) => void
 }
 
+/** `manifest.author` is `string | { name }` depending on how old the manifest is. */
+function readAuthor(manifest: PluginRow["manifest"]): string | undefined {
+  const author = (manifest as { author?: string | { name?: string } })?.author
+  if (typeof author === "string") return author.trim() || undefined
+  return author?.name?.trim() || undefined
+}
+
 // Memoized: the list re-renders on every store change (search keystrokes,
 // selection, detail focus) while row objects keep their identity across
-// re-filters — memo limits the work to rows whose own props changed.
+// re-filters, so memo limits the work to rows whose own props changed.
 export const PluginLibraryRow = memo(function PluginLibraryRow({
   plugin,
   selected,
@@ -64,6 +89,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
   })()
   const updateAvailable = !!(plugin.manifest as { updateAvailable?: boolean })?.updateAvailable
   const permissionCount = (plugin.manifest as { permissions?: string[] })?.permissions?.length ?? 0
+  const author = readAuthor(plugin.manifest)
   const contributions = useMemo(
     () => getAllContributions(plugin.capabilities, plugin.manifest),
     [plugin.capabilities, plugin.manifest]
@@ -74,11 +100,11 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
       className={cn(
         "group relative flex items-center gap-2 border-b px-2 py-1.5 text-sm",
         "transition-colors hover:bg-accent/40",
-        // Active = selected detail target — render a 3px primary accent bar
-        // via a pseudo-element so it composes with the errored left border
+        // Active = selected detail target, so render a 3px primary accent bar
+        // via a pseudo-element. It composes with the errored left border
         // without one overwriting the other.
         active &&
-          "bg-accent/60 before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-primary",
+          "bg-accent/60 before:absolute before:inset-y-0 before:left-0 before:z-10 before:w-[3px] before:bg-primary",
         !plugin.enabled && "opacity-70",
         // Errored gets a destructive tint + thicker left border so the row
         // is unmistakably distinct from disabled/loading.
@@ -92,77 +118,92 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
         checked={selected}
         onCheckedChange={() => onToggleSelect(plugin.id)}
         aria-label={t("selectAria", { name: plugin.name })}
+        className="relative z-10 shrink-0"
+      />
+      <PluginAvatar
+        name={plugin.name}
+        icon={(plugin.manifest as { icon?: string })?.icon}
+        seed={plugin.id}
+        size={24}
         className="shrink-0"
       />
-      <button
-        type="button"
-        onClick={() => onOpen(plugin.id)}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-ring"
-        data-testid={`plugin-library-row-${plugin.id}`}
-      >
-        <PluginAvatar
-          name={plugin.name}
-          icon={(plugin.manifest as { icon?: string })?.icon}
-          seed={plugin.id}
-          size={24}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="font-medium truncate">{plugin.name}</span>
-            <PluginVersionBadge version={plugin.version} className="shrink-0" />
-            {updateAvailable && (
-              <Badge variant="secondary" className="text-xs shrink-0">
-                {t("updateBadge")}
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          {/* The open affordance. `after:inset-0` stretches its hit area over
+              the whole row without swallowing the siblings, which keep their
+              own stacking context via `relative z-10`. */}
+          <button
+            type="button"
+            onClick={() => onOpen(plugin.id)}
+            className="min-w-0 truncate text-left font-medium after:absolute after:inset-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+            data-testid={`plugin-library-row-${plugin.id}`}
+          >
+            {plugin.name}
+          </button>
+          <PluginVersionBadge version={plugin.version} className="shrink-0" />
+          {updateAvailable && (
+            <Badge variant="secondary" className="shrink-0 text-xs">
+              {t("updateBadge")}
+            </Badge>
+          )}
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            {permissionCount > 0 && (
+              <span className="hidden items-center gap-1 text-xs text-muted-foreground @md/plugin-list:flex">
+                <ShieldCheckIcon className="size-3" />
+                {permissionCount}
+              </span>
+            )}
+            <PluginSignatureBadge state={signatureState} compact />
+            {errored && (
+              <TriangleAlertIcon
+                className="size-3.5 shrink-0 text-destructive"
+                aria-label={t("erroredAria")}
+              />
+            )}
+            <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+            <span className="relative z-10">
+              <PluginActivationProgress
+                pluginId={plugin.id}
+                pluginName={plugin.name}
+                variant="row"
+              />
+            </span>
+          </div>
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          {author && <span className="truncate">{author}</span>}
+          {author && contributions.length > 0 && (
+            <span aria-hidden className="shrink-0">
+              ·
+            </span>
+          )}
+          <div className="relative z-10 hidden min-w-0 items-center gap-1 @sm/plugin-list:flex">
+            {contributions.slice(0, 3).map((contribution) => (
+              <CapabilityHoverChip
+                key={contribution.capability}
+                capability={String(contribution.capability)}
+                count={contribution.count}
+                entries={contribution.entries}
+              />
+            ))}
+            {contributions.length > 3 && (
+              <Badge
+                variant="outline"
+                className="shrink-0 text-xs"
+                aria-label={t("moreCapabilitiesAria", { count: contributions.length - 3 })}
+              >
+                +{contributions.length - 3}
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground truncate">
-            <span className="truncate">{plugin.id}</span>
-            {errored && plugin.error && (
-              <span className="flex items-center gap-0.5 text-destructive shrink-0">
-                <CircleAlertIcon className="size-3" />
-                <span className="line-clamp-1">{plugin.error}</span>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="hidden items-center gap-1 @2xl/plugin-list:flex">
-          {contributions.slice(0, 3).map((contribution) => (
-            <CapabilityHoverChip
-              key={contribution.capability}
-              capability={String(contribution.capability)}
-              count={contribution.count}
-              entries={contribution.entries}
-            />
-          ))}
-          {contributions.length > 3 && (
-            <Badge
-              variant="outline"
-              className="text-xs"
-              aria-label={t("moreCapabilitiesAria", { count: contributions.length - 3 })}
-            >
-              +{contributions.length - 3}
-            </Badge>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {permissionCount > 0 && (
-            <span className="hidden @lg/plugin-list:flex items-center gap-1 text-xs text-muted-foreground">
-              <ShieldCheckIcon className="size-3" />
-              {permissionCount}
+          {errored && plugin.error && (
+            <span className="flex min-w-0 items-center gap-0.5 text-destructive">
+              <CircleAlertIcon className="size-3 shrink-0" />
+              <span className="line-clamp-1">{plugin.error}</span>
             </span>
           )}
-          <PluginSignatureBadge state={signatureState} compact />
-          {errored && (
-            <TriangleAlertIcon
-              className="size-3.5 text-destructive shrink-0"
-              aria-label={t("erroredAria")}
-            />
-          )}
-          <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
-          <PluginActivationProgress pluginId={plugin.id} pluginName={plugin.name} variant="row" />
         </div>
-      </button>
+      </div>
       <PluginRowActionsMenu
         plugin={plugin}
         onOpen={onOpen}
@@ -171,7 +212,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
         onUninstall={onUninstall}
         onReviewPermissions={onReviewPermissions}
         onRollback={onRollback}
-        triggerClassName="size-6 shrink-0"
+        triggerClassName="relative z-10 size-6 shrink-0"
       />
     </div>
   )
@@ -184,15 +225,15 @@ interface CapabilityHoverChipProps {
 }
 
 // Capability badge that, when hovered or focused, surfaces the concrete
-// contributions for that capability (e.g. capability="tools" → ids of every
-// declared tool). Falls back to a plain badge when the manifest exposes no
-// contribution surface for the tag (entries.length === 0).
+// contributions for that capability (e.g. capability="tools" gives the ids of
+// every declared tool). Falls back to a plain badge when the manifest exposes
+// no contribution surface for the tag (entries.length === 0).
 function CapabilityHoverChip({ capability, count, entries }: CapabilityHoverChipProps) {
   const t = useTranslations("plugins.card")
   const label = count > 0 ? `${capability} · ${count}` : capability
   if (entries.length === 0) {
     return (
-      <Badge variant="outline" className="text-xs">
+      <Badge variant="outline" className="shrink-0 text-xs">
         {label}
       </Badge>
     )
@@ -202,7 +243,7 @@ function CapabilityHoverChip({ capability, count, entries }: CapabilityHoverChip
       <HoverCardTrigger asChild>
         <Badge
           variant="outline"
-          className="text-xs cursor-help"
+          className="shrink-0 cursor-help text-xs"
           tabIndex={0}
           aria-label={t("capabilityChipAria", { capability, count })}
         >
@@ -217,7 +258,7 @@ function CapabilityHoverChip({ capability, count, entries }: CapabilityHoverChip
               <li key={entry.id} className="flex items-baseline gap-1.5">
                 <code className="font-mono text-[10px] text-muted-foreground">{entry.id}</code>
                 {entry.label && entry.label !== entry.id && (
-                  <span className="text-muted-foreground">— {entry.label}</span>
+                  <span className="text-muted-foreground">{entry.label}</span>
                 )}
               </li>
             ))}

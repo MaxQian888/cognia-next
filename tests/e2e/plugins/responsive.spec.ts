@@ -59,25 +59,57 @@ test.describe("plugin workspace — desktop (1440)", () => {
     expect(navBox!.x + navBox!.width).toBeLessThanOrEqual(centerBox!.x + 1)
     expect(centerBox!.width).toBeGreaterThan(navBox!.width)
 
-    // The capability rail is container-query gated at @3xl (768px of the
-    // CENTER PANE, not the viewport). With the default pane split
-    // (nav 15% / center 39% / detail 46%) the center is ~561px at 1440 —
-    // the rail is legitimately hidden here and only appears on ultra-wide
-    // viewports or after the user grows the center pane.
-    await expect(page.getByTestId("plugin-library-capability-rail")).not.toBeVisible()
-  })
-
-  test("the capability rail appears once the center pane crosses @3xl", async ({ page }) => {
-    await page.setViewportSize({ width: 2560, height: 1000 })
-    await page.goto("/plugins?section=library", { waitUntil: "domcontentloaded" })
-    await expect(page.getByTestId("plugin-library-pane")).toBeVisible({ timeout: 15_000 })
-    // 39% of 2560 ≈ 998px of center width — past the @3xl (768px) container
-    // breakpoint, so the rail must take layout space.
+    // The capability rail is container-query gated at @xl (576px of the
+    // CENTER PANE, not the viewport). With the current split
+    // (nav 14% / center 52% / detail 34%) the center is ~750px at 1440, so
+    // the rail takes layout space here. It used to be gated at @3xl (768px)
+    // against a 39% center pane, which never opened on an ordinary desktop.
     const rail = page.getByTestId("plugin-library-capability-rail")
     await expect(rail).toBeVisible()
     const railBox = await rail.boundingBox()
     expect(railBox).not.toBeNull()
-    expect(railBox!.width).toBeGreaterThanOrEqual(170)
+    expect(railBox!.width).toBeGreaterThanOrEqual(150)
+    // The rail and its Sheet fallback are mutually exclusive by construction.
+    await expect(page.getByTestId("plugin-category-sheet-trigger")).not.toBeVisible()
+  })
+
+  // The capability axis had NO reachable entry point between a >=1024px
+  // viewport and a <768px center pane: the rail was container-gated while its
+  // Sheet fallback was gated `lg:hidden` on the VIEWPORT, so both hid at once.
+  // Both now key off the same container query, so exactly one is present at
+  // every width. These are the widths that used to fall in the hole.
+  for (const width of [1000, 1024, 1280, 1440]) {
+    test(`capability filtering is reachable at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto("/plugins?section=library", { waitUntil: "domcontentloaded" })
+      await expect(page.getByTestId("plugin-library-pane")).toBeVisible({ timeout: 15_000 })
+
+      const railVisible = await page.getByTestId("plugin-library-capability-rail").isVisible()
+      const sheetVisible = await page.getByTestId("plugin-category-sheet-trigger").isVisible()
+      expect(railVisible || sheetVisible).toBe(true)
+      expect(railVisible && sheetVisible).toBe(false)
+    })
+  }
+
+  test("dragging the center pane narrow swaps the rail for the Sheet trigger", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto("/plugins?section=library", { waitUntil: "domcontentloaded" })
+    await expect(page.getByTestId("plugin-library-capability-rail")).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // Drag the detail-pane handle left until the center falls under @xl.
+    const handles = page.locator('[role="separator"]')
+    const detailHandle = handles.last()
+    const box = await detailHandle.boundingBox()
+    expect(box).not.toBeNull()
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box!.x - 420, box!.y + box!.height / 2, { steps: 12 })
+    await page.mouse.up()
+
+    await expect(page.getByTestId("plugin-library-capability-rail")).not.toBeVisible()
+    await expect(page.getByTestId("plugin-category-sheet-trigger")).toBeVisible()
   })
 
   test("?section=governance&gov=permissions renders the governance pane", async ({ page }) => {
@@ -138,12 +170,13 @@ test.describe("plugin workspace — mobile (375)", () => {
     await expect(page.getByTestId("plugin-governance-pane")).toBeVisible({ timeout: 15_000 })
   })
 
-  test("the capability rail is hidden below the container breakpoint", async ({ page }) => {
+  test("the capability rail collapses into its Sheet trigger", async ({ page }) => {
     await page.goto("/plugins?section=library", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("plugin-library-pane")).toBeVisible({ timeout: 15_000 })
-    // Container-query gated (@3xl) — on a phone the rail must not take
-    // layout space.
+    // Container-query gated (@xl): on a phone the rail must not take layout
+    // space, and the Sheet trigger must stand in for it.
     await expect(page.getByTestId("plugin-library-capability-rail")).not.toBeVisible()
+    await expect(page.getByTestId("plugin-category-sheet-trigger")).toBeVisible()
   })
 })
 

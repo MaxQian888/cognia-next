@@ -1,10 +1,16 @@
 "use client"
 
-// Mobile / tablet sidebar drawer for /plugins. Wraps the existing
-// PluginCategorySidebar in a Sheet so users below the `lg:` breakpoint
-// (no longer have access to the desktop left rail) can still filter by
-// capability. The trigger button is intended to be shown only on
-// `<lg` viewports — pass the appropriate visibility class through `className`.
+// Narrow-pane drawer for /plugins. Wraps the existing PluginCategorySidebar
+// in a Sheet so the capability axis stays reachable when the center pane is
+// too narrow to lay the rail out inline.
+//
+// The trigger is rendered by `library/plugin-library-pane.tsx` under the SAME
+// `@container/plugin-pane` query that hides the rail, so exactly one of the
+// two is present at any width. It used to be mounted in the page header
+// behind a `lg:` *viewport* rule, which could not agree with the *container*
+// rule the rail uses: on a >=1024px viewport with a <768px center pane both
+// vanished. Callers may still pass `className`, but a visibility class that
+// is not the pane's own container query re-opens that gap.
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -30,6 +36,7 @@ export function PluginCategorySheet({ className }: Props) {
           variant="outline"
           className={cn(className)}
           aria-label={t("categoriesButton")}
+          data-testid="plugin-category-sheet-trigger"
         >
           <LayoutListIcon className="size-3.5 mr-1.5" />
           {t("categoriesButton")}

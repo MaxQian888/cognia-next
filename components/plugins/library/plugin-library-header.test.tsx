@@ -10,11 +10,6 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("../dialogs/plugin-category-sheet", () => ({
-  PluginCategorySheet: ({ className }: { className?: string }) => (
-    <div data-testid="plugin-category-sheet" className={className} />
-  ),
-}))
 // `useLibrarySubFilterSegments` is deliberately NOT mocked — it reads the
 // same `usePlugins()` mock below, so letting it run proves the status axis
 // actually reaches the toolbar's segments slot (and that the zero-count
@@ -125,10 +120,14 @@ describe("PluginLibraryHeader", () => {
     expect(usePluginsStore.getState().filters.sort).toBe("usage")
   })
 
-  it("renders the capability sheet trigger gated to lg:hidden so the rail is only fallback for narrow viewports", () => {
+  // The trigger used to live here behind `lg:hidden`, a VIEWPORT rule
+  // standing in for a rail gated on the center pane's own CONTAINER query.
+  // On a >=1024px viewport with a <768px center pane both disappeared, which
+  // is the default split on an ordinary desktop. It now lives beside the rail
+  // in `plugin-library-pane.tsx` under the same gate.
+  it("does not render the capability sheet trigger", () => {
     render(<PluginLibraryHeader />)
-    const sheet = screen.getByTestId("plugin-category-sheet")
-    expect(sheet.className).toContain("lg:hidden")
+    expect(screen.queryByTestId("plugin-category-sheet")).not.toBeInTheDocument()
   })
 
   it("hides the result count when filters are inactive (filtered === total)", () => {

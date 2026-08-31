@@ -359,7 +359,7 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
         // Keep the nav rail compact by default — its rows are short labels
         // ("已安装" / Discover / Governance), so a wide column just wastes
         // horizontal space the center list needs.
-        defaultSize: 15,
+        defaultSize: 14,
         minSize: 12,
         maxSize: 24,
       }}
@@ -377,13 +377,19 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
           ? undefined
           : {
               label: t("detailSheetLabel"),
-              // README-centric detail reads better with width — give it a wider
-              // default/max than the old tabbed pane (the shell still collapses
-              // it into a Sheet on narrow viewports).
+              // README-centric detail reads better with width, but not at the
+              // center pane's expense: at 46% the center sat around 39% (~460
+              // to 560px at 1440), which is below the `@xl` container gate the
+              // library's capability rail and its rows' capability chips are
+              // written against. The rail was therefore unreachable at the
+              // default split on a normal desktop, and the row degraded to
+              // name/version/status. 34% keeps the README comfortable while
+              // leaving the center above that gate; the user can still drag to
+              // 52% when they want to read.
               content: <PluginDetailPane />,
-              defaultSize: 46,
-              minSize: 30,
-              maxSize: 60,
+              defaultSize: 34,
+              minSize: 28,
+              maxSize: 52,
             }
       }
     >

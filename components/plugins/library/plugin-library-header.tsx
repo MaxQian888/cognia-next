@@ -3,8 +3,12 @@
 // Library's contribution to the page header's second tier. Supplies the
 // three things that tier takes — search, segments, section tools — to the
 // shared `PluginSectionToolbar`, which owns the layout and the zero-count
-// rule. Library's tools are the filter-sheet trigger, the capability sheet
-// (narrow panes only), the sort select, and the list/card view toggle.
+// rule. Library's tools are the filter-sheet trigger, the sort select, and
+// the list/card view toggle. The capability-sheet trigger deliberately
+// does NOT live here: the rail it stands in for is gated on the center
+// pane's own container query, and a `lg:` viewport rule in this header
+// could never agree with it, so it lives in `plugin-library-pane.tsx`
+// next to the rail, under the same gate.
 //
 // Lives inside the FeaturePageHeader controls slot. Primary and page-level
 // actions are hosted by the header's fixed action tier so they remain visible
@@ -22,7 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
 import { PluginSectionToolbar } from "../plugin-section-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
 import { useLibrarySubFilterSegments } from "./plugin-library-sub-filter"
@@ -73,10 +76,6 @@ export function PluginLibraryHeader() {
             <FilterIcon className="size-3.5" />
             <span className="hidden sm:inline ml-1.5">{t("filtersButton")}</span>
           </Button>
-          {/* Capability rail is inline on lg+; narrow viewports get the
-              equivalent affordance as a Sheet trigger so the capability
-              filter axis stays reachable. */}
-          <PluginCategorySheet className="lg:hidden" />
           <Select value={sort} onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}>
             <SelectTrigger
               className="h-8 w-auto gap-1.5 text-xs"
