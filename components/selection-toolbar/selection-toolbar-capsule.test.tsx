@@ -118,6 +118,42 @@ describe("SelectionToolbarCapsule", () => {
     expect(container.querySelector(".lucide-check")).toBeInTheDocument()
   })
 
+  it("renders a bounded host status result", () => {
+    renderCapsule({ phase: { kind: "status", action: "plugin:a", message: "Inspected" } })
+    expect(screen.getByRole("status")).toHaveTextContent("Inspected")
+  })
+
+  it("renders plugin actions in the host-owned More panel and dispatches them", () => {
+    const onAction = jest.fn()
+    const plugin = {
+      id: "plug:a",
+      icon: resolveVisibleActions({ types: [], candidate: {}, contextualEnabled: true })[0].icon,
+      label: "Plugin action",
+      mode: "await" as const,
+      priority: 50,
+      pluginActionId: "plug:a",
+    }
+    renderCapsule({ moreOpen: true, overflowActions: [plugin], onAction })
+    fireEvent.click(screen.getByRole("menuitem", { name: /Plugin action/ }))
+    expect(onAction).toHaveBeenCalledWith("plug:a")
+  })
+
+  it("keeps rewrite modes inside a submenu instead of permanent capsule buttons", () => {
+    const onAction = jest.fn()
+    const rewrite = {
+      id: "cognia:rewrite",
+      icon: resolveVisibleActions({ types: [], candidate: {}, contextualEnabled: true })[0].icon,
+      label: "Rewrite",
+      mode: "await" as const,
+      priority: 50,
+      children: [{ id: "cognia:rewrite:improve", title: "Improve" }],
+    }
+    renderCapsule({ moreOpen: true, overflowActions: [rewrite], onAction })
+    fireEvent.click(screen.getByRole("menuitem", { name: /Rewrite/ }))
+    fireEvent.click(screen.getByRole("menuitem", { name: /Improve/ }))
+    expect(onAction).toHaveBeenCalledWith("cognia:rewrite:improve")
+  })
+
   it("replaces the action row with an alert when the write was refused", () => {
     renderCapsule({
       phase: { kind: "error", action: "remember", reason: "含敏感信息，未存入记忆" },

@@ -1,13 +1,10 @@
 import { createRef, useState } from "react"
+import { MoreHorizontalIcon, PuzzleIcon, WandSparklesIcon } from "lucide-react"
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 
 import { SELECTION_SHADOW_PAD } from "@/lib/tauri/selection-toolbar"
 import { SelectionToolbarCapsule, type SelectionToolbarPhase } from "./selection-toolbar-capsule"
-import {
-  resolveVisibleActions,
-  type SelectionActionId,
-  type TargetLocale,
-} from "./selection-toolbar-actions"
+import { resolveVisibleActions, type TargetLocale } from "./selection-toolbar-actions"
 import type { SelectionToolbarGeometryHandles } from "./use-selection-toolbar-geometry"
 
 /**
@@ -158,12 +155,12 @@ export const ReducedMotion: Story = { args: { hovered: "explain", reduceMotion: 
  */
 export const Interactive: Story = {
   render: function InteractiveCapsule(args) {
-    const [hovered, setHovered] = useState<SelectionActionId | null>(null)
+    const [hovered, setHovered] = useState<string | null>(null)
     const [localeOpen, setLocaleOpen] = useState(false)
     const [targetLocale, setTargetLocale] = useState<TargetLocale>("zh-CN")
     const [phase, setPhase] = useState<SelectionToolbarPhase>({ kind: "idle" })
 
-    const run = (id: SelectionActionId) => {
+    const run = (id: string) => {
       setLocaleOpen(false)
       if (id === "speak") {
         setPhase({ kind: "speaking", progress: 0.35 })
@@ -285,6 +282,85 @@ export const InSitu: Story = {
       </div>
     )
   },
+}
+
+/**
+ * A selection the classifier recognised, so a contextual action joins the row.
+ *
+ * The hairline is the point of this story. The stable actions and the ones
+ * this particular selection minted are icons of the same size in the same
+ * strip, and without a mark the newcomer reads as one of the six that moved.
+ */
+export const ContextualBands: Story = {
+  args: {
+    actions: resolveVisibleActions({
+      types: ["url"],
+      candidate: {},
+      contextualEnabled: true,
+    }),
+  },
+}
+
+const PLUGIN_ACTIONS = [
+  {
+    id: "cognia:rewrite",
+    icon: WandSparklesIcon,
+    label: "Rewrite",
+    mode: "await" as const,
+    priority: 50,
+    attribution: "Cognia",
+    children: [
+      { id: "cognia:rewrite:improve", title: "Improve" },
+      { id: "cognia:rewrite:concise", title: "Concise" },
+      { id: "cognia:rewrite:detailed", title: "Detailed" },
+    ],
+  },
+  {
+    id: "acme.tools:summarize",
+    icon: PuzzleIcon,
+    label: "Summarize",
+    mode: "await" as const,
+    priority: 50,
+    pluginActionId: "acme.tools:summarize",
+    attribution: "Acme Tools",
+    accelerator: "alt+shift+s",
+  },
+]
+
+const WITH_MORE = [
+  ...resolveVisibleActions({ types: [], candidate: {}, contextualEnabled: true }).slice(0, 5),
+  {
+    id: "__more",
+    icon: MoreHorizontalIcon,
+    label: "More",
+    mode: "local" as const,
+    priority: 101,
+    isMore: true,
+  },
+]
+
+/** Host and plugin actions in the overflow menu, each attributed to its owner. */
+export const MoreMenu: Story = {
+  args: {
+    actions: WITH_MORE,
+    moreOpen: true,
+    overflowActions: PLUGIN_ACTIONS,
+  },
+}
+
+/** One page deeper: a parent's sub-actions, with the way back at the top. */
+export const MoreSubmenu: Story = {
+  args: {
+    actions: WITH_MORE,
+    moreOpen: true,
+    overflowActions: PLUGIN_ACTIONS,
+    overflowInitialParentId: "cognia:rewrite",
+  },
+}
+
+/** A plugin reported back without producing text to review. */
+export const HostStatus: Story = {
+  args: { phase: { kind: "status", action: "acme.tools:summarize", message: "Indexed 4 sources" } },
 }
 
 /**

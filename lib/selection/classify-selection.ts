@@ -20,8 +20,15 @@
  * and a language-detection dependency.
  */
 
-export type SelectionContentType =
-  "url" | "email" | "code" | "measurement" | "foreignLanguage" | "term"
+import type { PluginSelectionContentType } from "@/types/plugin"
+
+/**
+ * Aliased, not re-declared. The classifier, the plugin manifest validator, and
+ * the manifest type all have to agree on this vocabulary, and three hand-kept
+ * copies drifted silently: a type added here and to the union still failed
+ * manifest validation, with nothing to catch it.
+ */
+export type SelectionContentType = PluginSelectionContentType
 
 export interface SelectionClassification {
   /** Highest-confidence first, deduped, at most {@link MAX_MATCHED_TYPES}. */

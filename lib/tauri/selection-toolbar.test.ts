@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import {
   captureClipboardSelection,
+  copySelectionActionResult,
   executeSelectionToolbarAction,
   finishSelectionToolbar,
   getCurrentSelectionCandidate,
@@ -14,6 +15,8 @@ import {
   startSelectionToolbar,
   stopSelectionToolbar,
   takePendingSelectionStage,
+  replaceCurrentSelection,
+  undoSelectionReplacement,
 } from "./selection-toolbar"
 
 jest.mock("@/lib/tauri", () => ({
@@ -41,7 +44,7 @@ it("maps selection toolbar lifecycle calls to their native commands", async () =
   await stopSelectionToolbar()
 
   expect(invokeMock).toHaveBeenNthCalledWith(1, "selection_toolbar_start", {
-    args: { disabledApps: ["1Password"] },
+    args: { mode: "automatic", disabledApps: ["1Password"], disabledSites: [] },
   })
   expect(invokeMock).toHaveBeenNthCalledWith(2, "selection_toolbar_status")
   expect(invokeMock).toHaveBeenNthCalledWith(3, "selection_toolbar_stop")
@@ -70,6 +73,35 @@ it("maps candidate and action calls without changing the captured text", async (
   expect(invokeMock).toHaveBeenNthCalledWith(5, "selection_toolbar_reveal")
   expect(invokeMock).toHaveBeenNthCalledWith(6, "selection_toolbar_set_interactive", {
     interactive: true,
+  })
+})
+
+it("maps validated replacement and undo to dedicated native commands", async () => {
+  invokeMock
+    .mockResolvedValueOnce({ replaced: true, undoExpiresAt: 42 })
+    .mockResolvedValueOnce(true)
+
+  await expect(replaceCurrentSelection("candidate-1", "replacement")).resolves.toEqual({
+    replaced: true,
+    undoExpiresAt: 42,
+  })
+  await expect(undoSelectionReplacement("candidate-1")).resolves.toBe(true)
+
+  expect(invokeMock).toHaveBeenNthCalledWith(1, "selection_toolbar_replace", {
+    candidateId: "candidate-1",
+    text: "replacement",
+  })
+  expect(invokeMock).toHaveBeenNthCalledWith(2, "selection_toolbar_undo", {
+    candidateId: "candidate-1",
+  })
+})
+
+it("copies normalized action output through the native candidate boundary", async () => {
+  invokeMock.mockResolvedValue(undefined)
+  await copySelectionActionResult("candidate-1", "result")
+  expect(invokeMock).toHaveBeenCalledWith("selection_toolbar_copy_result", {
+    candidateId: "candidate-1",
+    text: "result",
   })
 })
 
@@ -138,17 +170,47 @@ describe("off Tauri", () => {
     await expect(bridge.startSelectionToolbar()).resolves.toEqual({
       running: false,
       hasCandidate: false,
+      mode: "off",
+      accessibility: "unknown",
+      inputMonitoring: "unknown",
+      screenRecording: "unknown",
+      uia: "unknown",
+      ocrAvailable: false,
+      shortcutActivationActive: false,
+      replaceAvailable: false,
     })
     await expect(bridge.stopSelectionToolbar()).resolves.toEqual({
       running: false,
       hasCandidate: false,
+      mode: "off",
+      accessibility: "unknown",
+      inputMonitoring: "unknown",
+      screenRecording: "unknown",
+      uia: "unknown",
+      ocrAvailable: false,
+      shortcutActivationActive: false,
+      replaceAvailable: false,
     })
     await expect(bridge.getSelectionToolbarStatus()).resolves.toEqual({
       running: false,
       hasCandidate: false,
+      mode: "off",
+      accessibility: "unknown",
+      inputMonitoring: "unknown",
+      screenRecording: "unknown",
+      uia: "unknown",
+      ocrAvailable: false,
+      shortcutActivationActive: false,
+      replaceAvailable: false,
     })
     await expect(bridge.getCurrentSelectionCandidate()).resolves.toBeNull()
     await expect(bridge.captureClipboardSelection()).resolves.toBeNull()
+    await expect(bridge.replaceCurrentSelection("c1", "text")).resolves.toEqual({
+      replaced: false,
+      reason: "sourceUnavailable",
+    })
+    await expect(bridge.undoSelectionReplacement("c1")).resolves.toBe(false)
+    await bridge.copySelectionActionResult("c1", "text")
     await expect(bridge.takePendingSelectionStage()).resolves.toBeNull()
     await expect(bridge.listShortcutChords()).resolves.toEqual({})
     // A placeholder placement keeps the renderer's layout deterministic.

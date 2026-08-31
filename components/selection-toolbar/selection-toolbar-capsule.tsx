@@ -1,33 +1,51 @@
 "use client"
 
 /**
- * The visible pill. Purely presentational — `SelectionToolbarView` owns the
- * state machine, the IPC and the candidate; this file owns layout and motion.
+ * The visible pill. Purely presentational. `SelectionToolbarView` owns the
+ * state machine, the IPC and the candidate, and this file owns layout and
+ * motion.
  *
  * Icon-first by design: the toolbar appears directly over the user's text, and
  * six labelled buttons covered roughly three times the area six icons do.
  * Hovering expands the one button under the pointer into its label plus its
  * bound chord. The window is pre-sized to the widest of those states (see
- * `useSelectionToolbarGeometry`), so that expansion is pure layout animation —
- * no window resize, no IPC, no flicker.
+ * `useSelectionToolbarGeometry`), so that expansion is pure layout animation,
+ * with no window resize, no IPC and no flicker.
+ *
+ * Every floating piece here takes its tint, radius and elevation from
+ * `selection-surface.tsx` rather than restating them, so the pill and the two
+ * menus stay one object over a moving desktop.
  */
 
-import { useEffect, useRef } from "react"
+import { useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { useFormatter, useTranslations } from "next-intl"
-import { CheckIcon, ChevronDownIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  InfoIcon,
+  Loader2Icon,
+  TriangleAlertIcon,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Surface } from "@/components/surface/surface"
 import { MOBILE_DURATION, MOBILE_EASE, MOBILE_SPRING } from "@/lib/ui/motion"
 import type { SelectionToolbarPlacement } from "@/lib/tauri/selection-toolbar"
 import { formatKeybinding } from "@/lib/shortcuts/utils"
 import {
-  SELECTION_ACTIONS,
   TARGET_LOCALES,
   type SelectionActionDescriptor,
-  type SelectionActionId,
   type TargetLocale,
 } from "./selection-toolbar-actions"
+import {
+  SELECTION_GLASS,
+  SELECTION_GLASS_TINT,
+  SelectionDivider,
+  SelectionListItem,
+  SelectionListPanel,
+} from "./selection-surface"
 import type { SelectionToolbarGeometryHandles } from "./use-selection-toolbar-geometry"
 
 /** Shared id for the hover highlight that slides between buttons. */
@@ -36,9 +54,10 @@ const WAVEFORM_BARS = [0.35, 0.7, 1, 0.55, 0.85, 0.4] as const
 
 export type SelectionToolbarPhase =
   | { kind: "idle" }
-  | { kind: "pending"; action: SelectionActionId }
-  | { kind: "ok"; action: SelectionActionId }
-  | { kind: "error"; action: SelectionActionId; reason: string }
+  | { kind: "pending"; action: string }
+  | { kind: "ok"; action: string }
+  | { kind: "error"; action: string; reason: string }
+  | { kind: "status"; action: string; message: string }
   | { kind: "speaking"; progress?: number }
 
 export interface SelectionToolbarCapsuleProps {
@@ -46,14 +65,14 @@ export interface SelectionToolbarCapsuleProps {
   /**
    * The buttons this selection earned, already ordered and capped by
    * `resolveVisibleActions`. Passed in rather than read from the table here so
-   * the ghost row and the real row provably measure the same set — the ghost
-   * is what pins the window width, so a divergence would clip a label.
+   * the ghost row and the real row provably measure the same set. The ghost is
+   * what pins the window width, so a divergence would clip a label.
    */
   actions: readonly SelectionActionDescriptor[]
   phase: SelectionToolbarPhase
-  hovered: SelectionActionId | null
-  onHoverChange: (id: SelectionActionId | null) => void
-  onAction: (id: SelectionActionId) => void
+  hovered: string | null
+  onHoverChange: (id: string | null) => void
+  onAction: (id: string) => void
   onStopSpeech: () => void
   chords: Record<string, string>
   isMac: boolean
@@ -63,10 +82,33 @@ export interface SelectionToolbarCapsuleProps {
   onLocaleSelect: (locale: TargetLocale) => void
   truncated: boolean
   reduceMotion: boolean
+  overflowActions?: readonly SelectionActionDescriptor[]
+  moreOpen?: boolean
+  onMoreOpenChange?: (open: boolean) => void
+  overflowInitialParentId?: string
 }
 
-const CAPSULE_CLASS =
-  "pointer-events-auto flex items-center gap-0.5 rounded-full border bg-popover/95 p-1 text-popover-foreground shadow-xl backdrop-blur-xl"
+/**
+ * Which band of the row an action belongs to.
+ *
+ * The row is not one list, it is up to four: the stable actions the user has
+ * built habits on, the contextual ones this particular selection minted, the
+ * ones a plugin contributed, and the overflow handle. They are all icons of the
+ * same size, so without a mark the row reads as an undifferentiated strip and
+ * the promoted contextual action looks like a button that moved.
+ */
+function bandOf(action: SelectionActionDescriptor): string {
+  if (action.isMore) return "more"
+  if (action.pluginActionId) return "plugin"
+  return action.requires ? "contextual" : "generic"
+}
+
+/** True when a hairline belongs before `actions[index]`. */
+function startsBand(actions: readonly SelectionActionDescriptor[], index: number): boolean {
+  return index > 0 && bandOf(actions[index]) !== bandOf(actions[index - 1])
+}
+
+const CAPSULE_CLASS = "pointer-events-auto flex items-center gap-0.5 p-1"
 
 export function SelectionToolbarCapsule({
   geometry,
@@ -84,9 +126,13 @@ export function SelectionToolbarCapsule({
   onLocaleSelect,
   truncated,
   reduceMotion,
+  overflowActions = [],
+  moreOpen = false,
+  onMoreOpenChange,
+  overflowInitialParentId,
 }: SelectionToolbarCapsuleProps) {
   const t = useTranslations("selectionToolbar")
-  const { shellRef, capsuleRef, panelRef, ghostRef, placement } = geometry
+  const { shellRef, capsuleRef, panelRef, ghostRef, placement, remeasure } = geometry
 
   const enter = reduceMotion
     ? { opacity: 1, scale: 1, y: 0 }
@@ -95,6 +141,8 @@ export function SelectionToolbarCapsule({
     ? { opacity: 0 }
     : { opacity: 0, scale: 0.96, y: placement === "above" ? 4 : -4 }
 
+  const actionLabel = (action: SelectionActionDescriptor) =>
+    action.label ?? (action.labelKey ? t(action.labelKey) : action.id)
   const localePanel = localeOpen ? (
     <LocalePanel
       containerRef={panelRef}
@@ -102,10 +150,33 @@ export function SelectionToolbarCapsule({
       targetLocale={targetLocale}
       onSelect={onLocaleSelect}
       onClose={() => onLocaleOpenChange(false)}
+      onResize={remeasure}
       reduceMotion={reduceMotion}
+      title={t("chooseLanguage")}
       label={(locale) => t(`languages.${locale}` as never)}
     />
   ) : null
+  const overflowPanel = moreOpen ? (
+    <ActionOverflowPanel
+      containerRef={panelRef}
+      placement={placement}
+      actions={overflowActions}
+      label={actionLabel}
+      chords={chords}
+      isMac={isMac}
+      onAction={(id) => {
+        onMoreOpenChange?.(false)
+        onAction(id)
+      }}
+      onClose={() => onMoreOpenChange?.(false)}
+      onResize={remeasure}
+      title={t("more")}
+      backLabel={t("back")}
+      initialParentId={overflowInitialParentId}
+      reduceMotion={reduceMotion}
+    />
+  ) : null
+  const auxiliaryPanel = localePanel ?? overflowPanel
 
   return (
     <>
@@ -115,7 +186,7 @@ export function SelectionToolbarCapsule({
         chords={chords}
         isMac={isMac}
         localeLabel={t(`languages.${targetLocale}` as never)}
-        label={(action) => t(action.labelKey)}
+        label={actionLabel}
       />
 
       <div
@@ -125,88 +196,121 @@ export function SelectionToolbarCapsule({
           placement === "above" ? "justify-end" : "justify-start"
         )}
       >
-        {placement === "above" ? localePanel : null}
-        <motion.div
-          ref={capsuleRef}
-          layout={!reduceMotion}
-          initial={enter}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={exit}
-          // Spring in, tween out. The entrance can afford a spring's
-          // settle because it grows out of the selection anchor and reads as
-          // physical; the exit cannot, because Rust only holds the native
-          // window for EXIT_ANIMATION_MS and a spring's tail would be cropped
-          // mid-flight.
-          transition={
-            reduceMotion
-              ? { duration: 0 }
-              : { ...MOBILE_SPRING, opacity: { duration: MOBILE_DURATION.fast } }
-          }
-          style={{ transformOrigin: placement === "above" ? "bottom center" : "top center" }}
-          className={CAPSULE_CLASS}
-          data-testid="selection-toolbar-capsule"
-          data-placement={placement}
-        >
-          <AnimatePresence mode="popLayout" initial={false}>
-            {phase.kind === "speaking" ? (
-              <SpeechBar
-                key="speech"
-                progress={phase.progress}
-                onStop={onStopSpeech}
-                label={t("stopSpeaking")}
-                reduceMotion={reduceMotion}
-              />
-            ) : phase.kind === "error" ? (
-              <ErrorBar key="error" message={phase.reason} reduceMotion={reduceMotion} />
-            ) : (
-              <motion.div
-                key="actions"
-                layout={!reduceMotion}
-                className="flex items-center gap-0.5"
-                initial={reduceMotion ? false : { opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-                transition={{ duration: reduceMotion ? 0 : MOBILE_DURATION.fast }}
-              >
-                {actions.map((action, index) => (
-                  <ActionButton
-                    key={action.id}
-                    index={index}
-                    action={action}
-                    label={t(action.labelKey)}
-                    chord={action.shortcutId ? chords[action.shortcutId] : undefined}
-                    isMac={isMac}
-                    expanded={hovered === action.id}
-                    phase={phase}
-                    localeOpen={localeOpen}
-                    localeLabel={t(`languages.${targetLocale}` as never)}
-                    chooseLanguageLabel={t("chooseLanguage")}
-                    onHoverChange={onHoverChange}
-                    onAction={onAction}
-                    onLocaleOpenChange={onLocaleOpenChange}
-                    reduceMotion={reduceMotion}
-                  />
-                ))}
-                {truncated ? (
-                  <span
-                    className="ml-0.5 rounded-pill bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
-                    title={t("truncatedHint")}
-                  >
-                    {t("truncated")}
-                  </span>
-                ) : null}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-        {placement === "below" ? localePanel : null}
+        {placement === "above" ? auxiliaryPanel : null}
+        <Surface asChild layer="overlay" radius="pill" elevation={3}>
+          <motion.div
+            ref={capsuleRef}
+            layout={!reduceMotion}
+            initial={enter}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={exit}
+            // Spring in, tween out. The entrance can afford a spring's
+            // settle because it grows out of the selection anchor and reads as
+            // physical. The exit cannot, because Rust only holds the native
+            // window for EXIT_ANIMATION_MS and a spring's tail would be cropped
+            // mid-flight.
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : { ...MOBILE_SPRING, opacity: { duration: MOBILE_DURATION.fast } }
+            }
+            style={{
+              ...SELECTION_GLASS_TINT,
+              transformOrigin: placement === "above" ? "bottom center" : "top center",
+            }}
+            className={cn(CAPSULE_CLASS, SELECTION_GLASS)}
+            data-testid="selection-toolbar-capsule"
+            data-placement={placement}
+          >
+            <AnimatePresence mode="popLayout" initial={false}>
+              {phase.kind === "speaking" ? (
+                <SpeechBar
+                  key="speech"
+                  progress={phase.progress}
+                  onStop={onStopSpeech}
+                  label={t("stopSpeaking")}
+                  reduceMotion={reduceMotion}
+                />
+              ) : phase.kind === "error" ? (
+                <MessageBar
+                  key="error"
+                  tone="error"
+                  message={phase.reason}
+                  reduceMotion={reduceMotion}
+                />
+              ) : phase.kind === "status" ? (
+                <MessageBar
+                  key="status"
+                  tone="status"
+                  message={phase.message}
+                  reduceMotion={reduceMotion}
+                />
+              ) : (
+                <motion.div
+                  key="actions"
+                  layout={!reduceMotion}
+                  role="toolbar"
+                  aria-orientation="horizontal"
+                  aria-label={t("title")}
+                  className="flex items-center gap-0.5"
+                  initial={reduceMotion ? false : { opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+                  transition={{ duration: reduceMotion ? 0 : MOBILE_DURATION.fast }}
+                >
+                  {actions.map((action, index) => (
+                    <Band key={action.id}>
+                      {startsBand(actions, index) ? <SelectionDivider /> : null}
+                      <ActionButton
+                        index={index}
+                        action={action}
+                        label={actionLabel(action)}
+                        chord={action.shortcutId ? chords[action.shortcutId] : action.accelerator}
+                        isMac={isMac}
+                        expanded={hovered === action.id}
+                        phase={phase}
+                        localeOpen={localeOpen}
+                        localeLabel={t(`languages.${targetLocale}` as never)}
+                        chooseLanguageLabel={t("chooseLanguage")}
+                        onHoverChange={onHoverChange}
+                        onAction={onAction}
+                        onLocaleOpenChange={onLocaleOpenChange}
+                        reduceMotion={reduceMotion}
+                      />
+                    </Band>
+                  ))}
+                  {truncated ? (
+                    <span
+                      className="ml-0.5 rounded-pill bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                      title={t("truncatedHint")}
+                    >
+                      {t("truncated")}
+                    </span>
+                  ) : null}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        </Surface>
+        {placement === "below" ? auxiliaryPanel : null}
       </div>
     </>
   )
 }
 
 /**
- * Off-screen mirror of every hover state the capsule can be in — one row per
+ * A keyed pair of siblings: an optional band divider and the button after it.
+ *
+ * `motion` reads its children to drive layout animation, and a bare
+ * `React.Fragment` is transparent to that, so the divider and the button it
+ * precedes stay two independently animated boxes as they must.
+ */
+function Band({ children }: { children: React.ReactNode }) {
+  return <>{children}</>
+}
+
+/**
+ * Off-screen mirror of every hover state the capsule can be in, one row per
  * action, that action expanded. The container is `w-max`, so its width is the
  * widest of them, which is exactly the width the window has to be pinned to.
  *
@@ -214,6 +318,9 @@ export function SelectionToolbarCapsule({
  * expansion becomes pure layout animation with no resize round-trip, so the
  * capsule never flickers and Rust is never asked to move a visible window
  * sixty times while the pointer sweeps the row.
+ *
+ * It mirrors the band dividers too. They are 1px plus margins each, and a row
+ * measured without them is a row that clips its own last label.
  */
 function HoverWidthGhost({
   ref,
@@ -238,28 +345,28 @@ function HoverWidthGhost({
     >
       {actions.map((expandedAction) => (
         <div key={expandedAction.id} className="flex w-max items-center gap-0.5 p-1">
-          {actions.map((action) => {
-            const chord = action.shortcutId ? chords[action.shortcutId] : undefined
+          {actions.map((action, index) => {
+            const chord = action.shortcutId ? chords[action.shortcutId] : action.accelerator
             const isExpanded = action.id === expandedAction.id
             return (
-              <span
-                key={action.id}
-                className="flex h-8 items-center gap-1.5 rounded-pill px-2 text-xs font-medium"
-              >
-                <action.icon className="size-4" />
-                {isExpanded ? (
-                  <span className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span>{label(action)}</span>
-                    {action.hasLocalePicker ? <span>· {localeLabel}</span> : null}
-                    {chord ? (
-                      <kbd className="px-1 py-px font-mono text-[10px] leading-none">
-                        {formatKeybinding(chord, isMac)}
-                      </kbd>
-                    ) : null}
-                  </span>
-                ) : null}
-                {action.hasLocalePicker ? <ChevronDownIcon className="size-3" /> : null}
-              </span>
+              <Band key={action.id}>
+                {startsBand(actions, index) ? <SelectionDivider /> : null}
+                <span className="flex h-8 items-center gap-1.5 rounded-pill px-2 text-xs font-medium">
+                  <action.icon className="size-4" />
+                  {isExpanded ? (
+                    <span className="flex items-center gap-1.5 whitespace-nowrap">
+                      <span>{label(action)}</span>
+                      {action.hasLocalePicker ? <span>· {localeLabel}</span> : null}
+                      {chord ? (
+                        <kbd className="px-1 py-px font-mono text-[10px] leading-none">
+                          {formatKeybinding(chord, isMac)}
+                        </kbd>
+                      ) : null}
+                    </span>
+                  ) : null}
+                  {action.hasLocalePicker ? <ChevronDownIcon className="size-3" /> : null}
+                </span>
+              </Band>
             )
           })}
         </div>
@@ -270,7 +377,7 @@ function HoverWidthGhost({
 
 interface ActionButtonProps {
   index: number
-  action: (typeof SELECTION_ACTIONS)[number]
+  action: SelectionActionDescriptor
   label: string
   chord: string | undefined
   isMac: boolean
@@ -279,8 +386,8 @@ interface ActionButtonProps {
   localeOpen: boolean
   localeLabel: string
   chooseLanguageLabel: string
-  onHoverChange: (id: SelectionActionId | null) => void
-  onAction: (id: SelectionActionId) => void
+  onHoverChange: (id: string | null) => void
+  onAction: (id: string) => void
   onLocaleOpenChange: (open: boolean) => void
   reduceMotion: boolean
 }
@@ -329,6 +436,7 @@ function ActionButton({
         layout={!reduceMotion}
         aria-label={label}
         aria-keyshortcuts={chord}
+        aria-haspopup={action.isMore || action.children?.length ? "menu" : undefined}
         disabled={phase.kind === "pending"}
         whileTap={reduceMotion ? undefined : { scale: 0.96 }}
         onClick={() => onAction(action.id)}
@@ -346,7 +454,7 @@ function ActionButton({
             initial={reduceMotion ? false : { scale: 0.6, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={reduceMotion ? { duration: 0 } : MOBILE_SPRING}
-            className="flex"
+            className="flex text-success"
           >
             <CheckIcon className="size-4" />
           </motion.span>
@@ -372,7 +480,7 @@ function ActionButton({
                 <span className="text-muted-foreground">· {localeLabel}</span>
               ) : null}
               {chord ? (
-                <kbd className="rounded bg-foreground/10 px-1 py-px font-mono text-[10px] leading-none text-muted-foreground">
+                <kbd className="rounded-control bg-foreground/10 px-1 py-px font-mono text-[10px] leading-none text-muted-foreground">
                   {formatKeybinding(chord, isMac)}
                 </kbd>
               ) : null}
@@ -406,11 +514,127 @@ function ActionButton({
         <motion.span
           layoutId={reduceMotion ? undefined : HIGHLIGHT_LAYOUT_ID}
           transition={MOBILE_SPRING}
-          className="absolute inset-0 rounded-full bg-accent"
+          className="absolute inset-0 rounded-pill bg-accent"
           aria-hidden
         />
       ) : null}
     </motion.div>
+  )
+}
+
+/**
+ * The More menu, one page deep.
+ *
+ * A parent with `children` (the built-in rewrite modes, or any plugin action
+ * that declares sub-actions) opens as a second page rather than as a nested
+ * flyout. A flyout would have to escape the measured shell to have anywhere to
+ * go, and ADR-0093 forbids that: the native window is sized from the shell's
+ * bounding box, so anything outside it is simply cropped.
+ */
+function ActionOverflowPanel({
+  containerRef,
+  placement,
+  actions,
+  label,
+  chords,
+  isMac,
+  onAction,
+  onClose,
+  onResize,
+  reduceMotion,
+  title,
+  backLabel,
+  initialParentId,
+}: {
+  containerRef: React.RefObject<HTMLElement | null>
+  placement: SelectionToolbarPlacement
+  actions: readonly SelectionActionDescriptor[]
+  label: (action: SelectionActionDescriptor) => string
+  chords: Record<string, string>
+  isMac: boolean
+  onAction: (id: string) => void
+  onClose: () => void
+  onResize: () => void
+  reduceMotion: boolean
+  title: string
+  backLabel: string
+  initialParentId?: string
+}) {
+  const [selectedParentId, setSelectedParentId] = useState<string | null | undefined>(undefined)
+  const parentId = selectedParentId === undefined ? initialParentId : selectedParentId
+  const parent = parentId ? (actions.find((action) => action.id === parentId) ?? null) : null
+  const shownActions: SelectionActionDescriptor[] = parent?.children
+    ? parent.children.map((child) => ({
+        id: child.id,
+        icon: parent.icon,
+        label: child.title,
+        mode: parent.mode,
+        priority: parent.priority,
+        pluginActionId: child.id,
+        // No attribution on a child row. The user reached this page through
+        // the parent, whose own row named the owner, so repeating it once per
+        // mode is a column of the same word.
+      }))
+    : [...actions]
+
+  return (
+    <SelectionListPanel
+      containerRef={containerRef}
+      placement={placement}
+      reduceMotion={reduceMotion}
+      role="menu"
+      label={parent ? label(parent) : title}
+      onClose={onClose}
+      // Skip the Back row: it is a way out, never the thing the user came for.
+      focusIndex={parent ? 1 : 0}
+      pageKey={parent?.id ?? "root"}
+      onResize={onResize}
+      className="min-w-52"
+    >
+      {parent ? (
+        <>
+          <SelectionListItem
+            role="menuitem"
+            label={backLabel}
+            icon={<ArrowLeftIcon className="size-4" />}
+            onClick={() => setSelectedParentId(null)}
+            active
+          />
+          <SelectionDivider className="mx-1 my-1 h-px w-auto" />
+        </>
+      ) : null}
+      {shownActions.map((action, index) => {
+        const chord = action.shortcutId ? chords[action.shortcutId] : action.accelerator
+        return (
+          <SelectionListItem
+            key={action.id}
+            role="menuitem"
+            label={label(action)}
+            icon={<action.icon className="size-4" />}
+            active={!parent && index === 0}
+            // The plugin's own attribution, not the id's first segment. A row
+            // reading `com.acme.tools` where the plugin is called "Acme Tools"
+            // is the registry leaking into product copy.
+            hint={
+              chord ? (
+                <kbd className="font-mono">{formatKeybinding(chord, isMac)}</kbd>
+              ) : (
+                (action.attribution ?? undefined)
+              )
+            }
+            trailing={
+              action.children?.length ? (
+                <ChevronDownIcon className="size-3 -rotate-90 text-muted-foreground" />
+              ) : null
+            }
+            onClick={() => {
+              if (action.children?.length) setSelectedParentId(action.id)
+              else onAction(action.id)
+            }}
+          />
+        )
+      })}
+    </SelectionListPanel>
   )
 }
 
@@ -420,109 +644,49 @@ function LocalePanel({
   targetLocale,
   onSelect,
   onClose,
+  onResize,
   reduceMotion,
+  title,
   label,
 }: {
-  /** Reported to Rust as a hit rect — see `useSelectionToolbarGeometry`. */
   containerRef: React.RefObject<HTMLElement | null>
   placement: SelectionToolbarPlacement
   targetLocale: TargetLocale
   onSelect: (locale: TargetLocale) => void
   onClose: () => void
+  onResize: () => void
   reduceMotion: boolean
+  title: string
   label: (locale: TargetLocale) => string
 }) {
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
-
-  // Rust focuses the window while this panel is open (`set_interactive`), so
-  // the keyboard genuinely reaches it. Land on the current target rather than
-  // nowhere — this replaced a Radix DropdownMenu, which did roving focus for
-  // free, and dropping that would have made the panel mouse-only.
-  useEffect(() => {
-    const index = TARGET_LOCALES.indexOf(targetLocale)
-    optionRefs.current[index >= 0 ? index : 0]?.focus()
-    // Deliberately mount-only: re-focusing whenever the target changes would
-    // fight the user's own arrow-key movement.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const moveFocus = (from: number, delta: number) => {
-    const count = TARGET_LOCALES.length
-    optionRefs.current[(from + delta + count) % count]?.focus()
-  }
-
-  const onKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
-    const index = optionRefs.current.findIndex((option) => option === document.activeElement)
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault()
-        moveFocus(index < 0 ? -1 : index, 1)
-        break
-      case "ArrowUp":
-        event.preventDefault()
-        moveFocus(index < 0 ? 1 : index, -1)
-        break
-      case "Home":
-        event.preventDefault()
-        optionRefs.current[0]?.focus()
-        break
-      case "End":
-        event.preventDefault()
-        optionRefs.current[TARGET_LOCALES.length - 1]?.focus()
-        break
-      case "Escape":
-        event.preventDefault()
-        onClose()
-        break
-      default:
-        break
-    }
-  }
-
+  const current = TARGET_LOCALES.indexOf(targetLocale)
   return (
-    <motion.ul
-      ref={(node) => {
-        containerRef.current = node
-      }}
-      onKeyDown={onKeyDown}
-      // Rendered inline instead of in a Radix portal: the native window is
-      // sized from this shell's bounding box, and a portalled `position: fixed`
-      // menu would sit outside it — so the window would never grow to contain
-      // the menu and it would be clipped by `overflow: hidden`.
+    <SelectionListPanel
+      containerRef={containerRef}
+      placement={placement}
+      reduceMotion={reduceMotion}
       role="listbox"
-      aria-orientation="vertical"
-      initial={
-        reduceMotion ? false : { opacity: 0, scale: 0.96, y: placement === "above" ? 6 : -6 }
-      }
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
-      transition={
-        reduceMotion ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
-      }
-      style={{ transformOrigin: placement === "above" ? "bottom center" : "top center" }}
-      className="pointer-events-auto flex w-max min-w-36 flex-col rounded-xl border bg-popover/95 p-1 text-popover-foreground shadow-xl backdrop-blur-xl"
+      label={title}
+      onClose={onClose}
+      // Land on the current target rather than nowhere.
+      focusIndex={current >= 0 ? current : 0}
+      onResize={onResize}
+      className="min-w-40"
     >
-      {TARGET_LOCALES.map((locale, index) => (
-        <li key={locale}>
-          <button
-            type="button"
-            role="option"
-            ref={(node) => {
-              optionRefs.current[index] = node
-            }}
-            aria-selected={locale === targetLocale}
-            // Roving tabindex: one stop for the whole list, as a listbox should
-            // have — Tab moves past it, arrows move within it.
-            tabIndex={locale === targetLocale ? 0 : -1}
-            onClick={() => onSelect(locale)}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent focus:bg-accent focus:outline-none"
-          >
-            <span className="flex-1">{label(locale)}</span>
-            {locale === targetLocale ? <CheckIcon className="size-3.5" /> : null}
-          </button>
-        </li>
+      {TARGET_LOCALES.map((locale) => (
+        <SelectionListItem
+          key={locale}
+          role="option"
+          label={label(locale)}
+          selected={locale === targetLocale}
+          active={locale === targetLocale}
+          onClick={() => onSelect(locale)}
+          trailing={
+            locale === targetLocale ? <CheckIcon className="size-3.5 shrink-0" /> : undefined
+          }
+        />
       ))}
-    </motion.ul>
+    </SelectionListPanel>
   )
 }
 
@@ -555,10 +719,10 @@ function SpeechBar({
         aria-label={label}
         whileTap={reduceMotion ? undefined : { scale: 0.96 }}
         onClick={onStop}
-        className="flex size-8 items-center justify-center rounded-full hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        className="flex size-8 items-center justify-center rounded-full transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
       >
         {/*
-          A filled `SquareIcon` reads as a solid block against the pill — too
+          A filled `SquareIcon` reads as a solid block against the pill, too
           heavy, and closer to a record indicator than a stop button. A small
           rounded rect is the transport convention and sits with the capsule's
           own radius.
@@ -577,7 +741,7 @@ function SpeechBar({
             className="w-0.5 rounded-full bg-foreground/60"
             // Baseline 6px, not 4: at the trough of the loop the bars are the
             // only thing saying "still playing", and 4px reads as a dotted
-            // line rather than a waveform.
+            // line rather than as a waveform.
             initial={{ height: 6 }}
             animate={
               reduceMotion
@@ -606,22 +770,43 @@ function SpeechBar({
   )
 }
 
-function ErrorBar({ message, reduceMotion }: { message: string; reduceMotion: boolean }) {
+/**
+ * The one shape a sentence takes inside the pill.
+ *
+ * A refused write and a plugin's own status line are the same event as far as
+ * the capsule is concerned: the action row is gone and one line of text has
+ * taken its place. They differ in tone and in which live region announces
+ * them, and in nothing else, so they are one component with two settings
+ * rather than two components that were already drifting apart.
+ */
+function MessageBar({
+  tone,
+  message,
+  reduceMotion,
+}: {
+  tone: "error" | "status"
+  message: string
+  reduceMotion: boolean
+}) {
+  const Icon = tone === "error" ? TriangleAlertIcon : InfoIcon
   return (
     <motion.div
-      key="error"
+      key={tone}
       layout={!reduceMotion}
-      role="alert"
+      role={tone === "error" ? "alert" : "status"}
       initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
       transition={
         reduceMotion ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
       }
-      className="flex items-center gap-2 px-2 py-1 text-xs text-warning"
+      className={cn(
+        "flex items-center gap-2 px-2 py-1 text-xs",
+        tone === "error" ? "text-warning" : "text-muted-foreground"
+      )}
     >
-      <TriangleAlertIcon className="size-4 shrink-0" />
-      <span className="whitespace-nowrap">{message}</span>
+      <Icon className="size-4 shrink-0" />
+      <span className="max-w-80 truncate whitespace-nowrap">{message}</span>
     </motion.div>
   )
 }

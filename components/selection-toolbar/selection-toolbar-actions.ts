@@ -80,10 +80,12 @@ export type SelectionActionId =
 export type SelectionActionMode = "local" | "handoff" | "await" | "launch"
 
 export interface SelectionActionDescriptor {
-  id: SelectionActionId
+  id: string
   icon: LucideIcon
   /** Key under the `selectionToolbar` namespace. */
-  labelKey: SelectionActionId
+  labelKey?: SelectionActionId
+  /** Host-resolved label for plugin-contributed actions. */
+  label?: string
   /**
    * Matches an id in the Rust `SELECTION_ACTION_SHORTCUTS` table.
    *
@@ -106,6 +108,26 @@ export interface SelectionActionDescriptor {
    * Higher goes first; `copy` is `0` and is never evicted.
    */
   priority: number
+  pluginActionId?: string
+  isMore?: boolean
+  children?: Array<{ id: string; title: string }>
+  /**
+   * Who contributed this action, in the words the user would recognise: the
+   * plugin's display name, or "Cognia" for the host's own extras.
+   *
+   * Rendered as the muted end of an overflow row. The panel used to derive
+   * that from `pluginActionId.split(":")[0]`, which prints a registry id where
+   * a product name belongs.
+   */
+  attribution?: string
+  /**
+   * Plugin-declared chord, already bound through the plugin shortcut bridge.
+   *
+   * Separate from `shortcutId` because the two resolve differently: the six
+   * stable actions look their chord up in the live registry (the user may have
+   * re-bound it), while a plugin ships a literal accelerator with its manifest.
+   */
+  accelerator?: string
 }
 
 export const SELECTION_ACTIONS: readonly SelectionActionDescriptor[] = [
@@ -193,6 +215,20 @@ export const SELECTION_ACTIONS: readonly SelectionActionDescriptor[] = [
   },
 ] as const
 
+/**
+ * AX subrole of a password field.
+ *
+ * Rust already refuses to read secure fields, so nothing downstream of this
+ * constant should ever see one. It exists so the three places that act on that
+ * fact name it once instead of spelling the literal out again.
+ */
+export const SECURE_TEXT_FIELD_SUBROLE = "AXSecureTextField"
+
+/** Whether this candidate came out of a password field. */
+export function selectionIsSecure(candidate: { sourceSubrole?: string }): boolean {
+  return candidate.sourceSubrole === SECURE_TEXT_FIELD_SUBROLE
+}
+
 /** How many buttons the capsule will show at once. */
 export const MAX_VISIBLE_ACTIONS = 6
 /** How many contextual actions may appear together. */
@@ -217,7 +253,7 @@ export function isActionSuppressed(
   action: SelectionActionDescriptor,
   candidate: { origin?: string; sourceSubrole?: string }
 ): boolean {
-  if (candidate.sourceSubrole === "AXSecureTextField") return true
+  if (selectionIsSecure(candidate)) return true
   if (candidate.origin === "ocr") {
     return action.id === "openLink" || action.id === "composeEmail"
   }
@@ -245,7 +281,7 @@ export function resolveVisibleActions(input: {
 }): readonly SelectionActionDescriptor[] {
   const { types, candidate, contextualEnabled } = input
 
-  if (candidate.sourceSubrole === "AXSecureTextField") return []
+  if (selectionIsSecure(candidate)) return []
   if (!contextualEnabled) return GENERIC_ACTIONS
 
   const matched = CONTEXTUAL_ACTIONS.filter(
@@ -268,7 +304,10 @@ export function resolveVisibleActions(input: {
     return bPriority - aPriority
   })
 
-  const evicted = new Set<SelectionActionId>()
+  // Keyed by the descriptor's own id type, which is `string` now that plugin
+  // actions share this shape. A narrower set here does not make the loop any
+  // safer, it just fails to compile.
+  const evicted = new Set<string>()
   for (const action of evictionOrder) {
     if (kept.length - evicted.size + matched.length <= MAX_VISIBLE_ACTIONS) break
     if (action.id === "copy") continue
@@ -297,6 +336,6 @@ export function findActionByShortcutId(
   return SELECTION_ACTIONS.find((action) => action.shortcutId === shortcutId)
 }
 
-export function findAction(id: SelectionActionId): SelectionActionDescriptor | undefined {
+export function findAction(id: string): SelectionActionDescriptor | undefined {
   return SELECTION_ACTIONS.find((action) => action.id === id)
 }

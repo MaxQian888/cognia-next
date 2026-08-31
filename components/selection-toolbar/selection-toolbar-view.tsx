@@ -22,14 +22,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, useReducedMotion } from "motion/react"
 import { emitTo, listen } from "@tauri-apps/api/event"
 import { useLocale, useTranslations } from "next-intl"
+import { MoreHorizontalIcon, PuzzleIcon, WandSparklesIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { resolveLucideIcon } from "@/lib/icons/lucide-catalog"
 import { getPref, setPref } from "@/lib/tauri/store"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { isTauri } from "@/lib/tauri"
 import { isMacPlatform } from "@/lib/tauri/os"
 import {
   executeSelectionToolbarAction,
+  copySelectionActionResult,
+  replaceCurrentSelection,
+  undoSelectionReplacement,
   finishSelectionToolbar,
   getCurrentSelectionCandidate,
   listShortcutChords,
@@ -38,6 +43,11 @@ import {
   SELECTION_DISMISS_EVENT,
   SELECTION_ESCAPE_EVENT,
   SELECTION_RESULT_EVENT,
+  SELECTION_ACTION_CATALOG_EVENT,
+  SELECTION_ACTION_REQUEST_EVENT,
+  SELECTION_ACTION_RESULT_EVENT,
+  SELECTION_ACTION_LAYOUT_PREF,
+  SELECTION_OPEN_RESULT_EVENT,
   SELECTION_SHADOW_PAD,
   SELECTION_SHORTCUT_EVENT,
   SELECTION_SPEECH_EVENT,
@@ -46,6 +56,8 @@ import {
   setSelectionToolbarKeepAlive,
   type ExternalSelectionCandidate,
   type SelectionResultPayload,
+  type SelectionActionCatalogPayload,
+  type SelectionActionExecutionPayload,
   type SelectionShortcutPayload,
   type SelectionSpeechPayload,
   type SelectionToolbarAction,
@@ -61,6 +73,7 @@ import {
   findActionByShortcutId,
   initialTargetLocale,
   resolveVisibleActions,
+  selectionIsSecure,
   SELECTION_CONTEXTUAL_ACTIONS_PREF,
   SELECTION_TRANSLATE_LOCALE_PREF,
   TARGET_LOCALES,
@@ -68,7 +81,16 @@ import {
   type TargetLocale,
 } from "./selection-toolbar-actions"
 import { SelectionToolbarCapsule, type SelectionToolbarPhase } from "./selection-toolbar-capsule"
+import { SelectionResultPanel, SelectionResultPanelShell } from "./selection-result-panel"
 import { useSelectionToolbarGeometry } from "./use-selection-toolbar-geometry"
+import {
+  normalizeSelectionActionLayout,
+  type SelectionActionLayout,
+} from "@/lib/selection/preferences"
+import {
+  resolveSelectionActionSlots,
+  type SelectionHostActionDescriptor,
+} from "@/lib/selection/action-layout"
 
 /** How long a ✓ stays up before the toolbar leaves. */
 const SUCCESS_DWELL_MS = 420
@@ -112,12 +134,26 @@ export function SelectionToolbarView() {
 
   const [candidate, setCandidate] = useState<ExternalSelectionCandidate | null>(null)
   const [phase, setPhase] = useState<SelectionToolbarPhase>({ kind: "idle" })
-  const [hovered, setHovered] = useState<SelectionActionId | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
   const [localeOpen, setLocaleOpen] = useState(false)
   const [chords, setChords] = useState<Record<string, string>>({})
   const [targetLocale, setTargetLocale] = useState<TargetLocale>(() => initialTargetLocale(locale))
   const [contextualEnabled, setContextualEnabled] = useState(true)
   const [searchEngine, setSearchEngine] = useState(() => defaultSearchEngine(locale))
+  const [pluginActions, setPluginActions] = useState<SelectionHostActionDescriptor[]>([])
+  const [actionLayout, setActionLayout] = useState<SelectionActionLayout>({
+    ordered: [],
+    hidden: [],
+    pinned: [],
+  })
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [submenuActionId, setSubmenuActionId] = useState<string | null>(null)
+  const [execution, setExecution] = useState<SelectionActionExecutionPayload | null>(null)
+  const [undoAvailable, setUndoAvailable] = useState(false)
+  const [replaceUnavailableReason, setReplaceUnavailableReason] = useState<string | undefined>()
+  const [resultError, setResultError] = useState<string | undefined>()
+  const pendingRequestRef = useRef<string | null>(null)
+  const candidateIdRef = useRef<string | null>(null)
   const isMac = useMemo(() => isMacPlatform(), [])
 
   // Pure and synchronous, so the buttons a selection deserves are known on the
@@ -127,7 +163,7 @@ export function SelectionToolbarView() {
     () => classifySelection(candidate?.text ?? "", { uiLocale: locale }),
     [candidate?.text, locale]
   )
-  const visibleActions = useMemo(
+  const builtInActions = useMemo(
     () =>
       resolveVisibleActions({
         types: classification.types,
@@ -139,6 +175,75 @@ export function SelectionToolbarView() {
       }),
     [classification.types, candidate?.origin, candidate?.sourceSubrole, contextualEnabled]
   )
+
+  const secure = selectionIsSecure({ sourceSubrole: candidate?.sourceSubrole })
+
+  const { visibleActions, overflowActions } = useMemo(() => {
+    // `resolveVisibleActions` already withholds every built-in from a password
+    // field, but the slot resolver merges plugin ids in beside them, so
+    // withholding the built-ins alone would leave a capsule made entirely of
+    // third-party buttons over a password. The rule belongs to the candidate,
+    // not to the built-in table.
+    if (secure) return { visibleActions: [], overflowActions: [] }
+    const slots = resolveSelectionActionSlots({
+      builtInIds: builtInActions.map((action) => action.id),
+      pluginActions,
+      layout: actionLayout,
+    })
+    const pluginById = new Map(pluginActions.map((action) => [action.id, action]))
+    const toDescriptor = (id: string) => {
+      const builtIn = findAction(id)
+      if (builtIn) return builtIn
+      const plugin = pluginById.get(id)
+      if (!plugin) return undefined
+      return {
+        id: plugin.id,
+        // The manifest's own icon, through the same catalog the plugin
+        // validator admits names against, so what a manifest may declare is
+        // what actually draws. The two fallbacks stay meaningful: a wand for
+        // the host's own extras, a puzzle piece for third-party ones.
+        icon:
+          resolveLucideIcon(plugin.icon) ??
+          (plugin.source === "cognia" ? WandSparklesIcon : PuzzleIcon),
+        label: plugin.title,
+        mode: "await" as const,
+        priority: 50,
+        pluginActionId: plugin.id,
+        children: plugin.children,
+        attribution: plugin.attribution,
+        accelerator: plugin.accelerator,
+      }
+    }
+    let primaryIds = [...slots.primaryIds]
+    const moreIds = [...slots.overflowIds]
+    if (moreIds.length > 0) {
+      const removable = [...primaryIds]
+        .reverse()
+        .find((id) => id !== "copy" && !actionLayout.pinned.includes(id))
+      const evicted = removable ?? primaryIds[primaryIds.length - 1]
+      if (evicted) {
+        primaryIds = primaryIds.filter((id) => id !== evicted)
+        moreIds.unshift(evicted)
+      }
+      primaryIds.push("__more")
+    }
+    const moreDescriptor = {
+      id: "__more",
+      icon: MoreHorizontalIcon,
+      label: t("more"),
+      mode: "local" as const,
+      priority: 101,
+      isMore: true,
+    }
+    return {
+      visibleActions: primaryIds
+        .map((id) => (id === "__more" ? moreDescriptor : toDescriptor(id)))
+        .filter((action): action is NonNullable<typeof action> => Boolean(action)),
+      overflowActions: moreIds
+        .map(toDescriptor)
+        .filter((action): action is NonNullable<typeof action> => Boolean(action)),
+    }
+  }, [actionLayout, builtInActions, pluginActions, secure, t])
 
   const dwellRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearDwell = useCallback(() => {
@@ -152,11 +257,29 @@ export function SelectionToolbarView() {
   // every change and pushes the result to Rust.
   const contentKey = [
     candidate?.id ?? "none",
+    // The row itself. The plugin catalog arrives asynchronously and can add a
+    // More button and evict an action, and the panels are sized from the same
+    // measurement — leaving this out left a window measured for the row the
+    // capsule had a moment ago, with `overflow: hidden` cropping the rest.
+    visibleActions.map((action) => action.id).join(","),
+    overflowActions.length,
+    submenuActionId ?? "",
     phase.kind,
-    phase.kind === "pending" || phase.kind === "ok" || phase.kind === "error" ? phase.action : "",
+    phase.kind === "pending" ||
+    phase.kind === "ok" ||
+    phase.kind === "error" ||
+    phase.kind === "status"
+      ? phase.action
+      : "",
     phase.kind === "speaking" && phase.progress !== undefined ? "p" : "",
     hovered ?? "",
     localeOpen ? "menu" : "",
+    moreOpen ? "more" : "",
+    execution?.requestId ?? "",
+    // The result sheet grows a row for each of these.
+    undoAvailable ? "undo" : "",
+    replaceUnavailableReason ?? "",
+    resultError ?? "",
     targetLocale,
     candidate?.truncated ? "trunc" : "",
     Object.keys(chords).length,
@@ -175,7 +298,10 @@ export function SelectionToolbarView() {
 
     void Promise.all([
       getCurrentSelectionCandidate().then((current) => {
-        if (alive) setCandidate(current)
+        if (alive) {
+          candidateIdRef.current = current?.id ?? null
+          setCandidate(current)
+        }
       }),
       listShortcutChords().then((bound) => {
         if (alive) setChords(bound)
@@ -193,13 +319,28 @@ export function SelectionToolbarView() {
       getPref<string>(SELECTION_SEARCH_ENGINE_PREF).then((saved) => {
         if (alive && isSearchEngineId(saved)) setSearchEngine(saved)
       }),
+      getPref<SelectionActionLayout>(SELECTION_ACTION_LAYOUT_PREF).then((saved) => {
+        if (alive) setActionLayout(normalizeSelectionActionLayout(saved))
+      }),
       listen<ExternalSelectionCandidate>(SELECTION_CANDIDATE_EVENT, (event) => {
         if (!alive) return
         clearDwell()
+        candidateIdRef.current = event.payload.id
         setCandidate(event.payload)
         setPhase({ kind: "idle" })
         setHovered(null)
         setLocaleOpen(false)
+        setMoreOpen(false)
+        setSubmenuActionId(null)
+        setExecution(null)
+        setUndoAvailable(false)
+        setReplaceUnavailableReason(undefined)
+        setResultError(undefined)
+      }).then(track),
+      listen<SelectionActionCatalogPayload>(SELECTION_ACTION_CATALOG_EVENT, (event) => {
+        if (alive && candidateIdRef.current === event.payload.candidateId) {
+          setPluginActions(event.payload.actions)
+        }
       }).then(track),
       listen(SELECTION_ESCAPE_EVENT, () => {
         // Rust only routes Escape here while a sub-panel owns focus; closing it
@@ -209,6 +350,7 @@ export function SelectionToolbarView() {
       listen(SELECTION_DISMISS_EVENT, () => {
         if (!alive) return
         clearDwell()
+        candidateIdRef.current = null
         // Unmounting drives the AnimatePresence exit; Rust holds the native
         // hide back by EXIT_ANIMATION_MS for idle/completed dismissals so the
         // animation is actually on screen.
@@ -216,6 +358,12 @@ export function SelectionToolbarView() {
         setPhase({ kind: "idle" })
         setHovered(null)
         setLocaleOpen(false)
+        setMoreOpen(false)
+        setSubmenuActionId(null)
+        setExecution(null)
+        setPluginActions([])
+        setUndoAvailable(false)
+        setResultError(undefined)
       }).then(track),
     ])
 
@@ -238,27 +386,56 @@ export function SelectionToolbarView() {
 
   // Freeze the idle countdown whenever the user is engaged with the toolbar or
   // something is still in flight.
-  const busy = phase.kind !== "idle"
+  const busy = phase.kind !== "idle" || execution !== null
   useEffect(() => {
     if (!candidate) return
-    void setSelectionToolbarKeepAlive(hovered !== null || localeOpen || busy)
-  }, [candidate, hovered, localeOpen, busy])
+    void setSelectionToolbarKeepAlive(hovered !== null || localeOpen || moreOpen || busy)
+  }, [candidate, hovered, localeOpen, moreOpen, busy])
 
   useEffect(() => {
     if (!candidate) return
-    void setSelectionToolbarInteractive(localeOpen)
-  }, [candidate, localeOpen])
+    void setSelectionToolbarInteractive(localeOpen || moreOpen)
+  }, [candidate, localeOpen, moreOpen])
 
   const finish = useCallback((candidateId: string) => {
     void finishSelectionToolbar(candidateId)
   }, [])
 
   const runAction = useCallback(
-    (id: SelectionActionId) => {
+    (id: string) => {
       if (!candidate) return
+      if (id === "__more") {
+        setLocaleOpen(false)
+        setSubmenuActionId(null)
+        setMoreOpen((open) => !open)
+        return
+      }
+      const plugin = pluginActions.find(
+        (action) => action.id === id || action.children?.some((child) => child.id === id)
+      )
+      if (plugin) {
+        if (plugin.id === id && plugin.children?.length) {
+          setLocaleOpen(false)
+          setSubmenuActionId(id)
+          setMoreOpen(true)
+          return
+        }
+        const requestId = globalThis.crypto.randomUUID()
+        pendingRequestRef.current = requestId
+        setMoreOpen(false)
+        setLocaleOpen(false)
+        setExecution(null)
+        setPhase({ kind: "pending", action: id })
+        void emitTo(MAIN_WINDOW_LABEL, SELECTION_ACTION_REQUEST_EVENT, {
+          requestId,
+          candidateId: candidate.id,
+          actionId: id,
+        })
+        return
+      }
       const descriptor = findAction(id)
       if (!descriptor || phase.kind === "pending") return
-      const action = toAction(id, targetLocale, classification, searchEngine)
+      const action = toAction(id as SelectionActionId, targetLocale, classification, searchEngine)
       // The classification that made a contextual button visible has gone
       // missing. Doing nothing beats guessing a URL to open.
       if (!action) return
@@ -287,8 +464,87 @@ export function SelectionToolbarView() {
           dwellRef.current = setTimeout(() => finish(candidate.id), ERROR_DWELL_MS)
         })
     },
-    [candidate, phase.kind, targetLocale, classification, searchEngine, clearDwell, finish, t]
+    [
+      candidate,
+      pluginActions,
+      phase.kind,
+      targetLocale,
+      classification,
+      searchEngine,
+      clearDwell,
+      finish,
+      t,
+    ]
   )
+
+  const canReplaceCandidate = Boolean(
+    candidate &&
+    candidate.origin === "accessibility" &&
+    candidate.editable &&
+    candidate.replaceCapability === "paste" &&
+    !candidate.truncated
+  )
+
+  const replaceResult = useCallback(
+    async (text: string) => {
+      if (!candidate) return
+      setResultError(undefined)
+      try {
+        const result = await replaceCurrentSelection(candidate.id, text)
+        if (result.replaced) {
+          setUndoAvailable(Boolean(result.undoExpiresAt))
+          setReplaceUnavailableReason(undefined)
+          return
+        }
+        setReplaceUnavailableReason(
+          result.reason === "stale" || result.reason === "selectionChanged"
+            ? "replaceUnavailable.stale"
+            : result.reason === "rolloutDisabled"
+              ? // Not a property of the field. Saying "not editable" here sent
+                // the user to check a text field that was fine.
+                "replaceUnavailable.rolloutDisabled"
+              : "replaceUnavailable.notEditable"
+        )
+      } catch {
+        setResultError(t("errors.generic"))
+      }
+    },
+    [candidate, t]
+  )
+
+  const copyGeneratedResult = useCallback(
+    (text: string) => {
+      if (!candidate) return
+      setResultError(undefined)
+      void copySelectionActionResult(candidate.id, text).catch(() => {
+        setResultError(t("errors.generic"))
+      })
+    },
+    [candidate, t]
+  )
+
+  const openGeneratedResult = useCallback(
+    (text: string) => {
+      if (!candidate || !execution) return
+      void emitTo(MAIN_WINDOW_LABEL, SELECTION_OPEN_RESULT_EVENT, {
+        candidateId: candidate.id,
+        text,
+        attribution: execution.attribution ?? t("cogniaAttribution"),
+      })
+      setExecution(null)
+    },
+    [candidate, execution, t]
+  )
+
+  const undoReplacement = useCallback(() => {
+    if (!candidate) return
+    void undoSelectionReplacement(candidate.id)
+      .then((undone) => {
+        if (undone) setUndoAvailable(false)
+        else setResultError(t("errors.generic"))
+      })
+      .catch(() => setResultError(t("errors.generic")))
+  }, [candidate, t])
 
   // Results and playback state arrive from the main window, which owns the
   // memory writer and the single `ttsOrchestrator` shared with chat and the pet.
@@ -315,6 +571,70 @@ export function SelectionToolbarView() {
         setPhase({ kind: "error", action: "remember", reason })
         dwellRef.current = setTimeout(() => finish(candidate.id), ERROR_DWELL_MS)
       }).then(track),
+      listen<SelectionActionExecutionPayload>(SELECTION_ACTION_RESULT_EVENT, (event) => {
+        if (
+          !alive ||
+          event.payload.candidateId !== candidate.id ||
+          event.payload.requestId !== pendingRequestRef.current
+        ) {
+          return
+        }
+        pendingRequestRef.current = null
+        clearDwell()
+        if (!event.payload.ok) {
+          setPhase({ kind: "error", action: event.payload.actionId, reason: t("errors.generic") })
+          dwellRef.current = setTimeout(() => setPhase({ kind: "idle" }), ERROR_DWELL_MS)
+          return
+        }
+        const result = event.payload.result
+        if (!result || result.kind === "status") {
+          if (result?.kind === "status" && result.message) {
+            setPhase({ kind: "status", action: event.payload.actionId, message: result.message })
+            dwellRef.current = setTimeout(() => setPhase({ kind: "idle" }), ERROR_DWELL_MS)
+            return
+          }
+          setPhase({ kind: "ok", action: event.payload.actionId })
+          dwellRef.current = setTimeout(() => setPhase({ kind: "idle" }), SUCCESS_DWELL_MS)
+          return
+        }
+        if (event.payload.output === "copy" && result.kind === "text") {
+          void copySelectionActionResult(candidate.id, result.text)
+            .then(() => {
+              if (!alive) return
+              setPhase({ kind: "ok", action: event.payload.actionId })
+              dwellRef.current = setTimeout(() => setPhase({ kind: "idle" }), SUCCESS_DWELL_MS)
+            })
+            .catch(() => {
+              if (alive) {
+                setPhase({
+                  kind: "error",
+                  action: event.payload.actionId,
+                  reason: t("errors.generic"),
+                })
+              }
+            })
+          return
+        }
+        setPhase({ kind: "idle" })
+        setExecution(event.payload)
+        setReplaceUnavailableReason(
+          candidate.origin === "ocr"
+            ? "replaceUnavailable.ocr"
+            : candidate.origin === "clipboard"
+              ? "replaceUnavailable.clipboard"
+              : canReplaceCandidate
+                ? undefined
+                : "replaceUnavailable.notEditable"
+        )
+        if (
+          event.payload.directReplaceAllowed &&
+          event.payload.output === "replace" &&
+          result.kind === "text" &&
+          canReplaceCandidate
+        ) {
+          void replaceResult(result.text)
+        }
+      }).then(track),
       listen<SelectionSpeechPayload>(SELECTION_SPEECH_EVENT, (event) => {
         if (!alive || event.payload.candidateId !== candidate.id) return
         if (event.payload.playing) {
@@ -326,6 +646,10 @@ export function SelectionToolbarView() {
       }).then(track),
       listen<SelectionShortcutPayload>(SELECTION_SHORTCUT_EVENT, (event) => {
         if (!alive || event.payload.candidateId !== candidate.id) return
+        if (event.payload.shortcutId.startsWith("selection.action:")) {
+          runAction(event.payload.shortcutId.slice("selection.action:".length))
+          return
+        }
         const descriptor = findActionByShortcutId(event.payload.shortcutId)
         if (descriptor) runAction(descriptor.id)
       }).then(track),
@@ -335,7 +659,7 @@ export function SelectionToolbarView() {
       alive = false
       unlistens.forEach(safeUnlisten)
     }
-  }, [candidate, clearDwell, finish, runAction, t])
+  }, [candidate, canReplaceCandidate, clearDwell, finish, replaceResult, runAction, t])
 
   useEffect(() => clearDwell, [clearDwell])
 
@@ -354,6 +678,11 @@ export function SelectionToolbarView() {
     if (!candidate) return
     void emitTo(MAIN_WINDOW_LABEL, SELECTION_SPEECH_STOP_EVENT, { candidateId: candidate.id })
   }, [candidate])
+
+  const generatedResult =
+    execution?.result?.kind === "text" || execution?.result?.kind === "variants"
+      ? execution.result
+      : null
 
   return (
     <div
@@ -377,25 +706,71 @@ export function SelectionToolbarView() {
       }
     >
       <AnimatePresence>
-        {candidate ? (
-          <SelectionToolbarCapsule
-            key={candidate.id}
-            geometry={geometry}
-            actions={visibleActions}
-            phase={phase}
-            hovered={hovered}
-            onHoverChange={setHovered}
-            onAction={runAction}
-            onStopSpeech={stopSpeech}
-            chords={chords}
-            isMac={isMac}
-            targetLocale={targetLocale}
-            localeOpen={localeOpen}
-            onLocaleOpenChange={setLocaleOpen}
-            onLocaleSelect={chooseTarget}
-            truncated={candidate.truncated}
-            reduceMotion={reduceMotion}
-          />
+        {/*
+          No row means no toolbar. A password field withholds every action, and
+          an empty pill floating over the field would be a promise of something
+          to click that is not there.
+        */}
+        {candidate && (generatedResult || visibleActions.length > 0) ? (
+          generatedResult ? (
+            <SelectionResultPanelShell geometry={geometry}>
+              <SelectionResultPanel
+                candidate={candidate}
+                result={generatedResult}
+                attribution={execution?.attribution ?? t("cogniaAttribution")}
+                canReplace={execution?.output === "replace" && canReplaceCandidate}
+                replaceUnavailableReason={replaceUnavailableReason}
+                undoAvailable={undoAvailable}
+                errorMessage={resultError}
+                onCopy={copyGeneratedResult}
+                onOpen={openGeneratedResult}
+                onReplace={(text) => void replaceResult(text)}
+                onCancel={() => {
+                  setExecution(null)
+                  setUndoAvailable(false)
+                  setResultError(undefined)
+                }}
+                onUndo={undoReplacement}
+              />
+            </SelectionResultPanelShell>
+          ) : (
+            <SelectionToolbarCapsule
+              key={candidate.id}
+              geometry={geometry}
+              actions={visibleActions}
+              overflowActions={
+                submenuActionId
+                  ? [
+                      ...visibleActions.filter((action) => action.id === submenuActionId),
+                      ...overflowActions.filter((action) => action.id !== submenuActionId),
+                    ]
+                  : overflowActions
+              }
+              overflowInitialParentId={submenuActionId ?? undefined}
+              moreOpen={moreOpen}
+              onMoreOpenChange={(open) => {
+                setMoreOpen(open)
+                if (!open) setSubmenuActionId(null)
+                if (open) setLocaleOpen(false)
+              }}
+              phase={phase}
+              hovered={hovered}
+              onHoverChange={setHovered}
+              onAction={runAction}
+              onStopSpeech={stopSpeech}
+              chords={chords}
+              isMac={isMac}
+              targetLocale={targetLocale}
+              localeOpen={localeOpen}
+              onLocaleOpenChange={(open) => {
+                setLocaleOpen(open)
+                if (open) setMoreOpen(false)
+              }}
+              onLocaleSelect={chooseTarget}
+              truncated={candidate.truncated}
+              reduceMotion={reduceMotion}
+            />
+          )
         ) : null}
       </AnimatePresence>
     </div>

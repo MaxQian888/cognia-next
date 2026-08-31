@@ -120,7 +120,7 @@ describe("resolveVisibleActions", () => {
   })
 
   it("keeps the generic actions in their canonical relative order", () => {
-    const result = visible(["url"]).filter((id) => STABLE_SIX.includes(id))
+    const result = visible(["url"]).filter((id) => STABLE_SIX.includes(id as SelectionActionId))
     expect(result).toEqual(STABLE_SIX.filter((id) => result.includes(id)))
   })
 
@@ -198,4 +198,12 @@ describe("initialTargetLocale", () => {
       expect(TARGET_LOCALES).toContain(initialTargetLocale(input))
     }
   })
+})
+
+it("keeps every built-in descriptor host-local while allowing runtime ids", () => {
+  for (const action of SELECTION_ACTIONS) {
+    expect(action.labelKey).toBe(action.id)
+    expect(action.pluginActionId).toBeUndefined()
+    expect(action.isMore).toBeUndefined()
+  }
 })

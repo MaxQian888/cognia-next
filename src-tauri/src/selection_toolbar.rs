@@ -22,7 +22,7 @@ use crate::automation::input_monitor::{InputButton, InputEvent, InputSubscriptio
 use crate::automation::platform::shared::credential_window;
 use crate::automation::selection::{build_text_selection, TextSelectionSnapshot};
 use crate::automation::selection_events::{self, SelectionSubscription};
-use crate::automation::types::{EventFilter, EventKind, Point, Rect, SubscriptionId};
+use crate::automation::types::{EventFilter, EventKind, KeyChord, Point, Rect, SubscriptionId};
 
 pub const SELECTION_TOOLBAR_LABEL: &str = "selection-toolbar";
 pub const SELECTION_CANDIDATE_EVENT: &str = "selection://candidate";
@@ -81,6 +81,17 @@ const SELECTION_SETTLE_MS: u64 = 350;
 /// Distinct from — and far below — `MAX_SELECTION_CHARS`, which is the
 /// *storage* cap applied once text is actually read.
 const SELECTION_MAX_AUTO_RAISE_CHARS: i64 = 4_000;
+const REPLACEMENT_FRESH_MS: i64 = 30_000;
+const UNDO_LEASE_MS: i64 = 8_000;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectionToolbarMode {
+    Off,
+    #[default]
+    Automatic,
+    Manual,
+}
 
 /// Where a publish attempt came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +245,16 @@ pub const SELECTION_ACTION_SHORTCUTS: &[(&str, &str)] = &[
     ("selection.remember", "alt+shift+5"),
     ("selection.speak", "alt+shift+6"),
 ];
+pub const SELECTION_SHORTCUT_DEFAULTS: &[(&str, &str)] = &[
+    ("selection.showToolbar", "alt+shift+space"),
+    ("selection.captureClipboard", "alt+shift+c"),
+    ("selection.copy", "alt+shift+1"),
+    ("selection.explain", "alt+shift+2"),
+    ("selection.translate", "alt+shift+3"),
+    ("selection.ask", "alt+shift+4"),
+    ("selection.remember", "alt+shift+5"),
+    ("selection.speak", "alt+shift+6"),
+];
 const DEFAULT_BLOCKED_APPS: &[&str] = &[
     "1password",
     "authy",
@@ -260,6 +281,13 @@ pub enum SelectionOrigin {
     /// so. Recognition errors are ordinary here in a way they never are for a
     /// selection the user made in a real text control.
     Ocr,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectionReplaceCapability {
+    None,
+    Paste,
 }
 
 /// Which side of the selection the toolbar ended up on. `clamp_toolbar_position`
@@ -324,6 +352,11 @@ pub struct ExternalSelectionCandidate {
     /// Page URL when the source application exposes one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
+    pub editable: bool,
+    pub replace_capability: SelectionReplaceCapability,
+    /// Native-only identity used to re-focus the source before replacement.
+    #[serde(skip)]
+    pub source_pid: Option<u32>,
 }
 
 impl ExternalSelectionCandidate {
@@ -339,15 +372,31 @@ impl ExternalSelectionCandidate {
             truncated: snapshot.truncated,
             source_subrole: None,
             source_url: None,
+            editable: false,
+            replace_capability: SelectionReplaceCapability::None,
+            source_pid: None,
         }
     }
 
     /// Attach what the element hit-test learned about where the text came
     /// from. Separate from `from_snapshot` because the OCR path has no element
     /// to inspect — it only has pixels.
-    fn with_source_element(mut self, subrole: Option<String>, url: Option<String>) -> Self {
+    fn with_source_element(
+        mut self,
+        subrole: Option<String>,
+        url: Option<String>,
+        source_title: Option<String>,
+        editable: bool,
+        source_pid: Option<u32>,
+    ) -> Self {
         self.source_subrole = subrole;
         self.source_url = url;
+        if self.source_title.is_none() {
+            self.source_title = source_title;
+        }
+        self.editable = editable;
+        self.replace_capability = replacement_capability(editable);
+        self.source_pid = source_pid;
         self
     }
 }
@@ -511,7 +560,20 @@ pub struct SelectionStagePayload {
 #[serde(rename_all = "camelCase")]
 pub struct SelectionToolbarStartArgs {
     #[serde(default)]
+    pub mode: SelectionToolbarMode,
+    #[serde(default)]
     pub disabled_apps: Vec<String>,
+    #[serde(default)]
+    pub disabled_sites: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectionProbeState {
+    Ok,
+    Missing,
+    Unknown,
+    NotApplicable,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -519,6 +581,53 @@ pub struct SelectionToolbarStartArgs {
 pub struct SelectionToolbarStatus {
     pub running: bool,
     pub has_candidate: bool,
+    pub mode: SelectionToolbarMode,
+    pub accessibility: SelectionProbeState,
+    pub input_monitoring: SelectionProbeState,
+    pub screen_recording: SelectionProbeState,
+    pub uia: SelectionProbeState,
+    pub ocr_available: bool,
+    pub shortcut_activation_active: bool,
+    /// Whether this build carries selection replacement. See
+    /// `selection_replacement_rollout_enabled`. Settings reads it to label the
+    /// per-action Direct Replace control inert instead of offering a switch
+    /// that can never take effect.
+    pub replace_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UndoLease {
+    candidate_id: String,
+    expires_at: i64,
+    input_generation: u64,
+}
+
+struct ReplacementInProgressGuard(Arc<SelectionToolbarInner>);
+
+impl ReplacementInProgressGuard {
+    fn try_acquire(inner: Arc<SelectionToolbarInner>) -> Result<Self, String> {
+        inner
+            .replacement_in_progress
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| "another selection replacement is already running".to_string())?;
+        Ok(Self(inner))
+    }
+}
+
+impl Drop for ReplacementInProgressGuard {
+    fn drop(&mut self) {
+        self.0
+            .replacement_in_progress
+            .store(false, Ordering::SeqCst);
+    }
+}
+
+impl UndoLease {
+    fn is_valid(&self, candidate_id: &str, now: i64, input_generation: u64) -> bool {
+        self.candidate_id == candidate_id
+            && now <= self.expires_at
+            && self.input_generation == input_generation
+    }
 }
 
 struct ActiveSelectionMonitor {
@@ -538,6 +647,8 @@ struct SelectionToolbarInner {
     candidate: Mutex<Option<ExternalSelectionCandidate>>,
     pending_stage: Mutex<Option<SelectionStagePayload>>,
     disabled_apps: Mutex<HashSet<String>>,
+    disabled_sites: Mutex<Vec<String>>,
+    mode: Mutex<SelectionToolbarMode>,
     generation: AtomicU64,
     /// Every *opaque* rect inside the window, in logical (CSS) pixels, as last
     /// reported by the renderer: the capsule, plus the language list while it
@@ -558,9 +669,6 @@ struct SelectionToolbarInner {
     /// Set while the renderer has a focus-taking sub-panel open (the language
     /// list). Escape then belongs to that panel, not to the whole toolbar.
     interactive: AtomicBool,
-    /// The action shortcut ids this module actually bound, so stopping releases
-    /// exactly those and never a chord the user re-bound for themselves.
-    owned_shortcuts: Mutex<HashSet<&'static str>>,
     /// Wall-clock ms of the last action chord `dispatch_shortcut` accepted.
     ///
     /// The input tap is listen-only and reports no modifier state, so the `3`
@@ -568,6 +676,9 @@ struct SelectionToolbarInner {
     /// press therefore does not dismiss on sight — it waits
     /// `SHORTCUT_CLAIM_GRACE_MS` and stands down if a chord claimed it.
     shortcut_claim_ms: AtomicI64,
+    input_generation: AtomicU64,
+    undo_lease: Mutex<Option<UndoLease>>,
+    replacement_in_progress: AtomicBool,
 }
 
 #[derive(Clone, Default)]
@@ -579,13 +690,6 @@ impl SelectionToolbarState {
     fn is_running(&self) -> bool {
         self.inner.active.lock().is_some()
     }
-
-    fn status(&self) -> SelectionToolbarStatus {
-        SelectionToolbarStatus {
-            running: self.is_running(),
-            has_candidate: self.inner.candidate.lock().is_some(),
-        }
-    }
 }
 
 #[tauri::command]
@@ -596,13 +700,19 @@ pub async fn selection_toolbar_start(
     args: Option<SelectionToolbarStartArgs>,
 ) -> Result<SelectionToolbarStatus, String> {
     let args = args.unwrap_or_default();
+    *state.inner.mode.lock() = args.mode;
     *state.inner.disabled_apps.lock() = args
         .disabled_apps
         .into_iter()
         .map(|app| app.to_lowercase())
         .collect();
+    *state.inner.disabled_sites.lock() = args
+        .disabled_sites
+        .into_iter()
+        .filter_map(|site| normalize_hostname_rule(&site))
+        .collect();
     if state.is_running() {
-        return Ok(state.status());
+        return toolbar_health_status(&app, &automation, &state).await;
     }
 
     // Build and convert the overlay up-front rather than lazily on the first
@@ -666,6 +776,7 @@ pub async fn selection_toolbar_start(
                                 press = Some(PressRecord { x, y, ts_ms });
                             }
                             if !point_inside_toolbar(&app_handle, &coordinator, x, y) {
+                                invalidate_undo(&coordinator);
                                 dismiss(&app_handle, &coordinator, DismissReason::Interrupted);
                             }
                         }
@@ -675,6 +786,9 @@ pub async fn selection_toolbar_start(
                             button: InputButton::Left,
                             ts_ms,
                         } => {
+                            if !point_inside_toolbar(&app_handle, &coordinator, x, y) {
+                                invalidate_undo(&coordinator);
+                            }
                             left_button_down = false;
                             let release = PressRecord { x, y, ts_ms };
                             let (intent, count) =
@@ -709,9 +823,13 @@ pub async fn selection_toolbar_start(
                             }
                         }
                         InputEvent::Scroll { .. } => {
+                            invalidate_undo(&coordinator);
                             dismiss(&app_handle, &coordinator, DismissReason::Interrupted)
                         }
                         InputEvent::KeyDown { vk, ts_ms, .. } => {
+                            if !toolbar_is_focused(&app_handle) {
+                                invalidate_undo(&coordinator);
+                            }
                             handle_key_down(
                                 &app_handle,
                                 &coordinator,
@@ -726,12 +844,23 @@ pub async fn selection_toolbar_start(
 
                 signal = selection_receiver.recv() => {
                     let Some(signal) = signal else { continue };
+                    if coordinator.replacement_in_progress.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    *coordinator.undo_lease.lock() = None;
                     match settle_decision(signal.selected_len, signal.at_ms) {
                         SettleAction::DismissNow => {
                             settle.deadline_ms = None;
                             dismiss(&app_handle, &coordinator, DismissReason::Interrupted);
                         }
-                        SettleAction::Ignore => settle.deadline_ms = None,
+                        SettleAction::Ignore => {
+                            settle.deadline_ms = None;
+                            // A long live selection must also retire any older
+                            // candidate. Otherwise the next action chord would
+                            // dispatch against stale short text instead of
+                            // taking the on-demand 20k capture path.
+                            dismiss(&app_handle, &coordinator, DismissReason::Interrupted);
+                        }
                         // Re-arming pushes the deadline out, so a burst of
                         // keystrokes collapses into a single publish once the
                         // user stops moving the caret.
@@ -769,8 +898,8 @@ pub async fn selection_toolbar_start(
         event_subscription,
         task,
     });
-    bind_action_shortcuts(&app, &state.inner);
-    Ok(state.status())
+    bind_action_shortcuts(&app);
+    toolbar_health_status(&app, &automation, &state).await
 }
 
 /// Sleep until the settle deadline, or forever when nothing is armed.
@@ -805,6 +934,9 @@ fn spawn_publish<R: Runtime>(
     let inner = inner.clone();
     let automation = automation.clone();
     tauri::async_runtime::spawn(async move {
+        if *inner.mode.lock() != SelectionToolbarMode::Automatic {
+            return;
+        }
         // The observer path has already waited out the settle window, so only
         // the click path needs to let the app commit its selection first.
         if trigger == SelectionTrigger::Click {
@@ -820,6 +952,13 @@ fn spawn_publish<R: Runtime>(
                 if app_is_disabled(&inner, name) {
                     return;
                 }
+            }
+            if preflight
+                .source_url
+                .as_deref()
+                .is_some_and(|url| hostname_is_disabled(url, &inner.disabled_sites.lock()))
+            {
+                return;
             }
         }
 
@@ -860,15 +999,19 @@ fn spawn_publish<R: Runtime>(
         // `secure_field` is the only subrole the renderer acts on, and the
         // preflight already resolved it — no second hit-test needed for the
         // overwhelmingly common case.
-        let subrole = preflight
-            .as_ref()
-            .and_then(|p| p.secure_field.then(|| "AXSecureTextField".to_string()));
+        let subrole = preflight.as_ref().and_then(|p| p.source_subrole.clone());
         let source_url = preflight
             .as_ref()
             .and_then(|p| trim_source_url(p.source_url.as_deref()));
         let candidate =
             ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Accessibility)
-                .with_source_element(subrole, source_url);
+                .with_source_element(
+                    subrole,
+                    source_url,
+                    preflight.as_ref().and_then(|p| p.window_title.clone()),
+                    preflight.as_ref().is_some_and(|p| p.editable),
+                    preflight.as_ref().and_then(|p| p.pid),
+                );
         let _ = show_candidate(&app, &inner, candidate);
     })
 }
@@ -891,6 +1034,41 @@ fn trim_source_url(raw: Option<&str>) -> Option<String> {
     let _ = parsed.set_username("");
     let _ = parsed.set_password(None);
     Some(parsed.to_string())
+}
+
+fn normalize_hostname_rule(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().to_ascii_lowercase();
+    if trimmed.is_empty() || trimmed.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let (wildcard, host) = trimmed
+        .strip_prefix("*.")
+        .map_or((false, trimmed.as_str()), |host| (true, host));
+    let parsed = url::Url::parse(&format!("https://{host}")).ok()?;
+    let hostname = parsed.host_str()?;
+    if parsed.port().is_some() || parsed.path() != "/" || parsed.query().is_some() {
+        return None;
+    }
+    Some(format!("{}{hostname}", if wildcard { "*." } else { "" }))
+}
+
+fn hostname_is_disabled(raw_url: &str, rules: &[String]) -> bool {
+    let Ok(parsed) = url::Url::parse(raw_url) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    rules.iter().any(|rule| {
+        let normalized = rule.to_ascii_lowercase();
+        normalized
+            .strip_prefix("*.")
+            .is_some_and(|suffix| host != suffix && host.ends_with(&format!(".{suffix}")))
+            || normalized == host
+    })
 }
 
 /// Smallest drag box worth capturing, in logical pixels. Below this the region
@@ -1025,10 +1203,7 @@ fn handle_key_down<R: Runtime>(
     settle_armed: bool,
 ) {
     let window = app.get_webview_window(SELECTION_TOOLBAR_LABEL);
-    let toolbar_focused = window
-        .as_ref()
-        .and_then(|window| window.is_focused().ok())
-        .unwrap_or(false);
+    let toolbar_focused = toolbar_is_focused(app);
     if is_escape_key(vk) {
         // With the language list open the toolbar holds focus, so give the
         // renderer the first refusal: Escape should close that panel, and only
@@ -1073,6 +1248,17 @@ fn handle_key_down<R: Runtime>(
     });
 }
 
+fn toolbar_is_focused<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.get_webview_window(SELECTION_TOOLBAR_LABEL)
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false)
+}
+
+fn invalidate_undo(inner: &SelectionToolbarInner) {
+    inner.input_generation.fetch_add(1, Ordering::SeqCst);
+    *inner.undo_lease.lock() = None;
+}
+
 #[tauri::command]
 pub async fn selection_toolbar_stop(
     app: AppHandle,
@@ -1095,77 +1281,125 @@ pub async fn selection_toolbar_stop(
         }
         drop(active);
     }
-    unbind_action_shortcuts(&app, &state.inner);
+    unbind_action_shortcuts(&app);
+    *state.inner.mode.lock() = SelectionToolbarMode::Off;
     dismiss(&app, &state.inner, DismissReason::Interrupted);
     automation.input_monitor.stop_if_idle();
-    Ok(state.status())
+    toolbar_health_status(&app, &automation, &state).await
 }
 
-/// Claim the six action chords, recording which ones we actually took.
-///
-/// A chord the user has already re-bound (the renderer replays persisted
-/// overrides at boot) is left alone — binding the default here would silently
-/// clobber their configuration. A conflict with an unrelated shortcut is logged
-/// and skipped rather than failing `start`: losing one hotkey is not a reason to
-/// leave the whole feature off.
-///
-/// The ids that *were* claimed go into `owned_shortcuts`, because ownership is
-/// the only thing that makes the unbind safe — see `unbind_action_shortcuts`.
-fn bind_action_shortcuts<R: Runtime>(app: &AppHandle<R>, inner: &Arc<SelectionToolbarInner>) {
-    let registry = app.state::<Arc<crate::shortcuts::ShortcutRegistry>>();
-    claim_shortcuts(
-        &mut inner.owned_shortcuts.lock(),
-        |id| registry.chord_for_id(id).is_some(),
-        |id, chord| registry.bind(app, id, chord),
-    );
-}
-
-/// Registry-free half of `bind_action_shortcuts`, so the ownership rule can be
-/// tested without a live Tauri app.
-fn claim_shortcuts<E: std::fmt::Display>(
-    owned: &mut HashSet<&'static str>,
-    already_bound: impl Fn(&str) -> bool,
-    mut bind: impl FnMut(&str, &str) -> Result<(), E>,
-) {
-    for (id, chord) in SELECTION_ACTION_SHORTCUTS {
-        if already_bound(id) {
-            continue;
-        }
-        match bind(id, chord) {
-            Ok(()) => {
-                owned.insert(*id);
-            }
-            Err(error) => {
-                log::warn!("selection toolbar shortcut {id}={chord} not bound: {error}")
-            }
-        }
+fn probe_state(
+    value: crate::automation::platform::shared::input_monitoring::ProbeState,
+) -> SelectionProbeState {
+    use crate::automation::platform::shared::input_monitoring::ProbeState;
+    match value {
+        ProbeState::Ok => SelectionProbeState::Ok,
+        ProbeState::Missing => SelectionProbeState::Missing,
+        ProbeState::Unknown => SelectionProbeState::Unknown,
+        ProbeState::NotApplicable => SelectionProbeState::NotApplicable,
     }
 }
 
-/// Release only the chords `bind_action_shortcuts` actually claimed.
-///
-/// Unbinding all six unconditionally is destructive, not merely untidy:
-/// `ShortcutRegistry::unbind` drops the id → chord mapping and unregisters it
-/// with the OS, so turning the toolbar off would delete a chord the user had
-/// re-bound to something else — one this module deliberately never took. Bind
-/// and unbind have to agree on ownership, so they share `owned_shortcuts`.
-fn unbind_action_shortcuts<R: Runtime>(app: &AppHandle<R>, inner: &Arc<SelectionToolbarInner>) {
-    let registry = app.state::<Arc<crate::shortcuts::ShortcutRegistry>>();
-    release_shortcuts(&mut inner.owned_shortcuts.lock(), |id| {
-        registry.unbind(app, id)
-    });
-}
-
-/// Registry-free half of `unbind_action_shortcuts`.
-fn release_shortcuts<E: std::fmt::Display>(
-    owned: &mut HashSet<&'static str>,
-    mut unbind: impl FnMut(&str) -> Result<(), E>,
-) {
-    for id in std::mem::take(owned) {
-        if let Err(error) = unbind(id) {
-            log::warn!("selection toolbar shortcut {id} not released: {error}");
+fn accessibility_probe() -> SelectionProbeState {
+    #[cfg(target_os = "macos")]
+    {
+        if crate::automation::platform::ax::accessibility_trusted() {
+            SelectionProbeState::Ok
+        } else {
+            SelectionProbeState::Missing
         }
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        SelectionProbeState::NotApplicable
+    }
+}
+
+fn screen_recording_probe() -> SelectionProbeState {
+    #[cfg(target_os = "macos")]
+    {
+        if crate::automation::platform::shared::screen_capture::screen_capture_permitted() {
+            SelectionProbeState::Ok
+        } else {
+            SelectionProbeState::Missing
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        SelectionProbeState::NotApplicable
+    }
+}
+
+async fn uia_probe(automation: &AutomationState) -> SelectionProbeState {
+    #[cfg(target_os = "windows")]
+    {
+        match automation.handle.capabilities().await {
+            Ok(capabilities) if capabilities.has_uia => SelectionProbeState::Ok,
+            Ok(_) => SelectionProbeState::Missing,
+            Err(_) => SelectionProbeState::Unknown,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = automation;
+        SelectionProbeState::NotApplicable
+    }
+}
+
+async fn toolbar_health_status(
+    app: &AppHandle,
+    automation: &AutomationState,
+    state: &SelectionToolbarState,
+) -> Result<SelectionToolbarStatus, String> {
+    let uia = uia_probe(automation).await;
+    let shortcut_activation_active = app
+        .state::<Arc<crate::shortcuts::ShortcutRegistry>>()
+        .selection_scope_active();
+    let ocr_available = !app
+        .state::<cognia_ocr::NativeOcrRegistry>()
+        .available_ids()
+        .await
+        .is_empty();
+    let running = state.is_running();
+    let has_candidate = state.inner.candidate.lock().is_some();
+    let mode = *state.inner.mode.lock();
+    Ok(SelectionToolbarStatus {
+        running,
+        has_candidate,
+        mode,
+        accessibility: accessibility_probe(),
+        input_monitoring: probe_state(
+            crate::automation::platform::shared::input_monitoring::input_monitoring_state(),
+        ),
+        screen_recording: screen_recording_probe(),
+        uia,
+        ocr_available,
+        shortcut_activation_active,
+        replace_available: selection_replacement_rollout_enabled(),
+    })
+}
+
+/// Open the selection shortcut scope for as long as the toolbar runs.
+///
+/// Ownership lives in `ShortcutRegistry` now, not here. It keeps the reserved
+/// (user-rebound) chords separate from the active registrations, so activation
+/// honours an override instead of clobbering it, and `deactivate_selection_scope`
+/// releases only what activation actually registered.
+fn bind_action_shortcuts<R: Runtime>(app: &AppHandle<R>) {
+    let registry = app.state::<Arc<crate::shortcuts::ShortcutRegistry>>();
+    registry.activate_selection_scope(app, SELECTION_SHORTCUT_DEFAULTS);
+}
+
+/// Close the selection shortcut scope.
+///
+/// Releasing every chord in the defaults table unconditionally would be
+/// destructive rather than merely untidy: `ShortcutRegistry::unbind` drops the
+/// id to chord mapping and unregisters it with the OS, so turning the toolbar
+/// off would delete a chord the user had re-bound for themselves. The registry
+/// releases only the ids activation registered, and keeps the reservation.
+fn unbind_action_shortcuts<R: Runtime>(app: &AppHandle<R>) {
+    let registry = app.state::<Arc<crate::shortcuts::ShortcutRegistry>>();
+    registry.deactivate_selection_scope(app);
 }
 
 /// Record that an action chord fired at `at_ms`, so the raw key press that
@@ -1192,9 +1426,18 @@ fn key_press_was_claimed(inner: &SelectionToolbarInner, pressed_ms: i64) -> bool
 /// state machine, and the exit animation. Running the action from Rust would
 /// fork all three and drift from the click path.
 pub fn dispatch_shortcut<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    if !SELECTION_ACTION_SHORTCUTS
-        .iter()
-        .any(|(known, _)| *known == id)
+    if id == "selection.showToolbar" {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = capture_live_candidate(&app).await;
+        });
+        return;
+    }
+    let is_configured_action = id.starts_with("selection.action:");
+    if !is_configured_action
+        && !SELECTION_ACTION_SHORTCUTS
+            .iter()
+            .any(|(known, _)| *known == id)
     {
         return;
     }
@@ -1203,9 +1446,23 @@ pub fn dispatch_shortcut<R: Runtime>(app: &AppHandle<R>, id: &str) {
     // chord is already sitting in its grace window, and it must stand down even
     // if the candidate went away in between.
     claim_key_press(&state.inner, now_ms());
-    let Some(candidate) = state.inner.candidate.lock().clone() else {
+    if let Some(candidate) = state.inner.candidate.lock().clone() {
+        emit_shortcut(app, id, &candidate);
         return;
-    };
+    }
+
+    // Action chords are also manual activation. This is what makes a 4,001+
+    // character selection actionable without auto-raising a capsule first.
+    let app = app.clone();
+    let id = id.to_string();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(Some(candidate)) = capture_live_candidate(&app).await {
+            emit_shortcut(&app, &id, &candidate);
+        }
+    });
+}
+
+fn emit_shortcut<R: Runtime>(app: &AppHandle<R>, id: &str, candidate: &ExternalSelectionCandidate) {
     let Some(window) = app.get_webview_window(SELECTION_TOOLBAR_LABEL) else {
         return;
     };
@@ -1217,9 +1474,11 @@ pub fn dispatch_shortcut<R: Runtime>(app: &AppHandle<R>, id: &str) {
 
 #[tauri::command]
 pub async fn selection_toolbar_status(
+    app: AppHandle,
+    automation: State<'_, AutomationState>,
     state: State<'_, SelectionToolbarState>,
 ) -> Result<SelectionToolbarStatus, String> {
-    Ok(state.status())
+    toolbar_health_status(&app, &automation, &state).await
 }
 
 #[tauri::command]
@@ -1296,6 +1555,356 @@ pub async fn selection_toolbar_execute(
         dismiss(&app, &state.inner, DismissReason::Completed);
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplacementRefusal {
+    NotEditable,
+    Stale,
+    SelectionChanged,
+    SourceUnavailable,
+    RolloutDisabled,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionReplacementResult {
+    pub replaced: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ReplacementRefusal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub undo_expires_at: Option<i64>,
+}
+
+/// Whether this BUILD carries selection replacement at all.
+///
+/// `option_env!` is resolved at compile time and no build in this repository
+/// sets it, so every shipped binary answers `false`. That is deliberate: the
+/// feature types into another application's text field, and turning it on is a
+/// release decision rather than a runtime one. What is NOT acceptable is
+/// pretending otherwise, so the answer is carried on three axes: the candidate
+/// never advertises a `paste` capability (see `replacement_capability`), the
+/// status reports `replaceAvailable: false` so settings can label the control
+/// inert, and `rollout_disabled_is_the_shipped_default` pins the build.
+fn selection_replacement_rollout_enabled() -> bool {
+    option_env!("COGNIA_SELECTION_REPLACE") == Some("1")
+}
+
+/// The replacement route a candidate may advertise.
+///
+/// Gated on the rollout, not just on editability. Advertising `Paste` from a
+/// build that always refuses is what made the overlay offer a Replace button
+/// whose only possible outcome was a refusal the user then saw as
+/// "this field is not editable".
+fn replacement_capability(editable: bool) -> SelectionReplaceCapability {
+    if editable && selection_replacement_rollout_enabled() {
+        SelectionReplaceCapability::Paste
+    } else {
+        SelectionReplaceCapability::None
+    }
+}
+
+fn replacement_refusal(
+    candidate: &ExternalSelectionCandidate,
+    live_text: Option<&str>,
+    now: i64,
+    rollout_enabled: bool,
+) -> Option<ReplacementRefusal> {
+    if !rollout_enabled {
+        return Some(ReplacementRefusal::RolloutDisabled);
+    }
+    if candidate.origin != SelectionOrigin::Accessibility
+        || !candidate.editable
+        || candidate.replace_capability != SelectionReplaceCapability::Paste
+        || candidate.truncated
+    {
+        return Some(ReplacementRefusal::NotEditable);
+    }
+    if now.saturating_sub(candidate.captured_at) > REPLACEMENT_FRESH_MS {
+        return Some(ReplacementRefusal::Stale);
+    }
+    match live_text {
+        Some(text) if text == candidate.text => None,
+        Some(_) => Some(ReplacementRefusal::SelectionChanged),
+        None => Some(ReplacementRefusal::SourceUnavailable),
+    }
+}
+
+fn source_identity_matches(
+    candidate: &ExternalSelectionCandidate,
+    preflight: Option<&crate::automation::backend::SelectionPreflight>,
+    live: &TextSelectionSnapshot,
+) -> bool {
+    let Some(preflight) = preflight else {
+        return false;
+    };
+    if candidate.source_pid.is_none() || candidate.source_pid != preflight.pid {
+        return false;
+    }
+    if candidate.source_app != live.source_app || candidate.source_title != live.source_title {
+        return false;
+    }
+    if candidate.source_subrole != preflight.source_subrole {
+        return false;
+    }
+    if candidate.source_url != trim_source_url(preflight.source_url.as_deref()) {
+        return false;
+    }
+    let (Some(expected), Some(actual)) = (candidate.anchor_rect, live.anchor_rect) else {
+        return false;
+    };
+    const TOLERANCE: i32 = 4;
+    (expected.x - actual.x).abs() <= TOLERANCE
+        && (expected.y - actual.y).abs() <= TOLERANCE
+        && (expected.width - actual.width).abs() <= TOLERANCE
+        && (expected.height - actual.height).abs() <= TOLERANCE
+}
+
+#[cfg(target_os = "macos")]
+fn focus_source_application(candidate: &ExternalSelectionCandidate) -> Result<(), String> {
+    use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+
+    let pid = candidate
+        .source_pid
+        .ok_or_else(|| "source process is unavailable".to_string())?;
+    let application = NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
+        .ok_or_else(|| "source application is unavailable".to_string())?;
+    application
+        .activateWithOptions(NSApplicationActivationOptions::empty())
+        .then_some(())
+        .ok_or_else(|| "source application refused activation".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn focus_source_application(candidate: &ExternalSelectionCandidate) -> Result<(), String> {
+    let pid = candidate
+        .source_pid
+        .ok_or_else(|| "source process is unavailable".to_string())?;
+    let script = format!(
+        "$p = Get-Process -Id {pid} -ErrorAction Stop; \
+         if (-not ((New-Object -ComObject WScript.Shell).AppActivate($p.Id))) {{ exit 2 }}"
+    );
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .status()
+        .map_err(|error| error.to_string())?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("source application focus failed: {status}"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn focus_source_application(_candidate: &ExternalSelectionCandidate) -> Result<(), String> {
+    Err("selection replacement is unsupported on this platform".into())
+}
+
+#[tauri::command]
+pub async fn selection_toolbar_replace(
+    app: AppHandle,
+    automation: State<'_, AutomationState>,
+    state: State<'_, SelectionToolbarState>,
+    candidate_id: String,
+    text: String,
+) -> Result<SelectionReplacementResult, String> {
+    if text.is_empty() || text.chars().count() > crate::automation::selection::MAX_SELECTION_CHARS {
+        return Err("selection replacement is empty or oversized".into());
+    }
+    let candidate = state
+        .inner
+        .candidate
+        .lock()
+        .clone()
+        .filter(|candidate| candidate.id == candidate_id)
+        .ok_or_else(|| "selection candidate is stale".to_string())?;
+    if let Some(reason) = replacement_refusal(
+        &candidate,
+        Some(&candidate.text),
+        now_ms(),
+        selection_replacement_rollout_enabled(),
+    ) {
+        return Ok(SelectionReplacementResult {
+            replaced: false,
+            reason: Some(reason),
+            undo_expires_at: None,
+        });
+    }
+    let input_generation = state.inner.input_generation.load(Ordering::SeqCst);
+    let _replacement_guard = ReplacementInProgressGuard::try_acquire(state.inner.clone())?;
+    let outcome = async {
+        let focus_candidate = candidate.clone();
+        tauri::async_runtime::spawn_blocking(move || focus_source_application(&focus_candidate))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|_| "source application is unavailable".to_string())?;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let preflight = automation.handle.selection_preflight().await.ok();
+        let live = read_accessibility_selection(&automation.handle).await;
+        let live_text = live
+            .as_ref()
+            .filter(|snapshot| source_identity_matches(&candidate, preflight.as_ref(), snapshot))
+            .map(|snapshot| snapshot.text.as_str());
+        if let Some(reason) = replacement_refusal(&candidate, live_text, now_ms(), true) {
+            return Ok(SelectionReplacementResult {
+                replaced: false,
+                reason: Some(reason),
+                undo_expires_at: None,
+            });
+        }
+        let candidate_still_current = state
+            .inner
+            .candidate
+            .lock()
+            .as_ref()
+            .is_some_and(|current| current.id == candidate.id);
+        if !candidate_still_current
+            || state.inner.input_generation.load(Ordering::SeqCst) != input_generation
+        {
+            return Ok(SelectionReplacementResult {
+                replaced: false,
+                reason: Some(ReplacementRefusal::SelectionChanged),
+                undo_expires_at: None,
+            });
+        }
+
+        crate::automation::commands::paste_via_clipboard(&app, &automation.handle, &text)
+            .await
+            .map_err(|error| error.to_string())?;
+        if state.inner.input_generation.load(Ordering::SeqCst) != input_generation {
+            return Ok(SelectionReplacementResult {
+                replaced: true,
+                reason: None,
+                undo_expires_at: None,
+            });
+        }
+        let expires_at = now_ms().saturating_add(UNDO_LEASE_MS);
+        *state.inner.undo_lease.lock() = Some(UndoLease {
+            candidate_id,
+            expires_at,
+            input_generation,
+        });
+        Ok(SelectionReplacementResult {
+            replaced: true,
+            reason: None,
+            undo_expires_at: Some(expires_at),
+        })
+    }
+    .await;
+    outcome
+}
+
+#[tauri::command]
+pub async fn selection_toolbar_undo(
+    automation: State<'_, AutomationState>,
+    state: State<'_, SelectionToolbarState>,
+    candidate_id: String,
+) -> Result<bool, String> {
+    let lease_is_valid = |state: &SelectionToolbarState| {
+        let generation = state.inner.input_generation.load(Ordering::SeqCst);
+        state
+            .inner
+            .undo_lease
+            .lock()
+            .as_ref()
+            .is_some_and(|lease| lease.is_valid(&candidate_id, now_ms(), generation))
+    };
+    let valid = lease_is_valid(&state);
+    if !valid {
+        return Ok(false);
+    }
+    let Some(candidate) = state
+        .inner
+        .candidate
+        .lock()
+        .clone()
+        .filter(|candidate| candidate.id == candidate_id)
+    else {
+        return Ok(false);
+    };
+    let focus = automation.handle.get_focus().await.ok();
+    let preflight = automation.handle.selection_preflight().await.ok();
+    let source_matches = match candidate.source_pid {
+        Some(pid) => focus.as_ref().and_then(|value| value.process_id) == Some(pid),
+        None => focus
+            .as_ref()
+            .and_then(|value| value.process_name.as_deref())
+            .is_some_and(|name| name == candidate.source_app),
+    };
+    let source_identity_matches = preflight.as_ref().is_some_and(|value| {
+        value.pid == candidate.source_pid
+            && value.source_subrole == candidate.source_subrole
+            && value.window_title == candidate.source_title
+    });
+    if !source_matches || !source_identity_matches || !lease_is_valid(&state) {
+        *state.inner.undo_lease.lock() = None;
+        return Ok(false);
+    }
+    *state.inner.undo_lease.lock() = None;
+    let chord = if cfg!(target_os = "macos") {
+        "meta+z"
+    } else {
+        "ctrl+z"
+    };
+    automation
+        .handle
+        .send_keys(KeyChord(chord.into()))
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn selection_toolbar_copy_result(
+    app: AppHandle,
+    state: State<'_, SelectionToolbarState>,
+    candidate_id: String,
+    text: String,
+) -> Result<(), String> {
+    let current = state
+        .inner
+        .candidate
+        .lock()
+        .as_ref()
+        .is_some_and(|candidate| candidate.id == candidate_id);
+    if !current {
+        return Err("selection candidate is stale".into());
+    }
+    if text.is_empty() || text.chars().count() > crate::automation::selection::MAX_SELECTION_CHARS {
+        return Err("selection action result is empty or oversized".into());
+    }
+    app.clipboard()
+        .write_text(text)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn selection_toolbar_open_permission_settings(permission: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let pane = match permission.as_str() {
+            "accessibility" => "Privacy_Accessibility",
+            "inputMonitoring" => "Privacy_ListenEvent",
+            "screenRecording" => "Privacy_ScreenCapture",
+            _ => return Err("unknown selection toolbar permission".into()),
+        };
+        let url = format!("x-apple.systempreferences:com.apple.preference.security?{pane}");
+        let status = tauri::async_runtime::spawn_blocking(move || {
+            std::process::Command::new("open").arg(url).status()
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+        return status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("opening System Settings failed: {status}"));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = permission;
+        Err("this platform has no permission settings pane for the selection toolbar".into())
+    }
 }
 
 /// Called by the toolbar renderer once a `holds_toolbar` action has settled
@@ -1469,6 +2078,59 @@ pub fn spawn_clipboard_capture<R: Runtime>(app: &AppHandle<R>) {
             log::warn!("selection toolbar clipboard capture failed: {error}");
         }
     });
+}
+
+async fn capture_live_candidate<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<ExternalSelectionCandidate>, String> {
+    let state = app.state::<SelectionToolbarState>();
+    if !state.is_running() {
+        return Ok(None);
+    }
+    let automation = app.state::<AutomationState>();
+    let preflight = automation.handle.selection_preflight().await.ok();
+    if preflight.as_ref().is_some_and(|value| value.secure_field) {
+        return Ok(None);
+    }
+    if let Some(value) = preflight.as_ref() {
+        if value
+            .process_name
+            .as_deref()
+            .is_some_and(|name| app_is_disabled(&state.inner, name))
+        {
+            return Ok(None);
+        }
+        if value
+            .source_url
+            .as_deref()
+            .is_some_and(|url| hostname_is_disabled(url, &state.inner.disabled_sites.lock()))
+        {
+            return Ok(None);
+        }
+    }
+    let Some(snapshot) = read_accessibility_selection(&automation.handle).await else {
+        return Ok(None);
+    };
+    if app_is_disabled(&state.inner, &snapshot.source_app) {
+        return Ok(None);
+    }
+    let candidate =
+        ExternalSelectionCandidate::from_snapshot(snapshot, SelectionOrigin::Accessibility)
+            .with_source_element(
+                preflight
+                    .as_ref()
+                    .and_then(|value| value.source_subrole.clone()),
+                preflight
+                    .as_ref()
+                    .and_then(|value| trim_source_url(value.source_url.as_deref())),
+                preflight
+                    .as_ref()
+                    .and_then(|value| value.window_title.clone()),
+                preflight.as_ref().is_some_and(|value| value.editable),
+                preflight.as_ref().and_then(|value| value.pid),
+            );
+    show_candidate(app, &state.inner, candidate.clone())?;
+    Ok(Some(candidate))
 }
 
 async fn capture_clipboard_candidate<R: Runtime>(
@@ -1654,6 +2316,7 @@ fn show_candidate<R: Runtime>(
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|error| error.to_string())?;
     *inner.candidate.lock() = Some(candidate.clone());
+    *inner.undo_lease.lock() = None;
     inner.hit_rects.lock().clear();
     inner.keep_alive.store(false, Ordering::SeqCst);
     *inner.idle_deadline.lock() = Some(Instant::now() + Duration::from_millis(IDLE_DISMISS_MS));
@@ -2122,64 +2785,6 @@ mod tests {
     }
 
     #[test]
-    fn stopping_releases_only_the_chords_the_toolbar_itself_claimed() {
-        // The user re-bound ⌥⇧6 to something of their own, so the renderer
-        // replayed that override before the toolbar ever started.
-        let user_owned = "selection.speak";
-        let mut owned = HashSet::new();
-        let mut bound: Vec<String> = Vec::new();
-        claim_shortcuts(
-            &mut owned,
-            |id| id == user_owned,
-            |id, _| {
-                bound.push(id.to_string());
-                Ok::<(), String>(())
-            },
-        );
-        assert_eq!(bound.len(), SELECTION_ACTION_SHORTCUTS.len() - 1);
-        assert!(!owned.contains(user_owned));
-
-        let mut released: Vec<String> = Vec::new();
-        release_shortcuts(&mut owned, |id| {
-            released.push(id.to_string());
-            Ok::<(), String>(())
-        });
-        // The whole point: `ShortcutRegistry::unbind` drops the mapping and
-        // unregisters with the OS, so releasing this id would have deleted the
-        // user's own chord — one the toolbar deliberately never took.
-        assert!(!released.iter().any(|id| id == user_owned));
-        assert_eq!(released.len(), SELECTION_ACTION_SHORTCUTS.len() - 1);
-        // Nothing is released twice if `stop` is called again.
-        assert!(owned.is_empty());
-    }
-
-    #[test]
-    fn a_chord_that_fails_to_bind_is_never_released() {
-        let mut owned = HashSet::new();
-        // A conflict with an unrelated shortcut: `start` logs and carries on.
-        claim_shortcuts(
-            &mut owned,
-            |_| false,
-            |id, _| {
-                if id == "selection.ask" {
-                    Err("conflict".to_string())
-                } else {
-                    Ok(())
-                }
-            },
-        );
-        assert!(!owned.contains("selection.ask"));
-
-        let mut released: Vec<String> = Vec::new();
-        release_shortcuts(&mut owned, |id| {
-            released.push(id.to_string());
-            Ok::<(), String>(())
-        });
-        // Whoever *does* hold that chord keeps it.
-        assert!(!released.iter().any(|id| id == "selection.ask"));
-    }
-
-    #[test]
     fn hit_test_covers_the_open_language_list_as_well_as_the_capsule() {
         // Window at (100, 100). The list sits above the capsule with the
         // shell's 6px gap between them, and is narrower than the pill.
@@ -2283,18 +2888,35 @@ mod tests {
     }
 
     #[test]
-    fn action_shortcuts_are_unique_and_do_not_collide_with_the_clipboard_chord() {
-        let ids: HashSet<&str> = SELECTION_ACTION_SHORTCUTS
+    fn selection_shortcut_defaults_are_unique_and_cover_every_action() {
+        // SELECTION_SHORTCUT_DEFAULTS is the table `activate_selection_scope`
+        // actually binds, so it is the one whose collisions matter. A duplicate
+        // chord here means one id silently loses its shortcut at activation.
+        let ids: HashSet<&str> = SELECTION_SHORTCUT_DEFAULTS
             .iter()
             .map(|(id, _)| *id)
             .collect();
-        let chords: HashSet<&str> = SELECTION_ACTION_SHORTCUTS
+        let chords: HashSet<&str> = SELECTION_SHORTCUT_DEFAULTS
             .iter()
             .map(|(_, chord)| *chord)
             .collect();
-        assert_eq!(ids.len(), SELECTION_ACTION_SHORTCUTS.len());
-        assert_eq!(chords.len(), SELECTION_ACTION_SHORTCUTS.len());
-        assert!(!chords.contains("alt+shift+c"));
+        assert_eq!(ids.len(), SELECTION_SHORTCUT_DEFAULTS.len());
+        assert_eq!(chords.len(), SELECTION_SHORTCUT_DEFAULTS.len());
+
+        // Every action chord `dispatch_shortcut` recognises must be bindable,
+        // which is what keeps the two tables from drifting apart.
+        for (id, chord) in SELECTION_ACTION_SHORTCUTS {
+            assert!(
+                SELECTION_SHORTCUT_DEFAULTS.contains(&(*id, *chord)),
+                "action shortcut {id}={chord} is not in the bound defaults table"
+            );
+        }
+        // The clipboard chord is scoped now rather than an unconditional
+        // builtin, so it belongs to this table and to no action.
+        assert!(ids.contains("selection.captureClipboard"));
+        assert!(!SELECTION_ACTION_SHORTCUTS
+            .iter()
+            .any(|(id, _)| *id == "selection.captureClipboard"));
     }
 
     #[test]
@@ -2311,6 +2933,9 @@ mod tests {
                 truncated: false,
                 source_subrole: None,
                 source_url: None,
+                editable: false,
+                replace_capability: SelectionReplaceCapability::None,
+                source_pid: None,
             },
             action: SelectionToolbarAction::Speak,
             focus_main: false,
@@ -2318,6 +2943,12 @@ mod tests {
         let value = serde_json::to_value(payload).unwrap();
         assert_eq!(value["focusMain"], serde_json::json!(false));
         assert_eq!(value["action"]["kind"], serde_json::json!("speak"));
+        assert_eq!(value["candidate"]["editable"], serde_json::json!(false));
+        assert_eq!(
+            value["candidate"]["replaceCapability"],
+            serde_json::json!("none")
+        );
+        assert!(value["candidate"].get("sourcePid").is_none());
     }
 
     #[test]
@@ -2852,5 +3483,164 @@ mod tests {
         // But a stale claim never suppresses the *next* press, or one chord
         // would mute every keystroke that followed it.
         assert!(!key_press_was_claimed(&inner, key_ts + 3));
+    }
+
+    #[test]
+    fn hostname_rules_match_exact_hosts_and_explicit_subdomain_wildcards() {
+        assert!(hostname_is_disabled(
+            "https://example.com/private?token=secret",
+            &["example.com".into()]
+        ));
+        assert!(!hostname_is_disabled(
+            "https://docs.example.com/",
+            &["example.com".into()]
+        ));
+        assert!(hostname_is_disabled(
+            "https://docs.example.com/",
+            &["*.example.com".into()]
+        ));
+        assert!(!hostname_is_disabled(
+            "https://notexample.com/",
+            &["*.example.com".into()]
+        ));
+        assert!(!hostname_is_disabled(
+            "file:///tmp/private",
+            &["*.example.com".into()]
+        ));
+    }
+
+    #[test]
+    fn start_args_carry_mode_apps_and_hostname_rules_in_camel_case() {
+        let args: SelectionToolbarStartArgs = serde_json::from_value(serde_json::json!({
+            "mode": "manual",
+            "disabledApps": ["1Password"],
+            "disabledSites": ["example.com"]
+        }))
+        .unwrap();
+        assert_eq!(args.mode, SelectionToolbarMode::Manual);
+        assert_eq!(args.disabled_apps, vec!["1Password"]);
+        assert_eq!(args.disabled_sites, vec!["example.com"]);
+    }
+
+    #[test]
+    fn rollout_disabled_is_the_shipped_default() {
+        // No build in this repository sets COGNIA_SELECTION_REPLACE, so the
+        // shipped answer is "off". The candidate must not advertise a paste
+        // route it cannot honour: an editable field still reports `None`, which
+        // is what keeps the overlay from offering a Replace button whose only
+        // outcome is a refusal.
+        assert!(!selection_replacement_rollout_enabled());
+        assert_eq!(replacement_capability(true), SelectionReplaceCapability::None);
+        assert_eq!(
+            replacement_capability(false),
+            SelectionReplaceCapability::None
+        );
+    }
+
+    #[test]
+    fn replacement_requires_rollout_fresh_editable_accessibility_and_exact_text() {
+        let mut candidate = ExternalSelectionCandidate {
+            id: "c1".into(),
+            text: "before".into(),
+            source_app: "TextEdit".into(),
+            source_title: None,
+            origin: SelectionOrigin::Accessibility,
+            anchor_rect: None,
+            captured_at: 1_000,
+            truncated: false,
+            source_subrole: Some("AXTextArea".into()),
+            source_url: None,
+            editable: true,
+            replace_capability: SelectionReplaceCapability::Paste,
+            source_pid: Some(42),
+        };
+        assert_eq!(
+            replacement_refusal(&candidate, Some("before"), 1_100, false),
+            Some(ReplacementRefusal::RolloutDisabled)
+        );
+        assert_eq!(
+            replacement_refusal(&candidate, Some("before"), 1_100, true),
+            None
+        );
+        assert_eq!(
+            replacement_refusal(&candidate, Some("changed"), 1_100, true),
+            Some(ReplacementRefusal::SelectionChanged)
+        );
+        candidate.captured_at = 0;
+        assert_eq!(
+            replacement_refusal(&candidate, Some("before"), REPLACEMENT_FRESH_MS + 1, true),
+            Some(ReplacementRefusal::Stale)
+        );
+        candidate.origin = SelectionOrigin::Ocr;
+        assert_eq!(
+            replacement_refusal(&candidate, Some("before"), 1, true),
+            Some(ReplacementRefusal::NotEditable)
+        );
+    }
+
+    #[test]
+    fn replacement_source_identity_includes_pid_control_window_and_selection_bounds() {
+        let rect = Rect {
+            x: 10,
+            y: 20,
+            width: 80,
+            height: 18,
+        };
+        let snapshot =
+            build_text_selection("before", "TextEdit", Some("Draft"), Some(rect)).unwrap();
+        let candidate = ExternalSelectionCandidate::from_snapshot(
+            snapshot.clone(),
+            SelectionOrigin::Accessibility,
+        )
+        .with_source_element(
+            Some("AXTextArea".into()),
+            None,
+            Some("Draft".into()),
+            true,
+            Some(42),
+        );
+        let mut preflight = crate::automation::backend::SelectionPreflight {
+            pid: Some(42),
+            process_name: Some("TextEdit".into()),
+            window_title: Some("Draft".into()),
+            source_url: None,
+            source_subrole: Some("AXTextArea".into()),
+            editable: true,
+            secure_field: false,
+            trusted: true,
+        };
+        assert!(source_identity_matches(
+            &candidate,
+            Some(&preflight),
+            &snapshot
+        ));
+        preflight.pid = Some(43);
+        assert!(!source_identity_matches(
+            &candidate,
+            Some(&preflight),
+            &snapshot
+        ));
+    }
+
+    #[test]
+    fn undo_lease_is_candidate_bound_short_lived_and_generation_bound() {
+        let lease = UndoLease {
+            candidate_id: "c1".into(),
+            expires_at: 5_000,
+            input_generation: 7,
+        };
+        assert!(lease.is_valid("c1", 4_999, 7));
+        assert!(!lease.is_valid("c2", 4_999, 7));
+        assert!(!lease.is_valid("c1", 5_001, 7));
+        assert!(!lease.is_valid("c1", 4_999, 8));
+    }
+
+    #[test]
+    fn replacement_guard_is_exclusive_and_releases_on_drop() {
+        let inner = Arc::new(SelectionToolbarInner::default());
+        let first = ReplacementInProgressGuard::try_acquire(inner.clone()).unwrap();
+        assert!(ReplacementInProgressGuard::try_acquire(inner.clone()).is_err());
+        drop(first);
+        assert!(ReplacementInProgressGuard::try_acquire(inner).is_ok());
     }
 }

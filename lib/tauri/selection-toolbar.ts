@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { isTauri } from "@/lib/tauri"
 import { SHORTCUT_LIST_COMMAND } from "@/lib/shortcuts/ipc"
+import type { PluginQuickActionResult } from "@/types/plugin"
+import type { SelectionHostActionDescriptor } from "@/lib/selection/action-layout"
 
 export const SELECTION_TOOLBAR_LABEL = "selection-toolbar"
 export const SELECTION_CANDIDATE_EVENT = "selection://candidate"
@@ -22,7 +24,15 @@ export const SELECTION_SPEECH_EVENT = "selection://speech"
 /** Toolbar → main window: stop the speech this candidate started. */
 export const SELECTION_SPEECH_STOP_EVENT = "selection://speech-stop"
 export const SELECTION_TOOLBAR_ENABLED_PREF = "selectionToolbar.enabled"
+export const SELECTION_TOOLBAR_MODE_PREF = "selectionToolbar.mode"
 export const SELECTION_TOOLBAR_DISABLED_APPS_PREF = "selectionToolbar.disabledApps"
+export const SELECTION_TOOLBAR_DISABLED_SITES_PREF = "selectionToolbar.disabledSites"
+export const SELECTION_ACTION_LAYOUT_PREF = "selectionToolbar.actionLayout.v1"
+export const SELECTION_DIRECT_REPLACE_ALLOWLIST_PREF = "selectionToolbar.directReplaceAllowlist.v1"
+export const SELECTION_ACTION_CATALOG_EVENT = "selection://action-catalog"
+export const SELECTION_ACTION_REQUEST_EVENT = "selection://action-request"
+export const SELECTION_ACTION_RESULT_EVENT = "selection://action-result"
+export const SELECTION_OPEN_RESULT_EVENT = "selection://open-result"
 
 /**
  * Where the selected text came from, and therefore how much to trust it.
@@ -72,6 +82,10 @@ export interface ExternalSelectionCandidate {
   sourceSubrole?: string
   /** Document URL when the source app exposes one (browsers). */
   sourceUrl?: string
+  /** Whether the native source control reported an editable text range. */
+  editable: boolean
+  /** Replacement path proved available when the candidate was captured. */
+  replaceCapability: "none" | "paste"
 }
 
 /**
@@ -140,12 +154,77 @@ export interface SelectionSpeechPayload {
   progress?: number
 }
 
+export interface SelectionActionCatalogPayload {
+  candidateId: string
+  actions: SelectionHostActionDescriptor[]
+}
+
+export interface SelectionActionRequestPayload {
+  requestId: string
+  candidateId: string
+  actionId: string
+}
+
+export interface SelectionActionExecutionPayload extends SelectionActionRequestPayload {
+  ok: boolean
+  result?: Exclude<PluginQuickActionResult, void>
+  attribution?: string
+  output?: SelectionHostActionDescriptor["output"]
+  directReplaceAllowed?: boolean
+  error?:
+    | "stale"
+    | "permissionDenied"
+    | "invalidResult"
+    | "piiBlocked"
+    | "noModel"
+    | "noOutput"
+    | "failed"
+}
+
+export interface SelectionOpenResultPayload {
+  candidateId: string
+  text: string
+  attribution: string
+}
+
 export interface SelectionToolbarStatus {
   running: boolean
   hasCandidate: boolean
+  mode: "off" | "automatic" | "manual"
+  accessibility: SelectionPermissionProbeState
+  inputMonitoring: SelectionPermissionProbeState
+  screenRecording: SelectionPermissionProbeState
+  uia: SelectionPermissionProbeState
+  ocrAvailable: boolean
+  shortcutActivationActive: boolean
+  /**
+   * Whether this build carries selection replacement at all. False in every
+   * shipped build today, so settings labels the per-action Direct Replace
+   * control inert rather than offering a switch that can never take effect.
+   */
+  replaceAvailable: boolean
 }
 
-const STOPPED_STATUS: SelectionToolbarStatus = { running: false, hasCandidate: false }
+export type SelectionPermissionProbeState = "ok" | "missing" | "notApplicable" | "unknown"
+
+const STOPPED_STATUS: SelectionToolbarStatus = {
+  running: false,
+  hasCandidate: false,
+  mode: "off",
+  accessibility: "unknown",
+  inputMonitoring: "unknown",
+  screenRecording: "unknown",
+  uia: "unknown",
+  ocrAvailable: false,
+  shortcutActivationActive: false,
+  replaceAvailable: false,
+}
+
+export interface SelectionToolbarStartOptions {
+  mode?: "automatic" | "manual"
+  disabledApps?: string[]
+  disabledSites?: string[]
+}
 
 /**
  * Every command invoked from the **overlay** window, as opposed to the main
@@ -173,14 +252,24 @@ export const OVERLAY_COMMANDS = {
   setInteractive: "selection_toolbar_set_interactive",
   setKeepAlive: "selection_toolbar_set_keep_alive",
   listShortcuts: SHORTCUT_LIST_COMMAND,
+  replace: "selection_toolbar_replace",
+  undo: "selection_toolbar_undo",
+  copyResult: "selection_toolbar_copy_result",
 } as const
 
 export async function startSelectionToolbar(
-  disabledApps: string[] = []
+  options: SelectionToolbarStartOptions | string[] = []
 ): Promise<SelectionToolbarStatus> {
   if (!isTauri()) return STOPPED_STATUS
+  const args = Array.isArray(options)
+    ? { mode: "automatic" as const, disabledApps: options, disabledSites: [] }
+    : {
+        mode: options.mode ?? "automatic",
+        disabledApps: options.disabledApps ?? [],
+        disabledSites: options.disabledSites ?? [],
+      }
   return invoke<SelectionToolbarStatus>("selection_toolbar_start", {
-    args: { disabledApps },
+    args,
   })
 }
 
@@ -202,6 +291,43 @@ export async function getCurrentSelectionCandidate(): Promise<ExternalSelectionC
 export async function captureClipboardSelection(): Promise<ExternalSelectionCandidate | null> {
   if (!isTauri()) return null
   return invoke<ExternalSelectionCandidate | null>("selection_toolbar_capture_clipboard")
+}
+
+export interface SelectionReplacementResult {
+  replaced: boolean
+  reason?: "notEditable" | "stale" | "selectionChanged" | "sourceUnavailable" | "rolloutDisabled"
+  undoExpiresAt?: number
+}
+
+export async function replaceCurrentSelection(
+  candidateId: string,
+  text: string
+): Promise<SelectionReplacementResult> {
+  if (!isTauri()) return { replaced: false, reason: "sourceUnavailable" }
+  return invoke<SelectionReplacementResult>(OVERLAY_COMMANDS.replace, {
+    candidateId,
+    text,
+  })
+}
+
+export async function undoSelectionReplacement(candidateId: string): Promise<boolean> {
+  if (!isTauri()) return false
+  return invoke<boolean>(OVERLAY_COMMANDS.undo, { candidateId })
+}
+
+export async function copySelectionActionResult(candidateId: string, text: string): Promise<void> {
+  if (!isTauri()) {
+    await navigator.clipboard?.writeText(text)
+    return
+  }
+  await invoke(OVERLAY_COMMANDS.copyResult, { candidateId, text })
+}
+
+export async function repairSelectionToolbarPermission(
+  permission: "accessibility" | "inputMonitoring" | "screenRecording"
+): Promise<void> {
+  if (!isTauri()) return
+  await invoke("selection_toolbar_open_permission_settings", { permission })
 }
 
 export async function takePendingSelectionStage(): Promise<SelectionStagePayload | null> {

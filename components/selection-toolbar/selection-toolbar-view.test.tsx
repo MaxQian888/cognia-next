@@ -25,6 +25,9 @@ const interactiveMock = jest.fn().mockResolvedValue(undefined)
 const keepAliveMock = jest.fn().mockResolvedValue(undefined)
 const finishMock = jest.fn().mockResolvedValue(undefined)
 const chordsMock = jest.fn()
+const replaceMock = jest.fn()
+const undoMock = jest.fn()
+const copyResultMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/selection-toolbar", () => ({
   SELECTION_CANDIDATE_EVENT: "selection://candidate",
   SELECTION_DISMISS_EVENT: "selection://dismiss",
@@ -33,6 +36,11 @@ jest.mock("@/lib/tauri/selection-toolbar", () => ({
   SELECTION_RESULT_EVENT: "selection://result",
   SELECTION_SPEECH_EVENT: "selection://speech",
   SELECTION_SPEECH_STOP_EVENT: "selection://speech-stop",
+  SELECTION_ACTION_CATALOG_EVENT: "selection://action-catalog",
+  SELECTION_ACTION_REQUEST_EVENT: "selection://action-request",
+  SELECTION_ACTION_RESULT_EVENT: "selection://action-result",
+  SELECTION_ACTION_LAYOUT_PREF: "selectionToolbar.actionLayout.v1",
+  SELECTION_OPEN_RESULT_EVENT: "selection://open-result",
   SELECTION_SHADOW_PAD: 20,
   executeSelectionToolbarAction: (...args: unknown[]) => executeMock(...args),
   getCurrentSelectionCandidate: () => currentMock(),
@@ -41,6 +49,9 @@ jest.mock("@/lib/tauri/selection-toolbar", () => ({
   setSelectionToolbarKeepAlive: (...args: unknown[]) => keepAliveMock(...args),
   finishSelectionToolbar: (...args: unknown[]) => finishMock(...args),
   listShortcutChords: () => chordsMock(),
+  replaceCurrentSelection: (...args: unknown[]) => replaceMock(...args),
+  undoSelectionReplacement: (...args: unknown[]) => undoMock(...args),
+  copySelectionActionResult: (...args: unknown[]) => copyResultMock(...args),
 }))
 
 const getPrefMock = jest.fn()
@@ -90,6 +101,8 @@ const candidate = {
   origin: "accessibility" as const,
   capturedAt: 1,
   truncated: false,
+  editable: true,
+  replaceCapability: "paste" as const,
 }
 
 function emit(event: string, payload: unknown) {
@@ -110,6 +123,8 @@ beforeEach(() => {
   currentMock.mockResolvedValue(candidate)
   chordsMock.mockResolvedValue({ "selection.copy": "alt+shift+1" })
   getPrefMock.mockResolvedValue(null)
+  replaceMock.mockResolvedValue({ replaced: true, undoExpiresAt: Date.now() + 8_000 })
+  undoMock.mockResolvedValue(true)
 })
 
 describe("SelectionToolbarView", () => {
@@ -118,6 +133,57 @@ describe("SelectionToolbarView", () => {
     expect(await screen.findByRole("button", { name: "copy" })).toBeInTheDocument()
     await waitFor(() => expect(revealMock).toHaveBeenCalled())
     expect(document.documentElement).toHaveAttribute("data-selection-toolbar")
+  })
+
+  it("renders host-owned More actions and previews a normalized plugin result", async () => {
+    render(<SelectionToolbarView />)
+    await screen.findByRole("button", { name: "copy" })
+    await emit("selection://action-catalog", {
+      candidateId: "candidate-1",
+      actions: [
+        {
+          id: "cognia:rewrite",
+          title: "Rewrite",
+          source: "cognia",
+          input: "text",
+          output: "replace",
+          children: [{ id: "cognia:rewrite:improve", title: "Improve" }],
+        },
+        {
+          id: "plug-a:summarize",
+          title: "Summarize",
+          source: "plugin",
+          pluginId: "plug-a",
+          input: "text",
+          output: "preview",
+        },
+      ],
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "more" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Summarize/ }))
+    const requestCall = emitToMock.mock.calls.find(
+      (call) => call[1] === "selection://action-request"
+    )
+    expect(requestCall).toBeDefined()
+    const request = requestCall?.[2] as {
+      requestId: string
+      candidateId: string
+      actionId: string
+    }
+    expect(request).toEqual(
+      expect.objectContaining({ candidateId: "candidate-1", actionId: "plug-a:summarize" })
+    )
+
+    await emit("selection://action-result", {
+      ...request,
+      ok: true,
+      result: { kind: "text", text: "A concise summary" },
+      attribution: "plug-a",
+      output: "preview",
+    })
+    expect(screen.getByText("A concise summary")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "replace" })).not.toBeInTheDocument()
   })
 
   it("does not reveal an unmeasured window, which on Windows would paint black", async () => {
