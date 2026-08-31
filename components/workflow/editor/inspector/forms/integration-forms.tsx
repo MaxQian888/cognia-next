@@ -33,6 +33,7 @@ import {
   TwinPicker,
   EntityPicker,
 } from "./shared/entity-picker"
+import { Surface } from "@/components/surface/surface"
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { PluginCapabilities } from "@/lib/plugin/api/plugin-capability-registry"
 import { PiiGateField } from "./form-support"
@@ -346,17 +347,25 @@ export function MemoryRecallConfig({ params, onChange }: ConfigProps) {
       <Field label={t("types.label")} hint={t("types.hint")} name="types">
         <div className="space-y-1.5">
           {MEMORY_TYPES.map((kind) => (
-            <label
+            // A radius, a border and a background is a panel (ADR-0148), so
+            // the tier and the corner come from `Surface` rather than from
+            // three utilities a style pack cannot reach.
+            <Surface
+              asChild
               key={kind}
-              className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-sm hover:bg-muted/40"
+              layer="raised"
+              radius="control"
+              className="flex items-center gap-2 border px-2 py-1.5 text-sm hover:brightness-105"
             >
-              <Checkbox
-                checked={types.includes(kind)}
-                onCheckedChange={() => toggleType(kind)}
-                data-testid={`mr-type-${kind}`}
-              />
-              <span>{t(`types.options.${kind}` as never)}</span>
-            </label>
+              <label>
+                <Checkbox
+                  checked={types.includes(kind)}
+                  onCheckedChange={() => toggleType(kind)}
+                  data-testid={`mr-type-${kind}`}
+                />
+                <span>{t(`types.options.${kind}` as never)}</span>
+              </label>
+            </Surface>
           ))}
         </div>
       </Field>
