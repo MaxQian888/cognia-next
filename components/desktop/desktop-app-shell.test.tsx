@@ -20,30 +20,37 @@ jest.mock("next/navigation", () => ({
   usePathname: () => pathname,
 }))
 
-jest.mock("@cognia/logging", () => ({
-  createLogger: () => ({
+jest.mock("@cognia/logging", () => {
+  // Namespace-agnostic on purpose. These mocks used to list the handful of
+  // `loggers.*` names the suite happened to reach, so the day an import chain
+  // grew a new one the whole suite died at load with
+  // "Cannot read properties of undefined (reading 'child')" and zero tests ran.
+  // A Proxy answers for any namespace, so graph growth cannot go dark here.
+  const child: Record<string, unknown> = {
     debug: jest.fn(),
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
-    child: jest.fn(),
-  }),
-  loggers: {
-    shell: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: (...args: unknown[]) => logWarn(...args),
-      error: jest.fn(),
-    },
-    ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
-    agent: {
-      debug: jest.fn(),
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
-    },
-  },
-}))
+    trace: jest.fn(),
+  }
+  child.child = () => child
+  // `shell` keeps the suite's own spies: several tests assert on what the shell
+  // logged. Every other namespace falls through to the generic child, which is
+  // the point of the Proxy.
+  const shell: Record<string, unknown> = {
+    ...child,
+    info: (...args: unknown[]) => logInfo(...args),
+    warn: (...args: unknown[]) => logWarn(...args),
+  }
+  shell.child = () => shell
+  return {
+    createLogger: () => child,
+    logger: child,
+    loggers: new Proxy({} as Record<string, unknown>, {
+      get: (_target, prop) => (prop === "shell" ? shell : child),
+    }),
+  }
+})
 
 jest.mock("@/lib/db/schema", () => ({
   whenSeeded: jest.fn().mockResolvedValue(undefined),

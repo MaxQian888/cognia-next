@@ -53,12 +53,14 @@ export {
   selectTotalUnreadCount,
   // Derived: Consensus
   selectActiveTeamConsensus,
+  selectTeamConsensus,
   selectActiveTeamPendingConsensus,
   // Derived: Shared Memory
   selectActiveTeamSharedMemory,
   selectActiveTeamSharedMemoryEntries,
   // Derived: Delegations
   selectActiveTeamDelegations,
+  selectTeamDelegations,
   selectActiveDelegations,
   // Derived: Events
   selectActiveTeamEvents,

@@ -5,23 +5,23 @@
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 
 jest.mock("@cognia/logging", () => {
-  const childLogger = {
+  // Namespace-agnostic on purpose. These mocks used to list the handful of
+  // `loggers.*` names the suite happened to reach, so the day an import chain
+  // grew a new one the whole suite died at load with
+  // "Cannot read properties of undefined (reading 'child')" and zero tests ran.
+  // A Proxy answers for any namespace, so graph growth cannot go dark here.
+  const child: Record<string, unknown> = {
+    debug: jest.fn(),
+    info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
-    info: jest.fn(),
-    debug: jest.fn(),
+    trace: jest.fn(),
   }
+  child.child = () => child
   return {
-    createLogger: () => ({ ...childLogger, child: () => childLogger }),
-    logger: { ...childLogger, child: () => childLogger },
-    loggers: {
-      agent: {
-        child: () => childLogger,
-      },
-      plugin: {
-        child: () => childLogger,
-      },
-    },
+    createLogger: () => child,
+    logger: child,
+    loggers: new Proxy({} as Record<string, unknown>, { get: () => child }),
   }
 })
 

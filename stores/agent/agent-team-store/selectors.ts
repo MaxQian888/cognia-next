@@ -194,13 +194,25 @@ export const selectActiveTeamStructuredMessages = (state: AgentTeamState) =>
 // Derived: Consensus
 // ============================================================================
 
-export const selectActiveTeamConsensus = (state: AgentTeamState) => {
-  const team = selectActiveTeam(state)
+/**
+ * Consensus for a NAMED team.
+ *
+ * The `selectActiveTeam*` family reads whatever the store last selected, which
+ * is correct while the only consumer is a workspace the user navigated into.
+ * The run cockpit shows one run at a time and never selects a team, so a panel
+ * built on the active-team selector there shows whatever the retired workspace
+ * last looked at. Every caller outside that workspace has to name its team.
+ */
+export const selectTeamConsensus = (state: AgentTeamState, teamId: string | undefined) => {
+  const team = teamId ? state.teams[teamId] : undefined
   if (!team) return []
   return (team.consensusIds || [])
     .map((id) => state.consensus[id])
     .filter((c): c is ConsensusRequest => c !== undefined)
 }
+
+export const selectActiveTeamConsensus = (state: AgentTeamState) =>
+  selectTeamConsensus(state, state.activeTeamId ?? undefined)
 
 export const selectActiveTeamPendingConsensus = (state: AgentTeamState) =>
   selectActiveTeamConsensus(state).filter((c) => c.status === "open")
@@ -282,13 +294,17 @@ export const selectResolvedCapabilities =
 // Derived: Delegations
 // ============================================================================
 
-export const selectActiveTeamDelegations = (state: AgentTeamState) => {
-  const team = selectActiveTeam(state)
+/** Delegations a NAMED team is the source of. See `selectTeamConsensus`. */
+export const selectTeamDelegations = (state: AgentTeamState, teamId: string | undefined) => {
+  const team = teamId ? state.teams[teamId] : undefined
   if (!team) return []
   return Object.values(state.delegations).filter(
     (d): d is TeamDelegationRecord => d.sourceTeamId === team.id
   )
 }
+
+export const selectActiveTeamDelegations = (state: AgentTeamState) =>
+  selectTeamDelegations(state, state.activeTeamId ?? undefined)
 
 export const selectActiveDelegations = (state: AgentTeamState) =>
   Object.values(state.delegations).filter((d) => d.status === "active")

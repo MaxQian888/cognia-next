@@ -1926,6 +1926,9 @@
       "renamed": "Renamed",
       "resync": "Resynced"
     },
+    "coordination": {
+      "unavailable": "Coordination is not available on this device. The squad run record is not synced here."
+    },
     "degraded": {
       "no_active_run": "no live run to steer",
       "not_admitted": "the run has not been admitted yet",
@@ -2017,6 +2020,7 @@
       "approvals": "Approvals",
       "artifacts": "Artifacts",
       "changes": "Changes",
+      "coordination": "Coordination",
       "overview": "Overview",
       "tests": "Tests"
     },

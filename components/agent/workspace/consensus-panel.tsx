@@ -25,9 +25,11 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { ConsensusRequest } from "@/types/agent/agent-team"
+import type { AgentTeamState } from "@/stores/agent/agent-team-store/types"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import {
   selectActiveTeamConsensus,
+  selectTeamConsensus,
   selectSelectedTeammateId,
 } from "@/stores/agent/agent-team-store/selectors"
 import {
@@ -68,13 +70,29 @@ function statusVariant(
   }
 }
 
-export function ConsensusPanel() {
+export interface ConsensusPanelProps {
+  /**
+   * Which team's consensus to show.
+   *
+   * Omitted means "whichever team the store last selected", which is right
+   * inside a workspace the user navigated into and wrong everywhere else. The
+   * run cockpit shows one run at a time and never selects a team, so without
+   * this it would render whatever the retired workspace last looked at.
+   */
+  teamId?: string
+}
+
+export function ConsensusPanel({ teamId }: ConsensusPanelProps = {}) {
   const t = useTranslations("agentTeamsWorkspace.consensus")
   const tConfirm = useTranslations("agentTeamsWorkspace.settings.confirm")
-  // selectActiveTeamConsensus materialises a new array each call; useShallow
-  // makes the subscriber bail out when the contents are reference-equal, so
-  // the panel doesn't re-render every store update.
-  const consensus = useAgentTeamStore(useShallow(selectActiveTeamConsensus))
+  // The selector materialises a new array each call, so `useShallow` makes the
+  // subscriber bail out when the contents are reference-equal and the panel
+  // does not re-render on every store update.
+  const consensus = useAgentTeamStore(
+    useShallow((state: AgentTeamState) =>
+      teamId === undefined ? selectActiveTeamConsensus(state) : selectTeamConsensus(state, teamId)
+    )
+  )
   const selectedTeammateId = useAgentTeamStore(selectSelectedTeammateId)
   const [pendingResolve, setPendingResolve] = useState<{ id: string; lead: number } | null>(null)
 

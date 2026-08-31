@@ -61,20 +61,23 @@ import type { AgentTeamState } from "./types"
 import type { SharedMemoryEntry } from "@/types/agent/agent-team"
 
 jest.mock("@cognia/logging", () => {
-  const child = {
+  // Namespace-agnostic on purpose. These mocks used to list the handful of
+  // `loggers.*` names the suite happened to reach, so the day an import chain
+  // grew a new one the whole suite died at load with
+  // "Cannot read properties of undefined (reading 'child')" and zero tests ran.
+  // A Proxy answers for any namespace, so graph growth cannot go dark here.
+  const child: Record<string, unknown> = {
     debug: jest.fn(),
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
-    child: () => child,
+    trace: jest.fn(),
   }
+  child.child = () => child
   return {
-    createLogger: () => ({ ...child, child: () => child }),
-    logger: { ...child, child: () => child },
-    loggers: {
-      agent: { ...child, child: () => child },
-      plugin: { ...child, child: () => child },
-    },
+    createLogger: () => child,
+    logger: child,
+    loggers: new Proxy({} as Record<string, unknown>, { get: () => child }),
   }
 })
 
@@ -632,7 +635,10 @@ describe("agent-team-store store-level config", () => {
     const stored = window.localStorage.getItem("cognia-agent-teams")
     expect(stored).not.toBeNull()
     const parsed = JSON.parse(stored as string)
-    expect(parsed.version).toBe(6)
+    // Tracks `PERSIST_VERSION`. This said 6 for as long as the suite could not
+    // load, which is what a dark test costs: the bump to 7 landed with nothing
+    // watching.
+    expect(parsed.version).toBe(7)
     expect(parsed.state.displayMode).toBe("compact")
     // partialize keeps templates / defaultConfig / displayMode / workspaceTab /
     // lastAdapterSyncVersion AND (v4+) the durable team definitions.

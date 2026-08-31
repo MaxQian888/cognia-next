@@ -36,6 +36,7 @@ import { InspectRow } from "@/components/scheduler/details/_shared/inspect-row"
 import { RunImOrigin, useRunImOrigin } from "@/components/execution/run-im-origin"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { cn } from "@/lib/utils"
+import { isSquadRun, RunCoordinationTab } from "./run-coordination-tab"
 import { useExecutionRunDetail } from "@/hooks/agent-runs/use-execution-run-detail"
 import { changeKindLabelKey, changesAreComplete } from "@/lib/execution/run-detail-model"
 import { runKindLabelKey } from "@/lib/execution/cockpit-model"
@@ -84,6 +85,8 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
   const duration = row.endedAt ? formatDuration(row.endedAt - row.startedAt) : undefined
   // Null for every run started on the desktop, which is what gates the row.
   const imOrigin = useRunImOrigin(row.runId)
+  // Only a Squad run has consensus and delegations to show.
+  const squadRun = isSquadRun(row)
 
   const dispatch = async (action: RunControlAction, steerMessage?: string) => {
     const result = await actions.dispatch(row, action, steerMessage ? { steerMessage } : {})
@@ -166,7 +169,21 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             {t("tabs.approvals")}
             <SectionCount value={interrupts.length} />
           </TabsTrigger>
+          {/*
+            Only a Squad run has coordination. Offering the tab on a direct-chat
+            or workflow run would be a permanently empty section rather than a
+            capability.
+          */}
+          {squadRun ? (
+            <TabsTrigger value="coordination">{t("tabs.coordination")}</TabsTrigger>
+          ) : null}
         </TabsList>
+
+        {squadRun ? (
+          <TabsContent value="coordination" className="pt-2">
+            <RunCoordinationTab row={row} />
+          </TabsContent>
+        ) : null}
 
         <TabsContent value="overview" className="pt-2">
           <InspectRow label={t("detail.kind")} value={t(`kind.${runKindLabelKey(row)}`)} />

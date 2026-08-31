@@ -24,8 +24,14 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     selector({ delegations: {}, teams: {}, activeTeamId: null }),
 }))
 
+let namedTeamIds: (string | undefined)[] = []
 jest.mock("@/stores/agent/agent-team-store/selectors", () => ({
   selectActiveTeamDelegations: () => mockDelegations,
+  // Records what the panel asked for. See the team-scoping block below.
+  selectTeamDelegations: (_state: unknown, teamId: string | undefined) => {
+    namedTeamIds.push(teamId)
+    return mockDelegations
+  },
 }))
 
 import { DelegationsPanel } from "./delegations-panel"
@@ -106,5 +112,25 @@ describe("DelegationsPanel", () => {
     render(<DelegationsPanel />)
     const reasons = screen.getAllByText(/Older|Newer/).map((el) => el.textContent)
     expect(reasons[0]).toBe("Newer")
+  })
+})
+
+/**
+ * Same reasoning as `ConsensusPanel`: the active-team selector reads whatever
+ * the store last selected, which the run cockpit never sets.
+ */
+describe("DelegationsPanel team scoping", () => {
+  beforeEach(() => {
+    namedTeamIds = []
+  })
+
+  it("reads the named team when given one", () => {
+    render(<DelegationsPanel teamId="team-42" />)
+    expect(namedTeamIds).toEqual(["team-42"])
+  })
+
+  it("falls back to the store's selection when no team is named", () => {
+    render(<DelegationsPanel />)
+    expect(namedTeamIds).toEqual([])
   })
 })

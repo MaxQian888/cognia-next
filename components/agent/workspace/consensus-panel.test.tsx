@@ -32,8 +32,15 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
     }),
 }))
 
+let namedTeamIds: (string | undefined)[] = []
 jest.mock("@/stores/agent/agent-team-store/selectors", () => ({
   selectActiveTeamConsensus: () => mockConsensus,
+  // Records what the panel asked for, so a test can prove it named its team
+  // rather than falling back to whatever the store last selected.
+  selectTeamConsensus: (_state: unknown, teamId: string | undefined) => {
+    namedTeamIds.push(teamId)
+    return mockConsensus
+  },
   selectSelectedTeammateId: () => mockTeammateId,
 }))
 
@@ -103,5 +110,29 @@ describe("ConsensusPanel", () => {
     expect(screen.queryByText("vote")).not.toBeInTheDocument()
     expect(screen.queryByText("cancel")).not.toBeInTheDocument()
     expect(screen.getByText("done")).toBeInTheDocument()
+  })
+})
+
+/**
+ * The `selectActiveTeam*` family reads whatever the store last selected, which
+ * is right inside a workspace the user navigated into and wrong in the run
+ * cockpit, which shows one run at a time and never selects a team. A panel
+ * dropped there without a team would render the retired workspace's last
+ * selection.
+ */
+describe("ConsensusPanel team scoping", () => {
+  beforeEach(() => {
+    namedTeamIds = []
+    mockConsensus = [makeConsensus()]
+  })
+
+  it("reads the named team when given one", () => {
+    render(<ConsensusPanel teamId="team-42" />)
+    expect(namedTeamIds).toEqual(["team-42"])
+  })
+
+  it("falls back to the store's selection when no team is named", () => {
+    render(<ConsensusPanel />)
+    expect(namedTeamIds).toEqual([])
   })
 })

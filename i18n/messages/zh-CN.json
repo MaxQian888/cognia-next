@@ -1926,6 +1926,9 @@
       "renamed": "重命名",
       "resync": "已重新同步"
     },
+    "coordination": {
+      "unavailable": "本设备没有协同记录。小队运行记录没有同步到这里。"
+    },
     "degraded": {
       "no_active_run": "没有正在运行的会话可以介入",
       "not_admitted": "该运行尚未获得执行许可",
@@ -2017,6 +2020,7 @@
       "approvals": "审批",
       "artifacts": "产物",
       "changes": "文件变更",
+      "coordination": "协同",
       "overview": "概览",
       "tests": "测试"
     },

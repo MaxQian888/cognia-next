@@ -136,7 +136,8 @@
     "artifacts": "Artifacts",
     "changes": "Changes",
     "overview": "Overview",
-    "tests": "Tests"
+    "tests": "Tests",
+    "coordination": "Coordination"
   },
   "tests": {
     "counts": "{passed} passed · {failed} failed · {skipped} skipped",
@@ -145,5 +146,8 @@
     "inconclusiveHint": "The output could not be parsed — this is not a pass.",
     "passed": "Passed"
   },
-  "title": "Agent Runs"
+  "title": "Agent Runs",
+  "coordination": {
+    "unavailable": "Coordination is not available on this device. The squad run record is not synced here."
+  }
 }

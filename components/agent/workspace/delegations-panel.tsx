@@ -23,8 +23,12 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { TeamDelegationRecord, TeamDelegationStatus } from "@/types/agent/agent-team"
+import type { AgentTeamState } from "@/stores/agent/agent-team-store/types"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { selectActiveTeamDelegations } from "@/stores/agent/agent-team-store/selectors"
+import {
+  selectActiveTeamDelegations,
+  selectTeamDelegations,
+} from "@/stores/agent/agent-team-store/selectors"
 import { approveDelegation, cancelDelegation } from "@/lib/ai/agent/team/delegation-orchestrator"
 
 function statusVariant(
@@ -48,11 +52,22 @@ function statusVariant(
   }
 }
 
-export function DelegationsPanel() {
+export interface DelegationsPanelProps {
+  /** Which team's delegations to show. See `ConsensusPanelProps.teamId`. */
+  teamId?: string
+}
+
+export function DelegationsPanel({ teamId }: DelegationsPanelProps = {}) {
   const t = useTranslations("agentTeamsWorkspace.delegations")
-  // selectActiveTeamDelegations materialises a fresh array; useShallow bails out
-  // when the contents are reference-equal so the panel doesn't churn.
-  const delegations = useAgentTeamStore(useShallow(selectActiveTeamDelegations))
+  // The selector materialises a fresh array, so `useShallow` bails out when the
+  // contents are reference-equal and the panel does not churn.
+  const delegations = useAgentTeamStore(
+    useShallow((state: AgentTeamState) =>
+      teamId === undefined
+        ? selectActiveTeamDelegations(state)
+        : selectTeamDelegations(state, teamId)
+    )
+  )
 
   const ordered = useMemo(
     () =>

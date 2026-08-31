@@ -136,7 +136,8 @@
     "artifacts": "产物",
     "changes": "文件变更",
     "overview": "概览",
-    "tests": "测试"
+    "tests": "测试",
+    "coordination": "协同"
   },
   "tests": {
     "counts": "{passed} 通过 · {failed} 失败 · {skipped} 跳过",
@@ -145,5 +146,8 @@
     "inconclusiveHint": "输出无法解析——这不等于通过。",
     "passed": "通过"
   },
-  "title": "运行中心"
+  "title": "运行中心",
+  "coordination": {
+    "unavailable": "本设备没有协同记录。小队运行记录没有同步到这里。"
+  }
 }
