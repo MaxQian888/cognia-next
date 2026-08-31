@@ -261,7 +261,15 @@ export function WorkspaceOverview() {
               machine, which on a laptop with several checked-out projects read
               as "this workspace owns all of these". Rows it does not own stay
               one click away. */}
-          <WorkspaceEnvironmentList projectId={workspaceId ?? undefined} />
+          <WorkspaceEnvironmentList
+            projectId={workspaceId ?? undefined}
+            // The tab listed every environment and could create none: the only
+            // creation entry in the app was inside the Source Control sheet.
+            rootDir={
+              workspace?.roots?.find((root) => root.isPrimary)?.path ?? workspace?.roots?.[0]?.path
+            }
+            showCreate
+          />
         </TabsContent>
 
         <TabsContent value="capabilities" className="mt-0">

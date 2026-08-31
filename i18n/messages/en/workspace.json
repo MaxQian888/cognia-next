@@ -98,7 +98,8 @@
       "restorable": "Restorable"
     },
     "title": "Execution environments",
-    "unpin": "Unpin environment"
+    "unpin": "Unpin environment",
+    "create": "New worktree"
   },
   "manage": {
     "activeBadge": "Active",

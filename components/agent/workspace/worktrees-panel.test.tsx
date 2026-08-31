@@ -7,16 +7,33 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-const isTauriMock = jest.fn(() => true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
-
 const gitBranchesMock = jest.fn()
 const gitCheckoutBranchMock = jest.fn(async (..._a: unknown[]) => {})
 const gitDeleteBranchMock = jest.fn(async (..._a: unknown[]) => {})
+const runGitUserActionMock = jest.fn((_command: string, operation: () => Promise<unknown>) =>
+  operation()
+)
 jest.mock("@/lib/git/commands", () => ({
   gitBranches: (...a: unknown[]) => gitBranchesMock(...a),
   gitCheckoutBranch: (...a: unknown[]) => gitCheckoutBranchMock(...a),
   gitDeleteBranch: (...a: unknown[]) => gitDeleteBranchMock(...a),
+  runGitUserAction: (...a: unknown[]) =>
+    (runGitUserActionMock as unknown as (...args: unknown[]) => unknown)(...a),
+}))
+
+// The panel now shows the live inventory above the reclaimed branches. Stubbed
+// here so this suite stays about the branch list; the inventory has its own.
+const inventoryRender = jest.fn()
+jest.mock("@/components/workspace/workspace-environment-list", () => ({
+  WorkspaceEnvironmentList: (props: { rootDir?: string; showCreate?: boolean }) => {
+    inventoryRender(props)
+    return <div data-testid="live-environments" data-root-dir={props.rootDir} />
+  },
+}))
+
+const gateMock = jest.fn(() => ({ available: true, reason: null as string | null }))
+jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
+  useWorkspaceCommandGate: () => gateMock,
 }))
 
 jest.mock("@/components/source-control/compare-refs-sheet", () => ({
@@ -43,7 +60,9 @@ function makeTeam(workingDir?: string): AgentTeam {
 }
 
 beforeEach(() => {
-  isTauriMock.mockReturnValue(true)
+  jest.clearAllMocks()
+  gateMock.mockReturnValue({ available: true, reason: null })
+  runGitUserActionMock.mockImplementation((_command, operation) => operation())
   gitBranchesMock.mockReset()
   gitCheckoutBranchMock.mockClear()
   gitDeleteBranchMock.mockClear()
@@ -51,16 +70,34 @@ beforeEach(() => {
 })
 
 describe("WorktreesPanel", () => {
-  it("renders the desktop-only placeholder on web", () => {
-    isTauriMock.mockReturnValue(false)
+  it("shows the live worktree inventory above the reclaimed branches", async () => {
+    // The tab was named Worktrees and listed only branches, so it could read as
+    // empty on a machine with live worktrees on disk.
+    gitBranchesMock.mockResolvedValue([])
     render(<WorktreesPanel team={makeTeam("/repo")} />)
+
+    expect(await screen.findByTestId("live-environments")).toHaveAttribute("data-root-dir", "/repo")
+    expect(inventoryRender).toHaveBeenCalledWith(
+      expect.objectContaining({ rootDir: "/repo", showCreate: true })
+    )
+  })
+
+  it("only refuses when the team has no working directory", () => {
+    // Previously this also refused off Tauri, so the whole tab was blank on a
+    // paired phone or browser even though the host could answer.
+    render(<WorktreesPanel team={makeTeam(undefined)} />)
     expect(screen.getByTestId("worktrees-desktop-only")).toBeInTheDocument()
     expect(gitBranchesMock).not.toHaveBeenCalled()
   })
 
-  it("renders the desktop-only placeholder when the team has no workingDir", () => {
-    render(<WorktreesPanel team={makeTeam(undefined)} />)
-    expect(screen.getByTestId("worktrees-desktop-only")).toBeInTheDocument()
+  it("disables branch actions with a reason instead of hiding the tab", async () => {
+    gateMock.mockReturnValue({ available: false, reason: "needs host.admin" })
+    gitBranchesMock.mockResolvedValue([branch("agent/run1/Alice/t1")])
+    render(<WorktreesPanel team={makeTeam("/repo")} />)
+
+    const checkout = await screen.findByText("actions.checkout")
+    expect(checkout.closest("button")).toBeDisabled()
+    expect(checkout.closest("button")).toHaveAttribute("title", "needs host.admin")
   })
 
   it("shows the empty state when there are no agent branches", async () => {
@@ -80,10 +117,13 @@ describe("WorktreesPanel", () => {
 
     fireEvent.click(screen.getByText("actions.checkout"))
     expect(gitCheckoutBranchMock).toHaveBeenCalledWith("/repo", "agent/run1/Alice/t1")
+    // Both writes are `approval: "interactive"`, so they must carry a lease.
+    expect(runGitUserActionMock).toHaveBeenCalledWith("git_checkout_branch", expect.any(Function))
 
     fireEvent.click(screen.getByText("actions.delete"))
     await waitFor(() =>
       expect(gitDeleteBranchMock).toHaveBeenCalledWith("/repo", "agent/run1/Alice/t1", true)
     )
+    expect(runGitUserActionMock).toHaveBeenCalledWith("git_delete_branch", expect.any(Function))
   })
 })

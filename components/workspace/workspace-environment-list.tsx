@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ArchiveIcon,
+  GitBranchPlusIcon,
   BoxesIcon,
   FolderOpenIcon,
   GitBranchIcon,
@@ -59,6 +60,8 @@ import type {
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
 import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
+import { useElementWidth } from "@/hooks/use-element-width"
+import { NewWorktreeForm } from "./new-worktree-form"
 import { useWorkspaceActionController } from "@/hooks/use-workspace-action-controller"
 
 export interface WorkspaceEnvironmentListProps {
@@ -73,8 +76,34 @@ export interface WorkspaceEnvironmentListProps {
   projectId?: string
   refreshKey?: number
   showPrune?: boolean
+  /**
+   * Offer worktree creation inline.
+   *
+   * Opt-in because the three mount points want different things: the
+   * source-control sheet already renders the form above this list, and the
+   * device runtime section is a read-out of another machine. `/workspace`
+   * listed every environment and could make none, which is the gap this
+   * closes.
+   */
+  showCreate?: boolean
   canMutate?: (command: string) => boolean
 }
+
+/**
+ * Container width below which the table becomes a card list.
+ *
+ * A measured container width, not a viewport breakpoint and not a CSS
+ * container query. This list is mounted in the `/workspace` tab, a
+ * source-control sheet and the device runtime section, so the viewport never
+ * describes the space it has (the reasoning `SettingsMasterDetail` writes
+ * down). A CSS query would have to render both layouts and hide one, which
+ * puts every action button in the accessibility tree twice.
+ *
+ * 640px is where the five columns stop fitting without the action column
+ * sliding off the end, which is not a cosmetic problem: it made every control
+ * on the row unreachable on a phone.
+ */
+const COMPACT_WIDTH = 640
 
 function hasAction(row: WorkspaceEnvironmentSummary, action: WorkspaceEnvironmentAction) {
   return row.allowedActions.includes(action)
@@ -96,6 +125,7 @@ export function WorkspaceEnvironmentList({
   projectId,
   refreshKey = 0,
   showPrune = false,
+  showCreate = false,
   canMutate = () => true,
 }: WorkspaceEnvironmentListProps) {
   const t = useTranslations("workspace.environments")
@@ -117,9 +147,15 @@ export function WorkspaceEnvironmentList({
   // lack the `host.admin` an interactive command needs, so `remove`, `prune`
   // and `delete` can each be available while the others are not.
   const gate = useWorkspaceCommandGate()
+  const containerRef = useRef<HTMLElement | null>(null)
+  const containerWidth = useElementWidth(containerRef)
+  // Zero means "not measured yet". The table is the unmeasured default so a
+  // wide pane never flashes cards on first paint.
+  const compact = containerWidth > 0 && containerWidth < COMPACT_WIDTH
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [branchTarget, setBranchTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [branchName, setBranchName] = useState("")
+  const [createOpen, setCreateOpen] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [forceRemove, setForceRemove] = useState(false)
   const [deleteBranch, setDeleteBranch] = useState(false)
@@ -265,23 +301,196 @@ export function WorkspaceEnvironmentList({
    * whichever says no supplies the tooltip, so a disabled button is never
    * silent about why.
    */
-  const actionProps = (command: string, key: string) => {
+  const actionProps = (command: string, key?: string) => {
     const verdict = gate(command)
     const allowed = verdict.available && canMutate(command)
     return {
-      disabled: pendingId === key || !allowed,
+      // `key` is the row this action belongs to. Creation has no row, so it
+      // passes none and is not disabled by another row's pending action.
+      disabled: (key !== undefined && pendingId === key) || !allowed,
       title: verdict.reason ?? undefined,
       "data-unavailable": allowed ? undefined : "true",
     }
   }
+
+  // ---------------------------------------------------------------- row parts
+  //
+  // The table and the card list are two containers over ONE row. Rendering the
+  // cells twice is how a control ends up on the wide layout and not the narrow
+  // one, so the parts are built here and both containers place them.
+
+  const renderIdentity = (row: WorkspaceEnvironmentSummary) => (
+    <>
+      <div className="truncate font-mono text-xs" title={row.path}>
+        {row.path}
+      </div>
+      <div className="flex flex-wrap gap-1 pt-1">
+        {row.locked ? (
+          <Badge variant="outline" title={row.lockReason ?? undefined}>
+            {t("locked")}
+          </Badge>
+        ) : null}
+        {row.prunable ? (
+          <Badge variant="outline" title={row.pruneReason ?? undefined}>
+            {t("prunable")}
+          </Badge>
+        ) : null}
+      </div>
+    </>
+  )
+
+  const renderKind = (row: WorkspaceEnvironmentSummary) => (
+    <>
+      <div className="flex flex-col items-start gap-1">
+        <Badge variant={row.ownership === "managed" ? "secondary" : "outline"}>
+          {t(`ownership.${row.ownership}`)}
+        </Badge>
+        {row.ownerType ? (
+          <span className="text-xs text-muted-foreground">
+            {t(`ownerTypes.${row.ownerType}`)}
+            {row.ownerRef ? ` · ${row.ownerRef}` : null}
+          </span>
+        ) : null}
+      </div>
+    </>
+  )
+
+  const renderActions = (row: WorkspaceEnvironmentSummary) => (
+    <div className="flex justify-end gap-1">
+      {hasAction(row, "open") && canOpenPaths ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => openPathAsWorkspace(row.path)}
+          aria-label={t("open")}
+        >
+          <FolderOpenIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "pin") && row.workspaceId ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("task_workspace_managed_pin", row.environmentId)}
+          onClick={() =>
+            void runManagedAction(row, "task_workspace_managed_pin", (workspaceId) =>
+              pinManagedWorkspace(workspaceId, !row.pinned)
+            )
+          }
+          aria-label={row.pinned ? t("unpin") : t("pin")}
+        >
+          {row.pinned ? (
+            <PinOffIcon aria-hidden className="size-4" />
+          ) : (
+            <PinIcon aria-hidden className="size-4" />
+          )}
+        </Button>
+      ) : null}
+      {hasAction(row, "makePermanent") && row.workspaceId ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("task_workspace_managed_permanent", row.environmentId)}
+          onClick={() =>
+            void runManagedAction(
+              row,
+              "task_workspace_managed_permanent",
+              makeManagedWorkspacePermanent
+            )
+          }
+          aria-label={t("makePermanent")}
+        >
+          <ShieldCheckIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "createBranchHere") && row.workspaceId ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("task_workspace_environment_create_branch", row.environmentId)}
+          onClick={() => {
+            setBranchTarget(row)
+            setBranchName("")
+          }}
+          aria-label={t("createBranch")}
+        >
+          <GitBranchIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "archive") && row.workspaceId ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("task_workspace_managed_archive", row.environmentId)}
+          onClick={() =>
+            void runManagedAction(row, "task_workspace_managed_archive", archiveManagedWorkspace)
+          }
+          aria-label={t("archive")}
+        >
+          <ArchiveIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "adopt") ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps(
+            row.workspaceId ? "task_workspace_managed_adopt" : "task_workspace_environment_adopt",
+            row.environmentId
+          )}
+          onClick={() => void adoptEnvironment(row)}
+          aria-label={t("adopt")}
+        >
+          <ShieldCheckIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "restore") && row.workspaceId ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("task_workspace_managed_restore", row.environmentId)}
+          onClick={() =>
+            void runManagedAction(row, "task_workspace_managed_restore", restoreManagedWorkspace)
+          }
+          aria-label={t("restore")}
+        >
+          <RotateCcwIcon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "delete") && row.workspaceId ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("task_workspace_managed_delete", row.environmentId)}
+          onClick={() => setDeleteTarget(row)}
+          aria-label={t("delete")}
+        >
+          <Trash2Icon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+      {hasAction(row, "remove") ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          {...actionProps("git_worktree_remove", row.environmentId)}
+          onClick={() => requestRemove(row)}
+          aria-label={t("remove")}
+        >
+          <Trash2Icon aria-hidden className="size-4" />
+        </Button>
+      ) : null}
+    </div>
+  )
 
   const canOpenPaths = !rootDir || !isRemoteGitTarget(rootDir)
   const canPrune = Boolean(rows?.some((row) => hasAction(row, "prune")))
 
   return (
     <section
+      ref={containerRef}
       className="flex min-h-0 flex-col gap-2"
       data-testid="workspace-environments"
+      data-density={compact ? "compact" : "full"}
       data-presentation={presentation}
     >
       <div className="flex items-center gap-2">
@@ -297,13 +506,26 @@ export function WorkspaceEnvironmentList({
             {t("count", { count: scoped?.length ?? 0 })}
           </span>
         )}
+        {showCreate && rootDir ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setCreateOpen((current) => !current)}
+            aria-expanded={createOpen}
+            data-testid="workspace-environments-create-toggle"
+            {...actionProps("git_worktree_add")}
+          >
+            <GitBranchPlusIcon aria-hidden className="size-4" />
+            {t("create")}
+          </Button>
+        ) : null}
         {showPrune ? (
           <Button
             size="sm"
             variant="ghost"
             onClick={() => void prune()}
             {...(() => {
-              const props = actionProps("git_worktree_prune", "__prune__")
+              const props = actionProps("git_worktree_prune")
               return { ...props, disabled: props.disabled || !canPrune || pendingId !== null }
             })()}
             aria-label={t("prune")}
@@ -321,6 +543,19 @@ export function WorkspaceEnvironmentList({
           <RefreshCwIcon aria-hidden className="size-4" />
         </Button>
       </div>
+
+      {showCreate && rootDir && createOpen ? (
+        <div className="rounded-lg border p-3" data-testid="workspace-environments-create">
+          <NewWorktreeForm
+            rootDir={rootDir}
+            canMutate={canMutate}
+            onCreated={() => {
+              setCreateOpen(false)
+              void load()
+            }}
+          />
+        </div>
+      ) : null}
 
       {error ? (
         <p className="text-sm text-destructive" role="alert">
@@ -344,203 +579,70 @@ export function WorkspaceEnvironmentList({
           </EmptyHeader>
         </Empty>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("path")}</TableHead>
-              <TableHead>{t("kind")}</TableHead>
-              {presentation === "page" ? <TableHead>{t("state")}</TableHead> : null}
-              {presentation === "page" ? <TableHead>{t("base")}</TableHead> : null}
-              <TableHead className="text-right">{t("actions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {scoped.map((row) => (
-              <TableRow
-                key={row.environmentId}
-                data-testid={`workspace-environment-${row.environmentId}`}
-              >
-                <TableCell className="max-w-80">
-                  <div className="truncate font-mono text-xs" title={row.path}>
-                    {row.path}
-                  </div>
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {row.locked ? (
-                      <Badge variant="outline" title={row.lockReason ?? undefined}>
-                        {t("locked")}
-                      </Badge>
+        <>
+          {compact ? null : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("path")}</TableHead>
+                  <TableHead>{t("kind")}</TableHead>
+                  {presentation === "page" ? <TableHead>{t("state")}</TableHead> : null}
+                  {presentation === "page" ? <TableHead>{t("base")}</TableHead> : null}
+                  <TableHead className="text-right">{t("actions")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {scoped.map((row) => (
+                  <TableRow
+                    key={row.environmentId}
+                    data-testid={`workspace-environment-${row.environmentId}`}
+                  >
+                    <TableCell className="max-w-80">{renderIdentity(row)}</TableCell>
+                    <TableCell>{renderKind(row)}</TableCell>
+                    {presentation === "page" ? (
+                      <TableCell>{row.state ? t(`states.${row.state}`) : t("stateNone")}</TableCell>
                     ) : null}
-                    {row.prunable ? (
-                      <Badge variant="outline" title={row.pruneReason ?? undefined}>
-                        {t("prunable")}
-                      </Badge>
+                    {presentation === "page" ? (
+                      <TableCell className="font-mono text-xs">
+                        {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
+                      </TableCell>
                     ) : null}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-col items-start gap-1">
-                    <Badge variant={row.ownership === "managed" ? "secondary" : "outline"}>
-                      {t(`ownership.${row.ownership}`)}
-                    </Badge>
-                    {row.ownerType ? (
+                    <TableCell>{renderActions(row)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          {/* Narrow container: one card per row, same parts. */}
+          {compact ? (
+            <ul className="flex flex-col gap-2">
+              {scoped.map((row) => (
+                <li
+                  key={row.environmentId}
+                  data-testid={`workspace-environment-card-${row.environmentId}`}
+                  className="flex flex-col gap-2 rounded-lg border bg-card p-3"
+                >
+                  <div className="min-w-0">{renderIdentity(row)}</div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {renderKind(row)}
+                    {presentation === "page" ? (
                       <span className="text-xs text-muted-foreground">
-                        {t(`ownerTypes.${row.ownerType}`)}
-                        {row.ownerRef ? ` · ${row.ownerRef}` : null}
+                        {row.state ? t(`states.${row.state}`) : t("stateNone")}
+                      </span>
+                    ) : null}
+                    {presentation === "page" ? (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
                       </span>
                     ) : null}
                   </div>
-                </TableCell>
-                {presentation === "page" ? (
-                  <TableCell>{row.state ? t(`states.${row.state}`) : t("stateNone")}</TableCell>
-                ) : null}
-                {presentation === "page" ? (
-                  <TableCell className="font-mono text-xs">
-                    {row.base ? t(`bases.${row.base.kind}`) : (row.branch ?? t("baseNone"))}
-                  </TableCell>
-                ) : null}
-                <TableCell>
-                  <div className="flex justify-end gap-1">
-                    {hasAction(row, "open") && canOpenPaths ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => openPathAsWorkspace(row.path)}
-                        aria-label={t("open")}
-                      >
-                        <FolderOpenIcon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "pin") && row.workspaceId ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps("task_workspace_managed_pin", row.environmentId)}
-                        onClick={() =>
-                          void runManagedAction(row, "task_workspace_managed_pin", (workspaceId) =>
-                            pinManagedWorkspace(workspaceId, !row.pinned)
-                          )
-                        }
-                        aria-label={row.pinned ? t("unpin") : t("pin")}
-                      >
-                        {row.pinned ? (
-                          <PinOffIcon aria-hidden className="size-4" />
-                        ) : (
-                          <PinIcon aria-hidden className="size-4" />
-                        )}
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "makePermanent") && row.workspaceId ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps("task_workspace_managed_permanent", row.environmentId)}
-                        onClick={() =>
-                          void runManagedAction(
-                            row,
-                            "task_workspace_managed_permanent",
-                            makeManagedWorkspacePermanent
-                          )
-                        }
-                        aria-label={t("makePermanent")}
-                      >
-                        <ShieldCheckIcon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "createBranchHere") && row.workspaceId ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps(
-                          "task_workspace_environment_create_branch",
-                          row.environmentId
-                        )}
-                        onClick={() => {
-                          setBranchTarget(row)
-                          setBranchName("")
-                        }}
-                        aria-label={t("createBranch")}
-                      >
-                        <GitBranchIcon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "archive") && row.workspaceId ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps("task_workspace_managed_archive", row.environmentId)}
-                        onClick={() =>
-                          void runManagedAction(
-                            row,
-                            "task_workspace_managed_archive",
-                            archiveManagedWorkspace
-                          )
-                        }
-                        aria-label={t("archive")}
-                      >
-                        <ArchiveIcon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "adopt") ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps(
-                          row.workspaceId
-                            ? "task_workspace_managed_adopt"
-                            : "task_workspace_environment_adopt",
-                          row.environmentId
-                        )}
-                        onClick={() => void adoptEnvironment(row)}
-                        aria-label={t("adopt")}
-                      >
-                        <ShieldCheckIcon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "restore") && row.workspaceId ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps("task_workspace_managed_restore", row.environmentId)}
-                        onClick={() =>
-                          void runManagedAction(
-                            row,
-                            "task_workspace_managed_restore",
-                            restoreManagedWorkspace
-                          )
-                        }
-                        aria-label={t("restore")}
-                      >
-                        <RotateCcwIcon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "delete") && row.workspaceId ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps("task_workspace_managed_delete", row.environmentId)}
-                        onClick={() => setDeleteTarget(row)}
-                        aria-label={t("delete")}
-                      >
-                        <Trash2Icon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                    {hasAction(row, "remove") ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        {...actionProps("git_worktree_remove", row.environmentId)}
-                        onClick={() => requestRemove(row)}
-                        aria-label={t("remove")}
-                      >
-                        <Trash2Icon aria-hidden className="size-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                  {renderActions(row)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
       )}
 
       {otherProjectCount > 0 ? (
