@@ -108,6 +108,7 @@ function makeSeamDeps(overrides?: {
       checkWithConsent: async () => true,
     }),
     getBroker: () => ({ request: async () => true }),
+    resolveSandboxRuntimeRef: () => undefined,
   }
 }
 

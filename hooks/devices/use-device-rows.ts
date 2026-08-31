@@ -43,12 +43,12 @@ import { listPairedDevices } from "@/lib/db/paired-devices"
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
 import { getFriendlyDeviceLabel } from "@/lib/device/device-identity"
-import { getMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { isTauri, transport } from "@/lib/tauri"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
-import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
+import { useSandboxRuntimeAvailability } from "@/hooks/sandbox/use-sandbox-runtime-availability"
+import { projectSandboxConnectionCapabilities } from "@/lib/sandbox/runtime-availability"
 
 /**
  * How often live presence and the host snapshot are re-read.
@@ -158,7 +158,7 @@ function readPresence(deviceIds: readonly string[]): Map<string, DevicePresenceS
 export function useDeviceRows(): UseDeviceRowsResult {
   const pairedDevices = useLiveQuery(() => listPairedDevices(), [], [])
   const { connections } = useSandboxConnections()
-  const { health } = useSandboxHealth()
+  const runtimeAvailability = useSandboxRuntimeAvailability()
 
   const { hosts, activeHostId } = useRemoteHostStore(
     useShallow((state) => ({ hosts: state.hosts, activeHostId: state.activeHostId }))
@@ -227,8 +227,8 @@ export function useDeviceRows(): UseDeviceRowsResult {
         platform: detectPlatform(),
         appVersion: APP_VERSION,
         capabilities: detectLocalCapabilities(),
-        microvmAvailable: getMicrovmExec() !== null,
-        osSandboxAvailable: health.available,
+        microvmAvailable: runtimeAvailability.microvm.available,
+        osSandboxAvailable: runtimeAvailability.os.available,
       },
       pairedDevices: pairedDevices ?? [],
       hostDevices: hostDevices ?? undefined,
@@ -236,7 +236,10 @@ export function useDeviceRows(): UseDeviceRowsResult {
       sshHosts: sshHosts ?? [],
       workers,
       presence: readPresence(deviceIds),
-      sandboxConnections: connections,
+      sandboxConnections: connections.map((connection) => ({
+        ...connection,
+        capabilities: projectSandboxConnectionCapabilities(connection, isTauri()),
+      })),
       activeHostId,
       ownerNames,
       ...(hostPersonUserId ? { hostPersonUserId } : {}),
@@ -252,7 +255,8 @@ export function useDeviceRows(): UseDeviceRowsResult {
     activeHostId,
     ownerNames,
     hostPersonUserId,
-    health.available,
+    runtimeAvailability.microvm.available,
+    runtimeAvailability.os.available,
     now,
   ])
 

@@ -6,7 +6,7 @@ const cancelJob = jest.fn<Promise<unknown>, [string]>()
 const retryJob = jest.fn<Promise<unknown>, [string, { id: string }]>()
 const setKillSwitch = jest.fn<Promise<void>, [unknown]>()
 
-let snapshot: RetrievalControlSnapshot
+let snapshot: RetrievalControlSnapshot | undefined
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => snapshot,
@@ -100,6 +100,16 @@ it("shows content-free generation, job, trace, and Vault status", () => {
   expect(screen.queryByText("trace-1")).toBeNull()
 })
 
+it("shows a loading state instead of reporting an empty control plane before data arrives", () => {
+  snapshot = undefined
+  render(<RetrievalControlPanel />)
+
+  expect(screen.getByText("Loading retrieval state…")).toBeInTheDocument()
+  expect(
+    screen.queryByText("No retrieval generations or jobs are recorded for this scope.")
+  ).not.toBeInTheDocument()
+})
+
 it("cancels active jobs and creates a new queued retry for terminal failures", async () => {
   snapshot = controlSnapshot({
     jobs: [
@@ -152,4 +162,15 @@ it("requires confirmation before engaging the kill switch", async () => {
       })
     )
   )
+})
+
+it("recovers the kill-switch control and reports a failed request", async () => {
+  setKillSwitch.mockRejectedValue(new Error("database unavailable"))
+  render(<RetrievalControlPanel />)
+
+  fireEvent.click(screen.getByRole("button", { name: "Stop new retrieval work" }))
+  fireEvent.click(screen.getByRole("button", { name: "Stop new retrieval work" }))
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("The retrieval control action failed.")
+  expect(screen.getByRole("button", { name: "Stop new retrieval work" })).toBeEnabled()
 })

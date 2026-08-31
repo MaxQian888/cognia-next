@@ -52,6 +52,7 @@ export function RetrievalControlPanel({
   const accountLocked = useAccountStore((state) => state.locked)
   const [error, setError] = useState(false)
   const [busyJobId, setBusyJobId] = useState<string | null>(null)
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false)
   const snapshot = useLiveQuery(
     () => listRetrievalControlSnapshot({ corpusIds, corpusPrefixes }),
     [corpusIds.join("\u0000"), corpusPrefixes.join("\u0000")]
@@ -85,6 +86,7 @@ export function RetrievalControlPanel({
   }
 
   const setKillSwitch = async (engaged: boolean) => {
+    setKillSwitchBusy(true)
     setError(false)
     try {
       await setRetrievalKillSwitch({
@@ -94,6 +96,8 @@ export function RetrievalControlPanel({
       })
     } catch {
       setError(true)
+    } finally {
+      setKillSwitchBusy(false)
     }
   }
 
@@ -111,16 +115,21 @@ export function RetrievalControlPanel({
             )}
             {t("title")}
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
             <Badge variant="outline">{vaultLabel}</Badge>
             {snapshot?.runtime.killSwitchEngaged ? (
-              <Button size="sm" variant="outline" onClick={() => void setKillSwitch(false)}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={killSwitchBusy}
+                onClick={() => void setKillSwitch(false)}
+              >
                 {t("killSwitch.disable")}
               </Button>
             ) : (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" variant="outline" disabled={!snapshot || killSwitchBusy}>
                     {t("killSwitch.enable")}
                   </Button>
                 </AlertDialogTrigger>
@@ -133,7 +142,10 @@ export function RetrievalControlPanel({
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>{t("confirmKillSwitch.cancel")}</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => void setKillSwitch(true)}>
+                    <AlertDialogAction
+                      disabled={killSwitchBusy}
+                      onClick={() => void setKillSwitch(true)}
+                    >
                       {t("confirmKillSwitch.confirm")}
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -144,7 +156,7 @@ export function RetrievalControlPanel({
         </div>
       </CardHeader>
       <CardContent className={compact ? "space-y-3 p-3 pt-0" : "space-y-4"}>
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 lg:grid-cols-4">
           <Metric label={t("metrics.activeGenerations")} value={activeGenerations.length} />
           <Metric label={t("metrics.activeJobs")} value={activeJobs.length} />
           <Metric label={t("metrics.quarantined")} value={quarantined} />
@@ -157,13 +169,22 @@ export function RetrievalControlPanel({
           </p>
         ) : null}
 
-        {!hasRows ? <p className="text-muted-foreground text-xs">{t("empty")}</p> : null}
+        {!snapshot ? (
+          <p className="text-muted-foreground text-xs" role="status">
+            {t("loading")}
+          </p>
+        ) : !hasRows ? (
+          <p className="text-muted-foreground text-xs">{t("empty")}</p>
+        ) : null}
 
         {!compact && snapshot?.generations.length ? (
           <ul className="space-y-1">
             {snapshot.generations.slice(0, 8).map((generation) => (
-              <li key={generation.id} className="flex items-center justify-between gap-2 text-xs">
-                <span className="truncate font-mono">{generation.id}</span>
+              <li
+                key={generation.id}
+                className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs"
+              >
+                <span className="min-w-0 flex-1 truncate font-mono">{generation.id}</span>
                 <Badge variant={generation.status === "failed" ? "destructive" : "secondary"}>
                   {t(`generation.${generation.status}`)}
                 </Badge>
@@ -181,9 +202,9 @@ export function RetrievalControlPanel({
                   key={job.id}
                   className="flex flex-wrap items-center justify-between gap-2 text-xs"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="truncate font-mono">{job.id}</p>
-                    <p className="text-muted-foreground">
+                    <p className="break-words text-muted-foreground">
                       {t(`jobs.${job.status}`)} · {job.kind} ·{" "}
                       {t("jobs.attempt", { attempt: job.attempt, maxAttempts: job.maxAttempts })}
                     </p>

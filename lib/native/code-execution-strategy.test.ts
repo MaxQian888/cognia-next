@@ -21,6 +21,26 @@ beforeEach(() => {
   mockedInvoke.mockReset()
 })
 
+afterEach(() => {
+  document.body.replaceChildren()
+})
+
+function postCanvas(kind: string, payload: unknown, options?: { nonce?: string; source?: Window }) {
+  const iframe = document.querySelector("iframe") as HTMLIFrameElement | null
+  if (!iframe) throw new Error("expected an active Canvas iframe")
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      data: {
+        __cogniaCanvas: true,
+        nonce: options?.nonce ?? iframe.dataset.canvasNonce,
+        kind,
+        payload,
+      },
+      source: options?.source ?? iframe.contentWindow,
+    })
+  )
+}
+
 describe("executeCodeWithSandboxPriority — Python (Tauri)", () => {
   it("returns sandbox=unsupported when not running under Tauri", async () => {
     const result = await executeCodeWithSandboxPriority({
@@ -141,8 +161,8 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
 
     // Drive the message handler manually (jsdom does not run the iframe code).
     await new Promise((r) => setTimeout(r, 0))
-    window.postMessage({ __cogniaCanvas: true, kind: "stdout", payload: "hello" }, "*")
-    window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+    postCanvas("stdout", "hello")
+    postCanvas("done", null)
 
     const result = await promise
     expect(result.sandbox).toBe("iframe")
@@ -157,8 +177,8 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
     })
 
     await new Promise((r) => setTimeout(r, 0))
-    window.postMessage({ __cogniaCanvas: true, kind: "stderr", payload: "oops" }, "*")
-    window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+    postCanvas("stderr", "oops")
+    postCanvas("done", null)
 
     const result = await promise
     expect(result.success).toBe(false)
@@ -204,7 +224,19 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
     // Random event without our marker — must not affect result.
     window.postMessage({ kind: "stdout", payload: "x" }, "*")
     window.postMessage(null, "*")
-    window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+    postCanvas("done", null)
+    const result = await promise
+    expect(result.stdout).toBe("")
+  })
+
+  it("rejects spoofed source and nonce even when the marker is present", async () => {
+    const promise = executeCodeWithSandboxPriority({ code: "console.log(1)", language: "js" })
+    await new Promise((r) => setTimeout(r, 0))
+
+    postCanvas("stdout", "wrong source", { source: window })
+    postCanvas("stdout", "wrong nonce", { nonce: "spoofed" })
+    postCanvas("done", null)
+
     const result = await promise
     expect(result.stdout).toBe("")
   })
@@ -215,7 +247,11 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
       language: "html",
     })
     await new Promise((r) => setTimeout(r, 0))
-    window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+    const iframe = document.querySelector("iframe") as HTMLIFrameElement
+    expect(iframe.srcdoc).toContain("Content-Security-Policy")
+    expect(iframe.srcdoc).toContain("connect-src 'none'")
+    expect(iframe.srcdoc.indexOf("__cogniaCanvas")).toBeLessThan(iframe.srcdoc.indexOf("<p>hi</p>"))
+    postCanvas("done", null)
     const result = await promise
     expect(result.sandbox).toBe("iframe")
     expect(result.success).toBe(true)
@@ -227,7 +263,9 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
       language: "css",
     })
     await new Promise((r) => setTimeout(r, 0))
-    window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+    const iframe = document.querySelector("iframe") as HTMLIFrameElement
+    expect(iframe.srcdoc).toContain("<style>body { color: red }</style>")
+    postCanvas("done", null)
     const result = await promise
     expect(result.success).toBe(true)
   })
@@ -275,7 +313,7 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
         language: "javascript",
       })
       await new Promise((r) => setTimeout(r, 0))
-      window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+      postCanvas("done", null)
       const result = await promise
       expect(result.sandbox).toBe("iframe")
       expect(result.success).toBe(true)
@@ -296,7 +334,7 @@ describe("executeCodeWithSandboxPriority — iframe sandbox", () => {
         language: "javascript",
       })
       await new Promise((r) => setTimeout(r, 0))
-      window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+      postCanvas("done", null)
       const result = await promise
       expect(result.sandbox).toBe("iframe")
     } finally {
@@ -318,10 +356,20 @@ describe("executeCodeWithSandboxPriority — unsupported language", () => {
     expect(result.error).toMatch(/Unsupported language/i)
   })
 
+  it.each(["typescript", "ts", "jsx", "tsx"])(
+    "reports %s as unsupported until a compiler is installed",
+    async (language) => {
+      const result = await executeCodeWithSandboxPriority({ code: "const x: number = 1", language })
+      expect(result.sandbox).toBe("unsupported")
+      expect(result.error).toMatch(/Unsupported language/i)
+      expect(document.querySelector("iframe")).toBeNull()
+    }
+  )
+
   it("defaults to javascript when language is omitted", async () => {
     const promise = executeCodeWithSandboxPriority({ code: "console.log(1)" })
     await new Promise((r) => setTimeout(r, 0))
-    window.postMessage({ __cogniaCanvas: true, kind: "done", payload: null }, "*")
+    postCanvas("done", null)
     const result = await promise
     expect(result.sandbox).toBe("iframe")
   })

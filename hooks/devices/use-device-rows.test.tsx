@@ -9,6 +9,10 @@ const pairedRows: unknown[] = []
 let listWorkersImpl: () => Promise<unknown[]> = async () => []
 let transportCallImpl: (name: string) => Promise<unknown> = async () => []
 let tauri = true
+let runtimeAvailability = {
+  os: { available: true, backend: "seatbelt", reason: "available", detail: "" },
+  microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
+}
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => pairedRows,
@@ -29,18 +33,14 @@ jest.mock("@/hooks/automation/use-sandbox-connections", () => ({
   useSandboxConnections: () => ({ connections: [] }),
 }))
 
-jest.mock("@/hooks/sandbox/use-sandbox-health", () => ({
-  useSandboxHealth: () => ({
-    health: { available: true, backend: "seatbelt", version: "", lastError: "" },
-  }),
+jest.mock("@/hooks/sandbox/use-sandbox-runtime-availability", () => ({
+  useSandboxRuntimeAvailability: () => runtimeAvailability,
 }))
 
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   useRemoteHostStore: (selector: (state: unknown) => unknown) =>
     selector({ hosts: [], activeHostId: null }),
 }))
-
-jest.mock("@/lib/sandbox/microvm-bridge", () => ({ getMicrovmExec: () => null }))
 
 /**
  * The real settings store pulls in the keyring at module scope, which throws
@@ -65,6 +65,10 @@ beforeEach(() => {
   tauri = true
   listWorkersImpl = async () => []
   transportCallImpl = async () => []
+  runtimeAvailability = {
+    os: { available: true, backend: "seatbelt", reason: "available", detail: "" },
+    microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
+  }
   jest.clearAllMocks()
 })
 
@@ -74,7 +78,29 @@ describe("useDeviceRows", () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.rows).toHaveLength(1)
     expect(result.current.rows[0]).toMatchObject({ ref: "local", isSelf: true })
+    expect(result.current.rows[0]?.runtime.shellTiers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tier: "os", available: true }),
+        expect.objectContaining({ tier: "microvm", available: false }),
+      ])
+    )
     expect(result.current.summary).toMatchObject({ total: 1, online: 1 })
+  })
+
+  it("projects the shared runtime availability into local shell tiers", async () => {
+    runtimeAvailability = {
+      os: { available: false, backend: "seatbelt", reason: "probe-failed", detail: "failed" },
+      microvm: { available: true, reason: "workspace-required", requiresWorkspace: true },
+    }
+
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows[0]?.runtime.shellTiers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tier: "os", available: false }),
+        expect.objectContaining({ tier: "microvm", available: true }),
+      ])
+    )
   })
 
   it("reads the host device list when the host answers", async () => {

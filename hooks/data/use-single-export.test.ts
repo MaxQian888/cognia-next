@@ -33,6 +33,9 @@ const saveExportMock = jest.fn()
 jest.mock("@/lib/files/save-export", () => ({
   saveExport: (args: unknown) => saveExportMock(args),
 }))
+jest.mock("@/lib/twin/export-provenance", () => ({
+  resolveSessionTwinProvenance: jest.fn(async () => undefined),
+}))
 
 import { useSingleExport } from "./use-single-export"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"

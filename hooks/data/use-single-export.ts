@@ -12,6 +12,8 @@ import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { getDb } from "@/lib/db/schema"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { saveExport, type SaveExportOutcome } from "@/lib/files/save-export"
+import { resolveSessionTwinProvenance } from "@/lib/twin/export-provenance"
+import { enforceExportDisclosure } from "@/lib/export/disclosure"
 
 interface RunArgs {
   format: SingleExportFormat
@@ -48,7 +50,10 @@ export function useSingleExport() {
         args.messages ??
         (await getDb().messages.where("sessionId").equals(args.session.id).sortBy("createdAt"))
 
-      const wallpaperDataUrl = await resolveThemeWallpaper(args.theme, args.withWallpaper ?? false)
+      const [wallpaperDataUrl, provenance] = await Promise.all([
+        resolveThemeWallpaper(args.theme, args.withWallpaper ?? false),
+        resolveSessionTwinProvenance(args.session, messages),
+      ])
 
       const rendered = renderSingleExport({
         format: args.format,
@@ -61,13 +66,17 @@ export function useSingleExport() {
         includeTokens: args.includeTokens,
         wallpaperDataUrl,
         includeAllBranches: args.includeAllBranches,
+        provenance,
       })
 
       // Plugin host: let plugins rewrite the export payload before it's
       // written to disk / downloaded. The pipeline returns the original
       // content unchanged when no plugin transforms it.
       const transformed = await hooks.dispatchExportTransform(rendered.content, args.format)
-      const out = { ...rendered, content: transformed }
+      const out = {
+        ...rendered,
+        content: enforceExportDisclosure(transformed, args.format, provenance),
+      }
 
       const outcome = await saveExport({
         filename: out.filename,

@@ -10,6 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
+import { injectFrameCsp, injectFrameHead, serializeFrameCsp } from "@/lib/security/frame-csp"
 
 export type CodeSandboxKind = "iframe" | "tauri-python" | "unsupported"
 
@@ -52,6 +53,18 @@ export interface CodeExecutionRequest {
 }
 
 const DEFAULT_TIMEOUT_MS = 30000
+const CANVAS_FRAME_CSP = serializeFrameCsp([
+  ["default-src", "'none'"],
+  ["script-src", "'unsafe-inline' 'unsafe-eval'"],
+  ["style-src", "'unsafe-inline'"],
+  ["img-src", "data: blob:"],
+  ["font-src", "data:"],
+  ["media-src", "data: blob:"],
+  ["connect-src", "'none'"],
+  ["object-src", "'none'"],
+  ["base-uri", "'none'"],
+  ["form-action", "'none'"],
+])
 
 function nowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now()
@@ -73,9 +86,13 @@ async function executeInIframeSandbox(
   const start = nowMs()
   const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const lang = (req.language ?? "javascript").toLowerCase()
+  const nonce =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
   const iframe = document.createElement("iframe")
   iframe.setAttribute("sandbox", "allow-scripts")
+  iframe.dataset.canvasNonce = nonce
   iframe.style.display = "none"
   document.body.appendChild(iframe)
 
@@ -87,31 +104,37 @@ async function executeInIframeSandbox(
     }
   }
 
-  const html =
+  const nonceLiteral = JSON.stringify(nonce)
+  const bootstrap = `<script>(function(){
+    const nonce=${nonceLiteral};
+    let done=false;
+    const send=(kind,payload)=>parent.postMessage({__cogniaCanvas:true,nonce,kind,payload},'*');
+    const stringify=(args)=>args.map((value)=>{try{return typeof value==='string'?value:JSON.stringify(value)}catch{return String(value)}}).join(' ');
+    ['log','info','debug'].forEach((method)=>{const original=console[method];console[method]=(...args)=>{send('stdout',stringify(args));original.apply(console,args)}});
+    ['warn','error'].forEach((method)=>{const original=console[method];console[method]=(...args)=>{send('stderr',stringify(args));original.apply(console,args)}});
+    window.addEventListener('error',(event)=>send('stderr',String(event.message||event.error||'Script error')));
+    window.addEventListener('unhandledrejection',(event)=>send('stderr',String(event.reason||'Unhandled rejection')));
+    window.addEventListener('load',()=>setTimeout(()=>{if(!done){done=true;send('done',null)}},0),{once:true});
+  })();</script>`
+  const userMarkup =
     lang === "html"
       ? req.code
       : lang === "css"
-        ? `<style>${req.code}</style>`
-        : `<!doctype html><html><head><meta charset="utf-8"></head><body><script>
-          (function () {
-            const out = []; const err = [];
-            const send = (kind, payload) => parent.postMessage({__cogniaCanvas: true, kind, payload}, '*');
-            ['log','info','debug'].forEach((m) => { const orig = console[m]; console[m] = (...a) => { out.push(a.map(String).join(' ')); send('stdout', a.map(String).join(' ')); orig.apply(console, a); }; });
-            ['warn','error'].forEach((m) => { const orig = console[m]; console[m] = (...a) => { err.push(a.map(String).join(' ')); send('stderr', a.map(String).join(' ')); orig.apply(console, a); }; });
-            window.addEventListener('error', (e) => send('stderr', String(e.message)));
-            try { ${lang === "javascript" || lang === "typescript" || lang === "jsx" || lang === "tsx" ? req.code : ""} } catch (e) { send('stderr', String(e && e.message ? e.message : e)); }
-            send('done', {});
-          })();
-        </script></body></html>`
+        ? `<style>${req.code.replace(/<\/style/gi, "<\\/style")}</style>`
+        : `<script>eval(${JSON.stringify(req.code).replaceAll("<", "\\u003c")});</script>`
+  const html = injectFrameCsp(injectFrameHead(userMarkup, bootstrap), CANVAS_FRAME_CSP)
 
   return new Promise<UnifiedCodeExecutionResult>((resolve) => {
     let stdout = ""
     let stderr = ""
     let settled = false
+    const handleAbort = () => finalize(false, "aborted")
     const finalize = (ok: boolean, error?: string) => {
       if (settled) return
       settled = true
+      clearTimeout(timeoutId)
       window.removeEventListener("message", handler)
+      req.signal?.removeEventListener("abort", handleAbort)
       cleanup()
       resolve({
         success: ok,
@@ -123,16 +146,26 @@ async function executeInIframeSandbox(
       })
     }
     const handler = (ev: MessageEvent) => {
-      const data = ev.data as { __cogniaCanvas?: boolean; kind?: string; payload?: unknown } | null
-      if (!data || !data.__cogniaCanvas) return
+      const data = ev.data as {
+        __cogniaCanvas?: boolean
+        nonce?: string
+        kind?: string
+        payload?: unknown
+      } | null
+      if (ev.source !== iframe.contentWindow) return
+      if (!data || !data.__cogniaCanvas || data.nonce !== nonce) return
       if (data.kind === "stdout") stdout += String(data.payload ?? "") + "\n"
       else if (data.kind === "stderr") stderr += String(data.payload ?? "") + "\n"
       else if (data.kind === "done") finalize(stderr.length === 0)
     }
+    const timeoutId = setTimeout(
+      () => finalize(false, `execution timed out after ${timeoutMs}ms`),
+      timeoutMs
+    )
     window.addEventListener("message", handler)
-    req.signal?.addEventListener("abort", () => finalize(false, "aborted"))
-    setTimeout(() => finalize(false, `execution timed out after ${timeoutMs}ms`), timeoutMs)
+    req.signal?.addEventListener("abort", handleAbort, { once: true })
     iframe.srcdoc = html
+    if (req.signal?.aborted) handleAbort()
   })
 }
 
@@ -190,16 +223,7 @@ export async function executeCodeWithSandboxPriority(
   if (lang === "python" || lang === "py") {
     return executePythonViaTauri(req)
   }
-  const iframeLanguages = new Set([
-    "javascript",
-    "js",
-    "typescript",
-    "ts",
-    "jsx",
-    "tsx",
-    "html",
-    "css",
-  ])
+  const iframeLanguages = new Set(["javascript", "js", "html", "css"])
   if (iframeLanguages.has(lang)) {
     return executeInIframeSandbox(req)
   }

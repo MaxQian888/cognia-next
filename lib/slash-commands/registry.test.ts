@@ -193,8 +193,21 @@ describe("slash-command registry (lib/slash-commands/registry)", () => {
     it("forwards the context object", async () => {
       const handler = jest.fn(async (_args, ctx) => ({ payload: ctx }))
       registerSlashCommand({ id: "ctx", name: "Ctx", handler })
-      const result = await dispatchSlashCommand("/ctx", { sessionId: "s1" })
-      expect(result?.payload).toEqual({ sessionId: "s1" })
+      const quickAction = {
+        surface: "selection" as const,
+        selection: {
+          candidateId: "c1",
+          sourceApp: "TextEdit",
+          origin: "accessibility" as const,
+          capturedAt: 1,
+          truncated: false,
+          contentTypes: [],
+          editable: true,
+          replaceCapability: "paste" as const,
+        },
+      }
+      const result = await dispatchSlashCommand("/ctx", { sessionId: "s1", quickAction })
+      expect(result?.payload).toEqual({ sessionId: "s1", quickAction })
     })
   })
 

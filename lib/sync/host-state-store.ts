@@ -685,6 +685,7 @@ async function persistBusinessProjection(
         importFidelity: canonical.header.importFidelity,
         sequenceDigest: canonical.header.sequenceDigest,
         lossCount: 0,
+        losses: [],
         rebuilt: false,
         createdAt: Date.parse(canonical.header.createdAt) || now,
         updatedAt: Date.parse(canonical.header.updatedAt) || now,
