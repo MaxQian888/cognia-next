@@ -3,6 +3,9 @@
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react"
+
+import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
+
 import {
   usePluginMarketplace,
   __resetPluginMarketplaceClientForTests,
@@ -168,5 +171,56 @@ describe("usePluginMarketplace", () => {
     const { result } = renderHook(() => usePluginMarketplace({}))
     await waitFor(() => expect(result.current.state.kind).toBe("ready"))
     expect(client.searchPlugins).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * `plugin-marketplace-store` carried `setRemoteMode` / `setFallbackMode` /
+ * `recordDiagnostic` with zero callers, so `PluginMarketplaceModeBanner`
+ * always saw the default `"remote"` mode and returned null. Four translated
+ * strings were unreachable and a degraded catalog looked exactly like a
+ * healthy one.
+ */
+describe("source mode reporting", () => {
+  beforeEach(() => {
+    usePluginMarketplaceStore.setState({
+      sourceState: { mode: "demo", updatedAt: "" },
+      diagnostics: [],
+      latestDiagnostic: undefined,
+    })
+  })
+
+  it("marks the catalog remote after a successful refresh", async () => {
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => []),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+      uninstallPlugin: jest.fn(async () => undefined),
+    })
+    const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(usePluginMarketplaceStore.getState().sourceState.mode).toBe("remote")
+  })
+
+  it("falls back to degraded and records a diagnostic when the registry throws", async () => {
+    __resetPluginMarketplaceClientForTests({
+      searchPlugins: jest.fn(async () => {
+        throw new Error("registry unreachable")
+      }),
+      getPlugin: jest.fn(async () => null),
+      installPlugin: jest.fn(async () => undefined),
+      uninstallPlugin: jest.fn(async () => undefined),
+    })
+    const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
+    await act(async () => {
+      await result.current.refresh()
+    })
+    const state = usePluginMarketplaceStore.getState()
+    expect(state.sourceState.mode).toBe("degraded")
+    expect(state.sourceState.lastFailureCategory).toBe("network")
+    expect(state.latestDiagnostic?.operation).toBe("search")
+    expect(state.latestDiagnostic?.message).toContain("registry unreachable")
   })
 })

@@ -18,15 +18,5 @@
     "demoTitle": "演示市场"
   },
   "retry": "重试",
-  "searchPlaceholder": "在市场中搜索…",
-  "sections": {
-    "all": "全部",
-    "builtin": "内置",
-    "featured": "精选",
-    "popular": "热门",
-    "recent": "最近上架",
-    "shared": "共享",
-    "vscode": "VS Code",
-    "workspace": "工作区"
-  }
+  "searchPlaceholder": "在市场中搜索…"
 }

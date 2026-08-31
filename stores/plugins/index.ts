@@ -1,6 +1,7 @@
 export {
   usePluginsStore,
   DEFAULT_PLUGIN_FILTERS,
+  curationAnswerableBy,
   type PluginSortMode,
   type PluginFilters,
   type PluginImportStaging,
@@ -14,4 +15,6 @@ export {
   type PluginGovernanceView,
   type PluginDetailSubTab,
   type PluginListViewMode,
+  type PluginDiscoverCuration,
+  type PluginDiscoverOrigin,
 } from "./plugins-store"

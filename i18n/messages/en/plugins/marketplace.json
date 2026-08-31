@@ -18,15 +18,5 @@
     "demoTitle": "Demo marketplace"
   },
   "retry": "Retry",
-  "searchPlaceholder": "Search the marketplace…",
-  "sections": {
-    "all": "All",
-    "builtin": "Built-in",
-    "featured": "Featured",
-    "popular": "Popular",
-    "recent": "Recent",
-    "shared": "Shared",
-    "vscode": "VS Code",
-    "workspace": "Workspace"
-  }
+  "searchPlaceholder": "Search the marketplace…"
 }

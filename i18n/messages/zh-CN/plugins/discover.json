@@ -1,0 +1,18 @@
+{
+  "curation": {
+    "all": "全部",
+    "featured": "精选",
+    "popular": "热门",
+    "recent": "最新"
+  },
+  "curationLabel": "排行",
+  "curationUnavailable": "排行来自 Cognia 注册表，对该来源不适用。",
+  "origin": {
+    "all": "全部来源",
+    "builtin": "内置",
+    "registry": "Cognia 注册表",
+    "vscode": "Open VSX",
+    "workspace": "工作区目录"
+  },
+  "originLabel": "来源"
+}

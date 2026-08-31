@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("@/lib/native/utils", () => ({
   ...jest.requireActual("@/lib/native/utils"),
@@ -58,6 +58,7 @@ jest.mock("@/lib/plugin/vscode-shim/openvsx-install-flow", () => ({
 
 import { __resetPluginMarketplaceClientForTests } from "@/hooks/plugins"
 import { getOpenVsxClient } from "@/lib/plugin/vscode-shim/openvsx-client"
+import { usePluginsStore } from "@/stores/plugins"
 import { PluginMarketplace } from "./plugin-marketplace"
 
 const getOpenVsxClientMock = getOpenVsxClient as jest.Mock
@@ -107,6 +108,9 @@ const ENTRIES = [
 ]
 
 beforeEach(() => {
+  // Both Discover axes live in the plugins store now, so reset them or a
+  // previous case leaks its origin into the next one.
+  usePluginsStore.setState({ discoverCuration: "all", discoverOrigin: "all" })
   installedRows.length = 0
   githubSourceEntries.length = 0
   jest.clearAllMocks()
@@ -129,40 +133,42 @@ describe("PluginMarketplace", () => {
     expect(screen.getAllByText("Beta").length).toBeGreaterThan(0)
   })
 
-  it("renders the section toggle group", async () => {
+  /**
+   * The eight-item switch that used to live in this pane mixed curation
+   * (all / featured / popular / recent) with origin (builtin / workspace /
+   * shared / vscode). It moved to `PluginDiscoverHeader` in the page header
+   * and became two controls, so the pane keeps only the actions that open
+   * something.
+   */
+  it("no longer draws its own toolbar", async () => {
     render(<PluginMarketplace />)
     await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    const toolbar = screen.getByTestId("plugin-marketplace-toolbar")
-    expect(toolbar).toHaveClass("min-w-0")
-    expect(toolbar).toHaveAttribute("data-slot", "card")
-    expect(toolbar.querySelector("[data-slot='card-content']")).not.toBeNull()
-    expect(screen.getByTestId("plugin-marketplace-sections-scroller")).toHaveClass(
-      "overflow-x-auto"
-    )
-    expect(screen.getByTestId("plugin-marketplace-sections-scroller")).not.toHaveClass(
-      "sm:overflow-visible"
-    )
-    expect(screen.getByText("sections.featured")).toBeInTheDocument()
-    expect(screen.getByText("sections.popular")).toBeInTheDocument()
-    expect(screen.getByText("sections.recent")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-marketplace-toolbar")).toBeNull()
+    expect(screen.queryByTestId("plugin-marketplace-sections-scroller")).toBeNull()
+    expect(screen.getByTestId("plugin-marketplace-manage-sources")).toBeInTheDocument()
   })
 
-  it("still renders all seven pre-existing sections alongside the new one", async () => {
-    // Adding the 8th section must not disturb the 7 that were there.
+  // The two axes are independent: a ranking narrows the registry's answer,
+  // and the origin decides whose answer is read at all. A git catalog
+  // publishes no featured / popular / recent list, so it drops out under a
+  // ranking rather than being presented as if it had one.
+  it("narrows to the registry's ranked list when a ranking is chosen", async () => {
+    githubSourceEntries.push({ id: "ws-1", name: "WorkspaceOne" })
     render(<PluginMarketplace />)
-    await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    for (const key of [
-      "all",
-      "featured",
-      "popular",
-      "recent",
-      "builtin",
-      "workspace",
-      "shared",
-      "vscode",
-    ]) {
-      expect(screen.getByText(`sections.${key}`)).toBeInTheDocument()
-    }
+    await waitFor(() => expect(screen.getAllByText("Beta").length).toBeGreaterThan(0))
+    expect(screen.getByText("WorkspaceOne")).toBeInTheDocument()
+
+    // `getFeaturedPlugins` returns only the first entry in this suite.
+    act(() => usePluginsStore.getState().setDiscoverCuration("featured"))
+    await waitFor(() => expect(screen.queryByText("WorkspaceOne")).toBeNull())
+    expect(screen.queryByText("Beta")).toBeNull()
+    expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0)
+  })
+
+  it("clears a ranking the newly picked origin cannot answer", () => {
+    act(() => usePluginsStore.getState().setDiscoverCuration("featured"))
+    act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
+    expect(usePluginsStore.getState().discoverCuration).toBe("all")
   })
 
   it("lists built-in plugins in the dedicated Built-in section", async () => {
@@ -176,7 +182,7 @@ describe("PluginMarketplace", () => {
     } as never)
     render(<PluginMarketplace />)
     await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
-    fireEvent.click(screen.getByText("sections.builtin"))
+    act(() => usePluginsStore.getState().setDiscoverOrigin("builtin"))
     await waitFor(() => expect(screen.getByText("Builtin One")).toBeInTheDocument())
   })
 
@@ -258,7 +264,7 @@ describe("PluginMarketplace", () => {
     await waitFor(() => expect(screen.getByText("SearchOne")).toBeInTheDocument())
     expect(screen.queryByText("PopularOne")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText("sections.popular"))
+    act(() => usePluginsStore.getState().setDiscoverCuration("popular"))
     await waitFor(() => expect(screen.getByText("PopularOne")).toBeInTheDocument())
     expect(screen.queryByText("SearchOne")).not.toBeInTheDocument()
   })
@@ -281,12 +287,12 @@ describe("PluginMarketplace", () => {
     expect(screen.getByText("WorkspaceOne")).toBeInTheDocument()
 
     // Workspace = git sources only.
-    fireEvent.click(screen.getByText("sections.workspace"))
+    act(() => usePluginsStore.getState().setDiscoverOrigin("workspace"))
     await waitFor(() => expect(screen.getByText("WorkspaceOne")).toBeInTheDocument())
     expect(screen.queryByText("RemoteOne")).not.toBeInTheDocument()
 
     // Shared = remote registry only.
-    fireEvent.click(screen.getByText("sections.shared"))
+    act(() => usePluginsStore.getState().setDiscoverOrigin("registry"))
     await waitFor(() => expect(screen.getByText("RemoteOne")).toBeInTheDocument())
     expect(screen.queryByText("WorkspaceOne")).not.toBeInTheDocument()
   })
@@ -301,7 +307,7 @@ describe("PluginMarketplace", () => {
       expect(getOpenVsxClientMock).not.toHaveBeenCalled()
       expect(searchExtensions).not.toHaveBeenCalled()
 
-      fireEvent.click(screen.getByText("sections.vscode"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
       await waitFor(() => expect(searchExtensions).toHaveBeenCalled())
     })
 
@@ -332,7 +338,7 @@ describe("PluginMarketplace", () => {
       const cogniaCallsBeforeSwitch = searchPlugins.mock.calls.length
       expect(searchExtensions).not.toHaveBeenCalled()
 
-      fireEvent.click(screen.getByText("sections.vscode"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
 
       // The section's entries come from Open VSX...
       await waitFor(() => expect(screen.getByText("Prettier")).toBeInTheDocument())
@@ -359,7 +365,7 @@ describe("PluginMarketplace", () => {
       })
 
       render(<PluginMarketplace />)
-      fireEvent.click(screen.getByText("sections.vscode"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
 
       await waitFor(() => expect(screen.getByText("ext-0")).toBeInTheDocument())
       // PAGE_SIZE = 12 maps onto the registry's `size`.
@@ -387,11 +393,11 @@ describe("PluginMarketplace", () => {
       render(<PluginMarketplace />)
       await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
 
-      fireEvent.click(screen.getByText("sections.vscode"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
       await waitFor(() => expect(screen.getByText("vscodeError")).toBeInTheDocument())
 
       // Switching back is unaffected — the failure is scoped to the section.
-      fireEvent.click(screen.getByText("sections.all"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("all"))
       await waitFor(() => expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0))
     })
 
@@ -415,7 +421,7 @@ describe("PluginMarketplace", () => {
       // The cognia error card is what renders first.
       await waitFor(() => expect(screen.getByText("error")).toBeInTheDocument())
 
-      fireEvent.click(screen.getByText("sections.vscode"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
       await waitFor(() => expect(screen.getByText("prettier-vscode")).toBeInTheDocument())
     })
 
@@ -433,7 +439,7 @@ describe("PluginMarketplace", () => {
       mockOpenVsxSearch()
 
       render(<PluginMarketplace />)
-      fireEvent.click(screen.getByText("sections.vscode"))
+      act(() => usePluginsStore.getState().setDiscoverOrigin("vscode"))
 
       await waitFor(() =>
         expect(

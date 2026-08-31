@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { PluginSource } from "@/types/plugin"
+import { usePluginMarketplaceStore } from "@/stores/plugin-runtime/plugin-marketplace-store"
 
 export type PluginMarketplaceQueryState =
   | { kind: "idle" }
@@ -134,6 +135,20 @@ export function usePluginMarketplace(options?: UsePluginMarketplaceOptions): Use
   const [recent, setRecent] = useState<PluginMarketplaceEntry[]>([])
   const [installingId, setInstallingId] = useState<string | null>(null)
 
+  /**
+   * Report which mode the catalog is actually being served in.
+   *
+   * `plugin-marketplace-store` has carried `setRemoteMode` / `setFallbackMode`
+   * / `recordDiagnostic` since it landed and NOTHING called them, so
+   * `PluginMarketplaceModeBanner` always saw the default `"remote"` and
+   * returned null. Four translated strings were unreachable and a degraded
+   * catalog looked identical to a healthy one. This is the one place that
+   * knows, so it is the one place that says.
+   */
+  const setRemoteMode = usePluginMarketplaceStore((s) => s.setRemoteMode)
+  const setFallbackMode = usePluginMarketplaceStore((s) => s.setFallbackMode)
+  const recordDiagnostic = usePluginMarketplaceStore((s) => s.recordDiagnostic)
+
   const refresh = useCallback(async () => {
     setState({ kind: "loading" })
     try {
@@ -148,13 +163,16 @@ export function usePluginMarketplace(options?: UsePluginMarketplaceOptions): Use
       setFeatured(normalizeEntries(f))
       setPopular(normalizeEntries(p))
       setRecent(normalizeEntries(r))
+      setRemoteMode()
     } catch (err) {
-      setState({
-        kind: "error",
-        error: err instanceof Error ? err.message : String(err),
-      })
+      const message = err instanceof Error ? err.message : String(err)
+      setState({ kind: "error", error: message })
+      // The store redacts the message before storing it, so a token that
+      // leaked into a fetch error never reaches the ring buffer.
+      setFallbackMode("network", message)
+      recordDiagnostic({ operation: "search", category: "network", retryable: true, message })
     }
-  }, [query])
+  }, [query, setRemoteMode, setFallbackMode, recordDiagnostic])
 
   const install = useCallback(async (id: string, version?: string) => {
     setInstallingId(id)

@@ -53,6 +53,27 @@ export type PluginSortMode = "name" | "updated" | "usage" | "rating"
 export type PluginCapabilityFilter = string | "all"
 export type PluginPermissionFilter = string | "all"
 export type PluginSourceFilter = string | "all"
+
+/**
+ * Discover's two axes, which used to be one.
+ *
+ * The marketplace shipped a single eight-item ToggleGroup that mixed curation
+ * (all / featured / popular / recent) with origin (builtin / workspace /
+ * shared / vscode). Two orthogonal questions on one control means "featured
+ * extensions from Open VSX" cannot be asked at all, and picking a registry
+ * silently discards whatever curation the user had chosen.
+ *
+ * Curation is applied as a membership filter over whatever the origin
+ * returned, so the two compose as AND. `curationAnswerableBy` says which
+ * origins can answer a curation at all: featured / popular / recent are
+ * rankings the cognia registry publishes, and no other source has them.
+ */
+export type PluginDiscoverCuration = "all" | "featured" | "popular" | "recent"
+export type PluginDiscoverOrigin = "all" | "registry" | "builtin" | "workspace" | "vscode"
+
+export function curationAnswerableBy(origin: PluginDiscoverOrigin): boolean {
+  return origin === "all" || origin === "registry"
+}
 export type PluginStatusFilter = string | "all"
 
 export interface PluginFilters {
@@ -135,8 +156,18 @@ interface PluginsStoreState {
   conflictDialogTarget: ConflictSummary | null
   /** When non-null, open the rollback dialog scoped to this plugin id. */
   rollbackTarget: string | null
+  /** Discover's curation axis (which ranking), independent of the origin. */
+  discoverCuration: PluginDiscoverCuration
+  /** Discover's origin axis (which registry or catalog). */
+  discoverOrigin: PluginDiscoverOrigin
 
   setActiveSection: (section: PluginNavSection) => void
+  setDiscoverCuration: (curation: PluginDiscoverCuration) => void
+  /**
+   * Also resets the curation when the new origin cannot answer one, so the
+   * control never shows a ranking the visible list is not filtered by.
+   */
+  setDiscoverOrigin: (origin: PluginDiscoverOrigin) => void
   setLibrarySubFilter: (sub: PluginLibrarySubFilter) => void
   setGovernanceView: (view: PluginGovernanceView) => void
   setDetailSubTab: (sub: PluginDetailSubTab) => void
@@ -226,6 +257,8 @@ export const usePluginsStore = create<PluginsStoreState>()(
       filters: DEFAULT_PLUGIN_FILTERS,
       selection: new Set<string>(),
       detailPluginId: null,
+      discoverCuration: "all",
+      discoverOrigin: "all",
       filterSheetOpen: false,
       importStaging: null,
       deleteTarget: null,
@@ -242,6 +275,12 @@ export const usePluginsStore = create<PluginsStoreState>()(
         })),
       setGovernanceView: (view) => set({ governanceView: view }),
       setDetailSubTab: (sub) => set({ detailSubTab: sub }),
+      setDiscoverCuration: (curation) => set({ discoverCuration: curation }),
+      setDiscoverOrigin: (origin) =>
+        set((state) => ({
+          discoverOrigin: origin,
+          discoverCuration: curationAnswerableBy(origin) ? state.discoverCuration : "all",
+        })),
       setListViewMode: (mode) => set({ listViewMode: mode }),
       setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
       resetFilters: () => set({ filters: DEFAULT_PLUGIN_FILTERS }),

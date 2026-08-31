@@ -1,0 +1,18 @@
+{
+  "curation": {
+    "all": "All",
+    "featured": "Featured",
+    "popular": "Popular",
+    "recent": "Recent"
+  },
+  "curationLabel": "Ranking",
+  "curationUnavailable": "Rankings come from the Cognia registry, so they do not apply to this source.",
+  "origin": {
+    "all": "All sources",
+    "builtin": "Built in",
+    "registry": "Cognia registry",
+    "vscode": "Open VSX",
+    "workspace": "Workspace catalogs"
+  },
+  "originLabel": "Source"
+}

@@ -107,6 +107,19 @@ export function buildView(rows: PluginRow[] | undefined, filters: PluginFilters)
   }
 }
 
+/** `manifest.author` is `string | { name }` depending on the manifest's age. */
+function readAuthor(manifest: PluginRow["manifest"]): string {
+  const author = (manifest as { author?: string | { name?: string } })?.author
+  const name = typeof author === "string" ? author : (author?.name ?? "")
+  return name.toLowerCase()
+}
+
+function readKeywords(manifest: PluginRow["manifest"]): string[] {
+  const raw = (manifest as { keywords?: unknown })?.keywords
+  if (!Array.isArray(raw)) return []
+  return raw.filter((k): k is string => typeof k === "string").map((k) => k.toLowerCase())
+}
+
 function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
   const q = filters.query.trim().toLowerCase()
   return rows.filter((row) => {
@@ -127,6 +140,13 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
       const hasUpdate = !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
       if (!hasUpdate) return false
     }
+    if (filters.tag) {
+      // `PluginFilters.tag` was declared and defaulted to null, and no
+      // component set it and no selector applied it. It is what a keyword
+      // chip writes, so it has to actually narrow the list.
+      const keywords = readKeywords(row.manifest)
+      if (!keywords.includes(filters.tag.toLowerCase())) return false
+    }
     if (filters.configurable && !pluginExposesConfig(row)) {
       // Matches the retired "Plugin configuration" settings section: a plugin
       // is configurable if it ships a configSchema with properties OR a custom
@@ -134,13 +154,20 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
       return false
     }
     if (q) {
+      // Name / description / id only used to be searchable, so a user who
+      // remembered the publisher or a keyword the manifest advertises had no
+      // way to find the plugin by it.
       const description = (
         (row.manifest as { description?: string })?.description ?? ""
       ).toLowerCase()
+      const author = readAuthor(row.manifest)
+      const keywords = readKeywords(row.manifest)
       if (
         !row.name.toLowerCase().includes(q) &&
         !description.includes(q) &&
-        !row.id.toLowerCase().includes(q)
+        !row.id.toLowerCase().includes(q) &&
+        !author.includes(q) &&
+        !keywords.some((keyword) => keyword.includes(q))
       ) {
         return false
       }

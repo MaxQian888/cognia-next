@@ -1,18 +1,24 @@
 "use client"
 
-// Full marketplace surface — replaces the BrowseTab inline implementation.
-// Three sections (featured / popular / recent) + a search box and a
-// detail sheet driven by `selectedEntry` state. Install path goes through
-// the unified hook so both the storefront card and detail CTA share state.
+// Full marketplace surface.
+//
+// Browsing is two axes, not one. `discoverOrigin` picks which registry or
+// catalog answers, `discoverCuration` filters that answer by a ranking the
+// cognia registry publishes, and the two compose as AND. Both live in the
+// plugins store because the controls that drive them render in the page
+// header (`PluginDiscoverHeader`), not in this pane. This file used to draw
+// its own Card toolbar here with a single eight-item switch that mixed the two
+// questions, which is why "featured extensions on Open VSX" could not be asked
+// and why picking a registry silently threw away the chosen ranking.
+//
+// Install path goes through the unified hook so both the storefront card and
+// the detail CTA share state.
 
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { listPlugins } from "@/lib/db/plugins"
 import { usePluginMarketplace, useBuiltinPluginEntries } from "@/hooks/plugins"
 import type {
@@ -29,16 +35,13 @@ import { PluginMarketplaceSourcesDialog } from "./plugin-marketplace-sources-dia
 import { PluginInstallFromGithubDialog } from "../dialogs/plugin-install-from-github-dialog"
 import { PluginDiscovery } from "../plugin-discovery"
 import { PluginPreInstallDialog } from "../dialogs/plugin-pre-install-dialog"
-import { ScrollShadowRow } from "../scroll-shadow-row"
 import { PluginMarketplaceModeBanner } from "./plugin-marketplace-mode-banner"
 import { PluginComparisonSheet, PluginComparisonTrigger } from "../dialogs/plugin-comparison-sheet"
 import { PluginMarketplaceSkeleton } from "./plugin-marketplace-skeleton"
 import { PluginEmptyState } from "../_shared/plugin-empty-state"
 import { PluginErrorCard } from "../_shared/plugin-error-card"
 import { useOpenVsxMarketplace } from "@/hooks/plugins/use-openvsx-marketplace"
-
-type Section =
-  "all" | "featured" | "popular" | "recent" | "builtin" | "workspace" | "shared" | "vscode"
+import { usePluginsStore } from "@/stores/plugins"
 
 const PAGE_SIZE = 12
 
@@ -47,21 +50,38 @@ export function PluginMarketplace() {
   const tv = useTranslations("plugins.openVsx")
   const market = usePluginMarketplace()
   const builtinEntries = useBuiltinPluginEntries()
-  const [section, setSection] = useState<Section>("all")
+  const curation = usePluginsStore((s) => s.discoverCuration)
+  const origin = usePluginsStore((s) => s.discoverOrigin)
   // Open VSX is a third-party registry: nothing is fetched until the user
-  // actually opens the section. `enabled` is the whole gate.
-  const openVsx = useOpenVsxMarketplace({ enabled: section === "vscode", pageSize: PAGE_SIZE })
+  // actually selects it as the origin. `enabled` is the whole gate.
+  const openVsx = useOpenVsxMarketplace({ enabled: origin === "vscode", pageSize: PAGE_SIZE })
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE)
   const [selectedEntry, setSelectedEntry] = useState<PluginMarketplaceEntry | null>(null)
   const sources = useGithubMarketplaceSources()
   const [sourcesDialogOpen, setSourcesDialogOpen] = useState(false)
   const [githubInstallRef, setGithubInstallRef] = useState<string | null>(null)
 
-  // Reset the visible window whenever the section or query changes so we
+  /**
+   * The search box moved to the page header, so `filters.query` in the plugins
+   * store is now the single source and this pane pushes it down to whichever
+   * registry hook is answering. Both hooks are updated, not just the active
+   * one, so switching origin keeps the term the user typed. Written with the
+   * documented prev-value compare rather than an effect, same as the paging
+   * reset above.
+   */
+  const storeQuery = usePluginsStore((s) => s.filters.query)
+  const [seenQuery, setSeenQuery] = useState(storeQuery)
+  if (storeQuery !== seenQuery) {
+    setSeenQuery(storeQuery)
+    market.setQuery(storeQuery)
+    openVsx.setQuery(storeQuery)
+  }
+
+  // Reset the visible window whenever either axis or the query changes so we
   // don't stay zoomed into page 5 of "popular" after the user switches.
   // React 19: the documented prev-value compare pattern keeps the reset
   // out of `useEffect` (rule `react-hooks/set-state-in-effect`).
-  const viewKey = `${section}|${market.query}`
+  const viewKey = `${origin}|${curation}|${storeQuery}`
   const [trackedView, setTrackedView] = useState(viewKey)
   if (trackedView !== viewKey) {
     setTrackedView(viewKey)
@@ -115,11 +135,11 @@ export function PluginMarketplace() {
    */
   const [vscodeClient, setVscodeClient] = useState<MarketplaceClient | null>(null)
   useEffect(() => {
-    if (section !== "vscode" || vscodeClient) return
+    if (origin !== "vscode" || vscodeClient) return
     void import("@/lib/plugin/vscode-shim/openvsx-install-flow").then((mod) =>
       setVscodeClient(mod.createOpenVsxInstallClient() as unknown as MarketplaceClient)
     )
-  }, [section, vscodeClient])
+  }, [origin, vscodeClient])
 
   const preInstall = usePluginPreInstall(client)
   // A second instance rather than a shared one: the two consent chains are
@@ -144,34 +164,48 @@ export function PluginMarketplace() {
   const allResults =
     market.state.kind === "ready" && Array.isArray(market.state.results) ? market.state.results : []
 
+  /**
+   * The curation axis: which of the cognia registry's lists to read.
+   *
+   * `curationAnswerableBy` keeps the control from offering a ranking a
+   * non-registry origin cannot answer, so this only ever chooses among lists
+   * the registry itself publishes.
+   */
+  const registryEntries =
+    curation === "featured"
+      ? market.featured
+      : curation === "popular"
+        ? market.popular
+        : curation === "recent"
+          ? market.recent
+          : allResults
+
+  /** The origin axis: which registry or catalog answers at all. */
   const sectionEntries = (() => {
-    switch (section) {
-      case "featured":
-        return market.featured
-      case "popular":
-        return market.popular
-      case "recent":
-        return market.recent
+    switch (origin) {
       case "builtin":
         return builtinEntries
       case "workspace":
         // Plugins from GitHub marketplace catalogs the user/org added.
         return sources.entries
-      case "shared":
-        // Plugins from the remote (shared) Cognia plugin registry.
-        return allResults
+      case "registry":
+        // The remote (shared) Cognia plugin registry on its own.
+        return registryEntries
       case "vscode":
-        // VS Code extensions from Open VSX — a different registry entirely.
+        // VS Code extensions from Open VSX, a different registry entirely.
         // Deliberately not merged into "all": these aren't cognia plugins, and
-        // the section is also the paging boundary (server-side, not client).
+        // the origin is also the paging boundary (server-side, not client).
         return openVsx.entries
       default:
-        // Merge GitHub marketplace-repo entries into the default browse view.
-        return [...allResults, ...sources.entries]
+        // "All sources" merges the GitHub marketplace-repo entries in, but
+        // only while no ranking is chosen. A git catalog publishes no
+        // featured / popular / recent list, so including its entries under a
+        // ranking would claim a standing they were never given.
+        return curation === "all" ? [...allResults, ...sources.entries] : registryEntries
     }
   })()
 
-  const isVscodeSection = section === "vscode"
+  const isVscodeSection = origin === "vscode"
   // Open VSX pages on the server, so the grid renders everything fetched so far
   // and "Load more" asks for the next window. The other sections page on the
   // client over a fully-materialised list. One grid, two paging models.
@@ -182,12 +216,11 @@ export function PluginMarketplace() {
    * Which registry's loading / error state governs the content region.
    *
    * This used to be an early `return` above the toolbar, which had the effect
-   * of replacing the entire page — including the section toggle — with the
-   * cognia registry's error card. That made the VS Code section *unreachable*
-   * whenever cognia's registry was unhappy, even though the section needs
-   * nothing from it. Keeping the toolbar mounted and scoping the status to the
-   * content region is what actually lets the user switch away from a failing
-   * registry.
+   * of replacing the entire page — including the origin picker — with the
+   * cognia registry's error card. That made Open VSX *unreachable* whenever
+   * cognia's registry was unhappy, even though it needs nothing from it. The
+   * picker now lives in the page header, and scoping the status to the content
+   * region is what lets the user switch away from a failing registry.
    */
   const status:
     | { kind: "loading" }
@@ -215,75 +248,28 @@ export function PluginMarketplace() {
   // Discovery is shown as a hero strip whenever the user is in the default
   // "all" view with no active query — nudges first-time users toward
   // featured plugins without competing with their search results.
-  const showDiscovery = section === "all" && market.query.trim() === ""
+  const showDiscovery = origin === "all" && curation === "all" && storeQuery.trim() === ""
 
   return (
-    <div className="flex w-full min-w-0 max-w-full flex-col gap-4 overflow-x-clip">
+    <div className="@container/plugin-discover flex w-full min-w-0 max-w-full flex-col gap-4 overflow-x-clip">
       <PluginMarketplaceModeBanner />
       {showDiscovery && <PluginDiscovery onInstall={(id, version) => onInstallById(id, version)} />}
-      <Card
-        className="min-w-0 gap-0 bg-card/40 py-0 shadow-xs"
-        data-testid="plugin-marketplace-toolbar"
-      >
-        <CardContent className="flex flex-col gap-2 p-2.5">
-          <div className="flex min-w-0 items-center gap-2">
-            {/* Same Input, two data sources. The Open VSX hook debounces
-              internally, so Enter is a redundant-but-harmless refresh there. */}
-            <Input
-              placeholder={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
-              aria-label={isVscodeSection ? tv("searchPlaceholder") : t("searchPlaceholder")}
-              value={isVscodeSection ? openVsx.query : market.query}
-              onChange={(e) =>
-                isVscodeSection ? openVsx.setQuery(e.target.value) : market.setQuery(e.target.value)
-              }
-              onKeyDown={(e) => {
-                if (e.key !== "Enter") return
-                if (isVscodeSection) openVsx.refresh()
-                else void market.refresh()
-              }}
-              className="min-w-0 flex-1 bg-background/80 sm:max-w-lg"
-            />
-            <div className="flex shrink-0 items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSourcesDialogOpen(true)}
-                aria-label={t("manageSources")}
-                data-testid="plugin-marketplace-manage-sources"
-              >
-                <GitBranchIcon className="size-3.5" />
-                <span className="hidden lg:inline">{t("manageSources")}</span>
-              </Button>
-              <PluginComparisonTrigger />
-            </div>
-          </div>
-          <div className="flex min-w-0 items-center">
-            <ScrollShadowRow
-              className="min-w-0 flex-1"
-              scrollerClassName="-mx-0.5 px-0.5 pb-0.5"
-              testId="plugin-marketplace-sections"
-            >
-              <ToggleGroup
-                type="single"
-                value={section}
-                onValueChange={(v) => v && setSection(v as Section)}
-                variant="outline"
-                size="sm"
-                className="w-max"
-              >
-                <ToggleGroupItem value="all">{t("sections.all")}</ToggleGroupItem>
-                <ToggleGroupItem value="featured">{t("sections.featured")}</ToggleGroupItem>
-                <ToggleGroupItem value="popular">{t("sections.popular")}</ToggleGroupItem>
-                <ToggleGroupItem value="recent">{t("sections.recent")}</ToggleGroupItem>
-                <ToggleGroupItem value="builtin">{t("sections.builtin")}</ToggleGroupItem>
-                <ToggleGroupItem value="workspace">{t("sections.workspace")}</ToggleGroupItem>
-                <ToggleGroupItem value="shared">{t("sections.shared")}</ToggleGroupItem>
-                <ToggleGroupItem value="vscode">{t("sections.vscode")}</ToggleGroupItem>
-              </ToggleGroup>
-            </ScrollShadowRow>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Search, ranking and source now live in the page header's controls
+          tier (`PluginDiscoverHeader`), the same tier every other section
+          uses. What is left here are the two actions that open something. */}
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setSourcesDialogOpen(true)}
+          aria-label={t("manageSources")}
+          data-testid="plugin-marketplace-manage-sources"
+        >
+          <GitBranchIcon className="size-3.5" />
+          <span className="hidden @lg/plugin-discover:inline">{t("manageSources")}</span>
+        </Button>
+        <PluginComparisonTrigger />
+      </div>
 
       {isVscodeSection && (
         <p className="text-xs text-muted-foreground">{tv("vscodeSectionHint")}</p>

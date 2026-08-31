@@ -16,7 +16,7 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockRows ?? [])),
 }))
 
-import { usePlugins } from "./use-plugins"
+import { buildView, usePlugins } from "./use-plugins"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 function row(over: Partial<PluginRow>): PluginRow {
@@ -171,5 +171,66 @@ describe("usePlugins", () => {
     act(() => usePluginsStore.getState().setFilters({ sort: "rating" }))
     const { result } = renderHook(() => usePlugins())
     expect(result.current.filtered.map((r) => r.name)).toEqual(["high", "low"])
+  })
+})
+
+describe("search and tag reach", () => {
+  const row = (over: Record<string, unknown> = {}) =>
+    ({
+      id: "acme.widgets",
+      name: "Widgets",
+      version: "1.0.0",
+      status: "enabled",
+      source: "marketplace",
+      type: "frontend",
+      enabled: true,
+      capabilities: [],
+      path: "/p",
+      manifest: { id: "acme.widgets" },
+      createdAt: 0,
+      updatedAt: 0,
+      ...over,
+    }) as never
+
+  const filters = (over: Record<string, unknown>) => ({
+    ...DEFAULT_PLUGIN_FILTERS,
+    ...over,
+  })
+
+  // Name / description / id used to be the whole of it, so a user who
+  // remembered the publisher or an advertised keyword could not find the
+  // plugin by either.
+  it("matches on the author, in both manifest shapes", () => {
+    const objectForm = row({ manifest: { id: "a", author: { name: "Acme Labs" } } })
+    const stringForm = row({ id: "b", manifest: { id: "b", author: "Acme Labs" } })
+    const view = buildView([objectForm, stringForm], filters({ query: "acme lab" }))
+    expect(view.filtered).toHaveLength(2)
+  })
+
+  it("matches on a manifest keyword", () => {
+    const view = buildView(
+      [row({ manifest: { id: "a", keywords: ["Screenshot", "OCR"] } })],
+      filters({ query: "ocr" })
+    )
+    expect(view.filtered).toHaveLength(1)
+  })
+
+  it("still rejects a term that appears nowhere", () => {
+    const view = buildView([row()], filters({ query: "nothing-matches-this" }))
+    expect(view.filtered).toHaveLength(0)
+  })
+
+  // `PluginFilters.tag` was declared, defaulted to null, and applied by
+  // nothing. It is what a keyword chip writes.
+  it("narrows by the tag facet", () => {
+    const tagged = row({ id: "a", manifest: { id: "a", keywords: ["ocr"] } })
+    const untagged = row({ id: "b", manifest: { id: "b", keywords: ["chat"] } })
+    const view = buildView([tagged, untagged], filters({ tag: "OCR" }))
+    expect(view.filtered.map((r) => r.id)).toEqual(["a"])
+  })
+
+  it("ignores the tag facet when it is null", () => {
+    const view = buildView([row(), row({ id: "b" })], filters({ tag: null }))
+    expect(view.filtered).toHaveLength(2)
   })
 })

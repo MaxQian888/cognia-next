@@ -32,6 +32,11 @@ jest.mock("./governance/plugin-governance-header", () => ({
     <div data-testid="controls-governance" data-layout={layout} />
   ),
 }))
+jest.mock("./discover/plugin-discover-header", () => ({
+  PluginDiscoverHeader: ({ layout }: { layout?: string }) => (
+    <div data-testid="controls-discover" data-layout={layout} />
+  ),
+}))
 
 import { render, renderHook, screen } from "@testing-library/react"
 
@@ -73,7 +78,14 @@ describe("PluginSectionControls", () => {
     expect(screen.getByTestId("controls-governance")).toHaveAttribute("data-layout", "stacked")
   })
 
-  it.each(["discover", "agent-packages", "devtools"] as const)(
+  // Discover drew its own toolbar inside the center pane until now, which is
+  // the migration `plugin-section-toolbar.tsx` was written for and never got.
+  it("renders the discover controls and forwards the layout", () => {
+    render(<PluginSectionControls section="discover" layout="stacked" />)
+    expect(screen.getByTestId("controls-discover")).toHaveAttribute("data-layout", "stacked")
+  })
+
+  it.each(["agent-packages", "devtools"] as const)(
     "renders nothing for %s, which carries its own controls",
     (section) => {
       const { container } = render(<PluginSectionControls section={section} />)

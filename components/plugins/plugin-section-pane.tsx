@@ -14,6 +14,7 @@ import type { PluginNavSection } from "@/stores/plugins"
 
 import { AgentPackagesPane } from "./agent-packages/agent-packages-pane"
 import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
+import { PluginDiscoverHeader } from "./discover/plugin-discover-header"
 import { PluginDiscoverPane } from "./discover/plugin-discover-pane"
 import { PluginGovernanceHeader } from "./governance/plugin-governance-header"
 import { PluginGovernancePane } from "./governance/plugin-governance-pane"
@@ -53,15 +54,15 @@ export interface PluginSectionControlsProps {
 
 /**
  * The section's second-tier controls, or nothing when the section has none.
- * Discover, Devtools and Agent Packages currently carry their own controls
- * inside their pane.
+ * Devtools and Agent Packages carry their own controls inside their pane.
  */
 export function PluginSectionControls({ section, layout }: PluginSectionControlsProps) {
   if (section === "library") return <PluginLibraryHeader layout={layout} />
+  if (section === "discover") return <PluginDiscoverHeader layout={layout} />
   if (section === "governance") return <PluginGovernanceHeader layout={layout} />
   return null
 }
 
 export function pluginSectionHasControls(section: PluginNavSection): boolean {
-  return section === "library" || section === "governance"
+  return section === "library" || section === "discover" || section === "governance"
 }
