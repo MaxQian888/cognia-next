@@ -1939,6 +1939,7 @@
       "changesIncomplete": "这份文件变更列表并不完整——部分文件事件未被捕获。",
       "error": "错误",
       "finished": "结束于",
+      "imOrigin": "来自会话",
       "journalUnavailable": "本设备上没有该运行的日志。",
       "kind": "类型",
       "loading": "加载中…",
@@ -10802,6 +10803,10 @@
     },
     "empty": "当前没有正在运行的任务。",
     "filteredEmpty": "没有符合筛选条件的任务。",
+    "imOrigin": {
+      "label": "来自会话",
+      "open": "打开来源会话"
+    },
     "kind": {
       "agentTurn": "对话",
       "chat": "对话",
@@ -12333,6 +12338,10 @@
     }
   },
   "inbox": {
+    "activeDelegations": {
+      "count": "{count, plural, other {# 个运行中}}",
+      "tooltip": "{count, plural, other {本会话有 # 个委派任务还在跑。打开运行台可以干预或停止。}}"
+    },
     "activity": {
       "assignment": {
         "assigned": "已分配",
@@ -20827,7 +20836,9 @@
       "reviewPermissions": "审查权限",
       "rollback": "回滚…",
       "runtimeWarnings": {
-        "python-runtime-unavailable": "Python 运行时不可用——仅桌面端"
+        "python-runtime-unavailable": "Python 运行时不可用——仅桌面端",
+        "vscode-runtime-unavailable": "VS Code 宿主不可用，仅桌面端",
+        "wasm-runtime-unavailable": "WASM 运行时不可用，仅桌面端"
       },
       "selectAria": "选择 {name}",
       "status": {
@@ -20945,6 +20956,20 @@
       "title": "对比插件",
       "triggerLabel": "对比（{count}）",
       "yes": "是"
+    },
+    "compatibility": {
+      "blockedLabel": "本端不可用",
+      "blockedTooltip": "该插件未声明对 {host} 运行时的支持，Cognia 不会在本设备上启动它。请改在桌面端打开。",
+      "degradedLabel": "本端受限",
+      "degradedTooltip": "该插件在 {host} 运行时下的能力会被削减。",
+      "host": {
+        "browser": "浏览器",
+        "headless": "无头",
+        "mobile": "移动端",
+        "tauri": "桌面端"
+      },
+      "installBlocked": "插件安装在桌面端后台执行，需要 Cognia 桌面应用。",
+      "runtimeUnavailable": "该插件的运行时在本设备上不可用。"
     },
     "configForm": {
       "arrayAdd": "添加条目",

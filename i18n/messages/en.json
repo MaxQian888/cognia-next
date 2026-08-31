@@ -1939,6 +1939,7 @@
       "changesIncomplete": "This change list is incomplete — some file events were not captured.",
       "error": "Error",
       "finished": "Finished",
+      "imOrigin": "From chat",
       "journalUnavailable": "The run journal is not on this device.",
       "kind": "Kind",
       "loading": "Loading…",
@@ -10802,6 +10803,10 @@
     },
     "empty": "Nothing is running right now.",
     "filteredEmpty": "No executions match your filters.",
+    "imOrigin": {
+      "label": "From chat",
+      "open": "Open the conversation"
+    },
     "kind": {
       "agentTurn": "Chat",
       "chat": "Chat",
@@ -12333,6 +12338,10 @@
     }
   },
   "inbox": {
+    "activeDelegations": {
+      "count": "{count, plural, one {# run} other {# runs}}",
+      "tooltip": "{count, plural, one {# delegated run is still going. Open the cockpit to steer or stop it.} other {# delegated runs are still going. Open the cockpit to steer or stop them.}}"
+    },
     "activity": {
       "assignment": {
         "assigned": "Assigned",
@@ -20827,7 +20836,9 @@
       "reviewPermissions": "Review permissions",
       "rollback": "Rollback…",
       "runtimeWarnings": {
-        "python-runtime-unavailable": "Python runtime unavailable — desktop only"
+        "python-runtime-unavailable": "Python runtime unavailable — desktop only",
+        "vscode-runtime-unavailable": "VS Code host unavailable, desktop only",
+        "wasm-runtime-unavailable": "WASM runtime unavailable, desktop only"
       },
       "selectAria": "Select {name}",
       "status": {
@@ -20945,6 +20956,20 @@
       "title": "Compare plugins",
       "triggerLabel": "Compare ({count})",
       "yes": "Yes"
+    },
+    "compatibility": {
+      "blockedLabel": "Not available here",
+      "blockedTooltip": "This plugin does not declare support for the {host} runtime, so Cognia will not start it on this device. Open it on the desktop app instead.",
+      "degradedLabel": "Limited here",
+      "degradedTooltip": "This plugin runs with reduced capability on the {host} runtime.",
+      "host": {
+        "browser": "browser",
+        "headless": "headless",
+        "mobile": "mobile",
+        "tauri": "desktop"
+      },
+      "installBlocked": "Installing plugins runs in the desktop backend, so it needs the Cognia desktop app.",
+      "runtimeUnavailable": "Its runtime is not available on this device."
     },
     "configForm": {
       "arrayAdd": "Add item",

@@ -48,5 +48,9 @@
     "queuedOnSlot": "Waiting for the folder"
   },
   "title": "Execution Monitor",
-  "watchLeg": "Watch {label}"
+  "watchLeg": "Watch {label}",
+  "imOrigin": {
+    "open": "Open the conversation",
+    "label": "From chat"
+  }
 }

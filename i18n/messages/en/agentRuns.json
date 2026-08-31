@@ -57,6 +57,7 @@
     "changesIncomplete": "This change list is incomplete — some file events were not captured.",
     "error": "Error",
     "finished": "Finished",
+    "imOrigin": "From chat",
     "journalUnavailable": "The run journal is not on this device.",
     "kind": "Kind",
     "loading": "Loading…",

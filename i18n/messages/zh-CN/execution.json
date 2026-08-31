@@ -48,5 +48,9 @@
     "queuedOnSlot": "等待目录空出"
   },
   "title": "执行监视器",
-  "watchLeg": "查看 {label}"
+  "watchLeg": "查看 {label}",
+  "imOrigin": {
+    "open": "打开来源会话",
+    "label": "来自会话"
+  }
 }

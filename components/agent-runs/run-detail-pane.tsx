@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InspectRow } from "@/components/scheduler/details/_shared/inspect-row"
+import { RunImOrigin, useRunImOrigin } from "@/components/execution/run-im-origin"
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { cn } from "@/lib/utils"
 import { useExecutionRunDetail } from "@/hooks/agent-runs/use-execution-run-detail"
@@ -81,6 +82,8 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
 
   const busy = actions.pendingRowId === row.rowId
   const duration = row.endedAt ? formatDuration(row.endedAt - row.startedAt) : undefined
+  // Null for every run started on the desktop, which is what gates the row.
+  const imOrigin = useRunImOrigin(row.runId)
 
   const dispatch = async (action: RunControlAction, steerMessage?: string) => {
     const result = await actions.dispatch(row, action, steerMessage ? { steerMessage } : {})
@@ -191,6 +194,12 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             />
           )}
           {row.error && <InspectRow label={t("detail.error")} value={row.error} />}
+          {/* Only for a run a chat handed over. `RunImOrigin` renders nothing
+              otherwise, so the row is gated on the same lookup rather than on
+              a guess about the run kind. */}
+          {imOrigin && (
+            <InspectRow label={t("detail.imOrigin")} value={<RunImOrigin runId={row.runId} />} />
+          )}
           {row.source !== "journal" && (
             <p className="pt-2 text-xs text-muted-foreground">{t("detail.notJournalled")}</p>
           )}

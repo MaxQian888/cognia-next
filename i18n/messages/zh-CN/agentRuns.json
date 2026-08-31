@@ -57,6 +57,7 @@
     "changesIncomplete": "这份文件变更列表并不完整——部分文件事件未被捕获。",
     "error": "错误",
     "finished": "结束于",
+    "imOrigin": "来自会话",
     "journalUnavailable": "本设备上没有该运行的日志。",
     "kind": "类型",
     "loading": "加载中…",

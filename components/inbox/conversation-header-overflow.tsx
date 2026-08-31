@@ -46,6 +46,7 @@ import { SlaBadge } from "./sla-badge"
 import { PendingApprovalChip } from "./pending-approval-chip"
 import { LabelPicker } from "./label-picker"
 import { LastInboundChip } from "./last-inbound-chip"
+import { ActiveDelegationsChip } from "./active-delegations-chip"
 import { ProviderModelSwitcher } from "./provider-model-switcher"
 import { QuietHoursChip } from "./quiet-hours-chip"
 import { AtStrategyChip } from "./at-strategy-chip"
@@ -207,6 +208,9 @@ export function ConversationHeaderOverflow({
             selectedIds={overrideRow?.labelIds ?? []}
           />
           <LastInboundChip conversationKey={conversationKey} />
+          {/* Renders only while a delegated run is in flight, which is the one
+              piece of this conversation's state that lives outside the thread. */}
+          <ActiveDelegationsChip conversationKey={conversationKey} />
         </OverflowGroup>
 
         <OverflowGroup label={t("groupRouting")}>

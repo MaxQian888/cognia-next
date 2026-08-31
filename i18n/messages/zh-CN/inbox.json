@@ -1,4 +1,8 @@
 {
+  "activeDelegations": {
+    "count": "{count, plural, other {# 个运行中}}",
+    "tooltip": "{count, plural, other {本会话有 # 个委派任务还在跑。打开运行台可以干预或停止。}}"
+  },
   "activity": {
     "assignment": {
       "assigned": "已分配",
