@@ -2,9 +2,6 @@
   "version": 1,
   "note": "Per-subsystem judgment on why it carries host guards (isTauri / isHeadlessHost / usePlatform). Produced by `pnpm audit:host-parity:report` and classified by hand — the census is mechanical, the classification is not. `confidence: \"low\"` marks a row decided from naming and a spot check rather than a full read; those are where a reviewer should look first. Classifications: physically-impossible (the host genuinely lacks the surface), unmigrated (no physical reason — the work just was not done), ui-assumption (backend can reach parity; the UI keys off the host instead of a capability), seam-infrastructure (this IS the host-detection/transport layer; branching on host is its job).",
   "subsystems": {
-    "app/agent-teams": {
-      "classification": "ui-assumption"
-    },
     "app/discover": {
       "classification": "ui-assumption"
     },
