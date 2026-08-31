@@ -68,11 +68,12 @@ test("buildJestArgs passes a single file verbatim (no one-entry brace group)", (
   assert.equal(args[1], "--collectCoverageFrom=lib/a.ts")
 })
 
-test("buildJestArgs --strict applies the 90% bar to the changed set", () => {
-  const args = buildJestArgs(["lib/a.ts"], { strict: true })
+test("buildJestArgs --strict applies the 90% bar to every changed file", () => {
+  const args = buildJestArgs(["lib/a.ts", "hooks/use-b.ts"], { strict: true })
   const thresholdArg = args.find((a) => a.startsWith("--coverageThreshold="))
   assert.deepEqual(JSON.parse(thresholdArg.split("=").slice(1).join("=")), {
-    global: { branches: 90, functions: 90, lines: 90, statements: 90 },
+    "./lib/a.ts": { branches: 90, functions: 90, lines: 90, statements: 90 },
+    "./hooks/use-b.ts": { branches: 90, functions: 90, lines: 90, statements: 90 },
   })
 })
 

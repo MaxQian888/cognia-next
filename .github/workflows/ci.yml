@@ -55,3 +55,22 @@ jobs:
   test:
     name: Test
     uses: ./.github/workflows/test.yml
+
+  # Branch protection consumes this stable name instead of the reusable
+  # workflows' dynamic matrix children. `always()` ensures cancellation or a
+  # startup failure cannot silently skip the required result.
+  ci-gate:
+    name: CI Gate
+    needs: [quality, test]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every CI tier to pass
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          test "$QUALITY_RESULT" = "success"
+          test "$TEST_RESULT" = "success"

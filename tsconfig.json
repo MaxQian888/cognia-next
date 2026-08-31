@@ -79,6 +79,7 @@
       "@cognia/plugin-sdk/api/i18n": ["./packages/plugin-sdk/src/api/i18n.ts"],
       "@cognia/plugin-sdk/api/integration": ["./packages/plugin-sdk/src/api/integration.ts"],
       "@cognia/plugin-sdk/api/webview": ["./packages/plugin-sdk/src/api/webview.ts"],
+      "@cognia/plugin-sdk/api/abort": ["./packages/plugin-sdk/src/api/abort.ts"],
       "@cognia/plugin-sdk/api/agent-turn": ["./packages/plugin-sdk/src/api/agent-turn.ts"],
       "@cognia/plugin-sdk/api/agent-team-template": [
         "./packages/plugin-sdk/src/api/agent-team-template.ts"
@@ -92,6 +93,7 @@
       "@cognia/plugin-sdk/api/context-provider": [
         "./packages/plugin-sdk/src/api/context-provider.ts"
       ],
+      "@cognia/plugin-sdk/api/download": ["./packages/plugin-sdk/src/api/download.ts"],
       "@cognia/plugin-sdk/api/eval": ["./packages/plugin-sdk/src/api/eval.ts"],
       "@cognia/plugin-sdk/api/external-agent-adapter": [
         "./packages/plugin-sdk/src/api/external-agent-adapter.ts"

@@ -53,6 +53,12 @@ jobs:
         with:
           node-version: 26.x
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install report dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Download this run's artifacts
         uses: actions/download-artifact@v7
         with:

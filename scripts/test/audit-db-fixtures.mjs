@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { Command, CommanderError } from "commander"
 import { execaSync } from "execa"
@@ -76,7 +76,7 @@ export function listFixtureCandidates() {
 }
 
 function listTestFiles() {
-  return execaSync("git", [
+  const files = execaSync("git", [
     "ls-files",
     "-co",
     "--exclude-standard",
@@ -87,6 +87,11 @@ function listTestFiles() {
     .stdout.trim()
     .split("\n")
     .filter(Boolean)
+  return filterExistingTestFiles(files)
+}
+
+export function filterExistingTestFiles(files, exists = existsSync) {
+  return files.filter((file) => exists(file))
 }
 
 function loadExclusions() {

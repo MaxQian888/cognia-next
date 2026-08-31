@@ -20,7 +20,7 @@ what to do when one goes red, and how to set up the optional integrations.
 
 | Tier         | Trigger                           | Runs                                                                     |
 | ------------ | --------------------------------- | ------------------------------------------------------------------------ |
-| **Hot path** | push to `dev`/`master`, any PR    | `ci.yml` → `quality.yml` + `test.yml`                                    |
+| **Hot path** | push to `dev`/`master`, any PR    | `ci.yml` → `quality.yml` + `test.yml` → stable `CI Gate`                 |
 | **Nightly**  | `nightly.yml`, 03:00 UTC + manual | full test matrix, 4-platform Tauri bundles, Tauri E2E (Windows), iOS E2E |
 | **Release**  | `v*` tag                          | `release.yml` → quality + test + signed Tauri release                    |
 | **Report**   | `workflow_run` after the hot path | `report.yml` → PR comment + job summary                                  |
@@ -31,6 +31,13 @@ Tauri **bundling** is deliberately off the hot path — it is the largest
 wall-clock item in the repo. The Tauri crate is still compiled on every run:
 `cargo-test-windows` builds the static export and then runs `cargo test`
 inside `src-tauri`, which is a full compile of the desktop app.
+
+`CI Gate` is the only check branch protection should require. It uses
+`if: always()` and fails unless both reusable workflows complete successfully,
+so adding, renaming, or sharding an internal job cannot silently weaken the
+required-check set. Enable it only after the commit that introduces the gate is
+present on `dev`; requiring a check that the default branch cannot emit locks
+every PR out.
 
 `schedule` only fires from the repository's **default branch**. That is why
 the nightly tier lives in its own top-level workflow instead of a `schedule:`
@@ -72,22 +79,23 @@ workflow changes — a brand-new group becomes a new matrix entry automatically.
 `pnpm gates:registry` fails the build if a verification-shaped script exists
 that is neither registered nor exempted with a written reason.
 
-| Group          | What it covers                                                                                                                                                                                                                                                                    |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lint`         | eslint, prettier                                                                                                                                                                                                                                                                  |
-| `types`        | `tsc --noEmit`                                                                                                                                                                                                                                                                    |
-| `i18n`         | key parity, hardcoded-string baseline, generated-bundle freshness                                                                                                                                                                                                                 |
-| `artifacts`    | generated files match their sources (`build:packages`, skills, plugin bundles, plugin contract)                                                                                                                                                                                   |
-| `audit`        | repo-specific structural audits — slots, trusted publishers, silent-failure flags, PII boundaries, command parity, E2E governance, co-located tests, static export, plugin-SDK WIT, plugin author imports; plus CLAUDE.md freshness, **advisory** until the subsystem map settles |
-| `sync`         | mirrored config/version files agree                                                                                                                                                                                                                                               |
-| `gate-tests`   | the gate tooling's own `node --test` suites                                                                                                                                                                                                                                       |
-| `plugin-sdk`   | the SDK's TS / Python / Rust contract surface                                                                                                                                                                                                                                     |
-| `rust`         | `cargo fmt --check`, ratcheted clippy                                                                                                                                                                                                                                             |
-| `supply-chain` | `pnpm audit`, `cargo deny` — **advisory**, never blocking                                                                                                                                                                                                                         |
+| Group          | What it covers                                                                                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`         | ESLint                                                                                                                                                                                                                                                              |
+| `format`       | Prettier                                                                                                                                                                                                                                                            |
+| `types`        | root `tsc`, Knip, browser-extension typecheck, web-site typecheck                                                                                                                                                                                                   |
+| `i18n`         | key parity, hardcoded-string baseline, generated-bundle freshness, deterministic key ordering                                                                                                                                                                       |
+| `artifacts`    | generated files match their sources (`build:packages`, skills, plugin bundles, plugin contract)                                                                                                                                                                     |
+| `audit`        | repo-specific structural audits — slots, trusted publishers, silent-failure flags, PII boundaries, command parity, E2E governance, co-located tests, DB-fixture ratchet, static export, plugin-SDK WIT, plugin author imports, and repository instruction freshness |
+| `sync`         | mirrored config/version files agree                                                                                                                                                                                                                                 |
+| `gate-tests`   | the gate tooling's own `node --test` suites                                                                                                                                                                                                                         |
+| `plugin-sdk`   | the SDK's TS / Python / Rust contract surface                                                                                                                                                                                                                       |
+| `rust`         | `cargo fmt --check`, ratcheted clippy                                                                                                                                                                                                                               |
+| `supply-chain` | blocking `pnpm audit` and `cargo deny`; exceptions must name an exact advisory and explain why no safe upgrade exists                                                                                                                                               |
 
 ---
 
-## Test runners
+## Test and build runners
 
 Six runners, each with one owner:
 
@@ -99,6 +107,13 @@ Six runners, each with one owner:
 | Playwright                       | `tests/e2e/**`           | `test.yml` — chromium + mobile-pixel-7, 2 shards each; tauri + iOS nightly        |
 | `cargo test`                     | 23 crates                | `test.yml` — `--workspace --exclude cognia-next` on Linux, `src-tauri` on Windows |
 | pytest                           | `plugin-sdk/python`      | `quality.yml`, `plugin-sdk` group                                                 |
+| Agent conformance                | real sidecars + server   | `test.yml`, dedicated conformance job                                             |
+
+The hot path also builds the docs site, web site, Android debug app, root
+static export, and Tauri frontend contract as independent jobs. The iOS
+simulator build runs on manual/nightly executions because it requires a macOS
+runner. Nightly Tauri packaging does not depend on the test job, so a test
+failure no longer hides whether packaging itself is broken.
 
 `src-tauri` is excluded from the Linux workspace run because its
 `tauri::generate_context!()` needs the Next.js static export at compile time;
@@ -110,8 +125,9 @@ the Windows job builds the export first and covers it there.
 
 Two levels, and they are not the same number.
 
-- **Changed files: ≥90%** lines/branches/functions — the real bar for anything
-  you touch. `pnpm test:coverage:changed -- --strict`, gated on every PR.
+- **Changed files: ≥90% per file** for lines/branches/functions — the real bar
+  for anything you touch. `pnpm test:coverage:changed -- --strict`, gated on
+  every PR. One well-covered file cannot subsidize another changed file.
 - **Repo-wide: layered floors** in `scripts/test/coverage-thresholds.json`,
   enforced by `scripts/test/merge-coverage.mjs --check` after the shards
   merge. They sit far below 90. `pnpm coverage:ratchet` reports which floors
@@ -135,6 +151,15 @@ the recorded list **may only shrink**, and anything new is a hard failure.
 | Clippy                 | `scripts/gates/clippy-baseline.json`         | `pnpm rust:clippy -- --write-baseline`           |
 | E2E governance         | `scripts/e2e/governance-exceptions.json`     | hand-edited, entries carry `reviewAfter`         |
 | Coverage floors        | `scripts/test/coverage-thresholds.json`      | `pnpm coverage:ratchet -- --write`               |
+| DB fixture migration   | `scripts/test/db-fixture-baseline.json`      | shrink only after adopting `createDbTestFixture` |
+| Advisory waivers       | `pnpm-workspace.yaml` `auditConfig`          | hand-edited, entries carry a reason + date       |
+
+Advisory waivers are the one list that lives in two files: `pnpm audit` reads
+`pnpm-workspace.yaml`, and the `audit:deps` script repeats the same ids as
+`--ignore` flags. JSON cannot hold the reason, so the justification and review
+date belong beside the ids in the YAML.
+`scripts/ci/workflow-contract.test.mjs` fails when the two lists drift or when a
+waived id has no comment above it.
 
 Regenerating a baseline to make a red build green is the failure mode these
 are most exposed to. Regenerate only after _fixing_ something; the gates print
@@ -346,6 +371,15 @@ expired, and the signing identity matches the certificate.
 
 Never bypass a hook with `--no-verify`. If a hook fails, fix the cause,
 re-stage, and make a **new** commit.
+
+### Branch protection
+
+The default branch is `dev`. It must require pull requests and the single
+status check `CI Gate`; do not require matrix child names such as
+`Quality / Gates (types)` because those are intentionally free to evolve. The
+repository currently has no protection rule, so this is a required deployment
+step after the repaired workflow has landed and emitted `CI Gate` at least
+once.
 
 ---
 

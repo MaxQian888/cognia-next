@@ -6,7 +6,7 @@ import {
   bucketize,
   genSettingsSync,
   loadTable,
-  renderOpenApi,
+  renderRequestSchemaCatalog,
   renderRust,
   parseArgs,
 } from "./gen-settings-sync.mjs"
@@ -64,33 +64,30 @@ test("renderRust comment blocks stay separated", async () => {
   assert.doesNotMatch(rust, /[^\n]\/\/!/)
 })
 
-test("renderOpenApi replaces only the generated region", () => {
-  const spec = [
-    "before: keep",
-    "                  propertyNames:",
-    "                    # BEGIN GENERATED settings-sync",
-    "                    enum: []",
-    "                    # END GENERATED settings-sync",
-    "after: keep",
-  ].join("\n")
-  const next = renderOpenApi(spec, ["alpha", "zebra"])
-  assert.equal(
-    next,
-    [
-      "before: keep",
-      "                  propertyNames:",
-      "                    # BEGIN GENERATED settings-sync",
-      "                    enum:",
-      "                      - alpha",
-      "                      - zebra",
-      "                    # END GENERATED settings-sync",
-      "after: keep",
-    ].join("\n")
-  )
+test("renderRequestSchemaCatalog updates only the canonical settings enum", () => {
+  const source = JSON.stringify({
+    schemaVersion: 1,
+    commands: {
+      app_settings_update: {
+        properties: { patch: { propertyNames: { enum: [] }, description: "keep" } },
+      },
+      untouched: { type: "object" },
+    },
+  })
+  const next = JSON.parse(renderRequestSchemaCatalog(source, ["alpha", "zebra"]))
+  assert.deepEqual(next.commands.app_settings_update.properties.patch.propertyNames.enum, [
+    "alpha",
+    "zebra",
+  ])
+  assert.equal(next.commands.app_settings_update.properties.patch.description, "keep")
+  assert.deepEqual(next.commands.untouched, { type: "object" })
 })
 
-test("renderOpenApi refuses to guess when the markers are gone", () => {
-  assert.throws(() => renderOpenApi("no markers here", ["alpha"]), /markers/)
+test("renderRequestSchemaCatalog refuses a missing canonical schema path", () => {
+  assert.throws(
+    () => renderRequestSchemaCatalog('{"commands":{}}', ["alpha"]),
+    /app_settings_update\.patch\.propertyNames\.enum is missing/
+  )
 })
 
 test("every non-shared classification in the real table carries a rationale", async () => {
@@ -110,9 +107,10 @@ test("the real table classifies transport config as never-writable", async () =>
   // Pinned because the old hand-written allowlist had these backwards: the
   // phone could write them but never received them, so a self-hosted signaling
   // server or TURN relay could not reach it.
-  for (const key of ["signalingUrl", "iceServers", "turnServers", "turnProvider"]) {
+  for (const key of ["signalingUrl", "iceServers", "turnServers"]) {
     assert.equal(table[key].category, "server-authoritative", `${key} must flow down only`)
   }
+  assert.equal(table.turnProvider.category, "desktop-only")
   assert.equal(table.webrtcEnabled.category, "device-local")
 })
 

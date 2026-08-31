@@ -102,6 +102,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Setup uv
+        if: matrix.python
+        uses: astral-sh/setup-uv@v7
+
       # `components:` is not optional here — dtolnay/rust-toolchain installs
       # the minimal profile, which ships neither clippy nor rustfmt.
       - name: Setup Rust toolchain
@@ -142,6 +146,34 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Gate scripts must be runnable from a clean GitHub image. Audit scripts
+      # invoke ripgrep directly, while Rust-backed groups compile GTK/GLib and
+      # PipeWire crates that require their pkg-config development packages.
+      - name: Install gate system dependencies
+        if: matrix.rust || matrix.group == 'audit'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ripgrep \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            libpipewire-0.3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      # The artifact and SDK checks consume built workspace packages; the
+      # plugin runtime check additionally verifies a prepared Node payload.
+      - name: Build workspace package prerequisites
+        if: matrix.group == 'artifacts' || matrix.group == 'plugin-sdk'
+        run: pnpm build:packages
+
+      - name: Prepare the plugin Node runtime
+        if: matrix.group == 'artifacts'
+        run: pnpm plugin-node:prepare
 
       - name: Install the Python plugin SDK
         if: matrix.python

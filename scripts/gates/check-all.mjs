@@ -33,8 +33,6 @@
  *
  * ## Deliberate omissions
  *
- *   - `i18n:sort:check` — the message files are not key-sorted, so it would
- *     always fail. Run `pnpm i18n:sort` once, then register it here.
  *   - test runners (jest / playwright / cargo test / sidecar `node --test`)
  *     are owned by `.github/workflows/test.yml`, not by this registry. They
  *     are listed in check-gate-registry.mjs's exemption table with that
@@ -105,6 +103,7 @@ const REGISTRY = [
 
   { script: "lint:i18n", group: "i18n" },
   { script: "i18n:build:check", group: "i18n" },
+  { script: "i18n:sort:check", group: "i18n" },
 
   // Generated / derived artifacts must be in sync with their sources.
   { script: "build:packages", group: "artifacts", resource: "package-build" },
@@ -127,6 +126,7 @@ const REGISTRY = [
   // in CI; until now nothing ran it (ADR-0119).
   { script: "pi:extension:pin:check", group: "artifacts" },
   { script: "companion-api:check", group: "artifacts" },
+  { script: "support:docs:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },
   { script: "ide:check", group: "artifacts" },
@@ -179,6 +179,7 @@ const REGISTRY = [
   { script: "audit:network-egress", group: "audit" },
   { script: "audit:command-parity", group: "audit" },
   { script: "audit:companion-command-manifest", group: "audit" },
+  { script: "companion-api:lint", group: "audit" },
   // The manifest gate above compares NAME SETS only — its whole schema check is
   // `if (!command.inputSchema)`. So a dispatch arm could drop half its
   // command's arguments and stay green (it did: `custom_headers`,
@@ -205,6 +206,7 @@ const REGISTRY = [
   { script: "audit:docs-links", group: "audit" },
   { script: "audit:adr-catalog", group: "audit" },
   { script: "audit:colocated-tests", group: "audit" },
+  { script: "test:db-fixture:audit", group: "audit" },
   { script: "audit:pro-ide-constants", group: "audit" },
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
@@ -245,6 +247,12 @@ const REGISTRY = [
   { script: "scripts:test:i18n", group: "gate-tests" },
   { script: "scripts:test:plugin", group: "gate-tests" },
   { script: "scripts:test:ci", group: "gate-tests" },
+  { script: "artifact-runtime:test", group: "gate-tests" },
+  { script: "support:docs:test", group: "gate-tests" },
+  { script: "tauri:debug:agent:test", group: "gate-tests" },
+  { script: "agent:sdk:test", group: "gate-tests" },
+  { script: "pet:compat:test", group: "gate-tests" },
+  { script: "audit:workspace-attribution:test", group: "gate-tests" },
   // `node --test` over mobile/scripts/ — the iOS project/plist configurators
   // `mobile:sync:ios` runs. Jest ignores `scripts/**/*.test.mjs`, so these had
   // no runner at all and their assertions never executed.
@@ -272,6 +280,7 @@ const REGISTRY = [
   { script: "sdk:ts:pack:test", group: "plugin-sdk" },
   { script: "sdk:scaffold:test", group: "plugin-sdk" },
   { script: "sdk:python:test", group: "plugin-sdk", runtime: "python" },
+  { script: "plugin:repowiki:test", group: "plugin-sdk", runtime: "python" },
   { script: "sdk:rust:test", group: "plugin-sdk", runtime: "rust", resource: "cargo" },
 
   // Rust quality. The workspace had never been linted or format-checked —

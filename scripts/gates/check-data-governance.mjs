@@ -15,23 +15,34 @@ export function quotedValues(source, declaration) {
   return [...source.slice(start, end).matchAll(/"([A-Za-z0-9_:-]+)"/g)].map((match) => match[1])
 }
 
+/**
+ * Fingerprint the single current schema declaration.
+ *
+ * This used to hash the append-only version chain, on the theory that history
+ * is immutable and any edit to it is data corruption. `schema.ts` now declares
+ * one cumulative version instead, so the thing worth pinning is the CURRENT
+ * store set: the baseline turns any unreviewed edit to `CURRENT_SCHEMA` into a
+ * gate failure, and re-running `pnpm db:governance:write` is the deliberate
+ * acknowledgement.
+ *
+ * The version number is read from `CURRENT_SCHEMA_VERSION` rather than counted,
+ * and the baseline records it, so lowering or forgetting to raise it is caught
+ * here. IndexedDB only upgrades on an increase, so an un-bumped edit would
+ * otherwise be silently ignored by every existing database.
+ */
 export function schemaSummary(source) {
-  const start = source.indexOf("    this.version(")
-  const end = source.indexOf("    // First full-chain construction", start)
-  if (start < 0 || end < 0) throw new Error("Unable to locate the append-only schema history")
-  const history = `${source.slice(start, end).replaceAll("\r\n", "\n").trimEnd()}\n`
-  const versions = [...history.matchAll(/this\.version\((\d+)\)/g)].map((match) => Number(match[1]))
-  for (let index = 1; index < versions.length; index += 1) {
-    if (versions[index] <= versions[index - 1]) {
-      throw new Error(
-        `Schema versions are not strictly increasing at ${versions[index - 1]} -> ${versions[index]}`
-      )
-    }
-  }
+  const versionMatch = source.match(/^export const CURRENT_SCHEMA_VERSION = (\d+)$/m)
+  if (!versionMatch) throw new Error("Unable to locate CURRENT_SCHEMA_VERSION in lib/db/schema.ts")
+
+  const start = source.indexOf("export const CURRENT_SCHEMA: Record<string, string | null> = {")
+  if (start < 0) throw new Error("Unable to locate the CURRENT_SCHEMA declaration")
+  const end = source.indexOf("\n}\n", start)
+  if (end < 0) throw new Error("Unterminated CURRENT_SCHEMA declaration")
+  const declaration = `${source.slice(start, end).replaceAll("\r\n", "\n").trimEnd()}\n}\n`
+
   return {
-    latestVersion: Math.max(...versions),
-    versionDeclarations: versions.length,
-    schemaHistorySha256: createHash("sha256").update(history).digest("hex"),
+    latestVersion: Number(versionMatch[1]),
+    schemaSha256: createHash("sha256").update(declaration).digest("hex"),
   }
 }
 

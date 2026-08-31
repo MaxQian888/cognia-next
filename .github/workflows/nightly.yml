@@ -43,5 +43,7 @@ jobs:
   # write scope (release.yml is the only caller that grants it).
   build-tauri:
     name: Build Tauri
+    # Gated on `test`: a bundle built from a red tree is not a sanity check,
+    # and the 4-platform matrix is the most expensive job in the repo.
     needs: test
     uses: ./.github/workflows/build-tauri.yml

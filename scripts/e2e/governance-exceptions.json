@@ -23,6 +23,13 @@
       "reviewAfter": "2026-08-31"
     },
     {
+      "file": "tests/e2e/mobile/chat-render-perf.spec.ts",
+      "rule": "runtime-skip",
+      "occurrences": 1,
+      "reason": "Opt-in performance benchmark requires CHAT_PERF_BENCH=1 and is intentionally excluded from the deterministic CI gate.",
+      "reviewAfter": "2026-12-31"
+    },
+    {
       "file": "tests/e2e/mobile/deeplink-pair.spec.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 1,

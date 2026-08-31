@@ -54,6 +54,7 @@ __pycache__/
 # these are what `uv run` and pytest drop while the gate executes)
 .venv/
 .pytest_cache/
+*.egg-info/
 
 # debug
 npm-debug.log*

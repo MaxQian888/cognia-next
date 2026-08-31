@@ -1,7 +1,23 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { analyzeDbTestSource, auditResultPasses, parseArgs } from "./audit-db-fixtures.mjs"
+import {
+  analyzeDbTestSource,
+  auditResultPasses,
+  filterExistingTestFiles,
+  parseArgs,
+} from "./audit-db-fixtures.mjs"
+
+test("ignores tracked test paths that were deleted from the working tree", () => {
+  const existing = new Set(["lib/present.test.ts"])
+
+  assert.deepEqual(
+    filterExistingTestFiles(["lib/deleted.test.ts", "lib/present.test.ts"], (file) =>
+      existing.has(file)
+    ),
+    ["lib/present.test.ts"]
+  )
+})
 
 test("parseArgs validates audit modes", () => {
   assert.deepEqual(parseArgs([]), { listCandidates: false, strict: false })

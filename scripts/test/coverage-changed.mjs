@@ -14,8 +14,8 @@
  *      files) and `--collectCoverageFrom` narrowed to exactly those files.
  *   3. Disables the config's layered `coverageThreshold` by default — those
  *      globs error when a group has no collected data, which is guaranteed
- *      here. Pass `--strict` to gate the changed files at the CLAUDE.md 90%
- *      bar instead.
+ *      here. Pass `--strict` to gate every changed file independently at the
+ *      CLAUDE.md 90% bar instead.
  *
  * The default base is `origin/dev`, NOT `master`. `dev` is this repo's real
  * trunk; `master` sits ~1500 commits behind it. Diffing against master made
@@ -107,8 +107,9 @@ export function filterCoverageTargets(files) {
  */
 export function buildJestArgs(files, { strict = false } = {}) {
   const coverageFrom = files.length === 1 ? files[0] : `{${files.join(",")}}`
+  const perFileThreshold = { branches: 90, functions: 90, lines: 90, statements: 90 }
   const threshold = strict
-    ? { global: { branches: 90, functions: 90, lines: 90, statements: 90 } }
+    ? Object.fromEntries(files.map((file) => [`./${file}`, perFileThreshold]))
     : {}
   return [
     "--coverage",

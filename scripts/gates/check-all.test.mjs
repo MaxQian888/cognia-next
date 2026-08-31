@@ -35,7 +35,7 @@ import {
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
-test("registry covers the read-only gates and excludes the unsorted i18n:sort:check", () => {
+test("registry covers the read-only gates", () => {
   for (const script of [
     "typecheck",
     "knip",
@@ -43,16 +43,17 @@ test("registry covers the read-only gates and excludes the unsorted i18n:sort:ch
     "lint:i18n",
     "release:sync-keys:check",
     "i18n:build:check",
+    "i18n:sort:check",
     "audit:command-parity",
     "audit:companion-command-manifest",
     "audit:e2e-governance",
     "audit:pii-boundaries",
     "lint:static-export",
     "config:sync:check",
+    "test:db-fixture:audit",
   ]) {
     assert.ok(hasGate(script), `${script} should be registered`)
   }
-  assert.ok(!hasGate("i18n:sort:check"))
 })
 
 test("registry picks up the gates that were previously wired to nothing", () => {

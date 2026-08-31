@@ -94,9 +94,7 @@ export const EXEMPTIONS = {
     "live IM P0 scenario — posts real messages into real conversations from real sandbox credentials against a running desktop app; can never run inside the fast gate matrix",
 
   "test:conformance":
-    "ADR-0090 conformance suite — drives the REAL sidecar + Agent SDK + claude-code subprocess (minutes per case) and needs the cognia-server binary (`conformance:prepare`). Runs as its own CI job, not inside the fast gate matrix",
-  "i18n:sort:check":
-    "message files are not key-sorted yet; would always fail. Run `pnpm i18n:sort` once, then register it in check-all.mjs",
+    "ADR-0090 conformance suite — drives the real sidecar + Agent SDK + claude-code subprocess and runs in test.yml's dedicated conformance job",
   "i18n:validate": "subsumed by the i18n:build:check gate, which runs it",
   "lint:i18n:staged": "husky pre-commit hook variant of the lint:i18n gate",
 
@@ -106,6 +104,13 @@ export const EXEMPTIONS = {
   "test:watch": "interactive jest — never runs unattended",
   "test:coverage": "jest coverage — owned by test.yml",
   "test:coverage:changed": "incremental coverage — owned by test.yml",
+  "sidecar:test:root":
+    "subsumed by the sidecars:test aggregate in test.yml after sidecars:build prepares every runtime",
+  "tauri:frontend:check":
+    "requires the Next.js static export and runs immediately after pnpm build in test.yml",
+  "pet:corpus:test": "subset of pet:compat:test, which runs scripts/pet/*.test.mjs",
+  "audit:workspace-attribution:baseline":
+    "writer — updates the ratchet baseline; audit:workspace-attribution is the blocking check",
   "test:coverage:merge":
     "shard-coverage merge tool — owned by test.yml, which runs its `--check` half as the real threshold gate",
   "test:evals": "eval suite — owned by test.yml",
@@ -175,16 +180,6 @@ export const EXEMPTIONS = {
   "test:coverage:merge:test": "covered by scripts:test:ci",
 
   // --- db-fixture audit (scripts/test/audit-db-fixtures.mjs) ---
-  // The non-strict half IS a real ratchet gate — same shape as
-  // `audit:colocated-tests` — and belongs in REGISTRY. It is exempt only
-  // because it is currently RED on pre-existing debt: 126 legacy-reset suites
-  // against a baseline of 121, all five of the excess committed by other work.
-  // Registering it today would fail `check:all` on someone else's suites.
-  // Migrate those five to `createDbTestFixture`, then move this entry into the
-  // REGISTRY in scripts/gates/check-all.mjs — that is the whole point of the
-  // baseline, which may only shrink.
-  "test:db-fixture:audit":
-    "ratchet gate, currently red on pre-existing debt (126 legacy resets vs baseline 121). Register it in check-all.mjs once those suites adopt createDbTestFixture",
   "test:db-fixture:audit:strict":
     "zero-tolerance variant — passes only when every suite has adopted the fast fixture; the ratchet half is `test:db-fixture:audit`",
   "test:db-fixture:candidates":

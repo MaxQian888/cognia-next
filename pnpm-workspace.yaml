@@ -30,10 +30,14 @@ overrides:
   # `{ expand }`. A graph-wide override therefore crashes the still-supported
   # minimatch 3/5/9 consumers before ESLint can load. Pin the latest maintenance
   # line compatible with each parent API instead.
-  "minimatch@3.1.5>brace-expansion": "1.1.16"
-  "minimatch@5.1.9>brace-expansion": "2.1.2"
-  "minimatch@9.0.9>brace-expansion": "2.1.2"
-  "minimatch@10.2.5>brace-expansion": "5.0.8"
+  "minimatch@3.1.5>brace-expansion": "1.1.18"
+  "minimatch@5.1.9>brace-expansion": "2.1.4"
+  "minimatch@9.0.9>brace-expansion": "2.1.4"
+  "minimatch@10.2.6>brace-expansion": "5.0.9"
+  mermaid: "11.16.1"
+  pdfjs-dist: "6.2.108"
+  shell-quote: "1.10.0"
+  tmp: "0.2.7"
   dompurify: "^3.4.12"
   esbuild: "^0.28.1"
   postcss: "^8.5.10"
@@ -113,3 +117,21 @@ minimumReleaseAgeExclude:
   - ai@7.0.48
   - get-tsconfig@4.14.1
   - tsx@4.23.3
+
+# `pnpm audit` is a BLOCKING gate (CI_CD.md, supply-chain group), so every entry
+# here has to name the advisory and say why no safe upgrade exists. The
+# `audit:deps` script mirrors these ids as `--ignore` flags because JSON cannot
+# carry the reason, and `scripts/ci/workflow-contract.test.mjs` keeps the two
+# lists in step and fails when an id here has no justification above it.
+auditConfig:
+  ignoreGhsas:
+    # image-size <=2.0.2: two infinite-loop DoS advisories, one in the ICNS
+    # parser and one in the JXL/HEIF parsers. Reached only through
+    # `@storybook/nextjs` and `@storybook/nextjs-vite >
+    # vite-plugin-storybook-nextjs`, both devDependencies that parse local story
+    # assets and never ship in the app, the desktop bundle or the mobile bundle.
+    # Storybook 10.5 pins the vulnerable range transitively, so the only upgrade
+    # is a graph-wide override replacing the copy Storybook's own build expects.
+    # reviewAfter: 2026-11-30 (re-check when Storybook 11 lands)
+    - GHSA-w3rx-r6r6-pgpr
+    - GHSA-5p2g-fcmc-qvqq

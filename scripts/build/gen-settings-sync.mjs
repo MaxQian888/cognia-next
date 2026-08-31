@@ -10,8 +10,8 @@
  *   1. `src-tauri/src/companion_api/settings_sync_generated.rs` — the server-side
  *      write allowlist (`APP_SETTINGS_MOBILE_ALLOWED_KEYS`) that
  *      `app_settings_update` enforces.
- *   2. `docs/api/mobile-companion-api.openapi.yaml` — the `propertyNames.enum`
- *      on the `app_settings_update` patch body, so the published wire contract
+ *   2. `protocol/companion-request-schemas.json` — the canonical request schema
+ *      consumed by `gen-companion-api.mjs`, so every generated OpenAPI surface
  *      names the same keys the server accepts.
  *
  * Before this existed the Rust constant and the TypeScript mirror were both
@@ -33,10 +33,7 @@ import { z } from "zod"
 
 const TABLE_SOURCE = "packages/agent-config-types/src/settings-sync.ts"
 const RUST_TARGET = "src-tauri/src/companion_api/settings_sync_generated.rs"
-const OPENAPI_TARGET = "docs/api/mobile-companion-api.openapi.yaml"
-
-const OPENAPI_BEGIN = "# BEGIN GENERATED settings-sync"
-const OPENAPI_END = "# END GENERATED settings-sync"
+const REQUEST_SCHEMA_TARGET = "protocol/companion-request-schemas.json"
 
 /**
  * Load the classification table. The file's only import is `import type`, so
@@ -192,24 +189,24 @@ mod tests {
 }
 
 /**
- * Replace the generated region of the OpenAPI spec in place. The markers are
- * committed by hand once; everything between them is owned by this generator.
+ * Update the canonical request-schema catalog structurally. The companion API
+ * generator serializes YAML and therefore cannot preserve marker comments in
+ * the generated OpenAPI document; owning the upstream JSON schema avoids two
+ * generators fighting over the same derived file.
  *
- * @param {string} spec
+ * @param {string} source
  * @param {string[]} shared
  */
-export function renderOpenApi(spec, shared) {
-  const lines = spec.split("\n")
-  const beginIdx = lines.findIndex((line) => line.trim() === OPENAPI_BEGIN)
-  const endIdx = lines.findIndex((line) => line.trim() === OPENAPI_END)
-  if (beginIdx < 0 || endIdx < 0 || endIdx < beginIdx) {
+export function renderRequestSchemaCatalog(source, shared) {
+  const catalog = JSON.parse(source)
+  const patchSchema = catalog?.commands?.app_settings_update?.properties?.patch
+  if (!patchSchema?.propertyNames || !Array.isArray(patchSchema.propertyNames.enum)) {
     throw new Error(
-      `${OPENAPI_TARGET}: missing or malformed "${OPENAPI_BEGIN}" / "${OPENAPI_END}" markers`
+      `${REQUEST_SCHEMA_TARGET}: app_settings_update.patch.propertyNames.enum is missing`
     )
   }
-  const indent = lines[beginIdx].slice(0, lines[beginIdx].indexOf("#"))
-  const body = [`${indent}enum:`, ...shared.map((key) => `${indent}  - ${key}`)]
-  return [...lines.slice(0, beginIdx + 1), ...body, ...lines.slice(endIdx)].join("\n")
+  patchSchema.propertyNames.enum = shared
+  return `${JSON.stringify(catalog, null, 2)}\n`
 }
 
 /**
@@ -224,7 +221,10 @@ export async function genSettingsSync(deps = {}) {
   const buckets = bucketize(await loadTable(read(TABLE_SOURCE)))
   const artifacts = [
     { path: RUST_TARGET, next: renderRust(buckets) },
-    { path: OPENAPI_TARGET, next: renderOpenApi(read(OPENAPI_TARGET), buckets.shared) },
+    {
+      path: REQUEST_SCHEMA_TARGET,
+      next: renderRequestSchemaCatalog(read(REQUEST_SCHEMA_TARGET), buckets.shared),
+    },
   ]
 
   /** @type {string[]} */ const errors = []

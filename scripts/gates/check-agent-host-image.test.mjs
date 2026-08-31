@@ -1,9 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
 
 import {
-  DOCKERFILE,
   LAYOUT_BUILD_SCRIPTS,
   RUNTIME_DIR_ENVS,
   checkLayoutBuilds,
@@ -104,19 +102,18 @@ test("flags a layout build that stages the Pi extension by hand", () => {
   assert.match(checkLayoutBuilds(byHand).join("\n"), /stagePiExtension\(\)/)
 })
 
-// A gate that only passes proves nothing. Run it against the commit before the
-// fix and assert it reports the two shipped defects: no bubblewrap in the
-// image, and layouts that staged the extension without the shared helper.
-test("fails against the tree as it stood before the fix", () => {
-  const at = (p) => execFileSync("git", ["show", `HEAD:${p}`], { encoding: "utf8" })
-  let dockerfile
-  try {
-    dockerfile = at(DOCKERFILE)
-  } catch {
-    return // not a git checkout (or the file is new) — nothing to compare against
-  }
-  const sources = Object.fromEntries(LAYOUT_BUILD_SCRIPTS.map((rel) => [rel, at(rel)]))
-  const problems = runChecks({ dockerfile, sources }).join("\n")
+// A gate that only passes proves nothing. Every check above is exercised
+// through `checkRuntimeStage` / `checkLayoutBuilds` directly, so `runChecks`
+// itself had nothing but a passing-path test: dropping either call from its
+// body would leave the whole suite green while the gate stopped catching the
+// two defects it was written for. Reconstruct exactly those defects here.
+test("runChecks reports the two shipped defects it was written to catch", () => {
+  const noBubblewrap = GOOD_DOCKERFILE.replace(" bubblewrap", "")
+  const stagedByHand = Object.fromEntries(
+    LAYOUT_BUILD_SCRIPTS.map((rel) => [rel, 'fs.copyFileSync(src, "sidecar/pi-extension/x")'])
+  )
+  const problems = runChecks({ dockerfile: noBubblewrap, sources: stagedByHand }).join("\n")
+
   assert.match(problems, /bubblewrap is not installed/)
   assert.match(problems, /stagePiExtension\(\)/)
 })

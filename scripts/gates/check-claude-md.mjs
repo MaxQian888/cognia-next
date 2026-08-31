@@ -9,7 +9,7 @@
  *   1. Every repo path referenced in the Subsystem Map's "Lives in" column exists.
  *   2. Every numeric ADR referenced in the map has a matching file in the ADR dir.
  *   3. The newest ADR file number is referenced somewhere in CLAUDE.md.
- *   4. The highest Dexie `.version(N)` in lib/db/schema.ts appears as `vN` in CLAUDE.md.
+ *   4. `CURRENT_SCHEMA_VERSION` in lib/db/schema.ts appears as `vN` in CLAUDE.md.
  *
  * Usage: pnpm lint:claude-md
  */
@@ -116,11 +116,26 @@ export function readAdrNumbers(dir = ADR_DIR) {
     .map(Number)
 }
 
-/** Read the highest Dexie .version(N) from schema.ts. */
+/**
+ * Read the current Dexie schema version from schema.ts.
+ *
+ * This used to take the max of every `.version(N)` literal, which worked while
+ * the schema was an append-only chain. It now declares one version through
+ * `CURRENT_SCHEMA_VERSION`, so there is no literal to scan for. Returning null
+ * on a miss is deliberate for a file that genuinely has no schema, but a miss
+ * here would silently retire invariant 4, so the constant is matched exactly
+ * and a malformed declaration throws rather than degrading to "no ceiling".
+ */
 export function readDexieCeiling(file = SCHEMA_FILE) {
   const src = readFileSync(file, "utf8")
-  const versions = [...src.matchAll(/\.version\((\d+)\)/g)].map((m) => Number(m[1]))
-  return versions.length ? Math.max(...versions) : null
+  if (!/CURRENT_SCHEMA_VERSION/.test(src)) return null
+  const match = src.match(/^export const CURRENT_SCHEMA_VERSION = (\d+)$/m)
+  if (!match) {
+    throw new Error(
+      `${file} mentions CURRENT_SCHEMA_VERSION but does not export it as a numeric literal — invariant 4 cannot read the schema ceiling.`
+    )
+  }
+  return Number(match[1])
 }
 
 function main() {

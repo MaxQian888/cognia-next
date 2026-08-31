@@ -24,7 +24,7 @@ public/catalog/models-dev/providers
 # SKILL.md sources would desync the committed generated catalog; the
 # `skills:build` codegen (pnpm skills:build) owns both.
 skills/built-in
-lib/skills/built-in-catalog.generated.ts
+generated/built-in-skills
 # esbuild owns this generated CommonJS bundle; formatting it would make the
 # committed artifact diverge from `pnpm plugin-convert:bundle`.
 crates/cognia-cli/assets/plugin-convert.cjs
@@ -73,6 +73,10 @@ services/diagnostic-server/deploy/helm/cognia-diagnostics/templates
 __mocks__
 # Capacitor mobile shell — separate package, has its own conventions.
 mobile
+# WXT owns this generated TypeScript/config surface and recreates it during
+# pnpm install; formatting authored files must never scan generated output.
+browser-extension/.wxt/
+browser-extension/.output/
 # IDE configuration files — not project source.
 .vscode
 # Fumadocs MDX content — Prettier's MDX support is non-idempotent on

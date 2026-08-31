@@ -90,8 +90,16 @@ jobs:
       - name: Run Jest shard with coverage
         run: >-
           pnpm exec jest --coverage --shard=${{ matrix.shard }}/4
-          --coverageReporters=json --coverageThreshold='{}'
+          --coverageReporters=json --coverageThreshold='{}' --maxWorkers=4
         env:
+          # PER PROCESS, not per step: NODE_OPTIONS is inherited by every Jest
+          # worker, so `--maxWorkers=4` multiplies whatever is set here by four.
+          # A 16384 ceiling on a 16 GB runner let all four workers grow past the
+          # machine before V8 considered collecting, and the OOM killer took one
+          # first. That surfaces as an opaque "Jest worker process exited"
+          # instead of the heap error the flag exists to prevent. 4 x 3 GB
+          # leaves the parent process and the OS room to finish the shard.
+          NODE_OPTIONS: "--max-old-space-size=3072"
           JEST_COVERAGE: "1"
           JEST_JUNIT_OUTPUT_NAME: junit-shard-${{ matrix.shard }}.xml
           JEST_TIMING_OUTPUT: coverage/jest-timings.json
@@ -267,6 +275,167 @@ jobs:
       - name: Enforce 90% coverage on changed files
         run: node scripts/test/coverage-changed.mjs --base "origin/${{ github.base_ref }}" --strict
 
+  # ADR-0090's compatibility contract is executable, not documentary. Keep it
+  # in a dedicated job because it builds and launches the real headless server
+  # plus the Agent SDK sidecar and is materially heavier than unit tests.
+  conformance:
+    name: Agent gateway conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            libpipewire-0.3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+      - name: Build sidecars
+        run: pnpm sidecars:install && pnpm sidecars:build
+      - name: Build the conformance server
+        run: pnpm conformance:prepare
+      - name: Run the conformance suite
+        run: pnpm test:conformance
+
+  docs-build:
+    name: Docs build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build documentation
+        run: pnpm docs:build
+
+  web-build:
+    name: Marketing site build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build marketing site
+        run: pnpm web:build
+
+  mobile-android-build:
+    name: Android native build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+      - name: Setup Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and sync the Android shell
+        run: pnpm mobile:sync:android
+      - name: Compile the Android debug application
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug
+
+  mobile-ios-build:
+    name: iOS native build (nightly)
+    runs-on: macos-14
+    timeout-minutes: 90
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+      - name: Setup Node.js 26.x
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26.x
+          cache: "pnpm"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and sync the iOS shell
+        run: pnpm mobile:sync:ios
+      - name: Compile the iOS simulator application
+        run: >-
+          xcodebuild
+          -workspace mobile/ios/App/App.xcworkspace
+          -scheme App
+          -configuration Debug
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
   sidecar:
     name: Sidecar Tests
     runs-on: ubuntu-latest
@@ -292,6 +461,9 @@ jobs:
 
       - name: Install sidecar dependencies
         run: pnpm sidecars:install
+
+      - name: Build sidecars
+        run: pnpm sidecars:build
 
       - name: Run sidecar tests (Claude + VS Code ext host)
         run: pnpm sidecars:test
@@ -332,6 +504,9 @@ jobs:
 
       - name: Build Next.js application
         run: pnpm build
+
+      - name: Verify the Tauri frontend artifact
+        run: pnpm tauri:frontend:check
 
       # Structured, not `du -sh`: report.yml downloads this same artifact from
       # the trunk branch's last successful run and diffs against it. The old
@@ -836,6 +1011,8 @@ jobs:
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev
