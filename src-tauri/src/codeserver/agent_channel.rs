@@ -98,6 +98,8 @@ const CONTENT_HANDLE_TTL: Duration = Duration::from_secs(30);
 const MAX_CONTENT_HANDLE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_CONTENT_HANDLE_COUNT: usize = 128;
 const MAX_CONTENT_STORE_BYTES: usize = 128 * 1024 * 1024;
+type AuthenticationSuccess = (String, Option<Value>, Vec<String>);
+type AuthenticationFailure = (Option<Value>, i64, String);
 const BROKER_CAPABILITIES: &[&str] = &[
     "cancel",
     "progress",
@@ -328,6 +330,9 @@ impl AgentChannel {
         self.ensure_content_server().await
     }
 
+    // Every field participates in content-handle authorization and integrity;
+    // keeping them explicit makes accidental scope loss visible at call sites.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_content_handle(
         &self,
         root: &str,
@@ -663,6 +668,7 @@ impl AgentChannel {
         Some((root, generation))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn insert_content(
         &self,
         root: &str,
@@ -723,6 +729,7 @@ impl AgentChannel {
         Ok(handle)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn take_content(
         &self,
         root: &str,
@@ -952,6 +959,112 @@ static AGENT_CHANNEL: Lazy<Arc<AgentChannel>> = Lazy::new(|| Arc::new(AgentChann
 /// The process-wide agent control channel.
 pub fn global() -> Arc<AgentChannel> {
     Arc::clone(&AGENT_CHANNEL)
+}
+
+/// The agent-drive verbs, as free functions over an already-canonical root.
+///
+/// They live here rather than on a host state because neither host contributes
+/// anything to them. `CodeServerState` and `RemoteCodeServerState` both did
+/// nothing but canonicalize a root and forward to the channel above, which is
+/// process-global and keyed by that root. Keeping the verb names and parameter
+/// shapes in one place is the point: the desktop and the headless host used to
+/// be the only caller and the only non-caller respectively, which is how a
+/// desktop driving a remote workbench ended up sending `openFile` to its own
+/// machine.
+///
+/// Canonicalization stays with the caller. The two hosts resolve a workspace
+/// root differently (one against the filesystem, one against the set of roots a
+/// device is allowed to reach), and collapsing that here would quietly widen
+/// what a remote caller can address.
+pub mod verbs {
+    use super::global;
+    use serde_json::{json, Value};
+
+    pub async fn open(
+        canonical: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<Value, String> {
+        global()
+            .send(
+                canonical,
+                "openFile",
+                json!({ "path": path, "line": line, "column": column }),
+            )
+            .await
+    }
+
+    pub async fn apply_edit(
+        canonical: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<Value, String> {
+        global()
+            .send(
+                canonical,
+                "applyEdit",
+                json!({ "path": path, "line": line, "column": column }),
+            )
+            .await
+    }
+
+    pub async fn read_active(canonical: &str) -> Result<Value, String> {
+        global().send(canonical, "readActive", json!({})).await
+    }
+
+    pub async fn save_all(canonical: &str, path: Option<&str>) -> Result<Value, String> {
+        global()
+            .send(canonical, "saveAll", json!({ "path": path }))
+            .await
+    }
+
+    pub async fn show_diff(
+        canonical: &str,
+        path: &str,
+        content: &str,
+        title: Option<&str>,
+    ) -> Result<Value, String> {
+        global()
+            .send(
+                canonical,
+                "showDiff",
+                json!({ "path": path, "content": content, "title": title }),
+            )
+            .await
+    }
+
+    pub async fn reveal(canonical: &str, path: &str) -> Result<Value, String> {
+        global()
+            .send(canonical, "revealInExplorer", json!({ "path": path }))
+            .await
+    }
+
+    pub async fn run_in_terminal(
+        canonical: &str,
+        command: &str,
+        cwd: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Value, String> {
+        global()
+            .send(
+                canonical,
+                "runInTerminal",
+                json!({ "command": command, "cwd": cwd, "name": name }),
+            )
+            .await
+    }
+
+    pub async fn notify(canonical: &str, message: &str, kind: Option<&str>) -> Result<Value, String> {
+        global()
+            .send(canonical, "notify", json!({ "message": message, "kind": kind }))
+            .await
+    }
+
+    pub async fn workspace_snapshot(canonical: &str, snapshot: Value) -> Result<Value, String> {
+        global().send(canonical, "workspaceSnapshot", snapshot).await
+    }
 }
 
 async fn upload_content(
@@ -1207,7 +1320,7 @@ fn authenticate_first_frame(
     channel: &AgentChannel,
     mode: ProtocolMode,
     value: Value,
-) -> Result<(String, Option<Value>, Vec<String>), (Option<Value>, i64, String)> {
+) -> Result<AuthenticationSuccess, AuthenticationFailure> {
     match mode {
         ProtocolMode::Legacy => {
             let frame = serde_json::from_value::<InboundFrame>(value)
@@ -1233,7 +1346,7 @@ async fn authenticate_jsonrpc_handshake<R, W>(
     reader: &mut R,
     writer: &mut W,
     challenge_request: Value,
-) -> Result<(String, Option<Value>, Vec<String>), (Option<Value>, i64, String)>
+) -> Result<AuthenticationSuccess, AuthenticationFailure>
 where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -1293,7 +1406,7 @@ fn authenticate_jsonrpc_hello(
     token_id: &str,
     challenged_credential: &BrokerCredential,
     challenge: &str,
-) -> Result<(String, Option<Value>, Vec<String>), (Option<Value>, i64, String)> {
+) -> Result<AuthenticationSuccess, AuthenticationFailure> {
     let id = value.get("id").cloned();
     if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
         || value.get("method").and_then(Value::as_str) != Some("cognia/hello")

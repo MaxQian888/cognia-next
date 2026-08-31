@@ -524,30 +524,42 @@ describe("<CodeServerPane /> against a remote host", () => {
     expect(registeredOpener).toBeDefined()
   })
 
-  it("stands down the app-to-editor half while a remote host is active", () => {
-    // Left running, these do not fail loudly. Agent drive reaches a local
-    // `CodeServerState` with no instance for this root and silently does
-    // nothing, and the theme sync repaints the LOCAL settings.json while the
-    // remote workbench keeps stock VS Code colours.
+  it("keeps driving the workbench when it belongs to a remote host", () => {
+    // The agent verbs and the two config writers are `target: "execution"`, so
+    // `RoutingTransport` carries them to the host that owns the workbench.
+    // Standing them down here, as this used to, was the workaround for their
+    // old `target: "client"` classification and would now disable a working
+    // feature.
     mockRemoteHostActive = true
     paneState.phase = "ready"
     paneState.mounted = true
     renderPane()
-    expect(settingsSync).toHaveBeenCalledWith(false, "managed")
-    expect(localeSync.mock.calls[0][0]).toBe(false)
+    expect(settingsSync).toHaveBeenCalledWith(true, "managed")
+    expect(localeSync.mock.calls[0][0]).toBe(true)
+  })
+
+  it("still stands down the two consumers that read editor events", () => {
+    // The reverse direction has no remote form: the companion extension
+    // reports editor changes as Tauri events on the process that spawned
+    // code-server, and an event bus is not part of the companion RPC surface.
+    // Leaving these on would listen to a local channel nothing publishes to.
+    mockRemoteHostActive = true
+    paneState.phase = "ready"
+    paneState.mounted = true
+    renderPane()
     expect(editorEvents).toHaveBeenCalledWith(false, "/repo")
     expect(chatBridge).toHaveBeenCalledWith(false, "/repo")
   })
 
-  it("does not register as the project-editor opener against a remote host", () => {
-    // Registering would accept every jump and route it into a local instance
-    // that has no window for this root, which reads as the editor ignoring the
-    // user rather than as an error.
+  it("registers as the project-editor opener against a remote host", () => {
+    // `codeserver_agent_open` and `codeserver_open_file` both reach the host
+    // now, so refusing the registration would drop every jump on the floor
+    // rather than protect the user from one.
     mockRemoteHostActive = true
     paneState.phase = "ready"
     paneState.mounted = true
     renderPane()
-    expect(registeredOpener).toBeUndefined()
+    expect(registeredOpener).toBeDefined()
   })
 
   it("still renders the workbench region, because the IDE itself works", () => {

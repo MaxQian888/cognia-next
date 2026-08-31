@@ -21,7 +21,7 @@ use crate::cli_bridge::detect;
 /// an app-managed copy and the cache are reused.
 const LOCAL_VSCODE_BIN: &str = "code";
 
-fn read_text_or_empty(path: &Path) -> Result<String, String> {
+pub fn read_text_or_empty(path: &Path) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
@@ -29,7 +29,7 @@ fn read_text_or_empty(path: &Path) -> Result<String, String> {
     }
 }
 
-pub(super) fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
+pub fn atomic_write_text(path: &Path, contents: &str) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("write {}: path has no parent", path.display()))?;

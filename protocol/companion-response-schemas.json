@@ -606,6 +606,10 @@
       },
       "additionalProperties": false
     },
+    "CodeServerAgentResult": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define."
+    },
     "CodeServerStatus": {
       "type": "object",
       "x-cognia-wire-source": "lib/codeserver/client.ts CodeServerStatus",
@@ -5179,6 +5183,33 @@
     "codeserver_activate_proxy": {
       "$ref": "#/$defs/BooleanResult"
     },
+    "codeserver_agent_apply_edit": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_notify": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_open": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_read_active": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_reveal": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_run_in_terminal": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_save_all": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_show_diff": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
+    "codeserver_agent_workspace_snapshot": {
+      "$ref": "#/$defs/CodeServerAgentResult"
+    },
     "codeserver_broker_notify": {
       "$ref": "#/$defs/NullResult"
     },
@@ -5197,6 +5228,15 @@
     "codeserver_list_proxies": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "codeserver_open_file": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_read_runtime_args": {
+      "$ref": "#/$defs/StringResult"
+    },
+    "codeserver_read_user_settings": {
+      "$ref": "#/$defs/StringResult"
+    },
     "codeserver_status": {
       "$ref": "#/$defs/CodeServerStatus"
     },
@@ -5208,6 +5248,12 @@
     },
     "codeserver_supported": {
       "$ref": "#/$defs/BooleanResult"
+    },
+    "codeserver_write_runtime_args": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "codeserver_write_user_settings": {
+      "$ref": "#/$defs/NullResult"
     },
     "codex_app_inventory": {
       "$ref": "#/$defs/CodexAppInventory"

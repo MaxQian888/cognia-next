@@ -9,6 +9,18 @@
   "downloadCancelled": "Download cancelled. The partial archive was removed.",
   "downloadDone": "code-server {version} installed.",
   "failed": "Failed: {error}",
+  "host": {
+    "title": "Pro IDE on the host",
+    "description": "Start and stop the workbench on the machine you are driving. Whether you can open it here is a separate question, answered below.",
+    "running": "Running",
+    "boundTo": "Bound to {root}",
+    "noWorkspace": "Pick a workspace first. The workbench is started for one project root at a time.",
+    "start": "Start workbench",
+    "stop": "Stop workbench",
+    "startFailed": "Could not start the workbench: {error}",
+    "stopFailed": "Could not stop the workbench: {error}",
+    "openWhere": "The workbench is served on the host and reached through a relay that authenticates the device, which a browser frame cannot do. Open it from the desktop app on that machine, or from a browser running on the host itself."
+  },
   "installed": "Installed",
   "location": "Location",
   "notInstalled": "Not installed",

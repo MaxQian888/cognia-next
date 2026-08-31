@@ -958,6 +958,20 @@ const KNOWN_COMMANDS: &[&str] = &[
     "codeserver_ensure",
     "codeserver_status",
     "codeserver_stop",
+    "codeserver_open_file",
+    "codeserver_agent_open",
+    "codeserver_agent_apply_edit",
+    "codeserver_agent_read_active",
+    "codeserver_agent_save_all",
+    "codeserver_agent_show_diff",
+    "codeserver_agent_reveal",
+    "codeserver_agent_run_in_terminal",
+    "codeserver_agent_notify",
+    "codeserver_agent_workspace_snapshot",
+    "codeserver_read_user_settings",
+    "codeserver_write_user_settings",
+    "codeserver_read_runtime_args",
+    "codeserver_write_runtime_args",
     "codeserver_stop_all",
     "codeserver_build_proxy",
     "codeserver_activate_proxy",
@@ -1340,6 +1354,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "terminal_list_path_executables",
     "codeserver_supported",
     "codeserver_status",
+    // Pro IDE reads. `read_active` reflects the editor rather than mutating it,
+    // and the two config readers return a file's current contents. All four are
+    // safe to serve from the idempotency cache on a retry.
+    "codeserver_agent_read_active",
+    "codeserver_read_user_settings",
+    "codeserver_read_runtime_args",
     "codeserver_list_proxies",
     // Ensuring the system host is structurally idempotent. Individual LSP
     // requests are not: didOpen/didChange/start/install mutate sidecar state.
@@ -1608,6 +1628,22 @@ const CONTROL_COMMANDS: &[&str] = &[
     "terminal_list_path_executables",
     "codeserver_ensure",
     "codeserver_stop",
+    // Pro IDE agent drive. Each one reaches into a live editor on the host:
+    // opening and revealing files, applying undo-able edits, flushing dirty
+    // buffers to disk, and running a command in the integrated terminal, which
+    // is arbitrary code execution in the user's shell. The two config writers
+    // repaint the workbench and change its display language.
+    "codeserver_open_file",
+    "codeserver_agent_open",
+    "codeserver_agent_apply_edit",
+    "codeserver_agent_save_all",
+    "codeserver_agent_show_diff",
+    "codeserver_agent_reveal",
+    "codeserver_agent_run_in_terminal",
+    "codeserver_agent_notify",
+    "codeserver_agent_workspace_snapshot",
+    "codeserver_write_user_settings",
+    "codeserver_write_runtime_args",
     "codeserver_stop_all",
     // Plugin install/uninstall/backup-restore — modify the on-disk plugin set.
     "plugin_install",

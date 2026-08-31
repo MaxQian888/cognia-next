@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
+import { ProIdeHostCard } from "./pro-ide-host-card"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import {
   CODESERVER_EVENTS,
@@ -202,15 +203,23 @@ export function ProIdeSection() {
     // "unsupported" whether the user was on Windows, on a phone, or in a
     // browser with nothing paired, which are three different situations with
     // three different next steps.
+    //
+    // The install card cannot help off the desktop shell, but the host's
+    // workbench still can, so the companion card comes with it rather than
+    // instead of it: "there is nothing to install here" and "there is nothing
+    // you can do about Pro IDE" are not the same statement.
     return (
-      <Card data-testid="pro-ide-unsupported">
-        <CardHeader>
-          <CardTitle>{t("title")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <SurfaceUnavailableNotice reach={reach} />
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-4">
+        <Card data-testid="pro-ide-unsupported">
+          <CardHeader>
+            <CardTitle>{t("title")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SurfaceUnavailableNotice reach={reach} />
+          </CardContent>
+        </Card>
+        <ProIdeHostCard />
+      </div>
     )
   }
 

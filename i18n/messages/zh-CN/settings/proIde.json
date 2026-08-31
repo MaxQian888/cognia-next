@@ -9,6 +9,18 @@
   "downloadCancelled": "已取消下载，未完成的安装包已删除。",
   "downloadDone": "已安装 code-server {version}。",
   "failed": "操作失败：{error}",
+  "host": {
+    "title": "主机上的 Pro IDE",
+    "description": "在你正接管的那台机器上启停工作台。能不能在这里打开它是另一个问题，下面会说。",
+    "running": "运行中",
+    "boundTo": "绑定到 {root}",
+    "noWorkspace": "先选一个工作区。工作台一次只为一个项目根目录启动。",
+    "start": "启动工作台",
+    "stop": "停止工作台",
+    "startFailed": "无法启动工作台：{error}",
+    "stopFailed": "无法停止工作台：{error}",
+    "openWhere": "工作台跑在主机上，要通过一条会校验设备身份的中继才能访问，而浏览器的内嵌框架带不上这个身份。请在那台机器的桌面应用里打开，或者在主机本机的浏览器里打开。"
+  },
   "installed": "已安装",
   "location": "安装位置",
   "notInstalled": "未安装",

@@ -353,7 +353,7 @@ impl CodeServerState {
             .iter()
             .map(|(root, _, _, _)| root.clone())
             .collect::<Vec<_>>();
-        let marker = managed_proxy_marker(&extensions_dir, &artifact.plugin_id);
+        let marker = managed_proxy_marker(extensions_dir, &artifact.plugin_id);
         let previous_sha = tokio::fs::read_to_string(&marker).await.ok();
         let previous = if let Some(previous_sha) = previous_sha.as_deref() {
             let app = app.clone();
@@ -462,9 +462,7 @@ impl CodeServerState {
         column: Option<u32>,
     ) -> Result<(), String> {
         let canonical = canonicalize_root(root)?;
-        let params = json!({ "path": path, "line": line, "column": column });
-        super::agent_channel::global()
-            .send(&canonical, "openFile", params)
+        super::agent_channel::verbs::open(&canonical, path, line, column)
             .await
             .map(|_| ())
     }
@@ -480,9 +478,7 @@ impl CodeServerState {
         column: Option<u32>,
     ) -> Result<(), String> {
         let canonical = canonicalize_root(root)?;
-        let params = json!({ "path": path, "line": line, "column": column });
-        super::agent_channel::global()
-            .send(&canonical, "applyEdit", params)
+        super::agent_channel::verbs::apply_edit(&canonical, path, line, column)
             .await
             .map(|_| ())
     }
@@ -491,9 +487,7 @@ impl CodeServerState {
     /// is returned to the renderer, which PII-gates it before it reaches the model.
     pub async fn agent_read_active(&self, root: &str) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        super::agent_channel::global()
-            .send(&canonical, "readActive", json!({}))
-            .await
+        super::agent_channel::verbs::read_active(&canonical).await
     }
 
     /// Flush dirty editor buffers to disk, optionally just one absolute `path`.
@@ -505,9 +499,7 @@ impl CodeServerState {
     /// could not make trustworthy.
     pub async fn agent_save_all(&self, root: &str, path: Option<&str>) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        super::agent_channel::global()
-            .send(&canonical, "saveAll", json!({ "path": path }))
-            .await
+        super::agent_channel::verbs::save_all(&canonical, path).await
     }
 
     /// Show a native diff between `path` on disk and a proposed revision, so a
@@ -520,18 +512,13 @@ impl CodeServerState {
         title: Option<&str>,
     ) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        let params = json!({ "path": path, "content": content, "title": title });
-        super::agent_channel::global()
-            .send(&canonical, "showDiff", params)
-            .await
+        super::agent_channel::verbs::show_diff(&canonical, path, content, title).await
     }
 
     /// Reveal an absolute path in the editor's file explorer.
     pub async fn agent_reveal(&self, root: &str, path: &str) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        super::agent_channel::global()
-            .send(&canonical, "revealInExplorer", json!({ "path": path }))
-            .await
+        super::agent_channel::verbs::reveal(&canonical, path).await
     }
 
     /// Run a command in the editor's integrated terminal.
@@ -546,10 +533,7 @@ impl CodeServerState {
         name: Option<&str>,
     ) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        let params = json!({ "command": command, "cwd": cwd, "name": name });
-        super::agent_channel::global()
-            .send(&canonical, "runInTerminal", params)
-            .await
+        super::agent_channel::verbs::run_in_terminal(&canonical, command, cwd, name).await
     }
 
     /// Surface an app-side message inside the editor.
@@ -560,10 +544,7 @@ impl CodeServerState {
         kind: Option<&str>,
     ) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        let params = json!({ "message": message, "kind": kind });
-        super::agent_channel::global()
-            .send(&canonical, "notify", params)
-            .await
+        super::agent_channel::verbs::notify(&canonical, message, kind).await
     }
 
     /// Push the app's workspace snapshot (issues / plans / agent runs, plus the
@@ -581,9 +562,7 @@ impl CodeServerState {
         snapshot: Value,
     ) -> Result<Value, String> {
         let canonical = canonicalize_root(root)?;
-        super::agent_channel::global()
-            .send(&canonical, "workspaceSnapshot", snapshot)
-            .await
+        super::agent_channel::verbs::workspace_snapshot(&canonical, snapshot).await
     }
 
     /// Open and reveal a project-relative file in this root's existing browser
@@ -772,7 +751,24 @@ pub fn user_settings_path_for_profile(
     app: &tauri::AppHandle,
     profile: IdeProfile,
 ) -> Result<PathBuf, String> {
-    let dir = profile_paths(app, profile)?.user_data_dir.join("User");
+    let root =
+        download::code_server_root(app).map_err(|e| format!("resolve code-server root: {e:#}"))?;
+    user_settings_path_at(&root, profile)
+}
+
+/// The same file, addressed by code-server root rather than by `AppHandle`.
+///
+/// The headless host has no `AppHandle` and keeps its root under its own data
+/// directory, which is why theme and locale sync had no headless implementation
+/// at all and repainted the *local* settings.json while the user was driving a
+/// remote workbench.
+pub fn user_settings_path_at(
+    code_server_root: &Path,
+    profile: IdeProfile,
+) -> Result<PathBuf, String> {
+    let dir = ProfilePaths::new(code_server_root, profile)
+        .user_data_dir
+        .join("User");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     Ok(dir.join("settings.json"))
 }
@@ -788,7 +784,20 @@ pub fn runtime_args_path_for_profile(
     app: &tauri::AppHandle,
     profile: IdeProfile,
 ) -> Result<PathBuf, String> {
-    let dir = profile_paths(app, profile)?.user_data_dir.join("User");
+    let root =
+        download::code_server_root(app).map_err(|e| format!("resolve code-server root: {e:#}"))?;
+    runtime_args_path_at(&root, profile)
+}
+
+/// The same file, addressed by code-server root. See
+/// {@link user_settings_path_at} for why the `AppHandle` version is not enough.
+pub fn runtime_args_path_at(
+    code_server_root: &Path,
+    profile: IdeProfile,
+) -> Result<PathBuf, String> {
+    let dir = ProfilePaths::new(code_server_root, profile)
+        .user_data_dir
+        .join("User");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     Ok(dir.join("argv.json"))
 }
@@ -931,7 +940,7 @@ fn code_server_args(
 
 /// Build a second code-server CLI invocation that talks to the already-running
 /// instance through the session socket derived from the shared user-data dir.
-fn open_file_args(user_data_dir: &Path, extensions_dir: &Path, target: &str) -> Vec<String> {
+pub(super) fn open_file_args(user_data_dir: &Path, extensions_dir: &Path, target: &str) -> Vec<String> {
     vec![
         "--user-data-dir".to_string(),
         user_data_dir.to_string_lossy().into_owned(),
@@ -942,7 +951,7 @@ fn open_file_args(user_data_dir: &Path, extensions_dir: &Path, target: &str) -> 
     ]
 }
 
-fn resolve_open_target(
+pub(super) fn resolve_open_target(
     root: &Path,
     relative_path: &str,
     line: Option<u32>,

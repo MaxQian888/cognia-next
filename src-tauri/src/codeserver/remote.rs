@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -51,6 +51,12 @@ struct RemoteInstance {
     child: Child,
     relay_id: String,
     allowed_devices: HashSet<String>,
+    /// What `open_file` needs to drive code-server's own CLI bridge. Held per
+    /// instance rather than recomputed, because the profile that spawned this
+    /// child is the only one whose session socket it will answer on.
+    binary_path: PathBuf,
+    user_data_dir: PathBuf,
+    extensions_dir: PathBuf,
 }
 
 impl RemoteInstance {
@@ -151,11 +157,10 @@ impl RemoteCodeServerState {
             ]);
         }
 
-        let child = spawn_code_server(&binary, &args, &envs).map_err(|error| {
+        let child = spawn_code_server(&binary, &args, &envs).inspect_err(|_error| {
             if broker_enabled {
                 super::agent_channel::global().deregister(&canonical);
             }
-            error
         })?;
         let mut allowed_devices = HashSet::new();
         allowed_devices.insert(device_id.to_string());
@@ -167,6 +172,9 @@ impl RemoteCodeServerState {
                 child,
                 relay_id: relay_id.clone(),
                 allowed_devices,
+                binary_path: PathBuf::from(binary.clone()),
+                user_data_dir: paths.user_data_dir.clone(),
+                extensions_dir: paths.extensions_dir.clone(),
             },
         );
         if let Err(error) = wait_healthy(port, STARTUP_BUDGET).await {
@@ -305,6 +313,235 @@ impl RemoteCodeServerState {
         } else {
             false
         }
+    }
+
+    /// The code-server root this host owns. Same shape as the desktop's, one
+    /// level below the data directory, and the anchor for every profile path.
+    pub fn code_server_root(&self) -> PathBuf {
+        self.data_dir.join("code-server")
+    }
+
+    /// Resolve `root` to the canonical workspace of a LIVE instance this device
+    /// is allowed to drive, or say why not.
+    ///
+    /// Every agent-drive verb below needs the same three answers and none of
+    /// them may be assumed. A dead child leaves a stale map entry, and a root
+    /// with no entry at all is the common case when the caller is a desktop
+    /// that has pointed itself at this host but never started a workbench here.
+    /// `status` returns a stopped status for a device that is not on the list,
+    /// so the same non-answer is used here rather than confirming the instance
+    /// exists.
+    pub async fn authorize_agent_root(&self, root: &str, device_id: &str) -> Result<String, String> {
+        let canonical = canonicalize_workspace(root)?;
+        let mut instances = self.instances.lock().await;
+        let Some(instance) = instances.get_mut(&canonical) else {
+            return Err("code-server is not running for this project root".to_string());
+        };
+        if !instance.is_alive() {
+            instance.retire();
+            instances.remove(&canonical);
+            super::agent_channel::global().deregister(&canonical);
+            return Err("code-server exited for this project root".to_string());
+        }
+        if !instance.allowed_devices.contains(device_id) {
+            return Err("code-server is not running for this project root".to_string());
+        }
+        Ok(canonical)
+    }
+
+    pub async fn agent_open(
+        &self,
+        root: &str,
+        device_id: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::open(&canonical, path, line, column).await
+    }
+
+    pub async fn agent_apply_edit(
+        &self,
+        root: &str,
+        device_id: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::apply_edit(&canonical, path, line, column).await
+    }
+
+    pub async fn agent_read_active(&self, root: &str, device_id: &str) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::read_active(&canonical).await
+    }
+
+    pub async fn agent_save_all(
+        &self,
+        root: &str,
+        device_id: &str,
+        path: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::save_all(&canonical, path).await
+    }
+
+    pub async fn agent_show_diff(
+        &self,
+        root: &str,
+        device_id: &str,
+        path: &str,
+        content: &str,
+        title: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::show_diff(&canonical, path, content, title).await
+    }
+
+    pub async fn agent_reveal(
+        &self,
+        root: &str,
+        device_id: &str,
+        path: &str,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::reveal(&canonical, path).await
+    }
+
+    pub async fn agent_run_in_terminal(
+        &self,
+        root: &str,
+        device_id: &str,
+        command: &str,
+        cwd: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::run_in_terminal(&canonical, command, cwd, name).await
+    }
+
+    pub async fn agent_notify(
+        &self,
+        root: &str,
+        device_id: &str,
+        message: &str,
+        kind: Option<&str>,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::notify(&canonical, message, kind).await
+    }
+
+    pub async fn agent_workspace_snapshot(
+        &self,
+        root: &str,
+        device_id: &str,
+        snapshot: Value,
+    ) -> Result<Value, String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        super::agent_channel::verbs::workspace_snapshot(&canonical, snapshot).await
+    }
+
+    /// Open a project-relative file through code-server's own CLI bridge.
+    ///
+    /// Kept as the fallback it is on the desktop: the companion extension is
+    /// the preferred path (`agent_open`), and this one still works when the
+    /// extension is absent or has not connected yet, because it goes through
+    /// the running instance's session socket rather than the agent channel.
+    pub async fn open_file(
+        &self,
+        root: &str,
+        device_id: &str,
+        relative_path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<(), String> {
+        let canonical = self.authorize_agent_root(root, device_id).await?;
+        let (binary_path, user_data_dir, extensions_dir) = {
+            let instances = self.instances.lock().await;
+            let instance = instances
+                .get(&canonical)
+                .ok_or_else(|| "code-server is not running for this project root".to_string())?;
+            (
+                instance.binary_path.clone(),
+                instance.user_data_dir.clone(),
+                instance.extensions_dir.clone(),
+            )
+        };
+        let relative_path = relative_path.to_string();
+        let workspace = canonical.clone();
+        let target = tokio::task::spawn_blocking(move || {
+            super::process::resolve_open_target(Path::new(&workspace), &relative_path, line, column)
+        })
+        .await
+        .map_err(|error| format!("resolve code-server file task: {error}"))??;
+
+        let args = super::process::open_file_args(&user_data_dir, &extensions_dir, &target);
+        let mut command = tokio::process::Command::new(&binary_path);
+        command.args(args).kill_on_drop(true);
+        let output = tokio::time::timeout(std::time::Duration::from_secs(10), command.output())
+            .await
+            .map_err(|_| "code-server file navigation timed out".to_string())?
+            .map_err(|error| format!("launch code-server file navigation: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(format!(
+            "code-server file navigation failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+
+    /// Contents of this host's `settings.json` for `profile`, or an empty
+    /// string when it does not exist yet. Same contract as the desktop command,
+    /// so the renderer's JSONC merge does not have to branch on host.
+    pub async fn read_user_settings(&self, profile: IdeProfile) -> Result<String, String> {
+        let root = self.code_server_root();
+        tokio::task::spawn_blocking(move || {
+            let path = super::process::user_settings_path_at(&root, profile)?;
+            super::commands::read_text_or_empty(&path)
+        })
+        .await
+        .map_err(|error| format!("read code-server settings task: {error}"))?
+    }
+
+    pub async fn write_user_settings(
+        &self,
+        contents: String,
+        profile: IdeProfile,
+    ) -> Result<(), String> {
+        let root = self.code_server_root();
+        tokio::task::spawn_blocking(move || {
+            let path = super::process::user_settings_path_at(&root, profile)?;
+            super::commands::atomic_write_text(&path, &contents)
+        })
+        .await
+        .map_err(|error| format!("write code-server settings task: {error}"))?
+    }
+
+    pub async fn read_runtime_args(&self, profile: IdeProfile) -> Result<String, String> {
+        let root = self.code_server_root();
+        tokio::task::spawn_blocking(move || {
+            let path = super::process::runtime_args_path_at(&root, profile)?;
+            super::commands::read_text_or_empty(&path)
+        })
+        .await
+        .map_err(|error| format!("read code-server runtime args task: {error}"))?
+    }
+
+    pub async fn write_runtime_args(
+        &self,
+        contents: String,
+        profile: IdeProfile,
+    ) -> Result<(), String> {
+        let root = self.code_server_root();
+        tokio::task::spawn_blocking(move || {
+            let path = super::process::runtime_args_path_at(&root, profile)?;
+            super::commands::atomic_write_text(&path, &contents)
+        })
+        .await
+        .map_err(|error| format!("write code-server runtime args task: {error}"))?
     }
 
     pub async fn stop_all(&self) {
@@ -957,9 +1194,9 @@ fn to_axum(message: tokio_tungstenite::tungstenite::Message) -> Option<Message> 
     use tokio_tungstenite::tungstenite::Message as Source;
     match message {
         Source::Text(value) => Some(Message::Text(value.to_string().into())),
-        Source::Binary(value) => Some(Message::Binary(value.into())),
-        Source::Ping(value) => Some(Message::Ping(value.into())),
-        Source::Pong(value) => Some(Message::Pong(value.into())),
+        Source::Binary(value) => Some(Message::Binary(value)),
+        Source::Ping(value) => Some(Message::Ping(value)),
+        Source::Pong(value) => Some(Message::Pong(value)),
         Source::Close(frame) => Some(Message::Close(frame.map(|frame| {
             axum::extract::ws::CloseFrame {
                 code: frame.code.into(),

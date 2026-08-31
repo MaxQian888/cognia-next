@@ -95,10 +95,11 @@ export function EditorEngineToggle({
       .openInLocalVsCode(projectRoot)
       .catch((cause) => toast.error(t("proIde.localVsCodeFailed", { error: String(cause) })))
 
-  // Driving a remote host means the workbench on screen belongs to that host,
-  // while every app-to-editor command stays local-only. `CodeServerPane` turns
-  // those off; this is where the user is told, next to the switch that put
-  // them in this state.
+  // Driving a remote host means the workbench on screen belongs to that host.
+  // The app-to-editor direction reaches it now, but the reverse does not: the
+  // extension reports editor changes as host-process events, and no request
+  // carries an event back. `CodeServerPane` keeps those two consumers gated.
+  // This is where the user is told, next to the switch that put them here.
   const remoteWorkbench = useRemoteHostActive() && value === "codeserver" && proIdeSupported
 
   return (

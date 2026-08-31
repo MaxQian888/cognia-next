@@ -89,6 +89,155 @@ impl DispatchHost {
         }
     }
 
+    /// Resolve `root` to the canonical workspace whose live workbench this
+    /// caller may drive, for whichever process owns it (ADR-0088).
+    ///
+    /// The agent-drive verbs were classified `target: "client"`, so a desktop
+    /// that had taken over a remote host sent every one of them to its own
+    /// machine, where no instance for that root exists. Agent open / diff /
+    /// save-all silently did nothing and the theme sync repainted the LOCAL
+    /// settings.json. Routing them makes "which machine owns this workbench"
+    /// the dispatcher's question rather than the caller's.
+    ///
+    /// The two hosts differ only here, which is why only this is a method and
+    /// the verbs themselves are free functions in `agent_channel::verbs`. On
+    /// the desktop `authorize_workspace_root` has already canonicalized the
+    /// root against the active project and the instance map is not
+    /// device-scoped, so there is nothing left to check. The headless host
+    /// additionally records which devices may drive an instance.
+    pub async fn ide_canonical_root(
+        &self,
+        root: &str,
+        device_id: &str,
+    ) -> Result<String, String> {
+        match self {
+            Self::Tauri(_) => Ok(root.to_string()),
+            Self::Headless(services) => {
+                services
+                    .code_server
+                    .authorize_agent_root(root, device_id)
+                    .await
+            }
+        }
+    }
+
+    /// Open a project-relative file through code-server's own CLI bridge.
+    ///
+    /// Unlike the verbs above this one needs the running instance's binary and
+    /// data directories, which only the owning state holds, so it stays a
+    /// per-host branch.
+    pub async fn ide_open_file(
+        &self,
+        root: &str,
+        device_id: &str,
+        path: &str,
+        line: Option<u32>,
+        column: Option<u32>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::codeserver::CodeServerState>()
+                    .open_file(root, path, line, column)
+                    .await
+            }
+            Self::Headless(services) => {
+                services
+                    .code_server
+                    .open_file(root, device_id, path, line, column)
+                    .await
+            }
+        }
+    }
+
+    pub async fn ide_read_user_settings(
+        &self,
+        profile: crate::codeserver::profile::IdeProfile,
+    ) -> Result<String, String> {
+        match self {
+            Self::Tauri(app) => {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || {
+                    let path =
+                        crate::codeserver::process::user_settings_path_for_profile(&app, profile)?;
+                    crate::codeserver::commands::read_text_or_empty(&path)
+                })
+                .await
+                .map_err(|error| format!("read code-server settings task: {error}"))?
+            }
+            Self::Headless(services) => services.code_server.read_user_settings(profile).await,
+        }
+    }
+
+    pub async fn ide_write_user_settings(
+        &self,
+        contents: String,
+        profile: crate::codeserver::profile::IdeProfile,
+    ) -> Result<(), String> {
+        match self {
+            Self::Tauri(app) => {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || {
+                    let path =
+                        crate::codeserver::process::user_settings_path_for_profile(&app, profile)?;
+                    crate::codeserver::commands::atomic_write_text(&path, &contents)
+                })
+                .await
+                .map_err(|error| format!("write code-server settings task: {error}"))?
+            }
+            Self::Headless(services) => {
+                services
+                    .code_server
+                    .write_user_settings(contents, profile)
+                    .await
+            }
+        }
+    }
+
+    pub async fn ide_read_runtime_args(
+        &self,
+        profile: crate::codeserver::profile::IdeProfile,
+    ) -> Result<String, String> {
+        match self {
+            Self::Tauri(app) => {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || {
+                    let path =
+                        crate::codeserver::process::runtime_args_path_for_profile(&app, profile)?;
+                    crate::codeserver::commands::read_text_or_empty(&path)
+                })
+                .await
+                .map_err(|error| format!("read code-server runtime args task: {error}"))?
+            }
+            Self::Headless(services) => services.code_server.read_runtime_args(profile).await,
+        }
+    }
+
+    pub async fn ide_write_runtime_args(
+        &self,
+        contents: String,
+        profile: crate::codeserver::profile::IdeProfile,
+    ) -> Result<(), String> {
+        match self {
+            Self::Tauri(app) => {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || {
+                    let path =
+                        crate::codeserver::process::runtime_args_path_for_profile(&app, profile)?;
+                    crate::codeserver::commands::atomic_write_text(&path, &contents)
+                })
+                .await
+                .map_err(|error| format!("write code-server runtime args task: {error}"))?
+            }
+            Self::Headless(services) => {
+                services
+                    .code_server
+                    .write_runtime_args(contents, profile)
+                    .await
+            }
+        }
+    }
+
     /// The sidecar supervisor state for this host (Tauri-managed on desktop,
     /// registry-owned headless). Panics if the desktop app never managed
     /// `SidecarState` — identical to the old `app.state::<T>()` behavior.

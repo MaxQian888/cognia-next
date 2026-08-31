@@ -6985,6 +6985,431 @@
       "outputTyped": true
     },
     {
+      "name": "codeserver_agent_apply_edit",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codeserver_agent_apply_edit (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "path"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_notify",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "codeserver_agent_notify (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "message"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_open",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "codeserver_agent_open (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "path"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_read_active",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codeserver_agent_read_active (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_reveal",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "codeserver_agent_reveal (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "path"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_run_in_terminal",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codeserver_agent_run_in_terminal (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "command"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_save_all",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codeserver_agent_save_all (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_show_diff",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "codeserver_agent_show_diff (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "path",
+          "content"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_agent_workspace_snapshot",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "codeserver_agent_workspace_snapshot (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "snapshot"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "snapshot": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": [
+          "object",
+          "array",
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ],
+        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
+        "x-cognia-schema-owner": "codeserver"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "codeserver_broker_notify",
       "category": "development",
       "resource": "codeserver",
@@ -7266,6 +7691,113 @@
       "outputTyped": true
     },
     {
+      "name": "codeserver_open_file",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "codeserver_open_file (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "path"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_read_runtime_args",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codeserver_read_runtime_args (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "native"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "string"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_read_user_settings",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "codeserver_read_user_settings (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "native"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "string"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "codeserver_status",
       "category": "development",
       "resource": "codeserver",
@@ -7407,6 +7939,82 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_write_runtime_args",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codeserver_write_runtime_args (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "contents"
+        ],
+        "properties": {
+          "contents": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "native"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "codeserver_write_user_settings",
+      "category": "development",
+      "resource": "codeserver",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "codeserver_write_user_settings (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "contents"
+        ],
+        "properties": {
+          "contents": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "native"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -43633,5 +44241,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "20656b3a0db576bd71b7596662ae97e1f7efc6dd84c531f2c791e0518552af19"
+  "catalogHash": "4b040ac7b7d88bf74cd3634bcab5a58156e68a26d5576542d6291c523f1bb837"
 }

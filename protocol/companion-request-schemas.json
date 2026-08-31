@@ -1699,6 +1699,178 @@
       },
       "additionalProperties": false
     },
+    "codeserver_agent_apply_edit": {
+      "type": "object",
+      "required": [
+        "root",
+        "path"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_notify": {
+      "type": "object",
+      "required": [
+        "root",
+        "message"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_open": {
+      "type": "object",
+      "required": [
+        "root",
+        "path"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_read_active": {
+      "type": "object",
+      "required": [
+        "root"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_reveal": {
+      "type": "object",
+      "required": [
+        "root",
+        "path"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_run_in_terminal": {
+      "type": "object",
+      "required": [
+        "root",
+        "command"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_save_all": {
+      "type": "object",
+      "required": [
+        "root"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_show_diff": {
+      "type": "object",
+      "required": [
+        "root",
+        "path",
+        "content"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_agent_workspace_snapshot": {
+      "type": "object",
+      "required": [
+        "root",
+        "snapshot"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
     "codeserver_broker_notify": {
       "type": "object",
       "required": [
@@ -1804,6 +1976,56 @@
     "codeserver_list_proxies": {
       "type": "object"
     },
+    "codeserver_open_file": {
+      "type": "object",
+      "required": [
+        "root",
+        "path"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_read_runtime_args": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "native"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_read_user_settings": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "native"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "codeserver_status": {
       "type": "object",
       "required": [
@@ -1833,6 +2055,44 @@
     },
     "codeserver_supported": {
       "type": "object"
+    },
+    "codeserver_write_runtime_args": {
+      "type": "object",
+      "required": [
+        "contents"
+      ],
+      "properties": {
+        "contents": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "native"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "codeserver_write_user_settings": {
+      "type": "object",
+      "required": [
+        "contents"
+      ],
+      "properties": {
+        "contents": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "native"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "codex_app_inventory": {
       "type": "object",

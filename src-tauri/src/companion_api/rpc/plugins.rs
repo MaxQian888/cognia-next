@@ -45,6 +45,20 @@ pub(super) const COMMANDS: &[&str] = &[
     "codeserver_status",
     "codeserver_stop",
     "codeserver_stop_all",
+    "codeserver_open_file",
+    "codeserver_agent_open",
+    "codeserver_agent_apply_edit",
+    "codeserver_agent_read_active",
+    "codeserver_agent_save_all",
+    "codeserver_agent_show_diff",
+    "codeserver_agent_reveal",
+    "codeserver_agent_run_in_terminal",
+    "codeserver_agent_notify",
+    "codeserver_agent_workspace_snapshot",
+    "codeserver_read_user_settings",
+    "codeserver_write_user_settings",
+    "codeserver_read_runtime_args",
+    "codeserver_write_runtime_args",
     "codeserver_build_proxy",
     "codeserver_activate_proxy",
     "codeserver_list_proxies",
@@ -873,6 +887,177 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             services.code_server.stop_all().await;
             Ok(Value::Null)
+        }
+        "codeserver_open_file" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let path: String = required(&args, "path")?;
+            let line = optional::<u32>(&args, "line")?;
+            let column = optional::<u32>(&args, "column")?;
+            host.ide_open_file(&root, device_id, &path, line, column)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_open" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let path: String = required(&args, "path")?;
+            let line = optional::<u32>(&args, "line")?;
+            let column = optional::<u32>(&args, "column")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::open(&canonical, &path, line, column)
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_apply_edit" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let path: String = required(&args, "path")?;
+            let line = optional::<u32>(&args, "line")?;
+            let column = optional::<u32>(&args, "column")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::apply_edit(&canonical, &path, line, column)
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_read_active" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::read_active(&canonical)
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_save_all" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let path = optional::<String>(&args, "path")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::save_all(&canonical, path.as_deref())
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_show_diff" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let path: String = required(&args, "path")?;
+            // The proposed revision travels inline, so a large file can exceed
+            // the host's `rpcJsonBodyBytes` ceiling and be refused before it
+            // reaches this arm. That is the honest outcome: the renderer falls
+            // back to the on-disk diff rather than silently truncating.
+            let content: String = required(&args, "content")?;
+            let title = optional::<String>(&args, "title")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::show_diff(
+                &canonical,
+                &path,
+                &content,
+                title.as_deref(),
+            )
+            .await
+            .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_reveal" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let path: String = required(&args, "path")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::reveal(&canonical, &path)
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_run_in_terminal" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let command: String = required(&args, "command")?;
+            let cwd = optional::<String>(&args, "cwd")?;
+            let terminal_name = optional::<String>(&args, "name")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::run_in_terminal(
+                &canonical,
+                &command,
+                cwd.as_deref(),
+                terminal_name.as_deref(),
+            )
+            .await
+            .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_notify" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let message: String = required(&args, "message")?;
+            let kind = optional::<String>(&args, "kind")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::notify(&canonical, &message, kind.as_deref())
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_agent_workspace_snapshot" => {
+            let root = authorize_workspace_root(host, required(&args, "root")?)?;
+            let snapshot: Value = required(&args, "snapshot")?;
+            let canonical = host
+                .ide_canonical_root(&root, device_id)
+                .await
+                .map_err(RpcError::service_unavailable)?;
+            crate::codeserver::agent_channel::verbs::workspace_snapshot(&canonical, snapshot)
+                .await
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_read_user_settings" => {
+            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+                .unwrap_or_default();
+            host.ide_read_user_settings(profile)
+                .await
+                .and_then(|contents| {
+                    serde_json::to_value(contents)
+                        .map_err(|error| format!("serialize code-server settings: {error}"))
+                })
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_write_user_settings" => {
+            let contents: String = required(&args, "contents")?;
+            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+                .unwrap_or_default();
+            host.ide_write_user_settings(contents, profile)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_read_runtime_args" => {
+            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+                .unwrap_or_default();
+            host.ide_read_runtime_args(profile)
+                .await
+                .and_then(|contents| {
+                    serde_json::to_value(contents)
+                        .map_err(|error| format!("serialize code-server runtime args: {error}"))
+                })
+                .map_err(RpcError::service_unavailable)
+        }
+        "codeserver_write_runtime_args" => {
+            let contents: String = required(&args, "contents")?;
+            let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
+                .unwrap_or_default();
+            host.ide_write_runtime_args(contents, profile)
+                .await
+                .map(|()| Value::Null)
+                .map_err(RpcError::service_unavailable)
         }
         "codeserver_build_proxy" => {
             let services = host

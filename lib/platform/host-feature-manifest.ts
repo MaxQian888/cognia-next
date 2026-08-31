@@ -42,6 +42,14 @@ export const HOST_FEATURE_IDS = [
   // remote external agents at all; falling back to sending a whole config per
   // turn is exactly the arrangement the store exists to replace.
   "external-agent.host-configs",
+  // Pro IDE (ADR-0088). Its presence is what tells a companion that this host
+  // can run a workbench at all, which nothing could discover before: the five
+  // lifecycle commands were reachable over the wire while the manifest said
+  // nothing about them, so a client had to call and see. Declared only after
+  // the agent-drive verbs became `target: "execution"`, per the rule at the
+  // bottom of this file: transport, authorization and dispatch first, feature
+  // second.
+  "pro-ide",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -297,6 +305,35 @@ export function buildLocalHostFeatureManifest({
     // talking to a Host whose attach is an unbounded registration: it must
     // assume control (the old implicit behaviour) and cannot show why it was
     // refused, because nothing tells it.
+    // The workbench lifecycle plus the agent-drive verbs, named individually
+    // because a host can legitimately have one without the other: an older
+    // build answers `codeserver_ensure` and refuses every `codeserver_agent_*`,
+    // and a client that assumed the whole set from the feature id would show
+    // an editor toolbar whose buttons do nothing.
+    features["pro-ide"] = {
+      version: 1,
+      operations: [
+        "codeserver_supported",
+        "codeserver_ensure",
+        "codeserver_status",
+        "codeserver_stop",
+        "codeserver_stop_all",
+        "codeserver_open_file",
+        "codeserver_agent_open",
+        "codeserver_agent_apply_edit",
+        "codeserver_agent_read_active",
+        "codeserver_agent_save_all",
+        "codeserver_agent_show_diff",
+        "codeserver_agent_reveal",
+        "codeserver_agent_run_in_terminal",
+        "codeserver_agent_notify",
+        "codeserver_agent_workspace_snapshot",
+        "codeserver_read_user_settings",
+        "codeserver_write_user_settings",
+        "codeserver_read_runtime_args",
+        "codeserver_write_runtime_args",
+      ],
+    }
     features["session.remote-control"] = {
       version: 1,
       operations: ["session_attach", "session_detach"],

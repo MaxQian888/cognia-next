@@ -1504,6 +1504,91 @@
         ]
       }
     },
+    "codeserver_agent_apply_edit": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "path",
+          "adminLease"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "codeserver_agent_run_in_terminal": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "command",
+          "adminLease"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "codeserver_agent_save_all": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "root",
+          "adminLease"
+        ],
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "codeserver_ensure": {
       "inputSchemaSource": "contract",
       "inputSchema": {
@@ -1564,6 +1649,60 @@
         "required": [
           "adminLease"
         ]
+      }
+    },
+    "codeserver_write_runtime_args": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "contents",
+          "adminLease"
+        ],
+        "properties": {
+          "contents": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "native"
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "codeserver_write_user_settings": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "contents",
+          "adminLease"
+        ],
+        "properties": {
+          "contents": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string",
+            "enum": [
+              "managed",
+              "native"
+            ]
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
       }
     },
     "codex_app_task_create": {
