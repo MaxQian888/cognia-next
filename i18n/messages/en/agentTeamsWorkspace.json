@@ -1090,6 +1090,11 @@
       "title": "No agent branches yet"
     },
     "refresh": "Refresh",
-    "title": "Agent branches"
+    "title": "Agent branches",
+    "moved": {
+      "title": "Worktrees moved",
+      "description": "Live environments and the branches isolated runs leave behind are both on the workspace page now. They belong to the repository, not to one squad.",
+      "action": "Open workspace"
+    }
   }
 }

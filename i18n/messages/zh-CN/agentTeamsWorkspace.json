@@ -1090,6 +1090,11 @@
       "title": "暂无 agent 分支"
     },
     "refresh": "刷新",
-    "title": "Agent 分支"
+    "title": "Agent 分支",
+    "moved": {
+      "title": "工作树已迁移",
+      "description": "实时环境与隔离运行留下的分支现在都在工作区页面。它们属于仓库，不属于某一个小队。",
+      "action": "打开工作区"
+    }
   }
 }

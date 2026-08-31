@@ -333,5 +333,16 @@
       "incompatible": "宿主版本不兼容。",
       "unsupported": "该宿主不提供此操作。"
     }
+  },
+  "agentBranches": {
+    "title": "Agent 分支",
+    "description": "隔离运行回收工作树后留下的分支。",
+    "empty": "该仓库里没有 agent 分支。",
+    "refresh": "刷新 agent 分支",
+    "actions": {
+      "checkout": "检出",
+      "delete": "删除",
+      "compare": "比较引用"
+    }
   }
 }

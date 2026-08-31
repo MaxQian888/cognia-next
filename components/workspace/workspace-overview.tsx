@@ -59,6 +59,7 @@ import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { WorkspaceCapabilities } from "./workspace-capabilities"
 import { WorkspaceMembers } from "./workspace-members"
 import { WorkspaceActivity } from "./workspace-activity"
+import { AgentBranchesSection } from "./agent-branches-section"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 import { useWorkspacePickerDialogs, WorkspacePickerList } from "./workspace-picker-list"
 
@@ -415,6 +416,15 @@ export function WorkspaceOverview() {
             you the worktrees and not the rules that produce them. One
             component, a second door, not a second editor.
           */}
+          {/*
+            What isolated runs left behind. Branches outlive the directories
+            above them, so after a run settles this is the only trace of what it
+            did. It lived in a tab of the retired `/agent-teams/workspace`,
+            where it was scoped to one squad's working directory rather than to
+            the repository the branches actually pile up in.
+          */}
+          <AgentBranchesSection {...(primaryRoot ? { rootDir: primaryRoot } : {})} />
+
           {workspaceId && primaryRoot ? (
             <ProjectEnvironmentManager
               projectId={workspaceId}

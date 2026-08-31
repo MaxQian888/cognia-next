@@ -333,5 +333,16 @@
       "incompatible": "The host is running an incompatible version.",
       "unsupported": "This host does not offer that action."
     }
+  },
+  "agentBranches": {
+    "title": "Agent branches",
+    "description": "Branches an isolated run left behind, once its worktree was reclaimed.",
+    "empty": "No agent branches in this repository.",
+    "refresh": "Refresh agent branches",
+    "actions": {
+      "checkout": "Check out",
+      "delete": "Delete",
+      "compare": "Compare refs"
+    }
   }
 }
