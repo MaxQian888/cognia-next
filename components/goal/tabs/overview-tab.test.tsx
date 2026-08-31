@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { appendGoalEvent, createGoal } from "@/lib/db/goals"
 import type { Goal } from "@/types/goal"
 import { GoalOverviewTab } from "./overview-tab"
@@ -32,12 +32,11 @@ function buildGoal(overrides: Partial<Goal> = {}): Goal {
   }
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("GoalOverviewTab", () => {
   it("renders objective + status + progress text", async () => {

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import type { Goal } from "@/types/goal"
 
 const isMobileMock = jest.fn(() => false)
@@ -43,14 +43,15 @@ const goal: Goal = {
   updatedAt: Date.now(),
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   isMobileMock.mockReturnValue(false)
   resolveGoalAcceptanceMock.mockClear()
 })
+afterAll(dbFixture.dispose)
 
 describe("GoalDetailSheet", () => {
   it("does not render content when closed", () => {

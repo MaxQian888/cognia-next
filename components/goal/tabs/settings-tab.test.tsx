@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime"
 import type { Goal } from "@/types/goal"
@@ -31,14 +31,15 @@ jest.mock("@/components/goal/goal-verification-workflow-picker", () => ({
 }))
 import { GoalSettingsTab } from "./settings-tab"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
 })
+afterAll(dbFixture.dispose)
 
 async function createTestGoal(overrides: Partial<Goal> = {}): Promise<Goal> {
   const g = await getGoalRuntime().createGoal({

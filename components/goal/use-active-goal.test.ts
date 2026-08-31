@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto"
 import { renderHook, waitFor } from "@testing-library/react"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createGoal } from "@/lib/db/goals"
 import type { Goal } from "@/types/goal"
 import { useOpenGoal } from "./use-active-goal"
@@ -29,12 +29,11 @@ function buildGoalInput(overrides: Partial<Goal> = {}): Parameters<typeof create
   }
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("useOpenGoal", () => {
   it("returns active when present", async () => {

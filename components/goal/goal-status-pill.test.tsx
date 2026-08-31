@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime"
 import type { Goal } from "@/types/goal"
@@ -37,15 +37,16 @@ const baseGoal: Goal = {
   updatedAt: Date.now(),
 }
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
   useBreakpointMock.mockReset().mockReturnValue("desktop")
 })
+afterAll(dbFixture.dispose)
 
 describe("GoalStatusPill", () => {
   it("renders nothing when goalOverride is null", () => {

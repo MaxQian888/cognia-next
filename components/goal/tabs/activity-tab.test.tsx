@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto"
 import { render, screen, waitFor } from "@testing-library/react"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { appendGoalEvent, createGoal } from "@/lib/db/goals"
 import type { Goal } from "@/types/goal"
 import { GoalActivityTab } from "./activity-tab"
@@ -21,12 +21,11 @@ const goal: Goal = {
   updatedAt: Date.now(),
 }
 
-beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-})
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+beforeEach(dbFixture.restore)
+afterAll(dbFixture.dispose)
 
 describe("GoalActivityTab", () => {
   it("shows the empty-state message when no events exist", async () => {

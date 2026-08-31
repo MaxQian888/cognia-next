@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { __resetGoalRuntimeForTesting, getGoalRuntime } from "@/lib/goal/runtime"
@@ -13,11 +13,11 @@ import { GoalConsole } from "./goal-console"
 
 // next-intl globally mocked in jest.setup.ts (resolves keys against en.json).
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
+  await dbFixture.restore()
   // Establish the default project scope up front (outside any liveQuery), the
   // way the app bootstrap does before /goals ever renders. Without it the
   // console's `useLiveQuery(listAllGoals)` would try to auto-create the project
@@ -26,6 +26,7 @@ beforeEach(async () => {
   await __resetRedactionKey()
   __resetGoalRuntimeForTesting()
 })
+afterAll(dbFixture.dispose)
 
 describe("GoalConsole", () => {
   it("renders the header and all six section tabs", async () => {
