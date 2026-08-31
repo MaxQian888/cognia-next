@@ -3,7 +3,9 @@
     "cancel": "Cancel",
     "confirmImport": "Import package",
     "create": "Create draft",
+    "deprecate": "Deprecate release",
     "export": "Export",
+    "fork": "Fork as draft",
     "import": "Import",
     "instantiate": "Create resources",
     "newDraft": "New draft",
@@ -121,8 +123,12 @@
     "source": "Source: {source}"
   },
   "instances": {
+    "detach": "Detach",
     "detached": "Detached",
-    "resources": "{count, plural, one {# resource} other {# resources}}"
+    "resources": "{count, plural, one {# resource} other {# resources}}",
+    "sourceUnavailable": "Source unavailable",
+    "upToDate": "On the latest release",
+    "updateTo": "Update to…"
   },
   "instantiateDialog": {
     "cancel": "Cancel",
@@ -160,12 +166,17 @@
     }
   },
   "messages": {
+    "deprecated": "Release deprecated.",
+    "detached": "Instance detached from its template.",
     "draftCreated": "Template draft created.",
     "draftForked": "This draft had already changed elsewhere, so your edit was saved separately as {id}.",
     "draftSaved": "Draft saved.",
+    "forked": "Forked into {id}.",
     "imported": "Template package imported.",
     "instantiated": "Template resources created.",
-    "published": "Template version {version} published."
+    "published": "Template version {version} published.",
+    "updated": "Instance updated to {version}.",
+    "yanked": "Release yanked."
   },
   "mobile": {
     "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
@@ -217,5 +228,18 @@
     "signed-unknown": "Signed, unknown publisher",
     "unsigned": "Unsigned",
     "verified-publisher": "Verified publisher"
+  },
+  "updateDialog": {
+    "cancel": "Cancel",
+    "changes": "{count, plural, =1 {1 change} other {# changes}}",
+    "confirm": "Apply update",
+    "conflicts": "{count, plural, =1 {1 conflict} other {# conflicts}} with your local edits",
+    "description": "From {from} to {to}.",
+    "status": {
+      "blocked": "Blocked",
+      "needs-confirmation": "Needs confirmation",
+      "ready": "Ready"
+    },
+    "title": "Update this instance"
   }
 }

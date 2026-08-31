@@ -15,6 +15,7 @@ import {
   Trash2Icon,
   UploadIcon,
   ChevronDownIcon,
+  GitFork as GitForkIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
@@ -30,7 +31,7 @@ import type {
 } from "@/lib/templates/contracts"
 import { isTemplateInputId, listTemplateTokens } from "@/lib/templates/contracts"
 import type { InspectedTemplatePackage } from "@/lib/templates/package"
-import type { TemplatePreflightPlan } from "@/lib/templates/service"
+import type { TemplatePreflightPlan, TemplateUpdatePlan } from "@/lib/templates/service"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -61,6 +62,8 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 import { TemplateBindingField } from "./template-binding-field"
 import { PublishConfirmDialog, type PublishSuggestion } from "./publish-confirm-dialog"
 import { InstantiateConfirmDialog } from "./instantiate-confirm-dialog"
+import { TemplateInstanceCard } from "./template-instance-card"
+import { TemplateUpdateDialog } from "./template-update-dialog"
 
 const FULL_DOMAINS: TemplateDomain[] = [
   "agentTeam",
@@ -191,6 +194,7 @@ export function TemplateStudio() {
   const [message, setMessage] = useState<string>()
   const [publishSuggestion, setPublishSuggestion] = useState<PublishSuggestion | null>(null)
   const [pendingInstantiate, setPendingInstantiate] = useState<TemplatePreflightPlan>()
+  const [updatePlan, setUpdatePlan] = useState<TemplateUpdatePlan>()
   const [pendingImport, setPendingImport] = useState<{
     bytes: Uint8Array
     inspected: InspectedTemplatePackage
@@ -229,6 +233,60 @@ export function TemplateStudio() {
     },
     []
   )
+
+  /**
+   * Released versions per definition, so an instance card can offer the ones it
+   * could move to. Derived from the catalog the page already reads rather than
+   * a per-card query.
+   */
+  const releasedVersionsByDefinition = useMemo(() => {
+    const out: Record<string, string[]> = {}
+    for (const definition of definitions) {
+      if (!definition.version) continue
+      if (definition.status === "yanked" || definition.status === "tombstone") continue
+      ;(out[definition.id] ??= []).push(definition.version)
+    }
+    return out
+  }, [definitions])
+
+  const openUpdate = async (instanceId: string, version: string) => {
+    setUpdatePlan(await runtime.service.planUpdate(instanceId, version))
+  }
+
+  const applyUpdate = async (target: TemplateUpdatePlan) => {
+    await runtime.service.applyUpdate(target, { confirmed: true })
+    setUpdatePlan(undefined)
+    setMessage(t("messages.updated", { version: target.next.version ?? "" }))
+    setInstances(await runtime.repository.listInstances())
+  }
+
+  const detachInstance = async (instanceId: string) => {
+    await runtime.service.detachInstance(instanceId)
+    setMessage(t("messages.detached"))
+    setInstances(await runtime.repository.listInstances())
+  }
+
+  /**
+   * Fork a published release into a new editable draft. `service.fork` existed
+   * with no caller, which is why the only way to base a template on an existing
+   * one was to create a blank draft and retype it.
+   */
+  const forkSelected = async () => {
+    if (!selected) return
+    const forked = await runtime.service.fork(selected.id, {
+      ...(selected.version ? { version: selected.version } : {}),
+      newId: makeDraftId(selected.domain, `${selected.metadata.name} copy`),
+    })
+    setSelectionKey(`id:${forked.id}`)
+    setMessage(t("messages.forked", { id: forked.id }))
+  }
+
+  /** Withdraw a release. `deprecate` also had no caller. */
+  const deprecateSelected = async (status: "deprecated" | "yanked") => {
+    if (!selected?.version) return
+    await runtime.service.deprecate(selected.id, selected.version, status)
+    setMessage(t(`messages.${status}`))
+  }
 
   const createDraft = async () => {
     const trimmed = draftName.trim()
@@ -541,6 +599,8 @@ export function TemplateStudio() {
                   onPublish={guard(openPublish)}
                   onSaveDraft={saveDraft}
                   onExport={guard(exportSelected)}
+                  onFork={guard(forkSelected)}
+                  onDeprecate={guard(() => deprecateSelected("deprecated"))}
                   t={t}
                 />
               </div>
@@ -569,18 +629,13 @@ export function TemplateStudio() {
         <TabsContent value="instances">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {instances.map((instance) => (
-              <Card key={instance.id}>
-                <CardHeader>
-                  <CardTitle className="text-base">{instance.source.definitionId}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-1 text-sm text-muted-foreground">
-                  <p>{instance.source.version ?? t("status.draft")}</p>
-                  <p>{t("instances.resources", { count: instance.resources.length })}</p>
-                  {instance.detachedAt ? (
-                    <Badge variant="outline">{t("instances.detached")}</Badge>
-                  ) : null}
-                </CardContent>
-              </Card>
+              <TemplateInstanceCard
+                key={instance.id}
+                instance={instance}
+                availableVersions={releasedVersionsByDefinition[instance.source.definitionId] ?? []}
+                onPlanUpdate={(id, version) => guard(() => openUpdate(id, version))()}
+                onDetach={(id) => guard(() => detachInstance(id))()}
+              />
             ))}
           </div>
         </TabsContent>
@@ -590,6 +645,11 @@ export function TemplateStudio() {
         suggestion={publishSuggestion}
         onOpenChange={(open) => (open ? undefined : setPublishSuggestion(null))}
         onConfirm={(bump) => guard(() => publish(bump))()}
+      />
+      <TemplateUpdateDialog
+        plan={updatePlan}
+        onOpenChange={(open) => (open ? undefined : setUpdatePlan(undefined))}
+        onConfirm={(target) => guard(() => applyUpdate(target))()}
       />
       <InstantiateConfirmDialog
         plan={pendingInstantiate}
@@ -713,6 +773,8 @@ function TemplateInspector({
   onPublish,
   onSaveDraft,
   onExport,
+  onFork,
+  onDeprecate,
   t,
 }: {
   definition?: TemplateDefinitionEnvelope
@@ -725,6 +787,8 @@ function TemplateInspector({
   onPublish(): void
   onSaveDraft(edits: { name: string; description: string; payload: TemplateJson }): Promise<void>
   onExport(): void
+  onFork(): void
+  onDeprecate(): void
   t: ReturnType<typeof useTranslations<"templateStudio">>
 }) {
   if (!definition) {
@@ -802,6 +866,26 @@ function TemplateInspector({
             <Button variant="outline" onClick={onExport}>
               <DownloadIcon className="size-4" />
               {t("actions.export")}
+            </Button>
+          ) : null}
+          {/* `fork` and `deprecate` shipped with no caller anywhere in the app,
+              so the only way to base a template on an existing one was to
+              create a blank draft and retype it, and a published release could
+              never be withdrawn. */}
+          {!mobile && !catalogOnly ? (
+            <Button variant="outline" onClick={onFork} data-testid="template-fork">
+              <GitForkIcon className="size-4" />
+              {t("actions.fork")}
+            </Button>
+          ) : null}
+          {!mobile && definition.version && definition.status === "published" ? (
+            <Button
+              variant="ghost"
+              className="text-destructive"
+              onClick={onDeprecate}
+              data-testid="template-deprecate"
+            >
+              {t("actions.deprecate")}
             </Button>
           ) : null}
           {!mobile && EDITOR_ROUTES[definition.domain] ? (

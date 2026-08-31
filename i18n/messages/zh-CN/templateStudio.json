@@ -3,7 +3,9 @@
     "cancel": "取消",
     "confirmImport": "导入包",
     "create": "创建草稿",
+    "deprecate": "弃用该版本",
     "export": "导出",
+    "fork": "另存为草稿",
     "import": "导入",
     "instantiate": "创建资源",
     "newDraft": "新建草稿",
@@ -121,8 +123,12 @@
     "source": "来源：{source}"
   },
   "instances": {
+    "detach": "脱钩",
     "detached": "已分离",
-    "resources": "{count} 个资源"
+    "resources": "{count} 个资源",
+    "sourceUnavailable": "来源不可用",
+    "upToDate": "已是最新版本",
+    "updateTo": "更新到…"
   },
   "instantiateDialog": {
     "cancel": "取消",
@@ -160,12 +166,17 @@
     }
   },
   "messages": {
+    "deprecated": "该版本已弃用。",
+    "detached": "实例已与模板脱钩。",
     "draftCreated": "模板草稿已创建。",
     "draftForked": "该草稿已在别处被改动，你的修改已另存为 {id}。",
     "draftSaved": "草稿已保存。",
+    "forked": "已复刻为 {id}。",
     "imported": "模板包已导入。",
     "instantiated": "模板资源已创建。",
-    "published": "模板版本 {version} 已发布。"
+    "published": "模板版本 {version} 已发布。",
+    "updated": "实例已更新到 {version}。",
+    "yanked": "该版本已撤回。"
   },
   "mobile": {
     "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
@@ -217,5 +228,18 @@
     "signed-unknown": "已签名，发布者未知",
     "unsigned": "未签名",
     "verified-publisher": "已验证发布者"
+  },
+  "updateDialog": {
+    "cancel": "取消",
+    "changes": "{count} 处变更",
+    "confirm": "应用更新",
+    "conflicts": "与你的本地修改有 {count} 处冲突",
+    "description": "从 {from} 更新到 {to}。",
+    "status": {
+      "blocked": "已阻断",
+      "needs-confirmation": "需要确认",
+      "ready": "就绪"
+    },
+    "title": "更新该实例"
   }
 }
