@@ -25,7 +25,10 @@ Use when: the result set is unknown-size (bugs, edge cases) and a fixed count wo
 - Fan out only what benefits from it; a quick lookup is cheaper inline.
 
 ## Stay within limits
-Respect depth and budget ceilings. Nested delegation multiplies cost; stop fanning out as the budget runs low. A dead/skipped agent returns nothing — filter and decide if the gap matters.
+Respect the depth, concurrency, tool, permission, and budget ceilings projected by
+the host. Skill instructions never expand that envelope. Nested delegation
+multiplies cost; stop fanning out as the budget runs low. A dead/skipped agent
+returns nothing — filter and decide if the gap matters.
 
 ## Synthesis checklist
 - Read every return; resolve contradictions (say which you trust and why).

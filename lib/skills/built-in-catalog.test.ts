@@ -1,7 +1,10 @@
 import {
+  BUILT_IN_SKILL_CAPABILITY_IDS,
   BUILT_IN_SKILL_CATALOG,
   builtinSkillId,
+  canonicalBuiltinSkillId,
   getCatalogSkill,
+  resolveBuiltinSkillIdentity,
   BUILTIN_SKILL_ID_PREFIX,
 } from "./built-in-catalog"
 
@@ -32,15 +35,140 @@ describe("built-in skills catalog", () => {
     expect(entry.category).toBe("data-analysis")
     expect(entry.surface).toEqual([])
     // Each of these is a real constraint in the pipeline, not style advice:
-    // the fence language the artifact detector keys on, the series list read
-    // from `data[0]` only, the line-count floor before a fence is lifted into
-    // the dock, and the palette the renderer owns.
-    expect(entry.content).toContain("fenced `json` block")
+    // the artifact tool, the series list read from `data[0]` only, the
+    // compatibility line-count floor, and the palette the renderer owns.
+    expect(entry.content).toContain("`artifact_create`")
+    expect(entry.content).toContain("do not try to bypass")
     expect(entry.content).toContain("first row only")
     expect(entry.content).toContain("at least three lines")
     expect(entry.content).toContain("Do not specify colours")
     // Scatter is the one shape with a different row contract.
     expect(entry.content).toMatch(/`x` and\s+`y`\*\* as numbers/)
+  })
+
+  it("publishes an orthogonal delivery and activation contract for every skill", () => {
+    expect(
+      Object.fromEntries(BUILT_IN_SKILL_CATALOG.map((entry) => [entry.id, entry.delivery]))
+    ).toEqual({
+      "agent-team-delegation": "inject",
+      "chart-design": "catalog",
+      "cognia-onboarding": "request-scoped",
+      "computer-use-safety": "inject",
+      "diagram-design": "catalog",
+      "digital-twin-query": "inject",
+      "goal-loop-execution": "inject",
+      "im-auto-reply": "inject",
+      "ocr-extraction": "catalog",
+      "plugin-authoring": "explicit",
+      "plugin-conversion": "explicit",
+      "web-research": "catalog",
+      "workflow-authoring": "inject",
+    })
+
+    for (const entry of BUILT_IN_SKILL_CATALOG) {
+      expect(entry.canonicalId).toBe(`builtin:${entry.id}`)
+      expect([...entry.triggers.surfaces, ...entry.triggers.intents].length).toBeGreaterThan(0)
+      expect(entry.surface).toEqual(entry.triggers.surfaces)
+      expect(entry.hostPolicies.length).toBeGreaterThan(0)
+      for (const requirement of entry.capabilityRequirements) {
+        expect(requirement.capability.trim()).not.toBe("")
+        expect(requirement.reason.trim()).not.toBe("")
+      }
+    }
+  })
+
+  it("exports the complete capability-id vocabulary for exhaustive runtime mapping", () => {
+    expect(BUILT_IN_SKILL_CAPABILITY_IDS).toEqual([
+      "agent-dispatch",
+      "artifact-authoring",
+      "cognia-cli",
+      "computer-use",
+      "goal-runtime",
+      "im-binding",
+      "ocr",
+      "plugin-conversion-tools",
+      "screen-capture",
+      "twin-context",
+      "web-fetch",
+      "web-search",
+      "workflow-editor-tools",
+      "workspace",
+      "workspace-backend",
+      "workspace-read",
+    ])
+    expect(
+      [
+        ...new Set(
+          BUILT_IN_SKILL_CATALOG.flatMap((entry) =>
+            entry.capabilityRequirements.map((requirement) => requirement.capability)
+          )
+        ),
+      ].sort()
+    ).toEqual(BUILT_IN_SKILL_CAPABILITY_IDS)
+  })
+
+  it("keeps specialized skills explicit and policy-sensitive skills host-owned", () => {
+    for (const id of ["plugin-authoring", "plugin-conversion"]) {
+      const entry = getCatalogSkill(id)!
+      expect(entry.delivery).toBe("explicit")
+      expect(entry.triggers.surfaces).toEqual([])
+      expect(entry.hostPolicies).toEqual(
+        expect.arrayContaining(["workspace-confined", "host-consent", "permission-ceiling"])
+      )
+    }
+
+    expect(getCatalogSkill("cognia-onboarding")).toMatchObject({
+      delivery: "request-scoped",
+      hostPolicies: expect.arrayContaining(["request-scope", "capability-preflight"]),
+    })
+    expect(getCatalogSkill("workflow-authoring")).toMatchObject({
+      delivery: "inject",
+      hostPolicies: expect.arrayContaining(["proposal-first", "host-consent"]),
+    })
+  })
+
+  it("makes contextual delivery reachable by default while specialists stay manual", () => {
+    for (const entry of BUILT_IN_SKILL_CATALOG) {
+      expect(entry.defaultEnabled).toBe(entry.delivery === "explicit" ? undefined : true)
+    }
+  })
+
+  it("emits a content-free resource manifest with a role for every payload", () => {
+    for (const entry of BUILT_IN_SKILL_CATALOG) {
+      const manifest = entry.resourceManifest ?? []
+      for (const resource of manifest) {
+        expect(["runtime-reference", "template", "example", "compliance"]).toContain(resource.role)
+      }
+    }
+
+    const diagram = getCatalogSkill("diagram-design")!
+    expect(
+      diagram.resourceManifest?.find((resource) => resource.path === "assets/template.html")?.role
+    ).toBe("template")
+    expect(
+      diagram.resourceManifest?.find(
+        (resource) => resource.path === "assets/example-flowchart.html"
+      )?.role
+    ).toBe("example")
+    expect(
+      diagram.resourceManifest?.find(
+        (resource) => resource.path === "references/UPSTREAM_LICENSE.txt"
+      )?.role
+    ).toBe("compliance")
+  })
+
+  it("pins request scope, proposal-first workflow editing, and exact visual tools in content", () => {
+    expect(getCatalogSkill("cognia-onboarding")!.content).toContain(
+      "at most one\nmissing-input reply"
+    )
+    expect(getCatalogSkill("workflow-authoring")!.content).toContain("`wf_propose_batch`")
+    expect(getCatalogSkill("workflow-authoring")!.content).toContain(
+      "Do not call legacy direct-mutation tools"
+    )
+    expect(getCatalogSkill("chart-design")!.content).toContain("artifact_create")
+    expect(getCatalogSkill("diagram-design")!.content).toContain(
+      'artifact_create` with `type: "html"'
+    )
   })
 
   it("registers plugin authoring as an opt-in skill with its required tools", () => {
@@ -78,5 +206,21 @@ describe("built-in skills catalog", () => {
 
   it("getCatalogSkill returns undefined for an unknown id", () => {
     expect(getCatalogSkill("does-not-exist")).toBeUndefined()
+  })
+
+  it("normalizes canonical, bundle, slug, and Dexie ids to one built-in identity", () => {
+    const expected = {
+      bundleId: "im-auto-reply",
+      canonicalId: "builtin:im-auto-reply",
+      storageId: "skill_builtin_im_auto_reply",
+    }
+    for (const alias of ["im-auto-reply", "builtin:im-auto-reply", "skill_builtin_im_auto_reply"]) {
+      expect(resolveBuiltinSkillIdentity(alias)).toEqual(expected)
+    }
+    expect(canonicalBuiltinSkillId(getCatalogSkill("im-auto-reply")!)).toBe(expected.canonicalId)
+  })
+
+  it("does not manufacture an identity for an unknown alias", () => {
+    expect(resolveBuiltinSkillIdentity("builtin:not-real")).toBeUndefined()
   })
 })

@@ -1,19 +1,39 @@
 ---
 name: First-run walkthrough
-description: Use when the user's message is one of the three fixed first-run starter prompts — reading a local folder, extracting text from a screenshot, or summarizing a web page — sent from the onboarding flow. Carry that one request to a finished, visible result in a single turn, then hand off. Do not greet, do not explain the product, and do not create anything the user did not ask for.
+description: Complete one authorized first-run folder, screenshot OCR, or web-summary request with a visible result.
 category: meta
 tags:
   - onboarding
   - first-run
 metadata:
-  surface: []
+  delivery: request-scoped
+  triggers:
+    surfaces: []
+    intents: [onboarding.read-folder, onboarding.extract-text, onboarding.summarize-web]
+  capability-requirements:
+    - capability: workspace-read
+      reason: the folder starter must inspect a host-approved local directory
+      when-intent: onboarding.read-folder
+    - capability: screen-capture
+      reason: the screenshot starter must capture a host-approved screen image
+      when-intent: onboarding.extract-text
+    - capability: ocr
+      reason: the screenshot starter must extract visible text
+      when-intent: onboarding.extract-text
+    - capability: web-fetch
+      reason: the web starter must read the supplied page
+      when-intent: onboarding.summarize-web
+  host-policies: [request-scope, capability-preflight, permission-ceiling, user-language]
   # The first-run flow is the only place this fires, and it must be live the
   # first time it is needed — a skill the user has to go enable cannot shape
   # the very first conversation.
   default-enabled: true
 ---
 
-The user has just finished setup and picked one of three cards. This is the first thing they will ever watch this product do. The entire job is to make that one thing finish, visibly, now.
+The user has just finished setup and picked one of three cards. The host attaches
+this skill only to that onboarding request. The scope lasts through at most one
+missing-input reply and ends with a visible result or an honest failure; it is
+not a permanent session instruction.
 
 ## You are not being introduced
 
@@ -42,9 +62,11 @@ Two of the three cards are missing exactly one fact — a path, a URL. Ask for t
 
 If the user's reply is ambiguous, pick the most likely reading and say which one you picked. Asking twice in the first minute is worse than being slightly wrong once.
 
-## Finish it in this turn
+## Finish the request, not merely the transport turn
 
 The result has to be something they can look at and judge without trusting you.
+If the starter omitted a path or URL, the one clarification is part of the same
+request; finish immediately after the user supplies it.
 
 - Show the actual output — the file listing, the extracted text, the summary. Not a report that you produced one.
 - Keep it short. This is a demonstration, not a deliverable.

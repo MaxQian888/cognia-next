@@ -1,6 +1,7 @@
 import type { Skill, SkillResource } from "@cognia/agent-config-types"
 import {
   createSkillLoadContext,
+  builtInCatalogResources,
   loadSkillForSession,
   loadSkillResourceForSession,
   releaseSkillLoadContext,
@@ -153,6 +154,90 @@ describe("session-scoped skill runtime loader", () => {
     })
   })
 
+  it("normalizes built-in aliases inside a scoped context", async () => {
+    const diagram = getCatalogSkill("diagram-design")!
+    const diagramSkill: Skill = {
+      id: "skill_builtin_diagram_design",
+      slug: "diagram-design",
+      canonicalId: "builtin:diagram-design",
+      name: diagram.name,
+      description: diagram.description,
+      content: diagram.content,
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    createSkillLoadContext({
+      sessionId: "aliases",
+      allowedSkillIds: [diagramSkill.canonicalId!],
+      getSkill: async (id) => (id === diagramSkill.id ? diagramSkill : undefined),
+      listResources: async () => [],
+      recordUsage,
+    })
+
+    await expect(loadSkillForSession("aliases", "diagram-design")).resolves.toMatchObject({
+      ok: true,
+      skill: { id: diagramSkill.id },
+    })
+    releaseSkillLoadContext("aliases")
+  })
+
+  it("rejects missing and stale attempt identity for an attempt-scoped context", async () => {
+    createSkillLoadContext({
+      sessionId: "attempt-session",
+      turnId: "turn-1",
+      attemptId: "attempt-2",
+      allowedSkillIds: [skill.id],
+      getSkill,
+      listResources,
+      recordUsage,
+    })
+
+    await expect(loadSkillForSession("attempt-session", skill.id)).resolves.toMatchObject({
+      ok: false,
+      code: "stale_context",
+    })
+    await expect(
+      loadSkillForSession(
+        { sessionId: "attempt-session", turnId: "turn-1", attemptId: "attempt-1" },
+        skill.id
+      )
+    ).resolves.toMatchObject({ ok: false, code: "stale_context" })
+    await expect(
+      loadSkillForSession(
+        { sessionId: "attempt-session", turnId: "turn-1", attemptId: "attempt-2" },
+        skill.id
+      )
+    ).resolves.toMatchObject({ ok: true })
+    releaseSkillLoadContext("attempt-session")
+  })
+
+  it("loads a disabled Skill only when the request scope explicitly authorizes it", async () => {
+    const disabled = { ...skill, status: "disabled" as const }
+    createSkillLoadContext({
+      sessionId: "request-scope",
+      allowedSkillIds: [disabled.id],
+      getSkill: async () => disabled,
+      listResources,
+      recordUsage,
+    })
+    await expect(loadSkillForSession("request-scope", disabled.id)).resolves.toMatchObject({
+      ok: false,
+      code: "out_of_scope",
+    })
+    createSkillLoadContext({
+      sessionId: "request-scope",
+      allowedSkillIds: [disabled.id],
+      allowDisabledSkillIds: [disabled.id],
+      getSkill: async () => disabled,
+      listResources,
+      recordUsage,
+    })
+    await expect(loadSkillForSession("request-scope", disabled.id)).resolves.toMatchObject({
+      ok: true,
+    })
+    releaseSkillLoadContext("request-scope")
+  })
+
   it("loads the curated diagram skill progressively, including paged references", async () => {
     const diagram = getCatalogSkill("diagram-design")!
     const diagramSkill: Skill = {
@@ -164,14 +249,7 @@ describe("session-scoped skill runtime loader", () => {
       createdAt: 1,
       updatedAt: 1,
     }
-    const diagramResources: SkillResource[] = diagram.resources!.map((resource, index) => ({
-      ...resource,
-      id: `diagram-resource-${index}`,
-      skillId: diagramSkill.id,
-      encoding: "utf-8",
-      createdAt: 1,
-      updatedAt: 1,
-    }))
+    const diagramResources: SkillResource[] = await builtInCatalogResources(diagramSkill.id)
     createSkillLoadContext({
       sessionId: "diagram-session",
       allowedSkillIds: [diagramSkill.id],
@@ -183,7 +261,9 @@ describe("session-scoped skill runtime loader", () => {
     const loaded = await loadSkillForSession("diagram-session", diagramSkill.id)
     expect(loaded).toMatchObject({ ok: true, skill: { id: diagramSkill.id } })
     expect(loaded.ok && loaded.content).toContain("Required output contract")
-    expect(loaded.ok && loaded.resources).toHaveLength(diagramResources.length)
+    expect(loaded.ok && loaded.resources).toHaveLength(
+      (await builtInCatalogResources(diagramSkill.id)).length
+    )
     expect(loaded.ok && loaded.content).not.toContain("# Architecture\n\n**Best for:**")
 
     const page = await loadSkillResourceForSession(
@@ -196,5 +276,77 @@ describe("session-scoped skill runtime loader", () => {
     expect(page).toMatchObject({ ok: true, binary: false, nextOffset: expect.any(Number) })
     expect(page.ok && page.content).toContain("# Architecture")
     releaseSkillLoadContext("diagram-session")
+  })
+
+  it("keeps compliance-only catalog resources out of model-readable runtime scope", async () => {
+    const paths = (await builtInCatalogResources("builtin:diagram-design")).map(
+      (resource) => resource.path
+    )
+    expect(paths).toContain("references/type-architecture.md")
+    expect(paths).not.toContain("references/THIRD_PARTY_LICENSES.md")
+    expect(paths).not.toContain("references/UPSTREAM_LICENSE.txt")
+  })
+
+  it("filters compliance roles from seeded rows before manifests, inline text, or payload reads", async () => {
+    const diagram = getCatalogSkill("diagram-design")!
+    const diagramSkill: Skill = {
+      id: "skill_builtin_diagram_design",
+      slug: "diagram-design",
+      canonicalId: diagram.canonicalId,
+      name: diagram.name,
+      content: diagram.content,
+      status: "enabled",
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const storedRows: SkillResource[] = [
+      {
+        id: "runtime-ref",
+        skillId: diagramSkill.id,
+        kind: "reference",
+        name: "type-architecture.md",
+        path: "references/type-architecture.md",
+        content: "runtime guidance",
+        encoding: "utf-8",
+        inline: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "license",
+        skillId: diagramSkill.id,
+        kind: "reference",
+        name: "THIRD_PARTY_LICENSES.md",
+        path: "references/THIRD_PARTY_LICENSES.md",
+        content: "license text must stay out of the model",
+        encoding: "utf-8",
+        inline: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ]
+    createSkillLoadContext({
+      sessionId: "seeded-diagram",
+      allowedSkillIds: [diagramSkill.id],
+      getSkill: async () => diagramSkill,
+      listResources: async () => storedRows,
+      recordUsage,
+    })
+
+    const loaded = await loadSkillForSession("seeded-diagram", diagramSkill.id)
+    expect(loaded).toMatchObject({
+      ok: true,
+      resources: [{ path: "references/type-architecture.md" }],
+    })
+    expect(loaded.ok && loaded.content).toContain("runtime guidance")
+    expect(loaded.ok && loaded.content).not.toContain("license text")
+    await expect(
+      loadSkillResourceForSession(
+        "seeded-diagram",
+        diagramSkill.id,
+        "references/THIRD_PARTY_LICENSES.md"
+      )
+    ).resolves.toMatchObject({ ok: false, code: "not_found" })
+    releaseSkillLoadContext("seeded-diagram")
   })
 })

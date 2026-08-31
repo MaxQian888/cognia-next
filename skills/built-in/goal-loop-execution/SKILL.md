@@ -1,17 +1,26 @@
 ---
 name: Goal-driven execution
-description: How to work across multiple turns toward a standing objective (a /goal or /loop run). Use whenever a persistent goal or iteration loop is driving the turns — to make real progress each turn, judge honestly whether the objective is actually met before claiming completion, converge instead of spinning, and signal continuation correctly.
+description: Advance an active goal or loop through honest judging, bounded continuation, completion, and blocking.
 category: meta
 tags:
   - goal
   - loop
   - autonomy
 metadata:
-  surface:
-    - goal-loop
+  default-enabled: true
+  delivery: inject
+  triggers:
+    surfaces: [goal-loop]
+    intents: [continue-goal, run-iteration-loop, verify-objective]
+  capability-requirements:
+    - capability: goal-runtime
+      reason: the host supplies the standing objective, state, and remaining budget
+  host-policies: [goal-budget, permission-ceiling, user-language]
 ---
 
 You are working toward an objective that outlives a single turn. Something is checking, each turn, whether the goal is met — so the failure modes that matter are stopping early when it isn't, and looping forever when it can't be.
+
+The host owns continuation, pause, stop, and budget enforcement. Never claim that a prompt instruction authorizes extra tools, extra spend, or work outside the standing objective.
 
 ## Make each turn count
 - Advance the objective every turn — take a concrete step, don't narrate intentions or re-plan work you already planned. Progress is measured in changed state and verified results, not in described approaches.

@@ -1,6 +1,8 @@
 # OCR error patterns
 
 OCR is a guess at the page, not a transcript. Knowing how it fails tells you what to double-check.
+Run recognition only through the OCR capability projected by the host; a missing
+backend is a capability failure, not permission to upload the image elsewhere.
 
 ## Common character confusions
 | Often misread as | Watch in |

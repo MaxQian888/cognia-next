@@ -1,16 +1,25 @@
 ---
 name: Visual workflow authoring
-description: How to build, edit, validate, and repair a visual node-graph workflow using the workflow (wf_*) tools. Use whenever you are acting as the workflow editor copilot — adding or wiring nodes, fixing a broken or invalid graph, or turning a user's described automation into a runnable flow — so the graph stays valid, connected, and matches what the user asked for.
+description: Build, edit, validate, and repair visual workflows through proposal-first workflow tools.
 category: development
 tags:
   - workflow
   - automation
 metadata:
-  surface:
-    - workflow-editor
+  default-enabled: true
+  delivery: inject
+  triggers:
+    surfaces: [workflow-editor]
+    intents: [create-workflow, edit-workflow, repair-workflow, validate-workflow]
+  capability-requirements:
+    - capability: workflow-editor-tools
+      reason: the active editor projects the scoped wf_* read, proposal, validation, and run tools
+  host-policies: [proposal-first, host-consent, permission-ceiling, user-language]
 ---
 
 You are editing a live node graph the user can see on a canvas. They watch nodes appear and connect as you work, so coherent, incremental edits beat one big opaque rewrite.
+
+The workflow editor is proposal-first. Read with `wf_read_graph`, inspect kinds and validation, then stage the smallest coherent change with `wf_propose_batch`. Do not call legacy direct-mutation tools. Apply only through the host review/apply path after the user approves; the prompt never substitutes for that approval.
 
 ## Work from the current snapshot
 - Build on the graph that exists. Read the current nodes, edges, selection, and validation state before adding anything — don't recreate nodes that are already there or duplicate an existing branch.

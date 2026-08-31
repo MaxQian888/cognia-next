@@ -20,6 +20,9 @@ Concrete responses to the failure modes you'll actually hit. The rule behind all
 - Change system settings, permissions, or credentials
 
 Reversible-in-one-step (read, scroll, navigate, open) needs no confirmation.
+The host owns the approval prompt and the resulting capability grant. Never click
+an approval dialog yourself, infer approval from silence, or continue when the
+host denies or withholds the capability.
 
 ## The two-attempt rule
 After two honest attempts at the same step fail, stop and report what's on screen. A third blind retry on a live machine is how real damage happens — a human looking at the screenshot will resolve in seconds what more clicking won't.

@@ -22,7 +22,10 @@ Research is only worth as much as the sources behind it. A confident answer buil
 | Security / safety / legal / financial | Primary source; flag if uncertain |
 
 ## Read, don't snippet
-Open the page; don't answer from the search-result summary. Fetch with a specific extraction goal, not "summarize this long page."
+Open the page with the host-projected web fetch capability; don't answer from the
+search-result summary. Fetch with a specific extraction goal, not "summarize this
+long page." If search or fetch is unavailable or denied, report the limitation
+instead of using an undeclared network path.
 
 ## Citation
 Name or link the source for each load-bearing claim. Distinguish what the sources state from what you're inferring by connecting them. When you couldn't confirm something, say so — "I couldn't verify this" is honest and useful. End substantive research with the sources you relied on.

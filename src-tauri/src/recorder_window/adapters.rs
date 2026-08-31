@@ -173,10 +173,7 @@ impl<R: tauri::Runtime> cognia_automation::automation::record::session::Recorder
 ///
 /// Idempotent: [`register`] calls it again once the recorder's other seams are
 /// ready, which is a no-op re-store of the same source.
-pub fn register_plugin_facts<R: tauri::Runtime>(app: &tauri::AppHandle<R>)
-where
-    R: 'static,
-{
+pub fn register_plugin_facts<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) {
     use cognia_automation::automation::commands::AutomationState;
     use tauri::Manager;
 
@@ -192,10 +189,7 @@ where
 }
 
 /// Convenience for boot: build every seam and hand them to the recorder.
-pub async fn register<R: tauri::Runtime>(app: &tauri::AppHandle<R>)
-where
-    R: 'static,
-{
+pub async fn register<R: tauri::Runtime + 'static>(app: &tauri::AppHandle<R>) {
     use cognia_automation::automation::commands::AutomationState;
     use cognia_automation::automation::record::secure_input::PlatformSecureProbe;
     use tauri::Manager;

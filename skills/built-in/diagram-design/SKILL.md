@@ -1,6 +1,6 @@
 ---
 name: Diagram Design
-description: Create polished technical and product diagrams as responsive HTML with inline SVG. Use when the user asks to draw, visualize, map, chart, or diagram architecture, flows, sequences, data models, timelines, organizations, processes, comparisons, or quantitative relationships.
+description: Create polished, responsive technical and product diagrams as sanitized HTML with inline SVG.
 category: creative-design
 tags:
   - diagram
@@ -11,6 +11,14 @@ license: MIT
 metadata:
   version: "2.0-cognia.1"
   default-enabled: true
+  delivery: catalog
+  triggers:
+    surfaces: []
+    intents: [diagram, architecture-figure, process-map, sequence-figure, data-model-figure]
+  capability-requirements:
+    - capability: artifact-authoring
+      reason: the HTML and inline-SVG result requires the host artifact dock and artifact_create tool
+  host-policies: [artifact-channel, permission-ceiling, user-language]
   upstream-repository: cathrynlavery/diagram-design
   upstream-commit: 8827b277395988877ba997b714b43513f764b569
 ---
@@ -23,7 +31,10 @@ This Cognia adaptation is based on `cathrynlavery/diagram-design` at commit `882
 
 ## Required output contract
 
-Return exactly one fenced `html` block containing a complete HTML document. Do not write a file and do not emit a second code block.
+Call `artifact_create` with `type: "html"`, a useful title, `language: "html"`,
+and one complete HTML document as `content`. Do not write a workspace file and
+do not bypass a missing artifact tool with a fenced block. If artifact authoring
+is unavailable, use an inline Mermaid diagram or concise prose instead.
 
 The document must:
 
@@ -114,7 +125,7 @@ Optional primitives are available in `references/primitive-annotation.md`, `refe
 
 Before returning the Artifact, verify:
 
-1. Exactly one fenced `html` block is present and the renderer marker is exact.
+1. Exactly one HTML artifact is created and the renderer marker is exact.
 2. The chosen type's reference and standard example were consulted.
 3. No `<script>`, `<link>`, `@import`, remote `src`/`href`, or external CSS/image URL remains.
 4. The SVG has a `viewBox`, width is responsive, and there is no fixed pixel `min-width`.

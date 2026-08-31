@@ -30,6 +30,27 @@ import type {
 
 export const RECORD_EVENT_CHANNEL = "record:event"
 
+/** Event the always-on-top controller listens on for collapse-state changes. */
+export const RECORDER_CONTROLLER_EVENT = "recorder:controller"
+
+/**
+ * Switch the floating controller between the expanded strip and the collapsed
+ * pill. Deliberately not a hide: while a recording runs there must always be
+ * something on screen that can stop it, which is why the controller window's
+ * capability grants no `core:window:allow-close` or `allow-hide`.
+ */
+export function recorderControllerSetCollapsed(collapsed: boolean): Promise<void> {
+  return transport.call<void>("recorder_controller_set_collapsed", { collapsed })
+}
+
+/**
+ * Begin an OS-level drag of the controller. Works on the non-activating panel
+ * without stealing focus from whatever is being recorded.
+ */
+export function recorderControllerBeginDrag(): Promise<void> {
+  return transport.call<void>("recorder_controller_begin_drag")
+}
+
 /** What blocks a recording on this machine right now, and why. */
 export function recordPreflight(): Promise<RecordPreflight> {
   return transport.call<RecordPreflight>("record_preflight")

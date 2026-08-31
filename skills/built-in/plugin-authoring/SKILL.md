@@ -1,6 +1,6 @@
 ---
 name: plugin-authoring
-description: Create a new Cognia plugin or extend an existing one from natural-language requirements, using the canonical generated plugin contract and public SDK surfaces. Use for Cognia plugin features, capabilities, contributions, runtimes, permissions, manifests, scaffolding, implementation, or validation. Route whole-bundle ecosystem import, export, migration, or porting to plugin-conversion instead.
+description: Create or extend a Cognia plugin through the current CLI contract and public SDK surfaces.
 category: development
 tags: [plugin, authoring, sdk, extension]
 allowed-tools:
@@ -11,10 +11,21 @@ allowed-tools:
   - Edit
   - Bash
 metadata:
-  surface: []
+  delivery: explicit
+  triggers:
+    surfaces: []
+    intents: [create-cognia-plugin, extend-cognia-plugin]
+  capability-requirements:
+    - capability: workspace
+      reason: plugin authoring reads and writes only inside the active workspace
+    - capability: cognia-cli
+      reason: canonical scaffold, contract, build, and verification commands come from the managed CLI
+  host-policies: [workspace-confined, host-consent, permission-ceiling, user-language]
 ---
 
 Produce a build-ready Cognia plugin. Never infer contract facts from memory or maintain a local capability list.
+
+This skill is explicit-only: use it only when the user attached or directly selected it. Attachment exposes guidance, not authority; workspace confinement, destructive-action confirmation, and the host permission ceiling still apply.
 
 ## Establish the contract
 

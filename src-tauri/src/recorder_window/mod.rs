@@ -174,8 +174,8 @@ mod tests {
 
     #[test]
     fn collapsed_size_is_smaller_in_both_axes() {
-        assert!(CONTROLLER_COLLAPSED_W < CONTROLLER_W);
-        assert!(CONTROLLER_COLLAPSED_H < CONTROLLER_H);
+        const { assert!(CONTROLLER_COLLAPSED_W < CONTROLLER_W) };
+        const { assert!(CONTROLLER_COLLAPSED_H < CONTROLLER_H) };
     }
 
     #[test]

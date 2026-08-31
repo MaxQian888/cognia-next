@@ -1,15 +1,25 @@
 ---
 name: OCR result handling
-description: How to work with text extracted from images or scanned documents via OCR. Use whenever you are reading, quoting, or acting on OCR output — to account for recognition errors, respect low-confidence regions, preserve document layout and structure, and avoid presenting a noisy scan as if it were clean ground truth.
+description: Extract and use OCR text with layout, confidence, PII, provenance, and error-aware verification.
 category: data-analysis
 tags:
   - ocr
   - extraction
 metadata:
-  surface: []
+  default-enabled: true
+  delivery: catalog
+  triggers:
+    surfaces: []
+    intents: [extract-text-from-image, read-scanned-document, verify-ocr-output]
+  capability-requirements:
+    - capability: ocr
+      reason: text extraction requires a host-projected OCR backend
+  host-policies: [permission-ceiling, pii-gate, user-language]
 ---
 
 OCR text is a best-effort guess at what's on a page, not a faithful transcript. Characters get confused (0/O, 1/l/I, rn/m), whitespace and column structure get mangled, and faint or rotated regions come out garbled. Treat the extracted text accordingly.
+
+Use only the OCR backend and source image the host made available. If OCR is unavailable, say so; do not substitute invented text or send the image to an unapproved cloud service.
 
 ## Read with the error model in mind
 - When a number, code, date, or identifier looks off, flag it rather than trusting it — a transposed digit in an invoice total or an account number is the kind of error OCR makes constantly and the kind that costs the most.

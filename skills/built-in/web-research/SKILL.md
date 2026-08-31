@@ -1,16 +1,28 @@
 ---
 name: Web research and verification
-description: How to research with web search and fetch tools and stand behind what you report. Use whenever you are searching the web, fetching pages, or answering a factual question from online sources — to focus queries, read the actual source instead of the snippet, corroborate claims across sources, cite where each fact came from, and separate what the sources say from what you're inferring.
+description: Research with available search/fetch routes, open primary sources, reconcile conflicts, and cite claims.
 category: data-analysis
 tags:
   - web
   - research
   - verification
 metadata:
-  surface: []
+  default-enabled: true
+  delivery: catalog
+  triggers:
+    surfaces: []
+    intents: [research-web, verify-online-fact, fetch-and-cite-source]
+  capability-requirements:
+    - capability: web-search
+      reason: discovery requires a configured host search provider
+    - capability: web-fetch
+      reason: verification requires opening the selected source rather than trusting snippets
+  host-policies: [network-policy, pii-gate, permission-ceiling, user-language]
 ---
 
 The value of web research is bringing back facts the user can trust. A confident answer assembled from search snippets you never opened is worse than no answer — it looks authoritative and can be wrong.
+
+Use the host-projected `web_search` and `web_fetch` tools. If search is unavailable, work only from URLs the user supplied or explain the limitation; never route a query through an undeclared network tool. Keep the report in the user's language.
 
 ## Query with intent
 - Make queries specific: include the version, the year, the exact error string, the proper noun. Broad queries return broad noise.

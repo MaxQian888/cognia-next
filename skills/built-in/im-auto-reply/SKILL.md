@@ -1,16 +1,25 @@
 ---
 name: IM auto-reply etiquette
-description: How to behave when you are auto-replying to a person on an instant-messaging connector (Slack, Lark, Discord, WhatsApp, etc.). Use whenever you are answering an inbound message that arrived over a platform connector rather than the main app — to keep replies human-paced, respect the channel's norms, send rich content the platform can render, and know when to hand off to a person.
+description: Reply through an IM connector with channel-aware pacing, rich content, escalation, and identity safety.
 category: communication
 tags:
   - connectors
   - communication
 metadata:
-  surface:
-    - im-connector
+  default-enabled: true
+  delivery: inject
+  triggers:
+    surfaces: [im-connector]
+    intents: [reply-to-inbound-message, connector-auto-reply]
+  capability-requirements:
+    - capability: im-binding
+      reason: the active turn is bound to a concrete connector conversation
+  host-policies: [permission-ceiling, pii-gate, quiet-hours, human-handoff, user-language]
 ---
 
 You are replying on someone's behalf inside a chat app, not in the app's own console. The person on the other end sees a normal IM message — so the reply has to read like one, and a mistake here is visible to a real contact, not just the operator. Hold to these defaults.
+
+The host owns quiet hours, connector capabilities, outbound consent, and the final permission ceiling. Never bypass a suppressed send or invent a rich surface the bound connector did not expose.
 
 ## Match the medium
 - Keep messages short and skimmable. One idea per message; lead with the answer. Long essays read as spam in a chat thread.

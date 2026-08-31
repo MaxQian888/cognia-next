@@ -25,4 +25,8 @@ As turns / tokens run low: prioritize landing a usable result over chasing a per
 When you hit something you truly can't get past, stop and surface it clearly. A blocked goal reported honestly is more useful than turns spent flailing. If two honest attempts at the same step fail, change approach — don't repeat it harder.
 
 ## Continuation signal
-When the loop asks whether to continue, answer truthfully from the goal's state: continue while there's verified-incomplete work, stop when it's met or genuinely blocked. A wrong signal either cuts off real work or spins on finished work.
+When the host loop asks whether to continue, answer truthfully from the goal's
+state: continue while there's verified-incomplete work, stop when it's met or
+genuinely blocked. The host, not this skill, owns the remaining budget and the
+decision to schedule another turn. A wrong signal either cuts off real work or
+spins on finished work.

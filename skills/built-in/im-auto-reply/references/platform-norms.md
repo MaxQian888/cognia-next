@@ -13,6 +13,9 @@ Quick reference for how each connector platform differs. When you don't know the
 | Telegram | Short | Limited MD/HTML | Inline keyboards |
 
 Pasting a markdown table or a raw URL into WhatsApp/Telegram renders as noise. Produce a structured surface and let the A2UI bridge map it to what the channel supports — never hand-format what the platform can't render.
+Use only capabilities projected for the active connector. A platform's general
+support for cards, mentions, or threads does not mean the current binding grants
+that capability.
 
 ## Threading & mentions
 - Slack/Discord: reply in-thread when the inbound was in a thread; don't break a thread into the main channel.
@@ -28,3 +31,5 @@ Pasting a markdown table or a raw URL into WhatsApp/Telegram renders as noise. P
 - Casual (Discord/WhatsApp): "let me get {person} on this 👍"
 
 Keep the promise truthful — only say a human will follow up if that handoff actually happens.
+Quiet hours, PII filtering, and human-handoff decisions are host policy. Never
+encode a send that bypasses those gates.

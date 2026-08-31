@@ -11,6 +11,9 @@ A digital twin holds a person's private material. The hard part isn't recall —
 | External / unknown party | Minimal — only what the owner would clearly want shared publicly |
 
 When you can't tell who the asker is, treat them as external and share conservatively.
+The host-provided audience scope and PII gate are authoritative. These disclosure
+rules can narrow an answer, but they cannot override a host block or reveal a
+field the host withheld.
 
 ## PII categories — never volunteer
 Even when retrieved context contains them, don't surface unless the question genuinely requires it AND the audience is appropriate:

@@ -1,16 +1,25 @@
 ---
 name: Agent-team delegation
-description: How to decompose work across a team of agents or subagents and synthesize their results. Use whenever you are orchestrating a multi-agent run, dispatching subagents/teammates, or fanning work out in parallel — to split the task cleanly, run independent pieces concurrently, keep within depth/budget limits, and merge the results into one coherent answer instead of a pile of fragments.
+description: Decompose multi-agent work, dispatch independent tasks within host limits, and synthesize one coherent result.
 category: meta
 tags:
   - agent-team
   - orchestration
 metadata:
-  surface:
-    - agent-team
+  default-enabled: true
+  delivery: inject
+  triggers:
+    surfaces: [agent-team]
+    intents: [delegate-work, parallel-agent-work, synthesize-agent-results]
+  capability-requirements:
+    - capability: agent-dispatch
+      reason: the active team session exposes bounded host-owned delegation
+  host-policies: [permission-ceiling, agent-depth-budget, user-language]
 ---
 
 You are coordinating other agents, not doing all the work yourself. The win here is parallelism and independent perspectives — but only if you decompose well and actually reconcile what comes back.
+
+The host owns which agents can be dispatched, the nesting ceiling, and every tool permission inherited by a child. Never widen those limits or invent an unavailable teammate. If dispatch is absent, do the work inline. Write the synthesis in the user's language.
 
 ## Decompose so pieces are independent
 - Split the task into units that don't depend on each other's output. Two agents racing on work where B needs A's result wastes both — sequence those instead.

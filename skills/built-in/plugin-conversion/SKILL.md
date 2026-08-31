@@ -1,14 +1,25 @@
 ---
 name: plugin-conversion
-description: Convert complete plugin bundles between Cognia and Claude Code, Codex, or Gemini CLI using Cognia's deterministic converter. Use when a user asks to import, export, migrate, port, or assess a plugin bundle across these ecosystems.
+description: Inspect and deterministically convert complete plugin bundles between supported ecosystems.
 allowed-tools:
   - inspect_plugin_conversion
   - apply_plugin_conversion
 metadata:
-  surface: []
+  delivery: explicit
+  triggers:
+    surfaces: []
+    intents: [inspect-plugin-conversion, apply-plugin-conversion, migrate-plugin-ecosystem]
+  capability-requirements:
+    - capability: workspace-backend
+      reason: source and output paths must resolve inside the active workspace
+    - capability: plugin-conversion-tools
+      reason: conversion is performed only by the host inspect and apply tools
+  host-policies: [workspace-confined, host-consent, permission-ceiling, user-language]
 ---
 
 Use Cognia's typed conversion tools; do not recreate converted manifests or runtime files yourself.
+
+This skill is explicit-only. Loading its instructions does not authorize an apply: the host owns workspace confinement, plan freshness, output-directory checks, and the desktop confirmation before writes.
 
 ## Inspect before writing
 

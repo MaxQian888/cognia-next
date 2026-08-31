@@ -1,6 +1,6 @@
 ---
 name: Chart Design
-description: Turn quantitative data into a live chart artifact that opens in Cognia's dock — comparisons, trends over time, distributions, compositions and correlations. Use when the user asks to chart, plot, graph, visualize numbers, show a trend, compare quantities, or break something down by share. For qualitative structure (architecture, flows, sequences, relationships) use diagram-design instead.
+description: Turn quantitative comparisons, trends, compositions, and correlations into live Cognia chart artifacts.
 category: data-analysis
 tags:
   - chart
@@ -11,7 +11,14 @@ license: MIT
 metadata:
   version: "1.0"
   default-enabled: true
-  surface: []
+  delivery: catalog
+  triggers:
+    surfaces: []
+    intents: [chart, plot, graph-quantitative-data, compare-quantities, show-trend]
+  capability-requirements:
+    - capability: artifact-authoring
+      reason: chart output requires the host artifact dock and artifact_create tool
+  host-policies: [artifact-channel, permission-ceiling, user-language]
 ---
 
 # Chart Design for Cognia
@@ -40,24 +47,9 @@ artifact_create({
 call `artifact_update` with its `artifactId` — the reader keeps the version
 history and reviews your change as a diff, instead of getting a second chart.
 
-If the tool is not available to you (the user turned agent authoring off, or
-this conversation is bound to a messaging platform with no dock), fall back to
-**exactly one fenced `json` block** with nothing else in the fence — a detector
-lifts it into the dock at the end of your turn.
-
-````
-```json
-{
-  "type": "bar",
-  "data": [
-    { "name": "Q1", "revenue": 182000, "cost": 141000 },
-    { "name": "Q2", "revenue": 205000, "cost": 148000 },
-    { "name": "Q3", "revenue": 199000, "cost": 152000 },
-    { "name": "Q4", "revenue": 261000, "cost": 160000 }
-  ]
-}
-```
-````
+This catalog skill is offered only when the host has exposed artifact authoring.
+If `artifact_create` is absent, do not try to bypass that decision with a fenced
+JSON block: use a compact markdown table or prose instead.
 
 ## The data contract
 
@@ -73,11 +65,9 @@ Hard requirements, each of which the renderer or the detector actually enforces:
   from the **first row only**, so every series must appear in `data[0]`. A series
   that starts at row two will not be drawn at all. Use `0` rather than omitting a
   key, and never `null`.
-- **Pretty-print it across at least three lines.** On the fence fallback the
-  artifact is lifted out of your reply by a detector with a line-count floor; a
-  single-line JSON blob is not picked up and the user sees raw JSON in the
-  transcript instead of a chart. Keep the same shape when passing it to
-  `artifact_create` so the two routes cannot drift.
+- **Pretty-print `content` across at least three lines.** This keeps stored
+  chart data reviewable and preserves compatibility with imported fenced-chart
+  artifacts, whose detector has a line-count floor.
 - **Do not specify colours, axis titles, widths or margins.** The renderer owns
   the palette so every chart in the app matches the user's theme in both light
   and dark. A `colors` or `options` key is ignored; hand-picked hex is how a
@@ -131,8 +121,8 @@ Guardrails worth honouring:
 - **Precise values matter more than shape** (a price list, a set of IDs, a table
   the user will copy from). Use a markdown table.
 - **The relationship is qualitative** — architecture, a flow, a sequence, a state
-  machine, an org chart, a timeline of events. That is `diagram-design`, or a
-  mermaid fence inline in your reply.
+  machine, an org chart, a timeline of events. That is `diagram-design`, or an
+  inline Mermaid diagram when the channel supports it.
 - **You are guessing at the data.** Never invent plausible-looking numbers to
   fill a chart. Ask, or chart only what you actually have and say which part is
   missing.
@@ -152,9 +142,9 @@ Guardrails worth honouring:
 
 ## Around the chart
 
-Put one or two sentences of prose **before** the fence saying what the chart
-shows and what the reader should notice — the finding, not a description of the
-axes. A chart with no reading is a shrug.
+Put one or two sentences of prose **before** creating the artifact saying what
+the chart shows and what the reader should notice — the finding, not a
+description of the axes. A chart with no reading is a shrug.
 
 If the user asked for the underlying numbers as well, give the table *and* the
 chart; they are cheap together and answer different questions.

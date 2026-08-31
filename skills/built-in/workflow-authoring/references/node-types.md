@@ -1,6 +1,9 @@
 # Workflow node taxonomy & validation
 
-Reference for building valid graphs with the `wf_*` tools. Read the live graph first; this just explains the kinds and the common failures.
+Reference for building valid graphs with the `wf_*` tools. Read the live graph
+with `wf_read_graph` first; this just explains the kinds and the common failures.
+Draft changes with `wf_propose_batch`. The host owns review and apply after user
+approval; do not call legacy direct-mutation tools to skip that proposal gate.
 
 ## Node kinds
 

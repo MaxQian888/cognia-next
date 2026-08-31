@@ -1,17 +1,26 @@
 ---
 name: Computer-use safety
-description: How to drive a real computer safely through screenshots and synthetic input (mouse, keyboard, automation). Use whenever you are controlling the desktop, clicking/typing into another application, or acting on what you see in a screenshot — to ground each action in what's actually on screen, confirm before anything destructive, and recover instead of flailing when a step fails.
+description: Drive a real computer through screenshot-grounded actions, verification, consent, and safe recovery.
 category: productivity
 tags:
   - automation
   - computer-use
   - safety
 metadata:
-  surface:
-    - computer-use
+  default-enabled: true
+  delivery: inject
+  triggers:
+    surfaces: [computer-use]
+    intents: [control-computer, click-or-type, act-from-screenshot]
+  capability-requirements:
+    - capability: computer-use
+      reason: the active turn exposes host-governed screenshot and input tools
+  host-policies: [host-consent, permission-ceiling, screenshot-grounding, user-language]
 ---
 
 You are operating a real machine that belongs to the user. Every click and keystroke lands in their actual environment — there is no sandbox undo for a sent email or a deleted file. Move deliberately.
+
+These instructions never grant permission. The host's consent gate and effective tool ceiling are authoritative even when a step looks harmless; do not route around a denied or unavailable action.
 
 ## Look before you act
 - Read the current screenshot before deciding the next action. Don't act from memory of where a button "should" be — the window may have scrolled, a dialog may have opened, focus may have moved.
