@@ -45,9 +45,14 @@ import { RuntimeSection } from "./sections/runtime-section"
 export interface DeviceDetailProps {
   row: DeviceRow | null
   actions: DeviceGrantActions
+  /**
+   * Opens the add-host sheet. A revoked host can only be paired again, not
+   * reconnected, so the card needs a way back to the flow that pairs one.
+   */
+  onRepairHost?: () => void
 }
 
-export function DeviceDetail({ row, actions }: DeviceDetailProps) {
+export function DeviceDetail({ row, actions, onRepairHost }: DeviceDetailProps) {
   const t = useTranslations("devices")
   const scroller = useRef<HTMLDivElement>(null)
   const ref = row?.ref ?? null
@@ -98,7 +103,7 @@ export function DeviceDetail({ row, actions }: DeviceDetailProps) {
             mostly empty card is the classic dashboard-grid failure. */}
         <div className="grid items-start gap-3.5 @3xl/device-pane:grid-cols-2">
           <OverviewSection row={row} />
-          <HostControls row={row} />
+          <HostControls row={row} onRepair={onRepairHost} />
           <CapabilitiesSection row={row} />
           <AccessSection row={row} actions={actions} />
           <RuntimeSection row={row} />

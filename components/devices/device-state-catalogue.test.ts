@@ -1,8 +1,9 @@
 /**
  * Every device grant state and reason must have a label, in both locales.
  *
- * `device-visuals.tsx` renders `t(\`grantState.${state}\`)` and
- * `access-section.tsx` renders `t(\`access.reason.${reasonKey}\`)` — both
+ * `device-visuals.tsx` renders `t(\`grantState.${state}\`)`,
+ * `access-section.tsx` renders `t(\`access.reason.${reasonKey}\`)`, and
+ * `host-controls.tsx` renders `t(\`host.state.${connectionState}\`)` — all
  * **dynamic** keys, which `pnpm lint:i18n` does not see. ADR-0149 §5 step two
  * added `suspended` / `ownerMismatch`, and a fifth state added without a label
  * would ship a badge reading `grantState.whatever` and pass every gate.
@@ -21,9 +22,20 @@ import zh from "@/i18n/messages/zh-CN/devices.json"
 /** Mirrors `DeviceGrantState`; the type is a union, so the values live here. */
 const GRANT_STATES = ["granted", "partial", "denied", "unknown", "suspended"] as const
 
+/** Mirrors `RemoteHostConnectionState`, pinned against the type below. */
+const CONNECTION_STATES = [
+  "disconnected",
+  "connecting",
+  "ready",
+  "degraded",
+  "revoked",
+  "versionMismatch",
+] as const
+
 type Catalogue = {
   grantState: Record<string, string>
   access: { reason: Record<string, string> }
+  host: { state: Record<string, string> }
 }
 
 const catalogues: Record<string, Catalogue> = {
@@ -66,6 +78,27 @@ describe("devices grant-state catalogue", () => {
   it.each(Object.keys(catalogues))("%s explains every reason a row can carry", (locale) => {
     const reasons = catalogues[locale]!.access.reason
     const missing = emittedReasonKeys().filter((key) => typeof reasons[key] !== "string")
+    expect(missing).toEqual([])
+  })
+
+  it("keeps the connection-state union in step with the type", () => {
+    const types = readFileSync(join(process.cwd(), "lib", "devices", "types.ts"), "utf8")
+    const declared = types
+      .match(/export type RemoteHostConnectionState =([\s\S]*?)\n\n/)![1]!
+      .split("|")
+      .map((part) => part.trim().replaceAll('"', ""))
+      .filter(Boolean)
+    expect(declared.sort()).toEqual([...CONNECTION_STATES].sort())
+  })
+
+  /**
+   * A host stuck in `degraded` or `versionMismatch` is exactly the row the
+   * console's attention count exists to surface. Shipping it with a label
+   * reading `host.state.degraded` would defeat the whole point.
+   */
+  it.each(Object.keys(catalogues))("%s labels every host connection state", (locale) => {
+    const labels = catalogues[locale]!.host.state
+    const missing = CONNECTION_STATES.filter((state) => typeof labels[state] !== "string")
     expect(missing).toEqual([])
   })
 

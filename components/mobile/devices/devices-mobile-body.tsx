@@ -156,7 +156,14 @@ export function DevicesMobileBody() {
           something definite to resolve against.
         */}
         <div className="h-[68vh] min-h-0">
-          <DeviceDetail row={selected} actions={actions} />
+          <DeviceDetail
+            row={selected}
+            actions={actions}
+            onRepairHost={() => {
+              setDetailOpen(false)
+              setAddHostOpen(true)
+            }}
+          />
         </div>
       </ResponsiveDetailSheet>
 

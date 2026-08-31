@@ -107,3 +107,59 @@ describe("HostControls", () => {
     expect(removeHost).toHaveBeenCalledWith("h1")
   })
 })
+
+/**
+ * `connectionState` has carried `degraded`, `versionMismatch` and `revoked`
+ * since ADR-0082, and `connectionError` has carried the reason. The header
+ * counted them and this card rendered neither, so a host stuck mid-handshake
+ * looked exactly like one nobody had connected yet.
+ */
+describe("connection health", () => {
+  it("names the state and the reason verbatim", () => {
+    render(
+      <HostControls
+        row={row({ connectionState: "degraded", connectionError: "capability probe timed out" })}
+      />
+    )
+    expect(screen.getByTestId("host-connection-state")).toHaveAttribute("data-state", "degraded")
+    expect(screen.getByTestId("host-connection-error")).toHaveTextContent(
+      "capability probe timed out"
+    )
+  })
+
+  it("offers a reconnect on a connected host, because connected can still be degraded", async () => {
+    render(
+      <HostControls
+        row={row({
+          connectionState: "degraded",
+          runtime: {
+            sandbox: { support: "unsupported", connections: [] },
+            shellTiers: [],
+            workspaces: { support: "supported" },
+            isRoutingTarget: true,
+          },
+        })}
+      />
+    )
+    await userEvent.click(screen.getByTestId("host-reconnect"))
+    expect(activateHost).toHaveBeenCalledWith("h1")
+  })
+
+  /**
+   * A host that threw this device out cannot be reconnected, only paired
+   * again. Offering Connect there sends the user round a loop.
+   */
+  it("replaces connect with re-pair on a revoked host", () => {
+    const onRepair = jest.fn()
+    render(<HostControls row={row({ connectionState: "revoked" })} onRepair={onRepair} />)
+    expect(screen.queryByTestId("host-connect")).not.toBeInTheDocument()
+    expect(screen.getByTestId("host-repair")).toBeInTheDocument()
+  })
+
+  it("shows the host's version when it is the thing to upgrade", () => {
+    render(
+      <HostControls row={row({ connectionState: "versionMismatch", serverVersion: "0.9.1" })} />
+    )
+    expect(screen.getByTestId("host-version-mismatch")).toHaveTextContent("0.9.1")
+  })
+})

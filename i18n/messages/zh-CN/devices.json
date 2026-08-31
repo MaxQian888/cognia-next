@@ -257,14 +257,25 @@
     "controlsHint": "连接后，本窗口的执行会以这台主机为目标。添加与发现主机仍留在设置中。",
     "connect": "连接",
     "disconnect": "断开",
+    "reconnect": "重新连接",
     "rename": "重命名",
     "renameLabel": "主机名称",
+    "repair": "重新配对",
     "save": "保存",
     "cancel": "取消",
     "remove": "移除",
     "removeAria": "移除 {label}",
     "removeTitle": "移除这台主机？",
-    "removeBody": "{label} 及其保存的凭据将被遗忘。需要重新配对才能再次连接。"
+    "removeBody": "{label} 及其保存的凭据将被遗忘。需要重新配对才能再次连接。",
+    "serverVersion": "主机报告 cognia {version}",
+    "state": {
+      "connecting": "连接中",
+      "degraded": "降级",
+      "disconnected": "未连接",
+      "ready": "就绪",
+      "revoked": "该设备已被吊销",
+      "versionMismatch": "需要升级"
+    }
   },
   "settingsLink": {
     "pairedTitle": "配对设备",

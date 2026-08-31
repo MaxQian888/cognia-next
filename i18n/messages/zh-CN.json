@@ -8868,13 +8868,24 @@
       "controls": "主机控制",
       "controlsHint": "连接后，本窗口的执行会以这台主机为目标。添加与发现主机仍留在设置中。",
       "disconnect": "断开",
+      "reconnect": "重新连接",
       "remove": "移除",
       "removeAria": "移除 {label}",
       "removeBody": "{label} 及其保存的凭据将被遗忘。需要重新配对才能再次连接。",
       "removeTitle": "移除这台主机？",
       "rename": "重命名",
       "renameLabel": "主机名称",
-      "save": "保存"
+      "repair": "重新配对",
+      "save": "保存",
+      "serverVersion": "主机报告 cognia {version}",
+      "state": {
+        "connecting": "连接中",
+        "degraded": "降级",
+        "disconnected": "未连接",
+        "ready": "就绪",
+        "revoked": "该设备已被吊销",
+        "versionMismatch": "需要升级"
+      }
     },
     "hostUnreachableBody": "无法向主机查询，因此生命周期状态与每项授权背后的具体能力来自本地镜像。在别处被挂起的设备在这里可能仍显示为正常。",
     "hostUnreachableTitle": "当前显示的是本地记录",
@@ -25783,6 +25794,11 @@
       "rollbackUnavailable": "该目标尚未部署过任何版本，没有可回滚的对象。",
       "rotateKey": "切换到已预配的密钥版本，需要管理员租约。",
       "upgrade": "在目标当前配置修订版本上部署新的不可变镜像摘要。"
+    },
+    "addAsHost": {
+      "action": "添加为远程主机",
+      "description": "把它添加为远程主机，之后可以从这里运行它的终端、文件与 Git。配对仍然需要在那台机器上执行 `cognia-server pair` 打印出的一次性邀请码，这里只是把地址带过去。",
+      "title": "从应用里驱动这台服务器"
     },
     "backups": {
       "description": "Agent 为该目标创建的恢复点，最新在前。",

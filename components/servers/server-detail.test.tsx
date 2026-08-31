@@ -191,3 +191,24 @@ it("shows a recovery point's size and kind so a restore is an informed choice", 
   expect(screen.getByText(/Volume snapshot/)).toBeInTheDocument()
   expect(screen.getByText("Verified")).toBeInTheDocument()
 })
+
+/**
+ * The two "server" vocabularies never met: an ops-controller `ServerSummary.id`
+ * and a `RemoteHost.id` are unrelated id spaces, so the machine you just
+ * deployed onto could not be reached from `/devices` without hunting for its
+ * address by hand.
+ */
+it("hands the server's address to the add-host flow", () => {
+  renderDetail()
+  const link = screen.getByTestId("server-add-as-host").querySelector("a")
+  expect(link).toHaveAttribute(
+    "href",
+    "/devices?addHost=1&baseUrl=https%3A%2F%2Fserver.example.com"
+  )
+})
+
+/** No address means nothing honest to hand over. */
+it("offers no hand-off for a server with no public URL", () => {
+  renderDetail({ server: server({ publicUrl: "" }) })
+  expect(screen.queryByTestId("server-add-as-host")).not.toBeInTheDocument()
+})

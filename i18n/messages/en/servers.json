@@ -25,6 +25,11 @@
     "rotateKey": "Switch to a pre-provisioned key version. Requires an admin lease.",
     "upgrade": "Deploy new immutable image digests at the target's current configuration revision."
   },
+  "addAsHost": {
+    "title": "Drive this server from the app",
+    "description": "Add it as a remote host so this app can run its terminal, files and git. Pairing still needs the one-shot invitation that `cognia-server pair` prints on the machine itself; this only carries the address across.",
+    "action": "Add as a remote host"
+  },
   "backups": {
     "description": "Recovery points the agent has taken for this target, newest first.",
     "empty": "Take a backup to create the first recovery point.",

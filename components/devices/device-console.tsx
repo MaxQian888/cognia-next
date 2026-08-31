@@ -244,7 +244,11 @@ export function DeviceConsole() {
           </Alert>
         ) : null}
         <div className="min-h-0 flex-1">
-          <DeviceDetail row={selected} actions={actions} />
+          <DeviceDetail
+            row={selected}
+            actions={actions}
+            onRepairHost={() => setAddHostOpen(true)}
+          />
         </div>
       </div>
 

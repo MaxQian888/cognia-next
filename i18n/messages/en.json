@@ -8868,13 +8868,24 @@
       "controls": "Host controls",
       "controlsHint": "Connecting makes this host the execution target for this window. Adding and discovering hosts stays in Settings.",
       "disconnect": "Disconnect",
+      "reconnect": "Reconnect",
       "remove": "Remove",
       "removeAria": "Remove {label}",
       "removeBody": "{label} will be forgotten, along with its stored credential. Pair with it again to reconnect.",
       "removeTitle": "Remove this host?",
       "rename": "Rename",
       "renameLabel": "Host name",
-      "save": "Save"
+      "repair": "Pair again",
+      "save": "Save",
+      "serverVersion": "Host reports cognia {version}",
+      "state": {
+        "connecting": "Connecting",
+        "degraded": "Degraded",
+        "disconnected": "Not connected",
+        "ready": "Ready",
+        "revoked": "This device was revoked",
+        "versionMismatch": "Upgrade required"
+      }
     },
     "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
     "hostUnreachableTitle": "Showing the local record",
@@ -25783,6 +25794,11 @@
       "rollbackUnavailable": "No release has been deployed to this target yet, so there is nothing to roll back to.",
       "rotateKey": "Switch to a pre-provisioned key version. Requires an admin lease.",
       "upgrade": "Deploy new immutable image digests at the target's current configuration revision."
+    },
+    "addAsHost": {
+      "action": "Add as a remote host",
+      "description": "Add it as a remote host so this app can run its terminal, files and git. Pairing still needs the one-shot invitation that `cognia-server pair` prints on the machine itself; this only carries the address across.",
+      "title": "Drive this server from the app"
     },
     "backups": {
       "description": "Recovery points the agent has taken for this target, newest first.",

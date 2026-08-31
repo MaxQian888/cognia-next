@@ -12,6 +12,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 import {
   ArchiveRestoreIcon,
   DatabaseBackupIcon,
@@ -20,6 +21,7 @@ import {
   PlugZapIcon,
   RotateCcwIcon,
   ScanSearchIcon,
+  ServerIcon,
   ShieldAlertIcon,
   SquareArrowUpIcon,
   StethoscopeIcon,
@@ -344,6 +346,30 @@ export function ServerDetailView({
                 onAction={actions.onCollectLogs}
               />
             </div>
+
+            {/*
+              The two "server" vocabularies in this app never met. A machine
+              you deploy Cognia onto here has an ops-controller id; a machine
+              this app can drive has a `RemoteHost.id`, and nothing connected
+              them, so the server you just deployed to could not be reached
+              from `/devices` without hunting for its address by hand.
+
+              This is a hand-off, not an auto-pair: the invitation is one-shot
+              and is printed on the host by `cognia-server pair`. All the
+              bridge can honestly do is carry the address across and say so.
+            */}
+            {server.publicUrl ? (
+              <section className="rounded-lg border p-4" data-testid="server-add-as-host">
+                <h3 className="text-sm font-medium">{t("addAsHost.title")}</h3>
+                <p className="mt-1 text-xs text-muted-foreground">{t("addAsHost.description")}</p>
+                <Button asChild variant="outline" size="sm" className="mt-3">
+                  <Link href={`/devices?addHost=1&baseUrl=${encodeURIComponent(server.publicUrl)}`}>
+                    <ServerIcon className="size-4" aria-hidden="true" />
+                    {t("addAsHost.action")}
+                  </Link>
+                </Button>
+              </section>
+            ) : null}
 
             {latestBackup && (
               <section className="rounded-lg border bg-card p-4">

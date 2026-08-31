@@ -257,14 +257,25 @@
     "controlsHint": "Connecting makes this host the execution target for this window. Adding and discovering hosts stays in Settings.",
     "connect": "Connect",
     "disconnect": "Disconnect",
+    "reconnect": "Reconnect",
     "rename": "Rename",
     "renameLabel": "Host name",
+    "repair": "Pair again",
     "save": "Save",
     "cancel": "Cancel",
     "remove": "Remove",
     "removeAria": "Remove {label}",
     "removeTitle": "Remove this host?",
-    "removeBody": "{label} will be forgotten, along with its stored credential. Pair with it again to reconnect."
+    "removeBody": "{label} will be forgotten, along with its stored credential. Pair with it again to reconnect.",
+    "serverVersion": "Host reports cognia {version}",
+    "state": {
+      "connecting": "Connecting",
+      "degraded": "Degraded",
+      "disconnected": "Not connected",
+      "ready": "Ready",
+      "revoked": "This device was revoked",
+      "versionMismatch": "Upgrade required"
+    }
   },
   "settingsLink": {
     "pairedTitle": "Paired devices",
