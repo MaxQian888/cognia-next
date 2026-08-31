@@ -20733,6 +20733,7 @@
       "noProject": "尚未选择项目。",
       "pickBundleTitle": "选择要安装的插件包",
       "pickProject": "选择项目…",
+      "pickProjectDesktopOnly": "选择项目目录需要桌面端应用。",
       "pickProjectTitle": "选择插件项目目录",
       "title": "运行 cognia 命令"
     },

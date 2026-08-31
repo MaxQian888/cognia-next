@@ -153,10 +153,16 @@ export async function saveBinaryFileAs(opts: SaveBinaryFileOptions): Promise<boo
   return true
 }
 
-/** Pick a directory (Tauri only). Returns null if the user cancels or web. */
-export async function pickDirectory(): Promise<string | null> {
+/**
+ * Pick a directory (Tauri only). Returns null if the user cancels or web.
+ *
+ * `title` names the native dialog. Optional because most callers want the
+ * platform default, and carried here so a caller that had its own title does
+ * not lose it by moving onto the shared picker.
+ */
+export async function pickDirectory(title?: string): Promise<string | null> {
   if (!isTauri()) return null
-  const picked = await open({ directory: true, multiple: false })
+  const picked = await open({ directory: true, multiple: false, ...(title ? { title } : {}) })
   if (!picked) return null
   return Array.isArray(picked) ? (picked[0] ?? null) : picked
 }

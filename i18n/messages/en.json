@@ -20733,6 +20733,7 @@
       "noProject": "No project selected.",
       "pickBundleTitle": "Select a plugin bundle to install",
       "pickProject": "Choose project…",
+      "pickProjectDesktopOnly": "Choosing a project folder needs the desktop app.",
       "pickProjectTitle": "Select a plugin project directory",
       "title": "Run cognia commands"
     },

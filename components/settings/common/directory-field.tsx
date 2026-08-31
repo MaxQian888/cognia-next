@@ -3,23 +3,22 @@
 /**
  * Absolute-path field with a native directory picker.
  *
- * Six settings surfaces pair `pickDirectory()` with an `<Input>` by hand; this
- * is that pairing once, including the part everyone re-derives: the picker only
- * exists on the desktop shell (`pickDirectory` resolves to `null` off Tauri), so
- * the text input is the real control everywhere and the Browse button is the
- * shortcut. Rendering a Browse button that silently does nothing on web is the
- * failure mode this avoids.
+ * The common layout for the pairing every path field needs: a text input that
+ * is the real control on every shell, plus a Browse shortcut only where a
+ * picker exists. Rendering a Browse button that silently does nothing on web
+ * is the failure mode this avoids.
+ *
+ * The decision behind that gate lives in `useDirectoryPicker`, shared with the
+ * surfaces whose layout is a compact icon button rather than this one. Read
+ * that hook for why there is no remote-host fallback.
  *
  * Labels are props rather than a namespace lookup so each caller keeps its own
- * i18n keys — the component never owns user-facing text.
+ * i18n keys. The component never owns user-facing text.
  */
-
-import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { pickDirectory } from "@/lib/files/file-bridge"
-import { isTauri } from "@/lib/tauri"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 
 export interface DirectoryFieldProps {
   value: string
@@ -44,24 +43,19 @@ export function DirectoryField({
   ariaLabel,
   browseLabel,
   disabled,
-  pick = pickDirectory,
-  hasPicker = isTauri,
+  pick,
+  hasPicker,
 }: DirectoryFieldProps) {
-  const [browsing, setBrowsing] = useState(false)
-  // Same gate `pickDirectory` itself applies, read here so the button is absent
-  // rather than present-and-inert on web and mobile.
-  const canBrowse = hasPicker()
+  const picker = useDirectoryPicker({
+    ...(pick ? { pick } : {}),
+    ...(hasPicker ? { hasPicker } : {}),
+  })
 
   async function browse() {
-    setBrowsing(true)
-    try {
-      const picked = await pick()
-      if (!picked) return // cancelled
-      onChange(picked)
-      onCommit(picked)
-    } finally {
-      setBrowsing(false)
-    }
+    const picked = await picker.browse()
+    if (!picked) return // cancelled, or no picker on this shell
+    onChange(picked)
+    onCommit(picked)
   }
 
   return (
@@ -75,13 +69,13 @@ export function DirectoryField({
         disabled={disabled}
         className="min-w-0 flex-1"
       />
-      {canBrowse && (
+      {picker.available && (
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="shrink-0"
-          disabled={disabled || browsing}
+          disabled={disabled || picker.busy}
           onClick={() => void browse()}
         >
           {browseLabel}

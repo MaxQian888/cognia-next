@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { DirectoryField } from "@/components/settings/common/directory-field"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -19,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CalendarClockIcon, ExternalLinkIcon, FolderIcon, SparklesIcon } from "lucide-react"
+import { CalendarClockIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@cognia/agent-config-types"
@@ -43,6 +44,9 @@ export function ScheduleCard() {
   const config = settings?.backupAutoSchedule ?? DEFAULT_BACKUP_AUTO_SCHEDULE
   const reminderDays = settings?.backupReminderDays ?? 7
   const [busy, setBusy] = useState(false)
+  // Local draft so typing does not write on every keystroke. Committed on blur
+  // and immediately after a pick, which is `DirectoryField`'s contract.
+  const [folderDraft, setFolderDraft] = useState(config.dirPath ?? "")
   const [cloudProviderId, setCloudProviderId] = useState<LocalCloudProviderId>("google-drive")
 
   const update = async (next: Partial<typeof config>) => {
@@ -57,15 +61,12 @@ export function ScheduleCard() {
     }
   }
 
-  const pickFolder = async () => {
-    if (!isTauri()) return
+  const commitFolder = async (dirPath: string) => {
+    const next = dirPath.trim()
+    if (!next || next === (config.dirPath ?? "")) return
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const picked = await open({ directory: true, multiple: false })
-      if (typeof picked === "string") {
-        await update({ dirPath: picked })
-        toast.success(t("folderSet"))
-      }
+      await update({ dirPath: next })
+      toast.success(t("folderSet"))
     } catch (error) {
       log.error("schedule-folder-pick-failed", { error })
       toast.error(error instanceof Error ? error.message : String(error))
@@ -147,18 +148,25 @@ export function ScheduleCard() {
         </div>
       </div>
 
+      {/* The destination is settable on every shell. It used to be a read-only
+          input inside this `isTauri()` block, so off the desktop there was no
+          way to configure a backup directory at all, even though the headless
+          host writes backups through its own filesystem adapter. */}
+      <div className="space-y-1">
+        <Label className="text-[11px]">{t("folderLabel")}</Label>
+        <DirectoryField
+          value={folderDraft}
+          onChange={setFolderDraft}
+          onCommit={(next) => void commitFolder(next)}
+          placeholder={t("folderPlaceholder")}
+          ariaLabel={t("folderLabel")}
+          browseLabel={t("pickFolder")}
+          disabled={busy}
+        />
+      </div>
+
       {isTauri() && (
         <div className="space-y-3">
-          <div className="space-y-1">
-            <Label className="text-[11px]">{t("folderLabel")}</Label>
-            <div className="flex gap-2">
-              <Input value={config.dirPath ?? ""} readOnly placeholder={t("folderPlaceholder")} />
-              <Button variant="outline" size="sm" onClick={() => void pickFolder()}>
-                <FolderIcon className="mr-1 size-4" />
-                {t("pickFolder")}
-              </Button>
-            </div>
-          </div>
           <div className="space-y-1 rounded-md border p-3">
             <Label className="text-[11px]" htmlFor="backup-cloud-provider">
               {t("cloudProviderLabel")}

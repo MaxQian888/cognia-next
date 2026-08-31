@@ -33,6 +33,15 @@ const dialogOpen = jest.fn()
 jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: (...args: unknown[]) => dialogOpen(...args),
 }))
+// The project picker now goes through the shared `pickDirectory`, which is the
+// only thing that keeps this reachable-on-web component from throwing at
+// `invoke`. Devtools is gated on a feature flag, not on the desktop shell.
+const pickDirectoryMock = jest.fn(async (): Promise<string | null> => null)
+jest.mock("@/lib/files/file-bridge", () => ({
+  pickDirectory: (...a: unknown[]) => pickDirectoryMock(...(a as [])),
+}))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+const isTauriMock = jest.requireMock("@/lib/tauri").isTauri as jest.Mock
 
 const toastWarning = jest.fn()
 const toastError = jest.fn()
@@ -68,6 +77,8 @@ function renderLauncher() {
 }
 
 beforeEach(() => {
+  isTauriMock.mockReturnValue(true)
+  pickDirectoryMock.mockReset()
   jest.clearAllMocks()
   useDevProjectStore.getState().clearProject()
   usePluginDevSessionStore.getState().clear()
@@ -108,7 +119,7 @@ describe("CogniaCliLauncher", () => {
   })
 
   it("picks a project directory and validates its manifest", async () => {
-    dialogOpen.mockResolvedValue("/picked/plugin")
+    pickDirectoryMock.mockResolvedValue("/picked/plugin")
     previewLocalManifest.mockResolvedValue({ name: "Picked Plugin", version: "1.0.0" })
     renderLauncher()
     await userEvent.click(screen.getByTestId("cognia-cli-pick-project"))
@@ -118,7 +129,7 @@ describe("CogniaCliLauncher", () => {
   })
 
   it("warns but still records the dir when the folder has no valid manifest", async () => {
-    dialogOpen.mockResolvedValue("/picked/notaplugin")
+    pickDirectoryMock.mockResolvedValue("/picked/notaplugin")
     previewLocalManifest.mockRejectedValue(new Error("no plugin.json"))
     renderLauncher()
     await userEvent.click(screen.getByTestId("cognia-cli-pick-project"))
@@ -145,6 +156,7 @@ describe("CogniaCliLauncher", () => {
   })
 
   it("installs a picked bundle via `cognia plugin install`", async () => {
+    // A FILE picker, not a directory one, so it stays on the raw dialog.
     dialogOpen.mockResolvedValue("/bundles/demo.zip")
     renderLauncher()
     await userEvent.click(screen.getByTestId("cognia-cli-run-install"))
@@ -159,5 +171,18 @@ describe("CogniaCliLauncher", () => {
     renderLauncher()
     await userEvent.click(screen.getByTestId("cognia-cli-run-lint"))
     expect(toastError).toHaveBeenCalled()
+  })
+
+  it("disables the picker with a reason where no picker exists", async () => {
+    // This component is reachable on web (devtools is flag-gated, not
+    // desktop-gated) and used to call `dialog.open` inside a try/finally with
+    // no catch, so clicking it produced an unhandled rejection.
+    isTauriMock.mockReturnValue(false)
+    render(<CogniaCliLauncher />)
+
+    const button = await screen.findByTestId("cognia-cli-pick-project")
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute("title")
+    expect(pickDirectoryMock).not.toHaveBeenCalled()
   })
 })

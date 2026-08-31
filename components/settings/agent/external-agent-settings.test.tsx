@@ -402,6 +402,9 @@ describe("ExternalAgentSettings — preset onboarding", () => {
 
   it("appends a folder chosen via Browse and never duplicates it", async () => {
     const user = userEvent.setup()
+    // The affordance exists only where a picker does. It used to render on
+    // every shell and do nothing at all when clicked.
+    isTauriMock.mockReturnValue(true)
     pickDirectoryMock.mockResolvedValue("/picked/skills")
     render(<ExternalAgentSettings />)
     await act(async () => {
@@ -420,6 +423,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
 
   it("leaves the skill roots unchanged when the folder picker is cancelled", async () => {
     const user = userEvent.setup()
+    isTauriMock.mockReturnValue(true)
     pickDirectoryMock.mockResolvedValue(null)
     render(<ExternalAgentSettings />)
     await act(async () => {
@@ -756,5 +760,22 @@ describe("ExternalAgentSettings — mandatory sandbox platform gate", () => {
     expect(screen.getByTestId("external-agent-sandbox-unavailable")).toHaveTextContent(
       /mandatory sandbox/i
     )
+  })
+
+  it("offers no directory affordance where no picker exists", async () => {
+    // `pickDirectory` resolves null off Tauri, so both of these buttons used to
+    // be present-and-inert: a click did nothing and nothing said why. The
+    // textarea and the working-directory input are the controls there.
+    const user = userEvent.setup()
+    isTauriMock.mockReturnValue(false)
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("preset-pick-codex-app-server"))
+    })
+
+    expect(await screen.findByTestId("codex-skill-roots")).toBeInTheDocument()
+    expect(screen.queryByTestId("codex-skill-roots-browse")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("cwd-browse")).not.toBeInTheDocument()
+    expect(pickDirectoryMock).not.toHaveBeenCalled()
   })
 })

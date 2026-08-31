@@ -43,7 +43,7 @@ import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsand
 import { isTauri } from "@/lib/tauri"
 import { platform as tauriPlatform } from "@tauri-apps/plugin-os"
 import { cn } from "@/lib/utils"
-import { pickDirectory } from "@/lib/files/file-bridge"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { toast } from "@/components/ui/sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -370,6 +370,9 @@ function AgentEditorDialog({
   // the form fields and stamps `metadata.preset` on save so `isFromPreset()`
   // can later badge the row.
   const [selectedPreset, setSelectedPreset] = useState<string>(initialPreset ?? "")
+  // Both path affordances below are this device's filesystem: an external agent
+  // spawns through a local process, so there is no host to browse instead.
+  const directoryPicker = useDirectoryPicker()
 
   const [formData, setFormData] = useState<AgentFormData>(() => {
     // Quick-start gallery: open with the preset's defaults so the user only
@@ -922,19 +925,27 @@ function AgentEditorDialog({
                         onChange={(e) => setFormData({ ...formData, processCwd: e.target.value })}
                         placeholder={t("cwdPlaceholder")}
                       />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        aria-label={t("codexSkillRootsBrowse")}
-                        data-testid="cwd-browse"
-                        onClick={async () => {
-                          const dir = await pickDirectory()
-                          if (dir) setFormData((prev) => ({ ...prev, processCwd: dir }))
-                        }}
-                      >
-                        <FolderPlus className="h-4 w-4" />
-                      </Button>
+                      {/* The path is this device's: an external agent spawns
+                          through a local process, so there is nothing to
+                          browse without a native picker and the input is the
+                          control. The button used to render regardless and do
+                          nothing at all when clicked. */}
+                      {directoryPicker.available && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label={t("codexSkillRootsBrowse")}
+                          data-testid="cwd-browse"
+                          disabled={directoryPicker.busy}
+                          onClick={async () => {
+                            const dir = await directoryPicker.browse()
+                            if (dir) setFormData((prev) => ({ ...prev, processCwd: dir }))
+                          }}
+                        >
+                          <FolderPlus className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </>
@@ -1123,24 +1134,30 @@ function AgentEditorDialog({
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="codexExtraSkillRoots">{t("codexExtraSkillRoots")}</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    data-testid="codex-skill-roots-browse"
-                    onClick={async () => {
-                      const dir = await pickDirectory()
-                      if (!dir) return
-                      setFormData((prev) => {
-                        const roots = parseSkillRootLines(prev.codexExtraSkillRoots)
-                        if (roots.includes(dir)) return prev
-                        return { ...prev, codexExtraSkillRoots: [...roots, dir].join("\n") }
-                      })
-                    }}
-                  >
-                    <FolderPlus className="h-4 w-4" />
-                    {t("codexSkillRootsBrowse")}
-                  </Button>
+                  {/* Same reasoning as the working-directory button above: the
+                      textarea beside it is the control on a shell with no
+                      picker, and this used to render inert. */}
+                  {directoryPicker.available && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid="codex-skill-roots-browse"
+                      disabled={directoryPicker.busy}
+                      onClick={async () => {
+                        const dir = await directoryPicker.browse()
+                        if (!dir) return
+                        setFormData((prev) => {
+                          const roots = parseSkillRootLines(prev.codexExtraSkillRoots)
+                          if (roots.includes(dir)) return prev
+                          return { ...prev, codexExtraSkillRoots: [...roots, dir].join("\n") }
+                        })
+                      }}
+                    >
+                      <FolderPlus className="h-4 w-4" />
+                      {t("codexSkillRootsBrowse")}
+                    </Button>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground">{t("codexExtraSkillRootsDesc")}</p>
                 <Textarea

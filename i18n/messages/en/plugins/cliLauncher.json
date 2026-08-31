@@ -18,5 +18,6 @@
   "pickBundleTitle": "Select a plugin bundle to install",
   "pickProject": "Choose project…",
   "pickProjectTitle": "Select a plugin project directory",
+  "pickProjectDesktopOnly": "Choosing a project folder needs the desktop app.",
   "title": "Run cognia commands"
 }

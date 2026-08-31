@@ -30,6 +30,7 @@ import { Card } from "@/components/ui/card"
 import { InstalledMarker } from "@/components/plugins/_shared/installed-marker"
 import { useCogniaCliStatus } from "@/hooks/plugins/use-cognia-cli-status"
 import { useDevProjectStore } from "@/stores/plugins/dev-project-store"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { usePluginDevSessionStore } from "@/stores/plugins/plugin-dev-session-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { launchCognia } from "@/lib/terminal/run-cognia"
@@ -61,24 +62,19 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
   const projectName = useDevProjectStore((s) => s.projectName)
   const setProject = useDevProjectStore((s) => s.setProject)
   const [picking, setPicking] = useState(false)
+  // The devtools section is gated on the `devtools` feature flag, NOT on the
+  // desktop shell, so this component is reachable on web. The raw dialog import
+  // below resolved fine there and then threw on `invoke`, inside a try/finally
+  // with no catch, which surfaced as an unhandled rejection.
+  const directoryPicker = useDirectoryPicker({ title: t("pickProjectTitle") })
   const [busyKey, setBusyKey] = useState<CommandKey | null>(null)
 
   const bridgeDown = !(status.bridge?.running ?? false)
 
-  async function pickDirectory(): Promise<string | null> {
-    const dialog = await import("@tauri-apps/plugin-dialog")
-    const picked = await dialog.open({
-      directory: true,
-      multiple: false,
-      title: t("pickProjectTitle"),
-    })
-    return typeof picked === "string" ? picked : null
-  }
-
   async function handlePickProject() {
     setPicking(true)
     try {
-      const picked = await pickDirectory()
+      const picked = await directoryPicker.browse()
       if (!picked) return
       let name: string | null = null
       try {
@@ -162,7 +158,8 @@ export function CogniaCliLauncher({ className }: { className?: string }) {
                 size="sm"
                 variant="outline"
                 onClick={() => void handlePickProject()}
-                disabled={picking}
+                disabled={picking || !directoryPicker.available}
+                title={directoryPicker.available ? undefined : t("pickProjectDesktopOnly")}
                 data-testid="cognia-cli-pick-project"
               >
                 {picking ? (

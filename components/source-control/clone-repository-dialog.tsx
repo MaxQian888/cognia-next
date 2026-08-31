@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
-import { pickDirectory } from "@/lib/files/file-bridge"
+import { useDirectoryPicker } from "@/hooks/files/use-directory-picker"
 import { gitClone, runGitUserAction } from "@/lib/git/commands"
 import { gitTargetFromRemote } from "@/lib/git/target"
 import { asGitError } from "@/types/git"
@@ -38,6 +38,7 @@ export function CloneRepositoryDialog({
   const t = useTranslations("sourceControl")
   const [remoteUrl, setRemoteUrl] = useState("")
   const [destination, setDestination] = useState("")
+  const directoryPicker = useDirectoryPicker()
   const [cloning, setCloning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [authRequired, setAuthRequired] = useState(false)
@@ -53,7 +54,7 @@ export function CloneRepositoryDialog({
 
   const browse = async () => {
     try {
-      const picked = await pickDirectory()
+      const picked = await directoryPicker.browse()
       if (picked) setDestination(picked)
     } catch {
       setError(t("clone.browseFailed"))
@@ -123,13 +124,17 @@ export function CloneRepositoryDialog({
                 autoComplete="off"
                 data-testid="clone-destination"
               />
-              {!remoteWorkspaceId && (
+              {/* `remoteWorkspaceId` answers "is this destination a relative
+                  path on a host", which is not the same question as "is there
+                  a picker". Off Tauri this rendered and did nothing, leaving
+                  the typed destination as the only route with no sign of it. */}
+              {!remoteWorkspaceId && directoryPicker.available && (
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
                   onClick={() => void browse()}
-                  disabled={cloning}
+                  disabled={cloning || directoryPicker.busy}
                   aria-label={t("clone.browse")}
                   data-testid="clone-browse"
                 >

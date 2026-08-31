@@ -6,6 +6,11 @@ jest.mock("@/lib/git/commands", () => ({
   runGitUserAction: (_command: string, operation: () => Promise<unknown>) => operation(),
 }))
 
+// Whether a native picker exists decides whether the Browse affordance is
+// offered at all. Stated here rather than inherited, since jsdom reports no
+// Tauri and the suite is about the picker.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+const isTauriMock = jest.requireMock("@/lib/tauri").isTauri as jest.Mock
 jest.mock("@/lib/files/file-bridge", () => ({
   pickDirectory: () => pickDirectory(),
 }))
@@ -16,6 +21,7 @@ import { CloneRepositoryDialog } from "./clone-repository-dialog"
 import { parseGitTarget } from "@/lib/git/target"
 
 beforeEach(() => {
+  isTauriMock.mockReturnValue(true)
   gitClone.mockReset()
   pickDirectory.mockReset()
 })
@@ -158,5 +164,16 @@ describe("CloneRepositoryDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled()
     finishClone("/work/repo")
     await waitFor(() => expect(onCloned).toHaveBeenCalledWith("/work/repo"))
+  })
+
+  it("drops the Browse affordance where no picker exists", async () => {
+    // The gate used to be `!remoteWorkspaceId`, which answers whether the
+    // destination is a relative path on a host, not whether a picker exists.
+    // Off Tauri the button rendered and did nothing.
+    isTauriMock.mockReturnValue(false)
+    render(<CloneRepositoryDialog open onOpenChange={() => {}} />)
+
+    expect(await screen.findByTestId("clone-destination")).toBeInTheDocument()
+    expect(screen.queryByTestId("clone-browse")).not.toBeInTheDocument()
   })
 })
