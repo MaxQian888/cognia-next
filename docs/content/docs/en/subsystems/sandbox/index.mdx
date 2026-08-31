@@ -40,8 +40,8 @@ different isolation mechanisms. Read this table first.
 | **Rendering sandbox**   | One-shot model artifacts (HTML / SVG / React)            | iframe + CSP + DOMPurify (see [Artifacts / Sandbox](../artifacts-sandbox)) | —    | Stable                                  |
 
 There is no fifth family. `lib/sandbox/web` used to hold a stub for a "web code-execution sandbox"
-that was never shipped and had no caller; it was removed. Running JS / TS / JSX / HTML / CSS in the
-browser is `lib/native/code-execution-strategy.ts` (a `sandbox="allow-scripts"` `srcdoc` iframe),
+that was never shipped and had no caller; it was removed. Running JavaScript / HTML / CSS in the
+browser is `lib/native/code-execution-strategy.ts` (an opaque `sandbox="allow-scripts"` `srcdoc` iframe),
 which the Canvas execution panel uses on every shell; Python on that panel is desktop-only and goes
 to the Rust `canvas_run_python`.
 
@@ -63,7 +63,7 @@ flowchart TB
   subgraph Plugin["Plugin isolation (ADR-0028)"]
     PS["PluginSandbox (renderer)"]
     T2["launchPluginJs (T2, node --permission)"]
-    T3["wasm-runtime (T3, Wasmtime/WASI)"]
+    T3["native host (T3, Rust/Wasmtime)"]
   end
 
   subgraph CUA["CUA remote sandbox (ADR-0020)"]
@@ -134,7 +134,7 @@ flowchart TB
   <Folder name="lib/plugin/ (plugin isolation)">
     <File name="core/sandbox.ts — PluginSandbox (renderer globals)" />
     <File name="launcher/launchPluginJs.ts — T2 node --permission flags" />
-    <File name="core/wasm-runtime.ts — T3 Wasmtime/WASI" />
+    <File name="core/wasm-loader.ts — generation-bound T3 bridge" />
   </Folder>
   <Folder name="UI + data">
     <File name="components/chat/composer/sandbox-shield.tsx — composer indicator" />

@@ -235,8 +235,10 @@ queues its fixed prompt through `queuePendingChatPrompt`, and lands the user in
 that conversation — so the first output goes through the production send path
 rather than a special one.
 
-The built-in `cognia-onboarding` skill shapes that conversation: do not re-greet,
-ask at most one question, finish in this turn, create nothing else.
+The built-in `cognia-onboarding` skill shapes the complete logical request: do
+not re-greet, ask at most one missing path/URL question, keep the request durable
+across retries or reloads, and create nothing else. It succeeds only after the
+visible result and its matching tool receipt are durable in message history.
 
 ### Anti-forgery without a server
 

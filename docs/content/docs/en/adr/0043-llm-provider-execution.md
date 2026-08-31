@@ -143,3 +143,32 @@ text would break that on a path that runs for every routed turn.
 `analyzeRoutingCalibration` also reports how the judge behaved — consulted,
 agreed, overrode, mean latency — because whether a second-opinion layer earns its
 cost is an empirical question, not an architectural one.
+
+### Phase 11 — Reachable parameters and provider-scoped admission (Accepted, implemented)
+
+The provider catalog and parameter registry now form one tested contract. Every
+built-in id has exactly one protocol, credential mode, model-source set,
+parameter schema, persistence target, and runtime adapter in
+`provider-contract-matrix.ts`; custom rows inherit the schema of their declared
+protocol but keep `customProviders` as their persistence target. The registry
+uses the catalog id `togetherai` (never `together-ai`). Parameters are projected
+only when the user persisted them, and the projection test asserts the final AI
+SDK provider-option shape. Anthropic thinking, OpenAI reasoning/logprobs/store,
+Google safety settings, and Mistral safe-prompt are retained. Controls that the
+active transport cannot send were removed. In particular, local engines use
+their OpenAI-compatible endpoint, so native `ollama.*` request options are not
+shown; ordinary sampling options remain available through the shared inference
+schema.
+
+`ProviderConnectionParams.concurrentLimit` is the sole persisted
+provider-specific concurrency setting. It is an optional positive integer;
+absence means no provider cap. The execution broker owns FIFO keyed provider
+lanes in addition to the global AI-turn pool, making effective admission the
+stricter of the two. Snapshots expose `providerId`, `providerLimit`,
+`waitingForProvider`, and `holdsProvider`. Direct chat, background agents,
+teams, workflows, scheduled/connector turns, and every routing attempt enter
+through the same lease path. A failed routing attempt releases its current
+provider permit before acquiring the fallback lane. Team member attempts reuse
+the outer turn's global permit and working-tree slot but still acquire their
+own provider permit. Cancellation and all success/error paths converge on the
+lease's idempotent release.

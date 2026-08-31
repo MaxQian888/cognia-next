@@ -10,7 +10,8 @@ description: "ADR-0028's five-tier hybrid execution sandbox: the build-options p
 <TLDR>
   When a `ChatSession` has the sandbox enabled, `lib/claude/build-options.ts:resolveSendOptions`
   **removes the SDK's `Bash` / `Edit` / `Write` builtins** and the native `text_editor`, appends a
-  system-prompt note, and stamps the active tier into `microvm-bridge`. The model is then steered to
+  system-prompt note, and binds tier, policy, target, and provider adapter into an immutable
+  `SandboxRuntimeRef`. The model is then steered to
   four `sandbox_*` tools (from the `cognia-sandboxed-tools` plugin) that route to either the OS
   backend (T1) or the e2b microVM (T4). Tiers T2/T3 cover plugin code; T5 is a per-action policy gate
   for `computer_use`. There is **no bypass** — when a backend is unavailable the call denies.
@@ -193,13 +194,19 @@ throws rather than silently falling back to the OS tier (see [Sandboxed tools](.
 
 ## Audit surface
 
-Every OS-sandbox call is recorded with a dedicated audit surface. The Rust `Surface` enum carries a
+Every OS and E2B sandbox call is recorded with a dedicated audit surface. The Rust `Surface` enum carries a
 `Sandbox` variant (`src-tauri/src/automation/permission.rs:53`); the dispatcher records an
 allow/deny/error `AuditEntry` for each `sandbox_exec` call and emits an `automation:event`
 (`src-tauri/src/sandbox/mod.rs:99-158`). Because the sandbox owns its own strict-mode policy, the
 shared permission gate short-circuits it — `Surface::Sandbox => Decision::Allow`
 (`permission.rs:325`) — while the global kill-switch still blocks for defence in depth. The
 Diagnostics tab renders these via `SandboxAuditCard`; see [Observability & UI](./observability-and-ui).
+
+Each stdout and stderr stream is capped independently at 1,000,000 UTF-8 bytes. Native backends read
+child pipes incrementally; E2B responses are truncated before crossing the tool boundary. Results
+carry `stdout_truncated` and `stderr_truncated` and append a visible truncation marker. Audit rows also
+carry effective tier/provider, refusal or termination, requested timeout, timeout state, exit code,
+truncation flags, and duration in the existing fields.
 
 ## Next
 

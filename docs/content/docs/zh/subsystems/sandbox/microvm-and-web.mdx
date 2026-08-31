@@ -8,11 +8,10 @@ description: "T4 级 e2b Firecracker microVM 层、microvm-bridge 中的会话�
 <Status variant="beta" />
 
 <TLDR>
-  `lib/sandbox/microvm-bridge.ts` 是 OS 沙箱与 e2b microVM 层（T4）之间由两部分组成的胶水层：一个会话级
-  **active tier** 映射，以及一个持有 **microVM exec 实现** 的注册表。`cognia-e2b-sandbox` 插件在
-  activate 时注册真实的 exec（`buildMicrovmExec`）；同一个插件还为 Marketplace integration 提供
-  `E2BWorkspaceBackend`。AgentENV 这类 E2B-compatible 自托管 endpoint 可在该插件设置里通过 API URL 配置。
-  `types/system/sandbox.ts` 承载跨边界的结果与消耗元数据形状。
+  `lib/sandbox/microvm-bridge.ts` 只暴露当前接受新绑定的 e2b adapter；每个会话的 tier、policy、
+  target 与已绑定 adapter 都在不可变 `SandboxRuntimeRef` 上。注销会启动 graceful drain：新绑定失败，
+  现有 owner 继续完成。e2b pool 分别跟踪 workspace handle 与 runtime ref ownership，在最后一个 owner
+  释放后关闭，并保留关闭失败以便重试。应用退出执行 best-effort 强制清理。
 </TLDR>
 
 ## 适配器注册表 —— `microvm-bridge.ts`
@@ -27,6 +26,7 @@ let registeredImpl: MicrovmExecAdapter | null = null
 
 /** Register the microvm exec adapter (called by the e2b plugin on activate). */
 export function setMicrovmExec(impl: MicrovmExecAdapter | null): void {
+  if (registeredImpl && registeredImpl !== impl) drainingImpls.add(registeredImpl)
   registeredImpl = impl
 }
 export function getMicrovmExec(): MicrovmExecAdapter | null {
@@ -36,6 +36,11 @@ export function getMicrovmExec(): MicrovmExecAdapter | null {
 
 该适配器是**按 owner 划分**的：每次调用都点名它所属的运行时引用，因此一个 E2B 工作区可以被认领、
 在同一会话的多次调用间复用，并随会话一起释放。
+
+adapter 注册返回的 disposer 表示“停止接受新绑定，并排空现有 owner”。已绑定 runtime record
+保留其取得的 adapter 实例，execute/release 不会重新读取全局注册表。retire/release 失败保留在
+cleanup-only ledger 中，由后续 session release 重试。既有 `APP_CLOSING` 路径调用
+`disposeMicrovmAdapters()`，作为强制清理边界。
 
 ```ts title="lib/sandbox/microvm-bridge.ts (adapter)"
 export interface MicrovmExecAdapter {
@@ -51,7 +56,7 @@ export interface MicrovmExecAdapter {
 "运营者设了这个上限"与"这次调用本来就只需要更少"：
 
 ```ts title="lib/sandbox/microvm-bridge.ts (shapes)"
-export interface MicrovmResult { exit_code: number; stdout: string; stderr: string; duration: number; timed_out: boolean }
+export interface MicrovmResult { exit_code: number; stdout: string; stderr: string; duration: number; timed_out: boolean; stdout_truncated?: boolean; stderr_truncated?: boolean }
 export interface MicrovmCommand { argv: string[]; cwd: string; env: Record<string, string>; stdin: string | null; timeout: number }
 export interface MicrovmRequest { writable: string[]; readable: string[]; targetFiles: string[]; maxCpuSeconds: number; maxMemoryMb: number; network: "off" | "on" | "allowlist"; networkHosts: string[] }
 export interface MicrovmCeiling { network?: "off" | "on" | "allowlist"; maxCpuSeconds?: number; maxMemoryMb?: number }
@@ -60,31 +65,14 @@ export interface MicrovmExecPayload { tool: string; command: MicrovmCommand; req
 
 ## e2b exec 适配器 —— `microvm-exec.ts`
 
-`buildMicrovmExec` 返回一个绑定了 options 的 `MicrovmExec`。每次调用都会预置一个全新的沙箱，运行通过
-`bash -c` 拼接的 argv（使引号处理与 OS 后端一致），然后关闭该沙箱。
+`buildMicrovmExec` 在 runtime ref 已认领的沙箱中执行，不会为每条命令创建或关闭 VM。preflight
+要求存活的 E2B-backed workspace handle，并在执行前增加 runtime ownership。释放 workspace handle
+后不再接受新 claim；直到最后一个 runtime owner 退出，VM 才保持存活。close 幂等，关闭失败的 pool
+entry 会保留，供之后重试清理。
 
-```ts title="plugins/e2b-sandbox/src/microvm-exec.ts:44-76 (excerpt)"
-return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmResult> {
-  const started = now()
-  const sandbox = await factory(resolveSandboxConnection(opts))
-  try {
-    const cmd = buildBashCommand(payload)
-    const result = await sandbox.exec({
-      cmd,
-      cwd: payload.command.cwd,
-      timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
-    })
-    return { exit_code: result.exitCode, stdout: result.stdout, stderr: result.stderr,
-             duration: Math.max(0, now() - started), timed_out: false }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return { exit_code: -1, stdout: "", stderr: message,
-             duration: Math.max(0, now() - started), timed_out: /timed?[ _-]?out/i.test(message) }
-  } finally {
-    await sandbox.close().catch(() => undefined)
-  }
-}
-```
+E2B 两个响应流在跨越工具边界前分别按 UTF-8 安全方式截断到 1,000,000 字节。可见的
+`... (truncated)` 标记以及独立的 `stdout_truncated` / `stderr_truncated` 标志会指出哪个流超过上限；
+下游工具渲染仍可应用既有的 30,000 字符显示限制。
 
 <Callout type="warn">
   AgentENV 需要 Linux 6.8+ 与 `/dev/kvm`；只有当 Cognia 与 AgentENV 运行在同一台主机、同一网络命名空间时，
@@ -145,10 +133,11 @@ await execChecked(sandbox, {
 文档把它描述成「插件通过 `executeCode(language, code)` 触达的面」。整棵树里并不存在这样的调用方，
 它所指的那个 `PluginSandbox` 也早已不在。这个桩被删除了，而不是继续作为一个无人索求的运行时的占位。
 
-真正的浏览器执行路径是 `lib/native/code-execution-strategy.ts`（`executeCodeWithSandboxPriority`）：
-JS / TS / JSX / HTML / CSS 在每个壳上都跑在 `sandbox="allow-scripts"` 的 `srcdoc` iframe 里，
-Python 在桌面端被路由到 Rust 的 `canvas_run_python`。消费方是
-`hooks/canvas/use-code-execution.ts` 与 `components/canvas/code-execution-panel.tsx`。
+真正的浏览器执行路径是 `lib/native/code-execution-strategy.ts`（`executeCodeWithSandboxPriority`）。
+JavaScript、HTML 与 CSS 在 opaque-origin `sandbox="allow-scripts"` 的 `srcdoc` iframe 中运行，
+CSP 使用 `connect-src 'none'`。每次运行拥有 nonce，并且只接受来自该 iframe `contentWindow` 的消息；
+timeout 与 abort 都会移除 listener、timer、abort handler 和 frame。Python 在桌面端路由到
+`canvas_run_python`。TypeScript、JSX 与 TSX 因为没有编译器/runtime，返回既有 unsupported 结果。
 
 ## 跨边界类型 —— `types/system/sandbox.ts`
 

@@ -151,6 +151,44 @@ Native icon fields use `PluginIconName`, the exported name of a
 manifest validation rather than silently falling back. VS Code light/dark icon
 resources and character-pack emoji/color metadata remain separate contracts.
 
+### Selection quick actions
+
+System-wide text selection is an explicit quick-action surface. Existing actions
+do not appear there unless they declare `surfaces: ["selection"]` and a
+`selection` contract:
+
+```ts
+ctx.quickActions.register({
+  id: "rewrite-selection",
+  title: "Rewrite selection",
+  surfaces: ["selection"],
+  selection: {
+    input: "text",
+    origins: ["accessibility"],
+    contentTypes: ["term", "code"],
+    maxChars: 4000,
+    output: "preview",
+  },
+  run: async (invocation) => ({
+    kind: "text",
+    text: await rewrite(invocation?.surface === "selection" ? invocation.selection.text ?? "" : ""),
+  }),
+})
+```
+
+`input: "metadata"` receives candidate/source/classification facts without the
+selected text. `input: "text"` also requires the dangerous `selection:read`
+manifest permission and tier-aware user consent before `selection.text` exists.
+The host validates eligibility and output again at invocation time; text results
+are bounded to 20,000 characters and variant results to eight entries.
+
+`output: "replace"` is a declaration, not permission to type. The host previews
+by default, requires a separate per-action direct-replace opt-in, and asks native
+code to re-focus and reread the source selection before a plain-text paste. OCR,
+clipboard, stale, changed, secure, and read-only selections cannot be replaced.
+Plugins contribute metadata and normalized results only; they never render UI in
+the native selection overlay.
+
 ### Context panels and view containers
 
 Use `contextPanels[]` for a resource-scoped right workbench panel. Use

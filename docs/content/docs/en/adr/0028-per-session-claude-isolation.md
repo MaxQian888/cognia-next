@@ -9,6 +9,15 @@ description: Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / proxy is
 
 > **Current-state amendment (2026-08-13).** `WarmQuery` and prewarm are present. Rollout acceptance is now based on pool-key isolation, cancellation, shutdown, stale-claim recovery, and feature-flag evidence. A macOS XPC backend is not part of this rollout.
 
+> **Sandbox lifecycle amendment (2026-08-30).** Runtime availability is now projected from the
+> active confinement probe and the accepting E2B adapter, rather than from configured provider
+> names. E2B unregister is drain-aware: new owners are rejected immediately, bound generations
+> retain their adapter, and a VM closes only after both its workspace handle and final runtime owner
+> release. Failed closes remain in a retry ledger; application shutdown is the forced-clean boundary.
+> OS and E2B output is capped at 1,000,000 UTF-8 bytes per stream with independent truncation flags.
+> Docker/computer-server is the only connection lifecycle adapter; imported cloud and Lume rows are
+> compatibility-only and expose no unsupported actions.
+
 > **Note (2026-07-25).** The per-session / per-character *account pinning* half
 > of this ADR is live and user-reachable, not speculative: `accountIdOverride`
 > is resolved by `lib/claude/env-resolver.ts`, edited from the Character editor
@@ -87,11 +96,20 @@ Threat model note: Node's permission model confines the plugin entry process onl
 
 #### T3 — Wasmtime + WASI for plugin WASM
 
-A new `lib/plugin/core/wasm-runtime.ts` runs WASM plugins via `@bytecodealliance/jco` (or the `wasmtime` Node binding); host imports are limited to preopens granted through `lib/plugin/security/wasm-grant.ts`. The preopen grant ledger is durable Dexie state (`wasmGrantLedger`, schema v88) with the old localStorage mirror used only as a migration fallback. On plugin updates, manifest preopens are reconciled against the ledger: removed paths are denied with a warning and newly declared paths are not granted until reviewed. The runtime also revalidates the loaded preopen set before every call, so revoking a grant after load takes effect without waiting for a reload.
+Rust/Wasmtime is the single production authority. `PluginLoader` records the generation returned by
+the native host, and `PluginManager` binds that exact generation into every declared tool and
+workflow-node projection. Activation fails when no generation exists; the native host rejects stale
+generations on activate, call, deactivate, and unload. The unused browser-side runtime and its
+unimplemented JCO component path were removed. Manifest preopens are still reconciled through
+`lib/plugin/security/wasm-grant.ts` before native load.
 
 #### T4 — e2b Firecracker microVM as opt-in tier
 
-`Character.computerUseSettings.sandboxTier?: "os" | "microvm"`. When `microvm`, the `sandbox_*` tool implementations route to the existing `plugins/e2b-sandbox/` workspace backend instead of T1. No changes to e2b; only a routing branch.
+`Character.computerUseSettings.sandboxTier?: "os" | "microvm"`. A microVM binding is eligible only
+when an accepting E2B adapter is registered and a live E2B-backed workspace handle can be claimed.
+The runtime record retains its bound adapter while the plugin drains, so active owners finish while
+new owners fail closed. Workspace-handle ownership and runtime-ref ownership are independent; the VM
+closes exactly once after both reach zero, and failed close/release operations remain retryable.
 
 #### T5 — Per-action policy gate for `computer_use`
 
@@ -111,7 +129,11 @@ Per-account `CLAUDE_CONFIG_DIR` directories eliminate the cross-process race on 
 
 ### Audit + observability
 
-`automation/audit.rs` gains a `Surface::Sandbox` variant. Every sandbox call (Allow / Deny / Error) is recorded; `resume_replayed` events are recorded too. The existing 5000-cap VecDeque + Dexie `automationAuditLog` mirror carry them. The existing Diagnostics tab (`components/settings/sections/diagnostics-section.tsx`, observability group) is extended with collapsible cards for the sandbox event log and a sidecar restart counter — no new tab.
+`automation/audit.rs` gains a `Surface::Sandbox` variant. Every sandbox call (Allow / Deny / Error)
+records the effective tier/provider, refusal or termination, requested timeout, timeout outcome,
+per-stream truncation, exit code, and duration in the existing payload. The 5000-cap VecDeque + Dexie
+`automationAuditLog` mirror carry both native and E2B events. Diagnostics queries the persisted table
+with `listAuditRows({ surface: "sandbox" })`, so unrelated recent events cannot hide sandbox rows.
 
 ### UI surfaces
 

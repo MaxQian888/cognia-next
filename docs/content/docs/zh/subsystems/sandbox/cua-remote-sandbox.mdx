@@ -16,6 +16,13 @@ description: "ADR-0020 的 Docker 化 computer-use 沙盒：一个由 WebSocket 
   注册表在应用 state 中管理，并在退出时拆除。连接是一等 Dexie 实体（schema **v57**）。
 </TLDR>
 
+<Callout type="warn">
+  runtime capability 来自实际 adapter。只有 Docker + computer-server 实现 start、stop、health、
+  delete 与 GUI。导入的 cua-cloud 和 Lume 行为兼容性继续可读，并分别渲染自己的 instance/endpoint
+  或 VM/image 字段，但所有未支持操作都会禁用。当前没有任何连接提供 `cua-desktop` shell/files
+  tier 所要求的已验证 workspace adapter。
+</Callout>
+
 ## 容器生命周期 — `lifecycle.rs`
 
 容器启动时将一个临时主机端口映射到容器的 8000，随后通过 `docker port` 解析出该主机端口。

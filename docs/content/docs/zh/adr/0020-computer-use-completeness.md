@@ -313,3 +313,92 @@ shell 或文件操作发生在容器内，因此 `workspaceRead` 与 `workspaceE
 或 `sandbox_exec`。Docker 的 start/stop/health/delete 现统一经过既有
 `SandboxProviderAdapter` 与 `runSandboxOperation`；未实现的 provider 会持久化
 类型化错误，不再停留在 `starting`。
+
+## 附录（2026-08-30）：app-session 工具面，以及始终没接上的那一半
+
+`28ca2c722` 用 revision-bound 的 **app session** 取代了 Anthropic 形状的
+`computer_20251124` 工具面。`get_app_state` 返回某个应用的一个编号 revision
+（可访问性树投影、与上一版的 diff、一帧画面、一个一次性 `turnToken`），
+`perform_action` 花掉这个 token，作用于元素句柄或像素目标。Rust 侧这次替换
+做得很好，TypeScript 侧只完成了一半。本附录同时记录缺口与修复，因为上文
+的 ADR 正文描述的仍是那个已被删除的工具面。
+
+**模型看不见屏幕。** `get_app_state` 返回的是普通对象，`plugin-tools.mjs`
+落到 `toolText`，`safety.mjs` 再用 `JSON.stringify` 序列化整个 revision。
+于是画面以 base64 **文本**抵达模型：视觉模型读不了，而一张 1280x800 的 PNG
+大约要花掉十万量级的 token，偏偏这个工具的描述要求每次动作前后都调用它。
+投影现在只有一份，位于 `lib/automation/model-frame.ts`，产出一个 MCP `image`
+块加一个剥掉 bytes、保留尺寸的 JSON 块（像素目标要靠这些尺寸校验）。
+两个面向模型的表面都用它：应用内的插件工具，以及 External Bridge 的
+`computer_use`，后者通过 `runWithGate` 统一的文本信封犯了同样的错。
+
+**五个工具里有四个发布的是空 schema。** `perform_action` 把整个动作词汇表
+声明成 `{"request": {"type": "object"}}`，模型因此从不知道元素句柄、像素目标
+和 `strategy` 的存在，而 `jsonSchemaToZodShape` 会把这个参数降级为
+`z.unknown()`，连校验也一并失去。契约现在只写一次，以 zod 形式落在
+`lib/automation/action-schemas.ts`，再用 `z.toJSONSchema` 渲染成 JSON Schema。
+Rust 仍是真相源，因此有一个 parity 测试从 `session.rs` 里读出 `UiAction` /
+`ActionTarget` / `ActionStrategy` 的枚举，zod 联合一旦漂移就失败。这项工作
+还牵出一个前置条件：`jsonSchemaPropToZod` 没有 `oneOf` / `anyOf` 分支，而模型
+看到的 schema 是从**转换后**的 zod 形状生成的，不是从 manifest，所以不修的话
+每个可辨联合都会原样退回 `z.unknown()`。
+
+**Windows 与 Linux 在静默点错位置。** 默认实现的
+`AutomationBackend::screenshot_application` 截的是整屏，汇报的却是前台**窗口**
+的逻辑矩形，而 `pixel_to_global_point` 假设画面正好覆盖 `logical_bounds`。
+于是整屏像素被映射进一个窗口矩形，全程不报错。默认实现现在汇报实际捕获的
+**显示器**矩形，也就是这些像素真正所属的那一个。
+
+**缺三个原语。** `zoom` 裁剪 revision 那一帧的一个区域，这是高分辨率屏幕上
+已知性价比最高的 grounding 补救手段。它裁的是**存量帧**而非重新捕获，因为
+重新捕获会与 UI 竞态，交回一个与模型正在推理的 revision 不匹配的区域。
+`wait` 让一个回合可以等 UI 稳定，而不是去读一张画到一半的帧。
+`PermissionGate::check_rate` 把驱动类调用限制在每分钟 150 次，并拒绝连续
+20 次同签名的调用。读永不限流，因为饿死 `get_app_state` 恰好会拿走 agent
+发现自己卡住所需的那份反馈。kill switch 会重置这个窗口，新一轮运行不会被
+上一轮的预算拒掉。
+
+**截图降采样现在作用于模型真正看的那条路。** 设置 → 自动化 → 行为下的这一项，
+过去只被 `desktop_screenshot`、同意缩略图和录制器读取，`desktop_get_app_state`
+完全不读。现在采集会分成两帧：交给调用方的那份按操作者的预算缩放，
+`UiSurface::pixel_width` / `pixel_height` 描述的就是**这一帧**，从而让穿过
+session 的每个像素坐标都说同一种语言；原生分辨率的那份则作为
+`SessionRecord::zoom_source` 留下。降采样因此不丢细节，因为 `zoom` 裁的是
+原生帧：基础帧保持便宜，细节仍然可以一区一区拿回来。`ZoomedRegion` 用
+「所展示帧」的坐标空间汇报 `region`，并以 `scale` 表示每个 region 像素对应
+多少裁剪像素，于是一个点按 `region.origin + crop_point / scale` 映射回去。
+只有当降采样确实缩小了尺寸时才会保留第二份拷贝。
+
+**凭据窗口遮蔽作用在了错误的那份拷贝上。** ADR-0020 W1 的遮蔽跑在命令边界，
+改的只是即将返回的那个 revision，而 session 存下的是原始帧。当 `zoom` 开始
+裁剪存量帧之后，一个处于前台的密码框会在 `get_app_state` 里被涂黑，却能在
+一次 `zoom` 之后被完整取回。遮蔽已移入采集过程
+（`worker::redact_captured_frame`），于是 session **存下**的那一帧本身就是
+遮蔽后的，所有读它的人都继承同一个决定。这次移动顺带补上一个既有缺口：
+`cognia-mcp-server` 的 `automation_proxy` 是进入同一个 worker 的第二个入口，
+它经过 `run_gated_enf` 有门禁，却从不做遮蔽，因此 MCP 客户端能拿到桌面路径
+已经涂黑的凭据像素。
+
+**一个跨语言的线格式缺陷。** `ElementRef` 与 `KeyChord` 在 Rust 侧是 newtype
+struct，serde 会透明渲染成裸 JSON 字符串，TypeScript 却把它们建模成一元组。
+`desktop.keys()`、`holdKey()`、`Locator.from` 以及事件触发器的 scope 过滤
+一直在发送后端会拒绝的形状，而 `elementRefValue()` 读一个真实引用只会拿到
+**第一个字符**。`lib/automation/types.test.ts` 里有两条断言钉的正是错误格式。
+Rust 侧现在有一个测试断言元组形状**不能**反序列化。
+
+**六处休眠接线接回。** `startAutomationAuditMirror` 零调用点，于是保留策略
+任务在勤奋清理一张自动化从不写入的表。`classify-risk.ts` 仍以已删除的工具名
+为键，ADR-0070 的 risk-to-ceremony 升级对 Computer Use 从未触发过。它的回归
+测试现在直接遍历共享常量，改名不会再让某个工具静默掉出等级。画中画视图在
+现行工具路径上没有生产者。`ComputerUseCard` 映射到已删除的工具名，解析的还是
+旧的 `{action, coordinate}` 形状，因此每次调用在聊天里都渲染成一坨原始 JSON。
+`find_text` / `click_text` 基于既有的 `ocr-click.ts` 重新注册为工具，覆盖元素
+句柄的盲区（Canvas、游戏、远程桌面、自绘控件），并在表面指引里注明它们捕获
+的是主显示器而非应用窗口。以及新建了
+`app/recorder-controller/page.tsx`，因为 `recorder_window` 打开的是一条不存在
+的路由，每次录制期间都是一条空白置顶条。
+
+本轮不做、仍然开放的部分：Windows 的 app-session 后端（那四个
+`AutomationBackend` 方法没有 UIA 覆写，所以 app session 目前只有 macOS）、
+权限授予入口、macOS 的 `window_op`，以及 macOS/Linux 上的 `DragOpts` 与
+`ScrollTarget::Element`。

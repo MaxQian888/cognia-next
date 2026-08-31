@@ -11,9 +11,10 @@ description: "cognia-sandboxed-tools: the in-tree plugin that registers four san
   `plugins/cognia-sandboxed-tools/src/index.ts` registers four MCP tools — `sandbox_bash`,
   `sandbox_edit`, `sandbox_write`, `sandbox_text_editor` — that the model uses **instead of** the
   SDK builtins when the session has the sandbox enabled. Each call is routed by `dispatchSandbox` to
-  either the OS sandbox (the `sandbox_exec` Tauri command, T1) or the e2b microVM (T4), based on the
-  active tier for the session. Strict mode: a `microvm` tier with no registered exec **throws** — no
-  silent fallback.
+  either the OS sandbox (the `sandbox_exec` Tauri command, T1) or the e2b microVM (T4), based on its
+  immutable `SandboxRuntimeRef`. Session-bearing plugin calls recover a missing ref centrally from
+  the active session binding; if none exists they fail closed. Only explicitly sessionless calls use
+  the host sentinel. A microVM tier with no eligible E2B binding never falls back to OS execution.
 </TLDR>
 
 ## The four tools

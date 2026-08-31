@@ -69,16 +69,17 @@ export function resolveShieldState(args: {
 - 虚线天蓝色 `Shield`（`[stroke-dasharray:3_2]`）—— 沙盒开启，microVM tier
 - 划掉的灰色 `ShieldOff` —— 沙盒关闭（今天的默认）
 
-此徽章的健康状态来自 `hooks/sandbox/use-sandbox-health.ts:useSandboxHealth`，它每 5 秒
-轮询一次 `sandbox_health_probe` Tauri 命令，并同时容忍来自 serde 的 `last_error`（蛇形）和
-`lastError`（驼峰）两种形状。
+护盾、Devices、Settings tier picker 与连接操作消费同一个 `runtime-availability` 投影。
+OS 可用性来自主动 confinement check，而不是只检查二进制是否存在的廉价 probe；microVM
+可用性来自当前正在接受新绑定的已注册 adapter，UI 同时说明最终资格还需要 E2B-backed workspace。
+已持久化但当前不可用的选择仍保持可见和选中，只会禁用并显示可操作原因。
 
 ## Diagnostics — 已发布并接通
 
 `components/settings/sections/diagnostics-section.tsx` 挂载了两个 ADR-0028 卡片：
 
-- **`SandboxAuditCard`** —— 读取 Dexie 的 `automationAuditLog`，过滤
-  `row.surface === "sandbox"`（`sandbox-audit-card.tsx:39`），并展示最新的 50 行，带
+- **`SandboxAuditCard`** —— 直接调用 `listAuditRows({ surface: "sandbox", limit: 50 })`，
+  并展示最新的 50 条沙盒行，带
   allow/deny/error 着色 + 时长。
 - **`SidecarRestartCard`** —— 每 5 秒轮询 `sidecar_restart_count` IPC，展示计数和
   上次重启的时间戳。
@@ -94,6 +95,11 @@ export function resolveShieldState(args: {
 `automation-section.tsx`——`TabId` 联合类型包含 `"sandboxes"`（第 77 行），带有
 `<TabsContent value="sandboxes"><SandboxConnectionsTab /></TabsContent>`（第 131-133 行）。生命周期
 按钮在 web 模式下禁用（`isTauri()`）。参见 [CUA 远程沙盒](./cua-remote-sandbox)。
+
+能力来自实际注册的 lifecycle adapter，而不是 provider 默认值。Docker / computer-server
+只暴露 start、stop、health、delete 与 GUI。既有 cua-cloud 和 Lume 行会保留并按 provider-specific
+配置读取，但不暴露任何 lifecycle 或 GUI 操作。`cua-desktop` 仍不能执行 shell/files，因为没有
+经过验证的 workspace adapter。
 
 ## Onboarding 导览幻灯片 —— 已发布
 
@@ -119,7 +125,7 @@ export function resolveShieldState(args: {
   下面的卡片。
 - **`sandbox-enable-card.tsx`** —— 默认 / 逐会话沙盒启用开关。
 - **`sandbox-tier-card.tsx`** —— 默认 tier 选择器（OS / microVM 单选组），写入
-  `AppSettings.sandboxTier`。
+  `AppSettings.sandboxTier`；它保留不可用的已持久化选择，并显示当前无法执行的原因。
 - **`sandbox-policy-card.tsx`** —— 资源/网络**上限**编辑器（可写根、CPU / 内存上限、网络策略），
   模型只能收窄，永远无法放宽。
 - **`automation-policy-card.tsx`** —— **T5** 逐动作策略编辑器：`allowedProcessNames`、

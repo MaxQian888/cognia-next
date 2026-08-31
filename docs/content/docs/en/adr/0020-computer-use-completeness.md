@@ -568,3 +568,113 @@ rejected during send preflight. It can never fall through to host automation or
 `sandbox_exec`. Docker start/stop/health/delete now dispatch through the
 existing `SandboxProviderAdapter` and `runSandboxOperation`; unsupported
 provider rows persist a typed error instead of remaining in `starting`.
+
+## Addendum (2026-08-30): the app-session tool face, and what was never wired to it
+
+`28ca2c722` replaced the Anthropic-shaped `computer_20251124` tool face with a
+revision-bound **app session**. `get_app_state` returns a numbered revision of
+one application (accessibility tree projection, a diff against the previous
+revision, a frame, and a single-use `turnToken`), and `perform_action` spends
+that token against either an element handle or a pixel target. The Rust side of
+that replacement was built well. The TypeScript side was finished only halfway,
+and this addendum records both the gap and the repair, because the ADR text
+above still describes the face that was removed.
+
+**The model could not see the screen.** `get_app_state` returned a plain object,
+`plugin-tools.mjs` fell through to `toolText`, and `safety.mjs` serialised the
+whole revision with `JSON.stringify`. The frame therefore reached the model as
+base64 *text*: unreadable to a vision model, and roughly a hundred thousand
+tokens for a single 1280x800 PNG, on a tool whose own description says to call
+it before and after every action. The projection now lives once, in
+`lib/automation/model-frame.ts`, and emits an MCP `image` block plus a JSON
+block with the bytes stripped and the dimensions kept (a pixel target is
+validated against those dimensions). Both model-facing surfaces use it: the
+in-app plugin tools, and the External Bridge's `computer_use`, which had the
+identical defect through `runWithGate`'s uniform text envelope.
+
+**Four of the five tools published an empty schema.** `perform_action` declared
+its entire action vocabulary as `{"request": {"type": "object"}}`, so the model
+was never told that element handles, pixel targets, or `strategy` exist, and
+`jsonSchemaToZodShape` degraded the argument to `z.unknown()`, removing
+validation as well. The contract is now written once as zod in
+`lib/automation/action-schemas.ts` and rendered to JSON Schema with
+`z.toJSONSchema`. Rust remains the source of truth, so a parity test reads the
+`UiAction` / `ActionTarget` / `ActionStrategy` enums out of `session.rs` and
+fails when the zod union drifts. A prerequisite surfaced during this work:
+`jsonSchemaPropToZod` had no `oneOf` / `anyOf` branch, and because the
+model-visible schema is generated from the *converted* zod shape rather than
+from the manifest, every discriminated union would have collapsed straight back
+to `z.unknown()`.
+
+**Windows and Linux misclicked silently.** The defaulted
+`AutomationBackend::screenshot_application` captured the whole screen but
+reported the focused *window's* logical rect, and `pixel_to_global_point`
+assumes the frame covers `logical_bounds`. Full-screen pixels were therefore
+mapped into a window rectangle, with no error anywhere. The default now reports
+the captured monitor's rect, which is the one the pixels actually belong to.
+
+**Three primitives were missing.** `zoom` crops a region of the revision's
+frame, which is the cheapest known remedy for grounding on a high-resolution
+screen. It crops a *stored* frame rather than re-capturing, because a
+re-capture races the UI and can return a region that no longer matches the
+revision the model is reasoning about. `wait` lets a turn pause for the UI to
+settle instead of re-reading a half-drawn frame. `PermissionGate::check_rate`
+bounds driving calls at 150 per minute and refuses 20 consecutive identical
+signatures. Reads are never limited, because starving `get_app_state` would
+remove exactly the feedback an agent needs to notice it is stuck. The kill
+switch resets the window, so a fresh run is not refused by the previous run's
+budget.
+
+**Screenshot scaling now applies where the model actually looks.** The setting
+under Settings, Automation, Behavior was read by `desktop_screenshot`, the
+consent thumbnail and the recorder, but not by `desktop_get_app_state`. The
+capture now splits into two frames. The caller is shown one scaled to the
+operator's budget, and `UiSurface::pixel_width` / `pixel_height` describe *that*
+frame so every pixel coordinate crossing the session speaks one space, while
+the full-resolution capture is retained as `SessionRecord::zoom_source`. The
+scaling therefore costs no detail, because `zoom` crops the capture: the base
+frame stays cheap and the detail is still reachable one region at a time.
+`ZoomedRegion` reports `region` in the shown frame's space and `scale` as crop
+pixels per region pixel, so a point maps back with
+`region.origin + crop_point / scale`. The second copy is kept only when the
+scaling actually shrank something.
+
+**Credential-window redaction was applied to the wrong copy.** ADR-0020 W1
+redaction ran at the command boundary and mutated only the revision being
+returned, while the session stored the raw frame. Once `zoom` began cropping
+the stored frame, a focused password prompt was blacked out in `get_app_state`
+and recoverable in full one `zoom` call later. Redaction moved into the capture
+(`worker::redact_captured_frame`), so the frame the session *stores* is already
+redacted and every reader of it inherits the decision. The same move closed a
+pre-existing gap: `cognia-mcp-server`'s `automation_proxy` is a second entry
+into the same worker, gated through `run_gated_enf` but never redacting, so an
+MCP client received credential pixels the desktop path blacked out.
+
+**A cross-language wire-format bug.** `ElementRef` and `KeyChord` are Rust
+newtype structs, which serde renders transparently as bare JSON strings, but
+TypeScript modelled them as one-element tuples. `desktop.keys()`, `holdKey()`,
+`Locator.from` and the event-trigger scope filter were all sending a shape the
+backend rejects, and `elementRefValue()` returned the first *character* of a
+real reference. Two assertions in `lib/automation/types.test.ts` were pinning
+the wrong format. A Rust test now asserts the tuple form does not deserialize.
+
+**Six dormant wirings reconnected.** `startAutomationAuditMirror` had zero
+callers, so the retention job was cleaning a table automation never wrote.
+`classify-risk.ts` still keyed on the removed tool names, so ADR-0070's
+risk-to-ceremony escalation never fired for Computer Use. Its regression test
+now iterates the shared constant, so a rename cannot silently drop a tool out
+of its tier. The picture-in-picture view had no producer on the live tool path.
+`ComputerUseCard` mapped to removed tool names and parsed the old
+`{action, coordinate}` shape, so every call rendered as raw JSON in chat.
+`find_text` / `click_text` were re-registered as tools over the existing
+`ocr-click.ts`, covering the blind spot element handles have (canvas, games,
+remote desktop, custom-drawn controls), with a note in the surface guidance
+that they capture the primary monitor rather than the app window. And
+`app/recorder-controller/page.tsx` was created, because `recorder_window`
+opened a route that did not exist, leaving a blank always-on-top strip during
+every recording.
+
+Out of scope here, and still open: the Windows app-session backend (the four
+`AutomationBackend` methods have no UIA override, so app sessions are macOS
+only), the permission-grant call to action, macOS `window_op`, and `DragOpts` /
+`ScrollTarget::Element` on macOS and Linux.

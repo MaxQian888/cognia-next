@@ -39,8 +39,8 @@ description: "cognia-next 中的四大隔离体系——ADR-0028 五层执行沙
 | **渲染沙盒**            | 一次性模型制品（HTML / SVG / React）                     | iframe + CSP + DOMPurify（见 [制品 / 沙盒](../artifacts-sandbox)）         | —    | 稳定                                    |
 
 不存在第五个家族。`lib/sandbox/web` 曾放着一个「web 代码执行沙盒」的桩，从未发布、也没有任何调用方，
-现已删除。浏览器里跑 JS / TS / JSX / HTML / CSS 的是 `lib/native/code-execution-strategy.ts`
-（`sandbox="allow-scripts"` 的 `srcdoc` iframe），Canvas 执行面板在每个壳上都走它；该面板上的 Python
+现已删除。浏览器里跑 JavaScript / HTML / CSS 的是 `lib/native/code-execution-strategy.ts`
+（opaque `sandbox="allow-scripts"` 的 `srcdoc` iframe），Canvas 执行面板在每个壳上都走它；该面板上的 Python
 仅限桌面，走 Rust 的 `canvas_run_python`。
 
 ## 它们如何协作
@@ -61,7 +61,7 @@ flowchart TB
   subgraph Plugin["插件隔离（ADR-0028）"]
     PS["PluginSandbox (renderer)"]
     T2["launchPluginJs (T2, node --permission)"]
-    T3["wasm-runtime (T3, Wasmtime/WASI)"]
+    T3["native host (T3, Rust/Wasmtime)"]
   end
 
   subgraph CUA["CUA 远程沙盒（ADR-0020）"]
@@ -132,7 +132,7 @@ flowchart TB
   <Folder name="lib/plugin/ (插件隔离)">
     <File name="core/sandbox.ts — PluginSandbox（渲染端 globals）" />
     <File name="launcher/launchPluginJs.ts — T2 node --permission 标志" />
-    <File name="core/wasm-runtime.ts — T3 Wasmtime/WASI" />
+    <File name="core/wasm-loader.ts — generation-bound T3 bridge" />
   </Folder>
   <Folder name="UI + 数据">
     <File name="components/chat/composer/sandbox-shield.tsx — 输入框指示器" />

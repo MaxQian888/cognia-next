@@ -1,6 +1,6 @@
 ---
 title: Computer Use
-description: Letting an agent drive the host desktop — the five-layer defence stack that gates every action, the HITL consent broker with time-boxed in-memory grants, coordinate rescaling for downscaled screenshots, and the sandbox crate underneath.
+description: Letting an agent drive the host desktop. The revision-bound app session the model actually drives, the five-layer defence stack that gates every action, the HITL consent broker with time-boxed in-memory grants, and the sandbox crate underneath.
 ---
 
 # Computer Use
@@ -19,8 +19,9 @@ description: Letting an agent drive the host desktop — the five-layer defence 
 
 <StatGrid>
   <Stat label="Defence layers" value="5" hint="permission · consent · audit · character filter · policy" />
-  <Stat label="Rust modules" value="37" hint="crates/cognia-automation/src — automation + sandbox + cua_sandbox" />
-  <Stat label="Frontend modules" value="15" hint="lib/automation — non-test .ts" />
+  <Stat label="Model tools" value="9" hint="plugins/computer-use · app session + zoom + wait + OCR fallbacks" />
+  <Stat label="Rust modules" value="91" hint="crates/cognia-automation/src · automation + sandbox + cua_sandbox" />
+  <Stat label="Frontend modules" value="14" hint="lib/automation · non-test .ts" />
   <Stat label="Grant durations" value="15 / 30 / 60" hint="minutes; default 30, max 60" />
   <Stat label="Consent timeout" value="90s" hint="default; clamped to 5s–115s" />
   <Stat label="Audit cap" value="5000" hint="AUTOMATION_AUDIT_CAP" />
@@ -64,15 +65,61 @@ Durations are a closed set — 15, 30 or 60 minutes (`CONSENT_GRANT_DURATIONS_MS
 capped at 60. The request timeout defaults to 90s and is clamped to 5s–115s. Grants never reach disk;
 that is what the `Whitelist` tier is for.
 
-## Coordinates have to be scaled back
+## What the model actually drives: a revision-bound app session
 
-When screenshot downscaling is on (Settings → Automation → Behavior), the model only ever sees the scaled
-frame, so every coordinate it emits is in scaled space and must be multiplied back up before dispatch.
-`lib/automation/coordinate-scaler.ts` mirrors the bidirectional scaling in Anthropic's
-`computer-use-demo` (`scaling.py`). State is keyed by capture target — `sessionKey`, cua connection id,
-or `"local"` — and refreshed on every screenshot flowing through `anthropic-action-mapper.ts`. With
-scaling disabled the source dims equal the scaled dims and the math degenerates to identity, so the path
-is the same either way.
+There is no `computer(action, coordinate)` tool. The model reads one application at a time and acts
+against a numbered revision of it, which is what makes a stale click detectable instead of silent.
+`get_app_state` returns a revision carrying an accessibility-tree projection, a diff against the
+previous revision, a frame, and a single-use `turnToken`. `perform_action` spends that token against
+either an **element handle** (delivered through the accessibility API, survives layout shifts) or a
+**pixel target** (which also carries the frame dimensions it was measured against, so a click against a
+frame the session has moved past is refused rather than landing somewhere unintended). `strategy` picks
+between `semantic`, `pixel` and `auto`.
+
+| Tool | What it does |
+| --- | --- |
+| `get_app_state` | A revision of one app: tree projection, diff, frame, `turnToken` |
+| `list_apps` | What can be targeted |
+| `query_elements` | Locator search inside the current revision |
+| `expand_element` | Page deeper into a truncated subtree |
+| `perform_action` | The eight-verb action vocabulary, against a handle or a pixel |
+| `zoom` | Crop one region of the current revision's frame |
+| `wait` | Let the UI settle before re-reading |
+| `find_text` / `click_text` | OCR fallback on the primary monitor, for what the tree cannot see |
+
+The action contract is written once as zod in `lib/automation/action-schemas.ts`, which serves the JSON
+Schema the tools publish, the TypeScript types, and a parity test that reads the Rust `UiAction` enum
+out of `session.rs` so the two cannot drift apart.
+
+Frames leave as MCP `image` blocks through `lib/automation/model-frame.ts`, never as stringified
+base64. The JSON half keeps the screenshot dimensions and drops the bytes, because a pixel target is
+validated against those dimensions. The same projection serves the in-app tools and the External
+Bridge's `computer_use`.
+
+## Scaling costs nothing, because zoom reads the capture
+
+Screenshot scaling (Settings → Automation → Behavior, 1280x800 by default) bounds the frame handed to
+the caller. The capture splits in two: the shown frame is scaled to that budget and
+`UiSurface.pixelWidth` / `pixelHeight` describe **it**, so every pixel coordinate crossing the session
+speaks one space, while the full-resolution capture is retained as the session's zoom source.
+
+That is what makes the scaling free. `zoom` crops the capture, not the shown frame, so the base frame
+stays cheap and the detail is still reachable one region at a time. A `ZoomedRegion` reports `region`
+in the shown frame's coordinates and `scale` as crop pixels per region pixel, so a point measured in
+the zoom maps back with `region.origin + cropPoint / scale`. When nothing was scaled, `scale` is 1 and
+the mapping is just adding the origin.
+
+Credential-window redaction (ADR-0020 W1) is applied at the capture rather than on the way out, so the
+frame the session stores is already redacted. Redacting only the outgoing revision would black out a
+password prompt in `get_app_state` and hand back the real pixels on the next `zoom` against the same
+revision.
+
+## Rate limiting
+
+`PermissionGate::check_rate` bounds driving calls at 150 per minute and refuses 20 consecutive
+identical signatures (command, process, window, click coordinates). Reads are never limited: starving
+`get_app_state` would remove exactly the feedback an agent needs to notice it is stuck. The kill switch
+resets the window, so a fresh run is not refused by the previous run's budget.
 
 ## Where it lives
 
@@ -90,9 +137,11 @@ crates/cognia-automation/src/
     lifecycle.rs  protocol.rs  registry.rs  remote_client.rs
 
 lib/automation/
-  types.ts                  # Platform · Capabilities · ElementRef · Locator · Screenshot · ClickTarget
-  client.ts  plugin-tauri.ts
-  anthropic-action-mapper.ts  coordinate-scaler.ts
+  types.ts                  # Platform, Capabilities, ElementRef, Screenshot, UiStateRevision
+  action-schemas.ts         # zod contract for the action vocabulary, rendered to JSON Schema
+  model-frame.ts            # revision to MCP image + JSON blocks (shared with the External Bridge)
+  client.ts                 # the desktop_* command surface
+  policy.ts
   ocr-screen.ts  ocr-click.ts        # click by on-screen text
   audit.ts  audit-retention.ts       # mirror + retention
   consent-durations.ts
@@ -100,7 +149,8 @@ lib/automation/
   computer-use-pip.ts  picture-in-picture-layout.ts
 
 components/automation/consent-overlay.tsx
-plugins/computer-use/src/index.ts     # the tool registration
+plugins/computer-use/src/index.ts     # the nine model tools
+lib/external-bridge/mcp-server/server.ts   # the same session, for external MCP clients
 ```
 
 ## Related

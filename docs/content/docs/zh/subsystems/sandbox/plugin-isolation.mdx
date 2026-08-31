@@ -12,9 +12,9 @@ description: "第三方插件代码如何被约束：渲染端的 PluginSandbox�
   `PluginPermission` 映射到一个具体的被允许的全局对象，包装 `console` / `setTimeout` / `fetch` /
   `localStorage`，并通过带显式参数和超时的 `Function` / `AsyncFunction` 运行插件代码。**T2**
   （`launchPluginJs.ts`）把 manifest 的权限翻译为 Node 24 的 `--permission` 标志，用于重新执行
-  Node 目标插件。**T3**（`wasm-runtime.ts`）在一个运行时下加载 WASM 插件，其 preopen 来自 Dexie
-  授权账本。T2 已经通过 `PluginLoader` / `PluginManager` 触达 Node-target frontend 插件；T3 会在
-  load 前对账 manifest preopens，并在每次 call 前重新验证。
+  Node 目标插件。**T3** 是原生 Rust/Wasmtime 宿主。T2 已经通过 `PluginLoader` / `PluginManager`
+  触达 Node-target frontend 插件；T3 会在原生 load 前对账 manifest preopens，并把宿主返回的
+  runtime generation 绑定到每个工具与 workflow node。
 </TLDR>
 
 ## 渲染端隔离 —— `PluginSandbox`
@@ -116,52 +116,20 @@ flag 会被完全省略。`PluginLoader.loadFrontendModule()` 会识别 Node-tar
   `--allow-child-process`。
 </Callout>
 
+权限审查 UI 会如实投影这个边界。scoped filesystem grant 可用；`network:fetch`、
+`network:upload`、`network:websocket`、`shell:execute` 与 `process:spawn` 为兼容 manifest
+仍然可见，但 grant/tier 控件会按缺失 broker 原因禁用，不再显示为已成功落实。
+
 ## T3 —— Wasmtime / WASI 运行时
-
-`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` 会 **在** 构建运行时之前从 Dexie-backed 授权账本解析
-preopen 集合，随后返回一个可控的 `WasmPluginHandle`。
-
-```ts title="lib/plugin/core/wasm-runtime.ts:82-102 (load + call)"
-export async function loadWasmPlugin(
-  pluginId: string,
-  source: WasmSource,
-  options: WasmRuntimeOptions = {}
-): Promise<WasmPluginHandle> {
-  if (!pluginId.trim()) throw new Error("loadWasmPlugin: pluginId is required")
-  const preopensResolver = options.preopensResolver ?? getGrantedPreopens
-  const preopens = [...(await preopensResolver(pluginId))]
-  const factory = options.runtimeFactory ?? defaultWasmRuntimeFactory
-  const instance = await factory({ pluginId, source, preopens })
-  return { async call(method, args) {
-    await verifyPreopenAllowedForCall(pluginId, preopens)
-    return instance.call(method, args)
-  } }
-```
 
 `PluginManager.preloadWasmComponent()` 会在 `plugin_wasm_load` 之前把 `manifest.wasm.fs.preopens` 与
 持久账本对账：过期账本 preopens 带 warning 拒绝，新声明的 manifest preopens 不会自动授权，只有交集会传给
 host。旧 `localStorage` 账本只作为一次性迁移 fallback 写入 `wasmGrantLedger` Dexie 表。
 
-由一个 magic-byte 启发式（`looksLikeComponent`，`wasm-runtime.ts:152-161`）决定两条交付路径：
-
-- **核心模块（Core modules）** —— 经由 `WebAssembly.instantiate` 实例化。没有 FS/网络绑定；唯一的宿主
-  导入是一个 `cognia` 命名空间，其 `read_file` 会拒绝任何不在授权集合内的路径：
-
-```ts title="lib/plugin/core/wasm-runtime.ts:176-181 (grant-gated read)"
-read_file: (path: string) => {
-  if (!grantedSet.has(path)) {
-    throw new Error(`wasm-runtime: preopen denied for ${path}`)
-  }
-  return memorySnapshot.get(path) ?? new Uint8Array()
-},
-```
-
-- **WASI Preview-2 组件（components）** —— 动态导入 `@bytecodealliance/jco`。组件路径目前会浮现一个结构化的
-  「not yet wired」错误，而不是固定到一个不断变动的 jco API（`wasm-runtime.ts:230-233`）；调用方可以注入一个
-  `runtimeFactory`，或改为发布一个核心模块。
-
-授权账本（`lib/plugin/security/wasm-grant.ts`）是权威来源 —— 宿主导入是纯的（没有真实的 FS），因此最坏情况下的
-影响半径（blast radius）是「插件读取它自己的授权」。
+`PluginLoader` 保存 `plugin_wasm_load` 返回的 generation。缺失 generation 时，`PluginManager`
+拒绝 activation，并把 generation 传入 `buildWasmToolDefinitions` 与 `buildWasmNodeDefs`。
+因此每次 execute 都点名确切的 loaded generation；原生宿主拒绝陈旧的 activate/call/deactivate/unload。
+未使用的浏览器 WASM runtime 与未实现的 JCO 路径已移除，Rust/Wasmtime 是唯一生产权威。
 
 ```mermaid
 flowchart TB
@@ -172,22 +140,21 @@ flowchart TB
     L["nodePermissionArgs → --allow-* flags"] --> SP["spawn('node', argv)"]
   end
   subgraph T3["WASM target (T3)"]
-    LW["loadWasmPlugin"] --> GR["getGrantedPreopens (ledger)"]
-    LW --> RT{"core vs component"}
-    RT -->|core| WI["WebAssembly.instantiate"]
-    RT -->|component| JCO["@bytecodealliance/jco (opt-in)"]
+    GR["reconcile preopens"] --> LW["plugin_wasm_load"]
+    LW --> GEN["bind native generation"]
+    GEN --> WI["Rust / Wasmtime calls"]
   end
 
   classDef soft fill:#1e3a5f,stroke:#38bdf8,color:#e0f2fe
-  class PS,L,SP,LW,GR,WI,JCO soft
+  class PS,L,SP,LW,GR,GEN,WI soft
 ```
 
 ## 测试
 
 `lib/plugin/core/sandbox.test.ts`（权限映射、钳制、命名空间化存储、执行）、
 `lib/plugin/launcher/launchPluginJs.test.ts`（标志构造、空列表省略）、以及
-`lib/plugin/core/wasm-runtime.test.ts` + `wasm-loader.test.ts`（preopen 门控、核心模块实例化、
-组件安装提示）。
+`wasm-loader.test.ts` + `manager.test.ts` + 原生 Wasmtime 测试（generation 绑定与 stale
+generation 拒绝）。
 
 ## 下一步
 

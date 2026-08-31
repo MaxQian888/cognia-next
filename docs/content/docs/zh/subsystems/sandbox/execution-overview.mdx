@@ -10,7 +10,8 @@ description: "ADR-0028 的五层混合执行沙盒：启用它的 build-options 
 <TLDR>
   当某个 `ChatSession` 启用了沙盒时，`lib/claude/build-options.ts:resolveSendOptions`
   会**移除 SDK 的 `Bash` / `Edit` / `Write` 内置工具**以及原生 `text_editor`，追加一条
-  系统提示说明，并将当前层级写入 `microvm-bridge`。随后模型会被引导至
+  系统提示说明，并把 tier、policy、target 与 provider adapter 绑定为不可变的
+  `SandboxRuntimeRef`。随后模型会被引导至
   四个 `sandbox_*` 工具（来自 `cognia-sandboxed-tools` 插件），这些工具会路由到 OS
   后端（T1）或 e2b microVM（T4）。T2/T3 层负责插件代码；T5 是针对 `computer_use` 的
   按动作策略门。这里**没有任何旁路**——当某个后端不可用时，调用将被拒绝。
@@ -189,13 +190,18 @@ runner 以非零退出），工具调用会**严格拒绝**。在策略层既没
 
 ## 审计面
 
-每一次 OS 沙盒调用都会被记录到专门的审计面。Rust 的 `Surface` 枚举带有一个
+每一次 OS 和 E2B 沙盒调用都会被记录到专门的审计面。Rust 的 `Surface` 枚举带有一个
 `Sandbox` 变体（`src-tauri/src/automation/permission.rs:53`）；调度器会为每次
 `sandbox_exec` 调用记录一条 allow/deny/error 的 `AuditEntry` 并发出一个 `automation:event`
 （`src-tauri/src/sandbox/mod.rs:99-158`）。由于沙盒拥有自己的严格模式策略，
 共享权限门会对其短路——`Surface::Sandbox => Decision::Allow`
 （`permission.rs:325`）——同时全局 kill-switch 仍会出于纵深防御而拦截。
 诊断标签页通过 `SandboxAuditCard` 渲染这些记录；见 [可观测性与 UI](./observability-and-ui)。
+
+stdout 与 stderr 各自限制为 1,000,000 个 UTF-8 字节。原生后端增量读取 child pipe；E2B
+响应在跨越工具边界前截断。结果包含 `stdout_truncated` 与 `stderr_truncated`，并追加可见截断标记。
+审计行也通过既有字段记录有效 tier/provider、拒绝或终止、请求 timeout、是否超时、exit code、
+两个截断标志与 duration。
 
 ## 下一步
 

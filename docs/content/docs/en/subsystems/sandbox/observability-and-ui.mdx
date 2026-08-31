@@ -70,16 +70,18 @@ export function resolveShieldState(args: {
 - dashed sky `Shield` (`[stroke-dasharray:3_2]`) — sandbox on, microVM tier
 - crossed muted `ShieldOff` — sandbox off (today's default)
 
-The health for this badge comes from `hooks/sandbox/use-sandbox-health.ts:useSandboxHealth`, which
-polls the `sandbox_health_probe` Tauri command every 5 s and tolerates both `last_error` (snake) and
-`lastError` (camel) shapes from serde.
+The shield, Devices, Settings tier picker, and connection actions consume one
+`runtime-availability` projection. OS availability comes from the active confinement check, not the
+cheap binary-presence probe. microVM availability comes from the currently accepting registered
+adapter; the UI also explains that final eligibility requires an E2B-backed workspace. Persisted
+unavailable selections remain visible and selected but disabled with an actionable reason.
 
 ## Diagnostics — shipped & wired
 
 `components/settings/sections/diagnostics-section.tsx` mounts two ADR-0028 cards:
 
-- **`SandboxAuditCard`** — reads the Dexie `automationAuditLog`, filters
-  `row.surface === "sandbox"` (`sandbox-audit-card.tsx:39`), and shows the newest 50 rows with
+- **`SandboxAuditCard`** — calls `listAuditRows({ surface: "sandbox", limit: 50 })` directly and shows
+  the newest 50 sandbox rows with
   allow/deny/error colouring + duration.
 - **`SidecarRestartCard`** — polls the `sidecar_restart_count` IPC every 5 s, showing the count and
   last-restart stamp.
@@ -95,6 +97,11 @@ sandboxes (the only sandbox UI a user can currently reach via a dedicated tab). 
 `automation-section.tsx` — the `TabId` union includes `"sandboxes"` (line 77), with
 `<TabsContent value="sandboxes"><SandboxConnectionsTab /></TabsContent>` (lines 131-133). Lifecycle
 buttons are disabled in web mode (`isTauri()`). See [CUA remote sandbox](./cua-remote-sandbox).
+
+Capabilities come from the registered lifecycle adapter, not provider defaults. Docker /
+computer-server exposes start, stop, health, delete, and GUI only. Existing cua-cloud and Lume rows
+remain readable with their provider-specific configuration, but expose no lifecycle or GUI actions.
+`cua-desktop` remains unavailable for shell/files because no verified workspace adapter exists.
 
 ## Onboarding tour slide — shipped
 
@@ -120,7 +127,8 @@ buttons are disabled in web mode (`isTauri()`). See [CUA remote sandbox](./cua-r
   composing the cards below.
 - **`sandbox-enable-card.tsx`** — the default / per-session sandbox enable toggle.
 - **`sandbox-tier-card.tsx`** — the default-tier picker (OS / microVM radio group), writing
-  `AppSettings.sandboxTier`.
+  `AppSettings.sandboxTier`; it preserves unavailable persisted choices and displays why they cannot
+  currently execute.
 - **`sandbox-policy-card.tsx`** — the resource/network **ceiling** editor (writable roots, CPU /
   memory caps, network policy) that the model can only narrow, never widen.
 - **`automation-policy-card.tsx`** — the **T5** per-action policy editor: `allowedProcessNames`,

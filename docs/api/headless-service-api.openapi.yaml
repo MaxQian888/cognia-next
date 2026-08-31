@@ -2099,6 +2099,7 @@ paths:
                     conversationSidebar: {}
                     conversationTimeline: {}
                     conversationTitle: {}
+                    costBudget: {}
                     customCss: {}
                     customCssEnabled: {}
                     customThemes: {}
@@ -2120,10 +2121,12 @@ paths:
                     language: {}
                     lastInboxViewedAt: {}
                     lmntVoice: {}
+                    messageDisplay: {}
                     mistralVoiceId: {}
                     mobileComputerUseEnabled: {}
                     motion: {}
                     notificationPreferences: {}
+                    onboardingProfile: {}
                     openaiVoice: {}
                     permissionMode: {}
                     pinnedWorkflowIds: {}
@@ -2136,6 +2139,7 @@ paths:
                     sidebarLayout: {}
                     streamPartialMessages: {}
                     sttLanguage: {}
+                    stylePack: {}
                     surfaceSkillsEnabled: {}
                     systemVoice: {}
                     telemetryEnabled: {}
@@ -2147,7 +2151,6 @@ paths:
                     ttsRate: {}
                     ttsVolume: {}
                     typographyExt: {}
-                    wallpapers: {}
                     xiaomiVoice: {}
               additionalProperties: false
       responses:
@@ -12533,6 +12536,8 @@ paths:
                   type: string
                 content:
                   type: string
+                  description: The proposed revision, inline. A file large enough to exceed the host's rpcJsonBodyBytes ceiling is refused
+                    before dispatch; the caller falls back to the on-disk diff rather than sending a truncated one.
                 title:
                   type: string
               additionalProperties: false

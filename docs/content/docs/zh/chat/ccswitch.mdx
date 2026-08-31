@@ -15,6 +15,14 @@ CCSwitch 互操作有两个独立 capability：
    base URL 同时写入 (a) cognia-next 自己的 `AppSettings`，(b) 用户勾选的每个外部 agent
    的 settings 文件——这样切完一次，cognia-next 和 Claude Code CLI 用同一套凭据。
 
+<Callout type="warn">
+  CCSwitch 互操作与订阅账号中心有独立的所有权边界。CCSwitch 行是外部只读来源，只有用户明确
+  执行受支持的导入/切换时才会产生写操作。账号中心的「停用」只改变 Cognia 当前凭据投影，
+  「从 Cognia 移除」只删除 Cognia 本地 vault 条目与引用。两者都不会写 CCSwitch 数据库、编辑
+  agent 登录、撤销 token，或登出 CCSwitch/Claude Code/Codex/OpenCode。「新会话默认」只是
+  Cognia resolver 偏好，不等同于 CCSwitch 切换。
+</Callout>
+
 ## 代码位置
 
 ```
@@ -253,6 +261,6 @@ provider 不导入——只是被引用为 active：写到 `AppSettings.activePr
 - **CCSwitch 重定向目录**——用户用 Dropbox / iCloud 把 `.cc-switch` 重定向到其他位置时
   我们看不到。需要用户把 CCSwitch 切回默认位置，或我们后续支持 CCSwitch 的 marker
   文件协议。
-- **OAuth 互斥**——CCSwitch provider 的优先级低于 OAuth bearer：如果用户登录了 Claude
-  订阅，sidecar 会优先用 OAuth；切换 CCSwitch provider 之前要先在 Subscription tab
-  退出登录。
+- **OAuth 优先级**——已投影的 Claude OAuth bearer 优先于 CCSwitch provider。明确执行
+  CCSwitch 切换前，请先在账号中心使用「停用」。这不会登出 Claude Code 或撤销 OAuth 凭据，
+  只会清除 Cognia 的 active 投影。

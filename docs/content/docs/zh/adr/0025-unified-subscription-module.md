@@ -155,6 +155,21 @@ OpenCode 与 Anthropic / Codex 根本不同：它是一个**多 提供商 客户
 
 ## 渲染器端的 IPC 接口
 
+### 2026-08-30 修订 — 账号中心加固与 schema v4
+
+订阅账号 CRUD 统一放在「设置 → 订阅 → 账号」。各 provider 页面只保留用量、探测和路由控件。
+渲染器列表/详情读取使用不含 secret 的 DTO；凭据更新、Codex 重新认证、偏好设置和本地移除使用
+限定范围的命令。运行时凭据解析与 Settings 保持隔离。
+
+Codex 刷新与定向重新认证由 host 管理。按账号的生命周期锁会串行化 token 轮换与删除；设备流带
+可取消 generation；轮换后的整套 token 原子持久化；终止型刷新失败会保存稳定的
+`reauth_required` reason。定向重新认证必须同时匹配原 workspace 与 subject；无法验证身份的
+legacy 账号必须另存。Schema v4 迁移只从传入凭据 payload 推导身份，不得检查 host 环境。
+
+移除严格限定为 Cognia 本地操作。UI 使用「停用」表示清除 active 投影，使用「从 Cognia 移除」
+表示删除 vault 条目。不存在远程 revoke/logout 命令，这些操作也不会编辑外部 agent store 或
+CCSwitch。
+
 > **2026-07-25修订。** 以下列表中有两点内容被删减。
 >
 > 1. **计数是28，不是20。** v3预设*库*命令（`subscription_list_presets`、`subscription_save_preset`、`subscription_delete_preset`、`subscription_set_default_preset`）、通用`subscription_authed_get`、`subscription_volcengine_usage`和ADR-0028环境解析器（`claude_env_for_account`、`claude_proxy_env_for_session`）都在本节写完后发布。2. **实现已移动。** 根据ADR-0067，vault/active-pointer/preset / 每个提供商发现 + OAuth 逻辑现存于`crates/cognia-subscription/`中;`src-tauri/src/subscription/`是薄薄的再出口外墙，加上Volcengine SigV4使用用命令。本ADR中其他引用的路径应与crate对照阅读。
@@ -165,7 +180,7 @@ OpenCode 与 Anthropic / Codex 根本不同：它是一个**多 提供商 客户
 
 人类特有（1）：`anthropic_oauth_save_pkce_result`（PKCE流在TS中运行;此hook仅持续于结果中）。
 
-Codex具体（5）：`codex_oauth_discover`、`codex_oauth_request_device_code`、`codex_oauth_poll_device_code`、`codex_oauth_refresh`、`codex_oauth_revoke`。
+Codex 生命周期命令包括：`codex_oauth_discover`、`codex_oauth_request_device_code`、`codex_oauth_poll_device_code`、`codex_oauth_cancel_device_code`、`subscription_refresh_codex_account`、`subscription_reauthenticate_codex_account`。远程 revoke 被有意省略。
 
 OpenCode-specific（2）：`opencode_oauth_discover`，`opencode_save_zen_key`。
 

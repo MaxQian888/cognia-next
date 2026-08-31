@@ -5,7 +5,7 @@ description: One account model across Anthropic, Codex and OpenCode — keyring-
 
 # Unified Subscription
 
-<Status variant="stable">Stable · ADR-0025 · keyring v2 / v20</Status>
+<Status variant="stable">Stable · ADR-0025 · vault schema v4</Status>
 
 <TLDR>
   Three subscription providers — Anthropic, Codex, OpenCode — share one account model, one vault format
@@ -78,6 +78,37 @@ components/settings/subscription/
 The vault, provider and discovery logic lives in the `cognia-subscription` crate; `mod.rs` re-exports it
 so existing `crate::subscription::…` call sites stay unchanged, while the command surface stays app-side
 because it owns the sidecar-restart seam and `ApiKeyState`.
+
+## Account Center and credential boundaries
+
+Settings → Subscription → Accounts is the only account CRUD surface. Claude, Codex, and OpenCode
+provider pages keep provider-specific usage, probe, and routing controls; they do not duplicate account
+mutation controls. “Active now” projects one credential into the provider runtime. “Default for new
+sessions” is a resolver fallback and does not activate or rewrite a running tool.
+
+The list and detail panes consume `AccountSummary` / `AccountDetail`, which cannot serialize access
+tokens, refresh tokens, ID tokens, or API keys. Settings mutations are scoped operations: rename,
+preference changes, credential replacement, identity-safe Codex reauthentication, and local removal.
+Secret-bearing full-account resolution remains confined to runtime consumers and explicit encrypted
+backup/export flows.
+
+Vault schema v4 adds non-secret Codex identity facts and lifecycle state. Codex refresh is host-owned,
+single-flight per account, atomically persists rotated access/refresh/ID tokens, and shares a lifecycle
+lock with removal. A targeted reauthentication may replace an account only when the stored and incoming
+workspace plus subject match. Legacy accounts without a verifiable fingerprint fail closed and must be
+added separately. Terminal refresh errors persist `reauth_required`; transient network failures remain
+retryable and do not invalidate the account.
+
+<Callout type="warn">
+  “Deactivate” only clears Cognia's active projection. “Remove from Cognia” only deletes the local vault
+  entry and migrates Cognia references. Neither operation revokes an upstream token, logs out an external
+  CLI, edits CCSwitch, or changes an external credential file/keychain entry. OpenCode and other external
+  credential representations are read-only until the user explicitly creates a Cognia-managed copy.
+</Callout>
+
+The v3 → v4 migration is a pure payload migration: it derives an optional fingerprint only from the ID
+token already present in the supplied vault payload. It performs no host discovery, keychain lookup,
+configuration-file read, or network request.
 
 ## Export is encrypted with the backup primitives
 

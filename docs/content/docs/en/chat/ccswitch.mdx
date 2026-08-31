@@ -16,6 +16,15 @@ CCSwitch interop has two independent capabilities:
 1. **Read-only browsing** — directly display the 4 tables from the CCSwitch database in Settings, providing a one-click "import into cognia-next" shortcut.
 2. **Coordinated switching** — when the user selects a CCSwitch provider as the current active one, write its API key and base URL simultaneously into (a) cognia-next's own `AppSettings`, and (b) the settings file of every external agent the user has checked — so after one switch, both cognia-next and Claude Code CLI use the same credentials.
 
+<Callout type="warn">
+  CCSwitch interop and Subscription Account Center have separate ownership. CCSwitch rows are external,
+  read-only source records until the user explicitly performs a supported import/switch action. Account
+  Center “Deactivate” changes only Cognia's active credential projection, and “Remove from Cognia” deletes
+  only Cognia's local vault entry/reference. Neither action writes the CCSwitch database, edits an agent
+  login, revokes a token, or logs out CCSwitch/Claude Code/Codex/OpenCode. “Default for new sessions” is a
+  Cognia resolver preference and is not a CCSwitch switch.
+</Callout>
+
 ## Code Locations
 
 ```
@@ -243,4 +252,6 @@ Providers are not imported — they are only referenced as active: writing to `A
 - **v1 only writes `claude-code`** — other agents (codex / gemini / opencode / openclaw) are shown grayed out with `unsupported: true` in the switch dialog. To add a new agent: add it to the `SUPPORTED_AGENTS` Set, provide its path in `targetPathFor`, and extend the Rust write command to support the new file format.
 - **Two-writer risk** — CCSwitch itself also writes `~/.claude/settings.json`; we rely on `detectActive` to converge on focus, but concurrent writes may still race. `writeClaudeSettingsEnv` creates a backup (returning `backupPath`) before writing, to allow rollback.
 - **CCSwitch redirected directory** — when the user redirects `.cc-switch` to another location via Dropbox / iCloud, we cannot see it. The user needs to switch CCSwitch back to the default location, or we need to add support for CCSwitch's marker file protocol in a future version.
-- **OAuth mutual exclusion** — CCSwitch provider priority is lower than OAuth bearer: if the user is logged into Claude Subscription, the sidecar prefers OAuth; before switching to a CCSwitch provider, log out in the Subscription tab first.
+- **OAuth precedence** — a projected Claude OAuth bearer takes precedence over a CCSwitch provider. Use
+  “Deactivate” in Account Center before an explicit CCSwitch switch. This does not log out Claude Code or
+  revoke the OAuth credential; it only clears Cognia's active projection.

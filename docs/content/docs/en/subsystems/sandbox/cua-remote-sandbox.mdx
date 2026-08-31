@@ -17,6 +17,14 @@ description: "ADR-0020's Dockerized computer-use sandbox: a ghcr.io/trycua/cua-x
   (schema **v57**).
 </TLDR>
 
+<Callout type="warn">
+  Runtime capabilities are adapter-derived. Only Docker with the computer-server driver implements
+  start, stop, health, delete, and GUI operations. Imported cua-cloud and Lume rows remain readable
+  for compatibility and render their own instance/endpoint or VM/image fields, but all unsupported
+  actions are disabled. No connection currently supplies the verified workspace adapter required by
+  the `cua-desktop` shell/files tier.
+</Callout>
+
 ## Container lifecycle — `lifecycle.rs`
 
 The container is launched with an ephemeral host port mapped to the container's 8000, then the host

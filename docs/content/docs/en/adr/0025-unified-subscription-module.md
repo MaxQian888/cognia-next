@@ -275,6 +275,24 @@ Verified against a live opencode install + the Zen gateway:
 
 ## Renderer-side IPC surface
 
+### Amendment 2026-08-30 — Account Center hardening and schema v4
+
+Subscription account CRUD is centralized in Settings → Subscription → Accounts. Provider pages retain
+usage, probe, and routing controls. Renderer account list/detail reads use secret-free DTOs; credential
+updates, Codex reauthentication, preferences, and local removal use scoped commands. Runtime credential
+resolution remains separate from Settings.
+
+Codex refresh and targeted reauthentication are host-owned. Per-account lifecycle locks serialize
+rotation with deletion, device flows carry cancellable generations, rotated token sets are persisted
+atomically, and terminal refresh failures persist stable `reauth_required` reasons. A targeted
+reauthentication must match both the prior workspace and subject; unverifiable legacy identities are
+added separately. Schema v4 migration derives identity only from the credential payload passed to it and
+must not inspect the host environment.
+
+Removal is deliberately local-only. The UI says “Deactivate” for clearing the active projection and
+“Remove from Cognia” for deleting a vault entry. There is no remote revoke/logout command, and these
+operations never edit external agent stores or CCSwitch.
+
 > **Amended 2026-07-25.** Two things drifted from the list below.
 >
 > 1. **The count is 28, not 20.** The v3 preset *library* commands
@@ -300,9 +318,10 @@ Shared (10): `subscription_init`, `subscription_list_accounts`,
 Anthropic-specific (1): `anthropic_oauth_save_pkce_result` (PKCE flow runs in
 TS; this hook only persists the result).
 
-Codex-specific (5): `codex_oauth_discover`,
+Codex-specific lifecycle commands include `codex_oauth_discover`,
 `codex_oauth_request_device_code`, `codex_oauth_poll_device_code`,
-`codex_oauth_refresh`, `codex_oauth_revoke`.
+`codex_oauth_cancel_device_code`, `subscription_refresh_codex_account`, and
+`subscription_reauthenticate_codex_account`. Remote revoke is intentionally absent.
 
 OpenCode-specific (2): `opencode_oauth_discover`, `opencode_save_zen_key`.
 

@@ -9,6 +9,13 @@ description: "Per-`ChatSession` OAuth / `CLAUDE_CONFIG_DIR` / base-URL / 代理�
 
 > **当前状态修订（2026-08-13）。** `WarmQuery` 与 prewarm 已存在。Rollout 验收改为验证 pool-key 隔离、取消、shutdown、stale claim 恢复及 feature flag 证据。macOS XPC backend 不属于本次 rollout。
 
+> **沙盒生命周期修订（2026-08-30）。** 运行时可用性现在来自实际 confinement probe 与
+> 正在接受新绑定的 E2B adapter，而不是 provider 名称。E2B 注销采用 drain：立即拒绝新 owner，
+> 已绑定 generation 保留原 adapter；只有 workspace handle 与最后一个 runtime owner 都释放后
+> 才关闭 VM。关闭失败进入可重试清理账本，应用退出是强制清理边界。OS 与 E2B 的 stdout/stderr
+> 各自限制为 1,000,000 个 UTF-8 字节，并分别报告截断。只有 Docker/computer-server 具备连接
+> 生命周期 adapter；导入的 cloud 与 Lume 行仅用于兼容读取，不暴露未实现操作。
+
 > **注 （2026-07-25）** 每会话/按角色*账号固定*的一半ADR是实时且用户可访问的，非推测：`accountIdOverride`由`lib/claude/env-resolver.ts`解决，从角色编辑器（`components/settings/characters-section.tsx`）和聊天会话设置表编辑，`components/settings/subscription/account-usage-chips.tsx`中显示为“正在使用”芯片，并有注册的`claude_env_for_account`/`claude_proxy_env_for_session` 命令支持。读者若仅凭字面理解前言，会认为这些内容根本不存在。执行沙盒部分尚未与该文档进行重新核实，因此整体状态保持提议，而非翻转为已接受。
 **Supersedes**：扩展ADR-0010（Claude订阅OAuth）、ADR-0020（计算机使用完整性）、ADR-0025（统一订阅模块）、ADR-0026（插件扩展点扩展）**作者**：Max Qian + Claude Opus 4.7
 
@@ -76,11 +83,19 @@ T1拦截路径：一个新的树内插件`plugins/cognia-sandboxed-tools/`注册
 
 #### T3 — Wasmtime + WASI for plugin WASM
 
-新`lib/plugin/core/wasm-runtime.ts`通过`@bytecodealliance/jco`（或`wasmtime`节点绑定）运行WASM插件;主机导入仅限于通过`lib/plugin/security/wasm-grant.ts`授予的预开。预开授权账本是持久的Dexie状态（`wasmGrantLedger`，模式v88），旧的localStorage镜像仅用作迁移回退。插件更新时，清单预开与账本对账：移除的路径被拒绝并警告，新声明的路径在审核前不会被授予。运行时还会在每次调用前重新验证已加载的预开集，因此加载后撤销授权无需等待重新加载即可生效。
+Rust/Wasmtime 是唯一生产权威。`PluginLoader` 保存原生宿主返回的 generation，
+`PluginManager` 把同一个 generation 绑定到每个已声明工具和 workflow node 投影。
+缺少 generation 时 activation 失败；原生宿主会在 activate、call、deactivate 与 unload
+时拒绝陈旧 generation。未使用的浏览器 WASM runtime 及其未实现 JCO component 路径已移除。
+原生 load 前仍通过 `lib/plugin/security/wasm-grant.ts` 对账 manifest preopen。
 
 #### T4 — e2b Firecracker microVM作为选择加入的等级
 
-`Character.computerUseSettings.sandboxTier?: "os" | "microvm"`。`microvm`时，`sandbox_*`工具实现会路由到现有的`plugins/e2b-sandbox/`工作区后端，而不是T1。e2b没有变化;只有一个路由分支。
+`Character.computerUseSettings.sandboxTier?: "os" | "microvm"`。只有正在接受新绑定的 E2B
+adapter 已注册，且能认领一个存活的 E2B workspace handle，microVM binding 才符合条件。
+插件 drain 时，runtime record 保留原 adapter，因此现有 owner 可以完成而新 owner 严格失败。
+workspace-handle ownership 与 runtime-ref ownership 独立；两者都归零后 VM 才恰好关闭一次，
+close/release 失败会保留并可重试。
 
 #### T5 — `computer_use`的每个行动策略 门禁
 
@@ -100,7 +115,11 @@ SDK的`--resume`忽略`CLAUDE_CONFIG_DIR`（只在默认`~/.claude/projects/`下
 
 ### 审计 + 可观测性
 
-`automation/audit.rs` 获得了`Surface::Sandbox`变体。每个沙箱调用（允许/拒绝/错误）都会被记录;`resume_replayed`事件也会被记录。现有的 5000 封 VecDeque + Dexie `automationAuditLog` 镜像负责携带这些事件。现有的诊断标签页（`components/settings/sections/diagnostics-section.tsx`，可观测组）扩展了可折叠的沙盒事件日志卡和sidecar重启计数器——没有新标签页。
+`automation/audit.rs` 提供 `Surface::Sandbox`。每次沙盒调用（允许/拒绝/错误）都会在既有
+payload 中记录有效 tier/provider、拒绝或终止原因、请求 timeout、是否超时、两个流的截断标志、
+exit code 与 duration。5000 条上限的 VecDeque 与 Dexie `automationAuditLog` 同时承载原生和
+E2B 事件。Diagnostics 直接调用 `listAuditRows({ surface: "sandbox" })`，因此无关的近期审计行
+不会遮住沙盒事件。
 
 ### UI 接口
 

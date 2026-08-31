@@ -7,19 +7,21 @@ description: Generated from the canonical Plugin Interface Catalog.
 
 # Plugin API Reference
 
-Contract `1.1.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtime enforcement remains fail-closed for unmapped methods.
+Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtime enforcement remains fail-closed for unmapped methods.
 
 | Namespace | Methods | Declared permissions | Runtimes | Data class |
 | --- | ---: | --- | --- | --- |
 | `ctx.a2ui` | 8 | None | frontend, hybrid, python | internal |
-| `ctx.agent` | 27 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
+| `ctx.agent` | 28 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
 | `ctx.ai` | 7 | `ai:chat`, `ai:embed` | frontend, hybrid | sensitive |
 | `ctx.artifact` | 10 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
-| `ctx.automation` | 18 | `automation:read`, `automation:click`, `automation:pointer`, `automation:window`, `automation:type`, `automation:screenshot` | frontend, hybrid | internal |
+| `ctx.automation` | 24 | `automation:read`, `automation:screenshot`, `automation:click`, `automation:pointer`, `automation:type`, `automation:window` | frontend, hybrid | internal |
 | `ctx.backup` | 6 | `backup:read`, `backup:write` | frontend, hybrid | internal |
+| `ctx.browser` | 4 | `agent:control`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
+| `ctx.characterPacks` | 3 | None | frontend, hybrid | internal |
 | `ctx.chat` | 4 | `session:write` | frontend, hybrid, python | internal |
 | `ctx.clipboard` | 7 | `clipboard:write`, `clipboard:read` | frontend, hybrid | sensitive |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
@@ -30,6 +32,7 @@ Contract `1.1.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.db` | 6 | `database:write`, `database:read` | frontend, hybrid | internal |
 | `ctx.dexie` | 2 | None | frontend, hybrid | internal |
 | `ctx.editor` | 9 | `editor:read`, `editor:write` | frontend, hybrid, python | internal |
+| `ctx.eval` | 5 | `tests:run`, `database:read`, `ai:chat`, `database:write` | frontend, hybrid | sensitive |
 | `ctx.events` | 17 | None | frontend, hybrid | internal |
 | `ctx.export` | 8 | `export:session`, `export:project` | frontend, hybrid | internal |
 | `ctx.extensions` | 3 | `extension:ui` | frontend, hybrid | internal |
@@ -48,21 +51,26 @@ Contract `1.1.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.modal` | 3 | None | frontend, hybrid | internal |
 | `ctx.network` | 8 | `network:fetch`, `network:upload` | frontend, hybrid | sensitive |
 | `ctx.notifications` | 7 | None | frontend, hybrid, python | internal |
-| `ctx.ocr` | 2 | None | frontend, hybrid | internal |
+| `ctx.ocr` | 8 | `media:image:read`, `database:write`, `native:filesystem`, `automation:screenshot`, `native:screen` | frontend, hybrid | internal |
 | `ctx.perf` | 5 | `perf:read` | frontend, hybrid | internal |
 | `ctx.permissions` | 5 | None | frontend, hybrid | internal |
 | `ctx.pet` | 6 | `pet:read` | frontend, hybrid | internal |
 | `ctx.project` | 20 | `project:write`, `project:read`, `project:delete` | frontend, hybrid | sensitive |
 | `ctx.python` | 3 | None | frontend, hybrid | internal |
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
+| `ctx.resources` | 6 | `database:read` | frontend, hybrid | sensitive |
+| `ctx.recorder` | 19 | `media:image:write`, `native:input`, `native:screen`, `media:image:read` | frontend, hybrid | sensitive |
+| `ctx.sandbox` | 6 | `session:read`, `native:filesystem`, `native:process`, `native:input` | frontend, hybrid | sensitive |
 | `ctx.scheduler` | 16 | None | frontend, hybrid | internal |
 | `ctx.secrets` | 6 | `secrets:write`, `secrets:read` | frontend, hybrid, python | secret |
 | `ctx.services` | 3 | None | frontend, hybrid | internal |
-| `ctx.session` | 15 | `session:write`, `session:delete`, `session:read` | frontend, hybrid | sensitive |
+| `ctx.securityScans` | 2 | `terminal:kill`, `database:write` | frontend, hybrid | sensitive |
+| `ctx.session` | 16 | `session:write`, `session:delete`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.settings` | 3 | None | frontend, hybrid | internal |
 | `ctx.share` | 6 | `share:create`, `share:read` | frontend, hybrid | internal |
 | `ctx.shell` | 4 | `shell:execute`, `process:spawn` | frontend, hybrid | internal |
 | `ctx.shortcuts` | 4 | None | frontend, hybrid | internal |
+| `ctx.sites` | 5 | `database:read` | frontend, hybrid | internal |
 | `ctx.storage` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.subscription` | 7 | `subscription:read` | frontend, hybrid | sensitive |
 | `ctx.team` | 21 | `team:write`, `team:read` | frontend, hybrid | sensitive |
@@ -72,12 +80,13 @@ Contract `1.1.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.toolResult` | 1 | `extension:ui` | frontend, hybrid | internal |
 | `ctx.tray` | 2 | None | frontend, hybrid | internal |
 | `ctx.ui` | 5 | None | frontend, hybrid, python | internal |
+| `ctx.userScheduler` | 5 | `database:write`, `settings:read`, `database:read`, `agent:control` | frontend, hybrid | sensitive |
 | `ctx.uri` | 1 | None | frontend, hybrid | internal |
 | `ctx.vector` | 13 | `vector:write`, `vector:read` | frontend, hybrid | internal |
 | `ctx.webview` | 1 | None | frontend, hybrid | internal |
 | `ctx.window` | 4 | None | frontend, hybrid | internal |
-| `ctx.workflow` | 3 | None | frontend, hybrid | internal |
-| `ctx.workspace` | 8 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write` | frontend, hybrid, python | internal |
+| `ctx.workflow` | 25 | `canvas:write`, `canvas:run`, `workflow:read`, `connectors:send`, `session:read` | frontend, hybrid | internal |
+| `ctx.workspace` | 9 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write` | frontend, hybrid, python | internal |
 
 ## Adapter error codes
 
@@ -131,6 +140,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `agent.registerSkill` | None | low | No |
 | `agent.registerTool` | None | low | No |
 | `agent.run` | `agent:control` | high | No |
+| `agent.runCharacterTurn` | `agent:control` | high | No |
 | `agent.runExternalAgent` | `agent:dispatch-external` | medium | No |
 | `agent.runStreamed` | `agent:control` | high | No |
 | `agent.runTeam` | `agent:dispatch` | medium | No |
@@ -181,18 +191,24 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
 | `automation.capabilities` | `automation:read` | medium | Yes |
+| `automation.captureDisplay` | `automation:screenshot` | medium | No |
 | `automation.click` | `automation:click` | high | No |
-| `automation.cursorPosition` | `automation:pointer` | high | Yes |
+| `automation.cursorPosition` | `automation:read` | high | Yes |
 | `automation.drag` | `automation:pointer` | high | No |
 | `automation.find` | `automation:read` | medium | Yes |
-| `automation.getFocus` | `automation:window` | high | Yes |
+| `automation.expandElement` | `automation:read` | medium | Yes |
+| `automation.getAppState` | `automation:read`, `automation:screenshot` | medium | No |
+| `automation.getFocus` | `automation:read` | high | Yes |
 | `automation.holdKey` | `automation:type` | high | No |
 | `automation.keys` | `automation:type` | high | Yes |
-| `automation.launchApp` | `automation:read` | medium | No |
-| `automation.mouseButton` | `automation:read` | medium | No |
+| `automation.launchApp` | `automation:window` | medium | No |
+| `automation.listApps` | `automation:read` | medium | Yes |
+| `automation.mouseButton` | `automation:click` | medium | No |
 | `automation.mouseMove` | `automation:pointer` | high | No |
-| `automation.paste` | `automation:read` | medium | No |
+| `automation.paste` | `automation:type` | medium | No |
+| `automation.performAction` | `automation:click`, `automation:type`, `automation:pointer`, `automation:window` | high | No |
 | `automation.pickAtPoint` | `automation:read` | medium | No |
+| `automation.queryElements` | `automation:read` | medium | Yes |
 | `automation.readTree` | `automation:read` | medium | Yes |
 | `automation.screenshot` | `automation:screenshot` | medium | No |
 | `automation.scroll` | `automation:pointer` | high | No |
@@ -209,6 +225,15 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `backup.restore` | `backup:write` | high | No |
 | `backup.serialize` | `backup:read` | medium | No |
 | `backup.validate` | `backup:read` | medium | Yes |
+
+## `ctx.browser`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `browser.isDomainAuthorized` | `agent:control` | medium | Yes |
+| `browser.primeDomainGrants` | `agent:control` | medium | Yes |
+| `browser.routeEngine` | `agent:control` | high | Yes |
+| `browser.saveAnnotation` | `agent:control`, `session:read` | high | No |
 
 ## `ctx.canvas`
 
@@ -246,6 +271,14 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `canvas.setSelection` | `canvas:write` | high | No |
 | `canvas.updateComment` | `canvas:write` | high | No |
 | `canvas.updateDocument` | `canvas:write` | high | No |
+
+## `ctx.characterPacks`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `characterPacks.get` | None | low | Yes |
+| `characterPacks.listRegistered` | None | low | Yes |
+| `characterPacks.register` | None | low | No |
 
 ## `ctx.chat`
 
@@ -399,6 +432,16 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `editor.runInTerminal` | `editor:write` | high | No |
 | `editor.saveDirty` | `editor:write` | high | No |
 | `editor.showDiff` | `editor:read` | medium | Yes |
+
+## `ctx.eval`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `eval.getRun` | `tests:run`, `database:read` | medium | Yes |
+| `eval.listDatasets` | `tests:run`, `database:read` | medium | Yes |
+| `eval.runCalibration` | `tests:run`, `ai:chat`, `database:write` | high | No |
+| `eval.runDataset` | `tests:run`, `ai:chat`, `database:write` | high | No |
+| `eval.runProject` | `tests:run`, `ai:chat`, `database:write` | high | No |
 
 ## `ctx.events`
 
@@ -717,8 +760,14 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
+| `ocr.extract` | `media:image:read`, `database:write` | high | No |
+| `ocr.extractFile` | `native:filesystem`, `media:image:read`, `database:write` | high | No |
+| `ocr.extractScreen` | `automation:screenshot`, `native:screen`, `media:image:read`, `database:write` | high | No |
+| `ocr.isReady` | None | low | Yes |
+| `ocr.listAvailableProviders` | None | low | Yes |
 | `ocr.listRegistered` | None | low | Yes |
 | `ocr.registerProvider` | None | low | No |
+| `ocr.runSlashCommand` | `native:filesystem`, `media:image:read`, `database:write` | high | No |
 
 ## `ctx.perf`
 
@@ -791,6 +840,52 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `quickActions.register` | None | low | No |
 | `quickActions.registerMany` | None | low | No |
 
+## `ctx.resources`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `resources.listAdapterInstances` | `database:read` | medium | Yes |
+| `resources.listCharacters` | `database:read` | medium | Yes |
+| `resources.listMcpServers` | `database:read` | medium | Yes |
+| `resources.listPlugins` | `database:read` | medium | Yes |
+| `resources.listSkills` | `database:read` | medium | Yes |
+| `resources.listTwins` | `database:read` | medium | Yes |
+
+## `ctx.recorder`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `recorder.deleteBundle` | `media:image:write` | high | No |
+| `recorder.getAvailability` | None | low | Yes |
+| `recorder.interrupt` | `native:input` | high | No |
+| `recorder.listCaptureTargets` | `native:screen` | medium | Yes |
+| `recorder.listRecoverable` | `media:image:read` | medium | Yes |
+| `recorder.loadBundle` | `media:image:read` | medium | Yes |
+| `recorder.onEvent` | `native:input` | medium | No |
+| `recorder.open` | None | low | No |
+| `recorder.pause` | `native:input` | high | No |
+| `recorder.preflight` | `native:input`, `native:screen` | medium | Yes |
+| `recorder.publishAvailability` | None | low | No |
+| `recorder.readAsset` | `media:image:read` | medium | Yes |
+| `recorder.resume` | `native:input` | high | No |
+| `recorder.start` | `native:input`, `native:screen`, `media:image:write` | high | No |
+| `recorder.status` | `native:input` | medium | Yes |
+| `recorder.statusSnapshot` | None | low | Yes |
+| `recorder.stop` | `native:input`, `media:image:write` | high | No |
+| `recorder.subscribeAvailability` | None | low | No |
+| `recorder.undoLast` | `native:input`, `media:image:write` | high | No |
+
+## `ctx.sandbox`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `sandbox.activeRefForSession` | `session:read` | medium | Yes |
+| `sandbox.assertWritablePath` | `native:filesystem` | medium | Yes |
+| `sandbox.clampRequest` | `native:process` | medium | Yes |
+| `sandbox.decorateComputerUseContext` | `native:input`, `session:read` | high | Yes |
+| `sandbox.execute` | `native:process` | high | No |
+| `sandbox.registerMicrovmAdapter` | `native:process` | high | No |
+
 ## `ctx.scheduler`
 
 | Method | Permissions | Risk | Idempotent |
@@ -831,12 +926,20 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `services.isAvailable` | None | low | Yes |
 | `services.onOptionalServiceChange` | None | low | No |
 
+## `ctx.securityScans`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `securityScans.registerRunController` | `terminal:kill` | high | No |
+| `securityScans.syncExecutionRun` | `database:write` | high | Yes |
+
 ## `ctx.session`
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
 | `session.addMessage` | `session:write` | high | No |
 | `session.createSession` | `session:write` | high | No |
+| `session.startSeededSession` | `session:write` | high | No |
 | `session.deleteMessage` | `session:delete` | high | No |
 | `session.deleteSession` | `session:delete` | high | No |
 | `session.getCurrentSession` | `session:read` | medium | Yes |
@@ -887,6 +990,16 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `shortcuts.isAvailable` | None | low | Yes |
 | `shortcuts.register` | None | low | No |
 | `shortcuts.registerMany` | None | low | No |
+
+## `ctx.sites`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `sites.getProductionUrl` | `database:read` | medium | Yes |
+| `sites.listDeployments` | `database:read` | medium | Yes |
+| `sites.listOperations` | `database:read` | medium | Yes |
+| `sites.listSites` | `database:read` | medium | Yes |
+| `sites.listVersions` | `database:read` | medium | Yes |
 
 ## `ctx.storage`
 
@@ -1019,6 +1132,16 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `ui.showNotification` | None | low | Yes |
 | `ui.showToast` | None | low | Yes |
 
+## `ctx.userScheduler`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `userScheduler.createTask` | `database:write`, `settings:read` | high | No |
+| `userScheduler.deleteTask` | `database:write` | high | No |
+| `userScheduler.getPolicy` | `settings:read` | medium | Yes |
+| `userScheduler.listTasks` | `database:read` | medium | Yes |
+| `userScheduler.runTaskNow` | `agent:control`, `database:write` | high | No |
+
 ## `ctx.uri`
 
 | Method | Permissions | Risk | Idempotent |
@@ -1062,9 +1185,31 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
+| `workflow.approvalActorScope` | None | low | Yes |
+| `workflow.autoLayoutEditor` | `canvas:write` | medium | No |
+| `workflow.buildApprovalSurface` | None | low | Yes |
 | `workflow.emitTriggerEvent` | None | low | No |
+| `workflow.emitWaitEvent` | `canvas:run` | high | No |
+| `workflow.executeRunWorkflowTyped` | `canvas:run` | high | No |
+| `workflow.explainEditorLastRun` | `workflow:read` | low | Yes |
+| `workflow.explainEditorValidation` | `workflow:read` | low | Yes |
+| `workflow.findWorkflowById` | `workflow:read` | low | Yes |
+| `workflow.findWorkflowByName` | `workflow:read` | low | Yes |
+| `workflow.getNodeCatalogEntry` | `workflow:read` | low | Yes |
+| `workflow.getRunnerToolDefinition` | `workflow:read` | low | Yes |
+| `workflow.listCopilotTemplates` | `workflow:read` | low | Yes |
+| `workflow.listNodeCatalog` | `workflow:read` | low | Yes |
+| `workflow.listWorkflowSummaries` | `workflow:read` | low | Yes |
+| `workflow.materializeCopilotTemplate` | `workflow:read` | low | Yes |
+| `workflow.mutateEditor` | `canvas:write` | medium | No |
+| `workflow.recordCallbackBinding` | `connectors:send` | high | No |
+| `workflow.refreshTemplateWarnings` | None | low | Yes |
 | `workflow.registerNode` | None | low | No |
 | `workflow.registerTrigger` | None | low | No |
+| `workflow.resolveEditor` | `workflow:read` | low | Yes |
+| `workflow.resolveTriggerOrigin` | `session:read` | medium | Yes |
+| `workflow.runWorkflow` | `canvas:run` | high | No |
+| `workflow.stageProposal` | `canvas:write` | medium | No |
 
 ## `ctx.workspace`
 
@@ -1072,6 +1217,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | --- | --- | --- | --- |
 | `workspace.acquire` | `filesystem:read`, `network:fetch` | high | No |
 | `workspace.changedSince` | `git:read` | low | Yes |
+| `workspace.getActiveRoot` | `filesystem:read` | medium | Yes |
 | `workspace.getBackend` | None | low | Yes |
 | `workspace.listRegistered` | None | low | Yes |
 | `workspace.read` | `filesystem:read` | medium | Yes |

@@ -10,9 +10,10 @@ description: "cognia-sandboxed-tools：内置插件，注册四个 sandbox_* MCP
 <TLDR>
   `plugins/cognia-sandboxed-tools/src/index.ts` 注册了四个 MCP 工具 —— `sandbox_bash`、
   `sandbox_edit`、`sandbox_write`、`sandbox_text_editor` —— 当会话启用沙盒时，模型会
-  **改用**它们而非 SDK 内置工具。每次调用都由 `dispatchSandbox` 根据会话当前激活的层级
-  路由到 OS 沙盒（`sandbox_exec` Tauri 命令，T1）或 e2b microVM（T4）。严格模式：
-  `microvm` 层级若没有已注册的 exec 会**抛出异常**——绝不静默回退。
+  **改用**它们而非 SDK 内置工具。每次调用都根据不可变 `SandboxRuntimeRef` 路由到 OS 沙盒
+  （`sandbox_exec` Tauri 命令，T1）或 e2b microVM（T4）。带 session 的插件调用若缺 ref，
+  会在统一调用边界从活跃 session binding 恢复；无法恢复时严格失败。只有明确无 session 的调用
+  使用 host sentinel。microVM 没有合格 E2B binding 时绝不回退到 OS。
 </TLDR>
 
 ## 四个工具

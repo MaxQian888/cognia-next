@@ -13,9 +13,9 @@ description: "How third-party plugin code is confined: the renderer-side PluginS
   `console` / `setTimeout` / `fetch` / `localStorage`, and runs plugin code through a `Function` /
   `AsyncFunction` with explicit args and a timeout. **T2** (`launchPluginJs.ts`) translates a
   manifest's permissions into Node 24 `--permission` flags for re-execing Node-target plugins.
-  **T3** (`wasm-runtime.ts`) loads WASM plugins under a runtime whose preopens come from the Dexie
-  grant ledger. T2 is reached through `PluginLoader`/`PluginManager` for Node-target frontend
-  plugins, and T3 reconciles manifest preopens before load plus revalidates them before every call.
+  **T3** is the native Rust/Wasmtime host. T2 is reached through `PluginLoader`/`PluginManager` for
+  Node-target frontend plugins; T3 reconciles manifest preopens before native load and binds the
+  returned runtime generation into every tool and workflow node.
 </TLDR>
 
 ## Renderer isolation — `PluginSandbox`
@@ -121,27 +121,12 @@ the normal `PluginManager` lifecycle.
   `--allow-child-process`.
 </Callout>
 
+The permission review UI projects this boundary truthfully. Scoped filesystem grants are available.
+`network:fetch`, `network:upload`, `network:websocket`, `shell:execute`, and `process:spawn` remain
+visible for manifest compatibility, but their grant/tier controls are disabled with the missing
+broker reason instead of appearing successfully enforced.
+
 ## T3 — Wasmtime / WASI runtime
-
-`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` resolves the preopen set from the Dexie-backed grant
-ledger **before** building the runtime, then returns a controllable `WasmPluginHandle`.
-
-```ts title="lib/plugin/core/wasm-runtime.ts:82-102 (load + call)"
-export async function loadWasmPlugin(
-  pluginId: string,
-  source: WasmSource,
-  options: WasmRuntimeOptions = {}
-): Promise<WasmPluginHandle> {
-  if (!pluginId.trim()) throw new Error("loadWasmPlugin: pluginId is required")
-  const preopensResolver = options.preopensResolver ?? getGrantedPreopens
-  const preopens = [...(await preopensResolver(pluginId))]
-  const factory = options.runtimeFactory ?? defaultWasmRuntimeFactory
-  const instance = await factory({ pluginId, source, preopens })
-  return { async call(method, args) {
-    await verifyPreopenAllowedForCall(pluginId, preopens)
-    return instance.call(method, args)
-  } }
-```
 
 `PluginManager.preloadWasmComponent()` reconciles `manifest.wasm.fs.preopens` with the durable
 ledger before `plugin_wasm_load`: stale ledger preopens are denied with a warning, newly declared
@@ -149,26 +134,11 @@ manifest preopens are not granted automatically, and only the intersection is pa
 The old `localStorage` ledger remains as a one-time migration fallback into the `wasmGrantLedger`
 Dexie table.
 
-Two delivery paths, decided by a magic-byte heuristic (`looksLikeComponent`, `wasm-runtime.ts:152-161`):
-
-- **Core modules** — instantiated via `WebAssembly.instantiate`. No FS/network bindings; the only host
-  import is a `cognia` namespace whose `read_file` rejects any path not in the granted set:
-
-```ts title="lib/plugin/core/wasm-runtime.ts:176-181 (grant-gated read)"
-read_file: (path: string) => {
-  if (!grantedSet.has(path)) {
-    throw new Error(`wasm-runtime: preopen denied for ${path}`)
-  }
-  return memorySnapshot.get(path) ?? new Uint8Array()
-},
-```
-
-- **WASI Preview-2 components** — dynamically import `@bytecodealliance/jco`. The component path
-  currently surfaces a structured "not yet wired" error rather than pinning a shifting jco API
-  (`wasm-runtime.ts:230-233`); callers can inject a `runtimeFactory` or ship a core module.
-
-The grant ledger (`lib/plugin/security/wasm-grant.ts`) is authoritative — host imports are pure (no
-real FS), so the worst-case blast radius is "the plugin reads its own grant".
+`PluginLoader` stores the generation returned by `plugin_wasm_load`. `PluginManager` refuses
+activation when that generation is missing and passes it into `buildWasmToolDefinitions` and
+`buildWasmNodeDefs`. Every execute call therefore names the exact loaded generation; the native host
+rejects stale activate/call/deactivate/unload requests. The unused browser-side WASM runtime and its
+unimplemented JCO path were removed, leaving Rust/Wasmtime as the single production authority.
 
 ```mermaid
 flowchart TB
@@ -179,22 +149,21 @@ flowchart TB
     L["nodePermissionArgs → --allow-* flags"] --> SP["spawn('node', argv)"]
   end
   subgraph T3["WASM target (T3)"]
-    LW["loadWasmPlugin"] --> GR["getGrantedPreopens (ledger)"]
-    LW --> RT{"core vs component"}
-    RT -->|core| WI["WebAssembly.instantiate"]
-    RT -->|component| JCO["@bytecodealliance/jco (opt-in)"]
+    GR["reconcile preopens"] --> LW["plugin_wasm_load"]
+    LW --> GEN["bind native generation"]
+    GEN --> WI["Rust / Wasmtime calls"]
   end
 
   classDef soft fill:#1e3a5f,stroke:#38bdf8,color:#e0f2fe
-  class PS,L,SP,LW,GR,WI,JCO soft
+  class PS,L,SP,LW,GR,GEN,WI soft
 ```
 
 ## Tests
 
 `lib/plugin/core/sandbox.test.ts` (permission mapping, clamping, namespaced storage, execution),
 `lib/plugin/launcher/launchPluginJs.test.ts` (flag construction, omit-on-empty), and
-`lib/plugin/core/wasm-runtime.test.ts` + `wasm-loader.test.ts` (preopen gating, core instantiate,
-component install-hint).
+`wasm-loader.test.ts` + `manager.test.ts` + native Wasmtime tests (generation binding and stale
+generation rejection).
 
 ## Next
 

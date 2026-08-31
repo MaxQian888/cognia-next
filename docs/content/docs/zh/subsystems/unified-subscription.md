@@ -5,7 +5,7 @@ description: 横跨 Anthropic、Codex 与 OpenCode 的同一套账号模型 —�
 
 # 统一订阅
 
-<Status variant="stable">Stable · ADR-0025 · keyring v2 / v20</Status>
+<Status variant="stable">Stable · ADR-0025 · vault schema v4</Status>
 
 <TLDR>
   三个订阅提供方 —— Anthropic、Codex、OpenCode —— 共用同一套账号模型、同一种 vault 格式、同一个额度接口面。
@@ -77,6 +77,33 @@ components/settings/subscription/
 vault、provider 与发现逻辑位于 `cognia-subscription` crate；`mod.rs` 将其再导出，
 使既有的 `crate::subscription::…` 调用点保持不变，
 而命令面留在 app 侧，因为它拥有 sidecar 重启接缝与 `ApiKeyState`。
+
+## 账号中心与凭据边界
+
+设置 → 订阅 → 账号是唯一的账号 CRUD 界面。Claude、Codex、OpenCode 的 provider 页面只保留
+各自的用量、探测和路由设置，不再重复账号修改控件。「当前激活」表示把一个凭据投影到当前
+provider 运行时；「新会话默认」只是解析新会话时的 fallback，不会激活账号，也不会改写正在
+运行的工具。
+
+列表与详情面板只消费无法序列化 access token、refresh token、ID token 或 API key 的
+`AccountSummary` / `AccountDetail`。设置界面的修改都走限定范围的操作：重命名、偏好设置、
+凭据替换、带身份校验的 Codex 重新认证，以及本地移除。含 secret 的完整账号解析只留在运行时
+consumer 和用户明确触发的加密备份/导出流程中。
+
+Vault schema v4 新增非 secret 的 Codex 身份信息与生命周期状态。Codex 刷新由 host 管理，
+按账号 single-flight，原子持久化轮换后的 access/refresh/ID token，并与移除操作共用生命周期锁。
+定向重新认证只有在 workspace 与 subject 都匹配时才允许覆盖原账号；缺少可验证 fingerprint 的
+legacy 账号会 fail closed，必须另存为新账号。终止型刷新错误会持久化为 `reauth_required`；瞬时
+网络错误保持可重试，不会让账号失效。
+
+<Callout type="warn">
+  「停用」只清除 Cognia 的 active 投影。「从 Cognia 移除」只删除本地 vault 条目并迁移 Cognia
+  内部引用。两者都不会撤销上游 token、登出外部 CLI、编辑 CCSwitch，或改动外部凭据文件/
+  keychain。OpenCode 等外部凭据只以只读形式展示，除非用户明确创建 Cognia 管理的副本。
+</Callout>
+
+v3 → v4 是纯 payload 迁移：只会从传入 vault payload 中已经存在的 ID token 推导可选 fingerprint，
+不会执行 host discovery、keychain 查询、配置文件读取或网络请求。
 
 ## 导出用的是备份那套加密原语
 
