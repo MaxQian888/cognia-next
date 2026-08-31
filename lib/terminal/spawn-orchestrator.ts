@@ -83,6 +83,14 @@ export interface SpawnFromDockInput {
   /** Test seam — swap the plugin hook bus. */
   hooks?: ReturnType<typeof getPluginEventHooks>
   /**
+   * Tab label, for a spawn whose name is not derivable from the shell.
+   *
+   * A remote spawn carries a profile id and the host answers with whatever it
+   * resolved, so an SSH session opened this way would otherwise be labelled by
+   * the host's shell rather than by the saved host the user picked.
+   */
+  title?: string
+  /**
    * Identity of the agent driving this spawn — set when the dock is
    * spawned via the `terminal_dock_*` MCP tool path
    * (`lib/terminal/dock-tool-handler.ts`). `terminal-store` scopes
@@ -256,9 +264,10 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
       origin: session.info.origin,
       shell: session.info.shell,
     },
-    input.agentSpawner
+    input.agentSpawner || input.title
       ? {
-          agentSpawner: input.agentSpawner,
+          ...(input.title ? { title: input.title } : {}),
+          ...(input.agentSpawner ? { agentSpawner: input.agentSpawner } : {}),
           ...(input.agentSpawnerMessageId
             ? { agentSpawnerMessageId: input.agentSpawnerMessageId }
             : {}),

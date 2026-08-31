@@ -97,6 +97,8 @@ jest.mock("@/lib/terminal/pick-transport", () => ({
   selectTerminalTransport: () => mockTransport,
 }))
 
+import userEvent from "@testing-library/user-event"
+
 import { MobileTerminalScreen } from "./mobile-terminal-screen"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -172,6 +174,44 @@ describe("MobileTerminalScreen", () => {
   })
 
   it("calls spawnFromDock when + New is tapped", () => {
+    render(<MobileTerminalScreen />)
+    fireEvent.click(screen.getByTestId("mobile-terminal-new"))
+    expect(mockSpawnFromDock).toHaveBeenCalled()
+  })
+
+  /**
+   * A phone could not open an SSH session because nothing on it offered to,
+   * not because it could not. The host resolves the profile id against its own
+   * `ssh_profiles` map and dials with credentials that never leave it.
+   */
+  it("offers saved SSH hosts behind the shell picker", async () => {
+    useSettingsStore.setState({
+      settings: {
+        terminal: {
+          sshHosts: [
+            {
+              id: "ssh-1",
+              name: "Production",
+              host: "prod.example.com",
+              port: 22,
+              username: "deploy",
+              authMethod: "agent",
+            },
+          ],
+        },
+      },
+    } as never)
+    render(<MobileTerminalScreen />)
+    // Radix opens on pointerdown, which `fireEvent.click` does not send.
+    await userEvent.click(screen.getByTestId("mobile-terminal-shell-picker"))
+    expect(await screen.findByTestId("terminal-shell-picker-ssh-ssh-1")).toBeInTheDocument()
+  })
+
+  /**
+   * One tap is the primary action on this screen. Collapsing the split into a
+   * menu button would trade it for a list the user usually does not need.
+   */
+  it("still spawns a default session on the first tap", () => {
     render(<MobileTerminalScreen />)
     fireEvent.click(screen.getByTestId("mobile-terminal-new"))
     expect(mockSpawnFromDock).toHaveBeenCalled()

@@ -149,8 +149,6 @@
     "connecting": "Connecting…",
     "edit": "Edit in Settings",
     "shellOnly": "A shell and nothing else. No agent, workspace or sandbox runs over SSH.",
-    "localOnlyTitle": "This machine only",
-    "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
     "credentialRequiredTitle": "Password not saved",
     "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting.",
     "unknownHostTitle": "Saved profile not found",
@@ -189,7 +187,12 @@
       "unreachable": "Could not connect: {message}",
       "invalid": "This profile cannot produce a connection ({reason}), so the host was never contacted. Fix it in Settings → Terminal.",
       "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward."
-    }
+    },
+    "viaHostTitle": "Connected by the paired host",
+    "viaHostBody": "This shell does not hold SSH credentials, so the paired host opens the connection with the key or password it keeps. Only hosts the host's own desktop has registered can be opened this way, and no host key is reported back over this transport.",
+    "noHostTitle": "No terminal host to connect through",
+    "noHostBody": "SSH runs on a machine, not in a browser tab. Pair a host, or open the desktop app, and this host becomes connectable again.",
+    "notOnHost": "The paired host has no SSH profile called {name}. Profiles are registered by the desktop that owns the host, so add it there and connect again."
   },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",

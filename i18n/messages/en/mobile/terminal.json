@@ -25,5 +25,8 @@
   "historyTitle": "Recent commands",
   "newSession": "New terminal session",
   "search": "Search in terminal",
-  "title": "Terminal"
+  "title": "Terminal",
+  "sshCredentialRequired": "{name} uses password authentication and no password is stored. Add one in Settings, Terminal, then connect again.",
+  "sshUnknownHost": "That SSH host is no longer saved.",
+  "sshConnectFailed": "Could not open the SSH session"
 }

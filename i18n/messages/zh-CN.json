@@ -9112,8 +9112,9 @@
       "forwardEnabled": "已启用",
       "forwardsLoopback": "两端始终绑定 127.0.0.1。可从网络访问的转发会把一台机器变成另一台机器的开放中继。",
       "forwardsNone": "没有转发规则。",
-      "localOnlyBody": "SSH 使用这台电脑自己的身份连接，因此配对的手机或浏览器无法打开。这里仍然列出它，是为了让机器清单完整。",
-      "localOnlyTitle": "仅限本机",
+      "noHostBody": "SSH 运行在机器上，而不是浏览器标签页里。配对一台宿主，或打开桌面应用，这台主机就能再次连接。",
+      "noHostTitle": "没有可用于连接的终端宿主",
+      "notOnHost": "配对宿主上没有名为 {name} 的 SSH 配置。配置由宿主所属的桌面登记，请在那里添加后再连接。",
       "probe": {
         "action": "测试连接",
         "cost": "测试会真正建立一次连接：它会经过每一个跳板并完成认证、在对方日志中留下记录、可能向 ssh-agent 索要口令，并在首次连接时信任主机密钥。它不会打开任何端口转发。",
@@ -9131,7 +9132,9 @@
       "shellOnly": "只有 shell。Agent、工作区与沙箱都不会经由 SSH 运行。",
       "title": "SSH",
       "unknownHostBody": "设置 → 终端中没有与 {ref} 匹配的配置。它可能在该行列出后被重命名或删除；请打开设置重新添加。",
-      "unknownHostTitle": "未找到已保存的配置"
+      "unknownHostTitle": "未找到已保存的配置",
+      "viaHostBody": "当前外壳不保存 SSH 凭据，因此由配对宿主用它保存的密钥或密码建立连接。只有宿主所属桌面登记过的主机才能这样打开，而且这条传输不会回传主机密钥。",
+      "viaHostTitle": "由配对宿主发起连接"
     },
     "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
     "standalonePair": "与主机配对",
@@ -18039,6 +18042,9 @@
       "historyTitle": "最近命令",
       "newSession": "新建终端会话",
       "search": "在终端中搜索",
+      "sshConnectFailed": "无法打开 SSH 会话",
+      "sshCredentialRequired": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加，然后重新连接。",
+      "sshUnknownHost": "该 SSH 主机已不在已保存列表中。",
       "title": "终端"
     },
     "transportTier": {
@@ -36204,6 +36210,7 @@
         "toasts": {
           "agentUnavailable": "无法连接到 SSH agent",
           "connectFailed": "SSH 连接失败",
+          "connectedViaHost": "已通过宿主连接，宿主用它保存的副本核对了服务器密钥。",
           "credentialRequired": "连接前请输入密码。",
           "hostKeyForgetFailed": "无法更新 known_hosts",
           "hostKeyForgotten": "已忘记旧的主机密钥。重新连接即可信任新密钥。",
@@ -40060,6 +40067,7 @@
       "sshLabel": "SSH 主机",
       "zsh": "zsh"
     },
+    "sshConnectedViaHost": "已通过宿主连接。宿主用它保存的副本核对了服务器密钥。",
     "stickyScroll": {
       "label": "固定的命令标题"
     },

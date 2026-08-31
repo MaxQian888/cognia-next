@@ -25,5 +25,8 @@
   "historyTitle": "最近命令",
   "newSession": "新建终端会话",
   "search": "在终端中搜索",
-  "title": "终端"
+  "title": "终端",
+  "sshCredentialRequired": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加，然后重新连接。",
+  "sshUnknownHost": "该 SSH 主机已不在已保存列表中。",
+  "sshConnectFailed": "无法打开 SSH 会话"
 }

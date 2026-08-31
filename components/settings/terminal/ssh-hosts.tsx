@@ -161,9 +161,19 @@ export function SshHosts() {
         return
       }
       setPanelOpen(true)
-      toast.success(t(`toasts.${result.hostKeyStatus}`), {
-        description: result.hostKeyFingerprint,
-      })
+      /**
+       * A null verdict is not a missing one. It means the host made the
+       * connection and the `/ws/terminal` frames carry no host-key fields, so
+       * the key was verified somewhere we cannot read. Formatting `null` into
+       * the key would render `toasts.null`.
+       */
+      if (result.hostKeyStatus === null) {
+        toast.success(t("toasts.connectedViaHost"))
+      } else {
+        toast.success(t(`toasts.${result.hostKeyStatus}`), {
+          description: result.hostKeyFingerprint ?? undefined,
+        })
+      }
     } catch (error) {
       toast.error(t("toasts.connectFailed"), {
         description: error instanceof Error ? error.message : String(error),

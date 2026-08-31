@@ -380,7 +380,8 @@
       "learned": "已连接并保存主机指纹",
       "removeFailed": "无法移除 SSH 主机",
       "syncFailed": "无法与终端主机同步 SSH 配置",
-      "verified": "已通过主机指纹校验并连接"
+      "verified": "已通过主机指纹校验并连接",
+      "connectedViaHost": "已通过宿主连接，宿主用它保存的副本核对了服务器密钥。"
     }
   },
   "stickyScroll": {

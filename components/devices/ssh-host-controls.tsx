@@ -47,7 +47,9 @@ import {
   resolveJumpChain,
 } from "@/lib/terminal/ssh-forwarding"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
+import { SSH_PROFILE_NOT_ON_HOST } from "@/lib/terminal/ssh-connect"
 import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
+import { terminalHostReachable } from "@/lib/terminal/host-settings"
 import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -79,7 +81,17 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
     () => (profileId ? resolveSshHostLaunch(profileId, hosts) : { kind: "unknownHost" as const }),
     [profileId, hosts]
   )
+  /**
+   * Whether this shell is the desktop, which decides HOW a connection is made
+   * rather than whether one can be.
+   *
+   * On the desktop the request is built here and handed to `ssh_terminal_spawn`
+   * with the local keyring behind it. Anywhere else the host makes the
+   * connection from a profile id, so what matters is whether a host can answer
+   * at all.
+   */
   const local = isTauri()
+  const hostReachable = terminalHostReachable()
 
   /**
    * Resolved from the saved set, not from `launch`.
@@ -158,14 +170,23 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
   return (
     <div className="space-y-3" data-testid="ssh-host-controls">
       {/*
-        Stated once, at the top, because it governs every control below. A
-        reader who does not know SSH is local-identity only will read a
-        disabled button as a bug.
+        Who will actually dial this host, stated once because it governs every
+        control below and because the answer is not the machine the reader is
+        looking at. Off the desktop the connection is made by the paired host
+        out of its own keyring, which is also why a profile it never registered
+        cannot be opened from here.
       */}
-      {!local ? (
-        <Alert data-testid="ssh-local-only">
-          <AlertTitle>{t("localOnlyTitle")}</AlertTitle>
-          <AlertDescription>{t("localOnlyBody")}</AlertDescription>
+      {!local && hostReachable ? (
+        <Alert data-testid="ssh-via-host">
+          <AlertTitle>{t("viaHostTitle")}</AlertTitle>
+          <AlertDescription>{t("viaHostBody")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {!hostReachable ? (
+        <Alert data-testid="ssh-no-host">
+          <AlertTitle>{t("noHostTitle")}</AlertTitle>
+          <AlertDescription>{t("noHostBody")}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -263,7 +284,7 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         <Button
           size="sm"
           onClick={() => void onConnect()}
-          disabled={!local || launch.kind !== "ready" || chainBroken || busy}
+          disabled={!hostReachable || launch.kind !== "ready" || chainBroken || busy}
           data-testid="ssh-connect"
         >
           {launch.kind === "credentialRequired" ? (
@@ -282,6 +303,13 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
           size="sm"
           variant="outline"
           onClick={probe}
+          /*
+            Still desktop-only, and for a real reason rather than an inherited
+            one: the probe opens its own connection from this machine through
+            `ssh_terminal_spawn`. There is no host-mediated equivalent, because
+            a connect-then-kill by profile id would open and close a session in
+            the host's own tab list.
+          */
           disabled={!local || !profile || chainBroken || probeState.status === "probing"}
           data-testid="ssh-probe"
         >
@@ -302,7 +330,9 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
 
       {error ? (
         <p role="alert" className="text-xs text-destructive" data-testid="ssh-connect-error">
-          {error}
+          {error.startsWith(`${SSH_PROFILE_NOT_ON_HOST}:`)
+            ? t("notOnHost", { name: error.slice(SSH_PROFILE_NOT_ON_HOST.length + 1) })
+            : error}
         </p>
       ) : null}
 

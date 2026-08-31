@@ -39,6 +39,19 @@ jest.mock("@/stores/terminal/terminal-store", () => ({
 }))
 
 /**
+ * Whether any terminal host can answer, which is now the question the Connect
+ * button asks. `isTauri` only decides HOW the connection is made: on the
+ * desktop through `ssh_terminal_spawn`, everywhere else by the paired host out
+ * of its own keyring.
+ */
+// eslint-disable-next-line no-var -- same hoisting rule as `tauri`.
+var hostReachable: boolean
+jest.mock("@/lib/terminal/host-settings", () => ({
+  ...jest.requireActual("@/lib/terminal/host-settings"),
+  terminalHostReachable: () => hostReachable,
+}))
+
+/**
  * The probe reaches Tauri through `SshTerminalSession.connect`, which is the
  * one seam it has: `useSshProbe` deliberately takes no injected runner from the
  * component, so the card cannot be wired to a probe that is not the real one.
@@ -102,6 +115,7 @@ function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
 
 beforeEach(() => {
   tauri = true
+  hostReachable = true
   sshHosts = [PROFILE]
   connectImpl = undefined
 })
@@ -121,15 +135,51 @@ it("opens a shell through the shared dock launcher", async () => {
 })
 
 /**
- * `ssh_terminal_*` is `target: "client"` with `capability: client.local`, and
- * the Rust arm refuses a non-local identity. Rendering the button disabled with
- * the reason keeps "not supported here" apart from "you have no SSH hosts".
+ * The gate that was wrong. `spawn_synchronized_profile` has always accepted a
+ * non-local identity and connects out of the host's own keyring, so a phone or
+ * a browser paired to a host can open an SSH session. What changes off the
+ * desktop is who dials, and the card says so.
  */
-it("refuses to connect off the desktop, and says why rather than hiding", () => {
+it("connects through the paired host off the desktop, and says who is dialling", () => {
   tauri = false
   render(<SshHostControls row={row()} connect={jest.fn()} />)
-  expect(screen.getByTestId("ssh-local-only")).toBeInTheDocument()
+  expect(screen.getByTestId("ssh-via-host")).toBeInTheDocument()
+  expect(screen.getByTestId("ssh-connect")).toBeEnabled()
+})
+
+/** SSH runs on a machine. With nothing paired there is no machine to run it. */
+it("refuses when no terminal host can answer at all, and says why rather than hiding", () => {
+  tauri = false
+  hostReachable = false
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByTestId("ssh-no-host")).toBeInTheDocument()
   expect(screen.getByTestId("ssh-connect")).toBeDisabled()
+})
+
+/**
+ * The probe stays desktop-only for a real reason rather than an inherited one:
+ * it opens its own connection from this machine, and a host-mediated
+ * connect-then-kill would open and close a session in the host's own tab list.
+ */
+it("still withholds the probe off the desktop, where it has no equivalent", () => {
+  tauri = false
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByTestId("ssh-probe")).toBeDisabled()
+})
+
+/**
+ * A host only knows the SSH profiles its own desktop registered, so this is a
+ * routine outcome rather than a corrupt state. The bare native string does not
+ * say whose list is being consulted.
+ */
+it("rewords a profile the host does not have, instead of the native string", async () => {
+  const connect = jest
+    .fn()
+    .mockResolvedValue({ kind: "error", message: "ssh_profile_not_on_host:prod-web-01" })
+  render(<SshHostControls row={row()} connect={connect} />)
+  await userEvent.click(screen.getByTestId("ssh-connect"))
+  expect(await screen.findByTestId("ssh-connect-error")).toHaveTextContent("devices.ssh.notOnHost")
+  expect(screen.getByTestId("ssh-connect-error")).toHaveTextContent("prod-web-01")
 })
 
 it("blocks a password host with no saved password, and names it", () => {

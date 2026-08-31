@@ -690,10 +690,27 @@ describe("TerminalDock", () => {
       expect(toastError).not.toHaveBeenCalled()
     })
 
-    it("withholds SSH hosts from the picker outside Tauri", () => {
+    /**
+     * The gate that was wrong. It withheld SSH from every non-Tauri transport
+     * on the belief that a LAN or WebRTC client had no path to a session. It
+     * has one: `spawn_synchronized_profile` resolves a named profile out of
+     * the host's own `ssh_profiles` map and connects with credentials that
+     * never leave it.
+     */
+    it("offers SSH hosts over a remote transport, which the host can dial", () => {
       seedSshHost()
       transportKind = "ws"
       platformKind = "mobile"
+      seedProjectAndSession()
+      render(<TerminalDock />)
+      expect(screen.getByTestId("dock-ssh-ssh-1")).toBeInTheDocument()
+    })
+
+    /** With no host that can spawn at all, there is no machine to run SSH on. */
+    it("withholds SSH hosts when nothing can spawn", () => {
+      seedSshHost()
+      transportKind = "unsupported"
+      platformKind = "web"
       seedProjectAndSession()
       render(<TerminalDock />)
       expect(screen.queryByTestId("dock-ssh-ssh-1")).toBeNull()

@@ -383,5 +383,6 @@
     "run": "运行",
     "selectPlaceholder": "请选择",
     "title": "填写模板变量"
-  }
+  },
+  "sshConnectedViaHost": "已通过宿主连接。宿主用它保存的副本核对了服务器密钥。"
 }

@@ -66,6 +66,25 @@ export interface TerminalShellPickerProps {
   sshHosts?: readonly SshHostProfile[]
   /** Connect a tab to a saved SSH host. */
   onNewSshHost?: (hostId: string) => void | Promise<void>
+  /**
+   * How big the affordance is drawn.
+   *
+   * `dock` is the compact "+ New" with its label and an attached chevron.
+   * `touch` is the same split affordance sized for a finger, with the label
+   * dropped, for a mobile header where a 28px control with 12px text has no
+   * place.
+   *
+   * Both are splits, deliberately. Collapsing the touch variant into a single
+   * menu button would cost the phone its one-tap "new terminal", which is the
+   * primary action on that screen, in exchange for a list it usually does not
+   * need. The menu behind the chevron is identical in both, which is the
+   * point: "what can I launch from here" is one answer, not one per shell.
+   */
+  variant?: "dock" | "touch"
+  /** Test id for the menu trigger, so a host screen keeps a stable anchor. */
+  triggerTestId?: string
+  /** Test id for the primary new-session button, same reason. */
+  newTestId?: string
   /** Override platform sniffing (tests). Defaults to `detectPlatform()`. */
   platform?: ShellPlatform
   /**
@@ -111,6 +130,9 @@ export function TerminalShellPicker({
   onNewProfile,
   sshHosts,
   onNewSshHost,
+  variant = "dock",
+  triggerTestId,
+  newTestId,
   platform,
   detectShells = defaultDetectShells,
 }: TerminalShellPickerProps) {
@@ -158,6 +180,7 @@ export function TerminalShellPicker({
   // left for the PATH scan to narrow — and nothing it *could* narrow, since it
   // probes this machine.
   const shellOptions = host ? baseOptions : filterDetectedShellOptions(baseOptions, detectedBins)
+  const touch = variant === "touch"
   return (
     <div className="flex items-center">
       <Button
@@ -167,11 +190,11 @@ export function TerminalShellPicker({
           void onNew()
         }}
         aria-label={t("terminal.dock.newSession")}
-        data-testid="terminal-dock-new"
-        className="h-7 rounded-r-none px-2 text-xs"
+        data-testid={newTestId ?? "terminal-dock-new"}
+        className={touch ? "h-8 w-8 rounded-r-none p-0" : "h-7 rounded-r-none px-2 text-xs"}
       >
-        <PlusIcon className="mr-1 h-3 w-3" />
-        {t("terminal.dock.newSession")}
+        <PlusIcon className={touch ? "h-4 w-4" : "mr-1 h-3 w-3"} />
+        {touch ? null : t("terminal.dock.newSession")}
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -179,10 +202,14 @@ export function TerminalShellPicker({
             size="sm"
             variant="ghost"
             aria-label={t("terminal.shellPicker.label")}
-            data-testid="terminal-dock-shell-picker"
-            className="h-7 w-5 rounded-l-none border-l border-border/40 p-0"
+            data-testid={triggerTestId ?? "terminal-dock-shell-picker"}
+            className={
+              touch
+                ? "h-8 w-6 rounded-l-none border-l border-border/40 p-0"
+                : "h-7 w-5 rounded-l-none border-l border-border/40 p-0"
+            }
           >
-            <ChevronDownIcon className="h-3 w-3" />
+            <ChevronDownIcon className={touch ? "h-3.5 w-3.5" : "h-3 w-3"} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

@@ -383,5 +383,6 @@
     "run": "Run",
     "selectPlaceholder": "Choose an option",
     "title": "Fill template variables"
-  }
+  },
+  "sshConnectedViaHost": "Connected through the host. It verified the server key with the copy it keeps."
 }

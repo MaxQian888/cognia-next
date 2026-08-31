@@ -283,8 +283,14 @@ export function TerminalDock() {
         toast.error(t("spawnError", { message: result.message }))
         return
       }
+      if (result.hostKeyStatus === null) {
+        // The host connected on our behalf and the terminal wire carries no
+        // host-key fields, so there is no verdict to report here.
+        toast.success(t("sshConnectedViaHost"))
+        return
+      }
       toast.success(t(`sshConnected.${result.hostKeyStatus}`), {
-        description: result.hostKeyFingerprint,
+        description: result.hostKeyFingerprint ?? undefined,
       })
     },
     [activeProjectId, hostKeyGuard, settingsSshHosts, t]
@@ -506,13 +512,18 @@ export function TerminalDock() {
   // Reactive transport: activating a remote Cognia host mid-session must move
   // the dock's affordances with it, and `canSpawn` — not "is this the local
   // PTY" — is what a spawn button should key off.
-  const { kind: transport, canSpawn, isLocalPty } = useTerminalTransport()
+  const { kind: transport, canSpawn } = useTerminalTransport()
   /**
-   * Gate the SSH group on `isLocalPty` rather than `canSpawn`: the SSH session
-   * class invokes Tauri commands directly, so a LAN or WebRTC client can spawn
-   * local shells through the host but has no path to open an SSH one.
+   * The SSH group follows `canSpawn`, not `isLocalPty`.
+   *
+   * It used to follow `isLocalPty` on the belief that a LAN or WebRTC client
+   * had no path to an SSH session. It has one, and always did:
+   * `TerminalHost::spawn_synchronized_profile` resolves a named profile out of
+   * the host's own `ssh_profiles` map and connects with credentials that never
+   * leave it. `connectSshFromDock` now takes that path, so the only question
+   * left is whether any host can spawn at all.
    */
-  const pickerSshHosts = isLocalPty ? settingsSshHosts : undefined
+  const pickerSshHosts = canSpawn ? settingsSshHosts : undefined
   const platform = usePlatform()
 
   // Percent-per-CSS-pixel for the axis this dock resizes along, so a pointer

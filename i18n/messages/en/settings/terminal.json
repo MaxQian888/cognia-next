@@ -380,7 +380,8 @@
       "learned": "Connected and saved the host fingerprint",
       "removeFailed": "Could not remove the SSH host",
       "syncFailed": "Could not synchronize SSH profiles with the terminal host",
-      "verified": "Connected with a verified host fingerprint"
+      "verified": "Connected with a verified host fingerprint",
+      "connectedViaHost": "Connected through the host, which verified the server key with the copy it keeps."
     }
   },
   "stickyScroll": {

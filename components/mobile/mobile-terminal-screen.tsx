@@ -61,8 +61,13 @@ import { TerminalTabStrip } from "@/components/terminal/terminal-tab-strip"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
 import { useMediaQuery, useResizableLayout } from "@/hooks/ui"
 import { detachFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
+import { TerminalShellPicker } from "@/components/terminal/terminal-shell-picker"
+import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
+import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
+import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { useProjectStore } from "@/stores/project/project-store"
+import { toast } from "sonner"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
@@ -138,16 +143,57 @@ export function MobileTerminalScreen() {
   const activeId = activeByProject[projectKey] ?? null
   const activeRow = activeId ? sessions[activeId] : undefined
 
-  const handleNew = useCallback(async () => {
-    const shell = resolveDefaultShell({
-      projectShell: project?.terminalConfig?.shell,
-      settingShell: settingsShell,
-    })
+  /**
+   * Saved SSH hosts, offered here for the first time.
+   *
+   * A phone can open one: the host resolves the profile id against its own
+   * `ssh_profiles` map and connects with credentials that never leave it. The
+   * only thing that was missing was somewhere to press.
+   */
+  const sshHosts = useSettingsStore(selectSavedSshHosts)
+  const hostKeyGuard = useSshHostKeyChange()
+
+  const handleNewSshHost = useCallback(
+    async (hostId: string) => {
+      const launch = resolveSshHostLaunch(hostId, sshHosts)
+      if (launch.kind !== "ready") {
+        toast.error(
+          launch.kind === "credentialRequired"
+            ? t("sshCredentialRequired", { name: launch.name })
+            : t("sshUnknownHost")
+        )
+        return
+      }
+      const result = await connectSshFromDock({
+        profile: launch.profile,
+        // A jump host is stored as a profile id, so the whole set travels or a
+        // bastion-backed host connects direct.
+        allProfiles: sshHosts ?? [],
+        rows: 28,
+        cols: 80,
+        projectId: activeProjectId ?? undefined,
+        store: useTerminalStore.getState(),
+      })
+      if (result.kind === "error") {
+        if (hostKeyGuard.capture(result.message)) return
+        toast.error(t("sshConnectFailed"), { description: result.message })
+      }
+    },
+    [activeProjectId, hostKeyGuard, sshHosts, t]
+  )
+
+  const handleNew = useCallback(async (shell?: string) => {
+    const resolved =
+      shell ??
+      resolveDefaultShell({
+        projectShell: project?.terminalConfig?.shell,
+        settingShell: settingsShell,
+      })
     const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
     const env = project?.terminalConfig?.env
     await spawnFromDock({
       req: {
-        shell,
+        shell: resolved,
         // Mobile defaults — the remote host re-fits on attach.
         rows: 28,
         cols: 80,
@@ -216,19 +262,26 @@ export function MobileTerminalScreen() {
         >
           <HistoryIcon className="h-4 w-4" />
         </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8"
-          onClick={() => {
-            void handleNew()
+        {/*
+          The same picker the dock renders, at a touch size. One component owns
+          "what can I launch from here", so a saved SSH host cannot be offered
+          on one shell and missing on the other.
+        */}
+        <TerminalShellPicker
+          variant="touch"
+          newTestId="mobile-terminal-new"
+          triggerTestId="mobile-terminal-shell-picker"
+          onNew={(shell) => {
+            void handleNew(shell)
           }}
-          aria-label={t("newSession")}
-          data-testid="mobile-terminal-new"
-        >
-          <PlusIcon className="h-4 w-4" />
-        </Button>
+          sshHosts={sshHosts}
+          onNewSshHost={(hostId) => {
+            void handleNewSshHost(hostId)
+          }}
+        />
       </header>
+
+      {hostKeyGuard.dialog}
       <div
         className="min-h-0 flex-1"
         data-testid={showTabletWorkbench ? "tablet-terminal-split" : "phone-terminal-surface"}

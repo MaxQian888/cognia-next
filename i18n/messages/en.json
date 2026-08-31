@@ -9112,8 +9112,9 @@
       "forwardEnabled": "On",
       "forwardsLoopback": "Both ends always bind 127.0.0.1. A forward reachable from the network would turn one machine into an open relay for the other.",
       "forwardsNone": "No forwarding rules.",
-      "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
-      "localOnlyTitle": "This machine only",
+      "noHostBody": "SSH runs on a machine, not in a browser tab. Pair a host, or open the desktop app, and this host becomes connectable again.",
+      "noHostTitle": "No terminal host to connect through",
+      "notOnHost": "The paired host has no SSH profile called {name}. Profiles are registered by the desktop that owns the host, so add it there and connect again.",
       "probe": {
         "action": "Test connection",
         "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward.",
@@ -9131,7 +9132,9 @@
       "shellOnly": "A shell and nothing else. No agent, workspace or sandbox runs over SSH.",
       "title": "SSH",
       "unknownHostBody": "Nothing in Settings → Terminal matches {ref}. The profile was renamed or removed after this row was listed; reopen Settings to add it back.",
-      "unknownHostTitle": "Saved profile not found"
+      "unknownHostTitle": "Saved profile not found",
+      "viaHostBody": "This shell does not hold SSH credentials, so the paired host opens the connection with the key or password it keeps. Only hosts the host's own desktop has registered can be opened this way, and no host key is reported back over this transport.",
+      "viaHostTitle": "Connected by the paired host"
     },
     "standaloneBody": "Nothing is paired and this app is not running its own host, so there is no fleet to show and no host to ask about grants or lifecycle state. What is below describes this machine.",
     "standalonePair": "Pair with a host",
@@ -18039,6 +18042,9 @@
       "historyTitle": "Recent commands",
       "newSession": "New terminal session",
       "search": "Search in terminal",
+      "sshConnectFailed": "Could not open the SSH session",
+      "sshCredentialRequired": "{name} uses password authentication and no password is stored. Add one in Settings, Terminal, then connect again.",
+      "sshUnknownHost": "That SSH host is no longer saved.",
       "title": "Terminal"
     },
     "transportTier": {
@@ -36204,6 +36210,7 @@
         "toasts": {
           "agentUnavailable": "No SSH agent is reachable",
           "connectFailed": "SSH connection failed",
+          "connectedViaHost": "Connected through the host, which verified the server key with the copy it keeps.",
           "credentialRequired": "Enter a password before connecting.",
           "hostKeyForgetFailed": "Could not update known_hosts",
           "hostKeyForgotten": "Old host key forgotten. Connect again to trust the new one.",
@@ -40060,6 +40067,7 @@
       "sshLabel": "SSH hosts",
       "zsh": "zsh"
     },
+    "sshConnectedViaHost": "Connected through the host. It verified the server key with the copy it keeps.",
     "stickyScroll": {
       "label": "Sticky command header"
     },
