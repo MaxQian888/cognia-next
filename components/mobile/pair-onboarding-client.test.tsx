@@ -133,6 +133,21 @@ jest.mock("@/lib/capacitor/haptics", () => ({
   notify: jest.fn(async () => ({ kind: "unsupported" })),
 }))
 
+// Unlock the credential store. `PairStep` refuses to spend a one-shot
+// invitation while it is locked, and answers that question through
+// `usesBrowserVault() && getActiveBrowserVault() === null`. jsdom is neither
+// Tauri nor Capacitor, so the first half is true here no matter which platform
+// this suite mocks, and the accessor is null because nothing unlocks a real
+// vault in a component test. Every submit below therefore stopped at the
+// pre-flight, before `registerPairPayload`, and the coordinator sat on the pair
+// step until the assertion timed out. Production reaches this screen with the
+// account unlocked, so say so. The locked verdict keeps its own coverage
+// through `PairStep`'s `isCredentialStoreReady` seam in pair-step.test.tsx.
+jest.mock("@/lib/runtime/browser-vault", () => ({
+  ...jest.requireActual("@/lib/runtime/browser-vault"),
+  getActiveBrowserVault: () => ({ accountId: "local_acct_a" }),
+}))
+
 // next/navigation — useRouter().push is used after Continue-to-chat.
 const pushMock = jest.fn()
 jest.mock("next/navigation", () => ({
