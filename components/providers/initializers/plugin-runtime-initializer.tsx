@@ -129,6 +129,31 @@ export function PluginRuntimeInitializer({
           () => useSettingsStore.getState().settings?.pluginSecurityPosture
         )
 
+        // Put the plugins that ship inside the installer on disk before the
+        // manager scans for them. Only the desktop shell has a plugin
+        // directory to seed into, and only a window that owns the runtime gets
+        // this far, so the pet and tray overlays do not each race for the same
+        // copy.
+        //
+        // The whole step is best effort. `seedBundledPluginsOnHost` already
+        // records per-plugin failures rather than raising, but the dynamic
+        // import and the Tauri path API sit outside anything it can catch on
+        // its own behalf. Losing a bundled plugin is worth far less than
+        // losing the plugin runtime, so nothing here may reach the outer
+        // handler.
+        if (tauri) {
+          try {
+            const { seedBundledPluginsOnHost } =
+              await import("@/lib/plugin/distribution/seed-bundled-plugins")
+            const seeded = await seedBundledPluginsOnHost()
+            if (seeded.seeded.length > 0 || Object.keys(seeded.failed).length > 0) {
+              log.info("plugin-runtime: bundled plugin seed", seeded)
+            }
+          } catch (seedError) {
+            log.warn("plugin-runtime: bundled plugin seed unavailable", { seedError })
+          }
+        }
+
         const { initializePluginManager } = await import("@/lib/plugin/core/manager")
         await initializePluginManager(resolution.config)
         window.__cogniaPluginRuntimeReady = true

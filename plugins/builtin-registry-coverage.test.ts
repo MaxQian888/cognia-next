@@ -18,7 +18,13 @@
  * that is neither fails the sweep, forcing the curation decision into review.
  *
  * Non-frontend plugins (python / wasm / vscode-extension) load through the
- * Tauri host, not the browser bundle, so they're out of scope here.
+ * Tauri host, not the browser bundle, so the registry above says nothing about
+ * them. They get the mirror-image guard at the bottom of this file: the host
+ * only ever finds a plugin that has a directory under
+ * `<appDataDir>/cognia/plugins`, so one that is neither staged into the
+ * installer nor marked dev-only exists for someone who cloned the repo and
+ * for nobody who installed the app. That is exactly how RepoWiki (ADR-0146)
+ * shipped as a whole subsystem that no release contained.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs"
@@ -106,5 +112,70 @@ describe("builtin-registry curation guard", () => {
     for (const id of Object.keys(INTENTIONALLY_UNBUNDLED)) {
       expect(frontendIds.has(id)).toBe(true)
     }
+  })
+})
+
+describe("on-disk plugin distribution guard", () => {
+  const distribution = JSON.parse(
+    readFileSync(join(PLUGINS_ROOT, "distribution.json"), "utf-8")
+  ) as {
+    bundled: Record<string, { id: string; reason: string; include: string[] }>
+    devOnly: Record<string, string>
+  }
+  const all = discoverFirstPartyPlugins()
+  const onDisk = all.filter((p) => p.type !== "frontend")
+
+  it("finds the non-frontend plugins it is meant to curate", () => {
+    expect(onDisk.length).toBeGreaterThan(0)
+  })
+
+  it.each(onDisk)("$dir is classified as bundled or dev-only", ({ dir, id }) => {
+    const bundled = dir in distribution.bundled
+    const devOnly = dir in distribution.devOnly
+    if (!bundled && !devOnly) {
+      throw new Error(
+        `Plugin "${dir}" (${id}) loads from disk but plugins/distribution.json does not classify it. ` +
+          `Nothing stages it into src-tauri/resources/plugins, and the Tauri host only scans ` +
+          `<appDataDir>/cognia/plugins, so an installed build will not have it at all. ` +
+          `Add it under "bundled" with the files to ship, or under "devOnly" with a reason.`
+      )
+    }
+    expect(bundled && devOnly).toBe(false)
+    if (bundled) expect(distribution.bundled[dir].id).toBe(id)
+  })
+
+  it("has no stale distribution entries", () => {
+    const dirs = new Set(onDisk.map((p) => p.dir))
+    for (const dir of [
+      ...Object.keys(distribution.bundled),
+      ...Object.keys(distribution.devOnly),
+    ]) {
+      expect(dirs.has(dir)).toBe(true)
+    }
+  })
+
+  it("gives every bundled plugin a reason and a manifest to ship", () => {
+    for (const [dir, entry] of Object.entries(distribution.bundled)) {
+      expect(entry.reason.length).toBeGreaterThan(20)
+      // Without plugin.json the host cannot discover the directory it just
+      // received, so the copy would be silently inert.
+      expect(entry.include).toContain("plugin.json")
+      expect(`${dir}/plugin.json`).toBeTruthy()
+    }
+  })
+
+  it("gives every dev-only plugin a reason", () => {
+    for (const reason of Object.values(distribution.devOnly)) {
+      expect(reason.length).toBeGreaterThan(20)
+    }
+  })
+
+  it("ships the staged tree in the installer", () => {
+    // The staging step is pointless if `bundle.resources` does not carry the
+    // result, and that omission is invisible until someone installs a release.
+    const tauriConf = JSON.parse(
+      readFileSync(join(PLUGINS_ROOT, "..", "src-tauri", "tauri.conf.json"), "utf-8")
+    ) as { bundle: { resources: string[] } }
+    expect(tauriConf.bundle.resources).toContain("resources/plugins/**/*")
   })
 })

@@ -15,6 +15,10 @@
   "permissions": ["clipboard:read", "clipboard:write"],
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts"

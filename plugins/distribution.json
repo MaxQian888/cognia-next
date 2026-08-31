@@ -1,0 +1,22 @@
+{
+  "$comment": "Which first-party plugins that do NOT load from the browser bundle are shipped inside the desktop installer. Frontend plugins are curated separately, by the browser builtin registry (see plugins/builtin-registry-coverage.test.ts). Everything else needs a directory on disk before the Tauri host can run it, so a plugin that is neither staged into the installer nor marked dev-only simply does not exist for a user who installed the app rather than cloning the repo. Keyed by directory name; both scripts/build/stage-bundled-plugins.mjs and the coverage guard read this file.",
+  "bundled": {
+    "repowiki": {
+      "id": "cognia-repowiki",
+      "reason": "ADR-0146 product subsystem: repository wiki generation, dependency graph, cited search. Its 213-case gate suite ships as source in the repo, not in the installer.",
+      "include": [
+        "plugin.json",
+        "main.py",
+        "pyproject.toml",
+        "README.md",
+        "LICENSE.upstream",
+        "repowiki/**/*.py"
+      ]
+    }
+  },
+  "devOnly": {
+    "cognia-python-demo": "Author reference: the smallest possible Python plugin. Copy-paste template, not a default.",
+    "cognia-python-runtime-demo": "Author reference for the Python reverse-RPC surface (ADR-0145). Exercises the contract rather than doing user-facing work.",
+    "wasm-example-formatter": "Author reference for the WASM component ABI. Its artifact is built by `cargo component` on demand and is not checked in, so there is nothing stable to stage."
+  }
+}

@@ -4,6 +4,12 @@
   "version": "0.1.0",
   "description": "Reference plugin exercising every supported Cognia plugin UI surface.",
   "type": "frontend",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
   "capabilities": [
     "components",
     "context-panel",

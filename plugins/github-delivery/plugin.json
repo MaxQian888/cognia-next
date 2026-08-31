@@ -10,6 +10,8 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
   "type": "frontend",
   "capabilities": ["integrations"],
   "permissions": [

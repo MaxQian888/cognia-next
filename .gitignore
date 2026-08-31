@@ -37,6 +37,7 @@ junit.xml
 /public/live2d/
 /public/_cognia/builtin-plugins/
 /src-tauri/resources/plugin-node/
+/src-tauri/resources/plugins/
 
 # production
 /build

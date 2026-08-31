@@ -440,9 +440,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
   },
   {
     // Strix autonomous pentest CLI wrapper. `browser`/`mobile` blocked (shells
-    // out to strix + a local Docker daemon); discovered here so the "Security"
-    // rail container + `/security` command materialize on the desktop shell.
-    // The compatibility policy gates it at enable time, not discovery.
+    // out to strix + a local Docker daemon); discovered here so the
+    // `/security` command materializes on the desktop shell. Its panel lives
+    // in the right-hand Context Workbench, not in a left-rail view container:
+    // the manifest declares no `viewsContainers` at all, and this comment
+    // claimed one for long enough to be worth saying so. The compatibility
+    // policy gates it at enable time, not discovery.
     manifest: builtinManifest(strixSecurityManifest, strixSecurityModule),
     path: "builtin://strix-security",
     compatibilityDiagnostics: [],

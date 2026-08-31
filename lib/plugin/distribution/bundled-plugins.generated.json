@@ -1,0 +1,170 @@
+{
+  "entries": {
+    "repowiki": {
+      "id": "cognia-repowiki",
+      "version": "0.1.0",
+      "files": [
+        {
+          "path": "LICENSE.upstream",
+          "bytes": 1066,
+          "sha256": "1a3a659f51882dde4f1cc8e35d9a5da2343e0c696f9b114ffe7af5f51ea6f71a"
+        },
+        {
+          "path": "README.md",
+          "bytes": 7293,
+          "sha256": "5854022d722d9e32f3e1b309cc7c01cb89f5a4953c1a76c6651ca440f69a7def"
+        },
+        {
+          "path": "main.py",
+          "bytes": 20707,
+          "sha256": "3a764d9f140689061d1cd2a2e0ed8011f7787e384d42790d16a30530e78c640d"
+        },
+        {
+          "path": "plugin.json",
+          "bytes": 5463,
+          "sha256": "4610a510459a8196db5ac156b03a934c289fdf7a3cbf6742477ac2b6ba569460"
+        },
+        {
+          "path": "pyproject.toml",
+          "bytes": 534,
+          "sha256": "0e04094a5ed28de7daaddc5b40dc4b4600ec87bcfb6d9e7ff66af43a18291e61"
+        },
+        {
+          "path": "repowiki/__init__.py",
+          "bytes": 100,
+          "sha256": "bee2cebde71e9a0f4238621164f869e3f1629bb46b8d376fb88560af78934bb9"
+        },
+        {
+          "path": "repowiki/config.py",
+          "bytes": 6226,
+          "sha256": "09e43178c5d5a675cca56573d46547ceae0287ef6f31c4a8f046b56785bccdd9"
+        },
+        {
+          "path": "repowiki/core/__init__.py",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "repowiki/core/analyzer.py",
+          "bytes": 24052,
+          "sha256": "e4a6bba44f1dca1445934baeb8e5968c67c85c7c6b706bb8223870ec263b68a7"
+        },
+        {
+          "path": "repowiki/core/cache.py",
+          "bytes": 3128,
+          "sha256": "56d1fff8cbc03e5fdd59a1d5323eae5413f7083627c0474c8f7df8e948baab3c"
+        },
+        {
+          "path": "repowiki/core/graph.py",
+          "bytes": 13973,
+          "sha256": "fa621dc2c51ba2e30d5f737557ac12cb183f785f43356b645d977a2df9e837da"
+        },
+        {
+          "path": "repowiki/core/mermaid.py",
+          "bytes": 4658,
+          "sha256": "abdbb81ed3a8a74f1619fbffffe41d8b694835e9316cf2784252969b596025c1"
+        },
+        {
+          "path": "repowiki/core/models.py",
+          "bytes": 3022,
+          "sha256": "e6d423b63a4ec01cb32844a91b5d1ba087707fb667a362e312225a89d4d648ea"
+        },
+        {
+          "path": "repowiki/core/rag.py",
+          "bytes": 23234,
+          "sha256": "0ec7234d2472fb2c5357d9e47f79fa1a9c7c520232b97d0b8394d7808b1c3ae8"
+        },
+        {
+          "path": "repowiki/core/rag_store.py",
+          "bytes": 11155,
+          "sha256": "b0b30e81e5e44e7a03d5fa748ad81497c92f264f449b4b5f0892a07f36c3a0e8"
+        },
+        {
+          "path": "repowiki/core/scanner.py",
+          "bytes": 12589,
+          "sha256": "0425312af47a277f6e3c62665b071872c833b52791759f2cd25fe37dc77ef19c"
+        },
+        {
+          "path": "repowiki/core/wiki_builder.py",
+          "bytes": 12872,
+          "sha256": "6014dd0737d664fc0791cee24bca9d0338f5fe12c6898c93a97b15a6593bbc9b"
+        },
+        {
+          "path": "repowiki/export/__init__.py",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "repowiki/export/html.py",
+          "bytes": 7825,
+          "sha256": "7b7769ca4b1f4e1fa49cd55b1c77a31ba38afbc79a74b8117edf7f41120c84e2"
+        },
+        {
+          "path": "repowiki/export/json_export.py",
+          "bytes": 1121,
+          "sha256": "fad072416c616367deb3094ea198c60444e5a4aaaea3cbbc495ab86826aa60db"
+        },
+        {
+          "path": "repowiki/export/markdown.py",
+          "bytes": 2110,
+          "sha256": "1fac252d93e4c3a379b1f848e2d8ea9bf15a62e3934d51a33fd10bb585537d8c"
+        },
+        {
+          "path": "repowiki/host.py",
+          "bytes": 13657,
+          "sha256": "60ee9f0d158bef12ec78dae7973725c7f05e98a43505037b22a5f40c38f2d3ce"
+        },
+        {
+          "path": "repowiki/ingest/__init__.py",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "repowiki/ingest/git_diff.py",
+          "bytes": 1321,
+          "sha256": "39bb5758bd0db175971590e0c904175e983a6c1d9542a227bbaf9f709bcdd44e"
+        },
+        {
+          "path": "repowiki/ingest/github.py",
+          "bytes": 4927,
+          "sha256": "aeb985655b5970cdc068f7e5a60ed7b4b8ab6fed5037e73adab3b03d3fb5a332"
+        },
+        {
+          "path": "repowiki/ingest/local.py",
+          "bytes": 3080,
+          "sha256": "b60910e2a66acfb29021f53031fe80f6582eba114baaebec6d8966c2aabd41e8"
+        },
+        {
+          "path": "repowiki/llm/__init__.py",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "repowiki/llm/client.py",
+          "bytes": 515,
+          "sha256": "704e27bd5e080c0801a0829188b21f248c783b34e6a2d90d998811ae53312a8d"
+        },
+        {
+          "path": "repowiki/llm/prompts.py",
+          "bytes": 11998,
+          "sha256": "2a8e14149711acd897a7ca0d1dc5efb3bcd69de6d13c4f721b603c0d594005b0"
+        },
+        {
+          "path": "repowiki/panel.py",
+          "bytes": 9223,
+          "sha256": "864e8fc484aac50af517f3e4863dc2816c1c0ba52c8c154c4fb6140f1fec9468"
+        },
+        {
+          "path": "repowiki/pipeline.py",
+          "bytes": 9185,
+          "sha256": "d139b4106909aa580d6f92cdfa8c07b098e720066c41e1e2032c189bb4d0b3e8"
+        },
+        {
+          "path": "repowiki/project.py",
+          "bytes": 3511,
+          "sha256": "1be4d1bcad611925201148826fa1ebe22daaba2e82e932a62ccd097da97521f5"
+        }
+      ]
+    }
+  }
+}

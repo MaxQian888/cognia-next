@@ -50,6 +50,11 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => ({
 import { emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 const mockEmitBus = emitSystemBusEvent as jest.Mock
 
+const mockDisposeMicrovmAdapters = jest.fn(async () => undefined)
+jest.mock("@/lib/sandbox/microvm-bridge", () => ({
+  disposeMicrovmAdapters: () => mockDisposeMicrovmAdapters(),
+}))
+
 const mockGetCurrentWindow = jest.fn()
 jest.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => mockGetCurrentWindow(),
@@ -76,6 +81,7 @@ jest.mock("@/stores/account/account-store", () => ({
 
 describe("PluginRuntimeInitializer", () => {
   const warningRefreshTeardown = jest.fn()
+  const originalE2E = process.env.NEXT_PUBLIC_E2E
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -84,12 +90,43 @@ describe("PluginRuntimeInitializer", () => {
     mockPluginRuntimeRequested = true
     mockUnlockedAccountId = "acct_test"
     mockAccountRevision = 1
+    process.env.NEXT_PUBLIC_E2E = originalE2E
     delete (window as typeof window & { __cogniaPluginRuntimeReady?: boolean })
       .__cogniaPluginRuntimeReady
     window.history.replaceState({}, "", "/")
   })
 
   it("keeps the pre-account E2E runtime off unrelated browser routes", () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<PluginRuntimeInitializer onlyForPluginSurfaceE2E />)
+
+    expect(mockInitializeManager).not.toHaveBeenCalled()
+    expect(mockInstallPackWarningRefreshWiring).not.toHaveBeenCalled()
+  })
+
+  it("boots the plugin-surface E2E runtime without an account or boot request", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    mockPluginRuntimeRequested = false
+    mockUnlockedAccountId = null
+    mockDetectPlatform.mockReturnValue("web")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "browser", pluginDirectory: "", enablePython: false },
+    })
+    window.history.replaceState({}, "", "/e2e/plugin-ui-surfaces")
+
+    render(<PluginRuntimeInitializer onlyForPluginSurfaceE2E />)
+
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
+    expect(mockInstallPackWarningRefreshWiring).toHaveBeenCalledTimes(1)
+    expect(mockMarkBootCapabilityReady).toHaveBeenCalledWith("plugin-runtime")
+  })
+
+  it("does not enable the pre-account bypass outside an E2E build", () => {
+    process.env.NEXT_PUBLIC_E2E = "0"
+    mockUnlockedAccountId = null
+    window.history.replaceState({}, "", "/e2e/plugin-ui-surfaces")
+
     render(<PluginRuntimeInitializer onlyForPluginSurfaceE2E />)
 
     expect(mockInitializeManager).not.toHaveBeenCalled()
@@ -216,6 +253,27 @@ describe("PluginRuntimeInitializer", () => {
     })
   })
 
+  it("boots the manager even when seeding the bundled plugins throws", async () => {
+    // The seeder resolves a bundle resource and calls into the host. Neither
+    // is available in this suite, which is the point: a bundled plugin that
+    // cannot be put on disk costs the user that plugin, and must never cost
+    // them the plugin runtime. Removing the guard around it makes every Tauri
+    // case in this file hang instead of failing here alone.
+    mockDetectPlatform.mockReturnValue("tauri")
+    mockGetCurrentWindow.mockReturnValue({ label: "main" })
+    mockAppDataDir.mockResolvedValue("/data")
+    mockJoin.mockResolvedValue("/data/cognia/plugins")
+    mockResolveBootstrap.mockReturnValue({
+      shouldInitialize: true,
+      config: { runtimeProfile: "tauri", pluginDirectory: "/data/cognia/plugins" },
+    })
+
+    render(<PluginRuntimeInitializer />)
+
+    await waitFor(() => expect(mockInitializeManager).toHaveBeenCalledTimes(1))
+    expect(mockMarkBootCapabilityFailed).not.toHaveBeenCalled()
+  })
+
   it("skips manager boot when the bootstrap resolution refuses", async () => {
     mockDetectPlatform.mockReturnValue("tauri")
     mockGetCurrentWindow.mockReturnValue({ label: "plugin-devtools" })
@@ -314,6 +372,7 @@ describe("PluginRuntimeInitializer", () => {
     mockEmitBus.mockClear()
     window.dispatchEvent(new Event("beforeunload"))
     expect(mockEmitBus).toHaveBeenCalledWith("system:app:closing", {})
+    expect(mockDisposeMicrovmAdapters).toHaveBeenCalledTimes(1)
   })
 
   it("does not re-initialize on re-render", async () => {

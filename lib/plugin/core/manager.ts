@@ -80,7 +80,16 @@ const ACTIVATE_TIMEOUT_MS = 30_000
  * `ACTIVATE_TIMEOUT_MS` — a lifecycle hook that runs longer is a bug.
  */
 const LIFECYCLE_HOOK_TIMEOUT_MS = 30_000
-const MANUAL_ENABLE_ONLY_BUILTINS = new Set(["github-delivery"])
+/**
+ * Plugins that ship with the app but never activate on their own.
+ *
+ * `cognia-repowiki` is seeded onto disk from the installer
+ * (`lib/plugin/distribution/seed-bundled-plugins.ts`) so it exists at all in a
+ * packaged build. Being installed is not a reason to run: it spawns a Python
+ * subprocess and provisions its own virtualenv, which is not a cost to impose
+ * on someone who has never asked for a repository wiki.
+ */
+const MANUAL_ENABLE_ONLY_BUILTINS = new Set(["github-delivery", "cognia-repowiki"])
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
