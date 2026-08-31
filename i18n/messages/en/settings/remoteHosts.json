@@ -25,9 +25,22 @@
     "errPayload": "That doesn't look like a pair payload or JWT.",
     "labelLabel": "Name (optional)",
     "labelPlaceholder": "My dev box",
+    "loopback": {
+      "absent": "No host answered on this computer's loopback port.",
+      "absentHint": "A browser can only reach a host over http://127.0.0.1. For a host on another machine, paste its invitation above.",
+      "blocked": "A host answered at {url} but has not allowed this browser.",
+      "blockedHint": "On that machine, add {origin} under Settings → Companion → Browser access.",
+      "found": "Found cognia {version} at {url}.",
+      "foundHint": "Run `cognia-server pair` on that machine and paste what it prints above.",
+      "probe": "Look for a host",
+      "probing": "Looking…",
+      "title": "On this computer",
+      "useAddress": "Use this address"
+    },
     "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
     "payloadLabel": "Pair payload or JWT",
     "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
+    "seededFrom": "Seeded from {url}. The invitation still has to be pasted.",
     "submit": "Pair host",
     "submitting": "Pairing…",
     "success": "Paired {label}."

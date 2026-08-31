@@ -264,10 +264,13 @@ export const SURFACE_CONTRACTS = [
     id: "devices",
     route: "/devices",
     navigation: true,
-    // A standalone phone with nothing paired still has one device to describe
-    // — itself — but the fleet half of the console is empty, so it explains
-    // rather than pretending to be a fleet view.
-    standalone: "explain",
+    // A standalone browser with nothing paired still has one device to
+    // describe (itself), and, since the console grew an in-place add-host
+    // sheet, it also has the one action that ends the standalone state. That
+    // makes this "full" rather than "explain": the surface is not a degraded
+    // fleet view here, it is the way out of having no fleet. The empty half is
+    // still stated by the console's own standalone alert.
+    standalone: "full",
     companion: "remote",
     offline: "cached-read",
   },

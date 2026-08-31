@@ -265,5 +265,9 @@
     "grants": "已授权项",
     "shellTiers": "可用 Shell 档位",
     "placement": "可参与调度维度"
+  },
+  "addHost": {
+    "description": "与一台运行 cognia-server 的机器配对，之后可以从这里驱动它的终端、文件与 Git。",
+    "title": "添加远程主机"
   }
 }

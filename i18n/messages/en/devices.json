@@ -265,5 +265,9 @@
     "grants": "Grants held",
     "shellTiers": "Shell tiers usable",
     "placement": "Placement dimensions"
+  },
+  "addHost": {
+    "description": "Pair with a machine running cognia-server so this app can drive its terminal, files, and git.",
+    "title": "Add a remote host"
   }
 }

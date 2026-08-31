@@ -13,7 +13,7 @@
  * has since been revoked is worse than one that reopens on the local device.
  */
 
-import { useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { RefreshCwIcon, ServerIcon, SmartphoneIcon } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -29,7 +29,11 @@ import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useDeviceRows } from "@/hooks/devices/use-device-rows"
 import { hasHostRuntime } from "@/lib/platform/capabilities"
+import { isTauri } from "@/lib/platform/detect"
+import { remoteHostRef } from "@/lib/devices/build-device-rows"
+import type { RemoteHost } from "@/stores/remote-host/remote-host-store"
 
+import { AddHostSheet } from "./add-host-sheet"
 import { DeviceDetail } from "./device-detail"
 import { DeviceListPane } from "./device-list-pane"
 
@@ -61,6 +65,46 @@ export function DeviceConsole() {
    * rendering a one-row "fleet".
    */
   const standalone = !hasHostRuntime()
+
+  /**
+   * Pairing a phone is a native flow on the desktop (Settings renders the QR)
+   * but a route of its own everywhere else.
+   *
+   * Adding a host used to route too, to `/settings?section=remote-hosts`, and
+   * that section is `profiles: ["desktop"]` in `settings-nav-config.ts`. On a
+   * phone or a browser the button therefore delivered a settings empty state.
+   * It is in-place now, so only pairing still navigates.
+   */
+  const pairHref = isTauri() ? "/settings?section=companion" : "/pair"
+
+  /**
+   * `?addHost=1&baseUrl=…` is how `/servers` and the palette hand a host over.
+   *
+   * Latched into state rather than read straight from the param, so closing
+   * the sheet does not fight a URL that still says "open". The latch is
+   * adjusted during render rather than in an effect: an effect would open the
+   * sheet one paint late, and `react-hooks/set-state-in-effect` refuses it.
+   */
+  const addHostParam = searchParams.get("addHost")
+  const seededBaseUrl = searchParams.get("baseUrl") ?? undefined
+  const [addHostOpen, setAddHostOpen] = useState(() => Boolean(addHostParam))
+  const [seenAddHostParam, setSeenAddHostParam] = useState(addHostParam)
+  if (addHostParam !== seenAddHostParam) {
+    setSeenAddHostParam(addHostParam)
+    // Only a *new* param opens the sheet. Clearing it must not slam a sheet
+    // the user opened from the header shut.
+    if (addHostParam) setAddHostOpen(true)
+  }
+
+  const onPaired = useCallback(
+    (host: RemoteHost) => {
+      // `remoteHostRef` is the same identity `buildDeviceRows` assigns, so
+      // this selects the row that was just created rather than a ref that
+      // merely looks like one.
+      select(remoteHostRef(host))
+    },
+    [select]
+  )
 
   // A `?device=<ref>` deep link wins over whatever was last selected — it is
   // what ⌘K and the Settings entry points hand us, and landing on the previous
@@ -120,14 +164,14 @@ export function DeviceConsole() {
             id: "pair",
             label: t("actions.pair"),
             icon: SmartphoneIcon,
-            onSelect: () => router.push("/settings?section=companion"),
+            onSelect: () => router.push(pairHref),
           }}
           secondaryActions={[
             {
               id: "add-host",
               label: t("actions.addHost"),
               icon: ServerIcon,
-              onSelect: () => router.push("/settings?section=remote-hosts"),
+              onSelect: () => setAddHostOpen(true),
             },
             {
               id: "refresh",
@@ -164,9 +208,22 @@ export function DeviceConsole() {
             <AlertTitle>{t("standaloneTitle")}</AlertTitle>
             <AlertDescription className="space-y-2">
               <span className="block">{t("standaloneBody")}</span>
-              <Button asChild size="sm" variant="outline">
-                <Link href="/pair">{t("standalonePair")}</Link>
-              </Button>
+              {/* Two ways out of standalone, both reachable from here. Adding
+                  a host is the one a browser can act on without another
+                  device in hand, so it leads. */}
+              <span className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setAddHostOpen(true)}
+                  data-testid="devices-standalone-add-host"
+                >
+                  {t("actions.addHost")}
+                </Button>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href={pairHref}>{t("standalonePair")}</Link>
+                </Button>
+              </span>
             </AlertDescription>
           </Alert>
         ) : null}
@@ -185,6 +242,13 @@ export function DeviceConsole() {
           <DeviceDetail row={selected} actions={actions} />
         </div>
       </div>
+
+      <AddHostSheet
+        open={addHostOpen}
+        onOpenChange={setAddHostOpen}
+        initialBaseUrl={seededBaseUrl}
+        onPaired={onPaired}
+      />
     </FeaturePageShell>
   )
 }

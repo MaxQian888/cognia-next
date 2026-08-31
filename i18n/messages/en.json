@@ -8768,6 +8768,10 @@
         "succeeded": "Succeeded"
       }
     },
+    "addHost": {
+      "description": "Pair with a machine running cognia-server so this app can drive its terminal, files, and git.",
+      "title": "Add a remote host"
+    },
     "adminState": {
       "active": "Active",
       "paused": "Paused",
@@ -25510,7 +25514,6 @@
     "workflowScriptReadOnlyTitle": "Workflow-managed task",
     "workflowTriggerNotFound": "Workflow trigger not found.",
     "workingDir": "Working Directory",
-    "yes": "Yes",
     "workspaceMove": {
       "cleared": "Schedule now belongs to every workspace.",
       "failed": "Could not move the schedule: {error}",
@@ -25525,7 +25528,8 @@
         "task-running": "A run is in flight. Wait for it to finish before moving the schedule."
       },
       "unbound": "Every workspace"
-    }
+    },
+    "yes": "Yes"
   },
   "searchCache": {
     "allProviders": "All providers",
@@ -31636,21 +31640,6 @@
         "usernameLabel": "Username",
         "usernamePlaceholder": "your-username"
       },
-      "workspaceMaintenance": {
-        "description": "Reconcile managed workspaces, reclaim protected snapshots, and expire blobs using the host-owned lifecycle policy.",
-        "error": "Workspace maintenance failed: {error}",
-        "kinds": {
-          "directoryReclaimed": "Directory reclaimed",
-          "failed": "Failed",
-          "reconciled": "Registry reconciled",
-          "snapshotExpired": "Snapshot expired"
-        },
-        "lastEvent": "{kind}: {detail}",
-        "noEvents": "No maintenance events recorded yet.",
-        "runNow": "Run workspace maintenance",
-        "running": "Running…",
-        "title": "Managed workspace maintenance"
-      },
       "workspaceLifecycle": {
         "description": "What the maintenance run below reclaims. A worktree directory with no run attached is removed once the machine is over the cap, oldest first.",
         "fields": {
@@ -31667,6 +31656,21 @@
         "save": "Save",
         "saved": "Saved",
         "title": "Worktree lifecycle"
+      },
+      "workspaceMaintenance": {
+        "description": "Reconcile managed workspaces, reclaim protected snapshots, and expire blobs using the host-owned lifecycle policy.",
+        "error": "Workspace maintenance failed: {error}",
+        "kinds": {
+          "directoryReclaimed": "Directory reclaimed",
+          "failed": "Failed",
+          "reconciled": "Registry reconciled",
+          "snapshotExpired": "Snapshot expired"
+        },
+        "lastEvent": "{kind}: {detail}",
+        "noEvents": "No maintenance events recorded yet.",
+        "runNow": "Run workspace maintenance",
+        "running": "Running…",
+        "title": "Managed workspace maintenance"
       }
     },
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
@@ -34199,9 +34203,22 @@
         "errPayload": "That doesn't look like a pair payload or JWT.",
         "labelLabel": "Name (optional)",
         "labelPlaceholder": "My dev box",
+        "loopback": {
+          "absent": "No host answered on this computer's loopback port.",
+          "absentHint": "A browser can only reach a host over http://127.0.0.1. For a host on another machine, paste its invitation above.",
+          "blocked": "A host answered at {url} but has not allowed this browser.",
+          "blockedHint": "On that machine, add {origin} under Settings → Companion → Browser access.",
+          "found": "Found cognia {version} at {url}.",
+          "foundHint": "Run `cognia-server pair` on that machine and paste what it prints above.",
+          "probe": "Look for a host",
+          "probing": "Looking…",
+          "title": "On this computer",
+          "useAddress": "Use this address"
+        },
         "payloadHint": "On the host run `cognia-server pair` and paste what it prints. A full payload fills in the URL for you.",
         "payloadLabel": "Pair payload or JWT",
         "payloadPlaceholder": "Paste the cgnp2 payload from `cognia-server pair`, or a raw pair JWT",
+        "seededFrom": "Seeded from {url}. The invitation still has to be pasted.",
         "submit": "Pair host",
         "submitting": "Pairing…",
         "success": "Paired {label}."

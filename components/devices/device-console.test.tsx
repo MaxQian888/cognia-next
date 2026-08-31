@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 
@@ -53,9 +54,15 @@ jest.mock("@/lib/platform/web-companion", () => ({
   hasWebCompanionTarget: () => platform?.webCompanion ?? false,
 }))
 
+const push = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: (...args: unknown[]) => push(...args) }),
   useSearchParams: () => searchParams,
+}))
+
+jest.mock("./add-host-sheet", () => ({
+  AddHostSheet: ({ open, initialBaseUrl }: { open: boolean; initialBaseUrl?: string }) =>
+    open ? <div data-testid="add-host-sheet" data-seeded={initialBaseUrl ?? ""} /> : null,
 }))
 
 jest.mock("./device-detail", () => ({
@@ -107,6 +114,7 @@ beforeEach(() => {
   useDeviceConsoleStore.setState(initial, true)
   rows = [LOCAL, row()]
   searchParams = new URLSearchParams()
+  push.mockClear()
   platform = { tauri: true, capacitor: false, webCompanion: false }
   hostUnreachable = false
   needsAttention = 0
@@ -243,5 +251,43 @@ describe("DeviceConsole", () => {
   it("hides the attention badge when nothing needs attention", () => {
     renderConsole()
     expect(screen.queryByTestId("devices-attention-count")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The action used to push `/settings?section=remote-hosts`, and that section
+   * was `profiles: ["desktop"]`, so on a phone or in a browser the button
+   * delivered a settings empty state. Adding a host is the one thing a
+   * standalone client can do to stop being standalone, so it happens here.
+   */
+  it("opens the add-host sheet in place instead of routing to Settings", async () => {
+    renderConsole()
+    expect(screen.queryByTestId("add-host-sheet")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Add a host" }))
+    expect(screen.getByTestId("add-host-sheet")).toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it("opens the sheet from a ?addHost deep link and seeds the base URL", () => {
+    searchParams = new URLSearchParams("addHost=1&baseUrl=https%3A%2F%2Fbox.example%3A27890")
+    renderConsole()
+    expect(screen.getByTestId("add-host-sheet")).toHaveAttribute(
+      "data-seeded",
+      "https://box.example:27890"
+    )
+  })
+
+  /**
+   * Pairing a phone is a native Settings flow on the desktop, but `/pair` is
+   * the route that actually exists everywhere else.
+   */
+  it.each([
+    [{ tauri: true, capacitor: false, webCompanion: false }, "/settings?section=companion"],
+    [{ tauri: false, capacitor: true, webCompanion: false }, "/pair"],
+    [{ tauri: false, capacitor: false, webCompanion: true }, "/pair"],
+  ])("routes pairing to the entry point that exists on this shell", async (flags, href) => {
+    platform = flags
+    renderConsole()
+    await userEvent.click(screen.getByRole("button", { name: "Pair a device" }))
+    expect(push).toHaveBeenCalledWith(href)
   })
 })

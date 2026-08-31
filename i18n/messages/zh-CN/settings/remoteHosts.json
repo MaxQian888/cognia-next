@@ -25,9 +25,22 @@
     "errPayload": "这看起来不像配对载荷或 JWT。",
     "labelLabel": "名称(可选)",
     "labelPlaceholder": "我的 dev box",
+    "loopback": {
+      "absent": "这台电脑的回环端口上没有主机应答。",
+      "absentHint": "浏览器只能通过 http://127.0.0.1 访问主机。若主机在另一台机器上，请在上面粘贴它的邀请码。",
+      "blocked": "{url} 有主机应答，但它尚未允许这个浏览器。",
+      "blockedHint": "请在那台机器的 设置 → 伴侣 → 浏览器访问 中添加 {origin}。",
+      "found": "在 {url} 找到 cognia {version}。",
+      "foundHint": "在那台机器上运行 `cognia-server pair`，把输出粘贴到上面。",
+      "probe": "查找主机",
+      "probing": "查找中…",
+      "title": "这台电脑上",
+      "useAddress": "使用该地址"
+    },
     "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
     "payloadLabel": "配对载荷或 JWT",
     "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",
+    "seededFrom": "来自 {url}。仍需粘贴该主机的邀请码。",
     "submit": "配对主机",
     "submitting": "配对中…",
     "success": "已配对 {label}。"

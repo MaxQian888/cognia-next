@@ -8768,6 +8768,10 @@
         "succeeded": "已成功"
       }
     },
+    "addHost": {
+      "description": "与一台运行 cognia-server 的机器配对，之后可以从这里驱动它的终端、文件与 Git。",
+      "title": "添加远程主机"
+    },
     "adminState": {
       "active": "正常",
       "paused": "已暂停",
@@ -25510,7 +25514,6 @@
     "workflowScriptReadOnlyTitle": "工作流托管任务",
     "workflowTriggerNotFound": "未找到该工作流触发器。",
     "workingDir": "工作目录",
-    "yes": "是",
     "workspaceMove": {
       "cleared": "该日程现在归属所有工作区。",
       "failed": "移动日程失败：{error}",
@@ -25525,7 +25528,8 @@
         "task-running": "有运行正在进行，请等待其结束后再移动日程。"
       },
       "unbound": "所有工作区"
-    }
+    },
+    "yes": "是"
   },
   "searchCache": {
     "allProviders": "全部 Provider",
@@ -31636,21 +31640,6 @@
         "usernameLabel": "用户名",
         "usernamePlaceholder": "你的用户名"
       },
-      "workspaceMaintenance": {
-        "description": "按照宿主生命周期策略协调受管工作区、回收受保护快照并清理过期 blob。",
-        "error": "工作区维护失败：{error}",
-        "kinds": {
-          "directoryReclaimed": "目录已回收",
-          "failed": "失败",
-          "reconciled": "Registry 已协调",
-          "snapshotExpired": "快照已过期"
-        },
-        "lastEvent": "{kind}：{detail}",
-        "noEvents": "尚无维护事件记录。",
-        "runNow": "运行工作区维护",
-        "running": "运行中…",
-        "title": "受管工作区维护"
-      },
       "workspaceLifecycle": {
         "description": "下方维护任务实际回收的依据。没有运行关联的工作树目录，会在超出上限后按最旧优先被清理。",
         "fields": {
@@ -31667,6 +31656,21 @@
         "save": "保存",
         "saved": "已保存",
         "title": "工作树生命周期"
+      },
+      "workspaceMaintenance": {
+        "description": "按照宿主生命周期策略协调受管工作区、回收受保护快照并清理过期 blob。",
+        "error": "工作区维护失败：{error}",
+        "kinds": {
+          "directoryReclaimed": "目录已回收",
+          "failed": "失败",
+          "reconciled": "Registry 已协调",
+          "snapshotExpired": "快照已过期"
+        },
+        "lastEvent": "{kind}：{detail}",
+        "noEvents": "尚无维护事件记录。",
+        "runNow": "运行工作区维护",
+        "running": "运行中…",
+        "title": "受管工作区维护"
       }
     },
     "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
@@ -34199,9 +34203,22 @@
         "errPayload": "这看起来不像配对载荷或 JWT。",
         "labelLabel": "名称(可选)",
         "labelPlaceholder": "我的 dev box",
+        "loopback": {
+          "absent": "这台电脑的回环端口上没有主机应答。",
+          "absentHint": "浏览器只能通过 http://127.0.0.1 访问主机。若主机在另一台机器上，请在上面粘贴它的邀请码。",
+          "blocked": "{url} 有主机应答，但它尚未允许这个浏览器。",
+          "blockedHint": "请在那台机器的 设置 → 伴侣 → 浏览器访问 中添加 {origin}。",
+          "found": "在 {url} 找到 cognia {version}。",
+          "foundHint": "在那台机器上运行 `cognia-server pair`，把输出粘贴到上面。",
+          "probe": "查找主机",
+          "probing": "查找中…",
+          "title": "这台电脑上",
+          "useAddress": "使用该地址"
+        },
         "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
         "payloadLabel": "配对载荷或 JWT",
         "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",
+        "seededFrom": "来自 {url}。仍需粘贴该主机的邀请码。",
         "submit": "配对主机",
         "submitting": "配对中…",
         "success": "已配对 {label}。"

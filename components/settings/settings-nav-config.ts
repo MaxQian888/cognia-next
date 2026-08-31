@@ -670,9 +670,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "remoteHosts",
     group: "system",
     icon: ServerIcon,
-    // The desktop's registry of remote hosts that may drive the app
-    // (ADR-0082 R0); web clients pair through `/pair` instead.
-    profiles: ["desktop"],
+    // The registry of remote hosts that may drive the app (ADR-0082 R0).
+    //
+    // No longer desktop-pinned. The store, the credential vault and
+    // `CompanionTransport` all work on a phone and in a browser, and pinning
+    // the section meant `/devices`' own "Add host" action delivered a settings
+    // empty state on two of three shells. mDNS is the only genuinely
+    // desktop-only part, and that gate now sits on the discovery panel inside
+    // `add-host-form.tsx` rather than on the whole surface.
   },
   {
     id: "network",
