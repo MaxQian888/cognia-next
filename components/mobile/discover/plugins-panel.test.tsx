@@ -26,6 +26,10 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: jest.fn().mockResolvedValue(undefined),
 }))
 
+jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
+  setPluginEnabledForHost: jest.fn().mockResolvedValue({ ok: true, queued: false }),
+}))
+
 jest.mock("sonner", () => ({
   toast: { error: jest.fn(), success: jest.fn(), info: jest.fn() },
 }))
@@ -33,15 +37,18 @@ jest.mock("sonner", () => ({
 import { useLiveQuery } from "dexie-react-hooks"
 import { getDb } from "@/lib/db/schema"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
+import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 
 const useLiveQueryMock = useLiveQuery as jest.Mock
 const updateMock = getDb().plugins.update as jest.Mock
 const enqueueMock = enqueue as jest.Mock
+const setEnabledMock = setPluginEnabledForHost as jest.Mock
 
 beforeEach(() => {
   useLiveQueryMock.mockReset()
   updateMock.mockClear()
   enqueueMock.mockClear()
+  setEnabledMock.mockClear().mockResolvedValue({ ok: true, queued: false })
 })
 
 describe("PluginsPanel", () => {
@@ -65,17 +72,27 @@ describe("PluginsPanel", () => {
     expect(screen.getByText("p2")).toBeInTheDocument()
   })
 
-  it("persists and enqueues a toggle when the switch flips", async () => {
+  // This panel used to write Dexie and enqueue `plugin_set_enabled`
+  // unconditionally, which is right on a paired phone and wrong on a desktop
+  // or a standalone browser. Where a toggle goes is one decision, and it lives
+  // in `setPluginEnabledForHost`.
+  it("delegates a toggle to the host-aware seam", async () => {
     useLiveQueryMock.mockReturnValue([{ id: "p1", name: "Web Tools", enabled: false }])
     const user = userEvent.setup()
     render(<PluginsPanel />)
     await user.click(screen.getByTestId("plugin-switch-p1"))
-    expect(updateMock).toHaveBeenCalledWith("p1", expect.objectContaining({ enabled: true }))
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: "plugin_set_enabled",
-        payload: { id: "p1", enabled: true },
-      })
-    )
+    expect(setEnabledMock).toHaveBeenCalledWith("p1", true)
+    expect(updateMock).not.toHaveBeenCalled()
+    expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a failed toggle as a toast", async () => {
+    setEnabledMock.mockResolvedValue({ ok: false, queued: false, error: "no runtime" })
+    useLiveQueryMock.mockReturnValue([{ id: "p1", name: "Web Tools", enabled: false }])
+    const user = userEvent.setup()
+    render(<PluginsPanel />)
+    await user.click(screen.getByTestId("plugin-switch-p1"))
+    const { toast } = jest.requireMock("sonner") as { toast: { error: jest.Mock } }
+    expect(toast.error).toHaveBeenCalledWith("toggleFailed")
   })
 })

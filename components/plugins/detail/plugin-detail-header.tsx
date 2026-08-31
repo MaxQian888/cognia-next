@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
+import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import { usePluginDiagnostics } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
@@ -114,7 +114,7 @@ export function PluginDetailHeader({ plugin }: Props) {
         <div className="flex items-center gap-2 shrink-0">
           <Switch
             checked={plugin.enabled}
-            onCheckedChange={(next) => void togglePluginEnabled(plugin.id, next)}
+            onCheckedChange={(next) => void setPluginEnabledForHost(plugin.id, next)}
             aria-label={plugin.enabled ? tCard("disable") : tCard("enable")}
             data-testid="plugin-detail-enable-toggle"
           />

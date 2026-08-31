@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { listPlugins } from "@/lib/db/plugins"
-import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
+import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePluginsStore } from "@/stores/plugins"
 
@@ -44,7 +44,7 @@ export function PluginBatchActionsBar() {
     // them all at once just queues N long operations behind one lock while the
     // UI shows nothing about which is in flight.
     for (const target of targets) {
-      await togglePluginEnabled(target.id, !allEnabled)
+      await setPluginEnabledForHost(target.id, !allEnabled, "batch")
     }
   }
 

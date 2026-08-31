@@ -21,7 +21,7 @@
 // external links keep landing on the right view without a parallel store
 // concept.
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import {
@@ -31,10 +31,7 @@ import {
   type PluginLibrarySubFilter,
   type PluginNavSection,
 } from "@/stores/plugins"
-import { deletePlugin, listPlugins, updatePlugin } from "@/lib/db/plugins"
-import { getDb } from "@/lib/db/schema"
-import { unregisterScheduledTasksForPlugin } from "@/lib/plugin/bridge/scheduled-task-bridge"
-import { usePluginMarketplace, PluginsViewProvider } from "@/hooks/plugins"
+import { usePluginMarketplace, usePluginRegistrySync, PluginsViewProvider } from "@/hooks/plugins"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { PlugIcon } from "lucide-react"
@@ -42,7 +39,7 @@ import { PlugIcon } from "lucide-react"
 // Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
-import { PluginDeleteDialog } from "./dialogs/plugin-delete-dialog"
+import { PluginDeleteDialogHost } from "./dialogs/plugin-delete-dialog-host"
 import { PluginPermissionReview } from "./plugin-permission-review"
 import { PluginImportDialog } from "./dialogs/plugin-import-dialog"
 import { PluginConflictDialog } from "./dialogs/plugin-conflict-dialog"
@@ -53,15 +50,14 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 
 // 3-pane shell pieces.
 import { PluginNavSidebar } from "./plugin-nav-sidebar"
-import { PluginLibraryPane } from "./library/plugin-library-pane"
-import { PluginLibraryHeader } from "./library/plugin-library-header"
 import { PluginPanelToolbar } from "./plugin-panel-toolbar"
-import { PluginDiscoverPane } from "./discover/plugin-discover-pane"
-import { PluginGovernancePane } from "./governance/plugin-governance-pane"
-import { PluginGovernanceHeader } from "./governance/plugin-governance-header"
-import { PluginDevtoolsPane } from "./devtools/plugin-devtools-pane"
-import { AgentPackagesPane } from "./agent-packages/agent-packages-pane"
 import { PluginDetailPane } from "./detail/plugin-detail-pane"
+import {
+  PluginSectionControls,
+  PluginSectionPane,
+  pluginSectionHasControls,
+  useVisiblePluginSection,
+} from "./plugin-section-pane"
 import { useDeveloperMode } from "@/lib/plugin/devtools/developer-mode"
 
 // One-time translation of legacy `?tab=` deep links into the canonical
@@ -212,60 +208,12 @@ export function PluginPanel() {
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
 
   // The panel only needs the imperative `refresh()` for the Sync Registry
-  // button — it never renders search/featured results itself. Opt out of the
+  // button, it never renders search/featured results itself. Opt out of the
   // on-mount auto-search so entering /plugins from the sidebar (which lands on
   // the Library section) doesn't fire a marketplace search. The Discover /
   // marketplace surfaces keep their own auto-loading hook instances.
   const market = usePluginMarketplace({ autoLoad: false })
-  const tToolbar = useTranslations("plugins.toolbar")
-  const [syncing, setSyncing] = useState(false)
-  // syncRegistry: refresh the marketplace catalog and stamp every installed
-  // plugin with `manifest.updateAvailable` if the catalog reports a newer
-  // version. The flag is consumed by the `hasUpdate` filter and the
-  // PluginPanelGrid badge surface.
-  const handleSync = useCallback(async () => {
-    setSyncing(true)
-    try {
-      await market.refresh()
-      const rows = await listPlugins()
-      const mod = (await import("@/lib/plugin/package/marketplace")) as unknown as {
-        getPluginMarketplace: () => {
-          checkForUpdates: (
-            installed: { id: string; version: string }[]
-          ) => Promise<{ id: string; latestVersion: string }[]>
-        }
-      }
-      // VS Code extensions are installed from Open VSX, so their ids must not
-      // be handed to the cognia registry: it can never have an answer for
-      // `esbenp.prettier-vscode`, and asking tells cognia's registry which
-      // extensions this user has. Their updates are checked against Open VSX
-      // by `PluginUpdater.checkForUpdates`, which routes by the same field.
-      const cogniaRows = rows.filter((r) => r.type !== "vscode-extension")
-      const updates = await mod
-        .getPluginMarketplace()
-        .checkForUpdates(cogniaRows.map((r) => ({ id: r.id, version: r.version })))
-      const updateIds = new Set(updates.map((u) => u.id))
-      await Promise.all(
-        rows.map((row) => {
-          const wantsFlag = updateIds.has(row.id)
-          const currentFlag = !!(row.manifest as { updateAvailable?: boolean }).updateAvailable
-          if (wantsFlag === currentFlag) return Promise.resolve()
-          return updatePlugin(row.id, {
-            manifest: { ...row.manifest, updateAvailable: wantsFlag },
-          })
-        })
-      )
-      toast.success(tToolbar("syncDone", { count: updateIds.size }))
-    } catch (err) {
-      // The toolbar fires this handler with `void` — surface the failure
-      // here or it becomes an unhandled rejection with a stuck-silent UI.
-      toast.error(
-        tToolbar("syncFailed", { message: err instanceof Error ? err.message : String(err) })
-      )
-    } finally {
-      setSyncing(false)
-    }
-  }, [market, tToolbar])
+  const { syncing, sync } = usePluginRegistrySync(market.refresh)
 
   const dialogHosts = (
     <>
@@ -289,7 +237,7 @@ export function PluginPanel() {
       {dialogHosts}
       <NewShellLayout
         onCheckUpdates={() => setUpdateOpen(true)}
-        onSyncRegistry={handleSync}
+        onSyncRegistry={sync}
         syncing={syncing}
       />
     </PluginsViewProvider>
@@ -306,31 +254,16 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
   const t = useTranslations("plugins.sections")
   const tPage = useTranslations("plugins")
   const activeSection = usePluginsStore((s) => s.activeSection)
-  const developerMode = useDeveloperMode()
-  const visibleSection = activeSection === "devtools" && !developerMode ? "library" : activeSection
+  const visibleSection = useVisiblePluginSection(activeSection)
 
   // Second header tier — one control vocabulary for every section. Each
   // section supplies its own segments/tools through `PluginSectionToolbar`
   // rather than inventing a picker of its own (see that component's note).
-  const controls =
-    visibleSection === "library" ? (
-      <PluginLibraryHeader />
-    ) : visibleSection === "governance" ? (
-      <PluginGovernanceHeader />
-    ) : undefined
-
-  const center =
-    visibleSection === "library" ? (
-      <PluginLibraryPane />
-    ) : visibleSection === "discover" ? (
-      <PluginDiscoverPane />
-    ) : visibleSection === "agent-packages" ? (
-      <AgentPackagesPane />
-    ) : visibleSection === "governance" ? (
-      <PluginGovernancePane />
-    ) : (
-      <PluginDevtoolsPane />
-    )
+  // The mapping itself lives in `plugin-section-pane.tsx` so the phone body
+  // renders the same sections from the same source.
+  const controls = pluginSectionHasControls(visibleSection) ? (
+    <PluginSectionControls section={visibleSection} />
+  ) : undefined
 
   return (
     <FeaturePageShell
@@ -393,42 +326,8 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
             }
       }
     >
-      {center}
+      <PluginSectionPane section={visibleSection} />
       <PluginExtensionSlot point="settings.plugins" className="border-t px-4 py-3 empty:hidden" />
     </FeaturePageShell>
-  )
-}
-
-function PluginDeleteDialogHost() {
-  const target = usePluginsStore((s) => s.deleteTarget)
-  const queueLength = usePluginsStore((s) => s.deleteQueue.length)
-  const setDeleteTarget = usePluginsStore((s) => s.setDeleteTarget)
-  const advanceDeleteQueue = usePluginsStore((s) => s.advanceDeleteQueue)
-  // After confirm / cancel, advance to the next queued target so a batch
-  // uninstall walks the whole selection without re-opening the bar.
-  const advance = () => {
-    if (queueLength > 0) advanceDeleteQueue()
-    else setDeleteTarget(null)
-  }
-  return (
-    <PluginDeleteDialog
-      open={target !== null}
-      pluginName={target?.name ?? ""}
-      onCancel={advance}
-      onConfirm={async ({ cascade }) => {
-        if (!target) return
-        const id = target.pluginId
-        await unregisterScheduledTasksForPlugin(id)
-        await deletePlugin(id)
-        if (cascade) {
-          const db = getDb()
-          await Promise.all([
-            db.pluginPermissions.where("pluginId").equals(id).delete(),
-            db.pluginAnalytics.where("pluginId").equals(id).delete(),
-          ])
-        }
-        advance()
-      }}
-    />
   )
 }

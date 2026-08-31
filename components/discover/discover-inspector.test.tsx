@@ -38,6 +38,15 @@ jest.mock("@/lib/db/skills", () => ({
 }))
 
 const enqueueMock = jest.fn()
+const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
+  ok: true,
+  queued: false,
+}))
+jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
+  setPluginEnabledForHost: (id: string, enabled: boolean) =>
+    setPluginEnabledForHostMock(id, enabled),
+}))
+
 jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (input: unknown) => {
     enqueueMock(input)
@@ -206,6 +215,7 @@ beforeEach(() => {
   enqueueMock.mockReset()
   pluginUpdateMock.mockReset().mockResolvedValue(undefined)
   mcpUpdateMock.mockReset().mockResolvedValue(undefined)
+  setPluginEnabledForHostMock.mockReset().mockResolvedValue({ ok: true, queued: false })
   toastErrorMock.mockReset()
   toastSuccessMock.mockReset()
   marketInstallMock.mockReset().mockResolvedValue(undefined)
@@ -275,7 +285,12 @@ describe("<DiscoverInspector />", () => {
     )
   })
 
-  it("calls plugins.update + enqueue when toggling a plugin", async () => {
+  // This surface used to write the Dexie row and enqueue `plugin_set_enabled`
+  // inline and UNCONDITIONALLY, so on desktop it bypassed the plugin manager
+  // (the row said "enabled" over a runtime that never started) and queued a
+  // job for a host that is this process. Routing decisions belong to
+  // `setPluginEnabledForHost`, which is what this asserts.
+  it("delegates a plugin toggle to the host-aware seam", async () => {
     const user = userEvent.setup()
     render(
       <DiscoverInspector
@@ -286,22 +301,16 @@ describe("<DiscoverInspector />", () => {
       />
     )
     await user.click(screen.getByTestId("discover-inspector-plugin-toggle"))
-    expect(pluginUpdateMock).toHaveBeenCalledWith(
-      plugin.id,
-      expect.objectContaining({ enabled: false })
-    )
-    // enqueue happens after the await resolves
+    expect(setPluginEnabledForHostMock).toHaveBeenCalledWith(plugin.id, false)
     await new Promise((r) => setTimeout(r, 0))
-    expect(enqueueMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        command: "plugin_set_enabled",
-        payload: { id: plugin.id, enabled: false },
-      })
+    expect(pluginUpdateMock).not.toHaveBeenCalled()
+    expect(enqueueMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ command: "plugin_set_enabled" })
     )
   })
 
-  it("surfaces an error toast when the plugin write fails", async () => {
-    pluginUpdateMock.mockRejectedValueOnce(new Error("boom"))
+  it("surfaces an error toast when the seam reports a failed toggle", async () => {
+    setPluginEnabledForHostMock.mockResolvedValueOnce({ ok: false, queued: false, error: "boom" })
     const user = userEvent.setup()
     render(
       <DiscoverInspector

@@ -81,3 +81,27 @@ export const PLUGIN_GOVERNANCE_VIEWS: ReadonlyArray<PluginGovernanceSubItem> = [
   { value: "audit", labelKey: "audit" },
   { value: "policy", labelKey: "policy" },
 ]
+
+export interface PluginSectionVisibility {
+  /** The opt-in localStorage devtools flag (`useDevtoolsGate`). */
+  devtoolsEnabled: boolean
+  /** Tauri shell, which is the only host that can run the desktop sections. */
+  isDesktop: boolean
+}
+
+/**
+ * The sections a given host should offer, in nav order.
+ *
+ * Shared by the desktop rail and the phone body so the two can never disagree
+ * about which sections exist. Pure, so the rule is testable without a shell.
+ */
+export function visiblePluginSections({
+  devtoolsEnabled,
+  isDesktop,
+}: PluginSectionVisibility): ReadonlyArray<PluginNavItem> {
+  return PLUGIN_NAV_SECTIONS.filter((item) => {
+    if (item.featureFlag === "devtools") return devtoolsEnabled
+    if (item.featureFlag === "desktop") return isDesktop
+    return true
+  })
+}

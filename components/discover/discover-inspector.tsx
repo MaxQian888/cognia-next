@@ -51,6 +51,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { listPlugins } from "@/lib/db/plugins"
 import { getDb } from "@/lib/db/schema"
+import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import { setSkillStatus } from "@/lib/db/skills"
 import { connectionsHref, mcpHref, settingsHref } from "@/lib/settings/deep-link"
 import {
@@ -271,17 +272,13 @@ function PluginInspector({ plugin }: { plugin: PluginRow }) {
   const platform = usePlatform()
   const isMobile = platform === "mobile"
   const market = usePluginMarketplace()
+  // Routed through the shared seam rather than writing Dexie + enqueueing
+  // here. This surface used to enqueue unconditionally, which on desktop
+  // meant the row said "enabled" over a runtime the manager never started,
+  // and queued a job for a host that is this process.
   const onToggle = async (next: boolean) => {
-    try {
-      await getDb().plugins.update(plugin.id, { enabled: next, updatedAt: Date.now() })
-      await enqueue({
-        command: "plugin_set_enabled",
-        payload: { id: plugin.id, enabled: next },
-        label: `${next ? "Enable" : "Disable"} plugin ${plugin.name || plugin.id}`,
-      })
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    }
+    const result = await setPluginEnabledForHost(plugin.id, next)
+    if (!result.ok && result.error) toast.error(result.error)
   }
   const onUninstall = async () => {
     try {

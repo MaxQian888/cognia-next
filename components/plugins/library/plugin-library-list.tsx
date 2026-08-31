@@ -15,7 +15,7 @@
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { BoxesIcon, CompassIcon } from "lucide-react"
-import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
+import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
@@ -55,7 +55,7 @@ export function PluginLibraryList() {
   // plugin / selected / active props change (matters for 50+ plugin lists
   // where every keystroke used to re-render every row).
   const handleToggleEnabled = useCallback(
-    (plugin: PluginRow) => void togglePluginEnabled(plugin.id, !plugin.enabled),
+    (plugin: PluginRow) => void setPluginEnabledForHost(plugin.id, !plugin.enabled),
     []
   )
   const handleUninstall = useCallback(

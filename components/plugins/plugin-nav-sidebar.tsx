@@ -25,7 +25,7 @@ import { usePluginsStore } from "@/stores/plugins"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { PLUGIN_NAV_SECTIONS } from "./plugin-nav-config"
+import { visiblePluginSections } from "./plugin-nav-config"
 
 /**
  * Which shell we are in, read SSR-safely.
@@ -52,11 +52,7 @@ export function PluginNavSidebar() {
 
   const isDesktop = useDesktopShell()
 
-  const visibleSections = PLUGIN_NAV_SECTIONS.filter((item) => {
-    if (item.featureFlag === "devtools") return devtoolsEnabled
-    if (item.featureFlag === "desktop") return isDesktop
-    return true
-  })
+  const visibleSections = visiblePluginSections({ devtoolsEnabled, isDesktop })
 
   return (
     <nav aria-label={t("library")} className="flex h-full min-h-0 flex-col overflow-y-auto p-2">

@@ -26,14 +26,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { PluginSectionToolbar } from "../plugin-section-toolbar"
+import { PluginSectionToolbar, type PluginSectionToolbarProps } from "../plugin-section-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
 import { useLibrarySubFilterSegments } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
 const SORT_MODES: readonly PluginSortMode[] = ["name", "updated", "usage", "rating"]
 
-export function PluginLibraryHeader() {
+export interface PluginLibraryHeaderProps {
+  /** Forwarded to `PluginSectionToolbar`; the phone body passes "stacked". */
+  layout?: PluginSectionToolbarProps["layout"]
+}
+
+export function PluginLibraryHeader({ layout }: PluginLibraryHeaderProps = {}) {
   const t = useTranslations("plugins.panel")
   const tSort = useTranslations("plugins.filterSheet")
   // Narrow selectors — subscribing to the whole `filters` object would
@@ -56,6 +61,7 @@ export function PluginLibraryHeader() {
 
   return (
     <PluginSectionToolbar
+      layout={layout}
       testId="plugin-library-toolbar"
       search={{
         value: query,

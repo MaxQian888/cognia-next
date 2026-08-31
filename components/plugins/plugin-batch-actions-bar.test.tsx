@@ -12,7 +12,9 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
+const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
+  ok: true,
+}))
 const mockRows: PluginRow[] = [
   {
     id: "a",
@@ -52,8 +54,9 @@ jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(() => Promise.resolve(mockRows)),
 }))
 
-jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
-  togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
+jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
+  setPluginEnabledForHost: (id: string, enabled: boolean) =>
+    setPluginEnabledForHostMock(id, enabled),
 }))
 
 const toastMock = jest.fn()
@@ -74,7 +77,7 @@ import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { usePluginsStore } from "@/stores/plugins"
 
 beforeEach(() => {
-  togglePluginEnabledMock.mockClear()
+  setPluginEnabledForHostMock.mockClear()
   toastMock.mockClear()
   checkForUpdatesMock.mockClear()
   installUpdateMock.mockClear()
@@ -106,11 +109,11 @@ describe("PluginBatchActionsBar", () => {
     // Sequential by design: each toggle now runs a real activation, and
     // `withLifecycleLock` serializes them anyway — so only the first has fired
     // synchronously and the rest need the microtask queue to drain.
-    expect(togglePluginEnabledMock).toHaveBeenCalledTimes(1)
+    expect(setPluginEnabledForHostMock).toHaveBeenCalledTimes(1)
 
-    await waitFor(() => expect(togglePluginEnabledMock).toHaveBeenCalledTimes(2))
-    expect(togglePluginEnabledMock).toHaveBeenCalledWith("a", false)
-    expect(togglePluginEnabledMock).toHaveBeenCalledWith("b", false)
+    await waitFor(() => expect(setPluginEnabledForHostMock).toHaveBeenCalledTimes(2))
+    expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("a", false)
+    expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("b", false)
   })
 
   it("clear-selection button empties the selection", () => {

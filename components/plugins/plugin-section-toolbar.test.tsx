@@ -162,3 +162,40 @@ describe("PluginSectionToolbar", () => {
     expect(root).not.toHaveTextContent(/\S/)
   })
 })
+
+describe("stacked layout", () => {
+  // A mobile body has no `FeaturePageHeader` controls slot scrolling on its
+  // behalf, and at 375px the one-row form squeezes the search input to a few
+  // characters. Stacked gives search its own line and scrolls the rest.
+  it("puts the search on its own line and scrolls segments + tools", () => {
+    render(
+      <PluginSectionToolbar
+        layout="stacked"
+        search={{ value: "", onChange: () => {}, placeholder: "Search" }}
+        segments={{
+          ariaLabel: "Status",
+          items: [{ value: "all", label: "All", count: 2 }],
+          value: "all",
+          onSelect: () => {},
+        }}
+        tools={<button type="button">Filter</button>}
+      />
+    )
+    const controls = screen.getByTestId("plugin-section-toolbar-controls")
+    expect(controls.className).toContain("overflow-x-auto")
+    expect(controls).toContainElement(screen.getByRole("button", { name: "Filter" }))
+    // The search sits outside that scroller, so it keeps its full width.
+    expect(controls).not.toContainElement(screen.getByPlaceholderText("Search"))
+  })
+
+  it("defaults to the single-row shape", () => {
+    render(
+      <PluginSectionToolbar
+        search={{ value: "", onChange: () => {}, placeholder: "Search" }}
+        tools={<button type="button">Filter</button>}
+      />
+    )
+    expect(screen.getByTestId("plugin-section-toolbar")).toHaveAttribute("data-layout", "row")
+    expect(screen.queryByTestId("plugin-section-toolbar-controls")).toBeNull()
+  })
+})

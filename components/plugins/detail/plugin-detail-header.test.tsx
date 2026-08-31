@@ -10,9 +10,12 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
-jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
-  togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
+const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
+  ok: true,
+}))
+jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
+  setPluginEnabledForHost: (id: string, enabled: boolean) =>
+    setPluginEnabledForHostMock(id, enabled),
 }))
 
 const recoverPluginRuntimeMock = jest.fn(async () => true)
@@ -57,7 +60,7 @@ function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
 }
 
 beforeEach(() => {
-  togglePluginEnabledMock.mockClear()
+  setPluginEnabledForHostMock.mockClear()
   recoverPluginRuntimeMock.mockClear()
   mockDiagnostics = []
   usePluginsStore.setState({
@@ -83,7 +86,7 @@ describe("PluginDetailHeader", () => {
     // while its runtime had never started.
     render(<PluginDetailHeader plugin={makePlugin({ enabled: true })} />)
     fireEvent.click(screen.getByTestId("plugin-detail-enable-toggle"))
-    expect(togglePluginEnabledMock).toHaveBeenCalledWith("alpha", false)
+    expect(setPluginEnabledForHostMock).toHaveBeenCalledWith("alpha", false)
   })
 
   it("Configure button only renders when the manifest declares a configSchema", () => {

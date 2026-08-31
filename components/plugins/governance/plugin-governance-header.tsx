@@ -14,9 +14,14 @@ import { useTranslations } from "next-intl"
 
 import { usePluginsStore, type PluginGovernanceView } from "@/stores/plugins"
 import { PLUGIN_GOVERNANCE_VIEWS } from "../plugin-nav-config"
-import { PluginSectionToolbar } from "../plugin-section-toolbar"
+import { PluginSectionToolbar, type PluginSectionToolbarProps } from "../plugin-section-toolbar"
 
-export function PluginGovernanceHeader() {
+export interface PluginGovernanceHeaderProps {
+  /** Forwarded to `PluginSectionToolbar`; the phone body passes "stacked". */
+  layout?: PluginSectionToolbarProps["layout"]
+}
+
+export function PluginGovernanceHeader({ layout }: PluginGovernanceHeaderProps = {}) {
   const t = useTranslations("plugins.sections.governanceSub")
   const tSections = useTranslations("plugins.sections")
   const view = usePluginsStore((s) => s.governanceView)
@@ -24,6 +29,7 @@ export function PluginGovernanceHeader() {
 
   return (
     <PluginSectionToolbar
+      layout={layout}
       testId="plugin-governance-toolbar"
       segments={{
         ariaLabel: tSections("governance"),

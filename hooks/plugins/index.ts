@@ -46,3 +46,4 @@ export {
   type RequestGrantArgs,
   type RequestGrantResult,
 } from "./use-wasm-capability-grant"
+export { usePluginRegistrySync, type PluginRegistrySync } from "./use-plugin-registry-sync"

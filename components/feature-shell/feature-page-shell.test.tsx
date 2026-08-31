@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, string>) =>
@@ -148,5 +148,90 @@ describe("wallpaper scope marker", () => {
     // wallpaper's effective opacity — the reason the nine page wrappers that
     // used to carry this attribute had to give it up when the shell took over.
     expect(container.querySelectorAll("[data-bg-target]")).toHaveLength(1)
+  })
+})
+
+/**
+ * The mobile Sheets were uncontrolled, which is a dead end for any route whose
+ * center pane SELECTS what the right pane shows: the tap wrote a store the
+ * Sheet was not watching, so nothing happened and the user had to find a 16px
+ * panel icon. `open` / `onOpenChange` on the pane config is what lets a route
+ * drive its own detail. Omitting them must keep the old behaviour exactly.
+ */
+describe("controlled mobile panes", () => {
+  beforeEach(() => {
+    isMobileValue = true
+  })
+
+  test("an uncontrolled right pane still opens from its own trigger", () => {
+    render(
+      <FeaturePageShell
+        storageId="uncontrolled"
+        rightPane={{ label: "Detail", content: <div data-testid="uncontrolled-detail" /> }}
+      >
+        <div data-testid="uncontrolled-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.queryByTestId("uncontrolled-detail")).toBeNull()
+    fireEvent.click(screen.getByLabelText("openRight:Detail"))
+    expect(screen.getByTestId("uncontrolled-detail")).toBeInTheDocument()
+  })
+
+  test("a controlled right pane renders open without anyone touching the trigger", () => {
+    render(
+      <FeaturePageShell
+        storageId="controlled"
+        rightPane={{
+          label: "Detail",
+          content: <div data-testid="controlled-detail" />,
+          open: true,
+          onOpenChange: jest.fn(),
+        }}
+      >
+        <div data-testid="controlled-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.getByTestId("controlled-detail")).toBeInTheDocument()
+  })
+
+  test("a controlled right pane stays shut while its owner says so", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <FeaturePageShell
+        storageId="controlled-shut"
+        rightPane={{
+          label: "Detail",
+          content: <div data-testid="shut-detail" />,
+          open: false,
+          onOpenChange,
+        }}
+      >
+        <div data-testid="shut-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.queryByTestId("shut-detail")).toBeNull()
+    // The trigger reports intent rather than opening itself, so the owner
+    // stays the single source of truth for what is selected.
+    fireEvent.click(screen.getByLabelText("openRight:Detail"))
+    expect(onOpenChange).toHaveBeenCalledWith(true)
+    expect(screen.queryByTestId("shut-detail")).toBeNull()
+  })
+
+  test("the left pane takes the same controls", () => {
+    const onOpenChange = jest.fn()
+    render(
+      <FeaturePageShell
+        storageId="controlled-left"
+        leftPane={{
+          label: "Sections",
+          content: <div data-testid="controlled-sections" />,
+          open: true,
+          onOpenChange,
+        }}
+      >
+        <div data-testid="controlled-left-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.getByTestId("controlled-sections")).toBeInTheDocument()
   })
 })

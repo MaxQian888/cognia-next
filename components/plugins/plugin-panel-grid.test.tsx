@@ -15,9 +15,12 @@ jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockRows,
 }))
 
-const togglePluginEnabledMock = jest.fn(async (_id: string, _enabled: boolean) => ({ ok: true }))
-jest.mock("@/lib/plugin/core/toggle-plugin-enabled", () => ({
-  togglePluginEnabled: (id: string, enabled: boolean) => togglePluginEnabledMock(id, enabled),
+const setPluginEnabledForHostMock = jest.fn(async (_id: string, _enabled: boolean) => ({
+  ok: true,
+}))
+jest.mock("@/lib/plugin/core/set-plugin-enabled-for-host", () => ({
+  setPluginEnabledForHost: (id: string, enabled: boolean) =>
+    setPluginEnabledForHostMock(id, enabled),
 }))
 jest.mock("@/lib/db/plugins", () => ({
   listPlugins: jest.fn(async () => mockRows),
@@ -28,7 +31,7 @@ import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
 beforeEach(() => {
   mockRows.length = 0
-  togglePluginEnabledMock.mockClear()
+  setPluginEnabledForHostMock.mockClear()
   usePluginsStore.setState({
     filters: DEFAULT_PLUGIN_FILTERS,
     selection: new Set(),

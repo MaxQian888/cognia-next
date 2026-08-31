@@ -2,6 +2,7 @@ import {
   PLUGIN_NAV_SECTIONS,
   PLUGIN_LIBRARY_SUBFILTERS,
   PLUGIN_GOVERNANCE_VIEWS,
+  visiblePluginSections,
 } from "./plugin-nav-config"
 
 describe("plugin-nav-config", () => {
@@ -57,5 +58,31 @@ describe("plugin-nav-config", () => {
       "audit",
       "policy",
     ])
+  })
+})
+
+describe("visiblePluginSections", () => {
+  // Shared by the desktop rail and the phone body. If the two ever filtered
+  // separately, one shell would offer a section the other refused to.
+  it("hides the desktop-only and devtools sections off a Tauri shell", () => {
+    const ids = visiblePluginSections({ devtoolsEnabled: false, isDesktop: false }).map(
+      (s) => s.section
+    )
+    expect(ids).toEqual(["library", "discover", "governance"])
+  })
+
+  it("offers agent packages on a desktop shell", () => {
+    const ids = visiblePluginSections({ devtoolsEnabled: false, isDesktop: true }).map(
+      (s) => s.section
+    )
+    expect(ids).toContain("agent-packages")
+    expect(ids).not.toContain("devtools")
+  })
+
+  it("adds devtools only behind its opt-in flag, and keeps nav order", () => {
+    const ids = visiblePluginSections({ devtoolsEnabled: true, isDesktop: true }).map(
+      (s) => s.section
+    )
+    expect(ids).toEqual(["library", "discover", "agent-packages", "governance", "devtools"])
   })
 })

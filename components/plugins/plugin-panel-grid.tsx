@@ -10,7 +10,7 @@ import { useTranslations } from "next-intl"
 import { BoxesIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { togglePluginEnabled } from "@/lib/plugin/core/toggle-plugin-enabled"
+import { setPluginEnabledForHost } from "@/lib/plugin/core/set-plugin-enabled-for-host"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
@@ -32,7 +32,7 @@ export function PluginPanelGrid() {
   // Stable handlers keep the memoized PluginCards from re-rendering when
   // unrelated store state (search query, selection elsewhere) changes.
   const handleToggleEnabled = useCallback(
-    (plugin: PluginRow) => void togglePluginEnabled(plugin.id, !plugin.enabled),
+    (plugin: PluginRow) => void setPluginEnabledForHost(plugin.id, !plugin.enabled),
     []
   )
   const handleUninstall = useCallback(

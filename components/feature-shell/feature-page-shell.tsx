@@ -19,7 +19,10 @@
  *
  * On viewports < md the panes collapse: only the center renders, with
  * "open left" / "open right" Sheet triggers in the toolbar so feature pages
- * stay usable on mobile / Capacitor.
+ * stay usable on mobile / Capacitor. Those Sheets are uncontrolled by
+ * default; a route whose center pane selects what the right pane shows should
+ * pass `open` / `onOpenChange` on the pane config so a tap opens the detail
+ * instead of silently updating a store nothing is watching.
  *
  * The shell owns `data-bg-target`, not its callers. Hand-marking it left seven
  * routes ( /logs, /devices, /agent-runs, /templates, /goals, /integrations,
@@ -51,6 +54,18 @@ export interface FeaturePaneConfig {
   maxSize?: number
   /** Sheet width override on mobile. */
   mobileWidthClass?: string
+  /**
+   * Controlled open state for this pane's mobile Sheet. Omit to leave the
+   * Sheet uncontrolled, which is the historical behaviour.
+   *
+   * Uncontrolled is wrong for any route whose center pane SELECTS what the
+   * right pane shows: tapping a row sets the selection in a store, the Sheet
+   * has no idea, and the tap reads as a dead end. The row had to be followed
+   * by a hunt for a 16px panel icon in the pane-controls strip. Passing the
+   * selection in here is what turns a phone tap into a detail view.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 export interface FeaturePageShellProps {
@@ -206,7 +221,7 @@ function FeaturePageShellMobile({
           data-testid={`feature-shell-${storageId}-pane-controls`}
         >
           {leftPane ? (
-            <Sheet>
+            <Sheet open={leftPane.open} onOpenChange={leftPane.onOpenChange}>
               <SheetTrigger asChild>
                 <Button
                   variant="ghost"
@@ -228,7 +243,7 @@ function FeaturePageShellMobile({
           )}
 
           {rightPane ? (
-            <Sheet>
+            <Sheet open={rightPane.open} onOpenChange={rightPane.onOpenChange}>
               <SheetTrigger asChild>
                 <Button
                   variant="ghost"

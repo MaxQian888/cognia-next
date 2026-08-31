@@ -1,31 +1,42 @@
 "use client"
 
 /**
- * Mobile Plugins page (ADR-0056). Lists installed plugins and toggles each
- * one's `enabled` flag. Available in BOTH runtime modes — the `plugins` Dexie
- * table is warmed by `sync_pull("plugins")` on a paired phone and is also
- * meaningful for the standalone shell's local plugin set, so there is no
- * `<PairedOnly>` gate here.
+ * Mobile Plugins page (ADR-0056), reached from the Me tab.
  *
- * The actual list + toggle UI is the existing `PluginsPanel` (Wave 2.6,
- * reused from the Discover surface). Each toggle writes through the
- * `plugin_set_enabled` outbound RPC — NOT `app_settings_update` — so no
- * mobile-settings allowlist key is required.
+ * Renders the SAME body as `/plugins` on a phone. It used to render a separate
+ * 94-line panel (`components/mobile/discover/plugins-panel.tsx`) whose only
+ * affordance was an enable switch: no install, no permissions, no
+ * configuration, no uninstall, and no code shared with the workspace. Two
+ * mobile plugin surfaces meant every improvement had to be made twice, and one
+ * of them was always behind.
+ *
+ * `SubPageShell` keeps the Me sub-page chrome (back arrow, safe-area top,
+ * wallpaper target), so the body is asked to drop its own header rather than
+ * stacking a second one.
+ *
+ * Available in BOTH runtime modes. The `plugins` Dexie table is warmed by
+ * `sync_pull("plugins")` on a paired phone and is also meaningful for the
+ * standalone shell's local plugin set, so there is no `<PairedOnly>` gate.
+ * Which of the two a toggle means is decided by
+ * `lib/plugin/core/set-plugin-enabled-for-host.ts` and stated in the body's
+ * own banner.
  */
 
 import { useTranslations } from "next-intl"
 
-import { PluginsPanel } from "@/components/mobile/discover/plugins-panel"
+import { PluginsMobileBody } from "@/components/mobile/plugins/plugins-mobile-body"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 
 export default function MobilePluginsPage() {
   const t = useTranslations("mobile.plugins")
   return (
-    <SubPageShell title={t("title")} backAria={t("backAria")} testid="mobile-plugins-page">
-      <div className="flex flex-col gap-3">
-        <p className="px-1 text-xs text-muted-foreground">{t("intro")}</p>
-        <PluginsPanel />
-      </div>
+    <SubPageShell
+      title={t("title")}
+      backAria={t("backAria")}
+      testid="mobile-plugins-page"
+      bodyClassName="flex min-h-0 flex-1 flex-col p-0"
+    >
+      <PluginsMobileBody showHeader={false} />
     </SubPageShell>
   )
 }
