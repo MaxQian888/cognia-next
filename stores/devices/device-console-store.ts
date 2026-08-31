@@ -21,36 +21,27 @@ interface DeviceConsoleState {
   selectedRef: string | null
   search: string
   kindFilter: DeviceKindFilter
-  /** Mobile-only: the list rail is a Sheet below `md`. */
-  listSheetOpen: boolean
 
   select: (ref: string | null) => void
   setSearch: (search: string) => void
   setKindFilter: (filter: DeviceKindFilter) => void
-  setListSheetOpen: (open: boolean) => void
-  reset: () => void
-}
-
-const INITIAL = {
-  selectedRef: null,
-  search: "",
-  kindFilter: "all" as const,
-  listSheetOpen: false,
 }
 
 export const useDeviceConsoleStore = create<DeviceConsoleState>((set) => ({
-  ...INITIAL,
+  selectedRef: null,
+  search: "",
+  kindFilter: "all",
 
   /**
-   * Picking a device closes the rail Sheet on mobile, where the rail covers
-   * the very pane the choice was meant to reveal.
-   *
    * No section state to reset: the detail pane is one scroll, and it returns
    * to the top on its own when the device changes.
+   *
+   * Nothing here owns whether a detail surface is open. `DevicesMobileBody`
+   * keeps that in local state on purpose, because selection survives
+   * navigation and deriving "open" from it would pop the drawer every time the
+   * user came back to the page.
    */
-  select: (ref) => set({ selectedRef: ref, listSheetOpen: false }),
+  select: (ref) => set({ selectedRef: ref }),
   setSearch: (search) => set({ search }),
   setKindFilter: (kindFilter) => set({ kindFilter }),
-  setListSheetOpen: (listSheetOpen) => set({ listSheetOpen }),
-  reset: () => set(INITIAL),
 }))

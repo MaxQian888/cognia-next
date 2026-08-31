@@ -36,13 +36,6 @@ import type {
 } from "@/lib/devices/types"
 import { cn } from "@/lib/utils"
 
-export const DEVICE_REACHABILITIES: readonly DeviceReachability[] = [
-  "online",
-  "recently-active",
-  "offline",
-  "unknown",
-]
-
 /**
  * `unknown` is muted rather than a fifth hue: "we have never heard from it" is
  * the absence of a signal, not a fifth severity. `recently-active` is amber

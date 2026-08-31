@@ -15,41 +15,39 @@ describe("device console store", () => {
 
   /**
    * The detail pane is one scroll, so there is no per-section state to carry
-   * or reset here. Pinning that down: a future re-addition of view state to this
-   * store has to justify itself against the scroll position the pane already
-   * manages, rather than quietly reintroducing two sources of "where am I".
+   * here, and no surface's open/closed flag either. Pinning that down: a future
+   * re-addition of view state to this store has to justify itself against the
+   * scroll position the pane already manages and the local `detailOpen`
+   * `DevicesMobileBody` deliberately owns, rather than quietly reintroducing a
+   * second source of "where am I".
    */
   it("holds no view state beyond selection, search and filter", () => {
     expect(Object.keys(useDeviceConsoleStore.getState()).sort()).toEqual([
       "kindFilter",
-      "listSheetOpen",
-      "reset",
       "search",
       "select",
       "selectedRef",
       "setKindFilter",
-      "setListSheetOpen",
       "setSearch",
     ])
   })
 
-  it("closes the mobile list sheet on selection", () => {
-    const { setListSheetOpen, select } = useDeviceConsoleStore.getState()
-    setListSheetOpen(true)
-    select("device:a")
-    expect(useDeviceConsoleStore.getState().listSheetOpen).toBe(false)
-  })
-
-  it("clears back to the initial view", () => {
+  it("keeps search and filter when the selection changes", () => {
     const state = useDeviceConsoleStore.getState()
-    state.select("device:a")
     state.setSearch("phone")
     state.setKindFilter("remote-host")
-    state.reset()
+    state.select("device:a")
     expect(useDeviceConsoleStore.getState()).toMatchObject({
-      selectedRef: null,
-      search: "",
-      kindFilter: "all",
+      selectedRef: "device:a",
+      search: "phone",
+      kindFilter: "remote-host",
     })
+  })
+
+  it("clears the selection when handed null", () => {
+    const state = useDeviceConsoleStore.getState()
+    state.select("device:a")
+    state.select(null)
+    expect(useDeviceConsoleStore.getState().selectedRef).toBeNull()
   })
 })

@@ -63,7 +63,7 @@ export interface TerminalShellPickerProps {
    * responsible for withholding these off-desktop — SSH sessions are spawned
    * through Tauri commands and have no web or mobile path.
    */
-  sshHosts?: SshHostProfile[]
+  sshHosts?: readonly SshHostProfile[]
   /** Connect a tab to a saved SSH host. */
   onNewSshHost?: (hostId: string) => void | Promise<void>
   /** Override platform sniffing (tests). Defaults to `detectPlatform()`. */

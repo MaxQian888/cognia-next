@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { type TerminalProfile } from "@/lib/terminal/profiles"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
-import { type SshHostProfile } from "@/lib/terminal/ssh-profiles"
+import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
 import { nextDockPosition } from "@/lib/terminal/dock-position"
 import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
 import {
@@ -132,9 +132,10 @@ export function TerminalDock() {
   const settingsProfiles = useSettingsStore(
     (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
   )
-  const settingsSshHosts = useSettingsStore(
-    (s) => (s.settings?.terminal as { sshHosts?: SshHostProfile[] } | undefined)?.sshHosts
-  )
+  // Through the shared selector, never an inline settings path. Three call
+  // sites once spelled this `settings.terminalSettings`, a key `AppSettings`
+  // has never declared, so every saved host silently resolved to `undefined`.
+  const settingsSshHosts = useSettingsStore(selectSavedSshHosts)
 
   const projectKey = activeProjectId ?? ""
 
