@@ -33,6 +33,8 @@ import { listCharacters } from "@/lib/db/characters"
 import { loggers } from "@cognia/logging"
 import { nextStep, previousStep, resolveStepSequence, resumeStep } from "@/lib/onboarding/steps"
 import { queuePendingChatPrompt } from "@/lib/chat/pending-prompt"
+import { createOnboardingRequest } from "@/lib/onboarding/request"
+import { onboardingSkillRowId } from "@/lib/onboarding/skill"
 import { resolveOnboardingShell } from "@/lib/onboarding/shell"
 import { setMobileRuntimeMode, type MobileRuntimeMode } from "@/lib/runtime/standalone-mode"
 import { useClientLiveQuery } from "@/hooks/data"
@@ -345,14 +347,25 @@ export function OnboardingFlow() {
         kind: "direct",
         characterId: character.id,
       })
-      // The chat pane consumes this on mount and sends it as a normal turn, so
-      // the first output goes through exactly the production send path.
-      queuePendingChatPrompt(session.id, t(`cards.${card.key}.prompt`))
+      const prompt = t(`cards.${card.key}.prompt`)
+      const skillId = onboardingSkillRowId()
+      const request = createOnboardingRequest({
+        cardId: card.id,
+        sessionId: session.id,
+        skillId,
+        prompt,
+      })
+      // The chat pane sends this as a normal turn and clears the handoff only
+      // after the user message is durable, so navigation cannot lose or replay
+      // the first request.
+      queuePendingChatPrompt(session.id, prompt, {
+        requestId: request.id,
+        skillIds: [skillId],
+      })
       await setOnboardingProfile({ intent: card.id, characterId: character.id })
-      await completeOnboarding()
       router.replace(APP_ROUTE)
     },
-    [character, completeOnboarding, mode, pairingGateClosed, router, setOnboardingProfile, t]
+    [character, mode, pairingGateClosed, router, setOnboardingProfile, t]
   )
 
   const changeCharacter = useCallback(() => {

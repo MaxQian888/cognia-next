@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { settingsHref } from "@/lib/settings/deep-link"
 import type { RecoveryRetryAction } from "@/lib/tauri/recovery"
 
 /**
@@ -170,10 +171,10 @@ export function SafeModeShell({ state, probing, onRetry }: SafeModeShellProps) {
             <Link href="/logs">{t("available.logs")}</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link href="/settings/data">{t("available.backup")}</Link>
+            <Link href={settingsHref("data")}>{t("available.backup")}</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link href="/settings/about">{t("available.about")}</Link>
+            <Link href={settingsHref("about")}>{t("available.about")}</Link>
           </Button>
         </CardContent>
       </Card>

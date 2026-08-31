@@ -202,7 +202,7 @@ export function GlobalSearchDialog({
     setLimit(undefined)
   }, [])
 
-  const groups = outcome?.groups ?? []
+  const groups = useMemo(() => outcome?.groups ?? [], [outcome])
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {

@@ -21,6 +21,7 @@ describe("resolveRouteBootCapabilities", () => {
     ["/settings", "?section=workflows", ["workflow-automation"]],
     ["/settings", "?section=memory", ["knowledge-agents"]],
     ["/settings", "?section=skills", ["knowledge-agents", "desktop-tools"]],
+    ["/settings", "?section=desktop", ["desktop-tools"]],
   ])("maps %s%s to its runtime capability", (pathname, search, expected) => {
     expect(resolveRouteBootCapabilities(pathname as string, search as string)).toEqual(expected)
   })

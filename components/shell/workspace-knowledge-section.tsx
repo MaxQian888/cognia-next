@@ -4,14 +4,22 @@ import { useMemo, useRef, useState } from "react"
 import type { ProjectKnowledgeIngestController } from "@/lib/project-knowledge/wire-ingest"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { FileTextIcon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
+import { FileTextIcon, Loader2Icon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { StatusBadge } from "@/components/status-badge"
+import { processDocumentAsync } from "@cognia/document/document-processor"
+import {
+  getDocumentAcceptString,
+  inferKnowledgeFileTypeFromFilename,
+  isBinaryFilename,
+} from "@cognia/document/support-matrix"
 import { cn } from "@/lib/utils"
 import { useProjectStore } from "@/stores/project/project-store"
 import { getDb } from "@/lib/db/schema"
@@ -24,36 +32,7 @@ interface Props {
   project: Project
 }
 
-/** Map a filename extension to a `KnowledgeFile.type`. */
-function typeForName(name: string): KnowledgeFile["type"] {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  if (ext === "md" || ext === "markdown") return "markdown"
-  if (ext === "json") return "json"
-  if (ext === "csv") return "csv"
-  if (ext === "html" || ext === "htm") return "html"
-  if (ext === "pdf") return "pdf"
-  if (
-    [
-      "js",
-      "ts",
-      "tsx",
-      "jsx",
-      "py",
-      "rs",
-      "go",
-      "java",
-      "c",
-      "cpp",
-      "h",
-      "rb",
-      "php",
-      "sh",
-    ].includes(ext)
-  ) {
-    return "code"
-  }
-  return "text"
-}
+const KNOWLEDGE_FILE_ACCEPT = getDocumentAcceptString("knowledge-base")
 
 /**
  * WorkspaceKnowledgeSection — manage a workspace's knowledge base (project-scoped
@@ -77,6 +56,7 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [pasteName, setPasteName] = useState("")
   const [pasteText, setPasteText] = useState("")
+  const [uploading, setUploading] = useState(false)
 
   const settings = resolveProjectKnowledgeSettings(project.knowledgeSettings)
   const files = project.knowledgeBase ?? []
@@ -108,17 +88,39 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
   )
 
   const handleUpload = async (fileList: FileList | null) => {
-    if (!fileList) return
-    for (const f of Array.from(fileList)) {
-      const content = await f.text()
-      addKnowledgeFile(project.id, {
-        name: f.name,
-        type: typeForName(f.name),
-        content,
-        size: content.length,
-      })
+    if (!fileList || fileList.length === 0) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(fileList)) {
+        try {
+          const data = isBinaryFilename(file.name) ? await file.arrayBuffer() : await file.text()
+          const processed = await processDocumentAsync(
+            `${project.id}:${file.name}:${file.lastModified}`,
+            file.name,
+            data,
+            { extractEmbeddable: true }
+          )
+          const content = (processed.embeddableContent || processed.content || "").trim()
+          if (!content) throw new Error(t("emptyFile"))
+          addKnowledgeFile(project.id, {
+            name: file.name,
+            type: inferKnowledgeFileTypeFromFilename(file.name) as KnowledgeFile["type"],
+            content,
+            size: file.size,
+          })
+        } catch (error) {
+          toast.error(
+            t("importFailed", {
+              name: file.name,
+              message: error instanceof Error ? error.message : String(error),
+            })
+          )
+        }
+      }
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
-    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   const handlePaste = () => {
@@ -140,9 +142,12 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
     })
   }
   const setTopK = (value: number) => {
-    if (!Number.isFinite(value) || value <= 0) return
+    if (!Number.isFinite(value)) return
     updateProject(project.id, {
-      knowledgeSettings: { ...project.knowledgeSettings, ragTopK: Math.floor(value) },
+      knowledgeSettings: {
+        ...project.knowledgeSettings,
+        ragTopK: Math.min(50, Math.max(1, Math.floor(value))),
+      },
     })
   }
 
@@ -174,7 +179,7 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
             return (
               <li
                 key={file.id}
-                className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5"
+                className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5"
               >
                 <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate text-xs" title={file.name}>
@@ -216,6 +221,8 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
           ref={fileInputRef}
           type="file"
           multiple
+          accept={KNOWLEDGE_FILE_ACCEPT}
+          disabled={uploading}
           className="hidden"
           data-testid="knowledge-file-input"
           onChange={(e) => void handleUpload(e.target.files)}
@@ -225,10 +232,15 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
           variant="outline"
           size="sm"
           className="w-full gap-1"
+          disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
         >
-          <UploadIcon className="size-4" />
-          {t("addFile")}
+          {uploading ? (
+            <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <UploadIcon className="size-4" />
+          )}
+          {uploading ? t("importing") : t("addFile")}
         </Button>
       </div>
 
@@ -275,13 +287,14 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
         <Label htmlFor="project-rag-topk" className="text-xs font-normal text-muted-foreground">
           {t("topK")}
         </Label>
-        <Input
+        <ClampedNumberInput
           id="project-rag-topk"
-          type="number"
+          aria-label={t("topK")}
           min={1}
           max={50}
+          integer
           value={settings.ragTopK}
-          onChange={(e) => setTopK(Number(e.target.value))}
+          onCommit={setTopK}
           className="h-7 w-20 text-xs"
         />
       </div>

@@ -17,6 +17,7 @@ import { BOOT_SCRIPT } from "@/lib/appearance/boot-script"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LocaleGate } from "@/components/providers/locale-gate"
+import { LightweightLocaleGate } from "@/components/providers/lightweight-locale-gate"
 import { SettingsHydrator } from "@/components/providers/settings-hydrator"
 import { SettingsSyncProvider } from "@/components/providers/settings-sync-provider"
 import { TauriProvider } from "@/components/providers/tauri-provider"
@@ -156,19 +157,24 @@ export default async function RootLayout({
           disableTransitionOnChange
           scriptProps={{ suppressHydrationWarning: true }}
         >
-          {/* Lightweight routes render only locale, settings/theme, and tooltip
-              providers. This keeps transparent overlay windows paint-through
-              and lets the public /status document bypass account gating and
-              the authenticated app runtime. Route-keyed so static-export HTML
-              and hydration agree; see lightweight-route-shell.tsx. */}
+          {/* Lightweight routes render only a mirrored locale, the settings
+              store, the outer theme, and tooltip providers. This keeps
+              transparent overlay windows paint-through and lets the public
+              /status document bypass account gating and the authenticated app
+              runtime. `SettingsHydrator` is the ONLY caller of
+              `useSettingsStore.load()`, and the pet overlay / popup routes read
+              `settings` directly. Without it they render defaults forever and
+              every `save()` runs against a store that never loaded. Route-keyed
+              so static-export HTML and hydration agree. See
+              lightweight-route-shell.tsx. */}
           <LightweightRouteShell
             lightweightShell={
-              <LocaleGate>
+              <LightweightLocaleGate>
                 <SettingsHydrator />
                 <SettingsSyncProvider>
                   <TooltipProvider>{children}</TooltipProvider>
                 </SettingsSyncProvider>
-              </LocaleGate>
+              </LightweightLocaleGate>
             }
           >
             <AccountStoreInitializer />

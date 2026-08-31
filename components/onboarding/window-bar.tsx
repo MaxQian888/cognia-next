@@ -45,9 +45,11 @@ export function OnboardingWindowBar({ onBack, busy = false }: OnboardingWindowBa
       data-testid="onboarding-window-bar"
       className={cn(
         "flex h-10 shrink-0 items-center gap-1 pr-1 select-none",
-        // macOS draws its traffic lights over the content at x=16 (see
-        // `tauri.conf.json`); without the reserve, Back sits under them.
-        mode === "traffic-lights" ? "pl-20" : "pl-3"
+        // macOS draws its traffic lights over the content (see
+        // `tauri.macos.conf.json`); without the reserve, Back sits under them.
+        // Same 88px `TitleBar` reserves — this row stands in for that one, so a
+        // narrower reserve here would move the wordmark between screens.
+        mode === "traffic-lights" ? "pl-22" : "pl-3"
       )}
     >
       {onBack && (

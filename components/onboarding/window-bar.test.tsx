@@ -32,7 +32,7 @@ describe("OnboardingWindowBar", () => {
   it("reserves room for the macOS traffic lights instead of drawing under them", () => {
     chromeMode.value = "traffic-lights"
     render(<OnboardingWindowBar />)
-    expect(screen.getByTestId("onboarding-window-bar")).toHaveClass("pl-20")
+    expect(screen.getByTestId("onboarding-window-bar")).toHaveClass("pl-22")
   })
 
   it("keeps the leading edge tight where the OS draws nothing", () => {
@@ -40,7 +40,7 @@ describe("OnboardingWindowBar", () => {
     render(<OnboardingWindowBar />)
     const bar = screen.getByTestId("onboarding-window-bar")
     expect(bar).toHaveClass("pl-3")
-    expect(bar).not.toHaveClass("pl-20")
+    expect(bar).not.toHaveClass("pl-22")
   })
 
   it("paints no tint or border — the flow is the content, not a framed page", () => {

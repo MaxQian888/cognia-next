@@ -351,8 +351,8 @@ export function TitleBar() {
   // and the bar has one of each), so it projects nothing — but it still sits
   // under the end zone, which has to span it the way it already spans the rail.
   const sidebarRightPx = sidebarSide === "right" && !projected.start ? sidebarPx : 0
-  // Must match the header's `pl-20` / `pl-2` below.
-  const barPaddingLeftPx = isMac ? 80 : 8
+  // Must match the header's `pl-22` / `pl-2` below.
+  const barPaddingLeftPx = isMac ? 88 : 8
   const columnStartPx = projected.start
     ? Math.max(0, railLeftPx + sidebarPx - barPaddingLeftPx - leftChromePx)
     : 0
@@ -688,10 +688,20 @@ export function TitleBar() {
           // `h-10` (40px) is the shared column-header height: the conversation
           // rail, chat and workbench headers project their content into this
           // bar's zones (see `title-bar-outlets.tsx`), so the row has to be as
-          // tall as the headers it replaces. macOS overlay traffic lights sit
-          // at y=14 (`tauri.conf.json`) to centre in it.
+          // tall as the headers it replaces.
+          //
+          // macOS: the overlay traffic lights are native chrome this bar has to
+          // make room for on BOTH axes. Vertically that is
+          // `trafficLightPosition.y` in `tauri.macos.conf.json` — tao insets
+          // them by growing the title-bar container and leaving the buttons at
+          // their original offset inside it, so the drawn top edge lands at
+          // `y - 7`, and centring a 14pt button in this 40px row wants y=20,
+          // not the 10 that parked them against the window's top edge.
+          // Horizontally the cluster ends around 72px, so `pl-22` (88px) is
+          // what keeps the app icon off the green button instead of the 80px
+          // that left them nearly touching.
           "relative flex h-[var(--chrome-h)] shrink-0 items-center bg-muted/40 text-xs select-none",
-          isMac ? "pl-20" : "pl-2"
+          isMac ? "pl-22" : "pl-2"
         )}
       >
         <div ref={leftChromeRef} className="flex items-center gap-1">

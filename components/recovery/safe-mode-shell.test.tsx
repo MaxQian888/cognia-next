@@ -137,11 +137,11 @@ describe("SafeModeShell", () => {
     )
     expect(screen.getByRole("link", { name: messages.safeMode.available.backup })).toHaveAttribute(
       "href",
-      "/settings/data"
+      "/settings?section=data"
     )
     expect(screen.getByRole("link", { name: messages.safeMode.available.about })).toHaveAttribute(
       "href",
-      "/settings/about"
+      "/settings?section=about"
     )
   })
 

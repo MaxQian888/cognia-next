@@ -713,6 +713,28 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
     background-color: rgb(255 255 255 / 0.3);
   }
 
+  /* Same problem in the selection toolbar's More menu, which caps at 18rem and
+     scrolls past it. The island can hardcode a white thumb because its pill is
+     always dark glass; this one follows the app theme in both directions, so
+     the thumb is mixed from the foreground token instead. */
+  html[data-selection-toolbar] .selection-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+  }
+  html[data-selection-toolbar] .selection-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  html[data-selection-toolbar] .selection-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html[data-selection-toolbar] .selection-scroll::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+    border-radius: 9999px;
+  }
+  html[data-selection-toolbar] .selection-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 36%, transparent);
+  }
+
   /* Kill every wallpaper layer inside the pet windows. `<BackgroundApplier />`
      mounts in this same root layout, so a user wallpaper is painted through TWO
      pseudo-element layers — `body[data-bg-enabled]::before` (fixed, full-window)
@@ -3711,6 +3733,48 @@ select {
 
 [data-rich-controls="always"] [data-message-rich-control] {
   opacity: 1 !important;
+}
+
+/* ADR-0127 — `messageDisplay.markdown.mathFontScale` / `.mathAlign` on the
+ * STREAMING branch. The finalized branch owns a wrapper element per expression
+ * (`<MathBlock>` / `<MathInline>`) and sets `font-size` / `text-align` there;
+ * `@streamdown/math` writes KaTeX straight into the block, so KaTeX's own
+ * elements are the only seam. `streaming-text-part.tsx` selects these classes —
+ * they are scoped to that branch so the finalized wrappers, which already carry
+ * their own inline `font-size`, never compound with them.
+ *
+ * `.katex` carries KaTeX's own 1.21em ratio. Restating it for the nested block
+ * case is what stops the outer `.katex-display` scale from compounding with it,
+ * so display and inline math land on the same effective size the finalized
+ * renderer produces. The default scale needs no rule at all. */
+.chat-math-sm .katex-display {
+  font-size: 0.8em;
+}
+
+.chat-math-lg .katex-display {
+  font-size: 1.2em;
+}
+
+.chat-math-sm .katex-display .katex,
+.chat-math-lg .katex-display .katex {
+  font-size: 1.21em;
+}
+
+.chat-math-sm .katex {
+  font-size: calc(1.21em * 0.8);
+}
+
+.chat-math-lg .katex {
+  font-size: calc(1.21em * 1.2);
+}
+
+/* Both selectors are required. KaTeX centers on `.katex-display` AND again on
+ * `.katex-display > .katex`, and that inner element is a full-width block — so
+ * styling only the outer wrapper leaves the glyphs centered, because the inner
+ * block's own `text-align` is what positions them. */
+.chat-math-left .katex-display,
+.chat-math-left .katex-display > .katex {
+  text-align: left;
 }
 
 /* ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
 ]
 
 const SETTINGS_CAPABILITIES: Readonly<Record<string, BootCapability>> = {
+  desktop: "desktop-tools",
   plugins: "plugin-runtime",
   workflows: "workflow-automation",
   scheduler: "workflow-automation",

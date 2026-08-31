@@ -222,7 +222,7 @@ export function useGlobalSearchActions({
           log.warn("global-search unknown command", { id })
       }
     },
-    [host, create, t, theme, setTheme]
+    [host, create, router, t, theme, setTheme]
   )
 
   const runAction = useCallback(

@@ -7,6 +7,18 @@ jest.mock("next-intl", () => ({
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: jest.fn() }))
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ projectChunks: {} }) }))
 jest.mock("@/lib/project-knowledge/ingest/ingest-file", () => ({ hashContent: () => "hash" }))
+const processDocumentAsync = jest.fn()
+jest.mock("@cognia/document/document-processor", () => ({
+  processDocumentAsync: (...args: unknown[]) => processDocumentAsync(...args),
+}))
+jest.mock("@cognia/document/support-matrix", () => ({
+  getDocumentAcceptString: () => ".txt,.pdf,.docx",
+  inferKnowledgeFileTypeFromFilename: (name: string) => (name.endsWith(".pdf") ? "pdf" : "text"),
+  isBinaryFilename: (name: string) => name.endsWith(".pdf"),
+}))
+
+const toastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => toastError(...args) } }))
 
 const reindexFile = jest.fn()
 const reindexProject = jest.fn()
@@ -65,6 +77,11 @@ beforeEach(() => {
   reindexFile.mockClear()
   reindexProject.mockClear()
   liveQueryMock.mockReset()
+  processDocumentAsync.mockReset().mockImplementation(async (_id, _name, data) => ({
+    content: typeof data === "string" ? data : "",
+    embeddableContent: typeof data === "string" ? data : "extracted binary text",
+  }))
+  toastError.mockReset()
 })
 
 describe("WorkspaceKnowledgeSection", () => {
@@ -137,6 +154,48 @@ describe("WorkspaceKnowledgeSection", () => {
         expect.objectContaining({ name: "notes.txt", type: "text" })
       )
     )
+  })
+
+  it("extracts binary document text instead of storing raw file bytes", async () => {
+    liveQueryMock.mockReturnValue(new Map())
+    const user = userEvent.setup()
+    render(<WorkspaceKnowledgeSection project={project()} />)
+    const file = new File(["binary pdf"], "guide.pdf", { type: "application/pdf" })
+    const buffer = new TextEncoder().encode("binary pdf").buffer
+    Object.defineProperty(file, "arrayBuffer", { value: async () => buffer })
+
+    await user.upload(screen.getByTestId("knowledge-file-input"), file)
+
+    await waitFor(() =>
+      expect(addKnowledgeFile).toHaveBeenCalledWith(
+        "ws1",
+        expect.objectContaining({
+          name: "guide.pdf",
+          type: "pdf",
+          content: "extracted binary text",
+          size: file.size,
+        })
+      )
+    )
+    expect(processDocumentAsync).toHaveBeenCalledWith(expect.any(String), "guide.pdf", buffer, {
+      extractEmbeddable: true,
+    })
+  })
+
+  it("reports failed file extraction without adding unusable knowledge", async () => {
+    liveQueryMock.mockReturnValue(new Map())
+    processDocumentAsync.mockRejectedValue(new Error("corrupt document"))
+    const user = userEvent.setup()
+    render(<WorkspaceKnowledgeSection project={project()} />)
+    const file = new File(["broken"], "guide.pdf", { type: "application/pdf" })
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("broken").buffer,
+    })
+
+    await user.upload(screen.getByTestId("knowledge-file-input"), file)
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("importFailed"))
+    expect(addKnowledgeFile).not.toHaveBeenCalled()
   })
 
   it("toggling the enable switch persists the setting", async () => {

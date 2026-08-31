@@ -62,6 +62,16 @@ jest.mock("@/lib/chat/pending-prompt", () => ({
   queuePendingChatPrompt: (...a: unknown[]) => queuePendingChatPrompt(...a),
 }))
 
+const createOnboardingRequest = jest.fn((input: Record<string, unknown>) => ({
+  id: `onboarding:${input.sessionId}:${input.cardId}`,
+}))
+jest.mock("@/lib/onboarding/request", () => ({
+  createOnboardingRequest: (input: Record<string, unknown>) => createOnboardingRequest(input),
+}))
+jest.mock("@/lib/onboarding/skill", () => ({
+  onboardingSkillRowId: () => "skill_builtin_cognia_onboarding",
+}))
+
 const buildMigrationPreview = jest.fn().mockResolvedValue({ artifacts: {} })
 const applyMigration = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/agent-migration/run", () => ({
@@ -331,7 +341,7 @@ describe("OnboardingFlow", () => {
     expect(replace).toHaveBeenCalledWith("/")
   })
 
-  it("runs a starter card through the production send path and completes", async () => {
+  it("runs a starter card through the production send path without settling before output", async () => {
     modelAccess.value = true
     modelAccess.resolved = true
     settings = {
@@ -345,21 +355,29 @@ describe("OnboardingFlow", () => {
     await waitFor(() => expect(createSession).toHaveBeenCalled())
     // The prompt is queued for the chat pane rather than sent here, so the
     // first output goes through exactly the normal turn pipeline.
-    expect(queuePendingChatPrompt).toHaveBeenCalledWith("s1", "cards.summarizeWeb.prompt")
+    expect(createOnboardingRequest).toHaveBeenCalledWith({
+      cardId: "summarize-web",
+      sessionId: "s1",
+      skillId: "skill_builtin_cognia_onboarding",
+      prompt: "cards.summarizeWeb.prompt",
+    })
+    expect(queuePendingChatPrompt).toHaveBeenCalledWith("s1", "cards.summarizeWeb.prompt", {
+      requestId: "onboarding:s1:summarize-web",
+      skillIds: ["skill_builtin_cognia_onboarding"],
+    })
     await waitFor(() =>
       expect(setOnboardingProfile).toHaveBeenCalledWith({
         intent: "summarize-web",
         characterId: "c1",
       })
     )
-    await waitFor(() => expect(completeOnboarding).toHaveBeenCalled())
+    expect(completeOnboarding).not.toHaveBeenCalled()
     expect(replace).toHaveBeenCalledWith("/")
   })
 
   it("does not let the terminal step claim success with no model to run on", async () => {
-    // The cards create a session, queue a prompt and record the flow as
-    // `completed`; without the gate the step reported success and handed the
-    // user a turn that failed in the chat pane a moment later.
+    // Without the gate the step would create a durable request that cannot be
+    // dispatched, then strand the user in the chat pane before any result.
     modelAccess.value = false
     modelAccess.resolved = false
     settings = {
