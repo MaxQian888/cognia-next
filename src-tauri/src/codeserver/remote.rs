@@ -45,6 +45,18 @@ pub struct RemoteCodeServerStatus {
     pub relay_path: Option<String>,
 }
 
+impl RemoteCodeServerStatus {
+    /// Attach the loopback port the RPC boundary decided this caller may see.
+    ///
+    /// Consuming `self` rather than mutating in place so the disclosure is a
+    /// visible step at the call site instead of a field somebody forgot to
+    /// clear.
+    pub fn with_loopback_port(mut self, port: Option<u16>) -> Self {
+        self.port = port;
+        self
+    }
+}
+
 struct RemoteInstance {
     port: u16,
     profile: IdeProfile,
@@ -301,6 +313,24 @@ impl RemoteCodeServerState {
             return Ok(stopped_status());
         }
         Ok(running_status(instance.profile, &instance.relay_id))
+    }
+
+    /// The workbench's loopback port for `root`, or `None` when nothing is
+    /// running there or this device may not drive it.
+    ///
+    /// Separate from [`Self::status`] on purpose. The port is not part of the
+    /// status a caller is entitled to: it is only meaningful to a process on
+    /// this machine, and only the RPC boundary knows whether the caller is
+    /// one. Keeping it a second question means no future caller of `status`
+    /// discloses it by accident.
+    pub async fn loopback_port(&self, root: &str, device_id: &str) -> Option<u16> {
+        let canonical = canonicalize_workspace(root).ok()?;
+        let mut instances = self.instances.lock().await;
+        let instance = instances.get_mut(&canonical)?;
+        if !instance.is_alive() || !instance.allowed_devices.contains(device_id) {
+            return None;
+        }
+        Some(instance.port)
     }
 
     pub async fn stop(&self, root: &str) -> bool {
@@ -585,6 +615,10 @@ impl RemoteCodeServerState {
     }
 }
 
+/// The status a caller is allowed to see, with the loopback port withheld.
+///
+/// Withholding is the default and the callers opt out, not in: see
+/// [`RemoteCodeServerStatus::with_loopback_port`].
 fn running_status(profile: IdeProfile, relay_id: &str) -> RemoteCodeServerStatus {
     RemoteCodeServerStatus {
         running: true,
@@ -1209,6 +1243,42 @@ fn to_axum(message: tokio_tungstenite::tungstenite::Message) -> Option<Message> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_status_withholds_the_loopback_port_until_the_boundary_grants_it() {
+        // The port is only meaningful to a process on this machine, and only
+        // the RPC boundary knows whether the caller is one. `running_status`
+        // therefore never carries it, and disclosure is a visible second step.
+        let status = running_status(IdeProfile::Managed, "relay-1");
+        assert!(status.running);
+        assert_eq!(status.port, None);
+        assert_eq!(status.relay_path.as_deref(), Some("/ide/relay/relay-1/"));
+
+        let disclosed = running_status(IdeProfile::Managed, "relay-1").with_loopback_port(Some(41234));
+        assert_eq!(disclosed.port, Some(41234));
+        // The relay stays: a same-machine browser prefers the port, but the
+        // desktop app on that host still reaches the workbench the usual way.
+        assert_eq!(disclosed.relay_path.as_deref(), Some("/ide/relay/relay-1/"));
+
+        // Granting "no port" is not the same as never asking, and must not
+        // resurrect a stale one.
+        assert_eq!(
+            running_status(IdeProfile::Managed, "relay-1")
+                .with_loopback_port(Some(1))
+                .with_loopback_port(None)
+                .port,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn loopback_port_is_refused_for_a_root_with_no_instance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = RemoteCodeServerState::new(dir.path().to_path_buf());
+        // Nothing has ever run here, so there is no port to hand out and the
+        // answer must be "none" rather than a canonicalization error.
+        assert_eq!(state.loopback_port(dir.path().to_str().unwrap(), "dev-1").await, None);
+    }
+
     use super::*;
 
     #[test]

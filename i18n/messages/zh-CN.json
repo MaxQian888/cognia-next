@@ -23405,6 +23405,15 @@
       "provisioningApiKey": "配置 API 密钥",
       "provisioningKeyHint": "在 OpenRouter 控制台创建配置密钥",
       "title": "API 密钥管理",
+      "webFrame": {
+        "openInTab": "在新标签页打开",
+        "reason": {
+          "framing-refused": "工作台拒绝被内嵌在这个页面里。它本身在跑、也能访问，请改为在独立标签页打开。",
+          "needs-host-browser": "工作台正在主机上运行，但这个浏览器够不着它。它监听的是那台机器的回环端口，而唯一能跨网络的那条路会对每个请求校验设备身份，内嵌框架做不到。请在那台机器的桌面应用里打开，或者在主机本机的浏览器里打开。",
+          "not-running": "这个工作区还没有正在运行的工作台。"
+        },
+        "title": "工作台"
+      },
       "weekly": "每周"
     },
     "keys": "个密钥",

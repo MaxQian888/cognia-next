@@ -121,6 +121,27 @@ impl DispatchHost {
         }
     }
 
+    /// The workbench's loopback port for `root`, when this host is running one
+    /// and the caller may drive it.
+    ///
+    /// Only ever disclosed to a caller on the loopback plane, which the arm
+    /// enforces. On the desktop the port comes from the local instance map,
+    /// which the desktop's own renderer already reads through
+    /// `codeserver_status`.
+    pub async fn ide_loopback_port(&self, root: &str, device_id: &str) -> Option<u16> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                let (_running, port, _profile) = app
+                    .state::<crate::codeserver::CodeServerState>()
+                    .status(root)
+                    .await;
+                port
+            }
+            Self::Headless(services) => services.code_server.loopback_port(root, device_id).await,
+        }
+    }
+
     /// Open a project-relative file through code-server's own CLI bridge.
     ///
     /// Unlike the verbs above this one needs the running instance's binary and

@@ -50,7 +50,16 @@
     "toggleMonaco": "Monaco",
     "toggleVsCode": "VS Code",
     "unsupportedDesc": "code-server has no build for your operating system. Use your local VS Code instead.",
-    "unsupportedTitle": "Pro IDE unavailable here"
+    "unsupportedTitle": "Pro IDE unavailable here",
+    "webFrame": {
+      "title": "Workbench",
+      "openInTab": "Open in a new tab",
+      "reason": {
+        "framing-refused": "The workbench declined to be embedded on this page. It is running and reachable, so open it in its own tab instead.",
+        "needs-host-browser": "The workbench is running on the host, but this browser cannot reach it. It answers on a loopback port on that machine, and the only route across the network authenticates the device on every request, which an embedded frame cannot do. Open it from the desktop app on that machine, or from a browser running on the host.",
+        "not-running": "No workbench is running for this workspace yet."
+      }
+    }
   },
   "proIdeChatBridge": {
     "explain": "Please explain this code.",

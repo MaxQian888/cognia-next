@@ -17,6 +17,34 @@ use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt as _;
 
+/// `super::dispatch` takes the listener plane the request arrived on. Every
+/// case below asks a question that plane does not change, so this shadows the
+/// glob import with the conservative one and the call sites stay as they were.
+/// The plane's own behaviour is covered by
+/// `loopback_plane_is_what_discloses_the_workbench_port`.
+#[allow(clippy::too_many_arguments)]
+async fn dispatch(
+    name: &str,
+    args: Value,
+    state: &SharedState,
+    host: &crate::companion_api::dispatch_host::DispatchHost,
+    device_id: &str,
+    account_id: Option<&str>,
+    scope: Option<&str>,
+) -> Result<Value, (StatusCode, Json<RpcError>)> {
+    super::dispatch(
+        name,
+        args,
+        state,
+        host,
+        device_id,
+        account_id,
+        scope,
+        crate::companion_api::remote_execution::ExecutionPlane::Network,
+    )
+    .await
+}
+
 #[test]
 fn known_commands_are_unique() {
     let unique: std::collections::HashSet<_> = KNOWN_COMMANDS.iter().copied().collect();

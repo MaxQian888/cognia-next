@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::companion_api::remote_execution::ExecutionPlane;
+
 pub(super) const COMMANDS: &[&str] = &[
     "plugin_list",
     "plugin_runtime_snapshot",
@@ -101,6 +103,7 @@ pub(super) async fn dispatch(
     device_id: &str,
     account_id: Option<&str>,
     scope: Option<&str>,
+    plane: super::super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     use tauri::Manager as _;
 
@@ -864,15 +867,29 @@ pub(super) async fn dispatch(
                 .headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
-            services
+            let status = services
                 .code_server
                 .status(&root, device_id)
                 .await
-                .and_then(|status| {
-                    serde_json::to_value(status)
-                        .map_err(|error| format!("serialize code-server status: {error}"))
-                })
-                .map_err(RpcError::service_unavailable)
+                .map_err(RpcError::service_unavailable)?;
+            // The workbench answers on a loopback port on the HOST, so the port
+            // is worth exactly nothing to a caller that cannot reach that
+            // loopback, and telling them anyway is a disclosure for no gain.
+            // A browser running on this machine is the one caller it means
+            // something to: it can embed the workbench directly instead of
+            // being sent through the device-authenticated relay, which an
+            // iframe cannot satisfy because it cannot attach a bearer token.
+            //
+            // The plane is the check, not the Origin or the Host header. Both
+            // of those are the caller's own claim. The plaintext listener's
+            // `127.0.0.1` bind is not.
+            let status = if plane == ExecutionPlane::LoopbackPlaintext && status.running {
+                status.with_loopback_port(host.ide_loopback_port(&root, device_id).await)
+            } else {
+                status
+            };
+            serde_json::to_value(status)
+                .map_err(|error| RpcError::internal(format!("serialize code-server status: {error}")))
         }
         "codeserver_stop" => {
             let services = host

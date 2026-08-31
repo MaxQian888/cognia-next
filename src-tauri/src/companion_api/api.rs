@@ -807,6 +807,9 @@ fn validate_policy_request(request: &CreatePolicyRequest, now: i64) -> Result<()
 pub async fn rpc_handler(
     Path(name): Path<String>,
     Extension(context): Extension<DeviceContext>,
+    // Absent on any router built without a listener behind it (the oneshot
+    // tests), which the mapping below reads as the conservative plane.
+    plane: Option<Extension<super::server::TransportPlane>>,
     headers: HeaderMap,
     State(state): State<SharedState>,
     body: Result<Json<serde_json::Value>, JsonRejection>,
@@ -830,6 +833,15 @@ pub async fn rpc_handler(
         super::remote_execution::ExecutionTransport::Http,
         idempotency_key,
     )
+    // The plaintext listener binds `127.0.0.1` and nothing else, so arriving on
+    // it is proof of same-machine. Every other plane, including a TLS request
+    // whose Host header says localhost, is not.
+    .with_plane(match plane {
+        Some(Extension(super::server::TransportPlane::Plaintext)) => {
+            super::remote_execution::ExecutionPlane::LoopbackPlaintext
+        }
+        _ => super::remote_execution::ExecutionPlane::Network,
+    })
     .with_traceparent(
         headers
             .get("traceparent")

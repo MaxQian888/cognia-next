@@ -14,6 +14,12 @@ jest.mock("next-intl", () => ({
 
 jest.mock("sonner", () => ({ toast: { error: jest.fn(), info: jest.fn() } }))
 
+let endpointBaseUrl: string | null = "http://127.0.0.1:27891"
+jest.mock("@/lib/tauri/companion-endpoint", () => ({
+  defaultCompanionEndpointResolver: async () =>
+    endpointBaseUrl === null ? null : { baseUrl: endpointBaseUrl },
+}))
+
 let hostSupports = true
 jest.mock("@/stores/remote-host/remote-host-store", () => ({
   activeHostSupportsFeature: (...args: unknown[]) => {
@@ -56,6 +62,7 @@ jest.mock("@/components/platform/surface-unavailable-notice", () => ({
 }))
 
 beforeEach(() => {
+  endpointBaseUrl = "http://127.0.0.1:27891"
   hostSupports = true
   reach = { available: true }
   projects = [{ id: "p1", roots: [{ path: "/srv/repo", isPrimary: true }] }]
@@ -100,13 +107,22 @@ describe("<ProIdeHostCard />", () => {
     expect(stop).toHaveBeenCalledWith("/srv/repo")
   })
 
-  it("says where the workbench can be opened even when it is running", async () => {
-    // "Started" reads as "now open it here", and on this shell that is not one
-    // of the options: the relay authenticates the device and an iframe cannot.
-    status.mockResolvedValue({ running: true, port: null, version: "1.0.0" })
+  it("says where the workbench can be opened while nothing is running", async () => {
+    // "Start it" alone reads as "and then open it here", which is only true on
+    // the host's own machine. The sentence carries the rest.
     render(<ProIdeHostCard />)
-    await waitFor(() => expect(screen.getByTestId("pro-ide-host-running")).toBeInTheDocument())
+    await waitFor(() => expect(status).toHaveBeenCalled())
     expect(screen.getByTestId("pro-ide-host-where")).toHaveTextContent("openWhere")
+    expect(screen.queryByTestId("pro-ide-host-frame")).not.toBeInTheDocument()
+  })
+
+  it("hands a running workbench to the frame, which decides embed or explain", async () => {
+    status.mockResolvedValue({ running: true, port: 41234, version: "1.0.0" })
+    render(<ProIdeHostCard />)
+    await waitFor(() => expect(screen.getByTestId("pro-ide-host-frame")).toBeInTheDocument())
+    // The sentence is gone: the frame says the same thing more precisely, and
+    // on a host-local browser it says nothing because the workbench is there.
+    expect(screen.queryByTestId("pro-ide-host-where")).not.toBeInTheDocument()
   })
 
   it("explains rather than disappearing when the host does not run a workbench", async () => {

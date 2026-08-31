@@ -2634,6 +2634,9 @@ pub async fn rpc_handler(
         &ctx.device_id,
         Some(&ctx.account_id),
         Some(&ctx.scope),
+        // This handler is test-only and is not behind the loopback listener,
+        // so it gets the plane that discloses nothing.
+        super::remote_execution::ExecutionPlane::Network,
     )
     .await;
     super::metrics::record_rpc_call(dispatched.is_ok());
@@ -2661,6 +2664,7 @@ pub(super) async fn dispatch_canonical(
     args: Value,
     state: &SharedState,
     ctx: &DeviceContext,
+    plane: super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     if name == "app_settings_update" {
         validate_app_settings_update(&args)?;
@@ -2676,6 +2680,7 @@ pub(super) async fn dispatch_canonical(
         &ctx.device_id,
         Some(&ctx.account_id),
         Some(&ctx.scope),
+        plane,
     )
     .await;
     super::metrics::record_rpc_call(result.is_ok());
@@ -3121,6 +3126,7 @@ pub(super) async fn dispatch(
     device_id: &str,
     account_id: Option<&str>,
     scope: Option<&str>,
+    plane: super::remote_execution::ExecutionPlane,
 ) -> Result<Value, (StatusCode, Json<RpcError>)> {
     validate_completion_command_fields(name, &args)?;
     // Remote Session Control gate. Runs for both the HTTP `rpc_handler` and
@@ -3214,7 +3220,11 @@ pub(super) async fn dispatch(
     }
 
     if plugins::COMMANDS.contains(&name) {
-        return plugins::dispatch(name, args, state, host, device_id, account_id, scope).await;
+        // Only this sub-dispatcher takes the plane. The other nine have no
+        // command that discloses anything a same-machine caller may see and an
+        // off-box one may not, and widening their signatures would invite one.
+        return plugins::dispatch(name, args, state, host, device_id, account_id, scope, plane)
+            .await;
     }
 
     if diagnostics::COMMANDS.contains(&name) {

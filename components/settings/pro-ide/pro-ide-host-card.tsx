@@ -24,9 +24,11 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { CodeServerWebFrame } from "@/components/editor/project/code-server-web-frame"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { codeServerClient, type CodeServerStatus } from "@/lib/codeserver/client"
+import { defaultCompanionEndpointResolver } from "@/lib/tauri/companion-endpoint"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { activeHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -54,6 +56,25 @@ export function ProIdeHostCard() {
 
   const [status, setStatus] = useState<CodeServerStatus | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
+  /**
+   * The Host's base URL, or `null` when this shell is the host.
+   *
+   * Read once and held, because "which machine is the Host" does not change
+   * without a re-pair, and the frame below must not flip between embedding and
+   * refusing while the user is typing in it.
+   */
+  const [hostBaseUrl, setHostBaseUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const endpoint = await defaultCompanionEndpointResolver().catch(() => null)
+      if (!cancelled) setHostBaseUrl(endpoint?.baseUrl ?? null)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const probe = useCallback(async () => {
     if (!root || !reach.available) return null
@@ -139,11 +160,23 @@ export function ProIdeHostCard() {
                 {running ? t("stop") : t("start")}
               </Button>
             </div>
-            {/* Said even when it is running, because "started" reads as "now
-                open it here" and on this shell that is not one of the options. */}
-            <p className="text-xs text-muted-foreground" data-testid="pro-ide-host-where">
-              {t("openWhere")}
-            </p>
+            {/*
+              A browser on the host's own machine can embed the workbench over
+              loopback. Everything else gets the sentence below instead, which
+              is the honest answer rather than a frame that would sit blank.
+            */}
+            {running ? (
+              <div
+                className="h-[60vh] min-h-80 overflow-hidden rounded-stage border"
+                data-testid="pro-ide-host-frame"
+              >
+                <CodeServerWebFrame status={status} hostBaseUrl={hostBaseUrl} />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground" data-testid="pro-ide-host-where">
+                {t("openWhere")}
+              </p>
+            )}
           </>
         ) : (
           <SurfaceUnavailableNotice reach={reach} data-testid="pro-ide-host-unavailable" />

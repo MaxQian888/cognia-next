@@ -46,12 +46,38 @@ impl ExecutionTransport {
     }
 }
 
+/// Which listener a request arrived on, as opposed to which protocol carried
+/// it (`ExecutionTransport`).
+///
+/// The plaintext companion listener is hard-bound to `127.0.0.1` and never to
+/// `0.0.0.0` — that bind is the entire justification for it having no TLS — so
+/// a request that arrives on it demonstrably came from a process on this
+/// machine. Nothing else about a request proves that: a device token, an
+/// Origin header and a loopback `Host` header are all forgeable or reusable
+/// from off-box.
+///
+/// One command needs to know. `codeserver_status` withholds the workbench's
+/// loopback port from every caller, because a port on the host's loopback is
+/// meaningless to anyone who cannot reach that loopback. A browser running ON
+/// the host can, and telling it the port is the difference between embedding
+/// the workbench and only being able to link to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionPlane {
+    /// Anything that is not provably same-machine. The default, so a path that
+    /// has not thought about this discloses nothing.
+    #[default]
+    Network,
+    /// The loopback-bound plaintext listener.
+    LoopbackPlaintext,
+}
+
 #[derive(Clone, Debug)]
 pub struct ExecutionRequest {
     pub command: String,
     pub args: Value,
     pub principal: DeviceContext,
     pub transport: ExecutionTransport,
+    pub plane: ExecutionPlane,
     pub request_id: String,
     pub policy_id: Option<String>,
     pub idempotency_key: Option<String>,
@@ -76,11 +102,25 @@ impl ExecutionRequest {
             args,
             principal,
             transport,
+            // Opt-in, never inferred. Every constructor that has not proven
+            // the caller is on this machine gets the conservative answer.
+            plane: ExecutionPlane::Network,
             request_id: Uuid::new_v4().to_string(),
             policy_id,
             idempotency_key,
             traceparent: None,
         }
+    }
+
+    /// Record that this request arrived on the loopback-bound listener.
+    ///
+    /// A builder rather than a `new` parameter so every other entry point keeps
+    /// the default: adding a plane argument to the constructor would have made
+    /// four callers pick a value for a question they cannot answer, and the
+    /// wrong answer is a disclosure.
+    pub fn with_plane(mut self, plane: ExecutionPlane) -> Self {
+        self.plane = plane;
+        self
     }
 
     pub fn with_traceparent(mut self, traceparent: Option<String>) -> Self {
@@ -684,6 +724,7 @@ async fn dispatch(
         request.args.clone(),
         state,
         &request.principal,
+        request.plane,
     )
     .await
     .map_err(|(status, axum::Json(error))| {
