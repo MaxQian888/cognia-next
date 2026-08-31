@@ -1,3 +1,6 @@
 {
-  "activeLabel": "Workspace: {name}"
+  "activeLabel": "Workspace: {name}",
+  "switchLabel": "Workspace: {name}. Tap to switch.",
+  "drawerTitle": "Switch workspace",
+  "drawerDescription": "Choose which workspace this device is working in."
 }

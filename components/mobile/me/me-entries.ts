@@ -20,6 +20,7 @@ import {
   DramaIcon,
   FileTextIcon,
   GraduationCapIcon,
+  FolderTreeIcon,
   GitBranchIcon,
   PenToolIcon,
   ShapesIcon,
@@ -320,6 +321,18 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/me/computer-use",
     section: "connection",
     keywords: ["computer use", "automation", "桌面"],
+  },
+  {
+    // `/source-control` was reachable from here and `/workspace` was not, which
+    // left the phone with a view of the repository and none of the workspace
+    // that owns it: its roots, trust, capabilities and worktrees.
+    id: "workspace",
+    pairedOnly: true,
+    icon: FolderTreeIcon,
+    labelKey: "workspaceRow",
+    href: "/workspace",
+    section: "connection",
+    keywords: ["workspace", "worktree", "roots", "project", "工作区", "工作树", "项目"],
   },
   {
     id: "source-control",

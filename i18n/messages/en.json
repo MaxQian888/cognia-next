@@ -16820,7 +16820,8 @@
       "unpinned": "Removed from favorites",
       "versionLabel": "Version",
       "webSearchRow": "Web search",
-      "workflowsSettingsRow": "Workflow settings"
+      "workflowsSettingsRow": "Workflow settings",
+      "workspaceRow": "Workspace"
     },
     "memory": {
       "empty": "No memories yet",
@@ -17981,7 +17982,10 @@
       "title": "Workflow settings"
     },
     "workspace": {
-      "activeLabel": "Workspace: {name}"
+      "activeLabel": "Workspace: {name}",
+      "drawerDescription": "Choose which workspace this device is working in.",
+      "drawerTitle": "Switch workspace",
+      "switchLabel": "Workspace: {name}. Tap to switch."
     }
   },
   "modelCatalog": {

@@ -95,6 +95,7 @@ const UNBRANCHED_ROUTES = [
   "/browser",
   "/logs?channel=traces&view=dashboard",
   "/source-control",
+  "/workspace",
   "/scheduler",
   "/plugins",
   "/skills",

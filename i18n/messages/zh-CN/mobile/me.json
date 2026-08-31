@@ -200,6 +200,7 @@
   },
   "skillsRow": "技能",
   "slashCommandsRow": "斜杠命令",
+  "workspaceRow": "工作区",
   "sourceControlRow": "源代码管理",
   "speechRow": "语音",
   "storage": {

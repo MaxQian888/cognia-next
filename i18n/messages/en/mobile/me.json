@@ -200,6 +200,7 @@
   },
   "skillsRow": "Skills",
   "slashCommandsRow": "Slash commands",
+  "workspaceRow": "Workspace",
   "sourceControlRow": "Source control",
   "speechRow": "Speech & voice",
   "storage": {

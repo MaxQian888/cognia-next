@@ -16820,7 +16820,8 @@
       "unpinned": "已从常用移除",
       "versionLabel": "版本",
       "webSearchRow": "网络搜索",
-      "workflowsSettingsRow": "工作流设置"
+      "workflowsSettingsRow": "工作流设置",
+      "workspaceRow": "工作区"
     },
     "memory": {
       "empty": "暂无记忆",
@@ -17981,7 +17982,10 @@
       "title": "工作流设置"
     },
     "workspace": {
-      "activeLabel": "工作区：{name}"
+      "activeLabel": "工作区：{name}",
+      "drawerDescription": "选择本设备当前使用的工作区。",
+      "drawerTitle": "切换工作区",
+      "switchLabel": "工作区：{name}。点按可切换。"
     }
   },
   "modelCatalog": {

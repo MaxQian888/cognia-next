@@ -1,3 +1,6 @@
 {
-  "activeLabel": "工作区：{name}"
+  "activeLabel": "工作区：{name}",
+  "switchLabel": "工作区：{name}。点按可切换。",
+  "drawerTitle": "切换工作区",
+  "drawerDescription": "选择本设备当前使用的工作区。"
 }
