@@ -46441,6 +46441,21 @@
       "undoFollow": "撤销",
       "unpin": "取消置顶 {name}",
       "untrustedHint": "未受信任的工作区"
+    },
+    "actionErrors": {
+      "consentRequired": "正在等待宿主设备批准，请在该设备上用验证码 {code} 确认。",
+      "consentRequiredNoCode": "正在等待宿主设备批准，请在该设备上确认后继续。",
+      "unavailable": {
+        "unknown": "该操作未能完成。",
+        "readOnly": "该宿主为只读，操作未发送。",
+        "queued": "已排队，等待宿主恢复连接。",
+        "offline": "宿主已离线，操作未发送。",
+        "requiresUnlock": "请先解锁保险库再执行该操作。",
+        "requiresPairing": "请先配对宿主再执行该操作。",
+        "requiresGrant": "本设备缺少 {grant} 权限，请在设备控制台中授予。",
+        "incompatible": "宿主版本不兼容。",
+        "unsupported": "该宿主不提供此操作。"
+      }
     }
   },
   "worktreeWorkflow": {

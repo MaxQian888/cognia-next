@@ -57,6 +57,8 @@ import type {
   WorkspaceEnvironmentSummary,
 } from "@/lib/task-workspace/types"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
+import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
+import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
 import { useWorkspaceActionController } from "@/hooks/use-workspace-action-controller"
 
 export interface WorkspaceEnvironmentListProps {
@@ -111,6 +113,10 @@ export function WorkspaceEnvironmentList({
   const otherProjectCount =
     rows === null || !projectId ? 0 : rows.filter((row) => row.projectId !== projectId).length
   const { pendingKey: pendingId, error, setError, clearError, run } = useWorkspaceActionController()
+  // Per command, not per host. A device can hold `workspace.write` and still
+  // lack the `host.admin` an interactive command needs, so `remove`, `prune`
+  // and `delete` can each be available while the others are not.
+  const gate = useWorkspaceCommandGate()
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [branchTarget, setBranchTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [branchName, setBranchName] = useState("")
@@ -148,14 +154,25 @@ export function WorkspaceEnvironmentList({
     }
   }, [rootDir, refreshKey, setError])
 
+  /**
+   * Every managed action is `approval: "interactive"`, so from a paired phone
+   * or browser it needs an admin lease. These used to be bare `transport.call`
+   * and answered `interactive_approval_required` remotely while the list they
+   * sat in rendered fine, because the reads need no approval.
+   *
+   * The command name is a parameter rather than derived, because the lease is
+   * bound to one exact command and a wrong name mints a lease the host will
+   * reject.
+   */
   const runManagedAction = async (
     row: WorkspaceEnvironmentSummary,
+    command: string,
     operation: (workspaceId: string) => Promise<unknown>
   ) => {
     const workspaceId = row.workspaceId
     if (!workspaceId) return
     await run(row.environmentId, async () => {
-      await operation(workspaceId)
+      await runWorkspaceUserAction(command, () => operation(workspaceId))
       await load()
     })
   }
@@ -164,7 +181,7 @@ export function WorkspaceEnvironmentList({
     if (!deleteTarget?.workspaceId) return
     const target = deleteTarget
     setDeleteTarget(null)
-    await runManagedAction(target, deleteManagedWorkspace)
+    await runManagedAction(target, "task_workspace_managed_delete", deleteManagedWorkspace)
   }
 
   const confirmCreateBranch = async () => {
@@ -172,7 +189,9 @@ export function WorkspaceEnvironmentList({
     const branch = branchName.trim()
     if (!target?.workspaceId || !branch || !hasAction(target, "createBranchHere")) return
     const created = await run(target.environmentId, () =>
-      createWorkspaceBranch(target.workspaceId!, branch)
+      runWorkspaceUserAction("task_workspace_environment_create_branch", () =>
+        createWorkspaceBranch(target.workspaceId!, branch)
+      )
     )
     if (!created) return
     setBranchTarget(null)
@@ -182,11 +201,13 @@ export function WorkspaceEnvironmentList({
 
   const adoptEnvironment = async (row: WorkspaceEnvironmentSummary) => {
     if (row.workspaceId) {
-      await runManagedAction(row, adoptManagedWorkspace)
+      await runManagedAction(row, "task_workspace_managed_adopt", adoptManagedWorkspace)
       return
     }
     await run(row.environmentId, async () => {
-      await adoptWorkspaceEnvironment(row.environmentId, row.sourceRoot, row.path)
+      await runWorkspaceUserAction("task_workspace_environment_adopt", () =>
+        adoptWorkspaceEnvironment(row.environmentId, row.sourceRoot, row.path)
+      )
       await load()
     })
   }
@@ -236,6 +257,24 @@ export function WorkspaceEnvironmentList({
     })
   }
 
+  /**
+   * Disabled-with-a-reason props for one action button.
+   *
+   * `canMutate` is the caller's own veto (the source-control sheet passes the
+   * git panel's policy) and the gate is the host's. Both must say yes, and
+   * whichever says no supplies the tooltip, so a disabled button is never
+   * silent about why.
+   */
+  const actionProps = (command: string, key: string) => {
+    const verdict = gate(command)
+    const allowed = verdict.available && canMutate(command)
+    return {
+      disabled: pendingId === key || !allowed,
+      title: verdict.reason ?? undefined,
+      "data-unavailable": allowed ? undefined : "true",
+    }
+  }
+
   const canOpenPaths = !rootDir || !isRemoteGitTarget(rootDir)
   const canPrune = Boolean(rows?.some((row) => hasAction(row, "prune")))
 
@@ -263,7 +302,10 @@ export function WorkspaceEnvironmentList({
             size="sm"
             variant="ghost"
             onClick={() => void prune()}
-            disabled={!canPrune || !canMutate("git_worktree_prune") || pendingId !== null}
+            {...(() => {
+              const props = actionProps("git_worktree_prune", "__prune__")
+              return { ...props, disabled: props.disabled || !canPrune || pendingId !== null }
+            })()}
             aria-label={t("prune")}
           >
             <RefreshCwIcon aria-hidden className="size-4" />
@@ -372,9 +414,9 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
+                        {...actionProps("task_workspace_managed_pin", row.environmentId)}
                         onClick={() =>
-                          void runManagedAction(row, (workspaceId) =>
+                          void runManagedAction(row, "task_workspace_managed_pin", (workspaceId) =>
                             pinManagedWorkspace(workspaceId, !row.pinned)
                           )
                         }
@@ -391,8 +433,14 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
-                        onClick={() => void runManagedAction(row, makeManagedWorkspacePermanent)}
+                        {...actionProps("task_workspace_managed_permanent", row.environmentId)}
+                        onClick={() =>
+                          void runManagedAction(
+                            row,
+                            "task_workspace_managed_permanent",
+                            makeManagedWorkspacePermanent
+                          )
+                        }
                         aria-label={t("makePermanent")}
                       >
                         <ShieldCheckIcon aria-hidden className="size-4" />
@@ -402,7 +450,10 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
+                        {...actionProps(
+                          "task_workspace_environment_create_branch",
+                          row.environmentId
+                        )}
                         onClick={() => {
                           setBranchTarget(row)
                           setBranchName("")
@@ -416,8 +467,14 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
-                        onClick={() => void runManagedAction(row, archiveManagedWorkspace)}
+                        {...actionProps("task_workspace_managed_archive", row.environmentId)}
+                        onClick={() =>
+                          void runManagedAction(
+                            row,
+                            "task_workspace_managed_archive",
+                            archiveManagedWorkspace
+                          )
+                        }
                         aria-label={t("archive")}
                       >
                         <ArchiveIcon aria-hidden className="size-4" />
@@ -427,7 +484,12 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
+                        {...actionProps(
+                          row.workspaceId
+                            ? "task_workspace_managed_adopt"
+                            : "task_workspace_environment_adopt",
+                          row.environmentId
+                        )}
                         onClick={() => void adoptEnvironment(row)}
                         aria-label={t("adopt")}
                       >
@@ -438,8 +500,14 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
-                        onClick={() => void runManagedAction(row, restoreManagedWorkspace)}
+                        {...actionProps("task_workspace_managed_restore", row.environmentId)}
+                        onClick={() =>
+                          void runManagedAction(
+                            row,
+                            "task_workspace_managed_restore",
+                            restoreManagedWorkspace
+                          )
+                        }
                         aria-label={t("restore")}
                       >
                         <RotateCcwIcon aria-hidden className="size-4" />
@@ -449,7 +517,7 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={pendingId === row.environmentId}
+                        {...actionProps("task_workspace_managed_delete", row.environmentId)}
                         onClick={() => setDeleteTarget(row)}
                         aria-label={t("delete")}
                       >
@@ -460,9 +528,7 @@ export function WorkspaceEnvironmentList({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        disabled={
-                          pendingId === row.environmentId || !canMutate("git_worktree_remove")
-                        }
+                        {...actionProps("git_worktree_remove", row.environmentId)}
                         onClick={() => requestRemove(row)}
                         aria-label={t("remove")}
                       >

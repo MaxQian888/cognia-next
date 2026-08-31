@@ -46441,6 +46441,21 @@
       "undoFollow": "Undo",
       "unpin": "Unpin {name}",
       "untrustedHint": "Untrusted workspace"
+    },
+    "actionErrors": {
+      "consentRequired": "Waiting for approval on the host device. Confirm there with code {code}.",
+      "consentRequiredNoCode": "Waiting for approval on the host device. Confirm it there to continue.",
+      "unavailable": {
+        "unknown": "This action could not be completed.",
+        "readOnly": "This host is read-only, so the action was not sent.",
+        "queued": "Queued until the host is reachable again.",
+        "offline": "The host is offline, so the action was not sent.",
+        "requiresUnlock": "Unlock the vault to run this action.",
+        "requiresPairing": "Pair with a host to run this action.",
+        "requiresGrant": "This device is missing the {grant} permission. Grant it in the device console.",
+        "incompatible": "The host is running an incompatible version.",
+        "unsupported": "This host does not offer that action."
+      }
     }
   },
   "worktreeWorkflow": {

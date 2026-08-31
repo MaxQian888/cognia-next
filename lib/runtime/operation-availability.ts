@@ -174,3 +174,41 @@ function isSafelyQueueable(
     )
   )
 }
+
+/**
+ * {@link resolveOperationAvailability}, plus the precondition a *user-triggered
+ * mutation* carries: an `approval: "interactive"` command reaching a companion
+ * host must present an admin lease, and a lease can only be minted by a device
+ * that can call `host_admin_lease_issue` and holds `host.admin`.
+ *
+ * Without this second question a surface reports "available", issues the call,
+ * and the host answers `interactive_approval_required`. That is a refusal the
+ * user cannot act on, because nothing named the missing grant.
+ * `requires-grant` with `requiredGrant: "host.admin"` is the answer they can
+ * act on.
+ *
+ * Extracted from `lib/git/commands.ts`, which held the only copy, so the git
+ * plane and the task-workspace plane cannot drift into two different answers
+ * about the same lease.
+ */
+export function resolveUserActionAvailability(
+  snapshot: RuntimeSnapshot,
+  command: string
+): OperationAvailability {
+  const availability = resolveOperationAvailability({ snapshot, command })
+  if (availability.state !== "available") return availability
+  const descriptor = getCommandDescriptor(command)
+  if (
+    snapshot.target?.kind === "companion" &&
+    descriptor?.approval === "interactive" &&
+    (!snapshot.host?.operations.includes("host_admin_lease_issue") ||
+      !snapshot.host.grants.includes("host.admin"))
+  ) {
+    return {
+      state: "requires-grant",
+      reason: "missing-grant",
+      requiredGrant: "host.admin",
+    }
+  }
+  return availability
+}

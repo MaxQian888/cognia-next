@@ -19,7 +19,10 @@ import { transport as baseTransport } from "@/lib/tauri"
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
-import { resolveOperationAvailability } from "@/lib/runtime/operation-availability"
+import {
+  resolveOperationAvailability,
+  resolveUserActionAvailability,
+} from "@/lib/runtime/operation-availability"
 import { languageFromPath } from "./language-map"
 import {
   gitTargetArgs,
@@ -160,22 +163,11 @@ export function resolveGitOperationAvailability(
   snapshot: ReturnType<typeof getRuntimeSnapshot>,
   command: string
 ): ReturnType<typeof resolveOperationAvailability> {
-  const availability = resolveOperationAvailability({ snapshot, command })
-  if (availability.state !== "available") return availability
-  const descriptor = getCommandDescriptor(command)
-  if (
-    snapshot.target?.kind === "companion" &&
-    descriptor?.approval === "interactive" &&
-    (!snapshot.host?.operations.includes("host_admin_lease_issue") ||
-      !snapshot.host.grants.includes("host.admin"))
-  ) {
-    return {
-      state: "requires-grant",
-      reason: "missing-grant",
-      requiredGrant: "host.admin",
-    }
-  }
-  return availability
+  // The lease precondition is not git-specific: every `approval: "interactive"`
+  // command reaching a companion host needs one. It lives in
+  // `lib/runtime/operation-availability.ts` so the task-workspace plane asks
+  // the same question and cannot answer it differently.
+  return resolveUserActionAvailability(snapshot, command)
 }
 
 /** Bind one exact 120-second approval lease to a user-triggered Git mutation. */

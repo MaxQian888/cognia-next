@@ -1,4 +1,9 @@
-import { onTauriEvent, transport } from "@/lib/tauri"
+import { onTauriEvent } from "@/lib/tauri"
+// Every call in this file goes through the approval-aware transport, reads
+// included. A read carries no pending lease so it is passed through untouched,
+// and routing all of them one way means a write cannot be added later that
+// silently skips the lease. See `./user-action.ts`.
+import { approvalAwareTransport as transport } from "./user-action"
 import { recordTaskWorkspaceOutcome } from "@/lib/code-adoption/outcome"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
