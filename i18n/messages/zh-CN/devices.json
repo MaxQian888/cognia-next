@@ -184,6 +184,12 @@
     "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。"
   },
   "runtime": {
+    "probeEmpty": "该主机报告没有工作树。",
+    "probeFailed": "无法读取该主机：{error}",
+    "probeLocked": "已锁定",
+    "probeWorkspaces": "读取它的工作树",
+    "probedVia": "经该主机自己的连接读到 {count, plural, =0 {0 个工作树} other {# 个工作树}}。全局路由未改变。",
+    "probing": "读取中…",
     "shellTiers": "Shell 档位",
     "tierAvailable": "可用",
     "tierUnavailable": "不可用",

@@ -12,9 +12,12 @@
  *    are its own business and are not reachable from here at all.
  *  * `task_workspace_environment_list` is `target: "execution"`, so it follows
  *    the active remote host. Rendering it under the local device while a Host
- *    is active would print that Host's worktrees under this machine's name —
- *    which is why an inactive Host offers an Activate button instead of a
- *    list.
+ *    is active would print that Host's worktrees under this machine's name.
+ *    An inactive Host is therefore not read through global routing at all: it
+ *    is probed over its own isolated transport (`useHostProbe`), which is what
+ *    `openRemoteHostTarget` was built for and had no UI caller until now.
+ *    Activation is still offered, because a probe is a read and everything
+ *    that writes needs the routing target.
  *
  * The sandbox registry itself is the existing settings surface, embedded
  * rather than reimplemented, so the two cannot drift.
@@ -26,7 +29,14 @@
 
 import { useCallback, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
-import { BoxIcon, FolderTreeIcon, GavelIcon, LayersIcon, PlugZapIcon } from "lucide-react"
+import {
+  BoxIcon,
+  FolderTreeIcon,
+  GavelIcon,
+  LayersIcon,
+  PlugZapIcon,
+  RadarIcon,
+} from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +44,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { SandboxConnectionsTab } from "@/components/settings/automation/sandbox-connections-tab"
 import { WorkspaceEnvironmentList } from "@/components/workspace/workspace-environment-list"
+import { useHostProbe } from "@/hooks/devices/use-host-probe"
 import {
   getExecutionAuthorityConfigServerSnapshot,
   getExecutionAuthorityConfigSnapshot,
@@ -167,6 +178,13 @@ function Workspaces({ row }: { row: DeviceRow }) {
   }, [activateHost, deactivate, row.hostId, row.kind])
 
   const supported = row.runtime.workspaces.support === "supported"
+  const inactiveHost = row.runtime.workspaces.support === "requires-activation"
+
+  // Only a remote Host can be read over its own transport. `requires-activation`
+  // on the LOCAL row means a Host is active and routing points away from here,
+  // and there is no second transport that reaches back to this machine.
+  const probeRef = inactiveHost && row.kind === "remote-host" ? (row.hostId ?? null) : null
+  const { state: probe, probe: runProbe } = useHostProbe(probeRef)
 
   return (
     <DeviceSection id="workspaces" title={t("runtime.workspaces")} icon={FolderTreeIcon} wide>
@@ -176,7 +194,7 @@ function Workspaces({ row }: { row: DeviceRow }) {
         ) : (
           <Alert>
             <AlertTitle>
-              {row.runtime.workspaces.support === "requires-activation"
+              {inactiveHost
                 ? t("runtime.workspacesInactiveTitle")
                 : t("runtime.workspacesUnsupportedTitle")}
             </AlertTitle>
@@ -184,22 +202,94 @@ function Workspaces({ row }: { row: DeviceRow }) {
               <span className="block">
                 {t(`runtime.reason.${row.runtime.workspaces.reasonKey ?? "workspaceNotHosted"}`)}
               </span>
-              {row.runtime.workspaces.support === "requires-activation" ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={activate}
-                  data-testid="activate-routing-target"
-                >
-                  <PlugZapIcon className="size-3.5" />
-                  {row.kind === "local" ? t("runtime.routeLocally") : t("runtime.activateHost")}
-                </Button>
+              {inactiveHost ? (
+                <span className="flex flex-wrap gap-2">
+                  {/* Reading is the common case, so it leads. Activation is
+                      still offered beside it because everything that WRITES
+                      needs this host to be the routing target. */}
+                  {probeRef ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={runProbe}
+                      disabled={probe.status === "probing"}
+                      data-testid="probe-host-workspaces"
+                    >
+                      <RadarIcon className="size-3.5" />
+                      {probe.status === "probing"
+                        ? t("runtime.probing")
+                        : t("runtime.probeWorkspaces")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant={probeRef ? "ghost" : "outline"}
+                    onClick={activate}
+                    data-testid="activate-routing-target"
+                  >
+                    <PlugZapIcon className="size-3.5" />
+                    {row.kind === "local" ? t("runtime.routeLocally") : t("runtime.activateHost")}
+                  </Button>
+                </span>
               ) : null}
             </AlertDescription>
           </Alert>
         )}
+
+        <HostProbeResult probe={probe} />
       </div>
     </DeviceSection>
+  )
+}
+
+/**
+ * What the isolated probe found, labelled with where it came from.
+ *
+ * Saying "read over this host's own connection" is not decoration: these rows
+ * did not come through the transport every other number on this page came
+ * through, and a reader who assumes otherwise will misread an empty list as
+ * "the active host has no worktrees".
+ */
+function HostProbeResult({ probe }: { probe: ReturnType<typeof useHostProbe>["state"] }) {
+  const t = useTranslations("devices")
+  if (probe.status === "idle" || probe.status === "probing") return null
+
+  if (probe.status === "error") {
+    return (
+      <p className="mt-2 text-xs text-destructive" data-testid="host-probe-error">
+        {t("runtime.probeFailed", { error: probe.message })}
+      </p>
+    )
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5" data-testid="host-probe-result">
+      <p className="text-[11px] text-muted-foreground">
+        {t("runtime.probedVia", { count: probe.environments.length })}
+      </p>
+      {probe.environments.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("runtime.probeEmpty")}</p>
+      ) : (
+        <ul className="space-y-1">
+          {probe.environments.map((env) => (
+            <li
+              key={env.environmentId}
+              className="flex items-baseline gap-2 rounded-md border px-2 py-1.5 text-xs"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{env.path}</span>
+              {env.branch ? (
+                <span className="shrink-0 text-muted-foreground">{env.branch}</span>
+              ) : null}
+              {env.locked ? (
+                <Badge variant="outline" className="shrink-0 font-normal">
+                  {t("runtime.probeLocked")}
+                </Badge>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

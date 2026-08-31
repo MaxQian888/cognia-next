@@ -184,6 +184,12 @@
     "ownerSuspendedHint": "Grants suspended: this device belongs to someone else."
   },
   "runtime": {
+    "probeEmpty": "This host reports no worktrees.",
+    "probeFailed": "Could not read this host: {error}",
+    "probeLocked": "Locked",
+    "probeWorkspaces": "Read its worktrees",
+    "probedVia": "{count, plural, =0 {No worktrees} one {# worktree} other {# worktrees}} read over this host's own connection. Routing has not changed.",
+    "probing": "Reading…",
     "shellTiers": "Shell tiers",
     "tierAvailable": "Available",
     "tierUnavailable": "Unavailable",

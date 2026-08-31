@@ -3,9 +3,12 @@ import {
   type RemoteHostCredential,
 } from "@/lib/remote-host/credential-vault"
 import type { CompanionConfig } from "@/lib/tauri/companion-storage"
-import { CompanionTransport } from "@/lib/tauri/transport-companion"
 import type { Transport } from "@/lib/tauri/transport-types"
-import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
+import {
+  getRemoteTransportFactory,
+  useRemoteHostStore,
+  type RemoteHost,
+} from "@/stores/remote-host/remote-host-store"
 
 type DisposableTransport = Transport & { destroy?: () => void }
 
@@ -56,9 +59,12 @@ export async function openRemoteHostTarget(
     devicePrivateKeyJwk: credential.devicePrivateKeyJwk,
     signalingPrivateKeyJwk: credential.signalingPrivateKeyJwk,
   }
+  // Same construction the store activates a host through, so a transport seam
+  // installed for one covers the other and there is one place to change how a
+  // companion transport is built.
   const transport = (
     deps.createTransport ??
-    ((provider: () => CompanionConfig) => new CompanionTransport({ configProvider: provider }))
+    (getRemoteTransportFactory() as (p: () => CompanionConfig) => DisposableTransport)
   )(() => config)
   return {
     host,

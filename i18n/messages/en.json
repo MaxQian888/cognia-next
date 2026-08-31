@@ -8951,6 +8951,12 @@
     "runtime": {
       "activateHost": "Activate this host",
       "isRoutingTarget": "Execution from this window currently routes here.",
+      "probeEmpty": "This host reports no worktrees.",
+      "probeFailed": "Could not read this host: {error}",
+      "probeLocked": "Locked",
+      "probeWorkspaces": "Read its worktrees",
+      "probedVia": "{count, plural, =0 {No worktrees} one {# worktree} other {# worktrees}} read over this host's own connection. Routing has not changed.",
+      "probing": "Reading…",
       "reason": {
         "activateToInspect": "Activate this host to route execution to it and read its workspaces.",
         "routedToRemoteHost": "This window currently routes execution to a remote host, so a workspace list would describe that host rather than this machine.",

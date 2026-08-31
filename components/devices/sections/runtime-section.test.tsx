@@ -31,6 +31,15 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
 let authoritySnapshot = { hostId: null as string | null, degradeAfterMs: 1 }
 const SERVER_SNAPSHOT = { hostId: null as string | null, degradeAfterMs: 1 }
 
+const probe = jest.fn()
+let probeState: unknown = { status: "idle" }
+jest.mock("@/hooks/devices/use-host-probe", () => ({
+  useHostProbe: (hostRef: string | null) => {
+    probe.mockImplementation(() => {})
+    return { state: hostRef ? probeState : { status: "idle" }, probe }
+  },
+}))
+
 jest.mock("@/lib/placement/authority", () => ({
   subscribeExecutionAuthorityConfig: () => () => {},
   getExecutionAuthorityConfigSnapshot: () => authoritySnapshot,
@@ -229,5 +238,83 @@ describe("RuntimeSection — timing authority", () => {
       />
     )
     expect(screen.queryByTestId("device-timing-authority")).not.toBeInTheDocument()
+  })
+
+  /**
+   * An inactive Host used to offer nothing but "Activate", which meant reading
+   * one machine's worktrees required pointing the whole desktop at it.
+   * `openRemoteHostTarget` opens an isolated transport for exactly this and
+   * had no UI caller.
+   */
+  describe("an inactive remote host", () => {
+    const inactiveHost = () =>
+      row({
+        ref: "host:h1",
+        kind: "remote-host",
+        hostId: "h1",
+        label: "Dev box",
+        isSelf: false,
+        runtime: {
+          sandbox: { support: "unsupported", reasonKey: "sandboxIsClientLocal", connections: [] },
+          shellTiers: [],
+          workspaces: { support: "requires-activation", reasonKey: "routedToRemoteHost" },
+          isRoutingTarget: false,
+        },
+      })
+
+    beforeEach(() => {
+      probeState = { status: "idle" }
+      probe.mockClear()
+    })
+
+    it("can be read without being made the routing target", async () => {
+      render(<RuntimeSection row={inactiveHost()} />)
+      await userEvent.click(screen.getByTestId("probe-host-workspaces"))
+      expect(probe).toHaveBeenCalled()
+      expect(activateHost).not.toHaveBeenCalled()
+    })
+
+    it("still offers activation, because writing needs the routing target", () => {
+      render(<RuntimeSection row={inactiveHost()} />)
+      expect(screen.getByTestId("activate-routing-target")).toBeInTheDocument()
+    })
+
+    it("says where the probed rows came from", () => {
+      probeState = {
+        status: "ready",
+        environments: [{ environmentId: "e1", path: "/w", branch: "main" }],
+      }
+      render(<RuntimeSection row={inactiveHost()} />)
+      expect(screen.getByTestId("host-probe-result")).toHaveTextContent("/w")
+    })
+
+    it("reports a failed probe rather than an empty host", () => {
+      probeState = { status: "error", message: "credential is unavailable" }
+      render(<RuntimeSection row={inactiveHost()} />)
+      expect(screen.getByTestId("host-probe-error")).toHaveTextContent("credential is unavailable")
+      expect(screen.queryByTestId("host-probe-result")).not.toBeInTheDocument()
+    })
+
+    /**
+     * `requires-activation` on the LOCAL row means a Host is active and
+     * routing points away from here. There is no second transport back to this
+     * machine, so offering a probe there would be a button that cannot work.
+     */
+    it("offers no probe on the local row", () => {
+      render(
+        <RuntimeSection
+          row={row({
+            runtime: {
+              sandbox: { support: "supported", connections: [] },
+              shellTiers: [],
+              workspaces: { support: "requires-activation", reasonKey: "routedToRemoteHost" },
+              isRoutingTarget: false,
+            },
+          })}
+        />
+      )
+      expect(screen.queryByTestId("probe-host-workspaces")).not.toBeInTheDocument()
+      expect(screen.getByTestId("activate-routing-target")).toBeInTheDocument()
+    })
   })
 })

@@ -156,6 +156,19 @@ const defaultTransportFactory: RemoteTransportFactory = (configProvider) =>
 
 let transportFactory: RemoteTransportFactory = defaultTransportFactory
 
+/**
+ * The factory the store activates hosts through, exposed so the isolated
+ * per-host path (`lib/remote-host/target-transport.ts`) builds its transport
+ * the same way.
+ *
+ * They were two constructions of the same thing, which meant a test seam
+ * installed here did not cover a probe opened there, and any future change to
+ * how a companion transport is built had two places to remember.
+ */
+export function getRemoteTransportFactory(): RemoteTransportFactory {
+  return transportFactory
+}
+
 /** Test-only override of the remote transport factory. */
 export function __setRemoteTransportFactoryForTests(factory: RemoteTransportFactory | null): void {
   transportFactory = factory ?? defaultTransportFactory

@@ -8951,6 +8951,12 @@
     "runtime": {
       "activateHost": "激活此主机",
       "isRoutingTarget": "本窗口的执行当前路由到这里。",
+      "probeEmpty": "该主机报告没有工作树。",
+      "probeFailed": "无法读取该主机：{error}",
+      "probeLocked": "已锁定",
+      "probeWorkspaces": "读取它的工作树",
+      "probedVia": "经该主机自己的连接读到 {count, plural, =0 {0 个工作树} other {# 个工作树}}。全局路由未改变。",
+      "probing": "读取中…",
       "reason": {
         "activateToInspect": "激活这台主机，把执行路由过去后即可读取它的工作区。",
         "routedToRemoteHost": "本窗口当前把执行路由到了远程主机，此时的工作区列表描述的是那台主机，而不是本机。",
