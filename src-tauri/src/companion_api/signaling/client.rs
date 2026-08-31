@@ -216,6 +216,43 @@ fn reconnect_delay_ms(attempt: usize, rejected: bool, random_unit: u64) -> u64 {
     half + (random_unit % half.max(1))
 }
 
+/// How one failed session should be surfaced.
+///
+/// Split out of the reconnect loop so the log level is a pure function of
+/// (was this a refusal, how long did the socket live) and can be pinned by a
+/// test instead of being read out of a running task's output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionFailure {
+    /// The socket stayed up past [`HEALTHY_RESET_AFTER`] and then broke.
+    ///
+    /// This is the expected cost of a WAN long-connection, not a fault: the
+    /// relay sits behind an edge that resets sockets periodically, and the
+    /// client is back within seconds. With one socket per paired device that
+    /// reset rate is multiplied by the device count, so warning on each one
+    /// buries every real failure. The loop counts them and speaks up only
+    /// once per [`REPEAT_LOG_EVERY`] of them.
+    ///
+    /// The counter is cleared by a clean close or by any [`Self::CannotConnect`],
+    /// and by nothing else: a session that reconnects and stays up for hours
+    /// still ends in this arm when it finally breaks. So the tally spans the
+    /// whole run since the last connect failure, and the log line says that
+    /// rather than calling drops an hour apart consecutive.
+    DroppedAfterHealthy,
+    /// The attempt never reached a healthy session: an ongoing failure that
+    /// keeps the device offline, and worth the existing loud-then-quiet
+    /// treatment. A refusal (4xx) always lands here — a relay that answers
+    /// "no" is a configuration problem no amount of uptime excuses.
+    CannotConnect,
+}
+
+fn classify_failure(rejected: bool, session_lifetime: Duration) -> SessionFailure {
+    if !rejected && session_lifetime >= HEALTHY_RESET_AFTER {
+        SessionFailure::DroppedAfterHealthy
+    } else {
+        SessionFailure::CannotConnect
+    }
+}
+
 async fn run_with_reconnect(
     config: ClientConfig,
     state: SharedState,
@@ -239,6 +276,15 @@ async fn run_with_reconnect(
     // REPEAT_LOG_EVERY.
     let mut last_error: Option<String> = None;
     let mut repeats = 0usize;
+    // [`SessionFailure::DroppedAfterHealthy`] events since the last connect
+    // failure or clean close. Not a consecutive-failure count: healthy sessions
+    // in between do not clear it, because a session only leaves this loop
+    // through the error arm when it breaks.
+    let mut healthy_drops = 0usize;
+    // The endpoint is announced once per task, not once per attempt: the URL
+    // never changes within a task's life, so re-stating it at `info` on every
+    // reconnect is pure repetition across every paired device at once.
+    let mut announced_endpoint = false;
     loop {
         if *cancel_rx.borrow() {
             return;
@@ -247,11 +293,12 @@ async fn run_with_reconnect(
             "device {} (room {})",
             config.device_id, config.rendezvous_id
         );
-        if repeats == 0 {
+        if !announced_endpoint {
             log::info!(
                 "signaling::client[{label}]: connecting to {}",
                 config.signaling_url
             );
+            announced_endpoint = true;
         } else {
             log::debug!(
                 "signaling::client[{label}]: reconnecting to {} (attempt {attempt})",
@@ -269,6 +316,7 @@ async fn run_with_reconnect(
                 attempt = 0;
                 last_error = None;
                 repeats = 0;
+                healthy_drops = 0;
                 // Clean shutdown — drop back to Offline pending next connect.
                 config.tier_writer.set(DeviceTier::Offline);
             }
@@ -281,25 +329,52 @@ async fn run_with_reconnect(
             Err(e) => {
                 let text = e.to_string();
                 rejected = is_permanent_rejection(&text);
-                if last_error.as_deref() == Some(text.as_str()) {
-                    repeats = repeats.saturating_add(1);
-                } else {
-                    repeats = 0;
-                }
-                if repeats.is_multiple_of(REPEAT_LOG_EVERY) {
-                    if rejected {
-                        log::warn!(
-                            "signaling::client[{label}]: relay refused the connection ({text}); \
-                             check the signaling URL, or turn the WebRTC tier off in \
-                             Settings → Companion if this Host does not need WAN fallback"
-                        );
-                    } else {
-                        log::warn!("signaling::client[{label}]: session error: {text}");
+                match classify_failure(rejected, session_started.elapsed()) {
+                    SessionFailure::DroppedAfterHealthy => {
+                        healthy_drops = healthy_drops.saturating_add(1);
+                        // An established socket that broke is not evidence of a
+                        // *repeating* fault, so clear the consecutive-failure
+                        // state: if the redial then fails, that failure is the
+                        // first of its own cycle and gets reported loudly.
+                        repeats = 0;
+                        last_error = None;
+                        if healthy_drops.is_multiple_of(REPEAT_LOG_EVERY) {
+                            log::warn!(
+                                "signaling::client[{label}]: lost an established signaling \
+                                 socket {healthy_drops} times since the last connect failure, \
+                                 most recently: {text}"
+                            );
+                        } else {
+                            log::debug!(
+                                "signaling::client[{label}]: signaling socket dropped, \
+                                 reconnecting: {text}"
+                            );
+                        }
                     }
-                } else {
-                    log::debug!("signaling::client[{label}]: session error: {text}");
+                    SessionFailure::CannotConnect => {
+                        healthy_drops = 0;
+                        if last_error.as_deref() == Some(text.as_str()) {
+                            repeats = repeats.saturating_add(1);
+                        } else {
+                            repeats = 0;
+                        }
+                        if repeats.is_multiple_of(REPEAT_LOG_EVERY) {
+                            if rejected {
+                                log::warn!(
+                                    "signaling::client[{label}]: relay refused the connection \
+                                     ({text}); check the signaling URL, or turn the WebRTC tier \
+                                     off in Settings → Companion if this Host does not need WAN \
+                                     fallback"
+                                );
+                            } else {
+                                log::warn!("signaling::client[{label}]: session error: {text}");
+                            }
+                        } else {
+                            log::debug!("signaling::client[{label}]: session error: {text}");
+                        }
+                        last_error = Some(text.clone());
+                    }
                 }
-                last_error = Some(text.clone());
                 config.tier_writer.set_with_error(DeviceTier::Failed, text);
                 if session_started.elapsed() >= HEALTHY_RESET_AFTER {
                     attempt = 0;
@@ -310,12 +385,13 @@ async fn run_with_reconnect(
         let delay =
             Duration::from_millis(reconnect_delay_ms(attempt, rejected, rand::random::<u64>()));
         tokio::select! {
+            biased;
+            // Same primitive for the same reason: `changed()` answers a dropped
+            // sender with `Err` at once, which would skip the backoff entirely
+            // and turn a hub that is gone into an undelayed reconnect loop
+            // against the relay.
+            () = wait_for_cancel(&mut cancel_rx) => return,
             _ = tokio::time::sleep(delay) => {}
-            _ = cancel_rx.changed() => {
-                if *cancel_rx.borrow() {
-                    return;
-                }
-            }
         }
     }
 }
@@ -434,6 +510,57 @@ impl SessionCrypto {
 // Single-connection session
 // ---------------------------------------------------------------------------
 
+/// Await `fut`, unwinding with [`SessionError::Cancelled`] the moment the hub
+/// asks this client to stop.
+///
+/// The handshake — dial, read the challenge, send `Subscribe` — runs *before*
+/// the session's `select!` loop, which used to be the only place the cancel
+/// flag was ever observed. That left a cancelled client blind for up to 13 s
+/// (8 s connect + 5 s challenge), and [`SignalingHub::configure`] cancels and
+/// re-spawns every device in the same breath: the old socket could finish
+/// subscribing *after* its replacement, take the room's desktop role back, and
+/// get the new socket closed with `session_replaced` — costing the replacement
+/// another full reconnect for nothing.
+///
+/// [`wait_for_cancel`] also inspects the *current* value, so a flag that was
+/// already set before this call short-circuits before the socket is dialed at
+/// all, and a channel whose sender is gone unwinds the same way.
+async fn cancellable<T>(
+    cancel_rx: &mut watch::Receiver<bool>,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T, SessionError> {
+    tokio::pin!(fut);
+    tokio::select! {
+        biased;
+        () = wait_for_cancel(cancel_rx) => Err(SessionError::Cancelled),
+        out = &mut fut => Ok(out),
+    }
+}
+
+/// Resolve once this client must stop: the hub raised the cancel flag, or the
+/// hub itself is gone.
+///
+/// [`watch::Receiver::changed`] is the wrong primitive for a cancel arm. Once
+/// the sender is dropped it returns `Err(RecvError)` immediately, and on every
+/// later poll. An arm that unwinds only on a raised flag therefore re-arms
+/// forever, and as the first arm under `biased;` the enclosing `select!` stops
+/// yielding at all: a 100% CPU spin where an unwind was intended.
+///
+/// A dropped sender is reachable, not hypothetical. The sender lives on the
+/// [`ClientHandle`], whose contract is "drop the handle to keep the task
+/// running", and `SignalingHub::cancel_one` defers the send to a *spawned*
+/// task, so a runtime that shuts down before that task is polled drops the
+/// sender with nothing ever sent.
+///
+/// `wait_for` covers both: it resolves when the predicate holds *and* when the
+/// channel closes, and it inspects the current value before waiting, so a flag
+/// raised before the first poll short-circuits. Its `Ref` borrows the channel's
+/// lock, so this returns `()` instead and no caller can hold that guard across
+/// an `.await`.
+async fn wait_for_cancel(cancel_rx: &mut watch::Receiver<bool>) {
+    let _ = cancel_rx.wait_for(|cancelled| *cancelled).await;
+}
+
 async fn run_one_session(
     config: &ClientConfig,
     state: SharedState,
@@ -447,16 +574,21 @@ async fn run_one_session(
         .as_str()
         .into_client_request()
         .map_err(|e| SessionError::Websocket(format!("invalid URL: {e}")))?;
-    let (mut ws_stream, _resp) =
-        tokio::time::timeout(Duration::from_secs(8), connect_async(request))
-            .await
-            .map_err(|_| SessionError::Websocket("signaling connect timed out".into()))?
-            .map_err(|e| SessionError::Websocket(e.to_string()))?;
-    let challenge_frame = tokio::time::timeout(Duration::from_secs(5), ws_stream.next())
-        .await
-        .map_err(|_| SessionError::Protocol("signaling challenge timed out".into()))?
-        .ok_or_else(|| SessionError::Websocket("stream ended before challenge".into()))?
-        .map_err(|error| SessionError::Websocket(error.to_string()))?;
+    let (mut ws_stream, _resp) = cancellable(
+        &mut cancel_rx,
+        tokio::time::timeout(Duration::from_secs(8), connect_async(request)),
+    )
+    .await?
+    .map_err(|_| SessionError::Websocket("signaling connect timed out".into()))?
+    .map_err(|e| SessionError::Websocket(e.to_string()))?;
+    let challenge_frame = cancellable(
+        &mut cancel_rx,
+        tokio::time::timeout(Duration::from_secs(5), ws_stream.next()),
+    )
+    .await?
+    .map_err(|_| SessionError::Protocol("signaling challenge timed out".into()))?
+    .ok_or_else(|| SessionError::Websocket("stream ended before challenge".into()))?
+    .map_err(|error| SessionError::Websocket(error.to_string()))?;
     let challenge = match challenge_frame {
         Message::Text(text) => match serde_json::from_str::<ServerFrame>(&text)
             .map_err(|error| SessionError::Protocol(format!("bad challenge frame: {error}")))?
@@ -502,14 +634,16 @@ async fn run_one_session(
         descriptor: Box::new(config.room_descriptor.clone()),
         proof: Box::new(own_proof.clone()),
     };
-    ws_stream
-        .send(Message::Text(
+    cancellable(
+        &mut cancel_rx,
+        ws_stream.send(Message::Text(
             serde_json::to_string(&subscribe)
                 .expect("serialize subscribe")
                 .into(),
-        ))
-        .await
-        .map_err(|e| SessionError::Websocket(e.to_string()))?;
+        )),
+    )
+    .await?
+    .map_err(|e| SessionError::Websocket(e.to_string()))?;
     let (mut write, mut read) = ws_stream.split();
     let mut crypto = SessionCrypto {
         identity,
@@ -549,15 +683,13 @@ async fn run_one_session(
         tokio::select! {
             biased;
 
-            _ = cancel_rx.changed() => {
-                if *cancel_rx.borrow() {
-                    teardown(
-                        &config.device_id,
-                        peer_session.take(),
-                        dispatcher.take(),
-                    ).await;
-                    return Err(SessionError::Cancelled);
-                }
+            () = wait_for_cancel(&mut cancel_rx) => {
+                teardown(
+                    &config.device_id,
+                    peer_session.take(),
+                    dispatcher.take(),
+                ).await;
+                return Err(SessionError::Cancelled);
             }
 
             Some(out) = out_rx.recv() => {
@@ -1166,6 +1298,14 @@ mod tests {
     }
 
     use super::*;
+    use crate::companion_api::{
+        deny_list::DenyList, desktop_messages_bridge::DesktopMessagesBridge,
+        desktop_writes_bridge::DesktopWritesBridge, event_bus::EventBus,
+        idempotency::IdempotencyCache, push::PushTokenRegistry, rate_limit::RateLimiter,
+        sync_bridge::SyncBridge, sync_registry::SyncTableRegistry, CompanionState,
+    };
+    use cognia_signaling_core::protocol::{derive_room_id, PROTOCOL_VERSION};
+    use parking_lot::RwLock;
 
     #[test]
     fn reuse_peer_for_offer_requires_restart_flag_and_existing_peer() {
@@ -1203,6 +1343,245 @@ mod tests {
             Some(&lease.token),
         )
         .is_err());
+    }
+
+    #[test]
+    fn an_established_socket_that_breaks_is_not_treated_as_a_fault() {
+        assert_eq!(
+            classify_failure(false, HEALTHY_RESET_AFTER),
+            SessionFailure::DroppedAfterHealthy
+        );
+        assert_eq!(
+            classify_failure(false, HEALTHY_RESET_AFTER + Duration::from_secs(600)),
+            SessionFailure::DroppedAfterHealthy
+        );
+    }
+
+    #[test]
+    fn a_session_that_never_got_healthy_is_a_real_failure() {
+        assert_eq!(
+            classify_failure(false, Duration::from_secs(0)),
+            SessionFailure::CannotConnect
+        );
+        assert_eq!(
+            classify_failure(false, HEALTHY_RESET_AFTER - Duration::from_millis(1)),
+            SessionFailure::CannotConnect
+        );
+    }
+
+    #[test]
+    fn a_refusal_stays_loud_however_long_the_socket_lived() {
+        // A 4xx is a configuration problem; uptime does not excuse it, and the
+        // operator needs the "check the signaling URL" line either way.
+        assert_eq!(
+            classify_failure(true, Duration::from_secs(0)),
+            SessionFailure::CannotConnect
+        );
+        assert_eq!(
+            classify_failure(true, HEALTHY_RESET_AFTER + Duration::from_secs(3_600)),
+            SessionFailure::CannotConnect
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellable_unwinds_a_flag_that_was_already_set() {
+        // `configure` cancels and re-spawns in the same breath, so a client can
+        // be cancelled before its first poll. It must not dial at all.
+        let (tx, mut rx) = watch::channel(false);
+        tx.send(true).unwrap();
+        let result = cancellable(&mut rx, async {
+            unreachable!("the operation must not be polled once cancel is set")
+        })
+        .await;
+        assert!(matches!(result, Err(SessionError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn cancellable_unwinds_a_flag_raised_mid_handshake() {
+        let (tx, mut rx) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let _ = tx.send(true);
+        });
+        // Stands in for the 8 s connect: long enough that the old code would
+        // have finished the handshake before ever looking at the flag.
+        let result = cancellable(&mut rx, tokio::time::sleep(Duration::from_secs(30))).await;
+        assert!(matches!(result, Err(SessionError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn cancellable_passes_the_value_through_when_no_cancel_arrives() {
+        let (_tx, mut rx) = watch::channel(false);
+        let result = cancellable(&mut rx, async { 7u8 }).await;
+        assert!(matches!(result, Ok(7)));
+    }
+
+    #[tokio::test]
+    async fn cancellable_treats_a_dropped_sender_as_a_cancel() {
+        // The sender lives on the `ClientHandle`; if it is gone the hub is gone.
+        let (tx, mut rx) = watch::channel(false);
+        drop(tx);
+        let result = cancellable(&mut rx, tokio::time::sleep(Duration::from_secs(30))).await;
+        assert!(matches!(result, Err(SessionError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn wait_for_cancel_resolves_when_the_sender_is_dropped() {
+        let (tx, mut rx) = watch::channel(false);
+        drop(tx);
+        tokio::time::timeout(Duration::from_secs(1), wait_for_cancel(&mut rx))
+            .await
+            .expect("a closed cancel channel must resolve the arm");
+    }
+
+    #[tokio::test]
+    async fn wait_for_cancel_holds_while_the_channel_is_live_and_uncancelled() {
+        // The other half of the contract: an arm that resolved on a *live*
+        // channel would spin the session loop just as hard. A `false` write is
+        // a change, and must still not unwind the session.
+        let (tx, mut rx) = watch::channel(false);
+        tx.send(false).expect("send");
+        let waited =
+            tokio::time::timeout(Duration::from_millis(50), wait_for_cancel(&mut rx)).await;
+        assert!(
+            waited.is_err(),
+            "a live, uncancelled channel must not unwind the session"
+        );
+    }
+
+    /// A signaling client config whose signing key matches its own room
+    /// descriptor, pointed at `url`.
+    fn test_client_config(url: &str, device_id: &str) -> ClientConfig {
+        let identity = SignalingIdentity::generate();
+        let mobile = SignalingIdentity::generate();
+        let mut room_descriptor = RoomDescriptor {
+            v: PROTOCOL_VERSION,
+            room_id: String::new(),
+            room_nonce: URL_SAFE_NO_PAD.encode([7u8; 16]),
+            desktop_signing_key: identity.public_key_base64(),
+            mobile_signing_key: mobile.public_key_base64(),
+            not_after: now_ms() + 600_000,
+        };
+        room_descriptor.room_id = derive_room_id(&room_descriptor);
+        let rendezvous_id = room_descriptor.room_id.clone();
+        ClientConfig {
+            signaling_url: url.to_string(),
+            rendezvous_id: rendezvous_id.clone(),
+            room_descriptor,
+            signaling_key_ref: "test-key-ref".into(),
+            signing_private_key: URL_SAFE_NO_PAD.encode(identity.private_bytes()),
+            device_id: device_id.to_string(),
+            ice_servers: Vec::new(),
+            tier_writer: super::super::SignalingHub::new()
+                .new_tier_writer(&rendezvous_id, device_id),
+        }
+    }
+
+    fn test_shared_state() -> SharedState {
+        Arc::new(CompanionState {
+            secret: RwLock::new(vec![0u8; 32]),
+            deny_list: Arc::new(DenyList::new()),
+            app_handle: None,
+            idempotency: Arc::new(IdempotencyCache::new()),
+            event_bus: EventBus::new(),
+            sync_bridge: SyncBridge::new(),
+            desktop_messages_bridge: DesktopMessagesBridge::new(),
+            desktop_writes_bridge: DesktopWritesBridge::new(),
+            sync_registry: SyncTableRegistry::with_defaults(),
+            rate_limiter: RateLimiter::with_defaults(),
+            push_tokens: PushTokenRegistry::new(),
+        })
+    }
+
+    /// Minimal stand-in for the rendezvous relay: completes the WebSocket
+    /// upgrade, issues a live challenge, and reports the moment the client's
+    /// `Subscribe` lands. That frame is the last thing `run_one_session` sends
+    /// before entering its `select!` loop, so the report is the signal that the
+    /// loop, and nothing earlier, is what observes the cancel.
+    async fn stub_relay() -> (String, tokio::sync::oneshot::Receiver<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind stub relay");
+        // The path matters: `append_rid` only adds a query, so a pathless URL
+        // would put `GET ?rid=... HTTP/1.1` on the wire and the upgrade would
+        // be refused as an invalid request target. Real rendezvous URLs are
+        // always `wss://host/signaling`.
+        let url = format!(
+            "ws://{}/signaling",
+            listener.local_addr().expect("local addr")
+        );
+        let (subscribed_tx, subscribed_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut ws = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("websocket upgrade");
+            let challenge = serde_json::to_string(&ServerFrame::Challenge {
+                challenge: URL_SAFE_NO_PAD.encode([3u8; 32]),
+                issued_at: now_ms(),
+                expires_at: now_ms() + 60_000,
+            })
+            .expect("serialize challenge");
+            ws.send(Message::Text(challenge.into()))
+                .await
+                .expect("send challenge");
+            let mut subscribed_tx = Some(subscribed_tx);
+            // Keep reading so the socket stays open: only the cancel should be
+            // able to end this session.
+            while let Some(Ok(frame)) = ws.next().await {
+                if matches!(frame, Message::Text(_)) {
+                    if let Some(tx) = subscribed_tx.take() {
+                        let _ = tx.send(());
+                    }
+                }
+            }
+        });
+        (url, subscribed_rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_cancel_sender_unwinds_the_session_loop() {
+        // Every removal path today sends `true` before dropping, but that is
+        // not what makes them safe: `ClientHandle` documents dropping without a
+        // shutdown, and `cancel_one` defers the send to a spawned task, so a
+        // runtime that shuts down first drops the sender with nothing sent.
+        // With `changed()` in the loop's first `biased;` arm, a sender that is
+        // gone answers `Err` on every poll and the session spins at 100% CPU
+        // instead of unwinding.
+        //
+        // The session deliberately runs on its own thread and runtime rather
+        // than `tokio::spawn`. A spinning task never reaches a yield point, so
+        // it can be neither cancelled nor joined: dropping a runtime that owns
+        // one blocks forever, and a regression would hang `cargo test` instead
+        // of failing it. On a detached thread the spin cannot block this test's
+        // runtime or the harness process, so the timeout below reports the
+        // regression and the run moves on.
+        let (url, subscribed) = stub_relay().await;
+        let config = test_client_config(&url, "rtc-cancel-drop-device");
+        let state = test_shared_state();
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("session runtime");
+            let outcome = runtime.block_on(run_one_session(&config, state, cancel_rx));
+            let _ = outcome_tx.send(matches!(outcome, Err(SessionError::Cancelled)));
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), subscribed)
+            .await
+            .expect("the client should subscribe within 5s")
+            .expect("the relay should report the subscribe");
+
+        drop(cancel_tx);
+
+        let cancelled = tokio::time::timeout(Duration::from_secs(2), outcome_rx)
+            .await
+            .expect("a dropped cancel sender must unwind the session, not spin")
+            .expect("the session thread should report an outcome");
+        assert!(cancelled, "the session should unwind as `Cancelled`");
     }
 
     #[test]

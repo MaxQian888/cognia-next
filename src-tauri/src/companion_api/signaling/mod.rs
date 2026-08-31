@@ -242,7 +242,21 @@ impl SignalingHub {
     /// Renderer push: replace the configured signaling URL + ICE/TURN
     /// servers. Any device clients already running are restarted so they
     /// pick up the new endpoint.
-    pub fn configure(&self, enabled: bool, signaling_url: String, ice_servers: Vec<RTCIceServer>) {
+    ///
+    /// Returns whether the configuration actually changed. An unchanged patch
+    /// is a no-op: the renderer re-pushes this on *every* `AppSettings` write
+    /// (the settings singleton is one Dexie row, so a `liveQuery` over it
+    /// refires for any field, and `saveSettings` bumps `updatedAt` even when
+    /// the value is identical), and restarting means tearing down one WSS per
+    /// paired device and re-running each one's challenge / Ed25519 proof /
+    /// ECDH handshake. Comparing first is what keeps an unrelated settings
+    /// write from turning into a reconnect storm across every paired device.
+    pub fn configure(
+        &self,
+        enabled: bool,
+        signaling_url: String,
+        ice_servers: Vec<RTCIceServer>,
+    ) -> bool {
         // Snapshot the prior device list so we can restart them after the
         // configuration mutation. We don't want to hold the parking_lot
         // mutex across `spawn_client`, which doesn't await but does touch
@@ -251,6 +265,12 @@ impl SignalingHub {
         let binding: Option<Binding>;
         {
             let mut inner = self.inner.lock();
+            if inner.enabled == enabled
+                && inner.signaling_url == signaling_url
+                && inner.ice_servers == ice_servers
+            {
+                return false;
+            }
             inner.enabled = enabled;
             inner.signaling_url = signaling_url;
             inner.ice_servers = ice_servers;
@@ -276,12 +296,19 @@ impl SignalingHub {
                 }
             }
         }
+        true
     }
 
-    /// Renderer push: declare the complete set of currently-paired devices.
-    /// The hub diffs against its existing clients — new devices get a
-    /// freshly spawned client task; removed devices have their client
-    /// cancelled.
+    /// Renderer push: declare the complete set of devices that should hold a
+    /// signaling client right now. The hub diffs against its existing clients:
+    /// new devices get a freshly spawned client task, removed devices have
+    /// theirs cancelled.
+    ///
+    /// Note "should hold a client", not "are paired". `selectSignalingDevices`
+    /// on the renderer side drops revoked, paused, unprovisioned, and (since
+    /// the 30-day dormancy rule) long-idle devices, so this list is a subset of
+    /// `pairedDevices` and the socket count follows it exactly. Waking a
+    /// dormant device is therefore just another push through this method.
     pub fn sync_devices(&self, devices: Vec<DeviceRegistration>) {
         let binding: Option<Binding>;
         let enabled: bool;
@@ -465,6 +492,16 @@ impl SignalingHub {
     /// every [`RECONNECT_DEVICE_MIN_SPACING`]. Calls that arrive sooner
     /// return a `"reconnect_throttled"` error so a renderer-side XSS
     /// can't churn the handshake in a tight loop.
+    ///
+    /// **This restarts, it does not enrol.** The registration is resolved out
+    /// of `pending_devices`, which is verbatim the last list
+    /// [`sync_devices`](Self::sync_devices) was given, so a device the renderer
+    /// deliberately left out is `not found` here. That matters because the
+    /// renderer now drops devices idle for 30 days
+    /// (`lib/signaling/wan-dormancy.ts`), and the owner can wake one from the
+    /// device console. Waking works by re-pushing `sync_devices` with the
+    /// device included, never by calling this. See
+    /// `reconnect_device_cannot_wake_a_device_the_renderer_filtered_out`.
     pub fn reconnect_device(&self, rendezvous_id: &str) -> Result<(), String> {
         // Check + update the throttle BEFORE any state mutation so a
         // rejected call doesn't even cancel the existing client. We
@@ -750,6 +787,9 @@ pub mod commands {
         let mut servers: Vec<RTCIceServer> =
             patch.ice_servers.into_iter().map(Into::into).collect();
         servers.extend(patch.turn_servers.into_iter().map(Into::into));
+        // The bool says whether anything was actually restarted; the renderer
+        // has no use for it (it dedupes on its own side too), so it is dropped
+        // here rather than widening the command's response shape.
         hub.configure(patch.enabled, patch.signaling_url, servers);
         Ok(())
     }
@@ -877,6 +917,72 @@ mod tests {
     }
 
     #[test]
+    fn configure_with_an_identical_patch_is_a_no_op() {
+        // The renderer re-pushes the same patch on every `AppSettings` write.
+        // Applying it would tear down one WSS per paired device and re-run each
+        // handshake, so an unchanged patch must not reach `clear_clients`.
+        let hub = SignalingHub::new();
+        let (enabled, url, ice) = {
+            let inner = hub.inner.lock();
+            (
+                inner.enabled,
+                inner.signaling_url.clone(),
+                inner.ice_servers.clone(),
+            )
+        };
+        assert!(
+            !hub.configure(enabled, url.clone(), ice.clone()),
+            "an unchanged patch must report no change"
+        );
+        assert!(
+            !hub.configure(enabled, url, ice),
+            "and must stay a no-op however many times it is re-pushed"
+        );
+    }
+
+    #[test]
+    fn configure_applies_a_real_change_and_then_settles() {
+        let hub = SignalingHub::new();
+        let ice = vec![RTCIceServer {
+            urls: vec!["stun:stun.example:3478".into()],
+            ..Default::default()
+        }];
+        assert!(
+            hub.configure(true, "wss://relay.example/signaling".into(), ice.clone()),
+            "a different URL + ICE set is a real change"
+        );
+        {
+            let inner = hub.inner.lock();
+            assert_eq!(inner.signaling_url, "wss://relay.example/signaling");
+            assert_eq!(inner.ice_servers, ice);
+        }
+        // Re-pushing what was just applied is now the no-op case — the dedupe
+        // reads live state, so it cannot go stale after a real change.
+        assert!(!hub.configure(true, "wss://relay.example/signaling".into(), ice.clone()));
+        // Only the enabled flag moving is still a change.
+        assert!(hub.configure(false, "wss://relay.example/signaling".into(), ice));
+    }
+
+    #[test]
+    fn configure_treats_ice_server_order_as_significant() {
+        // The comparison is a plain `Vec` equality, so a reordered list counts
+        // as a change and restarts. That is the safe direction: a missed
+        // restart would leave devices dialing a stale relay.
+        let hub = SignalingHub::new();
+        let a = RTCIceServer {
+            urls: vec!["stun:a.example:3478".into()],
+            ..Default::default()
+        };
+        let b = RTCIceServer {
+            urls: vec!["stun:b.example:3478".into()],
+            ..Default::default()
+        };
+        let url = "wss://relay.example/signaling".to_string();
+        assert!(hub.configure(true, url.clone(), vec![a.clone(), b.clone()]));
+        assert!(hub.configure(true, url, vec![b, a]));
+    }
+
+    #[test]
     fn sync_devices_with_disabled_flag_skips_spawn() {
         let hub = SignalingHub::new();
         hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
@@ -990,6 +1096,52 @@ mod tests {
         // Unknown ids surface "not found" regardless of bind state.
         let err = hub.reconnect_device("r-nope").unwrap_err();
         assert!(err.contains("not found"));
+    }
+
+    #[test]
+    fn reconnect_device_cannot_wake_a_device_the_renderer_filtered_out() {
+        // The renderer drops a device idle for 30 days from the list it pushes,
+        // so the hub never learns about it. `reconnect_device` resolves out of
+        // `pending_devices`, which is that same list, so it answers "not found"
+        // rather than dialling a room it has no descriptor for.
+        let hub = SignalingHub::new();
+        hub.configure(false, DEFAULT_SIGNALING_URL.to_string(), vec![]);
+        hub.sync_devices(vec![registration("active", "r-active")]);
+        let err = hub.reconnect_device("r-dormant").unwrap_err();
+        assert!(err.contains("not found"), "unexpected error: {err}");
+
+        // Waking one is a re-push that includes it, which is what makes it
+        // known here as well. This is the contract the console's wake button
+        // depends on, and the reason it does not call reconnect_device.
+        hub.sync_devices(vec![
+            registration("active", "r-active"),
+            registration("dormant", "r-dormant"),
+        ]);
+        assert!(
+            hub.registrations_snapshot()
+                .iter()
+                .any(|d| d.rendezvous_id == "r-dormant"),
+            "the woken device must be in the hub's registration set"
+        );
+        assert!(hub.reconnect_device("r-dormant").is_ok());
+    }
+
+    #[test]
+    fn sync_devices_cancels_a_client_the_renderer_stopped_listing() {
+        // The dormancy rule takes effect through exactly this path: a device
+        // that ages out simply stops appearing, and the diff tears its socket
+        // down. Nothing else has to know the rule exists.
+        let hub = SignalingHub::new();
+        hub.sync_devices(vec![registration("d1", "r1"), registration("d2", "r2")]);
+        assert_eq!(hub.registrations_snapshot().len(), 2);
+        hub.sync_devices(vec![registration("d1", "r1")]);
+        let remaining: Vec<String> = hub
+            .registrations_snapshot()
+            .into_iter()
+            .map(|d| d.rendezvous_id)
+            .collect();
+        assert_eq!(remaining, vec!["r1".to_string()]);
+        assert!(!hub.registered_rendezvous_ids().contains(&"r2".to_string()));
     }
 
     #[test]
