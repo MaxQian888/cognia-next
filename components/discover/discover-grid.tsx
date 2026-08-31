@@ -49,7 +49,13 @@ export interface DiscoverGridProps {
  */
 const VIRTUALIZE_THRESHOLD = 80
 
-const EMPTY_KEY_BY_CATEGORY: Partial<Record<DiscoverView, string>> = {
+/**
+ * Category to empty-state message key. Exported so `categories.test.ts` can
+ * pin it against the registry: a new category with no entry here silently
+ * falls back to the generic `empty.noQuery`, which reads as "no results"
+ * rather than "nothing is installed".
+ */
+export const EMPTY_KEY_BY_CATEGORY: Partial<Record<DiscoverView, string>> = {
   characters: "emptyCharacters",
   teams: "emptyTeams",
   skills: "emptySkills",
@@ -59,6 +65,9 @@ const EMPTY_KEY_BY_CATEGORY: Partial<Record<DiscoverView, string>> = {
   mcpTools: "emptyMcpTools",
   mcpPresets: "emptyMcpPresets",
   connectors: "emptyConnectors",
+  docsProviders: "emptyDocsProviders",
+  externalServices: "emptyExternalServices",
+  integrations: "emptyIntegrations",
   ocrProviders: "emptyOcrProviders",
   slashCommands: "emptySlashCommands",
   workflowTemplates: "emptyWorkflowTemplates",

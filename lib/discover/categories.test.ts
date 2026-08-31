@@ -93,6 +93,9 @@ describe("lib/discover/categories", () => {
       "mcpTools",
       "mcpPresets",
       "connectors",
+      "docsProviders",
+      "externalServices",
+      "integrations",
       "ocrProviders",
       "slashCommands",
     ])
@@ -217,5 +220,46 @@ describe("lib/discover/categories", () => {
       expect(isValidView("slashCommands")).toBe(true)
       expect(isValidView("nope")).toBe(false)
     })
+  })
+})
+
+/**
+ * The sidebar, the chip strip and the inspector header all label a category
+ * with `t(`categories.${id}`)`, and the grid picks its empty state from
+ * `EMPTY_KEY_BY_CATEGORY`. Both are template / table lookups that `lint:i18n`
+ * cannot follow, so adding a category without its copy renders a raw key path
+ * at people. Pin the catalogue against the registry instead.
+ */
+describe("discover category i18n catalogue", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const en = require("@/i18n/messages/en/discover.json") as Record<string, unknown>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const zh = require("@/i18n/messages/zh-CN/discover.json") as Record<string, unknown>
+
+  it.each(["en", "zh-CN"])("labels every registered category in %s", (locale) => {
+    const labels = ((locale === "en" ? en : zh).categories ?? {}) as Record<string, string>
+    for (const category of DISCOVER_CATEGORIES) {
+      expect(typeof labels[category.id]).toBe("string")
+      expect(labels[category.id]).not.toBe("")
+    }
+  })
+
+  it.each(["en", "zh-CN"])("labels both pseudo-categories in %s", (locale) => {
+    const labels = ((locale === "en" ? en : zh).categories ?? {}) as Record<string, string>
+    expect(typeof labels[FAVORITES_CATEGORY]).toBe("string")
+    expect(typeof labels[FORYOU_CATEGORY]).toBe("string")
+  })
+
+  it.each(["en", "zh-CN"])("gives every category an empty state in %s", (locale) => {
+    const messages = locale === "en" ? en : zh
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { EMPTY_KEY_BY_CATEGORY } = require("@/components/discover/discover-grid") as {
+      EMPTY_KEY_BY_CATEGORY: Record<string, string | undefined>
+    }
+    for (const category of DISCOVER_CATEGORIES) {
+      const key = EMPTY_KEY_BY_CATEGORY[category.id]
+      expect(key).toBeDefined()
+      expect(typeof messages[key as string]).toBe("string")
+    }
   })
 })

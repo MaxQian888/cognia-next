@@ -25,6 +25,8 @@ jest.mock("next/link", () => ({
   ),
 }))
 
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: jest.fn(() => "desktop") }))
+
 jest.mock("@/components/mobile/discover/character-detail-sheet", () => ({
   CharacterDetailSheet: ({ open }: { open: boolean }) =>
     open ? <div data-testid="character-detail-sheet" /> : null,
@@ -395,7 +397,7 @@ describe("<DiscoverInspector />", () => {
     )
   })
 
-  it("renders the connector inspector with status + a deep link to /settings/connections", () => {
+  it("renders the connector inspector with status + a deep link to the platform", () => {
     const connector = {
       type: "telegram" as const,
       iconName: "Send",
@@ -414,7 +416,10 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByText("connectorStatus.stable")).toBeInTheDocument()
     expect(screen.getByText("A2UI")).toBeInTheDocument()
     const link = screen.getByTestId("discover-inspector-open-connector")
-    expect(link).toHaveAttribute("href", "/settings/connections?platform=telegram")
+    expect(link).toHaveAttribute(
+      "href",
+      "/settings?section=connections&connectionsTab=adapters&platform=telegram"
+    )
   })
 
   it("disables the connector link when the platform is planned-only", () => {
@@ -460,7 +465,7 @@ describe("<DiscoverInspector />", () => {
       screen.getByText((content) => content.includes("ocrBadge.needsCredentials"))
     ).toBeInTheDocument()
     const link = screen.getByTestId("discover-inspector-open-ocr")
-    expect(link).toHaveAttribute("href", "/settings/ocr")
+    expect(link).toHaveAttribute("href", "/settings?section=ocr")
   })
 
   it("renders the workflow template inspector with locale-aware description + tags", () => {
@@ -632,7 +637,7 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByText("Show git status")).toBeInTheDocument()
     expect(screen.getByTestId("discover-inspector-open-slash-command")).toHaveAttribute(
       "href",
-      "/settings/slash-commands"
+      "/settings?section=slash-commands"
     )
   })
 
@@ -647,7 +652,7 @@ describe("<DiscoverInspector />", () => {
     )
     expect(screen.getByTestId("discover-inspector-add-mcp-preset")).toHaveAttribute(
       "href",
-      "/settings/external-bridge?preset=filesystem"
+      "/settings?section=mcp&preset=filesystem"
     )
     expect(screen.getByText("stdio")).toBeInTheDocument()
   })
@@ -725,6 +730,157 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByTestId("discover-inspector-open-subagent")).toHaveAttribute(
       "href",
       "/me/subagents"
+    )
+  })
+})
+
+describe("DiscoverInspector — connection planes", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const hostProfileMock = require("@/hooks/use-host-profile").useHostProfile as jest.Mock
+
+  const larkProvider = {
+    id: "lark",
+    mentionPrefix: "lark:",
+    kinds: ["doc", "wiki"],
+    hosts: ["tauri"],
+  } as unknown as Extract<DiscoverItem, { kind: "docsProvider" }>["data"]
+
+  function renderDocs() {
+    render(
+      <DiscoverInspector
+        category="docsProviders"
+        itemId="lark"
+        items={[{ kind: "docsProvider", id: "lark", data: larkProvider }]}
+        onClose={jest.fn()}
+      />
+    )
+  }
+
+  beforeEach(() => hostProfileMock.mockReturnValue("desktop"))
+
+  it("titles a document source by name, not by its raw provider id", () => {
+    // The header resolves through the `docsProviders` namespace. Scoped to
+    // `discover` it fell back to the id and read "lark".
+    renderDocs()
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("name.lark")
+  })
+
+  it("does not repeat the name in the body under the header", () => {
+    renderDocs()
+    expect(screen.getAllByText("name.lark")).toHaveLength(1)
+  })
+
+  it("shows a document source's namespace and the kinds it can read", () => {
+    renderDocs()
+    expect(screen.getByText("@lark:")).toBeInTheDocument()
+    expect(screen.getByText("kind.doc")).toBeInTheDocument()
+    expect(screen.getByText("kind.wiki")).toBeInTheDocument()
+  })
+
+  it("links a document source to the Connections overview that configures it", () => {
+    renderDocs()
+    expect(screen.getByTestId("discover-inspector-open-docs-provider")).toHaveAttribute(
+      "href",
+      "/settings?section=connections&connectionsTab=overview"
+    )
+  })
+
+  it("says why a document source cannot be read here, and stays visible", () => {
+    hostProfileMock.mockReturnValue("mobile-companion")
+    renderDocs()
+    expect(screen.getByTestId("discover-inspector-docs-reach")).toHaveAttribute(
+      "data-cause",
+      "runs-on-host"
+    )
+    // Still linked: the point is that the paired host CAN do this.
+    expect(screen.getByTestId("discover-inspector-open-docs-provider")).toBeInTheDocument()
+  })
+
+  it("shows no reach notice on a host that can read them", () => {
+    renderDocs()
+    expect(screen.queryByTestId("discover-inspector-docs-reach")).not.toBeInTheDocument()
+  })
+
+  it("lists an external service's providers with their per-provider state", () => {
+    const service = {
+      key: "figma-external-service:figma",
+      pluginId: "figma-external-service",
+      serviceId: "figma",
+      label: "Figma",
+      description: "Design context.",
+      icon: "🎨",
+      skillIds: ["figma-use"],
+      providers: [
+        {
+          providerId: "remote",
+          kind: "mcp" as const,
+          availability: "vendor-pending" as const,
+          surfaces: ["chat" as const],
+          priority: 100,
+          connection: null,
+          state: "not-connected" as const,
+          action: { kind: "blocked-upstream" as const },
+        },
+        {
+          providerId: "desktop",
+          kind: "mcp" as const,
+          availability: "supported" as const,
+          surfaces: ["chat" as const],
+          priority: 90,
+          connection: null,
+          state: "pending" as const,
+          action: { kind: "review" as const, serverId: "srv-1" },
+        },
+      ],
+      connected: false,
+      awaitingReview: true,
+    }
+    render(
+      <DiscoverInspector
+        category="externalServices"
+        itemId={service.key}
+        items={[{ kind: "externalService", id: service.key, data: service }]}
+        onClose={jest.fn()}
+      />
+    )
+    const rows = screen.getByTestId("discover-inspector-service-providers")
+    expect(rows).toHaveTextContent("remote")
+    expect(rows).toHaveTextContent("desktop")
+    expect(rows).toHaveTextContent("services.state.not-connected")
+    expect(rows).toHaveTextContent("status.pending")
+    expect(screen.getByTestId("discover-inspector-open-service")).toHaveAttribute(
+      "href",
+      "/settings?section=services"
+    )
+  })
+
+  it("routes an integration to its own page, which no settings pane replaces", () => {
+    const integration = {
+      id: "github-delivery:github",
+      pluginId: "github-delivery",
+      integrationId: "github",
+      label: "GitHub",
+      description: "Issues and pull requests.",
+      category: "developer",
+      actionCount: 2,
+      eventCount: 1,
+      authKinds: ["app" as const],
+    }
+    render(
+      <DiscoverInspector
+        category="integrations"
+        itemId={integration.id}
+        items={[{ kind: "integration", id: integration.id, data: integration }]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByText("integrationAuth.app")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-integration-counts")).toHaveTextContent(
+      '{"actions":2,"events":1}'
+    )
+    expect(screen.getByTestId("discover-inspector-open-integration")).toHaveAttribute(
+      "href",
+      "/integrations"
     )
   })
 })

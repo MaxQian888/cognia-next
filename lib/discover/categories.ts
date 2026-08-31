@@ -29,6 +29,9 @@ export type DiscoverCategoryId =
   | "mcpTools"
   | "mcpPresets"
   | "connectors"
+  | "docsProviders"
+  | "externalServices"
+  | "integrations"
   | "ocrProviders"
   | "slashCommands"
   | "workflowTemplates"
@@ -62,6 +65,14 @@ export const DISCOVER_CATEGORIES: readonly DiscoverCategory[] = [
   { id: "mcpTools", group: "extensions", iconName: "Wrench" },
   { id: "mcpPresets", group: "extensions", iconName: "Server" },
   { id: "connectors", group: "extensions", iconName: "Plug" },
+  // The three connection planes that had a catalog everywhere except the one
+  // page built for browsing. Feishu/Google document sources, plugin-delivered
+  // external services (Figma), and marketplace integrations (GitHub) were each
+  // reachable only from their own settings pane, so "what can I connect this
+  // to?" had no single answer.
+  { id: "docsProviders", group: "extensions", iconName: "Cloud" },
+  { id: "externalServices", group: "extensions", iconName: "Cable" },
+  { id: "integrations", group: "extensions", iconName: "PlugZap" },
   { id: "ocrProviders", group: "extensions", iconName: "ScanText" },
   { id: "slashCommands", group: "extensions", iconName: "Terminal" },
   { id: "workflowTemplates", group: "templates", iconName: "Workflow" },

@@ -81,3 +81,80 @@ export const Selected: Story = {
     }),
   },
 }
+
+export const DocsProvider: Story = {
+  args: {
+    item: item({
+      kind: "docsProvider",
+      id: "lark",
+      data: {
+        id: "lark",
+        mentionPrefix: "lark:",
+        kinds: ["doc", "wiki", "sheet"],
+        hosts: ["tauri"],
+      },
+    }),
+  },
+}
+
+export const ExternalServiceConnected: Story = {
+  args: {
+    item: item({
+      kind: "externalService",
+      id: "figma-external-service:figma",
+      data: {
+        key: "figma-external-service:figma",
+        pluginId: "figma-external-service",
+        serviceId: "figma",
+        label: "Figma",
+        description: "Design context, canvas editing, Code Connect and assets.",
+        icon: "🎨",
+        skillIds: ["figma-use"],
+        providers: [],
+        connected: true,
+        awaitingReview: false,
+      },
+    }),
+  },
+}
+
+export const ExternalServiceAwaitingReview: Story = {
+  args: {
+    item: item({
+      kind: "externalService",
+      id: "figma-external-service:figma",
+      data: {
+        key: "figma-external-service:figma",
+        pluginId: "figma-external-service",
+        serviceId: "figma",
+        label: "Figma",
+        description: "Design context, canvas editing, Code Connect and assets.",
+        icon: "🎨",
+        skillIds: ["figma-use"],
+        providers: [],
+        connected: false,
+        awaitingReview: true,
+      },
+    }),
+  },
+}
+
+export const Integration: Story = {
+  args: {
+    item: item({
+      kind: "integration",
+      id: "github-delivery:github",
+      data: {
+        id: "github-delivery:github",
+        pluginId: "github-delivery",
+        integrationId: "github",
+        label: "GitHub",
+        description: "Issues, pull requests, checks and the action approval queue.",
+        category: "developer",
+        actionCount: 6,
+        eventCount: 12,
+        authKinds: ["app"],
+      },
+    }),
+  },
+}

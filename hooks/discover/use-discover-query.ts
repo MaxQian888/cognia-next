@@ -25,7 +25,11 @@ import { favoriteKey } from "@/hooks/discover/use-discover-favorites"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { OcrProvider } from "@/types/ocr"
 import type { TwinDraft, TwinSource } from "@/types/twin"
+import type { ServiceConnection } from "@/types/external-service"
 import type { ConnectorMeta } from "@/lib/connectors/adapter-metadata"
+import type { DocsProvider } from "@/lib/docs-providers"
+import type { ServiceView } from "@/lib/external-services/service-view"
+import type { IntegrationAuthKind } from "@/types/plugin/plugin-integration"
 import type { WorkflowCopilotTemplate } from "@/lib/workflow/copilot-templates"
 import type { DiscoverFilter, DiscoverSort } from "@/hooks/discover/use-discover-route-state"
 import { listCharacters } from "@/lib/db/characters"
@@ -35,6 +39,19 @@ import { listSkills } from "@/lib/db/skills"
 import { listTeams } from "@/lib/db/teams"
 import { getDb } from "@/lib/db/schema"
 import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
+import { listDocsProviders } from "@/lib/docs-providers/registry"
+import {
+  getExternalServiceCatalogRevision,
+  listExternalServices,
+  subscribeExternalServiceCatalog,
+} from "@/lib/external-services/catalog"
+import { buildServiceViews } from "@/lib/external-services/service-view"
+import { listServiceConnections } from "@/lib/db/external-services"
+import {
+  getIntegrationRegistryRevision,
+  listRegisteredIntegrationEntries,
+  subscribeIntegrationRegistry,
+} from "@/lib/integrations/registry"
 import { getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { listCopilotTemplates } from "@/lib/workflow/copilot-templates"
 import type { McpPreset } from "@/lib/claude/mcp-presets"
@@ -69,6 +86,28 @@ export interface DiscoverTeamTemplate {
   pluginId?: string
 }
 
+/**
+ * Normalized marketplace-integration shape.
+ *
+ * `PluginIntegrationDef` carries JSON schemas and handler names the browser
+ * has no use for. What a browsing user wants is what it connects to, how it
+ * authenticates, and how much it can do.
+ */
+export interface DiscoverIntegration {
+  /** `${pluginId}:${definition.id}` */
+  id: string
+  pluginId: string
+  integrationId: string
+  label: string
+  description?: string
+  category?: string
+  icon?: string
+  actionCount: number
+  eventCount: number
+  /** Distinct auth kinds this integration accepts, for the "how" badge. */
+  authKinds: IntegrationAuthKind[]
+}
+
 /** Normalized external-agent preset shape (from `getPresetDisplayInfo`). */
 export interface DiscoverExternalAgentPreset {
   id: string
@@ -86,6 +125,9 @@ export type DiscoverItem =
   | { kind: "plugin"; id: string; data: PluginRow }
   | { kind: "mcpServer"; id: string; data: McpServer }
   | { kind: "connector"; id: string; data: ConnectorMeta }
+  | { kind: "docsProvider"; id: string; data: DocsProvider }
+  | { kind: "externalService"; id: string; data: ServiceView }
+  | { kind: "integration"; id: string; data: DiscoverIntegration }
   | { kind: "ocrProvider"; id: string; data: OcrProvider }
   | { kind: "workflowTemplate"; id: string; data: WorkflowCopilotTemplate }
   | { kind: "twinSource"; id: string; data: TwinSource }
@@ -197,6 +239,22 @@ function buildExternalAgentPresets(): DiscoverExternalAgentPreset[] {
   return out
 }
 
+/** Project the integration registry into its browse shape. */
+function buildIntegrations(): DiscoverIntegration[] {
+  return listRegisteredIntegrationEntries().map(({ pluginId, definition }) => ({
+    id: `${pluginId}:${definition.id}`,
+    pluginId,
+    integrationId: definition.id,
+    label: definition.label,
+    description: definition.description,
+    category: definition.category,
+    icon: definition.icon,
+    actionCount: definition.actions.length,
+    eventCount: definition.eventTypes.length,
+    authKinds: [...new Set(definition.authStrategies.map((strategy) => strategy.type))],
+  }))
+}
+
 /** The dispatchable subagents (host built-ins + plugin overlay + user templates). */
 function buildSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
   // `hidden` subagents stay dispatchable but out of the Discover browser.
@@ -224,6 +282,20 @@ export function useDiscoverQuery(
     subscribeSlashCommands,
     getSlashCommandsVersion,
     getSlashCommandsVersion
+  )
+
+  // Same treatment for the two connection registries plugins write into. Both
+  // are module-level maps populated at plugin-enable time, so a snapshot taken
+  // once would leave the catalog stuck at whatever was loaded on first paint.
+  const serviceCatalogVersion = useSyncExternalStore(
+    subscribeExternalServiceCatalog,
+    getExternalServiceCatalogRevision,
+    getExternalServiceCatalogRevision
+  )
+  const integrationVersion = useSyncExternalStore(
+    subscribeIntegrationRegistry,
+    getIntegrationRegistryRevision,
+    () => 0
   )
 
   // Every call site is unconditional so React hook order stays the same on
@@ -264,6 +336,18 @@ export function useDiscoverQuery(
         : Promise.resolve<readonly McpServer[]>(EMPTY),
     [category]
   )
+  // External services are the one connection plane whose browse row needs a
+  // Dexie read: the catalog says what EXISTS, the connection rows say what the
+  // user has actually set up, and a card that cannot tell those apart is the
+  // defect this category is here to avoid.
+  const serviceConnectionsRaw = useLiveQuery<readonly ServiceConnection[]>(
+    () =>
+      category === "externalServices" || isFavoritesView
+        ? listServiceConnections()
+        : Promise.resolve<readonly ServiceConnection[]>(EMPTY),
+    [category]
+  )
+
   const twinSourcesRaw = useLiveQuery<readonly TwinSource[]>(
     () =>
       category === "twinIngest" || isFavoritesView
@@ -366,6 +450,50 @@ export function useDiscoverQuery(
           if (filter === "installed") arr = arr.filter((m) => m.status === "stable")
           if (filter === "builtin") arr = arr.filter((m) => m.status !== "planned")
           return arr.map<DiscoverItem>((data) => ({ kind: "connector", id: data.type, data }))
+        }
+        case "docsProviders": {
+          // Synchronous registry. Deliberately NOT the host-filtered read:
+          // both built-ins are desktop-only, so filtering by host would empty
+          // this category on every phone and browser rather than showing what
+          // the product can connect to. The inspector states where each one
+          // runs.
+          const arr = listDocsProviders().filter(
+            (provider) =>
+              matchesQuery(provider.id, trimmed) ||
+              matchesQuery(provider.mentionPrefix, trimmed) ||
+              provider.kinds.some((kind) => matchesQuery(kind, trimmed))
+          )
+          return arr.map<DiscoverItem>((data) => ({ kind: "docsProvider", id: data.id, data }))
+        }
+        case "externalServices": {
+          void serviceCatalogVersion
+          let arr = buildServiceViews(
+            listExternalServices(),
+            serviceConnectionsRaw ?? EMPTY
+          ).filter(
+            (view) =>
+              matchesQuery(view.label, trimmed) ||
+              matchesQuery(view.description, trimmed) ||
+              matchesQuery(view.serviceId, trimmed)
+          )
+          // "Installed" means the user has a live connection to it, which for
+          // this plane is the only reading of installed that is not trivially
+          // true (a bundled service is always present in the catalog).
+          if (filter === "installed") arr = arr.filter((view) => view.connected)
+          arr.sort((a, b) => a.label.localeCompare(b.label))
+          return arr.map<DiscoverItem>((data) => ({ kind: "externalService", id: data.key, data }))
+        }
+        case "integrations": {
+          void integrationVersion
+          const arr = buildIntegrations().filter(
+            (integration) =>
+              matchesQuery(integration.label, trimmed) ||
+              matchesQuery(integration.description, trimmed) ||
+              matchesQuery(integration.category, trimmed) ||
+              matchesQuery(integration.integrationId, trimmed)
+          )
+          arr.sort((a, b) => a.label.localeCompare(b.label))
+          return arr.map<DiscoverItem>((data) => ({ kind: "integration", id: data.id, data }))
         }
         case "ocrProviders": {
           let arr = getSharedOcrRegistry()
@@ -500,6 +628,20 @@ export function useDiscoverQuery(
               id: data.type,
               data,
             })),
+            ...listDocsProviders().map<DiscoverItem>((data) => ({
+              kind: "docsProvider",
+              id: data.id,
+              data,
+            })),
+            ...buildServiceViews(
+              listExternalServices(),
+              serviceConnectionsRaw ?? EMPTY
+            ).map<DiscoverItem>((data) => ({ kind: "externalService", id: data.key, data })),
+            ...buildIntegrations().map<DiscoverItem>((data) => ({
+              kind: "integration",
+              id: data.id,
+              data,
+            })),
             ...getSharedOcrRegistry()
               .list()
               .map<DiscoverItem>((data) => ({ kind: "ocrProvider", id: data.id, data })),
@@ -564,6 +706,9 @@ export function useDiscoverQuery(
     twinSourcesRaw,
     twinDraftsRaw,
     slashVersion,
+    serviceCatalogVersion,
+    integrationVersion,
+    serviceConnectionsRaw,
     trimmed,
     sort,
     filter,
@@ -586,6 +731,8 @@ export function useDiscoverQuery(
         return pluginsRaw === undefined
       case "mcpTools":
         return mcpServersRaw === undefined
+      case "externalServices":
+        return serviceConnectionsRaw === undefined
       case "twinIngest":
         return twinSourcesRaw === undefined
       case "twinDrafts":
@@ -599,11 +746,14 @@ export function useDiscoverQuery(
           skillsRaw === undefined ||
           pluginsRaw === undefined ||
           mcpServersRaw === undefined ||
+          serviceConnectionsRaw === undefined ||
           twinSourcesRaw === undefined ||
           twinDraftsRaw === undefined
         )
       // Synchronous in-memory registries.
       case "connectors":
+      case "docsProviders":
+      case "integrations":
       case "ocrProviders":
       case "workflowTemplates":
       default:

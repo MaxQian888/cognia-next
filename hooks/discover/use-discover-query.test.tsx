@@ -54,6 +54,30 @@ jest.mock("@/lib/db/schema", () => ({
 jest.mock("@/lib/connectors/adapter-metadata", () => ({
   listConnectorMetadata: jest.fn(() => []),
 }))
+// The three connection registries. Docs providers and integrations are
+// synchronous module maps; external services additionally read the connection
+// rows, which is why `listServiceConnections` is stubbed rather than the
+// Dexie table (the favorites view aggregates every kind, so it reads them all).
+const listDocsProvidersMock = jest.fn<unknown[], []>(() => [])
+jest.mock("@/lib/docs-providers/registry", () => ({
+  listDocsProviders: () => listDocsProvidersMock(),
+}))
+const listExternalServicesMock = jest.fn<unknown[], []>(() => [])
+jest.mock("@/lib/external-services/catalog", () => ({
+  listExternalServices: () => listExternalServicesMock(),
+  subscribeExternalServiceCatalog: () => () => {},
+  getExternalServiceCatalogRevision: () => 0,
+}))
+const listServiceConnectionsMock = jest.fn<Promise<unknown[]>, []>(async () => [])
+jest.mock("@/lib/db/external-services", () => ({
+  listServiceConnections: () => listServiceConnectionsMock(),
+}))
+const listIntegrationEntriesMock = jest.fn<unknown[], []>(() => [])
+jest.mock("@/lib/integrations/registry", () => ({
+  listRegisteredIntegrationEntries: () => listIntegrationEntriesMock(),
+  subscribeIntegrationRegistry: () => () => {},
+  getIntegrationRegistryRevision: () => 0,
+}))
 jest.mock("@/lib/ocr/registry", () => ({
   getSharedOcrRegistry: jest.fn(() => ({ list: () => [] })),
 }))
@@ -237,6 +261,10 @@ beforeEach(() => {
   listPluginsMock.mockReset()
   sortByMock.mockReset()
   twinSourcesSortByMock.mockReset()
+  listDocsProvidersMock.mockReset().mockReturnValue([])
+  listExternalServicesMock.mockReset().mockReturnValue([])
+  listServiceConnectionsMock.mockReset().mockResolvedValue([])
+  listIntegrationEntriesMock.mockReset().mockReturnValue([])
 })
 
 afterEach(async () => {
@@ -700,5 +728,264 @@ describe("useDiscoverQuery", () => {
         expect.arrayContaining(["mcpPreset:github", "subagent:workflow-designer"])
       )
     })
+  })
+})
+
+describe("useDiscoverQuery — connection planes", () => {
+  const larkProvider = {
+    id: "lark",
+    mentionPrefix: "lark:",
+    kinds: ["doc", "wiki", "sheet"],
+    hosts: ["tauri"],
+  }
+  const googleProvider = {
+    id: "google",
+    mentionPrefix: "gdoc:",
+    kinds: ["doc", "sheet"],
+    hosts: ["tauri"],
+  }
+
+  const figma = {
+    pluginId: "figma-external-service",
+    definition: {
+      id: "figma",
+      label: "Figma",
+      description: "Design context and canvas editing.",
+      fallbackPolicy: "never",
+      providers: [
+        {
+          id: "remote",
+          kind: "mcp",
+          contributionId: "figma-remote",
+          priority: 100,
+          surfaces: ["chat"],
+          availability: "vendor-pending",
+        },
+        {
+          id: "desktop",
+          kind: "mcp",
+          contributionId: "figma-desktop",
+          priority: 90,
+          surfaces: ["chat"],
+        },
+      ],
+    },
+  }
+  const acme = {
+    pluginId: "acme",
+    definition: {
+      id: "acme",
+      label: "Acme",
+      description: "An OpenAPI service.",
+      fallbackPolicy: "never",
+      providers: [
+        {
+          id: "api",
+          kind: "openapi",
+          contributionId: "acme-api",
+          priority: 10,
+          surfaces: ["chat"],
+        },
+      ],
+    },
+  }
+
+  const github = {
+    pluginId: "github-delivery",
+    definition: {
+      id: "github",
+      label: "GitHub",
+      description: "Issues, pull requests and checks.",
+      category: "developer",
+      authStrategies: [
+        { id: "app", type: "app", label: "GitHub App", providerId: "gh" },
+        { id: "pat", type: "personal-access-token", label: "Token", providerId: "gh" },
+        { id: "app2", type: "app", label: "Second app", providerId: "gh" },
+      ],
+      resourceKinds: ["repository"],
+      eventTypes: [{ id: "issues.opened", label: "Issue opened", resourceKinds: ["repository"] }],
+      actions: [
+        {
+          id: "comment",
+          label: "Comment",
+          handler: "h",
+          inputSchema: {},
+          risk: "write",
+          idempotency: "none",
+        },
+        {
+          id: "close",
+          label: "Close",
+          handler: "h",
+          inputSchema: {},
+          risk: "write",
+          idempotency: "none",
+        },
+      ],
+    },
+  }
+
+  describe("docsProviders", () => {
+    it("lists EVERY registered provider, not the host-supported subset", () => {
+      // Both built-ins are desktop-only. Filtering by host here would empty the
+      // category on a phone, which is exactly the defect that made the mobile
+      // composer hide cloud documents entirely.
+      listDocsProvidersMock.mockReturnValue([larkProvider, googleProvider])
+      const { result } = renderHook(() => useDiscoverQuery("docsProviders", ""))
+      expect(result.current.loading).toBe(false)
+      expect(result.current.items.map((i) => i.id)).toEqual(["lark", "google"])
+      expect(result.current.items[0]).toEqual({
+        kind: "docsProvider",
+        id: "lark",
+        data: expect.objectContaining({ mentionPrefix: "lark:" }),
+      })
+    })
+
+    it("searches by mention prefix and by document kind", () => {
+      listDocsProvidersMock.mockReturnValue([larkProvider, googleProvider])
+      expect(
+        renderHook(() => useDiscoverQuery("docsProviders", "gdoc")).result.current.items.map(
+          (i) => i.id
+        )
+      ).toEqual(["google"])
+      expect(
+        renderHook(() => useDiscoverQuery("docsProviders", "wiki")).result.current.items.map(
+          (i) => i.id
+        )
+      ).toEqual(["lark"])
+    })
+  })
+
+  describe("externalServices", () => {
+    it("lists one entry per service with its providers merged in", async () => {
+      listExternalServicesMock.mockReturnValue([figma])
+      const { result, rerender } = renderHook(() => useDiscoverQuery("externalServices", ""))
+      await flush()
+      rerender()
+      expect(result.current.loading).toBe(false)
+      expect(result.current.items).toHaveLength(1)
+      const [item] = result.current.items
+      expect(item.kind).toBe("externalService")
+      expect(item.id).toBe("figma-external-service:figma")
+      expect(item.data).toEqual(expect.objectContaining({ label: "Figma", connected: false }))
+    })
+
+    it("reports loading until the connection rows resolve", () => {
+      listExternalServicesMock.mockReturnValue([figma])
+      const { result } = renderHook(() => useDiscoverQuery("externalServices", ""))
+      // The catalog is synchronous but the connection state is not, and a card
+      // that renders "not connected" before the read lands would be wrong.
+      expect(result.current.loading).toBe(true)
+    })
+
+    it("folds the connection rows into the merged view", async () => {
+      listExternalServicesMock.mockReturnValue([figma])
+      listServiceConnectionsMock.mockResolvedValue([
+        {
+          id: "c1",
+          pluginId: "figma-external-service",
+          serviceId: "figma",
+          providerId: "desktop",
+          runtimeTargetId: "local",
+          status: "connected",
+          providerFingerprint: "fp",
+          providerRef: { kind: "mcp", serverId: "srv-1" },
+          enabledSurfaces: ["chat"],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ])
+      const { result, rerender } = renderHook(() => useDiscoverQuery("externalServices", ""))
+      await flush()
+      rerender()
+      expect(result.current.items[0].data).toEqual(expect.objectContaining({ connected: true }))
+    })
+
+    it("filter=installed keeps only services with a live connection", async () => {
+      listExternalServicesMock.mockReturnValue([figma, acme])
+      const { result, rerender } = renderHook(() =>
+        useDiscoverQuery("externalServices", "", { filter: "installed" })
+      )
+      await flush()
+      rerender()
+      expect(result.current.items).toHaveLength(0)
+    })
+
+    it("sorts by label and searches the description", async () => {
+      listExternalServicesMock.mockReturnValue([figma, acme])
+      const all = renderHook(() => useDiscoverQuery("externalServices", ""))
+      await flush()
+      all.rerender()
+      expect(all.result.current.items.map((i) => i.data.label)).toEqual(["Acme", "Figma"])
+
+      const hit = renderHook(() => useDiscoverQuery("externalServices", "canvas"))
+      await flush()
+      hit.rerender()
+      expect(hit.result.current.items.map((i) => i.data.label)).toEqual(["Figma"])
+    })
+  })
+
+  describe("integrations", () => {
+    it("projects the registry into a browse shape", () => {
+      listIntegrationEntriesMock.mockReturnValue([github])
+      const { result } = renderHook(() => useDiscoverQuery("integrations", ""))
+      expect(result.current.loading).toBe(false)
+      expect(result.current.items[0]).toEqual({
+        kind: "integration",
+        id: "github-delivery:github",
+        data: expect.objectContaining({
+          label: "GitHub",
+          category: "developer",
+          actionCount: 2,
+          eventCount: 1,
+        }),
+      })
+    })
+
+    it("de-duplicates auth kinds so the badge row does not repeat itself", () => {
+      listIntegrationEntriesMock.mockReturnValue([github])
+      const { result } = renderHook(() => useDiscoverQuery("integrations", ""))
+      expect(result.current.items[0].data).toEqual(
+        expect.objectContaining({ authKinds: ["app", "personal-access-token"] })
+      )
+    })
+
+    it("searches by category", () => {
+      listIntegrationEntriesMock.mockReturnValue([github])
+      expect(
+        renderHook(() => useDiscoverQuery("integrations", "developer")).result.current.items
+      ).toHaveLength(1)
+      expect(
+        renderHook(() => useDiscoverQuery("integrations", "design")).result.current.items
+      ).toHaveLength(0)
+    })
+  })
+
+  it("aggregates all three planes into the favorites view", async () => {
+    listDocsProvidersMock.mockReturnValue([larkProvider])
+    listExternalServicesMock.mockReturnValue([figma])
+    listIntegrationEntriesMock.mockReturnValue([github])
+    listCharactersMock.mockResolvedValue([])
+    listTeamsMock.mockResolvedValue([])
+    listSkillsMock.mockResolvedValue([])
+    listPluginsMock.mockResolvedValue([])
+    sortByMock.mockResolvedValue([])
+    twinSourcesSortByMock.mockResolvedValue([])
+    const { result, rerender } = renderHook(() =>
+      useDiscoverQuery("favorites", "", {
+        favoriteKeys: new Set([
+          "docsProvider:lark",
+          "externalService:figma-external-service:figma",
+          "integration:github-delivery:github",
+        ]),
+      })
+    )
+    await flush()
+    rerender()
+    expect(result.current.items.map((i) => i.kind).sort()).toEqual([
+      "docsProvider",
+      "externalService",
+      "integration",
+    ])
   })
 })

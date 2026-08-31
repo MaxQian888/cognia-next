@@ -10,7 +10,12 @@ import type { PluginRow } from "@/lib/db/plugin-types"
 import type { TwinDraft } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: jest.fn(() => "desktop") }))
+
+import { useHostProfile } from "@/hooks/use-host-profile"
 import { DiscoverItemCard } from "./discover-item-card"
+
+const hostProfileMock = useHostProfile as jest.Mock
 
 jest.mock("next-intl", () => ({
   // Most assertions read on the raw i18n key — keep that behavior, but
@@ -464,5 +469,110 @@ describe("<DiscoverItemCard />", () => {
     rerender(<DiscoverItemCard item={plugin} selected={false} onSelect={jest.fn()} />)
     // Plugin subagents (id has ':') are not built-in.
     expect(screen.queryByText("builtInBadge")).not.toBeInTheDocument()
+  })
+})
+
+describe("DiscoverItemCard — connection planes", () => {
+  const docsItem: DiscoverItem = {
+    kind: "docsProvider",
+    id: "lark",
+    data: {
+      id: "lark",
+      mentionPrefix: "lark:",
+      kinds: ["doc", "wiki"],
+      hosts: ["tauri"],
+    } as unknown as Extract<DiscoverItem, { kind: "docsProvider" }>["data"],
+  }
+
+  beforeEach(() => hostProfileMock.mockReturnValue("desktop"))
+
+  it("names a document source from its own i18n catalogue", () => {
+    render(<DiscoverItemCard item={docsItem} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("name.lark")).toBeInTheDocument()
+    expect(screen.getByText("kind.doc · kind.wiki")).toBeInTheDocument()
+  })
+
+  it("carries no reach badge on a host that can read the documents", () => {
+    render(<DiscoverItemCard item={docsItem} selected={false} onSelect={jest.fn()} />)
+    expect(screen.queryByText(/reach\.short/)).not.toBeInTheDocument()
+  })
+
+  it("badges WHERE a blocked source runs rather than dropping it", () => {
+    // The card stays in the grid on every host. A phone learns its paired
+    // desktop can do this, which the old host filter never let it see.
+    hostProfileMock.mockReturnValue("mobile-companion")
+    render(<DiscoverItemCard item={docsItem} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("reach.short.runs-on-host")).toBeInTheDocument()
+  })
+
+  it("distinguishes a standalone browser from a companion", () => {
+    hostProfileMock.mockReturnValue("web-standalone")
+    render(<DiscoverItemCard item={docsItem} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("reach.short.no-runtime")).toBeInTheDocument()
+  })
+
+  it("renders an external service with its manifest label and connected badge", () => {
+    const item: DiscoverItem = {
+      kind: "externalService",
+      id: "figma-external-service:figma",
+      data: {
+        key: "figma-external-service:figma",
+        pluginId: "figma-external-service",
+        serviceId: "figma",
+        label: "Figma",
+        description: "Design context.",
+        icon: "🎨",
+        skillIds: [],
+        providers: [],
+        connected: true,
+        awaitingReview: false,
+      },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("Figma")).toBeInTheDocument()
+    expect(screen.getByText("serviceBadge.connected")).toBeInTheDocument()
+    // Never the built-in badge: every service is contributed by a plugin.
+    expect(screen.queryByText("builtInBadge")).not.toBeInTheDocument()
+  })
+
+  it("badges an unreviewed service as pending rather than connected", () => {
+    const item: DiscoverItem = {
+      kind: "externalService",
+      id: "figma-external-service:figma",
+      data: {
+        key: "figma-external-service:figma",
+        pluginId: "figma-external-service",
+        serviceId: "figma",
+        label: "Figma",
+        skillIds: [],
+        providers: [],
+        connected: false,
+        awaitingReview: true,
+      },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("serviceBadge.awaitingReview")).toBeInTheDocument()
+    expect(screen.queryByText("serviceBadge.connected")).not.toBeInTheDocument()
+  })
+
+  it("renders an integration with its category badge", () => {
+    const item: DiscoverItem = {
+      kind: "integration",
+      id: "github-delivery:github",
+      data: {
+        id: "github-delivery:github",
+        pluginId: "github-delivery",
+        integrationId: "github",
+        label: "GitHub",
+        description: "Issues and pull requests.",
+        category: "developer",
+        actionCount: 2,
+        eventCount: 1,
+        authKinds: ["app"],
+      },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("GitHub")).toBeInTheDocument()
+    expect(screen.getByText("developer")).toBeInTheDocument()
   })
 })

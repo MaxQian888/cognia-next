@@ -30,11 +30,14 @@ import { usePlatform } from "@/hooks/use-platform"
 import type {
   DiscoverItem,
   DiscoverExternalAgentPreset,
+  DiscoverIntegration,
   DiscoverTeamTemplate,
 } from "@/hooks/discover/use-discover-query"
 import type { Character, McpServer, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { ConnectorMeta } from "@/lib/connectors/adapter-metadata"
+import type { DocsProvider } from "@/lib/docs-providers"
+import type { ServiceView } from "@/lib/external-services/service-view"
 import type { DiscoverCategoryId, DiscoverView } from "@/lib/discover/categories"
 import type { OcrProvider } from "@/types/ocr"
 import type { TwinDraft, TwinSource } from "@/types/twin"
@@ -49,6 +52,11 @@ import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { listPlugins } from "@/lib/db/plugins"
 import { getDb } from "@/lib/db/schema"
 import { setSkillStatus } from "@/lib/db/skills"
+import { connectionsHref, mcpHref, settingsHref } from "@/lib/settings/deep-link"
+import {
+  DocsProviderNotice,
+  useDocsProviderReach,
+} from "@/components/docs-providers/docs-provider-notice"
 
 export interface DiscoverInspectorProps {
   category: DiscoverView
@@ -107,8 +115,9 @@ export function DiscoverInspector({
 
 function InspectorHeader({ item, onClose }: { item: DiscoverItem; onClose: () => void }) {
   const t = useTranslations("discover")
+  const tDocs = useTranslations("docsProviders")
   const locale = useLocale()
-  const name = displayName(item, t, locale)
+  const name = displayName(item, t, locale, tDocs)
   return (
     <header className="flex items-start gap-2 border-b border-border px-4 py-3">
       <div className="min-w-0 flex-1">
@@ -145,6 +154,12 @@ function InspectorBody({ item }: { item: DiscoverItem }) {
       return <McpServerInspector server={item.data} />
     case "connector":
       return <ConnectorInspector connector={item.data} />
+    case "docsProvider":
+      return <DocsProviderInspector provider={item.data} />
+    case "externalService":
+      return <ExternalServiceInspector service={item.data} />
+    case "integration":
+      return <IntegrationInspector integration={item.data} />
     case "ocrProvider":
       return <OcrProviderInspector provider={item.data} />
     case "workflowTemplate":
@@ -389,7 +404,13 @@ function TwinDraftInspector({ draft }: { draft: TwinDraft }) {
 function displayName(
   item: DiscoverItem,
   t: (k: string, params?: Record<string, string | number | Date>) => string,
-  locale: string
+  locale: string,
+  /**
+   * Document-source names live under their own namespace, and next-intl scopes
+   * a translator to one. Without this the header fell back to the raw provider
+   * id and rendered "lark" above a body reading "Feishu Docs".
+   */
+  tDocs: (k: string) => string
 ): string {
   switch (item.kind) {
     case "character":
@@ -404,6 +425,12 @@ function displayName(
       return item.data.name
     case "connector":
       return t(`connectorLabels.${item.data.type}`)
+    case "docsProvider":
+      return tDocs(`name.${item.data.id}`)
+    case "externalService":
+      return item.data.label
+    case "integration":
+      return item.data.label
     case "ocrProvider":
       return item.data.label
     case "workflowTemplate": {
@@ -450,6 +477,12 @@ function categoryOf(item: DiscoverItem): DiscoverCategoryId {
       return "mcpTools"
     case "connector":
       return "connectors"
+    case "docsProvider":
+      return "docsProviders"
+    case "externalService":
+      return "externalServices"
+    case "integration":
+      return "integrations"
     case "ocrProvider":
       return "ocrProviders"
     case "workflowTemplate":
@@ -507,7 +540,7 @@ function McpServerInspector({ server }: { server: McpServer }) {
         className="self-start"
         data-testid="discover-inspector-open-mcp"
       >
-        <Link href="/settings/external-bridge">
+        <Link href={settingsHref("mcp")}>
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>
@@ -519,7 +552,7 @@ function McpServerInspector({ server }: { server: McpServer }) {
 function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
   const t = useTranslations("discover")
   const planned = connector.status === "planned"
-  const settingsHref = `/settings/connections?platform=${connector.type}`
+  const platformHref = connectionsHref({ platform: connector.type })
   // Live count of configured adapter instances for this platform — drives
   // the "N configured" badge so the user sees current state without
   // navigating to /settings/connections. Skip the read entirely for
@@ -563,9 +596,158 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         data-testid="discover-inspector-open-connector"
       >
         <Link
-          href={planned ? "#" : settingsHref}
+          href={planned ? "#" : platformHref}
           onClick={planned ? (e) => e.preventDefault() : undefined}
         >
+          <ExternalLinkIcon className="size-4" />
+          {t("inspector.openFull")}
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+/**
+ * A cloud document source (Feishu, Google Workspace).
+ *
+ * Rendered on every host, including the ones that cannot read from it. The
+ * catalog's job is to say what the product connects to, and a phone that is
+ * paired to a desktop holding these accounts is one deep link away from using
+ * them. Filtering the provider out (which is what the composer used to do)
+ * removed that fact from the product entirely.
+ */
+function DocsProviderInspector({ provider }: { provider: DocsProvider }) {
+  const t = useTranslations("discover")
+  const tDocs = useTranslations("docsProviders")
+  const reach = useDocsProviderReach(provider)
+  return (
+    <>
+      {/* No name paragraph here: the header already carries it, and repeating
+       * it pushed the badges and the reason further down for no gain. */}
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="secondary" className="font-mono text-[10px]">
+          @{provider.mentionPrefix}
+        </Badge>
+        {provider.kinds.map((kind) => (
+          <Badge key={kind} variant="outline">
+            {tDocs(`kind.${kind}` as "kind.doc")}
+          </Badge>
+        ))}
+      </div>
+      <DocsProviderNotice reach={reach} data-testid="discover-inspector-docs-reach" />
+      <Button
+        asChild
+        variant="default"
+        className="self-start"
+        data-testid="discover-inspector-open-docs-provider"
+      >
+        {/* Both providers are configured from the Connections overview: Feishu
+         * borrows the Lark connector's accounts, Google keeps its own client
+         * credential in the same card. */}
+        <Link href={connectionsHref({ tab: "overview" })}>
+          <ExternalLinkIcon className="size-4" />
+          {t("inspector.openFull")}
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+/**
+ * A plugin-delivered external service and its interchangeable providers
+ * (Figma Remote / Figma Desktop, ...). The per-provider state and next step
+ * come from the same projection the settings section renders, so the two
+ * cannot disagree about whether something is connected.
+ */
+function ExternalServiceInspector({ service }: { service: ServiceView }) {
+  const t = useTranslations("discover")
+  const tServices = useTranslations("settings.externalServices")
+  return (
+    <>
+      {service.description ? (
+        <p className="text-sm text-muted-foreground">{service.description}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {service.connected ? (
+          <Badge>{tServices("status.connected")}</Badge>
+        ) : service.awaitingReview ? (
+          <Badge variant="outline">{tServices("status.pending")}</Badge>
+        ) : null}
+        {service.skillIds.length > 0 ? (
+          <Badge variant="secondary">
+            {tServices("services.skills", { count: service.skillIds.length })}
+          </Badge>
+        ) : null}
+      </div>
+      <ul className="space-y-1.5" data-testid="discover-inspector-service-providers">
+        {service.providers.map((provider) => (
+          <li
+            key={provider.providerId}
+            className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-2"
+            data-state={provider.state}
+          >
+            <span className="text-xs font-medium">{provider.providerId}</span>
+            <Badge variant="outline" className="text-[10px]">
+              {tServices(`services.providerKind.${provider.kind}` as "services.providerKind.mcp")}
+            </Badge>
+            <Badge variant="outline" className="text-[10px]">
+              {provider.state === "not-connected"
+                ? tServices("services.state.not-connected")
+                : tServices(`status.${provider.state}` as "status.pending")}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+      <Button
+        asChild
+        variant="default"
+        className="self-start"
+        data-testid="discover-inspector-open-service"
+      >
+        <Link href={settingsHref("services")}>
+          <ExternalLinkIcon className="size-4" />
+          {t("inspector.openFull")}
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+/** A marketplace integration (GitHub app installs, webhooks, action queue). */
+function IntegrationInspector({ integration }: { integration: DiscoverIntegration }) {
+  const t = useTranslations("discover")
+  return (
+    <>
+      {integration.description ? (
+        <p className="text-sm text-muted-foreground">{integration.description}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        {integration.category ? <Badge variant="outline">{integration.category}</Badge> : null}
+        {integration.authKinds.map((kind) => (
+          <Badge key={kind} variant="secondary">
+            {t(`integrationAuth.${kind}` as "integrationAuth.oauth2")}
+          </Badge>
+        ))}
+      </div>
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid="discover-inspector-integration-counts"
+      >
+        {t("integrationCounts", {
+          actions: integration.actionCount,
+          events: integration.eventCount,
+        })}
+      </p>
+      <Button
+        asChild
+        variant="default"
+        className="self-start"
+        data-testid="discover-inspector-open-integration"
+      >
+        {/* Its own route rather than a settings section: `/integrations` owns
+         * account enrolment, webhook subscriptions and the approval queue, and
+         * none of that has a settings-pane equivalent to redirect into. */}
+        <Link href="/integrations">
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>
@@ -595,7 +777,7 @@ function OcrProviderInspector({ provider }: { provider: OcrProvider }) {
         className="self-start"
         data-testid="discover-inspector-open-ocr"
       >
-        <Link href="/settings/ocr">
+        <Link href={settingsHref("ocr")}>
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>
@@ -657,7 +839,7 @@ function SlashCommandInspector({ command }: { command: SlashCommandDefinition })
         className="self-start"
         data-testid="discover-inspector-open-slash-command"
       >
-        <Link href="/settings/slash-commands">
+        <Link href={settingsHref("slash-commands")}>
           <ExternalLinkIcon className="size-4" />
           {t("inspector.manageCommands")}
         </Link>
@@ -691,7 +873,7 @@ function McpPresetInspector({ preset }: { preset: McpPreset }) {
           className="self-start"
           data-testid="discover-inspector-add-mcp-preset"
         >
-          <Link href={`/settings/external-bridge?preset=${encodeURIComponent(preset.id)}`}>
+          <Link href={mcpHref({ preset: preset.id })}>
             <ExternalLinkIcon className="size-4" />
             {t("inspector.addMcpServer")}
           </Link>

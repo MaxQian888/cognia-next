@@ -11,10 +11,13 @@
 import { useLocale, useTranslations } from "next-intl"
 import {
   BotIcon,
+  CableIcon,
+  CloudIcon,
   FileEditIcon,
   InboxIcon,
   LayoutTemplateIcon,
   PlugIcon,
+  PlugZapIcon,
   PuzzleIcon,
   ScanTextIcon,
   SparklesIcon,
@@ -29,6 +32,8 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useHostProfile } from "@/hooks/use-host-profile"
+import { docsProviderReach } from "@/lib/docs-providers/reach"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 import type { DiscoverViewMode } from "@/lib/discover/categories"
 import { cn } from "@/lib/utils"
@@ -51,6 +56,11 @@ interface ItemMeta {
  */
 function useItemMeta(item: DiscoverItem): ItemMeta {
   const t = useTranslations("discover")
+  // The document-source catalogue lives under its own namespace and is pinned
+  // there by `registry-i18n.test.ts`. Reading it directly beats copying every
+  // provider name into `discover.*` for a second registry to drift against.
+  const tDocs = useTranslations("docsProviders")
+  const hostProfile = useHostProfile()
   const locale = useLocale()
   switch (item.kind) {
     case "character": {
@@ -120,6 +130,53 @@ function useItemMeta(item: DiscoverItem): ItemMeta {
               ? t("connectorStatus.beta")
               : undefined,
         avatar: { kind: "icon", Icon: PlugIcon },
+      }
+    }
+    case "docsProvider": {
+      const provider = item.data
+      // The badge carries WHERE it runs, not merely that it is unavailable.
+      // A phone user reading "Available on your paired host" learns something
+      // the old desktop-only filter never let them see, because it removed the
+      // provider from the list entirely.
+      const block = docsProviderReach(provider, hostProfile).block
+      return {
+        name: tDocs(`name.${provider.id}` as "name.lark"),
+        description: provider.kinds.map((kind) => tDocs(`kind.${kind}` as "kind.doc")).join(" · "),
+        builtIn: true,
+        badge: block ? tDocs(`reach.short.${block}` as "reach.short.no-runtime") : undefined,
+        avatar: { kind: "icon", Icon: CloudIcon },
+      }
+    }
+    case "externalService": {
+      const service = item.data
+      return {
+        name: service.label,
+        description: service.description,
+        // Never "built-in": every external service is contributed by a plugin,
+        // the same reading `mcpServer` gives the flag (`!s.pluginId`). Claiming
+        // host-native status for plugin content would be the one thing this
+        // badge exists to distinguish.
+        builtIn: false,
+        badge: service.connected
+          ? t("serviceBadge.connected")
+          : service.awaitingReview
+            ? t("serviceBadge.awaitingReview")
+            : undefined,
+        avatar: service.icon
+          ? { kind: "color", color: "#475569", glyph: service.icon }
+          : { kind: "icon", Icon: CableIcon },
+      }
+    }
+    case "integration": {
+      const integration = item.data
+      return {
+        name: integration.label,
+        description: integration.description,
+        builtIn: false,
+        badge: integration.category,
+        avatar: integration.icon
+          ? { kind: "color", color: "#475569", glyph: integration.icon }
+          : { kind: "icon", Icon: PlugZapIcon },
       }
     }
     case "ocrProvider": {
