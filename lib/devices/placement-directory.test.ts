@@ -42,7 +42,7 @@ function manifest(features: HostFeatureManifest["features"]): HostFeatureManifes
 const TIERS: DeviceShellTierRow[] = [
   { tier: "os", available: true },
   { tier: "microvm", available: false, reasonKey: "microvmAdapterMissing" },
-  { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopRetired" },
+  { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopNoConnection" },
 ]
 
 function row(overrides: Partial<DeviceRow> = {}): DeviceRow {

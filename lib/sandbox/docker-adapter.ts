@@ -22,12 +22,14 @@ import type {
   SandboxContainerState,
   SandboxPolicyInput,
 } from "@/lib/automation/sandbox-client"
+import { MicrovmAdapterError } from "@cognia/plugin-sdk/api/sandbox"
 import type {
   DockerSandboxConfig,
   SandboxConnectionRow,
   SandboxLifecycleOperation,
   SandboxLifecycleState,
 } from "@/types/sandbox"
+import { attestDockerPolicy, containerPathFor } from "./docker-policy-attestation"
 import {
   SandboxCapabilityError,
   type SandboxExecRequest,
@@ -177,12 +179,35 @@ export function buildDockerSandboxAdapter(
       }
     },
 
-    workspaceRead: async (ctx, path) => client.readFile(ctx.connectionId, path),
+    workspaceRead: async (ctx, path) => {
+      // A host path means nothing inside a container. Reading it verbatim
+      // would either miss or, worse, hit an unrelated file that happens to
+      // share the path. Translate through the mount or refuse.
+      const inContainer = config.workspaceMount ? containerPathFor(config, path) : path
+      if (inContainer === null) {
+        throw new MicrovmAdapterError(
+          "workspace-boundary",
+          `"${path}" is outside the directory mounted into this machine, so it cannot be read from inside it.`
+        )
+      }
+      return client.readFile(ctx.connectionId, inContainer)
+    },
 
     workspaceExec: async (
       ctx: SandboxOperationContext,
       request: SandboxExecRequest
     ): Promise<SandboxExecResult> => {
+      // Docker froze this container's network mode and its cpu/memory ceiling
+      // at create time, and `docker exec` cannot tighten any of them for one
+      // command. A request asking for more confinement than the machine has is
+      // refused rather than run, because running it would execute under weaker
+      // isolation than the caller believes it obtained.
+      if (request.policy) {
+        const attestation = attestDockerPolicy(config, request.policy)
+        if (!attestation.attested) {
+          throw new MicrovmAdapterError("policy-not-attested", attestation.reason)
+        }
+      }
       const result = await client.exec(ctx.connectionId, {
         argv: request.argv,
         cwd: request.cwd,

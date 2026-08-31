@@ -118,7 +118,7 @@ describe("buildDeviceStats", () => {
           shellTiers: [
             { tier: "os", available: true },
             { tier: "microvm", available: false, reasonKey: "microvmAdapterMissing" },
-            { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopRetired" },
+            { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopNoConnection" },
           ],
           workspaces: { support: "supported" },
           isRoutingTarget: true,

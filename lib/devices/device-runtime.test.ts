@@ -38,10 +38,37 @@ const CONNECTION = {
 } as unknown as SandboxConnectionRow
 
 describe("buildLocalShellTiers", () => {
-  it("lists cua-desktop and never makes it available", () => {
-    const tiers = buildLocalShellTiers(LOCAL)
-    const cua = tiers.find((tier) => tier.tier === "cua-desktop")
-    expect(cua).toEqual({ tier: "cua-desktop", available: false, reasonKey: "cuaDesktopRetired" })
+  it("lists cua-desktop unavailable when no connection carries workspace execution", () => {
+    // Listed, not hidden: a session still holding the stored tier needs to see
+    // why it refuses.
+    const tiers = buildLocalShellTiers(LOCAL, [CONNECTION])
+    expect(tiers.find((tier) => tier.tier === "cua-desktop")).toEqual({
+      tier: "cua-desktop",
+      available: false,
+      reasonKey: "cuaDesktopNoConnection",
+    })
+  })
+
+  it("makes cua-desktop available once a connection carries workspace execution", () => {
+    // The withdrawal reason was that a bound desktop proved GUI isolation
+    // only. `docker exec` runs inside the container, so the reason no longer
+    // holds for a Docker connection that advertises the capability.
+    const capable = {
+      ...CONNECTION,
+      capabilities: { ...CONNECTION.capabilities, workspaceRead: true, workspaceExec: true },
+    } as SandboxConnectionRow
+    expect(buildLocalShellTiers(LOCAL, [capable]).find((t) => t.tier === "cua-desktop")).toEqual({
+      tier: "cua-desktop",
+      available: true,
+      reasonKey: undefined,
+    })
+  })
+
+  it("stays unavailable with no connections at all", () => {
+    expect(buildLocalShellTiers(LOCAL).find((t) => t.tier === "cua-desktop")).toMatchObject({
+      available: false,
+      reasonKey: "cuaDesktopNoConnection",
+    })
   })
 
   it("withholds the microVM tier when no adapter is registered", () => {

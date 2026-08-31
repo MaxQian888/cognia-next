@@ -13,6 +13,7 @@
  * operation must fail loudly and must never execute on the user's own desktop.
  */
 
+import type { MicrovmRequest } from "@cognia/plugin-sdk/api/sandbox"
 import type {
   SandboxCapabilities,
   SandboxConnectionDriver,
@@ -92,6 +93,12 @@ export interface SandboxExecRequest {
   env?: Record<string, string>
   stdin?: string
   timeoutMs?: number
+  /**
+   * The confinement this call requires. An adapter whose machine cannot
+   * already provide it must refuse rather than run the command under weaker
+   * isolation than the caller believes it obtained.
+   */
+  policy?: MicrovmRequest
 }
 
 export interface SandboxExecResult {

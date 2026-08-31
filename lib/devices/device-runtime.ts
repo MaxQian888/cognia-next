@@ -40,14 +40,27 @@ export interface DeviceRuntimeInput {
 /**
  * Shell tiers this machine can actually execute in.
  *
- * `cua-desktop` is listed and never available. It survives in
- * `SandboxShellTier` for stored values only: the character picker renders its
- * item disabled, `preflightMutableTarget` throws at bind time, and
- * `executeSandbox` throws at call time with host fallback explicitly
- * forbidden. Hiding it would leave a session that still carries the stored
- * value with nothing on screen explaining why it refuses.
+ * `cua-desktop` was withdrawn while a bound desktop could only prove remote
+ * GUI isolation, which left shell and file work unsandboxed. That reason no
+ * longer holds: `lib/sandbox/docker-adapter.ts` runs both through
+ * `docker exec`, which executes inside the container (`docker exec <id>
+ * hostname` returns the container id, and its `/etc/os-release` reports the
+ * image's distribution rather than the host's).
+ *
+ * It is still not unconditionally available. The tier needs a bound connection
+ * whose provider actually carries `workspaceExec`, so it stays listed and
+ * unavailable while no such connection exists, rather than being hidden. A
+ * session still holding the stored value would otherwise find nothing on
+ * screen explaining why it refuses.
  */
-export function buildLocalShellTiers(local: LocalDeviceInput): DeviceShellTierRow[] {
+export function buildLocalShellTiers(
+  local: LocalDeviceInput,
+  sandboxConnections: readonly SandboxConnectionRow[] = []
+): DeviceShellTierRow[] {
+  // Optional chaining, not a shortcut: a row written before the capability
+  // matrix existed carries none, and a missing matrix means "cannot", not
+  // "crash the whole runtime panel".
+  const cuaDesktopReady = sandboxConnections.some((row) => row.capabilities?.workspaceExec === true)
   return [
     {
       tier: "os",
@@ -62,7 +75,11 @@ export function buildLocalShellTiers(local: LocalDeviceInput): DeviceShellTierRo
       // the host, so an unregistered adapter is a hard refusal, not a warning.
       reasonKey: local.microvmAvailable ? undefined : "microvmAdapterMissing",
     },
-    { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopRetired" },
+    {
+      tier: "cua-desktop",
+      available: cuaDesktopReady,
+      reasonKey: cuaDesktopReady ? undefined : "cuaDesktopNoConnection",
+    },
   ]
 }
 
@@ -72,7 +89,7 @@ export function buildDeviceRuntime(input: DeviceRuntimeInput): DeviceRuntimeSumm
   if (input.kind === "local") {
     return {
       sandbox: { support: "supported", connections: input.sandboxConnections },
-      shellTiers: buildLocalShellTiers(input.local),
+      shellTiers: buildLocalShellTiers(input.local, input.sandboxConnections),
       workspaces: routesLocally
         ? { support: "supported" }
         : { support: "requires-activation", reasonKey: "routedToRemoteHost" },

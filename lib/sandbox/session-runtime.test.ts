@@ -370,12 +370,46 @@ describe("SandboxSessionRuntime", () => {
     )
   })
 
-  it("refuses cua-desktop execution without touching the OS sandbox", async () => {
+  it("binds cua-desktop when the connection carries workspace execution", async () => {
+    // The tier was withdrawn while a bound desktop could only prove GUI
+    // isolation. `docker exec` runs inside the container, so a connection that
+    // advertises the capability may now carry shell and file work.
     const deps = createDeps()
     deps.getConnection.mockResolvedValue(
       runningConnection({
         ...defaultSandboxCapabilities("docker", "computer-server"),
         workspaceExec: true,
+      })
+    )
+    const runtime = new SandboxSessionRuntime(deps)
+
+    await expect(
+      runtime.bindSession({
+        sessionId: "session-1",
+        binding: {
+          shellTier: "cua-desktop",
+          computerTarget: "bound",
+          connectionId: "connection-1",
+        },
+        policy: null,
+        confine: null,
+        sandboxEnabled: true,
+        computerUseEnabled: true,
+        workspaceRoot: "/workspace",
+      })
+    ).resolves.toBeDefined()
+    // Whatever happens, it must not have quietly run on this machine.
+    expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+  })
+
+  it("refuses cua-desktop without touching the OS sandbox when the connection cannot carry it", async () => {
+    // cua-cloud and lume have no adapter at all, so the refusal is still the
+    // whole answer, and it must never fall back to this host.
+    const deps = createDeps()
+    deps.getConnection.mockResolvedValue(
+      runningConnection({
+        ...defaultSandboxCapabilities("docker", "computer-server"),
+        workspaceExec: false,
       })
     )
     const runtime = new SandboxSessionRuntime(deps)

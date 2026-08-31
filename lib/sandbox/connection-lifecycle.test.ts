@@ -187,20 +187,82 @@ describe("runSandboxConnectionOperation", () => {
     expect(client.stop).not.toHaveBeenCalled()
   })
 
-  it("refuses workspaceExec while the capability is withdrawn", async () => {
-    // Until the exec path is proven to run inside the container, the driver
-    // restriction keeps this closed. The refusal is the feature.
+  it("runs workspaceExec inside the machine", async () => {
+    const client = fakeClient()
+    const result = await runSandboxConnectionOperation(row({ state: "running" }), "workspaceExec", {
+      client,
+      exec: { argv: ["hostname"] },
+    })
+    expect(client.exec).toHaveBeenCalledWith("conn-1", {
+      argv: ["hostname"],
+      cwd: undefined,
+      env: undefined,
+      stdin: undefined,
+      timeoutMs: undefined,
+    })
+    expect(result.exec).toMatchObject({ exitCode: 0, stdout: "container-host" })
+  })
+
+  it("refuses workspaceExec when the container cannot attest the requested policy", async () => {
+    // Docker froze the container's network mode at create time and `docker
+    // exec` cannot tighten it, so running this would execute with network
+    // access the caller believes it gave up.
     const client = fakeClient()
     await expect(
       runSandboxConnectionOperation(row({ state: "running" }), "workspaceExec", {
         client,
-        exec: { argv: ["hostname"] },
+        exec: {
+          argv: ["curl", "https://example.com"],
+          policy: {
+            writable: [],
+            readable: [],
+            targetFiles: [],
+            maxCpuSeconds: 0,
+            maxMemoryMb: 0,
+            network: "off",
+            networkHosts: [],
+          },
+        },
       })
-    ).rejects.toMatchObject<Partial<SandboxCapabilityError>>({
-      code: "unsupported-operation",
-      operation: "workspaceExec",
-    })
+    ).rejects.toMatchObject({ code: "policy-not-attested" })
     expect(client.exec).not.toHaveBeenCalled()
+  })
+
+  it("refuses a workspace read outside the mounted directory", async () => {
+    const client = fakeClient()
+    const mounted = row({
+      state: "running",
+      config: {
+        provider: "docker",
+        image: "image",
+        host: "127.0.0.1",
+        port: 1,
+        workspaceMount: { hostPath: "/host/ws", containerPath: "/workspace" },
+      },
+    })
+    await expect(
+      runSandboxConnectionOperation(mounted, "workspaceRead", { client, path: "/etc/passwd" })
+    ).rejects.toMatchObject({ code: "workspace-boundary" })
+    expect(client.readFile).not.toHaveBeenCalled()
+  })
+
+  it("rebases a workspace read onto the container mount", async () => {
+    const client = fakeClient()
+    const mounted = row({
+      state: "running",
+      config: {
+        provider: "docker",
+        image: "image",
+        host: "127.0.0.1",
+        port: 1,
+        workspaceMount: { hostPath: "/host/ws", containerPath: "/workspace" },
+      },
+    })
+    await runSandboxConnectionOperation(mounted, "workspaceRead", {
+      client,
+      path: "/host/ws/src/a.ts",
+    })
+    expect(client.readFile).toHaveBeenCalledWith("conn-1", "/workspace/src/a.ts")
   })
 })
 

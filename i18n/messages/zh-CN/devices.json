@@ -208,7 +208,7 @@
     "tierReason": {
       "osBackendUnavailable": "本机未安装操作系统沙盒后端。",
       "microvmAdapterMissing": "未注册 microVM 适配器。请启用 E2B 沙盒插件；没有它时 microVM 请求会被直接拒绝，而不会回退到宿主执行。",
-      "cuaDesktopRetired": "已撤回。绑定桌面只能证明远程 GUI 隔离，shell 与文件操作并未被沙盒化。仍带有该档位的历史会话会在绑定时被拒绝。"
+      "cuaDesktopNoConnection": "需要一台已绑定、且支持 shell 与文件执行的机器。Docker 连接通过 `docker exec` 提供，命令确实在容器内执行。云端与 Lume 连接目前没有适配器，只能提供远程桌面。"
     },
     "sandbox": "沙盒连接",
     "sandboxUnsupportedTitle": "这里没有沙盒连接",

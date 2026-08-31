@@ -12,7 +12,8 @@ import { transport } from "@/lib/tauri"
 import type { SandboxConnectionRow, SandboxSessionBinding } from "@/types/sandbox"
 
 import { validateSandboxSessionBinding } from "./binding"
-import { assertSandboxOperationAllowed, SandboxCapabilityError } from "./lifecycle-contract"
+import { runSandboxConnectionOperation } from "./connection-lifecycle"
+import { assertSandboxOperationAllowed } from "./lifecycle-contract"
 import {
   getMicrovmExec,
   type MicrovmExecAdapter,
@@ -411,14 +412,51 @@ export class SandboxSessionRuntime {
           throw error
         }
       }
-      case "cua-desktop":
-        // Unreachable in practice — `preflightMutableTarget` refuses this tier
-        // before a record exists. Kept only for switch exhaustiveness, so it
-        // must not pay a connection round-trip to restate the same refusal.
-        throw new SandboxRuntimeError(
-          "surface-disabled",
-          "The cua-desktop shell tier has no verified workspace execution adapter; host fallback is forbidden."
-        )
+      case "cua-desktop": {
+        // Runs the command inside the bound machine via the provider adapter.
+        // `preflightMutableTarget` has already established that the connection
+        // advertises `workspaceExec`, and the adapter attests the per-call
+        // policy against the container's frozen confinement before running
+        // anything. A refusal at either point stays a refusal: there is no
+        // fallback to this host.
+        const row = await this.requireConnection(record.binding.connectionId)
+        const started = Date.now()
+        try {
+          const exec = await runSandboxConnectionOperation(row, "workspaceExec", {
+            exec: {
+              argv: payload.command.argv,
+              cwd: payload.command.cwd,
+              env: payload.command.env,
+              stdin: payload.command.stdin ?? undefined,
+              timeoutMs: payload.command.timeout,
+              policy: payload.request,
+            },
+          })
+          if (!exec.exec) {
+            throw new SandboxRuntimeError(
+              "surface-disabled",
+              "The bound machine accepted the command but returned no result."
+            )
+          }
+          const result: MicrovmResult = {
+            exit_code: exec.exec.exitCode,
+            stdout: exec.exec.stdout,
+            stderr: exec.exec.stderr,
+            duration: exec.exec.durationMs,
+            timed_out: exec.exec.timedOut,
+            ...(exec.exec.stdoutTruncated ? { stdout_truncated: true } : {}),
+            ...(exec.exec.stderrTruncated ? { stderr_truncated: true } : {}),
+          }
+          this.recordMicrovmAudit(payload, {
+            result,
+            durationMs: Math.max(result.duration, Date.now() - started),
+          })
+          return result
+        } catch (error) {
+          this.recordMicrovmAudit(payload, { error, durationMs: Date.now() - started })
+          throw error
+        }
+      }
     }
   }
 
@@ -611,15 +649,12 @@ export class SandboxSessionRuntime {
       assertSandboxOperationAllowed(operationContext(row), "gui")
     }
     if (input.sandboxEnabled && input.binding.shellTier === "cua-desktop") {
+      // The tier is available only for a connection whose provider actually
+      // carries workspace execution. `assertSandboxOperationAllowed` refuses
+      // with `unsupported-operation` otherwise, which is still the whole
+      // answer for cua-cloud and lume: they have no adapter at all.
       const row = await this.requireConnection(input.binding.connectionId)
-      throw new SandboxCapabilityError({
-        code: "unsupported-operation",
-        operation: "workspaceExec",
-        provider: row.provider,
-        driver: row.driver,
-        message:
-          "The cua-desktop shell tier is unavailable because this connection has no verified workspace execution adapter.",
-      })
+      assertSandboxOperationAllowed(operationContext(row), "workspaceExec")
     }
   }
 }

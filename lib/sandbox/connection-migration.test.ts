@@ -1,5 +1,5 @@
 import type { LegacySandboxConnectionRow, SandboxConnectionRow } from "@/types/sandbox"
-import { defaultSandboxCapabilities } from "./connection-capabilities"
+import { defaultSandboxCapabilities, SANDBOX_CAPABILITY_REVISION } from "./connection-capabilities"
 import {
   LEGACY_SANDBOX_DRIVER,
   LEGACY_SANDBOX_IMAGE,
@@ -135,32 +135,68 @@ describe("migrateSandboxConnectionRow", () => {
     expect(twice).toBe(once)
   })
 
-  it("narrows stored computer-server workspace capabilities on every read", () => {
+  it("narrows a stored claim the current defaults do not support", () => {
     const migrated = migrateSandboxConnectionRow(legacyRow())
     const overclaimed: SandboxConnectionRow = {
       ...migrated,
-      capabilities: { ...migrated.capabilities, workspaceRead: true, workspaceExec: true },
+      // `connect` has no adapter for any pair, so it can only ever be removed.
+      capabilities: { ...migrated.capabilities, connect: true },
     }
 
     const normalized = migrateSandboxConnectionRow(overclaimed)
 
-    expect(normalized.capabilities.workspaceRead).toBe(false)
-    expect(normalized.capabilities.workspaceExec).toBe(false)
+    expect(normalized.capabilities.connect).toBe(false)
     expect(normalized).not.toBe(overclaimed)
     expect(migrateSandboxConnectionRow(normalized)).toBe(normalized)
   })
 
-  it("keeps implemented Docker lifecycle and GUI capabilities", () => {
+  it("recomputes from defaults when the row is behind the capability revision", () => {
+    // The narrow-only rule protects handshake narrowing, but it also means
+    // `false && true` stays false. Without the revision, a row written before
+    // an adapter existed could never learn one now does, and every existing
+    // database would show the new controls greyed out forever.
+    const migrated = migrateSandboxConnectionRow(legacyRow())
+    const stale: SandboxConnectionRow = {
+      ...migrated,
+      capabilitiesRevision: 1,
+      capabilities: { ...migrated.capabilities, workspaceExec: false, suspend: false },
+    }
+
+    const refreshed = migrateSandboxConnectionRow(stale)
+
+    expect(refreshed.capabilities.workspaceExec).toBe(true)
+    expect(refreshed.capabilities.suspend).toBe(true)
+    expect(refreshed.capabilitiesRevision).toBe(SANDBOX_CAPABILITY_REVISION)
+  })
+
+  it("still only narrows within a revision", () => {
+    // A handshake that discovered the peer supports less must not be undone by
+    // the next read.
+    const migrated = migrateSandboxConnectionRow(legacyRow())
+    const narrowed: SandboxConnectionRow = {
+      ...migrated,
+      capabilitiesRevision: SANDBOX_CAPABILITY_REVISION,
+      capabilities: { ...migrated.capabilities, gui: false },
+    }
+    expect(migrateSandboxConnectionRow(narrowed).capabilities.gui).toBe(false)
+  })
+
+  it("keeps implemented Docker lifecycle, GUI and workspace capabilities", () => {
     const migrated = migrateSandboxConnectionRow(legacyRow())
     expect(migrated.capabilities).toMatchObject({
+      create: true,
       start: true,
+      suspend: true,
+      resume: true,
       stop: true,
       delete: true,
       health: true,
       gui: true,
-      workspaceRead: false,
-      workspaceExec: false,
+      workspaceRead: true,
+      workspaceExec: true,
     })
+    // `connect` has no adapter for any pair.
+    expect(migrated.capabilities.connect).toBe(false)
   })
 
   it.each([
@@ -295,11 +331,11 @@ describe("migrateSandboxConnectionRows", () => {
     const row = migrateSandboxConnectionRow(legacyRow())
     const overclaimed = {
       ...row,
-      capabilities: { ...row.capabilities, workspaceExec: true },
+      capabilities: { ...row.capabilities, connect: true },
     }
     const result = migrateSandboxConnectionRows([overclaimed])
     expect(result.changed).toBe(1)
-    expect(result.rows[0].capabilities.workspaceExec).toBe(false)
+    expect(result.rows[0].capabilities.connect).toBe(false)
   })
 
   it("handles an empty table", () => {

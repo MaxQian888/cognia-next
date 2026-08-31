@@ -37,7 +37,7 @@ import type {
  * current revision is recomputed from defaults. Handshake narrowing is
  * per-connection and still only ever removes, within a revision.
  */
-export const SANDBOX_CAPABILITY_REVISION = 2
+export const SANDBOX_CAPABILITY_REVISION = 3
 
 /** Every operation, in a stable order for iteration and display. */
 export const SANDBOX_LIFECYCLE_OPERATIONS: readonly SandboxLifecycleOperation[] = [
@@ -81,9 +81,8 @@ const PROVIDER_CAPABILITIES: Record<SandboxConnectionProvider, SandboxCapabiliti
     delete: true,
     health: true,
     gui: true,
-    // `workspaceRead` / `workspaceExec` stay off here and are removed again by
-    // DRIVER_RESTRICTIONS below. They are unlocked only once the exec path is
-    // proven to run inside the selected container.
+    workspaceRead: true,
+    workspaceExec: true,
   }),
   "cua-cloud": caps({}),
   lume: caps({}),
@@ -93,14 +92,19 @@ const PROVIDER_CAPABILITIES: Record<SandboxConnectionProvider, SandboxCapabiliti
  * Operations a driver cannot carry, whatever the provider supports. Absent
  * from this map means "carries everything the provider offers".
  *
- * `computer-server` currently has a proven remote-GUI channel only. Its
- * workspace shell/files claims stay disabled until a real provider adapter
- * can prove those operations execute inside the selected container.
+ * `computer-server` carries workspace shell and file operations for Docker
+ * because `lib/sandbox/docker-adapter.ts` implements them with `docker exec`,
+ * which was verified to execute inside the container rather than on the host:
+ * `docker exec <id> hostname` returns the container id and its `/etc/os-release`
+ * reports the image's distribution, not the host's.
+ *
+ * The claim is still provider-scoped. `PROVIDER_CAPABILITIES` is what withholds
+ * it from cua-cloud and lume, neither of which has an adapter at all.
  */
 const DRIVER_RESTRICTIONS: Partial<
   Record<SandboxConnectionDriver, Partial<Record<SandboxLifecycleOperation, boolean>>>
 > = {
-  "computer-server": { workspaceRead: false, workspaceExec: false },
+  "computer-server": {},
   "cua-driver": {
     create: false,
     connect: false,

@@ -65,7 +65,7 @@ function row(overrides: Partial<DeviceRow> = {}): DeviceRow {
       shellTiers: [
         { tier: "os", available: true },
         { tier: "microvm", available: false, reasonKey: "microvmAdapterMissing" },
-        { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopRetired" },
+        { tier: "cua-desktop", available: false, reasonKey: "cuaDesktopNoConnection" },
       ],
       workspaces: { support: "supported" },
       isRoutingTarget: true,
@@ -80,10 +80,10 @@ beforeEach(() => {
 })
 
 describe("RuntimeSection — shell tiers", () => {
-  it("lists cua-desktop and explains why it is withdrawn rather than hiding it", () => {
+  it("lists cua-desktop and explains why it is unavailable rather than hiding it", () => {
     render(<RuntimeSection row={row()} />)
     expect(screen.getByTestId("shell-tier-cua-desktop")).toBeInTheDocument()
-    expect(screen.getByText(/Withdrawn/)).toBeInTheDocument()
+    expect(screen.getByText(/Needs a bound machine/)).toBeInTheDocument()
   })
 
   /**

@@ -41,13 +41,22 @@ describe("defaultSandboxCapabilities", () => {
     expect(caps.resume).toBe(true)
   })
 
-  it("keeps Docker workspace shell and files withdrawn until exec is proven", () => {
-    // The driver restriction removes both. They are unlocked only once
-    // `docker exec` is shown to run inside the selected container, not because
-    // the provider could in principle support them.
+  it("carries Docker workspace shell and files, because docker exec was proven", () => {
+    // Verified against a real container: `docker exec <id> hostname` returns
+    // the container id rather than the host's, and its `/etc/os-release`
+    // reports the image's distribution. The claim rests on that, not on what
+    // the provider could support in principle.
     const caps = defaultSandboxCapabilities("docker", "computer-server")
-    expect(caps.workspaceRead).toBe(false)
-    expect(caps.workspaceExec).toBe(false)
+    expect(caps.workspaceRead).toBe(true)
+    expect(caps.workspaceExec).toBe(true)
+  })
+
+  it("withholds workspace access from providers with no adapter at all", () => {
+    for (const provider of ["cua-cloud", "lume"] as const) {
+      const caps = defaultSandboxCapabilities(provider, "computer-server")
+      expect(caps.workspaceRead).toBe(false)
+      expect(caps.workspaceExec).toBe(false)
+    }
   })
 
   it("keeps cua-cloud and lume rows readable without unsupported actions", () => {
@@ -62,15 +71,15 @@ describe("defaultSandboxCapabilities", () => {
     expect(defaultSandboxCapabilities("lume", "cua-driver").health).toBe(false)
   })
 
-  it("lets the computer-server driver remove workspaceRead", () => {
-    expect(defaultSandboxCapabilities("lume", "computer-server").workspaceRead).toBe(false)
-    expect(defaultSandboxCapabilities("lume", "cua-driver").workspaceRead).toBe(false)
-  })
-
-  it("keeps computer-server workspace shell and files disabled until a real adapter exists", () => {
-    const caps = defaultSandboxCapabilities("lume", "computer-server")
-    expect(caps.workspaceRead).toBe(false)
-    expect(caps.workspaceExec).toBe(false)
+  it("withholds Lume workspace access at the provider, not the driver", () => {
+    // The computer-server driver carries workspace operations now. What keeps
+    // them off a Lume row is that Lume has no adapter at all, so neither
+    // driver can reach it.
+    for (const driver of DRIVERS) {
+      const caps = defaultSandboxCapabilities("lume", driver)
+      expect(caps.workspaceRead).toBe(false)
+      expect(caps.workspaceExec).toBe(false)
+    }
   })
 
   it("keeps the unregistered cua-driver projection unavailable", () => {
@@ -100,7 +109,7 @@ describe("narrowSandboxCapabilities", () => {
 
   it("never widens", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
-    expect(narrowSandboxCapabilities(caps, []).workspaceExec).toBe(false)
+    expect(narrowSandboxCapabilities(caps, []).connect).toBe(false)
   })
 
   it("does not mutate the input", () => {
@@ -116,7 +125,7 @@ describe("narrowSandboxCapabilities", () => {
 
   it("never re-enables an already-false capability", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
-    expect(narrowSandboxCapabilities(caps, ["workspaceExec"]).workspaceExec).toBe(false)
+    expect(narrowSandboxCapabilities(caps, ["connect"]).connect).toBe(false)
   })
 })
 
@@ -124,6 +133,6 @@ describe("supportsSandboxOperation", () => {
   it("reads the matrix", () => {
     const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(supportsSandboxOperation(caps, "start")).toBe(true)
-    expect(supportsSandboxOperation(caps, "workspaceExec")).toBe(false)
+    expect(supportsSandboxOperation(caps, "connect")).toBe(false)
   })
 })
