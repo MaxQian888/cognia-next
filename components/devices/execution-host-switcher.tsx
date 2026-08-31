@@ -160,22 +160,23 @@ export function ExecutionHostSwitcher({
         <span className="max-w-32 truncate">{label}</span>
       </button>
     ) : (
-      <button
-        type="button"
+      // A real `Button`, not a hand-rolled pill: the outline variant already
+      // owns the border, radius and hover surface, and `audit:surfaces` rightly
+      // refuses a bespoke element that carries all three itself.
+      <Button
+        variant="outline"
+        size="sm"
         aria-label={t("aria", { label })}
         data-testid="execution-host-chip"
         data-tone={tone}
-        className={cn(
-          "flex h-7 shrink-0 items-center gap-1.5 rounded-pill border px-2.5 text-xs transition-colors hover:bg-muted",
-          className
-        )}
+        className={cn("h-7 shrink-0 gap-1.5 px-2.5 text-xs font-normal", className)}
       >
         <span
           aria-hidden
           className={cn("inline-block size-1.5 rounded-full", SITE_TONE_DOT[tone])}
         />
         <span className="max-w-28 truncate">{label}</span>
-      </button>
+      </Button>
     )
 
   return (
