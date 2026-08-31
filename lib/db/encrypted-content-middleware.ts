@@ -88,30 +88,63 @@ function encryptedTable(databaseName: string, table: DBCoreTable): DBCoreTable {
     async mutate(request: DBCoreMutateRequest) {
       cipher()
       if (request.type !== "add" && request.type !== "put") return table.mutate(request)
-      if (request.values.length === 0) {
-        throw new Error(`Encrypted table ${table.name} does not allow criteria-only mutations.`)
+      const forwarded = { ...request }
+      // `criteria`, `upsert` and `isAdditionalChunk` are deliberately kept: they
+      // describe the write, they do not carry row data. `changeSpec` / `updates`
+      // do, and only `values` passes through `encryptRow`, so a layer that
+      // honoured the patch instead would write the plaintext fields it names
+      // next to the ciphertext envelope. Dexie attaches one to every
+      // `update()` / `modify()` / `upsert()` / `bulkUpdate()` write.
+      if (forwarded.type === "put") {
+        delete forwarded.changeSpec
+        delete forwarded.updates
       }
-      const values = await Dexie.waitFor(
-        Promise.all(request.values.map((value, index) => encryptRow(value, request.keys?.[index])))
-      )
-      return table.mutate({ ...request, values })
+      // An empty `values` array is a legitimate no-op write: a `bulkPut([])` from
+      // a drain that claimed nothing, or a `modify()` whose range matched no rows
+      // (Dexie still issues the latter, carrying only its criteria).
+      if (request.values.length > 0) {
+        forwarded.values = await Dexie.waitFor(
+          Promise.all(
+            request.values.map((value, index) => encryptRow(value, request.keys?.[index]))
+          )
+        )
+      }
+      return table.mutate(forwarded)
     },
+    // Every decryption below awaits WebCrypto, a native promise Dexie does not
+    // own. Inside a transaction (a `modify()`/`update()` read-modify-write, or
+    // any read the caller wrapped in `db.transaction()`) awaiting it directly
+    // lets the IndexedDB transaction go inactive and the following write fails
+    // with InvalidStateError. `Dexie.waitFor` holds the transaction open, which
+    // is what the cursor path below already relies on.
+    //
+    // It is not free, though: it arms a 60s timer and, inside a transaction,
+    // spins a keep-alive `get` against the store on every event-loop turn until
+    // the promise settles. So it is applied only when a row actually carries an
+    // envelope. A miss, or a row written before encryption, decrypts to itself
+    // and is returned without ever suspending.
     async get(request) {
       cipher()
-      return decryptRow(await table.get(request), request.key)
+      const row = await table.get(request)
+      if (!carriesEnvelope(row)) return row
+      return Dexie.waitFor(decryptRow(row, request.key))
     },
     async getMany(request) {
       cipher()
       const rows = await table.getMany(request)
-      return Promise.all(rows.map((row, index) => decryptRow(row, request.keys[index])))
+      if (!rows.some(carriesEnvelope)) return rows
+      return Dexie.waitFor(
+        Promise.all(rows.map((row, index) => decryptRow(row, request.keys[index])))
+      )
     },
     async query(request) {
       cipher()
       const response = await table.query(request)
       if (request.values === false) return response
+      if (!response.result.some(carriesEnvelope)) return response
       return {
         ...response,
-        result: await Promise.all(response.result.map((row) => decryptRow(row))),
+        result: await Dexie.waitFor(Promise.all(response.result.map((row) => decryptRow(row)))),
       }
     },
     async openCursor(request) {
@@ -124,6 +157,17 @@ function encryptedTable(databaseName: string, table: DBCoreTable): DBCoreTable {
       return table.count(request)
     },
   }
+}
+
+/**
+ * Whether a stored row has content to decrypt.
+ *
+ * The gate in front of `Dexie.waitFor` on the read paths. Deliberately the same
+ * predicate `decryptRow` uses to decide it has nothing to do, so "skipped the
+ * wait" and "returned the row unchanged" can never disagree.
+ */
+function carriesEnvelope(row: unknown): boolean {
+  return isRecord(row) && isEncryptedEnvelope(row[ENCRYPTED_CONTENT_FIELD])
 }
 
 function wrapCursor(
