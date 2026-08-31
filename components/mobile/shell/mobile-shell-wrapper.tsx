@@ -37,6 +37,7 @@ import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
 import { usesCompactShell } from "@/lib/shell/compact-shell"
+import { needsFullViewport } from "@/lib/shell/full-viewport-routes"
 import { getDb } from "@/lib/db/schema"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
@@ -142,48 +143,11 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     chat: (badges?.chat ?? 0) + inboundUnread,
   }
 
-  // Some routes own the full viewport and host an internal scroll region whose
-  // `h-full` chain needs a *definite* parent height to resolve against:
-  //   - Workflow detail sub-routes (`/workflows/...`): the touch editor + run
-  //     detail host a fixed-height ReactFlow canvas.
-  //   - The A2UI mini-apps hub + workspace (`/a2ui`): the hub wraps its body in
-  //     a `ScrollArea h-full` and the workspace stacks header/toolbar over a
-  //     flex-1 preview/tab region.
-  //   - The first-run flow (`/onboarding`): `StepShell` is `h-full` so it can
-  //     share one sizing rule with the desktop shell (where it fills the
-  //     chrome's content slot); its rail, scroll body and sticky footer all
-  //     hang off that height.
-  // A bare `min-h-[100dvh]` is NOT a *definite* height, so those `h-full`
-  // chains resolve to `auto` and collapse to 0 — the page renders as a blank
-  // strip below the top bar. Give just those routes a definite flex-column
-  // viewport so the offline banner takes its own row and the page body fills
-  // the rest; every other (scrollable) route keeps the document-scroll
-  // `min-h-[100dvh]`.
-  const fullViewport =
-    pathname.startsWith("/workflows/") ||
-    pathname === "/a2ui" ||
-    // `/sites`: the console is built on `FeaturePageShell`, whose desktop and
-    // mobile branches are both `flex h-full min-h-0 flex-1`. Without a definite
-    // viewport height that chain collapses to zero and the route paints a blank
-    // strip — which no overflow check would catch.
-    pathname === "/sites" ||
-    // `/devices` and `/servers` for exactly the same reason as `/sites`. Both
-    // are `FeaturePageShell` fleet consoles and both are reachable on a phone
-    // (`/devices` from the `/me` list, `/servers` from the rail), so without a
-    // definite height they were reachable *and* blank.
-    pathname === "/devices" ||
-    pathname === "/servers" ||
-    pathname.startsWith("/servers/") ||
-    pathname.startsWith("/a2ui/") ||
-    pathname === "/me/terminal" ||
-    pathname === "/onboarding" ||
-    pathname.startsWith("/onboarding/") ||
-    // `/pair` for the same reason as `/onboarding`: `PairShell` is a
-    // `h-[100dvh] overflow-hidden` two-pane window. Under the document-scroll
-    // branch the offline banner takes a row *above* a full-viewport child and
-    // the page grows a scrollbar that has nothing in it.
-    pathname === "/pair" ||
-    pathname.startsWith("/pair/")
+  // Which routes need a DEFINITE viewport height rather than the document
+  // scroll, and why, is `lib/shell/full-viewport-routes.ts`. It used to be a
+  // hand-maintained boolean here with no gate, which is how five routes built
+  // on `FeaturePageShell` ended up reachable and blank.
+  const fullViewport = needsFullViewport(pathname)
 
   return (
     <div

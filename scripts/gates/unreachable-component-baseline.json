@@ -10,7 +10,6 @@
     "components/a2ui/layout/index.ts",
     "components/a2ui/quick-app-builder.tsx",
     "components/account/account-switcher.tsx",
-    "components/mobile/settings/mobile-settings-panel.tsx",
     "components/terminal/ai-shell/index.ts"
   ]
 }

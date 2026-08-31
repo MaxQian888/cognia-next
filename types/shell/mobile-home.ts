@@ -36,12 +36,26 @@ export const MOBILE_QUICK_ACTION_CATALOG: readonly MobileQuickActionMeta[] = [
   { id: "discover", kind: "route", route: "/discover", i18nKey: "discover" },
   { id: "inbox", kind: "route", route: "/inbox", i18nKey: "inbox" },
   { id: "twin", kind: "route", route: "/twin", i18nKey: "twin" },
-  { id: "agentTeams", kind: "route", route: "/agent-teams", i18nKey: "agentTeams" },
+  { id: "squads", kind: "route", route: "/squads", i18nKey: "squads" },
   { id: "fleet", kind: "route", route: "/fleet", i18nKey: "fleet" },
   { id: "servers", kind: "route", route: "/servers", i18nKey: "servers" },
   { id: "devices", kind: "route", route: "/devices", i18nKey: "devices" },
   { id: "me", kind: "route", route: "/me", i18nKey: "me" },
 ] as const
+
+/**
+ * Ids that changed name after a layout was already persisted.
+ *
+ * The id doubles as the persistence key, so renaming one silently drops it from
+ * every saved home grid: the tile does not move, it disappears. Mapped on read
+ * instead, which is the same treatment `LEGACY_SIDEBAR_NAV_IDS` gives the rail.
+ *
+ * `agentTeams` pointed at `/agent-teams`, which ADR-0140 retired and took out
+ * of navigation, so the tile was a shortcut to a route nothing else links to.
+ */
+export const LEGACY_MOBILE_QUICK_ACTION_IDS: Readonly<Record<string, string>> = {
+  agentTeams: "squads",
+}
 
 /** Toggleable home sections (the quick-action grid + the two welcome blocks). */
 export type MobileHomeSectionId = "quickActions" | "recents" | "activeRuns"

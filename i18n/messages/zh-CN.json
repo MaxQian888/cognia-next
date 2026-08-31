@@ -16780,7 +16780,6 @@
     },
     "home": {
       "actions": {
-        "agentTeams": "智能体团队",
         "devices": "设备",
         "discover": "发现",
         "fleet": "智能体队列",
@@ -16789,6 +16788,7 @@
         "newChat": "新建会话",
         "search": "搜索",
         "servers": "服务器",
+        "squads": "小队",
         "twin": "数字分身",
         "workflows": "工作流"
       },

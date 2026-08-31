@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils"
 import { AccountCard } from "@/components/mobile/me/account-card"
 import { BackupReminderBanner } from "@/components/mobile/me/backup-reminder-banner"
 import { MeRow } from "@/components/mobile/me/me-row"
+import { useProjectStore } from "@/stores/project/project-store"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { QuickActionGrid } from "@/components/mobile/me/quick-action-grid"
 import { SignOutButton } from "@/components/mobile/me/sign-out-button"
@@ -76,6 +77,10 @@ export default function MePage() {
   const [lastSyncedLabel, setLastSyncedLabel] = useState<string | undefined>(undefined)
   const { paired, shortDeviceId } = useCompanionConfig()
   const { pinnedIds, togglePin } = usePinnedMeRows()
+  const activeWorkspaceName = useProjectStore((state) => {
+    const id = state.activeProjectId
+    return id ? (state.projects.find((p) => p.id === id)?.name ?? null) : null
+  })
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -111,6 +116,12 @@ export default function MePage() {
   const rowValue = (entry: MeEntry): string | undefined => {
     if (entry.id === "devices") return paired && shortDeviceId ? shortDeviceId : undefined
     if (entry.id === "sync") return lastSyncedLabel
+    // Which workspace this phone is pointed at. The switcher itself lives in
+    // the chat shell's nav sheet, which only the chat route mounts, so outside
+    // that route there was nothing on screen naming the active workspace at
+    // all. The palette can change it from anywhere; this is what says what it
+    // currently is.
+    if (entry.id === "workspace" && paired) return activeWorkspaceName ?? undefined
     // ADR-0056 D2 — agent-class pages are dead UI without a paired desktop;
     // annotate the row so the user knows before tapping into the placeholder.
     if (entry.pairedOnly && !paired) return t("requiresDesktop")
@@ -136,6 +147,11 @@ export default function MePage() {
   return (
     <main
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
+      // Every sub-page under this route gets the marker from `SubPageShell`,
+      // whose root is this exact class string. The index was written from it
+      // and lost the one attribute, so the wallpaper stopped at the door of
+      // the settings home.
+      data-bg-target="chat"
       data-testid="me-page"
       onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
     >

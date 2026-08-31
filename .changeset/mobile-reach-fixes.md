@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Five routes were reachable on a phone and rendered as a blank strip. The compact shell hands most routes a document scroll, which is not a definite height, so the height chain inside a feature-shell page collapses to zero and the page paints nothing under the top bar. Three routes had already shipped that way and been fixed one at a time. The list of exceptions was hand-maintained with no check, and `/workspace`, `/squads`, `/projects`, `/plugins` and `/twin` were all missing from it. The list is now derived and guarded, so a new console route cannot repeat it. The settings home also stops cutting the wallpaper off at its own door, which every one of its sub-pages already renders. The mobile home's agent-teams tile now opens Squads, the surface that replaced it, instead of a route taken out of navigation, and it keeps its place on grids that already had it. The `/me` workspace row shows which workspace the device is pointed at, which nothing outside the chat route said. A leftover mobile settings panel with no consumers is deleted.

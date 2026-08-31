@@ -25,6 +25,7 @@ import type { LucideIcon } from "lucide-react"
 
 import type { MobileSpotIconName } from "@/components/mobile/mobile-spot-icon"
 import {
+  LEGACY_MOBILE_QUICK_ACTION_IDS,
   MOBILE_QUICK_ACTION_CATALOG,
   type MobileHomeLayout,
   type MobileQuickActionMeta,
@@ -38,7 +39,7 @@ export const MOBILE_QUICK_ACTION_ICONS: Record<string, LucideIcon> = {
   discover: CompassIcon,
   inbox: InboxIcon,
   twin: BotIcon,
-  agentTeams: Users2Icon,
+  squads: Users2Icon,
   fleet: LayersIcon,
   servers: ServerCogIcon,
   devices: SmartphoneIcon,
@@ -53,7 +54,7 @@ export const MOBILE_QUICK_ACTION_SPOT_ICONS: Record<string, MobileSpotIconName> 
   discover: "discover",
   inbox: "chat",
   twin: "digital-twin",
-  agentTeams: "agent-teams",
+  squads: "agent-teams",
   fleet: "device-sync",
   servers: "device-sync",
   devices: "device-sync",
@@ -99,7 +100,10 @@ export function resolveMobileHomeLayout(
 
   const seen = new Set<string>()
   const active: MobileQuickActionItem[] = []
-  for (const id of layout.quickActions) {
+  for (const stored of layout.quickActions) {
+    // Renamed ids are mapped on read. Dropping them instead would delete the
+    // tile from every saved grid rather than moving it.
+    const id = LEGACY_MOBILE_QUICK_ACTION_IDS[stored] ?? stored
     if (seen.has(id)) continue
     const item = byId.get(id)
     if (!item) continue

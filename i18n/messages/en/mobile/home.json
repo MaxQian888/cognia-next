@@ -1,6 +1,5 @@
 {
   "actions": {
-    "agentTeams": "Agent teams",
     "discover": "Discover",
     "fleet": "Agent fleet",
     "inbox": "Inbox",
@@ -10,7 +9,8 @@
     "servers": "Servers",
     "twin": "Digital twin",
     "workflows": "Workflows",
-    "devices": "Devices"
+    "devices": "Devices",
+    "squads": "Squads"
   },
   "activeRuns": {
     "empty": "No active runs",

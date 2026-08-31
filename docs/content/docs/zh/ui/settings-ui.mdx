@@ -254,7 +254,7 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
 - 按 ADR-0056 D3，纯 settings-store 驱动的桌面分区**直接内嵌**进 `/me/*` 的 `SubPageShell`，而不是重写一份 —— `/me/appearance`、`/me/canvas`、`/me/eval` 都是这么做的。需要 Tauri 的分区在 `SETTINGS_NAV` 里标 `desktopOnly`，由 `settings-sidebar.tsx` 在非桌面环境过滤掉。
 - 移动 chrome（statusbar/safe-area/tab bar）由 `mobile-shell-wrapper` 顶层处理；`/me` 各页不重复关心。
 
-> `components/mobile/settings/mobile-settings-panel.tsx` 是 Wave 2.7 的遗留物，**不是**移动端设置外壳。它的内容早已拆进 `components/mobile/me/`，本体零消费者，已登记在 `scripts/gates/unreachable-component-baseline.json`。不要在它上面继续搭东西。
+> `components/mobile/settings/mobile-settings-panel.tsx` 曾是 Wave 2.7 的遗留物，**不是**移动端设置外壳。它的内容早已拆进 `components/mobile/me/`，本体零消费者，现已连同 `scripts/gates/unreachable-component-baseline.json` 里的登记项一并删除。移动端设置面就是 `components/mobile/me/`。
 
 ## SettingsSyncProvider
 

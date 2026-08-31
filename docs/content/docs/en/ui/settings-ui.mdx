@@ -275,10 +275,12 @@ separate, data-driven iOS-style list:
 - Mobile chrome (status bar / safe area / tab bar) is handled by
   `mobile-shell-wrapper`; the `/me` pages do not repeat that concern.
 
-> `components/mobile/settings/mobile-settings-panel.tsx` is a Wave-2.7 leftover,
-> not the mobile settings shell. Its pieces were extracted into
-> `components/mobile/me/`, leaving the panel with zero consumers — it is tracked
-> in `scripts/gates/unreachable-component-baseline.json`. Do not build on it.
+> `components/mobile/settings/mobile-settings-panel.tsx` was a Wave-2.7
+> leftover, not the mobile settings shell. Its pieces had been extracted into
+> `components/mobile/me/`, leaving the panel with zero consumers, and it has now
+> been deleted along with its entry in
+> `scripts/gates/unreachable-component-baseline.json`. `components/mobile/me/`
+> is the mobile settings surface.
 
 ## SettingsSyncProvider
 

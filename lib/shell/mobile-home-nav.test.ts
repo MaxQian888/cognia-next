@@ -43,3 +43,30 @@ describe("mobile-home-nav", () => {
     expect(active.map((i) => i.id)).toEqual(DEFAULT_MOBILE_HOME_LAYOUT.quickActions)
   })
 })
+
+/**
+ * ADR-0140 retired `/agent-teams` and took it out of navigation, but the mobile
+ * quick action still pointed at it, so the tile was a shortcut to a route
+ * nothing else links to. The id doubles as the persistence key, so it has to be
+ * mapped on read rather than dropped: dropping it deletes the tile from every
+ * saved grid instead of moving it.
+ */
+describe("the retired agent-teams tile", () => {
+  it("resolves a saved agentTeams tile to the squads one", () => {
+    const { active } = resolveMobileHomeLayout(getMobileQuickActionCatalog(), {
+      quickActions: ["agentTeams"],
+      hiddenSections: [...DEFAULT_MOBILE_HOME_LAYOUT.hiddenSections],
+    })
+    expect(active.map((item) => item.id)).toEqual(["squads"])
+    expect(active[0]!.route).toBe("/squads")
+  })
+
+  it("does not offer the tile twice when both ids are stored", () => {
+    const { active, available } = resolveMobileHomeLayout(getMobileQuickActionCatalog(), {
+      quickActions: ["agentTeams", "squads"],
+      hiddenSections: [...DEFAULT_MOBILE_HOME_LAYOUT.hiddenSections],
+    })
+    expect(active.filter((item) => item.id === "squads")).toHaveLength(1)
+    expect(available.some((item) => item.id === "squads")).toBe(false)
+  })
+})
