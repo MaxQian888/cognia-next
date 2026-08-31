@@ -18,6 +18,7 @@ import { FULL_VIEWPORT_ROUTE_PATTERNS, needsFullViewport } from "./full-viewport
 const EXEMPT: Record<string, string> = {
   issues: "IssuesMobileBody replaces the shell on the compact branch",
   memory: "MemoryMobileBody replaces the shell on the compact branch",
+  templates: "TemplatesMobileBody replaces the shell on the compact branch",
   goals: "GoalsMobileBody replaces the shell on the compact branch",
   discover: "DiscoverMobileBody replaces the shell on the compact branch",
   inbox: "redirect-only route",
