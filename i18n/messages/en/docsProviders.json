@@ -19,6 +19,10 @@
   },
   "label": "Feishu Docs",
   "labelGoogle": "Google Workspace",
+  "name": {
+    "google": "Google Workspace",
+    "lark": "Feishu Docs"
+  },
   "picker": {
     "accountLabel": "Account",
     "attached": "Attached “{title}”",
@@ -31,6 +35,23 @@
     "searching": "Searching…",
     "title": "Remote documents",
     "truncated": "“{title}” was too large and has been truncated."
+  },
+  "reach": {
+    "block": {
+      "needs-desktop-shell": "Reading these documents needs the desktop app, which is where the Feishu bridge and the Google sign-in listener live.",
+      "no-runtime": "This browser is not paired with anything that holds your Feishu or Google account, so there is nothing here that can open the document.",
+      "runs-on-host": "The host you paired with already holds these accounts and can open the document. This client has no route to the reader itself, so it cannot fetch the text for you."
+    },
+    "nextStep": {
+      "needs-desktop-shell": "Open Cognia on your desktop to use it.",
+      "no-runtime": "Open Cognia on your desktop, or pair this browser with a host that has the accounts connected.",
+      "runs-on-host": "Open Cognia on that host to attach the document, or paste its text here."
+    },
+    "short": {
+      "needs-desktop-shell": "Needs the desktop app",
+      "no-runtime": "Needs the desktop app",
+      "runs-on-host": "Available on your paired host"
+    }
   },
   "settings": {
     "connect": "Connect",
@@ -54,9 +75,5 @@
     "larkNoAccount": "No Feishu account is connected yet.",
     "notConnected": "Not connected",
     "title": "Remote documents"
-  },
-  "name": {
-    "lark": "Feishu Docs",
-    "google": "Google Workspace"
   }
 }

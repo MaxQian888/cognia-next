@@ -18,18 +18,62 @@
     "ko": "韩语",
     "zh-CN": "简体中文"
   },
+  "more": "更多",
+  "back": "返回",
+  "cogniaAttribution": "Cognia",
+  "rewrite": {
+    "title": "改写",
+    "modes": {
+      "improve": "优化",
+      "concise": "精简",
+      "detailed": "详细",
+      "technical": "技术化",
+      "simpler": "简化",
+      "variants": "多个版本"
+    }
+  },
   "openLink": "打开链接",
+  "permissionRequest": "允许{title}读取当前桌面选区",
   "prompts": {
     "convertUnit": "请把这个数值换算成我常用的单位。",
+    "convertMeasurement": "这段选区是一个度量值。请换算成我常用的单位，并保留原有精度。",
     "explain": "请解释这段内容。",
     "explainCode": "请解释这段代码。",
-    "translate": "请将这段内容翻译成{language}。"
+    "translate": "请将这段内容翻译成{language}。",
+    "translateDetected": "这段选区主要使用 {script} 文字。请翻译成{language}，并保留名称、代码和格式。"
   },
   "remember": "记忆",
+  "result": {
+    "title": "检查结果",
+    "attribution": "由 {name} 生成",
+    "source": "来源：{name}",
+    "sourceWarning": {
+      "accessibility": "来自可访问文本选区",
+      "clipboard": "来自剪贴板，无法替换原文",
+      "ocr": "OCR 文本可能包含识别错误"
+    },
+    "variants": "生成的候选版本",
+    "variant": "版本 {index}",
+    "original": "原文",
+    "result": "结果",
+    "replaceUnavailable": {
+      "ocr": "OCR 结果不能替换来源文本，请复制或在 Cognia 中打开。",
+      "clipboard": "剪贴板捕获不能替换来源文本，请复制或在 Cognia 中打开。",
+      "notEditable": "来源为只读或已不可编辑，请复制或在 Cognia 中打开。",
+      "stale": "来源选区已变化或过期，请复制或在 Cognia 中打开。",
+      "rolloutDisabled": "当前版本未包含直接替换功能，请复制或在 Cognia 中打开。"
+    },
+    "copyResult": "复制结果",
+    "openInCognia": "在 Cognia 中打开",
+    "replace": "替换",
+    "cancel": "取消",
+    "undo": "撤销"
+  },
   "searchWeb": "搜索",
   "speak": "朗读",
   "stopSpeaking": "停止朗读",
   "translate": "翻译",
   "truncated": "已截断",
-  "truncatedHint": "选区超过 20,000 个字符，已截断。"
+  "truncatedHint": "选区超过 20,000 个字符，已截断。",
+  "title": "划词操作"
 }

@@ -19,8 +19,11 @@
     "agentPresets": "智能体与子智能体",
     "characters": "角色",
     "connectors": "连接器",
+    "docsProviders": "文档源",
+    "externalServices": "外部服务",
     "favorites": "收藏",
     "foryou": "推荐",
+    "integrations": "集成",
     "mcpPresets": "MCP 预设",
     "mcpTools": "MCP 工具",
     "ocrProviders": "OCR 服务",
@@ -101,8 +104,11 @@
   "emptyCharacters": "还没有角色 — 在桌面端创建一个吧。",
   "emptyCharactersHint": "在桌面端创建角色后会同步到这里。",
   "emptyConnectors": "暂无可用连接器。",
+  "emptyDocsProviders": "尚未注册任何文档源。",
+  "emptyExternalServices": "尚未安装任何外部服务。启用附带服务的插件后会出现在这里。",
   "emptyFavorites": "还没有收藏 — 点任意项目上的星标即可固定到这里。",
   "emptyFiltered": "没有匹配 \"{query}\" 的结果。",
+  "emptyIntegrations": "尚未安装任何集成。",
   "emptyMcpPresets": "暂无可用的 MCP 预设。",
   "emptyMcpTools": "暂未配置 MCP 服务器。",
   "emptyOcrProviders": "暂未注册 OCR 提供方。",
@@ -158,6 +164,13 @@
     "useTemplate": "使用模板",
     "viewDocs": "查看文档"
   },
+  "integrationAuth": {
+    "api-key": "API 密钥",
+    "app": "应用安装",
+    "oauth2": "OAuth",
+    "personal-access-token": "访问令牌"
+  },
+  "integrationCounts": "{actions} 个操作 · {events} 种事件",
   "marketplace": {
     "browse": "浏览市场",
     "desktopOnly": "请在桌面端安装。",
@@ -198,6 +211,10 @@
   "search": "搜索…",
   "searchAria": "搜索发现内容",
   "searchScope": "搜索{category}…",
+  "serviceBadge": {
+    "awaitingReview": "待审阅",
+    "connected": "已连接"
+  },
   "share": {
     "action": "通过链接分享",
     "cancel": "取消",

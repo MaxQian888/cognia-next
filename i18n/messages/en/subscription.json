@@ -9,10 +9,69 @@
     "refresh": "Refresh now",
     "scopeLabel": "Scope",
     "signInCta": "Sign in",
-    "signOut": "Sign out",
+    "signOut": "Deactivate",
     "signedOutBody": "Authorize Cognia with your Claude account.",
     "signedOutTitle": "Not signed in",
     "unknownEmail": "Signed in (no email reported)"
+  },
+  "accountCenter": {
+    "actions": {
+      "activate": "Activate now",
+      "deactivate": "Deactivate",
+      "failed": "Account action failed: {error}",
+      "more": "More account actions",
+      "reauthenticate": "Reauthenticate",
+      "removeLocal": "Remove from Cognia",
+      "removed": "Account removed from Cognia.",
+      "rename": "Rename",
+      "renamed": "Account renamed.",
+      "setDefault": "Use by default",
+      "update": "Update credential"
+    },
+    "activeHelp": "Active now controls the credential projected to this provider's running tools.",
+    "add": "Add account",
+    "badges": {
+      "active": "Active now",
+      "default": "Default"
+    },
+    "defaultHelp": "Default is the fallback selected for newly resolved sessions; it does not activate the account immediately.",
+    "description": "Manage Claude, Codex, and OpenCode accounts in one place. External CLI credentials remain read-only.",
+    "empty": "No accounts match this filter.",
+    "emptyDetail": "Select an account to inspect its status and supported actions.",
+    "fields": {
+      "active": "Active now",
+      "authMode": "Authentication",
+      "default": "Default for new sessions",
+      "email": "Email",
+      "expiry": "Expiry",
+      "lastRotation": "Last credential rotation",
+      "notApplicable": "Does not expire",
+      "plan": "Plan",
+      "source": "Credential source"
+    },
+    "filterLabel": "Filter accounts by provider",
+    "filters": {
+      "all": "All providers"
+    },
+    "health": {
+      "expiring": "Expiring",
+      "ready": "Ready",
+      "reauth_required": "Reauthentication required",
+      "source_unavailable": "External source"
+    },
+    "listLabel": "Managed accounts",
+    "loading": "Loading accounts…",
+    "loadingDetail": "Loading safe account details…",
+    "no": "No",
+    "providers": {
+      "anthropic": "Claude",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    },
+    "reauthReason": "The saved credential cannot refresh ({reason}). Reauthenticate this exact account or add a different login as a new account.",
+    "title": "Account Center",
+    "webMode": "Account credentials are available only in the desktop app.",
+    "yes": "Yes"
   },
   "balance": {
     "description": "Remaining credit / quota for this account's provider.",
@@ -31,8 +90,6 @@
       "expiresLabel": "Token expires",
       "planLine": "{plan} · {mode}",
       "refresh": "Refresh token now",
-      "revokeOnSignOut": "Revoke server-side",
-      "revokeOnSignOutHint": "Also tells auth.openai.com to invalidate this token. Off by default — local-only sign out is reversible.",
       "signedOutBody": "Sign in to use Codex as an external agent.",
       "signedOutTitle": "No accounts yet",
       "unknownEmail": "(no email reported)"
@@ -42,10 +99,15 @@
       "actions": {
         "cancel": "Cancel",
         "close": "Close",
+        "retryOauth": "Restart OAuth",
         "startOauth": "Start OAuth"
       },
       "modeGroupLabel": "Sign-in mode",
       "modes": {
+        "apiKey": {
+          "description": "Store an OpenAI API key as a Cognia-managed Codex account.",
+          "label": "OpenAI API key"
+        },
         "oauth": {
           "description": "Start a fresh sign-in with ChatGPT. Opens auth.openai.com with the codex-cli first-party client_id.",
           "label": "Device-code OAuth"
@@ -54,6 +116,12 @@
           "description": "Adopt an existing credential from `~/.codex/auth.json` or codex-cli's keyring entry. Read-only — we never write back.",
           "label": "Reuse codex-cli"
         }
+      },
+      "apiKey": {
+        "description": "The key is sent once to Cognia's encrypted credential vault and is never read from an external CLI.",
+        "field": "OpenAI API key",
+        "placeholder": "sk-…",
+        "save": "Save API key"
       },
       "oauth": {
         "accessDenied": "Sign-in cancelled at the OpenAI side.",
@@ -106,6 +174,13 @@
       },
       "cardDescription": "Auto-refresh behavior for this provider.",
       "cardTitle": "Connection settings",
+      "invalidCadence": "Poll intervals must be numbers of at least 60 seconds.",
+      "invalidThreshold": "The warning threshold must be a number from 0 to 100.",
+      "pending": "Changes not applied.",
+      "save": "Apply settings",
+      "saveFailed": "Couldn't save settings: {error}",
+      "saved": "Settings saved.",
+      "saving": "Saving…",
       "probe": {
         "cardDescription": "Background polling of your Codex 5-hour and weekly limits.",
         "cardTitle": "Usage tracking",
@@ -149,7 +224,7 @@
       "referenceSummary": "Used by {sessions} session(s) and {characters} character(s).",
       "remove": "Remove",
       "removeConfirm": "Remove",
-      "removeDialogBody": "The credential will be deleted from the OS keychain. You can sign in again at any time.",
+      "removeDialogBody": "Removes this credential only from Cognia's vault. Remote sessions and external CLI logins are not changed.",
       "removeDialogTitle": "Remove this account?",
       "removed": "Account removed.",
       "rename": "Rename",
@@ -160,7 +235,7 @@
       "renamed": "Account renamed.",
       "replacementLabel": "Replacement account",
       "retry": "Retry",
-      "secretsHidden": "Token is hidden — view the OS keychain to inspect.",
+      "secretsHidden": "Credential bytes are hidden from the settings interface.",
       "setActive": "Set active",
       "setDefault": "Set as default",
       "title": "Accounts",
@@ -435,6 +510,10 @@
       "vaultGroup": "Vault"
     },
     "items": {
+      "accounts": {
+        "description": "Manage every provider account in one responsive workspace",
+        "label": "Account Center"
+      },
       "backup": {
         "description": "Export or import an encrypted vault copy",
         "label": "Backup & transfer"
@@ -500,6 +579,7 @@
       "addKey": "Add Zen key",
       "baseUrlField": "Base URL (optional)",
       "baseUrlPlaceholder": "Leave blank to use the default Zen endpoint",
+      "baseUrlReplaceHint": "Updating the credential replaces the stored base URL. Leave this blank only if this account uses the default Zen endpoint.",
       "cancel": "Cancel",
       "description": "Paste the API key from opencode.ai (Zen pay-per-request or Go flat-rate). Full OAuth is on the roadmap once the endpoint surface is documented.",
       "labelField": "Label (optional)",
@@ -639,7 +719,9 @@
       "title": "Cost by model",
       "totalCost": "Total cost",
       "totalTokens": "Total tokens",
-      "totalTurns": "Total turns"
+      "totalTurns": "Total turns",
+      "colReasoning": "Reasoning",
+      "unpricedNote": "{turns, plural, =1 {1 turn} other {# turns}} could not be priced, so the totals above are a lower bound."
     },
     "range": {
       "30d": "Last 30 days",
@@ -727,6 +809,22 @@
       "sourceHeaders": "From chat response headers",
       "title": "Current quota windows",
       "resetsAt": "Resets {at}"
+    },
+    "bySurface": {
+      "title": "By surface",
+      "description": "Which part of the app spent the quota. Chat, an agent team, a scheduled workflow and a connector reply all draw on the same plan.",
+      "empty": "No usage recorded in this range.",
+      "rowDetail": "{turns, plural, =1 {1 turn} other {# turns}} · {tokens} tokens"
+    },
+    "budget": {
+      "title": "Spending limits",
+      "description": "Live spend against the hard USD ceilings. At 100% the next request is held until you approve it.",
+      "empty": "No spending limit configured. Set one under Settings, Usage and cost.",
+      "level": {
+        "warning": "Warning",
+        "critical": "Critical",
+        "exceeded": "Exceeded"
+      }
     }
   },
   "webModeBanner": "Subscription credentials are stored in your OS keychain — only available in the desktop app."

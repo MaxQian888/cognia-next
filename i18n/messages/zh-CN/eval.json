@@ -262,6 +262,7 @@
   "lab": {
     "actions": {
       "back": "上一步",
+      "error": "操作未能完成",
       "next": "下一步"
     },
     "data": {
@@ -288,6 +289,12 @@
       "versionedHint": "实验会固定数据集版本、用例摘要、数据划分和应用版本。"
     },
     "evidence": {
+      "clearance": "数据集媒体许可",
+      "clearanceValues": {
+        "local-only": "仅限本地",
+        "manual": "人工许可",
+        "scanned": "扫描许可"
+      },
       "description": "当前项目的隐私、兼容性、费用和统计证据。",
       "encrypted": "加密制品",
       "encryptedHint": "提示、输出、轨迹、附件和评审理由均使用 AES-GCM 信封加密。",
@@ -310,7 +317,7 @@
       "agent": "完整 Agent 评估",
       "agentHint": "在隔离会话中比较角色、工具、RAG、团队、工作流和执行轨迹。",
       "model": "纯模型评估",
-      "modelHint": "比较提供方、部署、模型、提示和推理参数变体。"
+      "modelHint": "比较提供方、模型、提示和推理参数变体。"
     },
     "preflight": {
       "blocked": "当前禁止调度",
@@ -460,10 +467,18 @@
       "title": "运行实验"
     },
     "scoring": {
+      "addConstraint": "添加约束",
+      "addDimension": "添加维度",
       "budget": "硬预算（美元）",
       "calibrated": "校准已通过",
       "calibrationMetrics": "{count} 个锚点 · κ {kappa, number, ::.00} · 准确率 {accuracy, number, ::percent}",
       "description": "组合确定性规则、盲评、校准、硬约束和明确的决策策略。",
+      "confidence": "置信水平",
+      "constraints": "合格约束",
+      "constraintsHint": "候选项必须满足全部约束，之后才会应用效用权重。",
+      "dimensions": "效用维度",
+      "dimensionsHint": "权重可使用任意正比例，推荐引擎会自动归一化。",
+      "direction": "方向",
       "formal": "正式推荐",
       "formalHint": "至少需要 30 条有效留出用例和已校准的独立评审器。",
       "judgeInputPrice": "评审输入价格 / 百万 Token",
@@ -471,6 +486,10 @@
       "judgeModel": "独立评审模型",
       "judgeOutputPrice": "评审输出价格 / 百万 Token",
       "judgeProvider": "独立评审提供方",
+      "maximize": "越大越好",
+      "metric": "指标 ID",
+      "minimize": "越小越好",
+      "minimumCases": "最少有效用例数",
       "metrics": {
         "cost": "费用",
         "latency": "延迟",
@@ -478,7 +497,15 @@
         "reliability": "可靠性"
       },
       "notCalibrated": "缺少校准或未达到阈值",
+      "noConstraints": "没有合格约束。",
       "openCalibration": "打开校准",
+      "operator": "运算符",
+      "operators": {
+        "gt": ">",
+        "gte": "≥",
+        "lt": "<",
+        "lte": "≤"
+      },
       "policy": "决策策略",
       "policyHint": "先构建 Pareto 前沿，再只在合格变体中应用效用权重。",
       "secondJudgeInputPrice": "第二评审输入价格 / 百万 Token",
@@ -486,6 +513,11 @@
       "secondJudgeModel": "第二独立评审模型",
       "secondJudgeOutputPrice": "第二评审输出价格 / 百万 Token",
       "secondJudgeProvider": "第二独立评审提供方",
+      "removeConstraint": "移除约束",
+      "removeDimension": "移除维度",
+      "retentionDays": "证据保留天数",
+      "value": "阈值",
+      "weight": "权重",
       "title": "配置评分与决策策略"
     },
     "steps": {
@@ -501,6 +533,7 @@
     "subtitle": "通过持久执行和可解释证据进行可复现的模型选型。",
     "title": "模型评估实验室",
     "variants": {
+      "add": "添加候选项",
       "agentTarget": "Agent 目标类型",
       "capabilities": "声明输入与运行能力",
       "capabilitiesHint": "模型目录能力会自动识别；请显式声明该变体还能执行的全部契约。",
@@ -515,9 +548,10 @@
         "video": "视频输入"
       },
       "cloudOrUnverified": "云端 / 未验证",
+      "copyName": "{name} 副本",
       "deployment": "部署 ID",
       "deploymentPlaceholder": "可选的提供方部署或端点别名",
-      "description": "把每项提供方、部署、模型、运行目标、提示和推理参数差异固定为具名变体。",
+      "description": "为具名候选项配置当前模型或 Agent 运行时会真实使用的全部选项。",
       "incomplete": "未完成",
       "inference": "提示与推理参数",
       "inferenceHint": "所有取值都会固定在不可变实验清单中。",
@@ -528,10 +562,12 @@
       "maxOutputTokens": "最大输出 Token",
       "model": "模型 ID",
       "modelPlaceholder": "已配置的模型 ID",
+      "name": "候选项名称",
       "outputPrice": "输出费用（美元 / 百万 Token）",
       "provider": "提供方 ID",
       "providerPlaceholder": "已配置的提供方 ID",
       "ready": "已就绪",
+      "remove": "移除候选项",
       "systemPrompt": "系统提示",
       "systemPromptPlaceholder": "该变体专属的系统指令",
       "targetIds": {
@@ -548,7 +584,10 @@
       "temperature": "温度",
       "title": "配置可比较变体",
       "topP": "Top P",
-      "variant": "变体 {label}"
+      "duplicate": "复制候选项",
+      "variant": "变体 {label}",
+      "workflowVersion": "工作流版本 ID",
+      "workflowVersionPlaceholder": "可选的不可变已发布版本"
     }
   },
   "runBar": {

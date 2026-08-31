@@ -484,7 +484,9 @@
       "retry": "Check again"
     },
     "recording": {
+      "collapse": "Collapse controller",
       "elapsed": "Elapsed {time}",
+      "expand": "Expand controller",
       "finish": "Finish",
       "hideSheet": "Hide this panel",
       "hideSheetHint": "Recording continues. Use the floating controller to stop.",
@@ -492,6 +494,7 @@
       "lastStep": "Last: {description}",
       "limitWarning": "{kind} is at {percent}% of its limit.",
       "live": "Recording — {count} steps",
+      "moveController": "Move controller",
       "pause": "Pause",
       "paused": "Paused — {count} steps",
       "resume": "Resume",

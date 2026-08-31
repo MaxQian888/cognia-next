@@ -19,6 +19,10 @@
   },
   "label": "飞书云文档",
   "labelGoogle": "Google 文档",
+  "name": {
+    "google": "Google Workspace",
+    "lark": "飞书文档"
+  },
   "picker": {
     "accountLabel": "账号",
     "attached": "已附加「{title}」",
@@ -31,6 +35,23 @@
     "searching": "搜索中…",
     "title": "云端文档",
     "truncated": "「{title}」内容过大，已截断。"
+  },
+  "reach": {
+    "block": {
+      "needs-desktop-shell": "读取这类文档需要桌面应用，飞书请求桥和 Google 登录回调监听都运行在那里。",
+      "no-runtime": "当前浏览器未与任何持有飞书或 Google 账号的宿主配对，因此这里没有任何组件能够打开该文档。",
+      "runs-on-host": "你配对的宿主已经连接了这些账号，能够打开该文档；但当前客户端无法直接访问那个读取进程，所以取不回正文。"
+    },
+    "nextStep": {
+      "needs-desktop-shell": "请在桌面端打开 Cognia 使用此功能。",
+      "no-runtime": "请在桌面端打开 Cognia，或将此浏览器与已连接账号的宿主配对。",
+      "runs-on-host": "请在该宿主上打开 Cognia 添加文档，或直接把正文粘贴到这里。"
+    },
+    "short": {
+      "needs-desktop-shell": "需要桌面应用",
+      "no-runtime": "需要桌面应用",
+      "runs-on-host": "可在配对宿主上使用"
+    }
   },
   "settings": {
     "connect": "连接",
@@ -54,9 +75,5 @@
     "larkNoAccount": "尚未连接飞书账号。",
     "notConnected": "未连接",
     "title": "云端文档"
-  },
-  "name": {
-    "lark": "飞书文档",
-    "google": "Google Workspace"
   }
 }

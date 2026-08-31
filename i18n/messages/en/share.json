@@ -110,6 +110,9 @@
   },
   "ttlLabel": "Expires",
   "view": {
+    "provenance": {
+      "digitalTwin": "AI-generated with a Cognia Digital Twin"
+    },
     "a2uiReadonly": "Read-only preview",
     "appInvalid": "This shared app could not be loaded.",
     "appTitle": "Shared app",

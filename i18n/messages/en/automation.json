@@ -258,20 +258,26 @@
       "cursorPosition": "Read cursor position",
       "doubleClick": "Double-click",
       "drag": "Drag",
+      "expandElement": "Expand element",
       "findText": "Find text",
+      "getAppState": "Read app state",
       "holdKey": "Hold key",
       "key": "Press keys",
       "leftClick": "Left-click",
+      "listApps": "List applications",
       "middleClick": "Middle-click",
       "mouseDown": "Press mouse button",
       "mouseMove": "Move pointer",
       "mouseUp": "Release mouse button",
+      "performAction": "Perform action",
+      "queryElements": "Query elements",
       "rightClick": "Right-click",
       "screenshot": "Capture screen",
       "scroll": "Scroll",
       "tripleClick": "Triple-click",
       "type": "Type text",
-      "wait": "Wait"
+      "wait": "Wait",
+      "zoom": "Zoom into region"
     },
     "activity": "Activity: {action}",
     "close": "Close",
@@ -307,7 +313,8 @@
     "statusUnknown": "Unknown",
     "statusUnreachable": "Unreachable",
     "stop": "Stop",
-    "title": "Computer-Use Sandboxes"
+    "title": "Computer-Use Sandboxes",
+    "unsupportedAction": "No live adapter implements this action for the imported provider"
   },
   "screenOff": {
     "activeMonitor": {

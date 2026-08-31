@@ -11,7 +11,9 @@
     "supported": "Supported",
     "vendor-pending": "Vendor pending"
   },
-  "available": { "title": "Available services" },
+  "available": {
+    "title": "Available services"
+  },
   "connections": {
     "empty": "No external service connections yet.",
     "provider": "Provider: {provider}",
@@ -27,6 +29,34 @@
     "manage": "Manage",
     "validate": "Validate"
   },
+  "orphans": {
+    "description": "Websites you connected by hand, plus any rows left behind by a removed plugin.",
+    "title": "Other connections"
+  },
+  "services": {
+    "action": {
+      "blockedUpstream": "Not available",
+      "manage": "Manage server",
+      "none": "Nothing to do here",
+      "resume": "Resume",
+      "review": "Review and enable"
+    },
+    "blockedUpstreamHint": "Cognia is not admitted to this vendor's catalog yet, so this method cannot be connected.",
+    "empty": "No service definitions are installed. Enabling a plugin that ships one adds it here.",
+    "providerKind": {
+      "browser": "Website",
+      "integration": "Integration",
+      "mcp": "MCP server",
+      "openapi": "OpenAPI"
+    },
+    "providersLabel": "Connection methods",
+    "reviewHint": "This provider installed an MCP server that is disabled until you review what it can do.",
+    "skills": "{count} bundled skills",
+    "state": {
+      "not-connected": "Not set up"
+    },
+    "title": "Services"
+  },
   "status": {
     "blocked": "Blocked",
     "connected": "Connected",
@@ -35,7 +65,11 @@
     "pending": "Pending review",
     "suspended": "Suspended"
   },
-  "surface": { "chat": "Chat", "inbox": "Inbox", "workflow": "Workflow" },
+  "surface": {
+    "chat": "Chat",
+    "inbox": "Inbox",
+    "workflow": "Workflow"
+  },
   "title": "External services",
   "website": {
     "connect": "Connect website",

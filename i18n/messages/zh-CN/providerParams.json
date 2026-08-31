@@ -23,6 +23,10 @@
     }
   },
   "connection": {
+    "concurrentLimit": {
+      "description": "此提供商允许的最大并发请求数。留空时仅使用全局执行限制。",
+      "label": "提供商并发数"
+    },
     "maxRetries": {
       "description": "失败时的重试次数。",
       "label": "最大重试次数"
@@ -71,6 +75,7 @@
       "low": "低限制",
       "medium": "中等限制",
       "none": "无限制",
+      "off": "关闭",
       "sexuallyExplicit": {
         "description": "过滤色情内容。",
         "label": "露骨性内容"

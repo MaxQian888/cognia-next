@@ -400,6 +400,7 @@
     "level": "等级 {level}"
   },
   "quickMenu": {
+    "clean": "清洁",
     "clickThrough": "鼠标穿透",
     "feed": "喂食",
     "hideDesktopPet": "隐藏桌宠",
@@ -408,9 +409,11 @@
     "openSettings": "打开设置",
     "pet": "抚摸",
     "play": "玩耍",
+    "sleep": "休息",
     "showDesktopPet": "显示桌宠",
     "showMainWindow": "显示主窗口",
-    "talk": "聊天"
+    "talk": "聊天",
+    "treat": "奖励"
   },
   "rarity": {
     "common": "普通",

@@ -613,6 +613,17 @@
         "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
         "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
       },
+      "unavailableDetail": {
+        "cua-desktop": "此桌面连接没有经过验证的工作区适配器。",
+        "microvm": "请启用 E2B Sandbox 插件，并使用已绑定 E2B 工作区的会话。",
+        "os": "请在沙箱设置中运行主动隔离验证。",
+        "osProbeFailed": "当前 OS 隔离检查失败。请打开沙箱设置查看诊断详情，然后重试验证。"
+      },
+      "unavailableLabel": {
+        "cua-desktop": "沙箱不可用 — 绑定桌面",
+        "microvm": "沙箱不可用 — microVM 层",
+        "os": "沙箱不可用 — OS 层"
+      },
       "unpin": "恢复跟随默认值"
     },
     "saveTemplate": {
@@ -1241,6 +1252,7 @@
     "managedWorktreeUnavailable": "托管 Worktree 不可用。此任务未在本地目录中运行。",
     "noSession": "当前没有打开的会话，请先新建一个再发送。",
     "openSettings": "打开设置",
+    "providerConcurrencyCapReached": "该服务商的并发轮次已达上限。请等待其中一轮结束后重试，或更换服务商。",
     "pendingPromptPiiBlocked": "自动提示词可能包含隐私或凭据类数据，已阻止发送。请新建普通对话，并只提供你明确希望发送的内容。",
     "retry": "重试",
     "sidecarExited": "AI 进程意外停止，本轮已中断。点击重试可继续。",
@@ -1308,6 +1320,14 @@
     ]
   },
   "mcp": {
+    "computerUse": {
+      "actionFallback": "操作",
+      "frameAlt": "{tool} 画面",
+      "matches": "{count} 处匹配",
+      "nodes": "{count} 个节点",
+      "region": "区域（{x}, {y}）{width}×{height}",
+      "screenUnchanged": "画面与上一修订版本相比没有变化。"
+    },
     "edit": {
       "editCount": "{count} 处修改",
       "title": "编辑"
@@ -1325,6 +1345,12 @@
     "openInReview": "在审阅中打开",
     "plan": {
       "title": "计划"
+    },
+    "ragSearch": {
+      "hitCount": "{count} 个分块",
+      "noMatches": "未找到匹配的知识",
+      "scoreLabel": "相似度分数 {score}",
+      "title": "知识检索"
     },
     "read": {
       "title": "读取"
@@ -1723,9 +1749,6 @@
       "showAllRows": "显示全部行",
       "truncatedNotice": "已显示 {total, number} 行中的前 {shown, number} 行。"
     },
-    "taskList": {
-      "progress": "进度"
-    },
     "video": {
       "bilibiliTitle": "B 站视频",
       "defaultFilename": "video",
@@ -1956,7 +1979,6 @@
     "backgroundRunning": "后台运行中…",
     "cutOff": "因错误在完成前中断——这是最后的输出。",
     "depthBadge": "深度 {n}",
-    "durationMs": "{ms}ms",
     "logsTailNote": "仅显示最近 {n} 条日志",
     "noLogsYet": "暂无日志 — 子代理正在初始化。",
     "openInRuns": "在运行中心打开",

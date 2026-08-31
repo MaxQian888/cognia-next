@@ -613,6 +613,17 @@
         "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
         "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
       },
+      "unavailableDetail": {
+        "cua-desktop": "No verified workspace adapter exists for this desktop connection.",
+        "microvm": "Enable the E2B Sandbox plugin and use a session backed by an E2B workspace.",
+        "os": "Run the active confinement verification in Sandbox settings.",
+        "osProbeFailed": "The active OS confinement check failed. Open Sandbox settings for the diagnostic detail, then retry verification."
+      },
+      "unavailableLabel": {
+        "cua-desktop": "Sandbox unavailable — bound desktop",
+        "microvm": "Sandbox unavailable — microVM tier",
+        "os": "Sandbox unavailable — OS tier"
+      },
       "unpin": "Follow the default again"
     },
     "saveTemplate": {
@@ -1241,6 +1252,7 @@
     "managedWorktreeUnavailable": "The managed worktree is unavailable. This task was not run locally.",
     "noSession": "No conversation is open. Start a new one to send this.",
     "openSettings": "Open settings",
+    "providerConcurrencyCapReached": "This provider is already running its maximum number of concurrent turns. Try again once one finishes, or switch provider.",
     "pendingPromptPiiBlocked": "The automated prompt was blocked because it may contain private or credential-like data. Start a normal chat and share only the details you intend to send.",
     "retry": "Retry",
     "sidecarExited": "The assistant stopped unexpectedly and the turn was interrupted. Retry to continue.",
@@ -1308,6 +1320,14 @@
     ]
   },
   "mcp": {
+    "computerUse": {
+      "actionFallback": "action",
+      "frameAlt": "{tool} frame",
+      "matches": "{count, plural, =1 {1 match} other {# matches}}",
+      "nodes": "{count, plural, =1 {1 node} other {# nodes}}",
+      "region": "region ({x}, {y}) {width}×{height}",
+      "screenUnchanged": "Screen unchanged since the previous revision."
+    },
     "edit": {
       "editCount": "{count} edits",
       "title": "Edit"
@@ -1325,6 +1345,12 @@
     "openInReview": "Open in review",
     "plan": {
       "title": "Plan"
+    },
+    "ragSearch": {
+      "hitCount": "{count, plural, one {# chunk} other {# chunks}}",
+      "noMatches": "No matching knowledge found",
+      "scoreLabel": "Similarity score {score}",
+      "title": "Knowledge search"
     },
     "read": {
       "title": "Read"
@@ -1723,9 +1749,6 @@
       "showAllRows": "Show all rows",
       "truncatedNotice": "Showing the first {shown, number} of {total, number} rows."
     },
-    "taskList": {
-      "progress": "Progress"
-    },
     "video": {
       "bilibiliTitle": "Bilibili video",
       "defaultFilename": "video",
@@ -1956,7 +1979,6 @@
     "backgroundRunning": "Running in background…",
     "cutOff": "Cut off by an error before finishing — this is the last output.",
     "depthBadge": "depth {n}",
-    "durationMs": "{ms}ms",
     "logsTailNote": "Showing the last {n} log entries",
     "noLogsYet": "No log entries yet — sub-agent is initializing.",
     "openInRuns": "Open in Agent Runs",

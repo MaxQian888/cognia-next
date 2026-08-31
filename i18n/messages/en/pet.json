@@ -403,6 +403,7 @@
     "level": "Level {level}"
   },
   "quickMenu": {
+    "clean": "Clean",
     "clickThrough": "Click-through",
     "feed": "Feed",
     "hideDesktopPet": "Hide desktop pet",
@@ -411,9 +412,11 @@
     "openSettings": "Open settings",
     "pet": "Pet",
     "play": "Play",
+    "sleep": "Sleep",
     "showDesktopPet": "Show desktop pet",
     "showMainWindow": "Show main window",
-    "talk": "Talk"
+    "talk": "Talk",
+    "treat": "Treat"
   },
   "rarity": {
     "common": "Common",

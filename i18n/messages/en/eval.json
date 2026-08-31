@@ -262,6 +262,7 @@
   "lab": {
     "actions": {
       "back": "Back",
+      "error": "Action could not be completed",
       "next": "Next"
     },
     "data": {
@@ -288,6 +289,12 @@
       "versionedHint": "The experiment pins the dataset version, case digest, split, and application version."
     },
     "evidence": {
+      "clearance": "Dataset media clearance",
+      "clearanceValues": {
+        "local-only": "Local only",
+        "manual": "Manually cleared",
+        "scanned": "Scanner cleared"
+      },
       "description": "Privacy, compatibility, spend, and statistical evidence for the current project.",
       "encrypted": "Encrypted artifacts",
       "encryptedHint": "Prompts, outputs, trajectories, attachments, and judge reasoning use AES-GCM envelopes.",
@@ -310,7 +317,7 @@
       "agent": "Full Agent evaluation",
       "agentHint": "Compare characters, tools, RAG, teams, workflows, and trajectories in isolated sessions.",
       "model": "Pure model evaluation",
-      "modelHint": "Compare provider, deployment, model, prompt, and inference-parameter variants."
+      "modelHint": "Compare provider, model, prompt, and inference-parameter variants."
     },
     "preflight": {
       "blocked": "Dispatch is blocked",
@@ -460,10 +467,18 @@
       "title": "Run the experiment"
     },
     "scoring": {
+      "addConstraint": "Add constraint",
+      "addDimension": "Add dimension",
       "budget": "Hard budget (USD)",
       "calibrated": "Calibration passed",
       "calibrationMetrics": "{count} anchors · κ {kappa, number, ::.00} · accuracy {accuracy, number, ::percent}",
       "description": "Combine deterministic rules, blind judging, calibration, constraints, and an explicit decision policy.",
+      "confidence": "Confidence level",
+      "constraints": "Eligibility constraints",
+      "constraintsHint": "A candidate must satisfy every constraint before utility weights are applied.",
+      "dimensions": "Utility dimensions",
+      "dimensionsHint": "Weights may use any positive scale; they are normalized by the recommendation engine.",
+      "direction": "Direction",
       "formal": "Formal recommendation",
       "formalHint": "Requires at least 30 effective holdout cases and calibrated independent judging.",
       "judgeInputPrice": "Judge input price / 1M tokens",
@@ -471,6 +486,10 @@
       "judgeModel": "Independent judge model",
       "judgeOutputPrice": "Judge output price / 1M tokens",
       "judgeProvider": "Independent judge provider",
+      "maximize": "Maximize",
+      "metric": "Metric id",
+      "minimize": "Minimize",
+      "minimumCases": "Minimum effective cases",
       "metrics": {
         "cost": "Cost",
         "latency": "Latency",
@@ -478,7 +497,15 @@
         "reliability": "Reliability"
       },
       "notCalibrated": "Calibration missing or below threshold",
+      "noConstraints": "No eligibility constraints.",
       "openCalibration": "Open calibration",
+      "operator": "Operator",
+      "operators": {
+        "gt": ">",
+        "gte": "≥",
+        "lt": "<",
+        "lte": "≤"
+      },
       "policy": "Decision policy",
       "policyHint": "Build a Pareto frontier first; apply utility weights only among eligible variants.",
       "secondJudgeInputPrice": "Second judge input price / 1M tokens",
@@ -486,6 +513,11 @@
       "secondJudgeModel": "Second independent judge model",
       "secondJudgeOutputPrice": "Second judge output price / 1M tokens",
       "secondJudgeProvider": "Second independent judge provider",
+      "removeConstraint": "Remove constraint",
+      "removeDimension": "Remove dimension",
+      "retentionDays": "Evidence retention (days)",
+      "value": "Threshold",
+      "weight": "Weight",
       "title": "Configure scoring and decision policy"
     },
     "steps": {
@@ -501,6 +533,7 @@
     "subtitle": "Reproducible model selection with durable execution and explainable evidence.",
     "title": "Model Evaluation Lab",
     "variants": {
+      "add": "Add candidate",
       "agentTarget": "Agent target type",
       "capabilities": "Declared input and runtime capabilities",
       "capabilitiesHint": "Catalog capabilities are detected automatically. Explicitly declare every additional contract this variant can execute.",
@@ -515,9 +548,10 @@
         "video": "Video input"
       },
       "cloudOrUnverified": "Cloud / unverified",
+      "copyName": "{name} copy",
       "deployment": "Deployment id",
       "deploymentPlaceholder": "Optional provider deployment / endpoint alias",
-      "description": "Pin every provider, deployment, model, runtime, prompt, and inference difference as a named variant.",
+      "description": "Configure named candidates with the exact options consumed by the selected model or Agent runtime.",
       "incomplete": "Incomplete",
       "inference": "Prompt and inference parameters",
       "inferenceHint": "Every value is pinned in the immutable experiment manifest.",
@@ -528,10 +562,12 @@
       "maxOutputTokens": "Max output tokens",
       "model": "Model id",
       "modelPlaceholder": "Configured model id",
+      "name": "Candidate name",
       "outputPrice": "Output USD / 1M tokens",
       "provider": "Provider id",
       "providerPlaceholder": "Configured provider id",
       "ready": "Ready",
+      "remove": "Remove candidate",
       "systemPrompt": "System prompt",
       "systemPromptPlaceholder": "Variant-specific system instruction",
       "targetIds": {
@@ -548,7 +584,10 @@
       "temperature": "Temperature",
       "title": "Configure comparable variants",
       "topP": "Top P",
-      "variant": "Variant {label}"
+      "duplicate": "Duplicate candidate",
+      "variant": "Variant {label}",
+      "workflowVersion": "Workflow version id",
+      "workflowVersionPlaceholder": "Optional immutable published version"
     }
   },
   "runBar": {

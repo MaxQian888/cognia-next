@@ -8,6 +8,8 @@
   "colOptional": "Optional",
   "colPermission": "Permission",
   "colTier": "Tier",
+  "nodeNetworkUnavailable": "Unavailable in the Node runtime: scoped in-process network brokering is not implemented.",
+  "nodeSubprocessUnavailable": "Unavailable in the Node runtime: scoped in-process subprocess brokering is not implemented.",
   "description": "Review what this plugin declared, what's currently granted, and adjust at runtime. Dangerous permissions are highlighted.",
   "empty": "This plugin doesn't declare or hold any permissions.",
   "grant": "Grant",

@@ -98,6 +98,12 @@
   },
   "strictModeNote": "严格模式: 沙盒不可用时,沙盒化工具调用一律被拒 —— 没有 bypass 选项。",
   "tier": {
+    "availability": {
+      "adapterMissing": "请先启用 E2B Sandbox 插件，再选择此层级。",
+      "probeFailed": "当前 OS 隔离检查失败。请查看上方探测诊断，然后重试验证。",
+      "probeRequired": "请先成功运行“验证隔离”，再选择此层级。",
+      "workspaceRequired": "执行时还需要会话已绑定到现有 E2B 工作区。"
+    },
     "description": "当会话启用沙盒时，决定由哪一层执行 Bash / Edit / Write。角色可以覆盖。",
     "microvm": {
       "description": "通过 cognia-e2b-sandbox 插件，将调用路由到临时 Firecracker microVM。需要安装 @e2b/sdk 并配置 E2B_API_KEY。",

@@ -23,6 +23,10 @@
     }
   },
   "connection": {
+    "concurrentLimit": {
+      "description": "Maximum simultaneous requests for this provider. Leave empty to use only the global execution limit.",
+      "label": "Provider Concurrency"
+    },
     "maxRetries": {
       "description": "Number of retry attempts on failure.",
       "label": "Max Retries"
@@ -71,6 +75,7 @@
       "low": "Low restriction",
       "medium": "Medium restriction",
       "none": "No restriction",
+      "off": "Off",
       "sexuallyExplicit": {
         "description": "Filter sexually explicit content.",
         "label": "Sexually Explicit"

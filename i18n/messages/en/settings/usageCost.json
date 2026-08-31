@@ -5,7 +5,20 @@
     "dailyLabel": "Daily limit (USD)",
     "monthlyLabel": "Monthly limit (USD)",
     "noLimit": "No limit",
-    "hardBlockHint": "You are warned at 80% and 95%. At 100% the next request is held until you approve one more."
+    "hardBlockHint": "You are warned at {warn}% and {critical}%. At 100% the next request is held until you approve one more.",
+    "perProviderTitle": "Per-provider limits",
+    "perProviderDescription": "Cap one provider without lowering the ceiling for everything else. Providers you spent on this month are listed automatically.",
+    "perProviderEmpty": "No per-provider limit yet. Add one to cap a single provider.",
+    "perProviderDailyLabel": "Daily limit for {provider} (USD)",
+    "perProviderMonthlyLabel": "Monthly limit for {provider} (USD)",
+    "addProvider": "Add provider",
+    "removeProvider": "Remove the limit for {provider}",
+    "dailyShort": "Daily (USD)",
+    "monthlyShort": "Monthly (USD)",
+    "thresholdsTitle": "Warning thresholds",
+    "thresholdsDescription": "Percent of a limit at which you are notified. Leave blank to use the defaults.",
+    "warnAtLabel": "Warn at (%)",
+    "criticalAtLabel": "Critical at (%)"
   },
   "debug": {
     "title": "Trace debug session",
@@ -14,5 +27,10 @@
     "armFor": "{minutes} min",
     "disarm": "Stop now",
     "privacyHint": "Captured content is excluded from backups, exports and diagnostic reports. Sessions default to {minutes} minutes."
+  },
+  "spend": {
+    "title": "Spend against your limits",
+    "description": "Live totals from the same rollup the send gate reads, so this figure and the one that blocks a request are always the same.",
+    "empty": "Set a limit above and today's and this month's spend against it appear here."
   }
 }

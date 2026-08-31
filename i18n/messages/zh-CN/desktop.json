@@ -180,8 +180,8 @@
     "a2ui": "小应用",
     "agentRuns": "智能体运行",
     "aliases": {
-      "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本",
-      "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts"
+      "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts",
+      "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
     },
     "auxiliaryGroup": "个人与日志",
     "browser": "浏览器",
@@ -207,12 +207,14 @@
       "sideRight": "右侧",
       "title": "自定义侧边栏"
     },
+    "devices": "设备",
     "directMessages": "对话",
     "discover": "发现",
     "eval": "评估",
     "featuresGroup": "功能",
     "goals": "目标",
     "inbox": "收件箱",
+    "integrations": "集成",
     "issueProjects": "项目",
     "issues": "议题",
     "label": "频道导航栏",
@@ -241,8 +243,7 @@
     "unreadCount": "{count} 条未读",
     "workflows": "工作流",
     "workspace": "工作区",
-    "workspacesGroup": "工作区",
-    "devices": "设备"
+    "workspacesGroup": "工作区"
   },
   "jobCenter": {
     "actions": {
@@ -637,6 +638,7 @@
     "perf": "性能",
     "perfCpu": "CPU",
     "perfMem": "内存",
+    "runningCount": "{count, plural, other {# 个会话进行中}}",
     "streaming": "流式响应中",
     "syncLast": "已同步 {time}",
     "syncNever": "未同步",
@@ -646,8 +648,7 @@
     "terminalRunning": "终端面板 — 有会话正在运行",
     "terminalToggle": "切换终端面板",
     "usage": "用量与额度",
-    "usageOpen": "打开用量与额度",
-    "runningCount": "{count, plural, other {# 个会话进行中}}"
+    "usageOpen": "打开用量与额度"
   },
   "titleBar": {
     "alwaysOnTop": "置顶窗口",

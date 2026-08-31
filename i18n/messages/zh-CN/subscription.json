@@ -9,10 +9,69 @@
     "refresh": "立即刷新",
     "scopeLabel": "作用域",
     "signInCta": "登录",
-    "signOut": "登出",
+    "signOut": "停用",
     "signedOutBody": "用 Claude 账号授权 Cognia。",
     "signedOutTitle": "未登录",
     "unknownEmail": "已登录（服务器未返回邮箱）"
+  },
+  "accountCenter": {
+    "actions": {
+      "activate": "立即激活",
+      "deactivate": "停用",
+      "failed": "账号操作失败：{error}",
+      "more": "更多账号操作",
+      "reauthenticate": "重新认证",
+      "removeLocal": "从 Cognia 移除",
+      "removed": "账号已从 Cognia 移除。",
+      "rename": "重命名",
+      "renamed": "账号已重命名。",
+      "setDefault": "设为默认",
+      "update": "更新凭据"
+    },
+    "activeHelp": "“当前激活”决定该提供方正在运行的工具使用哪份凭据。",
+    "add": "添加账号",
+    "badges": {
+      "active": "当前激活",
+      "default": "默认"
+    },
+    "defaultHelp": "“默认”是新会话解析账号时的回退选择，不会立即激活该账号。",
+    "description": "统一管理 Claude、Codex 与 OpenCode 账号；外部 CLI 凭据始终只读。",
+    "empty": "当前筛选条件下没有账号。",
+    "emptyDetail": "选择账号后查看状态与可用操作。",
+    "fields": {
+      "active": "当前激活",
+      "authMode": "认证方式",
+      "default": "新会话默认",
+      "email": "邮箱",
+      "expiry": "到期时间",
+      "lastRotation": "上次凭据轮换",
+      "notApplicable": "不会过期",
+      "plan": "套餐",
+      "source": "凭据来源"
+    },
+    "filterLabel": "按提供方筛选账号",
+    "filters": {
+      "all": "全部提供方"
+    },
+    "health": {
+      "expiring": "即将过期",
+      "ready": "可用",
+      "reauth_required": "需要重新认证",
+      "source_unavailable": "外部来源"
+    },
+    "listLabel": "托管账号",
+    "loading": "正在加载账号…",
+    "loadingDetail": "正在加载安全账号详情…",
+    "no": "否",
+    "providers": {
+      "anthropic": "Claude",
+      "codex": "Codex",
+      "opencode": "OpenCode"
+    },
+    "reauthReason": "已保存凭据无法刷新（{reason}）。请重新认证同一账号，或把其他登录作为新账号添加。",
+    "title": "账号中心",
+    "webMode": "账号凭据仅可在桌面应用中使用。",
+    "yes": "是"
   },
   "balance": {
     "description": "该账号所用提供商的剩余额度 / 配额。",
@@ -31,8 +90,6 @@
       "expiresLabel": "Token 过期时间",
       "planLine": "{plan} · {mode}",
       "refresh": "立即刷新 Token",
-      "revokeOnSignOut": "服务端同步撤销",
-      "revokeOnSignOutHint": "同时告诉 auth.openai.com 让该 token 失效。默认关闭——仅本地登出可恢复。",
       "signedOutBody": "登录后即可在外部代理中使用 Codex。",
       "signedOutTitle": "暂无账号",
       "unknownEmail": "（未提供邮箱）"
@@ -42,10 +99,15 @@
       "actions": {
         "cancel": "取消",
         "close": "关闭",
+        "retryOauth": "重新开始 OAuth",
         "startOauth": "开始 OAuth"
       },
       "modeGroupLabel": "登录方式",
       "modes": {
+        "apiKey": {
+          "description": "将 OpenAI API Key 保存为由 Cognia 管理的 Codex 账号。",
+          "label": "OpenAI API Key"
+        },
         "oauth": {
           "description": "用 codex-cli 的官方 client_id 在 auth.openai.com 上重新登录 ChatGPT。",
           "label": "Device-code OAuth"
@@ -54,6 +116,12 @@
           "description": "从 `~/.codex/auth.json` 或 codex-cli 钥匙串条目中读取现有凭证，只读，不会写回。",
           "label": "复用 codex-cli"
         }
+      },
+      "apiKey": {
+        "description": "密钥只会发送一次到 Cognia 的加密凭据仓，不会从任何外部 CLI 读取。",
+        "field": "OpenAI API Key",
+        "placeholder": "sk-…",
+        "save": "保存 API Key"
       },
       "oauth": {
         "accessDenied": "在 OpenAI 一侧取消了登录。",
@@ -106,6 +174,13 @@
       },
       "cardDescription": "该服务商的自动刷新行为。",
       "cardTitle": "连接设置",
+      "invalidCadence": "轮询间隔必须是至少 60 秒的数字。",
+      "invalidThreshold": "预警阈值必须是 0 到 100 之间的数字。",
+      "pending": "更改尚未应用。",
+      "save": "应用设置",
+      "saveFailed": "保存设置失败：{error}",
+      "saved": "设置已保存。",
+      "saving": "正在保存…",
       "probe": {
         "cardDescription": "在后台轮询你的 Codex 5 小时与每周额度。",
         "cardTitle": "用量追踪",
@@ -149,7 +224,7 @@
       "referenceSummary": "由 {sessions} 个会话和 {characters} 个角色使用。",
       "remove": "删除",
       "removeConfirm": "删除",
-      "removeDialogBody": "凭证会从 OS 系统钥匙串中移除。随时可以重新登录。",
+      "removeDialogBody": "只会从 Cognia 凭据仓移除该凭据，不会改变远端会话或任何外部 CLI 登录。",
       "removeDialogTitle": "删除该账号？",
       "removed": "账号已移除。",
       "rename": "重命名",
@@ -160,7 +235,7 @@
       "renamed": "账号已重命名。",
       "replacementLabel": "替换账号",
       "retry": "重试",
-      "secretsHidden": "Token 不显示——如需查看请打开 OS 钥匙串管理器。",
+      "secretsHidden": "设置界面不会显示任何凭据内容。",
       "setActive": "设为激活",
       "setDefault": "设为默认",
       "title": "账号",
@@ -435,6 +510,10 @@
       "vaultGroup": "凭证仓"
     },
     "items": {
+      "accounts": {
+        "description": "在自适应工作区中统一管理所有提供方账号",
+        "label": "账号中心"
+      },
       "backup": {
         "description": "导出或导入加密的凭证仓副本",
         "label": "备份与迁移"
@@ -500,6 +579,7 @@
       "addKey": "添加 Zen key",
       "baseUrlField": "Base URL（可选）",
       "baseUrlPlaceholder": "留空则使用默认 Zen 端点",
+      "baseUrlReplaceHint": "更新凭据会覆盖已保存的 Base URL。只有该账号使用默认 Zen 端点时才留空。",
       "cancel": "取消",
       "description": "粘贴 opencode.ai 给出的 API key（Zen 按请求付费或 Go 包月）。等上游公开 OAuth 接口后，会替换为完整 OAuth 流程。",
       "labelField": "别名（可选）",
@@ -639,7 +719,9 @@
       "title": "按模型成本",
       "totalCost": "总成本",
       "totalTokens": "总 Token",
-      "totalTurns": "总轮次"
+      "totalTurns": "总轮次",
+      "colReasoning": "推理",
+      "unpricedNote": "有 {turns} 轮无法定价，因此上方合计为下限值。"
     },
     "range": {
       "30d": "最近 30 天",
@@ -727,6 +809,22 @@
       "sourceHeaders": "来自对话响应头",
       "title": "当前配额窗口",
       "resetsAt": "{at} 重置"
+    },
+    "bySurface": {
+      "title": "按来源",
+      "description": "额度花在了应用的哪一部分。对话、智能体团队、定时工作流与连接器回复都消耗同一份套餐。",
+      "empty": "该区间内没有用量记录。",
+      "rowDetail": "{turns} 轮 · {tokens} tokens"
+    },
+    "budget": {
+      "title": "支出上限",
+      "description": "相对硬性美元上限的实时花费。达到 100% 时下一次请求会被拦截，需你确认后放行。",
+      "empty": "尚未设置支出上限。可在「设置 › 用量与成本」中配置。",
+      "level": {
+        "warning": "接近上限",
+        "critical": "严重",
+        "exceeded": "已超出"
+      }
     }
   },
   "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"

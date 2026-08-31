@@ -8,6 +8,8 @@
   "colOptional": "可选",
   "colPermission": "权限",
   "colTier": "等级",
+  "nodeNetworkUnavailable": "Node 运行时不可用：尚未实现进程内的精确网络代理。",
+  "nodeSubprocessUnavailable": "Node 运行时不可用：尚未实现进程内的精确子进程代理。",
   "description": "查看该插件声明的、当前已授予的权限，并按需调整运行时授权。危险权限会高亮显示。",
   "empty": "此插件未声明或持有任何权限。",
   "grant": "授予",

@@ -87,6 +87,7 @@
   "selectionExplain": "Selection toolbar: explain",
   "selectionRemember": "Selection toolbar: add to memory",
   "selectionSpeak": "Selection toolbar: read aloud",
+  "selectionShowToolbar": "Show toolbar for current selection",
   "selectionTranslate": "Selection toolbar: translate",
   "title": "Global shortcuts",
   "unified": {

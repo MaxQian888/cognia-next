@@ -11,7 +11,9 @@
     "supported": "支持",
     "vendor-pending": "等待厂商批准"
   },
-  "available": { "title": "可用服务" },
+  "available": {
+    "title": "可用服务"
+  },
   "connections": {
     "empty": "还没有外部服务连接。",
     "provider": "Provider：{provider}",
@@ -27,6 +29,34 @@
     "manage": "管理",
     "validate": "校验"
   },
+  "orphans": {
+    "description": "你手动连接的网站，以及插件被移除后遗留的连接记录。",
+    "title": "其他连接"
+  },
+  "services": {
+    "action": {
+      "blockedUpstream": "暂不可用",
+      "manage": "管理服务器",
+      "none": "此处无需操作",
+      "resume": "恢复",
+      "review": "审阅并启用"
+    },
+    "blockedUpstreamHint": "Cognia 尚未获准进入该服务方的目录，因此暂时无法通过此方式连接。",
+    "empty": "尚未安装任何服务定义。启用附带服务的插件后会出现在这里。",
+    "providerKind": {
+      "browser": "网站",
+      "integration": "集成",
+      "mcp": "MCP 服务器",
+      "openapi": "OpenAPI"
+    },
+    "providersLabel": "连接方式",
+    "reviewHint": "该连接方式已安装一个 MCP 服务器；在你审阅其可执行的操作之前，它保持停用。",
+    "skills": "随附 {count} 个技能",
+    "state": {
+      "not-connected": "尚未配置"
+    },
+    "title": "服务"
+  },
   "status": {
     "blocked": "已阻止",
     "connected": "已连接",
@@ -35,7 +65,11 @@
     "pending": "等待审阅",
     "suspended": "已暂停"
   },
-  "surface": { "chat": "Chat", "inbox": "Inbox", "workflow": "Workflow" },
+  "surface": {
+    "chat": "Chat",
+    "inbox": "Inbox",
+    "workflow": "Workflow"
+  },
   "title": "外部服务",
   "website": {
     "connect": "连接网站",

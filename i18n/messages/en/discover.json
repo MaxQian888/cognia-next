@@ -19,8 +19,11 @@
     "agentPresets": "Agents & subagents",
     "characters": "Characters",
     "connectors": "Connectors",
+    "docsProviders": "Document sources",
+    "externalServices": "External services",
     "favorites": "Favorites",
     "foryou": "For You",
+    "integrations": "Integrations",
     "mcpPresets": "MCP presets",
     "mcpTools": "MCP tools",
     "ocrProviders": "OCR providers",
@@ -101,8 +104,11 @@
   "emptyCharacters": "No characters yet — create one on the desktop.",
   "emptyCharactersHint": "Create characters in the desktop app and they'll sync here.",
   "emptyConnectors": "No connectors available.",
+  "emptyDocsProviders": "No document sources are registered.",
+  "emptyExternalServices": "No external services are installed. Enabling a plugin that ships one adds it here.",
   "emptyFavorites": "No favorites yet — tap the star on any item to pin it here.",
   "emptyFiltered": "No matches for \"{query}\".",
+  "emptyIntegrations": "No integrations are installed.",
   "emptyMcpPresets": "No MCP presets available.",
   "emptyMcpTools": "No MCP servers configured.",
   "emptyOcrProviders": "No OCR providers registered.",
@@ -158,6 +164,13 @@
     "useTemplate": "Use template",
     "viewDocs": "View docs"
   },
+  "integrationAuth": {
+    "api-key": "API key",
+    "app": "App install",
+    "oauth2": "OAuth",
+    "personal-access-token": "Access token"
+  },
+  "integrationCounts": "{actions} actions · {events} event types",
   "marketplace": {
     "browse": "Browse marketplace",
     "desktopOnly": "Install from the desktop app.",
@@ -198,6 +211,10 @@
   "search": "Search discover…",
   "searchAria": "Search discover",
   "searchScope": "Search {category}…",
+  "serviceBadge": {
+    "awaitingReview": "Pending review",
+    "connected": "Connected"
+  },
   "share": {
     "action": "Share via link",
     "cancel": "Cancel",

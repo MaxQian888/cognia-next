@@ -11,6 +11,7 @@
   },
   "empty": "No retrieval generations or jobs are recorded for this scope.",
   "error": "The retrieval control action failed.",
+  "loading": "Loading retrieval state…",
   "generation": {
     "active": "Active",
     "failed": "Failed",

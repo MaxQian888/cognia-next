@@ -254,24 +254,30 @@
   },
   "pictureInPicture": {
     "actions": {
-      "clickText": "点击文字",
+      "clickText": "点击文本",
       "cursorPosition": "读取光标位置",
       "doubleClick": "双击",
       "drag": "拖拽",
+      "expandElement": "展开元素",
       "findText": "查找文字",
+      "getAppState": "读取应用状态",
       "holdKey": "长按按键",
       "key": "发送按键",
       "leftClick": "左键单击",
+      "listApps": "列出应用",
       "middleClick": "中键单击",
       "mouseDown": "按下鼠标",
       "mouseMove": "移动光标",
       "mouseUp": "松开鼠标",
+      "performAction": "执行动作",
+      "queryElements": "查询元素",
       "rightClick": "右键单击",
       "screenshot": "截取屏幕",
       "scroll": "滚动",
       "tripleClick": "三击",
       "type": "输入文字",
-      "wait": "等待"
+      "wait": "等待",
+      "zoom": "放大区域"
     },
     "activity": "当前操作：{action}",
     "close": "关闭",
@@ -307,7 +313,8 @@
     "statusUnknown": "未知",
     "statusUnreachable": "无法连接",
     "stop": "停止",
-    "title": "Computer-Use 沙箱"
+    "title": "Computer-Use 沙箱",
+    "unsupportedAction": "当前导入的提供商没有实现此操作的实时适配器"
   },
   "screenOff": {
     "activeMonitor": {

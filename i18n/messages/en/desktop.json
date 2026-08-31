@@ -180,8 +180,8 @@
     "a2ui": "Mini-Apps",
     "agentRuns": "Agent runs",
     "aliases": {
-      "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost",
-      "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers"
+      "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
+      "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
     },
     "auxiliaryGroup": "Profile and logs",
     "browser": "Browser",
@@ -207,12 +207,14 @@
       "sideRight": "Right",
       "title": "Customize sidebar"
     },
+    "devices": "Devices",
     "directMessages": "Chats",
     "discover": "Discover",
     "eval": "Evaluation",
     "featuresGroup": "Features",
     "goals": "Goals",
     "inbox": "Inbox",
+    "integrations": "Integrations",
     "issueProjects": "Projects",
     "issues": "Issues",
     "label": "Guild rail",
@@ -241,8 +243,7 @@
     "unreadCount": "{count, plural, one {# unread} other {# unread}}",
     "workflows": "Workflows",
     "workspace": "Workspace",
-    "workspacesGroup": "Workspaces",
-    "devices": "Devices"
+    "workspacesGroup": "Workspaces"
   },
   "jobCenter": {
     "actions": {
@@ -637,6 +638,7 @@
     "perf": "Performance",
     "perfCpu": "CPU",
     "perfMem": "Memory",
+    "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}",
     "streaming": "Streaming",
     "syncLast": "Synced {time}",
     "syncNever": "Not synced",
@@ -646,8 +648,7 @@
     "terminalRunning": "Terminal panel — a session is running",
     "terminalToggle": "Toggle terminal panel",
     "usage": "Usage & limits",
-    "usageOpen": "Open usage & limits",
-    "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}"
+    "usageOpen": "Open usage & limits"
   },
   "titleBar": {
     "alwaysOnTop": "Always on top",

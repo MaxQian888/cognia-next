@@ -110,6 +110,9 @@
   },
   "ttlLabel": "有效期",
   "view": {
+    "provenance": {
+      "digitalTwin": "由 Cognia 数字分身生成的 AI 内容"
+    },
     "a2uiReadonly": "只读预览",
     "appInvalid": "无法加载此分享的应用。",
     "appTitle": "分享的应用",

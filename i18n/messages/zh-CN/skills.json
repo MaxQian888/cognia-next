@@ -484,7 +484,9 @@
       "retry": "重新检查"
     },
     "recording": {
+      "collapse": "收起控制条",
       "elapsed": "已录 {time}",
+      "expand": "展开控制条",
       "finish": "完成",
       "hideSheet": "隐藏此面板",
       "hideSheetHint": "录制会继续。用悬浮控制条来停止。",
@@ -492,6 +494,7 @@
       "lastStep": "最近：{description}",
       "limitWarning": "{kind} 已达到上限的 {percent}%。",
       "live": "录制中——已捕获 {count} 步",
+      "moveController": "移动控制条",
       "pause": "暂停",
       "paused": "已暂停——已捕获 {count} 步",
       "resume": "继续",

@@ -5,7 +5,20 @@
     "dailyLabel": "每日上限（美元）",
     "monthlyLabel": "每月上限（美元）",
     "noLimit": "不限制",
-    "hardBlockHint": "达到 80% 与 95% 时提醒；达到 100% 时下一次请求会被拦截，需你确认后才放行一次。"
+    "hardBlockHint": "达到 {warn}% 与 {critical}% 时提醒；达到 100% 时下一次请求会被拦截，需你确认后才放行一次。",
+    "perProviderTitle": "按提供商设限",
+    "perProviderDescription": "只压住某一个提供商，不必调低整体上限。本月产生过花费的提供商会自动列出。",
+    "perProviderEmpty": "尚未设置按提供商的上限。添加一个即可只限制该提供商。",
+    "perProviderDailyLabel": "{provider} 的每日上限（美元）",
+    "perProviderMonthlyLabel": "{provider} 的每月上限（美元）",
+    "addProvider": "添加提供商",
+    "removeProvider": "移除 {provider} 的上限",
+    "dailyShort": "每日（美元）",
+    "monthlyShort": "每月（美元）",
+    "thresholdsTitle": "提醒阈值",
+    "thresholdsDescription": "达到上限的百分之多少时提醒你。留空则使用默认值。",
+    "warnAtLabel": "提醒阈值（%）",
+    "criticalAtLabel": "严重阈值（%）"
   },
   "debug": {
     "title": "链路调试会话",
@@ -14,5 +27,10 @@
     "armFor": "{minutes} 分钟",
     "disarm": "立即停止",
     "privacyHint": "捕获的内容不会进入备份、导出或诊断报告。会话默认时长为 {minutes} 分钟。"
+  },
+  "spend": {
+    "title": "上限使用情况",
+    "description": "与发送闸门读取同一份汇总，因此这里显示的数字和拦截请求时依据的数字始终一致。",
+    "empty": "在上方设置一个上限后，今日与本月的花费会显示在这里。"
   }
 }

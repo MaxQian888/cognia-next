@@ -98,6 +98,12 @@
   },
   "strictModeNote": "Strict mode: when unavailable, sandboxed tool calls are refused — no bypass option.",
   "tier": {
+    "availability": {
+      "adapterMissing": "Enable the E2B Sandbox plugin before selecting this tier.",
+      "probeFailed": "The active OS confinement check failed. Review the probe diagnostic above, then retry verification.",
+      "probeRequired": "Run Verify confinement successfully before selecting this tier.",
+      "workspaceRequired": "Execution also requires a session backed by an existing E2B workspace."
+    },
     "description": "Which sandbox layer runs Bash / Edit / Write when a session has sandbox enabled. Characters can override.",
     "microvm": {
       "description": "Routes calls to an ephemeral Firecracker microVM via the cognia-e2b-sandbox plugin. Requires @e2b/sdk + E2B_API_KEY.",
