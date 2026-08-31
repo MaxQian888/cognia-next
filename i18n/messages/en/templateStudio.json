@@ -3,6 +3,7 @@
     "cancel": "Cancel",
     "confirmImport": "Import package",
     "create": "Create draft",
+    "deleteDraft": "Delete draft",
     "deprecate": "Deprecate release",
     "export": "Export",
     "fork": "Fork as draft",
@@ -11,7 +12,8 @@
     "newDraft": "New draft",
     "openEditor": "Open editor",
     "preflight": "Check plan",
-    "publish": "Publish"
+    "publish": "Publish",
+    "yank": "Yank"
   },
   "create": {
     "description": "Start a portable template definition that you can review and publish.",
@@ -51,6 +53,17 @@
   "empty": {
     "noDescription": "No description",
     "noResults": "No templates match these filters."
+  },
+  "exportDialog": {
+    "cancel": "Cancel",
+    "confirm": "Export",
+    "contents": "Contents ({count} selected)",
+    "description": "A package can carry up to 256 releases. Pick everything the recipient will need.",
+    "noReleases": "Nothing published yet.",
+    "packageDescription": "Package description",
+    "packageId": "Package id",
+    "packageName": "Package name",
+    "title": "Export package"
   },
   "filters": {
     "allDomains": "All types",
@@ -117,6 +130,7 @@
   "inspector": {
     "empty": "Select a template to inspect its definition and available actions.",
     "hash": "Content hash: {hash}",
+    "label": "Inspector",
     "nodeGroup": "Node group — insert it from the workflow editor",
     "payload": "Portable payload",
     "readOnly": "Catalog only",
@@ -126,6 +140,7 @@
   "instances": {
     "detach": "Detach",
     "detached": "Detached",
+    "rebindTo": "Rebind to",
     "resources": "{count, plural, one {# resource} other {# resources}}",
     "sourceUnavailable": "Source unavailable",
     "upToDate": "On the latest release",
@@ -170,14 +185,69 @@
     "deprecated": "Release deprecated.",
     "detached": "Instance detached from its template.",
     "draftCreated": "Template draft created.",
+    "draftDeleted": "Draft deleted.",
     "draftForked": "This draft had already changed elsewhere, so your edit was saved separately as {id}.",
     "draftSaved": "Draft saved.",
     "forked": "Forked into {id}.",
     "imported": "Template package imported.",
     "instantiated": "Template resources created.",
+    "migrationRolledBack": "Rolled back {count} migrated templates.",
+    "packageRemoved": "Removed {definitions} releases. {instances} instances now have no source.",
+    "packageUnyanked": "Package restored.",
+    "packageYanked": "Package yanked. Nothing new will be built on it.",
     "published": "Template version {version} published.",
+    "rebound": "Instance rebound to its new source.",
     "updated": "Instance updated to {version}.",
     "yanked": "Release yanked."
+  },
+  "metadata": {
+    "addDependency": "Add dependency",
+    "addLocalized": "Add {locale}",
+    "author": "Author",
+    "capabilities": "Required capabilities",
+    "capabilitiesHint": "Checked when a plugin instantiates this template: each name is mapped to a plugin permission the caller must already hold.",
+    "category": "Category",
+    "compatibility": "Compatibility",
+    "compatibilityHint": "Preflight blocks instantiation on a platform that is not listed, and on a host outside the version range.",
+    "dependencies": "Dependencies",
+    "dependenciesHint": "A missing required dependency blocks preflight. An optional one is reported as a warning and uses its fallback.",
+    "dependencyFallback": "Fallback",
+    "dependencyFallbacks": {
+      "default": "Use default",
+      "omit": "Omit"
+    },
+    "dependencyId": "Dependency id",
+    "dependencyKind": "Dependency kind",
+    "dependencyKinds": {
+      "connector": "Connector",
+      "model": "Model",
+      "plugin": "Plugin",
+      "provider": "Provider",
+      "skill": "Skill",
+      "template": "Template",
+      "tool": "Tool"
+    },
+    "dependencyRequirement": "Requirement",
+    "dependencyVersion": "Version",
+    "icon": "Icon",
+    "iconHint": "Emoji or icon name",
+    "localized": "Localized names",
+    "localizedDescription": "{locale} description",
+    "localizedHint": "Shown instead of the default name and description when the app runs in that language.",
+    "localizedName": "{locale} name",
+    "maxHostVersion": "Maximum host version",
+    "minHostVersion": "Minimum host version",
+    "optional": "Optional",
+    "platforms": {
+      "desktop": "Desktop",
+      "mobile": "Mobile",
+      "web": "Web"
+    },
+    "removeDependency": "Remove dependency",
+    "removeLocalized": "Remove {locale}",
+    "required": "Required",
+    "tags": "Tags",
+    "tagsHint": "No tags yet"
   },
   "mobile": {
     "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
@@ -189,6 +259,30 @@
     "enable": "Enable a resource",
     "permission": "Request permission",
     "update": "Update a resource"
+  },
+  "packages": {
+    "maintenance": "Maintenance",
+    "none": "No packages imported yet.",
+    "reexport": "Re-export",
+    "remove": "Remove",
+    "removeDescription": "Removing {name} deletes the {count} releases it installed. Anything already created from them keeps working and can be rebound to another release.",
+    "removeTitle": "Remove this package?",
+    "rollback": "Roll back",
+    "rollbackDescription": "Deletes every {domain} template that the legacy-store import created and marks the journal rows rolled back. Published releases are untouched.",
+    "rollbackDomain": "Domain to roll back",
+    "rollbackHint": "Undo a legacy-store import for one domain. The originals it read from are never modified.",
+    "rollbackTitle": "Roll back this migration?",
+    "signed": "Manifest was signed on import. The bytes are not kept, so the signature cannot be re-checked here.",
+    "state": {
+      "hash-mismatch": "content hash does not match",
+      "missing": "no longer installed",
+      "verified": "hash verified"
+    },
+    "unsignedManifest": "Manifest was unsigned.",
+    "unyank": "Undo yank",
+    "verify": "Verify",
+    "yank": "Yank",
+    "yanked": "Yanked"
   },
   "preflight": {
     "blocked": "Plan blocked",

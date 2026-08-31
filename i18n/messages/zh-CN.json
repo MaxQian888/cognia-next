@@ -39611,6 +39611,7 @@
       "cancel": "取消",
       "confirmImport": "导入包",
       "create": "创建草稿",
+      "deleteDraft": "删除草稿",
       "deprecate": "弃用该版本",
       "export": "导出",
       "fork": "另存为草稿",
@@ -39619,7 +39620,8 @@
       "newDraft": "新建草稿",
       "openEditor": "打开编辑器",
       "preflight": "检查计划",
-      "publish": "发布"
+      "publish": "发布",
+      "yank": "撤回"
     },
     "create": {
       "description": "创建一份可审查、可发布的便携模板定义。",
@@ -39659,6 +39661,17 @@
     "empty": {
       "noDescription": "暂无描述",
       "noResults": "没有符合当前筛选条件的模板。"
+    },
+    "exportDialog": {
+      "cancel": "取消",
+      "confirm": "导出",
+      "contents": "内容（已选 {count} 项）",
+      "description": "一个包最多可以携带 256 个发行版。把接收方需要的都选上。",
+      "noReleases": "尚未发布任何内容。",
+      "packageDescription": "包描述",
+      "packageId": "包 ID",
+      "packageName": "包名称",
+      "title": "导出包"
     },
     "filters": {
       "allDomains": "全部类型",
@@ -39725,6 +39738,7 @@
     "inspector": {
       "empty": "请选择一个模板，以检查其定义和可用操作。",
       "hash": "内容哈希：{hash}",
+      "label": "检查器",
       "nodeGroup": "节点组，请在工作流编辑器里插入",
       "payload": "便携载荷",
       "readOnly": "仅目录",
@@ -39734,6 +39748,7 @@
     "instances": {
       "detach": "脱钩",
       "detached": "已分离",
+      "rebindTo": "重新绑定到",
       "resources": "{count} 个资源",
       "sourceUnavailable": "来源不可用",
       "upToDate": "已是最新版本",
@@ -39778,14 +39793,69 @@
       "deprecated": "该版本已弃用。",
       "detached": "实例已与模板脱钩。",
       "draftCreated": "模板草稿已创建。",
+      "draftDeleted": "草稿已删除。",
       "draftForked": "该草稿已在别处被改动，你的修改已另存为 {id}。",
       "draftSaved": "草稿已保存。",
       "forked": "已复刻为 {id}。",
       "imported": "模板包已导入。",
       "instantiated": "模板资源已创建。",
+      "migrationRolledBack": "已回滚 {count} 个迁移过来的模板。",
+      "packageRemoved": "已移除 {definitions} 个发行版，{instances} 个实例失去了来源。",
+      "packageUnyanked": "包已恢复。",
+      "packageYanked": "包已撤回，不会再基于它创建新内容。",
       "published": "模板版本 {version} 已发布。",
+      "rebound": "实例已重新绑定到新的来源。",
       "updated": "实例已更新到 {version}。",
       "yanked": "该版本已撤回。"
+    },
+    "metadata": {
+      "addDependency": "添加依赖",
+      "addLocalized": "添加 {locale}",
+      "author": "作者",
+      "capabilities": "所需能力",
+      "capabilitiesHint": "插件实例化本模板时会检查：每个名称都会映射到调用方必须已持有的插件权限。",
+      "category": "分类",
+      "compatibility": "兼容性",
+      "compatibilityHint": "未勾选的平台会在预检阶段被拦截，宿主版本超出范围时同样如此。",
+      "dependencies": "依赖",
+      "dependenciesHint": "缺失的必需依赖会拦截预检；可选依赖只报警告并走回退策略。",
+      "dependencyFallback": "回退",
+      "dependencyFallbacks": {
+        "default": "使用默认值",
+        "omit": "省略"
+      },
+      "dependencyId": "依赖 ID",
+      "dependencyKind": "依赖类型",
+      "dependencyKinds": {
+        "connector": "连接器",
+        "model": "模型",
+        "plugin": "插件",
+        "provider": "供应商",
+        "skill": "技能",
+        "template": "模板",
+        "tool": "工具"
+      },
+      "dependencyRequirement": "必需性",
+      "dependencyVersion": "版本",
+      "icon": "图标",
+      "iconHint": "Emoji 或图标名",
+      "localized": "本地化名称",
+      "localizedDescription": "{locale} 描述",
+      "localizedHint": "应用运行在该语言时，会取代默认名称与描述。",
+      "localizedName": "{locale} 名称",
+      "maxHostVersion": "最高宿主版本",
+      "minHostVersion": "最低宿主版本",
+      "optional": "可选",
+      "platforms": {
+        "desktop": "桌面端",
+        "mobile": "移动端",
+        "web": "网页端"
+      },
+      "removeDependency": "移除依赖",
+      "removeLocalized": "移除 {locale}",
+      "required": "必需",
+      "tags": "标签",
+      "tagsHint": "尚未添加标签"
     },
     "mobile": {
       "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
@@ -39797,6 +39867,30 @@
       "enable": "启用资源",
       "permission": "请求权限",
       "update": "更新资源"
+    },
+    "packages": {
+      "maintenance": "维护",
+      "none": "尚未导入任何包。",
+      "reexport": "重新导出",
+      "remove": "移除",
+      "removeDescription": "移除 {name} 会删除它安装的 {count} 个发行版。已经基于它们创建的内容仍可使用，并可以重新绑定到别的发行版。",
+      "removeTitle": "要移除这个包吗？",
+      "rollback": "回滚",
+      "rollbackDescription": "会删除旧存储导入所创建的全部「{domain}」模板，并把日志行标记为已回滚。已发布的发行版不受影响。",
+      "rollbackDomain": "要回滚的领域",
+      "rollbackHint": "撤销某个领域的旧存储导入。它读取的原始数据不会被改动。",
+      "rollbackTitle": "要回滚这次迁移吗？",
+      "signed": "导入时清单带有签名。字节内容未保留，因此这里无法重新校验签名。",
+      "state": {
+        "hash-mismatch": "内容哈希不匹配",
+        "missing": "已不在本地",
+        "verified": "哈希已校验"
+      },
+      "unsignedManifest": "导入时清单没有签名。",
+      "unyank": "撤销撤回",
+      "verify": "校验",
+      "yank": "撤回",
+      "yanked": "已撤回"
     },
     "preflight": {
       "blocked": "计划已阻止",

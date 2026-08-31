@@ -17,6 +17,7 @@ const messages = {
       updateTo: "Update to…",
       upToDate: "On the latest release",
       detach: "Detach",
+      rebindTo: "Rebind to…",
     },
   },
 }
@@ -25,7 +26,12 @@ function makeInstance(over: Partial<TemplateInstanceRecord> = {}): TemplateInsta
   return {
     id: "inst_1",
     idempotencyKey: "k",
-    source: { definitionId: "team.review", version: "1.0.0", contentHash: "sha256:a" },
+    source: {
+      definitionId: "team.review",
+      version: "1.0.0",
+      contentHash: "sha256:a",
+      snapshot: { domain: "agentTeam" },
+    },
     bindingFingerprint: "f",
     bindings: {},
     resources: [{ id: "r1" }],
@@ -38,21 +44,25 @@ function makeInstance(over: Partial<TemplateInstanceRecord> = {}): TemplateInsta
 
 function renderCard(
   instance: TemplateInstanceRecord,
-  availableVersions: string[] = ["1.0.0", "1.1.0"]
+  availableVersions: string[] = ["1.0.0", "1.1.0"],
+  rebindTargets: React.ComponentProps<typeof TemplateInstanceCard>["rebindTargets"] = []
 ) {
   const onPlanUpdate = jest.fn()
   const onDetach = jest.fn()
+  const onRebind = jest.fn()
   render(
     <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
       <TemplateInstanceCard
         instance={instance}
         availableVersions={availableVersions}
+        rebindTargets={rebindTargets}
         onPlanUpdate={onPlanUpdate}
         onDetach={onDetach}
+        onRebind={onRebind}
       />
     </NextIntlClientProvider>
   )
-  return { onPlanUpdate, onDetach }
+  return { onPlanUpdate, onDetach, onRebind }
 }
 
 describe("TemplateInstanceCard", () => {
@@ -88,5 +98,36 @@ describe("TemplateInstanceCard", () => {
   it("surfaces a source that is no longer available", () => {
     renderCard(makeInstance({ sourceUnavailableAt: "2026-08-03T00:00:00.000Z" } as never))
     expect(screen.getByText("Source unavailable")).toBeInTheDocument()
+  })
+
+  /**
+   * `rebindSource` was the one lifecycle method with no caller left, so an
+   * instance whose package was uninstalled, or one deliberately detached, had
+   * no way back.
+   */
+  it("offers a rebind only once the instance has lost its source", () => {
+    const targets = [
+      { id: "team.review.v2", version: "2.0.0", name: "Review v2", domain: "agentTeam" },
+    ]
+    renderCard(makeInstance(), ["1.0.0", "1.1.0"], targets)
+    expect(screen.queryByTestId("template-instance-rebind-inst_1")).toBeNull()
+
+    const { onRebind } = renderCard(
+      makeInstance({ sourceUnavailableAt: "2026-08-03T00:00:00.000Z" } as never),
+      ["1.0.0"],
+      targets
+    )
+    fireEvent.click(screen.getAllByTestId("template-instance-rebind-inst_1")[0])
+    fireEvent.click(screen.getByRole("option", { name: "Review v2 2.0.0" }))
+    expect(onRebind).toHaveBeenCalledWith("inst_1", "team.review.v2", "2.0.0")
+  })
+
+  it("hides a rebind target from another domain, which the service refuses", () => {
+    renderCard(
+      makeInstance({ detachedAt: "2026-08-02T00:00:00.000Z" } as never),
+      ["1.0.0"],
+      [{ id: "skill.notes", version: "1.0.0", name: "Notes", domain: "skill" }]
+    )
+    expect(screen.queryByTestId("template-instance-rebind-inst_1")).toBeNull()
   })
 })

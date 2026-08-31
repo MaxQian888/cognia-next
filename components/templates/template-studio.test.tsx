@@ -4,6 +4,9 @@ let catalogDefinitions: Array<Record<string, unknown>> = []
 // `mock`-prefixed so the hoisted `jest.mock` factories may close over them.
 let mockPlatform = "mobile"
 const mockSaveDraft = jest.fn()
+const mockDeleteDraft = jest.fn()
+const mockDeprecate = jest.fn()
+let mockPackages: Array<Record<string, unknown>> = []
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -21,11 +24,13 @@ jest.mock("@/hooks/use-template-catalog", () => ({
 jest.mock("@/lib/templates/runtime", () => ({
   getTemplateRuntime: () => ({
     repository: {
-      listPackages: async () => [],
+      listPackages: async () => mockPackages,
       listInstances: async () => [],
     },
     service: {
       saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
+      deleteDraft: (...args: unknown[]) => mockDeleteDraft(...args),
+      deprecate: (...args: unknown[]) => mockDeprecate(...args),
     },
   }),
 }))
@@ -67,6 +72,9 @@ describe("TemplateStudio", () => {
     catalogDefinitions = []
     mockPlatform = "mobile"
     mockSaveDraft.mockReset()
+    mockDeleteDraft.mockReset()
+    mockDeprecate.mockReset()
+    mockPackages = []
     window.history.replaceState({}, "", "/templates")
   })
 
@@ -76,6 +84,9 @@ describe("TemplateStudio", () => {
     })
 
     expect(screen.getByTestId("template-studio")).toBeInTheDocument()
+    // The Studio is on the shared feature shell, which is what owns
+    // `data-bg-target` and the panel-size persistence it used to lack.
+    expect(screen.getByTestId("feature-shell-templates")).toBeInTheDocument()
     expect(screen.getByText("mobile.title")).toBeInTheDocument()
     expect(screen.queryByText("actions.newDraft")).not.toBeInTheDocument()
     expect(screen.getByText("tabs.library")).toBeInTheDocument()
@@ -112,6 +123,62 @@ describe("TemplateStudio", () => {
     expect(screen.getByText("team.review@1.0.0")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "inspector.payload" }))
     expect(screen.getByText("{}")).toBeInTheDocument()
+  })
+
+  // `repository.deleteDraft` was reachable only from the migration rollback
+  // path, and `setReleaseStatus` only ever got its "deprecated" half, so a
+  // mistaken draft and a release that should never be installed again were both
+  // permanent.
+  it("deletes a draft through the service", async () => {
+    mockPlatform = "desktop"
+    catalogDefinitions = [draftDefinition()]
+    mockDeleteDraft.mockResolvedValue(undefined)
+    window.history.replaceState({}, "", "/templates?definition=user.skill.notes")
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("template-delete-draft"))
+    })
+
+    expect(mockDeleteDraft).toHaveBeenCalledWith("user.skill.notes")
+    expect(screen.getByText("messages.draftDeleted")).toBeInTheDocument()
+  })
+
+  it("yanks a release, not only deprecates it", async () => {
+    mockPlatform = "desktop"
+    catalogDefinitions = [
+      draftDefinition({ status: "published", version: "1.2.0", contentHash: "sha256:pub" }),
+    ]
+    mockDeprecate.mockResolvedValue(undefined)
+    window.history.replaceState({}, "", "/templates?definition=user.skill.notes")
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("template-yank"))
+    })
+
+    expect(mockDeprecate).toHaveBeenCalledWith("user.skill.notes", "1.2.0", "yanked")
+  })
+
+  it("opens the export picker rather than exporting one release blind", async () => {
+    mockPlatform = "desktop"
+    catalogDefinitions = [
+      draftDefinition({ status: "published", version: "1.2.0", contentHash: "sha256:pub" }),
+    ]
+    window.history.replaceState({}, "", "/templates?definition=user.skill.notes")
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+
+    expect(screen.queryByTestId("template-export-dialog")).not.toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /actions.export/ }))
+    })
+    expect(screen.getByTestId("template-export-dialog")).toBeInTheDocument()
   })
 
   describe("editing a draft", () => {
@@ -179,6 +246,40 @@ describe("TemplateStudio", () => {
       expect(mockSaveDraft).toHaveBeenCalledWith(
         expect.objectContaining({
           inputs: [{ id: "topic", label: "topic", required: true, kind: "string" }],
+        }),
+        4
+      )
+    })
+
+    // Regression: `createDraft` hard-coded all three platforms, an empty
+    // dependency list and an empty capability list, and the editor rendered
+    // none of them. Three preflight gates were therefore unreachable from the
+    // only surface that can author a template.
+    it("saves the compatibility and dependency fields the draft editor now owns", async () => {
+      mockSaveDraft.mockResolvedValue(draftDefinition({ revision: 5 }))
+      await openDraftEditor()
+
+      fireEvent.click(screen.getByLabelText("platforms.web"))
+      fireEvent.change(screen.getByLabelText("minHostVersion"), {
+        target: { value: "2.0.0" },
+      })
+      fireEvent.change(screen.getByLabelText("author"), {
+        target: { value: "Ada" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: /addDependency/ }))
+      fireEvent.change(screen.getByLabelText("dependencyId"), {
+        target: { value: "user.skill.base" },
+      })
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "draftEditor.save" }))
+      })
+
+      expect(mockSaveDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ name: "Notes", author: "Ada" }),
+          compatibility: { platforms: ["desktop", "web"], minHostVersion: "2.0.0" },
+          dependencies: [{ id: "user.skill.base", kind: "template", requirement: "required" }],
         }),
         4
       )

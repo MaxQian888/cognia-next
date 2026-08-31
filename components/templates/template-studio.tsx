@@ -36,7 +36,11 @@ import {
   listTemplateTokens,
 } from "@/lib/templates/contracts"
 import type { InspectedTemplatePackage } from "@/lib/templates/package"
-import type { TemplatePreflightPlan, TemplateUpdatePlan } from "@/lib/templates/service"
+import type {
+  TemplatePackageVerification,
+  TemplatePreflightPlan,
+  TemplateUpdatePlan,
+} from "@/lib/templates/service"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -64,9 +68,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { isWorkflowNodeGroupDefinition } from "@/lib/workflow/node-groups/materialize"
 
 import { TemplateBindingField } from "./template-binding-field"
+import { TemplateExportDialog, type TemplateExportRequest } from "./template-export-dialog"
+import { TemplatePackagesTab } from "./template-packages-tab"
+import { TemplateMetadataEditor, type TemplateMetadataDraft } from "./template-metadata-editor"
 import { PublishConfirmDialog, type PublishSuggestion } from "./publish-confirm-dialog"
 import { InstantiateConfirmDialog } from "./instantiate-confirm-dialog"
 import { TemplateInstanceCard } from "./template-instance-card"
@@ -214,6 +222,9 @@ export function TemplateStudio() {
   const [instances, setInstances] = useState<
     Awaited<ReturnType<typeof runtime.repository.listInstances>>
   >([])
+  // Whether the inspector rail's below-`md` Sheet is showing. Desktop ignores
+  // it: the rail is always mounted there.
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [draftName, setDraftName] = useState("")
   const [draftDescription, setDraftDescription] = useState("")
@@ -228,6 +239,10 @@ export function TemplateStudio() {
     bytes: Uint8Array
     inspected: InspectedTemplatePackage
   }>()
+  const [packageReports, setPackageReports] = useState<Record<string, TemplatePackageVerification>>(
+    {}
+  )
+  const [exportOrigin, setExportOrigin] = useState<TemplateDefinitionEnvelope>()
   const importRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -321,6 +336,7 @@ export function TemplateStudio() {
     setSelectionKey(`hash:${contentHash}`)
     setBindings({})
     setPlan(undefined)
+    setInspectorOpen(true)
   }
 
   const createDraft = async () => {
@@ -421,6 +437,7 @@ export function TemplateStudio() {
     description: string
     payload: TemplateJson
     inputs: TemplateInputSpec[]
+    metadata: TemplateMetadataDraft
   }) => {
     if (!selected) return
     const saved = await runtime.service.saveDraft(
@@ -428,11 +445,15 @@ export function TemplateStudio() {
         ...selected,
         metadata: {
           ...selected.metadata,
+          ...edits.metadata.metadata,
           name: edits.name,
           description: edits.description || undefined,
         },
         payload: edits.payload,
         inputs: edits.inputs,
+        dependencies: edits.metadata.dependencies,
+        capabilities: edits.metadata.capabilities,
+        compatibility: edits.metadata.compatibility,
       },
       selected.revision
     )
@@ -447,15 +468,83 @@ export function TemplateStudio() {
     )
   }
 
-  const exportSelected = async () => {
-    if (!selected?.version) return
-    const exported = await runtime.service.exportPackage({
-      id: `${selected.id}.package`,
-      version: selected.version,
-      name: selected.metadata.name,
-      definitionIds: [{ id: selected.id, version: selected.version }],
+  /** Every published release, so the export dialog can bundle more than one. */
+  const releases = useMemo(
+    () => definitions.filter((definition) => Boolean(definition.version)),
+    [definitions]
+  )
+
+  /** The same list, shaped for an instance card's rebind picker. */
+  const rebindTargets = useMemo(
+    () =>
+      releases.map((definition) => ({
+        id: definition.id,
+        version: definition.version!,
+        name: definition.metadata.name,
+        domain: definition.domain as string,
+      })),
+    [releases]
+  )
+
+  const runExport = async (request: TemplateExportRequest) => {
+    const exported = await runtime.service.exportPackage(request)
+    setExportOrigin(undefined)
+    downloadPackage(exported.bytes, `${request.id}-${request.version}.cognia-template`)
+  }
+
+  const verifyPackage = async (key: string) => {
+    const report = await runtime.service.verifyPackage(key)
+    setPackageReports((prev) => ({ ...prev, [key]: report }))
+    setPackages(await runtime.repository.listPackages())
+  }
+
+  const yankPackage = async (key: string, yanked: boolean) => {
+    await runtime.service.yankPackage(key, yanked)
+    setMessage(t(yanked ? "messages.packageYanked" : "messages.packageUnyanked"))
+    setPackages(await runtime.repository.listPackages())
+  }
+
+  const removePackage = async (key: string) => {
+    const removed = await runtime.service.removePackage(key)
+    setMessage(t("messages.packageRemoved", removed))
+    setPackageReports((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
     })
-    downloadPackage(exported.bytes, `${selected.id}-${selected.version}.cognia-template`)
+    setPackages(await runtime.repository.listPackages())
+    setInstances(await runtime.repository.listInstances())
+  }
+
+  const reexportPackage = async (key: string) => {
+    const exported = await runtime.service.reexportPackage(key)
+    downloadPackage(
+      exported.bytes,
+      `${exported.manifest.id}-${exported.manifest.version}.cognia-template`
+    )
+  }
+
+  const rollbackMigration = async (domain: TemplateDomain) => {
+    const rolledBack = await runtime.service.rollbackMigration(domain)
+    setMessage(t("messages.migrationRolledBack", { count: rolledBack }))
+  }
+
+  /**
+   * Discard a draft. Only drafts: a release is immutable by construction and
+   * `deprecate` is how one is withdrawn.
+   */
+  const deleteSelectedDraft = async () => {
+    if (!selected || (selected.status !== "draft" && selected.status !== "conflict")) return
+    await runtime.service.deleteDraft(selected.id)
+    setSelectionKey(undefined)
+    setPlan(undefined)
+    setMessage(t("messages.draftDeleted"))
+  }
+
+  const rebindInstance = async (instanceId: string, definitionId: string, version: string) => {
+    await runtime.service.rebindSource(instanceId, definitionId, version)
+    setMessage(t("messages.rebound"))
+    setInstances(await runtime.repository.listInstances())
   }
 
   const inspectImport = async (file?: File) => {
@@ -475,206 +564,242 @@ export function TemplateStudio() {
     setMessage(t("messages.imported"))
   }
 
-  return (
-    <div
-      className="flex h-full min-h-0 flex-col gap-4 p-4"
-      data-bg-target="chat"
-      data-testid="template-studio"
-    >
-      <FeaturePageHeader
-        icon={<FileArchiveIcon />}
-        title={t("title")}
-        description={t("description")}
-        variant="card"
-        actions={
-          platform === "mobile" ? null : (
-            <div className="flex items-center gap-2">
-              <input
-                ref={importRef}
-                type="file"
-                accept=".cognia-template,application/zip"
-                className="hidden"
-                onChange={(event) => guard(() => inspectImport(event.target.files?.[0]))()}
-              />
-              <Button variant="outline" onClick={() => importRef.current?.click()}>
-                <UploadIcon className="size-4" />
-                {t("actions.import")}
-              </Button>
-              <Button onClick={() => setCreateOpen(true)}>
-                <PlusIcon className="size-4" />
-                {t("actions.newDraft")}
-              </Button>
-            </div>
-          )
-        }
+  const header = (
+    <FeaturePageHeader
+      icon={<FileArchiveIcon />}
+      title={t("title")}
+      description={t("description")}
+      variant="card"
+      actions={
+        platform === "mobile" ? null : (
+          <div className="flex items-center gap-2">
+            <input
+              ref={importRef}
+              type="file"
+              accept=".cognia-template,application/zip"
+              className="hidden"
+              onChange={(event) => guard(() => inspectImport(event.target.files?.[0]))()}
+            />
+            <Button variant="outline" onClick={() => importRef.current?.click()}>
+              <UploadIcon className="size-4" />
+              {t("actions.import")}
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}>
+              <PlusIcon className="size-4" />
+              {t("actions.newDraft")}
+            </Button>
+          </div>
+        )
+      }
+    />
+  )
+
+  /**
+   * The inspector is the shell's right rail rather than a 360px column inside
+   * every tab. It was declared three times, once per definition tab, and the
+   * page owned no `data-bg-target` at all, so an enabled wallpaper simply did
+   * not reach /templates. `FeaturePageShell` owns both, plus panel-size
+   * persistence and the below-`md` Sheet fallback, which is why twelve other
+   * feature routes are already on it.
+   */
+  const inspector = (
+    <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <TemplateInspector
+        definition={selected}
+        bindings={bindings}
+        setBindings={setBindings}
+        plan={plan}
+        mobile={platform === "mobile"}
+        onPreflight={guard(runPreflight)}
+        onInstantiate={guard(instantiate)}
+        onPublish={guard(openPublish)}
+        onSaveDraft={saveDraft}
+        onExport={() => setExportOrigin(selected)}
+        onFork={guard(forkSelected)}
+        onDeprecate={guard(() => deprecateSelected("deprecated"))}
+        onYank={guard(() => deprecateSelected("yanked"))}
+        onDeleteDraft={guard(deleteSelectedDraft)}
+        t={t}
       />
+    </div>
+  )
 
-      {platform === "mobile" ? (
-        <Alert>
-          <ExternalLinkIcon />
-          <AlertTitle>{t("mobile.title")}</AlertTitle>
-          <AlertDescription>{t("mobile.description")}</AlertDescription>
-        </Alert>
-      ) : null}
-      {message ? (
-        <Alert>
-          <CheckCircle2Icon />
-          <AlertDescription>{message}</AlertDescription>
-        </Alert>
-      ) : null}
+  return (
+    <>
+      <FeaturePageShell
+        storageId="templates"
+        header={header}
+        centerClassName="gap-4 p-4"
+        rightPane={{
+          label: t("inspector.label"),
+          content: inspector,
+          defaultSize: 28,
+          minSize: 20,
+          maxSize: 44,
+          // Controlled, because the centre pane is what selects the row the
+          // rail shows. Left uncontrolled, a tap on a phone-width viewport set
+          // the selection in a Sheet nobody had opened, so the card read as a
+          // dead end.
+          open: inspectorOpen,
+          onOpenChange: setInspectorOpen,
+        }}
+      >
+        <div className="flex min-h-0 flex-1 flex-col gap-4" data-testid="template-studio">
+          {platform === "mobile" ? (
+            <Alert>
+              <ExternalLinkIcon />
+              <AlertTitle>{t("mobile.title")}</AlertTitle>
+              <AlertDescription>{t("mobile.description")}</AlertDescription>
+            </Alert>
+          ) : null}
+          {message ? (
+            <Alert>
+              <CheckCircle2Icon />
+              <AlertDescription>{message}</AlertDescription>
+            </Alert>
+          ) : null}
 
-      <Tabs defaultValue="library" className="min-h-0 flex-1">
-        <TabsList className="flex w-full justify-start overflow-x-auto">
-          <TabsTrigger value="library">{t("tabs.library")}</TabsTrigger>
-          <TabsTrigger value="drafts">{t("tabs.drafts")}</TabsTrigger>
-          <TabsTrigger value="published">{t("tabs.published")}</TabsTrigger>
-          <TabsTrigger value="packages">{t("tabs.packages")}</TabsTrigger>
-          <TabsTrigger value="instances">{t("tabs.instances")}</TabsTrigger>
-        </TabsList>
-        {(["library", "drafts", "published"] as const).map((tab) => {
-          const rows = definitions.filter((definition) => {
-            if (tab === "drafts")
-              return definition.status === "draft" || definition.status === "conflict"
-            if (tab === "published") return definition.version !== null
-            return true
-          })
-          return (
-            <TabsContent key={tab} value={tab} className="min-h-0">
-              <div className="mb-3 grid gap-2 md:grid-cols-[1fr_180px_180px]">
-                <div className="relative">
-                  <SearchIcon className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder={t("filters.search")}
-                    className="pl-9"
-                  />
-                </div>
-                <Select value={domain} onValueChange={(value) => setDomain(value as typeof domain)}>
-                  <SelectTrigger aria-label={t("filters.domain")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("filters.allDomains")}</SelectItem>
-                    {FILTERABLE_DOMAINS.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {t(`domains.${item}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={trust} onValueChange={(value) => setTrust(value as typeof trust)}>
-                  <SelectTrigger aria-label={t("filters.trust")}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("filters.allTrust")}</SelectItem>
-                    {(
-                      ["built-in", "verified-publisher", "signed-unknown", "unsigned"] as const
-                    ).map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {t(`trust.${item}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {rows.map((definition) => (
-                    <Card
-                      key={`${definition.id}@${definition.version ?? definition.revision}`}
-                      role="button"
-                      tabIndex={0}
-                      // Selection was conveyed by a border alone, and Space did
-                      // nothing: a `role="button"` that only answers Enter is
-                      // half a button to anyone not using a mouse.
-                      aria-pressed={selected?.contentHash === definition.contentHash}
-                      className={
-                        selected?.contentHash === definition.contentHash ? "border-primary" : ""
-                      }
-                      onClick={() => selectDefinition(definition.contentHash)}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter" && event.key !== " ") return
-                        event.preventDefault()
-                        selectDefinition(definition.contentHash)
-                      }}
+          <Tabs defaultValue="library" className="min-h-0 flex-1">
+            <TabsList className="flex w-full justify-start overflow-x-auto">
+              <TabsTrigger value="library">{t("tabs.library")}</TabsTrigger>
+              <TabsTrigger value="drafts">{t("tabs.drafts")}</TabsTrigger>
+              <TabsTrigger value="published">{t("tabs.published")}</TabsTrigger>
+              <TabsTrigger value="packages">{t("tabs.packages")}</TabsTrigger>
+              <TabsTrigger value="instances">{t("tabs.instances")}</TabsTrigger>
+            </TabsList>
+            {(["library", "drafts", "published"] as const).map((tab) => {
+              const rows = definitions.filter((definition) => {
+                if (tab === "drafts")
+                  return definition.status === "draft" || definition.status === "conflict"
+                if (tab === "published") return definition.version !== null
+                return true
+              })
+              return (
+                <TabsContent key={tab} value={tab} className="min-h-0">
+                  <div className="mb-3 grid gap-2 md:grid-cols-[1fr_180px_180px]">
+                    <div className="relative">
+                      <SearchIcon className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                      <Input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={t("filters.search")}
+                        className="pl-9"
+                      />
+                    </div>
+                    <Select
+                      value={domain}
+                      onValueChange={(value) => setDomain(value as typeof domain)}
                     >
-                      <CardHeader className="pb-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <CardTitle className="text-base">{definition.metadata.name}</CardTitle>
-                          <Badge variant="outline">{t(`domains.${definition.domain}`)}</Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm">
-                        <p className="line-clamp-2 text-muted-foreground">
-                          {definition.metadata.description || t("empty.noDescription")}
-                        </p>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="secondary">{t(`status.${definition.status}`)}</Badge>
-                          <Badge variant="secondary">
-                            {t(`trust.${definition.provenance.trust}`)}
-                          </Badge>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                  {rows.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">{t("empty.noResults")}</p>
-                  ) : null}
-                </div>
-                <TemplateInspector
-                  definition={selected}
-                  bindings={bindings}
-                  setBindings={setBindings}
-                  plan={plan}
-                  mobile={platform === "mobile"}
-                  onPreflight={guard(runPreflight)}
-                  onInstantiate={guard(instantiate)}
-                  onPublish={guard(openPublish)}
-                  onSaveDraft={saveDraft}
-                  onExport={guard(exportSelected)}
-                  onFork={guard(forkSelected)}
-                  onDeprecate={guard(() => deprecateSelected("deprecated"))}
-                  t={t}
-                />
+                      <SelectTrigger aria-label={t("filters.domain")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t("filters.allDomains")}</SelectItem>
+                        {FILTERABLE_DOMAINS.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {t(`domains.${item}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={trust}
+                      onValueChange={(value) => setTrust(value as typeof trust)}
+                    >
+                      <SelectTrigger aria-label={t("filters.trust")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t("filters.allTrust")}</SelectItem>
+                        {(
+                          ["built-in", "verified-publisher", "signed-unknown", "unsigned"] as const
+                        ).map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {t(`trust.${item}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {rows.map((definition) => (
+                      <Card
+                        key={`${definition.id}@${definition.version ?? definition.revision}`}
+                        role="button"
+                        tabIndex={0}
+                        // Selection was conveyed by a border alone, and Space did
+                        // nothing: a `role="button"` that only answers Enter is
+                        // half a button to anyone not using a mouse.
+                        aria-pressed={selected?.contentHash === definition.contentHash}
+                        className={
+                          selected?.contentHash === definition.contentHash ? "border-primary" : ""
+                        }
+                        onClick={() => selectDefinition(definition.contentHash)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return
+                          event.preventDefault()
+                          selectDefinition(definition.contentHash)
+                        }}
+                      >
+                        <CardHeader className="pb-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <CardTitle className="text-base">{definition.metadata.name}</CardTitle>
+                            <Badge variant="outline">{t(`domains.${definition.domain}`)}</Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-sm">
+                          <p className="line-clamp-2 text-muted-foreground">
+                            {definition.metadata.description || t("empty.noDescription")}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            <Badge variant="secondary">{t(`status.${definition.status}`)}</Badge>
+                            <Badge variant="secondary">
+                              {t(`trust.${definition.provenance.trust}`)}
+                            </Badge>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {rows.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">{t("empty.noResults")}</p>
+                    ) : null}
+                  </div>
+                </TabsContent>
+              )
+            })}
+            <TabsContent value="packages" className="min-h-0 overflow-y-auto">
+              <TemplatePackagesTab
+                packages={packages}
+                reports={packageReports}
+                onVerify={(key) => guard(() => verifyPackage(key))()}
+                onYank={(key, yanked) => guard(() => yankPackage(key, yanked))()}
+                onRemove={(key) => guard(() => removePackage(key))()}
+                onReexport={(key) => guard(() => reexportPackage(key))()}
+                onRollbackMigration={(domain) => guard(() => rollbackMigration(domain))()}
+              />
+            </TabsContent>
+            <TabsContent value="instances">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {instances.map((instance) => (
+                  <TemplateInstanceCard
+                    key={instance.id}
+                    instance={instance}
+                    availableVersions={
+                      releasedVersionsByDefinition[instance.source.definitionId] ?? []
+                    }
+                    rebindTargets={rebindTargets}
+                    onPlanUpdate={(id, version) => guard(() => openUpdate(id, version))()}
+                    onDetach={(id) => guard(() => detachInstance(id))()}
+                    onRebind={(id, definitionId, version) =>
+                      guard(() => rebindInstance(id, definitionId, version))()
+                    }
+                  />
+                ))}
               </div>
             </TabsContent>
-          )
-        })}
-        <TabsContent value="packages">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {packages.map((item) => (
-              <Card key={item.key}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <FileArchiveIcon className="size-4" />
-                    {item.manifest.name}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-1 text-sm text-muted-foreground">
-                  <p>{item.key}</p>
-                  <p>{t(`trust.${item.trust}`)}</p>
-                  <p className="font-mono text-xs">{item.fingerprint}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-        <TabsContent value="instances">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {instances.map((instance) => (
-              <TemplateInstanceCard
-                key={instance.id}
-                instance={instance}
-                availableVersions={releasedVersionsByDefinition[instance.source.definitionId] ?? []}
-                onPlanUpdate={(id, version) => guard(() => openUpdate(id, version))()}
-                onDetach={(id) => guard(() => detachInstance(id))()}
-              />
-            ))}
-          </div>
-        </TabsContent>
-      </Tabs>
+          </Tabs>
+        </div>
+      </FeaturePageShell>
 
       <PublishConfirmDialog
         suggestion={publishSuggestion}
@@ -685,6 +810,12 @@ export function TemplateStudio() {
         plan={updatePlan}
         onOpenChange={(open) => (open ? undefined : setUpdatePlan(undefined))}
         onConfirm={(target) => guard(() => applyUpdate(target))()}
+      />
+      <TemplateExportDialog
+        origin={exportOrigin}
+        releases={releases}
+        onOpenChange={(open) => (open ? undefined : setExportOrigin(undefined))}
+        onExport={(request) => guard(() => runExport(request))()}
       />
       <InstantiateConfirmDialog
         plan={pendingInstantiate}
@@ -793,7 +924,7 @@ export function TemplateStudio() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }
 
@@ -810,6 +941,8 @@ function TemplateInspector({
   onExport,
   onFork,
   onDeprecate,
+  onYank,
+  onDeleteDraft,
   t,
 }: {
   definition?: TemplateDefinitionEnvelope
@@ -820,10 +953,18 @@ function TemplateInspector({
   onPreflight(): void
   onInstantiate(): void
   onPublish(): void
-  onSaveDraft(edits: { name: string; description: string; payload: TemplateJson }): Promise<void>
+  onSaveDraft(edits: {
+    name: string
+    description: string
+    payload: TemplateJson
+    inputs: TemplateInputSpec[]
+    metadata: TemplateMetadataDraft
+  }): Promise<void>
   onExport(): void
   onFork(): void
   onDeprecate(): void
+  onYank(): void
+  onDeleteDraft(): void
   t: ReturnType<typeof useTranslations<"templateStudio">>
 }) {
   if (!definition) {
@@ -927,13 +1068,40 @@ function TemplateInspector({
             </Button>
           ) : null}
           {!mobile && definition.version && definition.status === "published" ? (
+            <>
+              <Button
+                variant="ghost"
+                className="text-destructive"
+                onClick={onDeprecate}
+                data-testid="template-deprecate"
+              >
+                {t("actions.deprecate")}
+              </Button>
+              {/* Deprecate and yank are the two halves of `setReleaseStatus`,
+                  and only the first had a caller: a release that should never
+                  be installed again could only be marked superseded. */}
+              <Button
+                variant="ghost"
+                className="text-destructive"
+                onClick={onYank}
+                data-testid="template-yank"
+              >
+                {t("actions.yank")}
+              </Button>
+            </>
+          ) : null}
+          {/* `repository.deleteDraft` was reachable only from the migration
+              rollback path, so a draft made by mistake, or the conflict draft a
+              clashing save forks off, could be edited forever but never removed. */}
+          {!mobile && (definition.status === "draft" || definition.status === "conflict") ? (
             <Button
               variant="ghost"
               className="text-destructive"
-              onClick={onDeprecate}
-              data-testid="template-deprecate"
+              onClick={onDeleteDraft}
+              data-testid="template-delete-draft"
             >
-              {t("actions.deprecate")}
+              <Trash2Icon className="size-4" />
+              {t("actions.deleteDraft")}
             </Button>
           ) : null}
           {!mobile && EDITOR_ROUTES[definition.domain] ? (
@@ -996,6 +1164,7 @@ function TemplateDraftEditor({
     description: string
     payload: TemplateJson
     inputs: TemplateInputSpec[]
+    metadata: TemplateMetadataDraft
   }): Promise<void>
   t: ReturnType<typeof useTranslations<"templateStudio">>
 }) {
@@ -1005,6 +1174,15 @@ function TemplateDraftEditor({
   const [inputs, setInputs] = useState<TemplateInputSpec[]>(() =>
     structuredClone(definition.inputs)
   )
+  const [metadata, setMetadata] = useState<TemplateMetadataDraft>(() => {
+    const { name: _name, description: _description, ...rest } = definition.metadata
+    return {
+      metadata: structuredClone(rest),
+      dependencies: structuredClone(definition.dependencies),
+      capabilities: [...definition.capabilities],
+      compatibility: structuredClone(definition.compatibility),
+    }
+  })
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
 
@@ -1061,7 +1239,7 @@ function TemplateDraftEditor({
     setError(undefined)
     setSaving(true)
     try {
-      await onSave({ name: trimmed, description: description.trim(), payload, inputs })
+      await onSave({ name: trimmed, description: description.trim(), payload, inputs, metadata })
     } catch (err) {
       // `saveDraft` refuses an invalid payload and names every reason. Show it
       // verbatim — a generic "save failed" would hide which field is wrong.
@@ -1161,6 +1339,7 @@ function TemplateDraftEditor({
           </p>
         ) : null}
       </div>
+      <TemplateMetadataEditor value={metadata} onChange={setMetadata} />
       {error ? (
         <Alert variant="destructive">
           <AlertTriangleIcon />
