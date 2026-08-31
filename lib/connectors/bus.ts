@@ -2572,6 +2572,35 @@ export class ConnectorBus {
       return true
     }
 
+    // ── Step 4-pre-b3: notification_action short-circuit (ADR-0042) ──
+    //
+    // A button on a Notification Center card that was pushed into this chat.
+    // The record already says what each button does, so the press runs its
+    // registered command directly, with no model digest turn. See
+    // `lib/notifications/im-callback-handler.ts`.
+    if (resolvedBinding?.kind === "notification_action") {
+      try {
+        const { handleNotificationActionCallback } =
+          await import("@/lib/notifications/im-callback-handler")
+        await handleNotificationActionCallback({
+          binding: resolvedBinding,
+          adapterId: event.adapterId,
+          conversationKey: resolvedConversationKey ?? undefined,
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "adapter.error",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return true
+    }
+
     // ── Step 4-pre-c: tool_approve short-circuit (control-plane HITL) ──
     //
     // A button on an A2UI tool-permission card. Resolve the pending approval

@@ -35,6 +35,11 @@ jest.mock("@/lib/issues/im/callback-handler", () => ({
   handleIssueActionCallback: (input: unknown) => mockHandleIssueAction(input),
 }))
 
+const mockHandleNotificationAction = jest.fn(async (_input: unknown): Promise<boolean> => true)
+jest.mock("@/lib/notifications/im-callback-handler", () => ({
+  handleNotificationActionCallback: (input: unknown) => mockHandleNotificationAction(input),
+}))
+
 const sender: PlatformIdentity = {
   id: "id-1",
   platform: "telegram",
@@ -1047,5 +1052,72 @@ describe("media_grant callback", () => {
     const kinds = (await getDb().connectorAudit.toArray()).map((r) => r.kind)
     expect(kinds).toContain("media_grant.granted")
     expect(kinds).not.toContain("callback.handler_failed")
+  })
+})
+
+describe("ConnectorBus.dispatchConnectorCallback: notification_action kind", () => {
+  // A Notification Center card pushed into a chat already says what each
+  // button does, so the press runs its registered command directly. Falling
+  // through to the generic handler would spend a model turn asking the model
+  // to interpret a button the product authored.
+  it("routes a notification card click to the notification handler, never the model", async () => {
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "a2ui:notification:n1:action_approve:approve",
+      kind: "notification_action",
+      surfaceId: "notification:n1",
+      componentId: "action_approve",
+      conversationKey,
+      payload: { notificationId: "n1", actionId: "approve" },
+    })
+
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({
+        triggerId: "a2ui:notification:n1:action_approve:approve",
+        value: "approve",
+        conversationKey,
+      })
+    )
+    expect(handler).not.toHaveBeenCalled()
+    expect(mockHandleNotificationAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterId: "adp_tg",
+        conversationKey,
+        binding: expect.objectContaining({
+          kind: "notification_action",
+          payload: { notificationId: "n1", actionId: "approve" },
+        }),
+      })
+    )
+  })
+
+  it("audits and swallows a handler failure instead of falling through to the model", async () => {
+    mockHandleNotificationAction.mockRejectedValueOnce(new Error("registry down"))
+    const conversationKey = "telegram:adp_tg:c1"
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId: "a2ui:notification:n2:action_reject:reject",
+      kind: "notification_action",
+      surfaceId: "notification:n2",
+      conversationKey,
+      payload: { notificationId: "n2", actionId: "reject" },
+    })
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await expect(
+      bus.dispatchConnectorCallback(
+        makeEvent({
+          triggerId: "a2ui:notification:n2:action_reject:reject",
+          value: "reject",
+          conversationKey,
+        })
+      )
+    ).resolves.not.toThrow()
+    expect(handler).not.toHaveBeenCalled()
   })
 })

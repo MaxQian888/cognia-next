@@ -233,6 +233,15 @@ export type ConnectorCallbackBindingKind =
   // purpose — the same card is how a grant is withdrawn. See
   // `lib/connectors/hitl/media-grant.ts`.
   | "media_grant"
+  // Notification Center card pushed into a chat (ADR-0042). A button press
+  // runs the record's registered `command` through
+  // `lib/notifications/action-registry.ts`, with no model turn. Payload
+  // carries `{ notificationId, actionId }` and nothing else: the command and
+  // its args live on the persisted centre row, so a stale card cannot carry a
+  // command the record no longer offers. Re-clickable, because idempotence is
+  // the handler's business and some notification actions genuinely repeat.
+  // See `lib/notifications/im-card.ts`.
+  | "notification_action"
 
 /**
  * Persisted association between an outbound A2UI surface and the
