@@ -339,10 +339,8 @@ fn apply_fixes(cwd: &Path, checks: &mut [Check]) {
                     *check = Check::ok(check.name, "installed (fixed by --fix)");
                 }
             }
-            "signing key" => {
-                if append_gitignore_entry(cwd, ".cognia/").is_ok() {
-                    *check = Check::ok(check.name, "present and gitignored (fixed by --fix)");
-                }
+            "signing key" if append_gitignore_entry(cwd, ".cognia/").is_ok() => {
+                *check = Check::ok(check.name, "present and gitignored (fixed by --fix)");
             }
             _ => {}
         }

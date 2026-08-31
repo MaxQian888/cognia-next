@@ -168,8 +168,10 @@ fn maybe_inflate(encoding: &str, payload: Vec<u8>) -> Vec<u8> {
 
 #[derive(Default)]
 struct Reassembler {
-    parts: HashMap<String, (Instant, Vec<Option<Vec<u8>>>)>,
+    parts: HashMap<String, PartialMessage>,
 }
+
+type PartialMessage = (Instant, Vec<Option<Vec<u8>>>);
 
 impl Reassembler {
     /// Add one chunk; returns the concatenated payload once all `sum` chunks

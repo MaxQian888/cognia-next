@@ -303,7 +303,7 @@ pub async fn matrix_crypto_update_tracked_users(
     // tauri::command expansion.
     let user_refs: Vec<&UserId> = users.iter().map(AsRef::as_ref).collect();
     machine
-        .update_tracked_users(user_refs.into_iter())
+        .update_tracked_users(user_refs)
         .await
         .map_err(|err| format!("Matrix update tracked users failed: {err}"))
 }

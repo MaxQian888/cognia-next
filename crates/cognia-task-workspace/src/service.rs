@@ -2503,9 +2503,7 @@ impl TaskWorkspaceService {
                 &crate::ResourceTrackingPolicy::default(),
             )
         };
-        if let Err(error) = created {
-            return Err(error);
-        }
+        created?;
         match self.registry.transition(
             workspace_id,
             record.owner_type,
@@ -4112,6 +4110,10 @@ fn clone_file(_source: &Path, _target: &Path) -> Result<(), ()> {
     Err(())
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "execution materialization requires each isolation input to remain explicit"
+)]
 fn create_execution(
     workspace_root: &Path,
     execution_root: &Path,

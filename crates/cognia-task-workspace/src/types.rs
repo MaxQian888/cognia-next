@@ -454,10 +454,11 @@ impl WorkspaceState {
 /// Interactive worktrees default to `WorkingState` (dirty local content is
 /// carried into the isolated root). Background and scheduled Git tasks
 /// default to `RemoteDefault` and refresh `origin/HEAD` at fire time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WorkspaceBaseSpec {
     /// Snapshot of the current working tree, including uncommitted edits.
+    #[default]
     WorkingState,
     /// The current HEAD of the local branch.
     LocalHead,
@@ -478,12 +479,6 @@ pub enum WorkspaceBaseSpec {
         #[serde(default)]
         head_sha: Option<String>,
     },
-}
-
-impl Default for WorkspaceBaseSpec {
-    fn default() -> Self {
-        Self::WorkingState
-    }
 }
 
 impl WorkspaceBaseSpec {

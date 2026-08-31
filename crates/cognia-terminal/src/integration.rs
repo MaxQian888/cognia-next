@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// `from_shell_path` is the canonical recogniser — it strips the directory
 /// + extension and lowercases, so `/usr/bin/zsh`, `C:\Program Files\PowerShell\7\pwsh.exe`,
-/// and just `bash` all classify correctly.
+///
+/// The recognizer therefore handles bare `bash` and both Unix and Windows
+/// absolute shell paths consistently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ShellKind {

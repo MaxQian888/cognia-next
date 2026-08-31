@@ -82,6 +82,7 @@ fn resolve_cli_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 ///     install wins), then a dev/bundled `cli` dir if present;
 ///   * append  — `~/.cargo/bin` as a low-priority fallback for a
 ///     `cargo install`ed copy.
+///
 /// ADR-0067 Tier-B inversion: the app-managed CLI-dir registry lives app-side
 /// in `cli_bridge::detect`. The app shell registers a snapshot provider at
 /// startup (before any terminal spawn); when unset — crate unit tests, or a

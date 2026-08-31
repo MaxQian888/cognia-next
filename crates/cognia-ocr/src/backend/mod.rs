@@ -27,7 +27,7 @@ pub mod ocrs;
 pub mod paddle;
 pub mod placeholder;
 
-#[cfg(all(feature = "ocr-tesseract"))]
+#[cfg(feature = "ocr-tesseract")]
 pub mod tesseract;
 
 async fn install_backends(registry: &NativeOcrRegistry, allow_platform_bound: bool) {

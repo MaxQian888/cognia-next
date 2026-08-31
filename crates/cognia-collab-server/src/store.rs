@@ -1726,8 +1726,19 @@ pub struct PgStore {
     pool: Pool,
 }
 
+fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        // The library is used directly by integration tests and embedders that
+        // never execute either binary's main(). rustls 0.23 cannot select a
+        // provider when multiple backends are present in the dependency graph.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 impl PgStore {
     pub async fn connect(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
+        ensure_crypto_provider();
         let config: Config = database_url.parse()?;
         let native_certificates = rustls_native_certs::load_native_certs();
         if !native_certificates.errors.is_empty() {
@@ -3647,6 +3658,12 @@ impl Store for PgStore {
 mod tests {
     use super::*;
     use cognia_tenant_auth::UserId;
+
+    #[test]
+    fn postgres_store_installs_a_rustls_crypto_provider() {
+        ensure_crypto_provider();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
 
     fn ada() -> UserId {
         UserId::parse("usr_aaaaaaaaaaaaaaaaaaaaaaaa").unwrap()

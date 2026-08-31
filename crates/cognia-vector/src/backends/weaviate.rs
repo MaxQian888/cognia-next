@@ -493,6 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_collection_posts_to_schema() {
+        super::super::initialize_direct_proxy();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/schema"))

@@ -503,10 +503,10 @@ async fn probe_remote_shell(
         let mut bytes = Vec::new();
         while let Some(message) = channel.wait().await {
             match message {
-                ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-                    if bytes.len() + data.len() <= 4096 {
-                        bytes.extend_from_slice(&data);
-                    }
+                ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. }
+                    if bytes.len() + data.len() <= 4096 =>
+                {
+                    bytes.extend_from_slice(&data);
                 }
                 ChannelMsg::ExitStatus { .. } | ChannelMsg::Close => break,
                 _ => {}

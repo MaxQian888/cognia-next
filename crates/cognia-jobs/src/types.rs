@@ -82,7 +82,7 @@ impl JobStatus {
         }
     }
 
-    pub fn from_str(raw: &str) -> Option<Self> {
+    pub fn parse(raw: &str) -> Option<Self> {
         match raw {
             "running" => Some(JobStatus::Running),
             "exited" => Some(JobStatus::Exited),
@@ -269,7 +269,7 @@ impl MonitorStatus {
         }
     }
 
-    pub fn from_str(raw: &str) -> Option<Self> {
+    pub fn parse(raw: &str) -> Option<Self> {
         match raw {
             "waiting" => Some(MonitorStatus::Waiting),
             "fired" => Some(MonitorStatus::Fired),
@@ -397,9 +397,9 @@ mod tests {
             JobStatus::Interrupted,
             JobStatus::Failed,
         ] {
-            assert_eq!(JobStatus::from_str(st.as_str()), Some(st));
+            assert_eq!(JobStatus::parse(st.as_str()), Some(st));
         }
-        assert_eq!(JobStatus::from_str("nonsense"), None);
+        assert_eq!(JobStatus::parse("nonsense"), None);
     }
 
     #[test]

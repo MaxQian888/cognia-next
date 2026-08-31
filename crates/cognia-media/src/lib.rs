@@ -1060,8 +1060,8 @@ pub mod commands {
         let first = metadata.first().ok_or_else(|| VideoError::InvalidInput {
             message: "at least one clip is required for concatenation".to_string(),
         })?;
-        let width = first.width.max(16).min(7680) & !1;
-        let height = first.height.max(16).min(4320) & !1;
+        let width = first.width.clamp(16, 7680) & !1;
+        let height = first.height.clamp(16, 4320) & !1;
         let fps = if first.fps.is_finite() && first.fps > 0.0 {
             first.fps.round().clamp(1.0, 120.0) as u32
         } else {

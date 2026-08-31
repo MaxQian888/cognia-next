@@ -91,7 +91,7 @@ fn passes_luhn(value: &str) -> bool {
         sum += digit;
         alternate = !alternate;
     }
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 /// Return `true` only when no recognized PII shape remains in `text`.

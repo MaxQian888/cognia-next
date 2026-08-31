@@ -46,7 +46,10 @@ tokio = { version = "1", features = [
 uuid = { version = "1", features = ["v4", "v7"] }
 dirs = "6"
 log = "0.4"
-russh = { version = "=0.62.6", default-features = false, features = ["ring", "rsa"] }
+# Do not enable russh's `rsa` feature: it pulls the unpatched RustCrypto RSA
+# implementation affected by RUSTSEC-2023-0071. Ed25519/ECDSA SSH keys remain
+# supported through the ring backend.
+russh = { version = "=0.62.6", default-features = false, features = ["ring"] }
 thiserror = "2"
 # ADR-0067 Tier C — `terminal_host_service` moved in from `app_lib`;
 # versions copied verbatim from `src-tauri/Cargo.toml` so the move adds

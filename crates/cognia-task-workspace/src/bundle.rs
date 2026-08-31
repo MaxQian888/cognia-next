@@ -464,7 +464,7 @@ pub fn execute_bundle_apply(
             .collect(),
         conflicts: apply_conflicts
             .into_iter()
-            .chain(compensate_conflicts.into_iter())
+            .chain(compensate_conflicts)
             .collect(),
         state,
     }

@@ -72,6 +72,12 @@ impl ReplayGuard {
     pub fn len(&self) -> usize {
         self.inner.lock().order.len()
     }
+
+    /// Test helper: whether no keys are retained.
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().order.is_empty()
+    }
 }
 
 impl Default for ReplayGuard {

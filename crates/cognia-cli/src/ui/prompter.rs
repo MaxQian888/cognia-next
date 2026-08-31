@@ -64,10 +64,7 @@ impl From<dialoguer::Error> for PromptError {
         // dialoguer wraps its own variants but is conceptually an I/O
         // failure (stdin closed, terminal lost, etc.) — collapse it
         // to `Io` so the chain renders one helpful line.
-        PromptError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        ))
+        PromptError::Io(std::io::Error::other(e.to_string()))
     }
 }
 

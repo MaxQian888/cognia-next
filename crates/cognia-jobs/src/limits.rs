@@ -128,6 +128,6 @@ mod tests {
     #[test]
     fn per_session_cap_is_below_the_global_cap() {
         // A single session must never be able to exhaust the host budget.
-        assert!(MAX_JOBS_PER_SESSION < MAX_JOBS_GLOBAL);
+        const { assert!(MAX_JOBS_PER_SESSION < MAX_JOBS_GLOBAL) };
     }
 }

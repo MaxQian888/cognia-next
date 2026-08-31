@@ -512,31 +512,32 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
             .iter()
             .find(|(candidate, _, _, _, _)| *candidate == plugin_type)
     });
-    if populated_js_contribution.is_some()
-        && runtime_entry_contract
-            .is_some_and(|(_, _, javascript_entry, _, _)| javascript_entry.is_none())
+    if runtime_entry_contract
+        .is_some_and(|(_, _, javascript_entry, _, _)| javascript_entry.is_none())
     {
-        let is_python_only = plugin_type == Some("python");
-        out.push(Diagnostic {
-            severity: Severity::Error,
-            field: populated_js_contribution.unwrap().into(),
-            code: if is_python_only {
-                "manifest.contributions.javascript.unsupported_for_python"
-            } else {
-                "manifest.contributions.javascript.unsupported_for_plugin_type"
-            }
-            .into(),
-            message: format!(
-                "Plugin type \"{}\" cannot declare JavaScript-executed contributions",
-                plugin_type.unwrap_or("unknown")
-            ),
-            hint: Some(if is_python_only {
-                "Change the plugin type to \"hybrid\" and add \"main\", or remove those contributions."
-                    .into()
-            } else {
-                "Use a JavaScript-capable plugin type, or remove those contributions.".into()
-            }),
-        });
+        if let Some(populated_js_contribution) = populated_js_contribution {
+            let is_python_only = plugin_type == Some("python");
+            out.push(Diagnostic {
+                severity: Severity::Error,
+                field: populated_js_contribution.into(),
+                code: if is_python_only {
+                    "manifest.contributions.javascript.unsupported_for_python"
+                } else {
+                    "manifest.contributions.javascript.unsupported_for_plugin_type"
+                }
+                .into(),
+                message: format!(
+                    "Plugin type \"{}\" cannot declare JavaScript-executed contributions",
+                    plugin_type.unwrap_or("unknown")
+                ),
+                hint: Some(if is_python_only {
+                    "Change the plugin type to \"hybrid\" and add \"main\", or remove those contributions."
+                        .into()
+                } else {
+                    "Use a JavaScript-capable plugin type, or remove those contributions.".into()
+                }),
+            });
+        }
     } else if let (Some(plugin_type), Some(_)) = (plugin_type, populated_js_contribution) {
         if let Some((_, _, Some(javascript_entry), true, _)) = RUNTIME_ENTRY_CONTRACTS
             .iter()

@@ -173,7 +173,7 @@ impl RunMirror {
     /// persist for a run id MUST include a snapshot; subsequent persists may
     /// omit it (the existing snapshot is preserved).
     pub fn persist(&self, input: &PersistRunStateInput) -> Result<()> {
-        let status = RunStatus::from_str(&input.status)
+        let status = RunStatus::parse(&input.status)
             .ok_or_else(|| MirrorError::InvalidStatus(input.status.clone()))?;
         let now = current_millis();
         let conn = self.conn()?.lock();

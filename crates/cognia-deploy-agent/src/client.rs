@@ -6,6 +6,7 @@ use cognia_deployment::agent_protocol::{
     ControllerToAgentMessage, AGENT_PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{ClientConfig, RootCertStore};
 use std::fs::File;
@@ -175,16 +176,15 @@ fn load_tls_config(config: &crate::TlsClientConfig) -> anyhow::Result<ClientConf
 }
 
 fn read_certificates(path: &std::path::Path) -> anyhow::Result<Vec<CertificateDer<'static>>> {
-    let mut reader = BufReader::new(File::open(path)?);
-    rustls_pemfile::certs(&mut reader)
+    let reader = BufReader::new(File::open(path)?);
+    CertificateDer::pem_reader_iter(reader)
         .collect::<Result<Vec<_>, _>>()
         .map_err(Into::into)
 }
 
 fn read_private_key(path: &std::path::Path) -> anyhow::Result<PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(File::open(path)?);
-    rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| anyhow::anyhow!("TLS private key file contains no supported key"))
+    let reader = BufReader::new(File::open(path)?);
+    PrivateKeyDer::from_pem_reader(reader).map_err(Into::into)
 }
 
 fn now_unix_seconds() -> i64 {

@@ -213,8 +213,8 @@ fn validate_render_request(
     }
     if !(16..=7680).contains(&options.width)
         || !(16..=4320).contains(&options.height)
-        || options.width % 2 != 0
-        || options.height % 2 != 0
+        || !options.width.is_multiple_of(2)
+        || !options.height.is_multiple_of(2)
     {
         return Err(invalid(
             "render dimensions must be even and within 16x16 to 7680x4320",

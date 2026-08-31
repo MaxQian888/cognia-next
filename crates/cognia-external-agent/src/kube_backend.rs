@@ -234,18 +234,20 @@ fn sanitize_label_value(value: &str) -> String {
 
 #[cfg(feature = "k8s-exec")]
 pub mod kube_api {
+    use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
 
     use async_trait::async_trait;
     use k8s_openapi::api::core::v1::Pod;
-    use kube::api::{Api, AttachParams, DeleteParams, PostParams};
+    use kube::api::{Api, AttachParams, DeleteParams, ListParams, PostParams};
     use kube::runtime::wait::{await_condition, conditions};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::mpsc;
 
     use super::super::container_backend::{
-        ContainerApi, RunnerEvent, RunnerRunError, RunnerSpec, RunningRunner,
+        is_owned, ContainerApi, OwnedContainer, RunnerEvent, RunnerRunError, RunnerSpec,
+        RunningRunner, OWNER_LABEL, OWNER_VALUE,
     };
     use super::{runner_pod_manifest, KubeRunnerOptions, RUNNER_CONTAINER_NAME};
 
@@ -288,6 +290,16 @@ pub mod kube_api {
         let statuses = pod.status?.container_statuses?;
         let state = statuses.into_iter().next()?.state?;
         state.terminated.map(|t| i64::from(t.exit_code))
+    }
+
+    fn pod_labels(pod: &Pod) -> BTreeMap<String, String> {
+        pod.metadata.labels.clone().unwrap_or_default()
+    }
+
+    fn owned_container_from_pod(pod: Pod) -> Option<OwnedContainer> {
+        let id = pod.metadata.name?;
+        let labels = pod.metadata.labels.unwrap_or_default();
+        is_owned(&labels).then_some(OwnedContainer { id, labels })
     }
 
     #[async_trait]
@@ -439,6 +451,34 @@ pub mod kube_api {
                 .map_err(|e| format!("pod delete failed: {e}"))
         }
 
+        async fn labels(
+            &self,
+            container_id: &str,
+        ) -> Result<Option<BTreeMap<String, String>>, String> {
+            self.pods()
+                .get_opt(container_id)
+                .await
+                .map(|pod| pod.as_ref().map(pod_labels))
+                .map_err(|e| format!("pod get failed: {e}"))
+        }
+
+        async fn list_owned(&self) -> Result<Vec<OwnedContainer>, String> {
+            // Include terminated pods: they are precisely the orphans a
+            // previous server process may have failed to delete.
+            let selector = format!("{OWNER_LABEL}={OWNER_VALUE}");
+            let params = ListParams::default().labels(&selector);
+            self.pods()
+                .list(&params)
+                .await
+                .map(|pods| {
+                    pods.items
+                        .into_iter()
+                        .filter_map(owned_container_from_pod)
+                        .collect()
+                })
+                .map_err(|e| format!("pod list failed: {e}"))
+        }
+
         async fn remove(&self, container_id: &str) -> Result<(), String> {
             match self
                 .pods()
@@ -450,6 +490,50 @@ pub mod kube_api {
                 Err(kube::Error::Api(status)) if status.code == 404 => Ok(()),
                 Err(e) => Err(format!("pod delete failed: {e}")),
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+
+        use super::*;
+        use crate::container_backend::{ownership_labels, INSTANCE_LABEL};
+
+        fn pod(name: Option<&str>, labels: BTreeMap<String, String>) -> Pod {
+            Pod {
+                metadata: ObjectMeta {
+                    name: name.map(str::to_string),
+                    labels: Some(labels),
+                    ..ObjectMeta::default()
+                },
+                ..Pod::default()
+            }
+        }
+
+        #[test]
+        fn pod_labels_preserve_ownership_metadata() {
+            let labels = ownership_labels("agent-1", "instance-previous");
+            assert_eq!(pod_labels(&pod(Some("runner-1"), labels.clone())), labels);
+        }
+
+        #[test]
+        fn owned_container_requires_name_and_owner_label() {
+            let labels = ownership_labels("agent-1", "instance-previous");
+            let owned = owned_container_from_pod(pod(Some("runner-1"), labels))
+                .expect("owner-labelled pod with a name");
+            assert_eq!(owned.id, "runner-1");
+            assert_eq!(
+                owned.labels.get(INSTANCE_LABEL).map(String::as_str),
+                Some("instance-previous")
+            );
+
+            assert!(owned_container_from_pod(pod(None, ownership_labels("a", "b"))).is_none());
+            assert!(owned_container_from_pod(pod(
+                Some("foreign"),
+                BTreeMap::from([("app".to_string(), "foreign".to_string())]),
+            ))
+            .is_none());
         }
     }
 }

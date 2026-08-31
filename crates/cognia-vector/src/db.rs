@@ -23,6 +23,23 @@ use super::filters::build_where;
 use super::schema::MIGRATIONS;
 use super::types::{Collection, Filter, FilterMode, Point, SearchHit, SearchResponse};
 
+type SqliteExtensionEntry = unsafe extern "C" fn(
+    *mut rusqlite::ffi::sqlite3,
+    *mut *mut std::ffi::c_char,
+    *const rusqlite::ffi::sqlite3_api_routines,
+) -> std::ffi::c_int;
+
+type CollectionHeaderRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+    i64,
+);
+
 /// Module-level guard so the auto-extension is registered at most once per
 /// process. Calling `sqlite3_auto_extension` more than once with the same
 /// pointer is a no-op upstream, but the `Once` keeps the FFI call out of
@@ -35,9 +52,10 @@ fn register_vec_extension() {
         // function pointer signature is the C-ABI sqlite3 extension entry
         // point; rusqlite's `ffi::sqlite3_auto_extension` accepts that.
         unsafe {
-            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+            let entry = std::mem::transmute::<*const (), SqliteExtensionEntry>(
                 sqlite_vec::sqlite3_vec_init as *const (),
-            )));
+            );
+            rusqlite::ffi::sqlite3_auto_extension(Some(entry));
         }
     });
 }
@@ -235,7 +253,7 @@ impl VectorStore {
         }
 
         let metadata_json = metadata
-            .map(|v| serde_json::to_string(v))
+            .map(serde_json::to_string)
             .transpose()
             .map_err(|e| VectorError::Serialization(e.to_string()))?;
         let now = now_iso();
@@ -742,16 +760,7 @@ impl VectorStore {
     pub fn export_collection_to_jsonl(&self, collection: &str) -> Result<String> {
         let conn = self.conn.lock();
         let (collection_id, dim) = Self::lookup_collection_id_and_dim(&conn, collection)?;
-        let header_row: (
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-            String,
-            i64,
-        ) = conn
+        let header_row: CollectionHeaderRow = conn
             .query_row(
                 "SELECT name, description, embedding_model, embedding_provider, \
                         metadata_json, created_at, updated_at, point_count \
@@ -1013,6 +1022,10 @@ impl VectorStore {
         ((1.0 - score_threshold) * 2.0).max(0.0)
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the native store boundary mirrors the renderer search contract explicitly"
+    )]
     pub fn search_points(
         &self,
         collection: &str,

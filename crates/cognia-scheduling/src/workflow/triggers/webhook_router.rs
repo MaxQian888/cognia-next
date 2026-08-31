@@ -160,16 +160,11 @@ pub struct IntegrationIngressEntry {
 const HMAC_SIGNATURE_HEADER_COGNIA: &str = "x-signature-256";
 
 /// Signature convention for host-owned legacy webhook triggers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SignatureMode {
     /// Cognia's own convention — `x-signature-256: sha256=<hex>`.
+    #[default]
     Cognia,
-}
-
-impl Default for SignatureMode {
-    fn default() -> Self {
-        Self::Cognia
-    }
 }
 
 impl SignatureMode {
@@ -878,7 +873,7 @@ fn verify_hmac_signature(
 }
 
 fn decode_hex(input: &str) -> Result<Vec<u8>, ()> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err(());
     }
     let mut out = Vec::with_capacity(input.len() / 2);

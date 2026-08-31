@@ -1842,6 +1842,7 @@ mod docker_integration {
             ],
             env: HashMap::new(),
             cwd: Some(tmp.path().display().to_string()),
+            framing: Default::default(),
         };
         let id = spawn_with_events(backend.as_ref(), emitter.clone(), spawn)
             .await

@@ -186,6 +186,10 @@ impl Drop for WatchManager {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the watcher thread receives independent ownership and event-routing inputs"
+)]
 fn watch_loop(
     receiver: mpsc::Receiver<WatchMessage>,
     root: &Path,
@@ -298,10 +302,7 @@ fn watch_loop(
             task_id: task_id.to_string(),
             run_id: run_id.to_string(),
             revision,
-            changes: changes
-                .into_iter()
-                .flat_map(|(_, changes)| changes)
-                .collect(),
+            changes: changes.into_values().flatten().collect(),
             overflow,
             resync_required: overflow,
         });

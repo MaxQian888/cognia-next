@@ -79,6 +79,13 @@ pub struct McpManagedInfo {
     pub started_at: Option<String>,
 }
 
+type McpServerRuntime = (
+    ServerHandle,
+    Arc<SidecarProcess>,
+    Option<Arc<AutomationProxy>>,
+    Option<Arc<OrchestrationProxy>>,
+);
+
 pub(crate) struct McpServerInner {
     pub(crate) status: McpServerStatus,
     /// Running server handle + the sidecar process it talks to + the optional
@@ -86,12 +93,7 @@ pub(crate) struct McpServerInner {
     /// `Some` only when start() was given the corresponding dependency
     /// (`AutomationHandle` / `AppHandle`); tests that build state manually
     /// (e.g. `start_stop_round_trip`) leave them `None`.
-    pub(crate) server: Option<(
-        ServerHandle,
-        Arc<SidecarProcess>,
-        Option<Arc<AutomationProxy>>,
-        Option<Arc<OrchestrationProxy>>,
-    )>,
+    pub(crate) server: Option<McpServerRuntime>,
 }
 
 impl McpServerState {

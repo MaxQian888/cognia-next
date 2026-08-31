@@ -95,7 +95,7 @@ fn scan_path(path_value: &str) -> Vec<String> {
         scan_dir(&dir, &mut set);
     }
     let mut names: Vec<String> = set.into_iter().collect();
-    names.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    names.sort_by_key(|name| name.to_lowercase());
     names
 }
 

@@ -882,7 +882,7 @@ impl WorkspaceStore {
     pub fn put_workspace(&self, record: &crate::WorkspaceRecord) -> Result<(), String> {
         let (base_kind, base_ref) = record.base.to_storage();
         let base_kind_str = serde_json::to_value(base_kind)
-            .and_then(|value| serde_json::from_value::<String>(value))
+            .and_then(serde_json::from_value::<String>)
             .map_err(|error| format!("encode base kind: {error}"))?;
         let owner_type = serialize_enum(&record.owner_type, "owner type")?;
         let environment_kind = serialize_enum(&record.environment_kind, "environment kind")?;

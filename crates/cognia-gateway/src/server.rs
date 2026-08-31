@@ -3425,8 +3425,10 @@ mod tests {
     #[test]
     fn apply_timeout_only_sets_when_positive() {
         // Can't easily inspect RequestBuilder; assert the config gate instead.
-        let mut cfg = GatewayConfig::default();
-        cfg.request_timeout_secs = 0;
+        let mut cfg = GatewayConfig {
+            request_timeout_secs: 0,
+            ..GatewayConfig::default()
+        };
         assert_eq!(cfg.request_timeout_secs, 0);
         cfg.request_timeout_secs = 10;
         assert!(cfg.request_timeout_secs > 0);

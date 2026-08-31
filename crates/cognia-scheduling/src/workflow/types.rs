@@ -52,7 +52,7 @@ impl RunStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "pending" => Self::Pending,
             "running" => Self::Running,
@@ -275,7 +275,7 @@ mod tests {
             let s = serde_json::to_string(&status).unwrap();
             let back: RunStatus = serde_json::from_str(&s).unwrap();
             assert_eq!(status, back);
-            assert_eq!(RunStatus::from_str(status.as_str()), Some(status));
+            assert_eq!(RunStatus::parse(status.as_str()), Some(status));
         }
     }
 
@@ -292,8 +292,8 @@ mod tests {
 
     #[test]
     fn run_status_from_str_returns_none_for_unknown_strings() {
-        assert!(RunStatus::from_str("nonsense").is_none());
-        assert!(RunStatus::from_str("").is_none());
+        assert!(RunStatus::parse("nonsense").is_none());
+        assert!(RunStatus::parse("").is_none());
     }
 
     #[test]

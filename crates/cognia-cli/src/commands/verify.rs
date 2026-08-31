@@ -4,7 +4,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::engine::signing::{fingerprint, verify_bundle};
 use crate::ui::{style, RuntimeUi};
@@ -156,8 +156,8 @@ struct VerifyJsonPayload {
 }
 
 fn emit_json_failure(
-    bundle: &PathBuf,
-    signature: &PathBuf,
+    bundle: &Path,
+    signature: &Path,
     stage: &'static str,
     public_key: Option<String>,
     error: String,

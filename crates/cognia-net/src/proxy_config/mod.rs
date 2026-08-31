@@ -19,32 +19,22 @@ use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyProtocol {
+    #[default]
     Http,
     Https,
     Socks5,
 }
 
-impl Default for ProxyProtocol {
-    fn default() -> Self {
-        Self::Http
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProxyMode {
+    #[default]
     Off,
     Manual,
     Auto,
-}
-
-impl Default for ProxyMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -774,7 +764,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    static NETWORK_ENV_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static NETWORK_ENV_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn manual(host: &str, port: u16) -> ProxyConfig {
         ProxyConfig {
@@ -861,8 +851,10 @@ mod tests {
 
     #[test]
     fn should_bypass_matches_domain_suffix() {
-        let mut cfg = ProxyConfig::default();
-        cfg.bypass = vec![".internal".to_string()];
+        let cfg = ProxyConfig {
+            bypass: vec![".internal".to_string()],
+            ..ProxyConfig::default()
+        };
         assert!(cfg.should_bypass("https://api.internal/foo"));
         assert!(cfg.should_bypass("https://internal/foo"));
         assert!(!cfg.should_bypass("https://api.example.com/foo"));
@@ -870,8 +862,10 @@ mod tests {
 
     #[test]
     fn should_bypass_matches_ipv4_and_ipv6_cidr() {
-        let mut cfg = ProxyConfig::default();
-        cfg.bypass = vec!["10.42.0.0/16".into(), "2001:db8::/32".into()];
+        let cfg = ProxyConfig {
+            bypass: vec!["10.42.0.0/16".into(), "2001:db8::/32".into()],
+            ..ProxyConfig::default()
+        };
         assert!(cfg.should_bypass("https://10.42.9.8/path"));
         assert!(!cfg.should_bypass("https://10.43.9.8/path"));
         assert!(cfg.should_bypass("https://[2001:db8:abcd::1]/path"));
@@ -929,7 +923,7 @@ mod tests {
 
     #[tokio::test]
     async fn managed_client_is_fail_closed_before_the_policy_is_installed() {
-        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        let _guard = NETWORK_ENV_TEST.lock().await;
         reset_uninitialized();
 
         // Not "direct by default": a client built during the hydration window
@@ -944,7 +938,7 @@ mod tests {
 
     #[tokio::test]
     async fn managed_client_sends_through_the_proxy_and_follows_a_later_policy_change() {
-        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        let _guard = NETWORK_ENV_TEST.lock().await;
         let (proxy_port, proxy_request) = serve_captured_request("proxy").await;
         let (origin_port, origin_request) = serve_captured_request("origin").await;
 
@@ -1192,7 +1186,7 @@ mod tests {
 
     #[tokio::test]
     async fn reqwest_proxy_auth_stays_on_proxy_and_bypass_is_direct() {
-        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        let _guard = NETWORK_ENV_TEST.lock().await;
         let (proxy_port, proxy_request) = serve_captured_request("proxy").await;
         let (origin_port, origin_request) = serve_captured_request("origin").await;
         let mut cfg = manual("127.0.0.1", proxy_port);
@@ -1236,7 +1230,7 @@ mod tests {
 
     #[tokio::test]
     async fn off_policy_ignores_ambient_proxy_environment() {
-        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        let _guard = NETWORK_ENV_TEST.lock().await;
         const KEYS: [&str; 6] = [
             "HTTP_PROXY",
             "HTTPS_PROXY",

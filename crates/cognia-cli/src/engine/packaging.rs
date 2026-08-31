@@ -246,10 +246,7 @@ pub fn write_bundle(
     seen.insert(wasm_main.to_string());
     seen.insert("plugin.json".to_string());
     for extra in &plan.extra_files {
-        if let Some(rel) = extra
-            .strip_prefix(&plan.manifest_path.parent().unwrap_or(Path::new(".")))
-            .ok()
-        {
+        if let Ok(rel) = extra.strip_prefix(plan.manifest_path.parent().unwrap_or(Path::new("."))) {
             let rel_str = rel.to_string_lossy().replace('\\', "/");
             if seen.contains(&rel_str) {
                 continue;

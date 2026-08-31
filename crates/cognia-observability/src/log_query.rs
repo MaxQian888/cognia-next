@@ -121,7 +121,7 @@ pub fn list_log_dir(dir: &Path) -> Vec<NativeLogFileInfo> {
             })
         })
         .collect::<Vec<_>>();
-    files.sort_by(|left, right| right.modified_ms.cmp(&left.modified_ms));
+    files.sort_by_key(|file| std::cmp::Reverse(file.modified_ms));
     files
 }
 

@@ -48,22 +48,19 @@ fn scheduler_validate_task_impl(
     }
 
     match &input.trigger {
-        crate::scheduler::SystemTaskTrigger::Cron { expression, .. } => {
-            if expression.split_whitespace().count() != 5 {
-                errors.push("Cron expression must have exactly 5 fields".to_string());
-            }
+        crate::scheduler::SystemTaskTrigger::Cron { expression, .. }
+            if expression.split_whitespace().count() != 5 =>
+        {
+            errors.push("Cron expression must have exactly 5 fields".to_string());
         }
-        crate::scheduler::SystemTaskTrigger::Interval { seconds } => {
-            if *seconds < 60 {
-                warnings.push(
-                    "Intervals less than 60 seconds may impact system performance".to_string(),
-                );
-            }
+        crate::scheduler::SystemTaskTrigger::Interval { seconds } if *seconds < 60 => {
+            warnings
+                .push("Intervals less than 60 seconds may impact system performance".to_string());
         }
-        crate::scheduler::SystemTaskTrigger::Once { run_at } => {
-            if crate::scheduler::service::parse_datetime(run_at).is_none() {
-                errors.push("Invalid datetime format for run_at".to_string());
-            }
+        crate::scheduler::SystemTaskTrigger::Once { run_at }
+            if crate::scheduler::service::parse_datetime(run_at).is_none() =>
+        {
+            errors.push("Invalid datetime format for run_at".to_string());
         }
         _ => {}
     }

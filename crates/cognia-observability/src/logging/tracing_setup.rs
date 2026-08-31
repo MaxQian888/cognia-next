@@ -85,9 +85,16 @@ pub fn configure_otel_tracer(tracer: Option<SdkTracer>) -> Result<(), String> {
     let mut handle = OTEL_RELOAD_HANDLE
         .lock()
         .map_err(|_| "native OTLP reload handle lock poisoned".to_string())?;
-    let handle = handle
-        .as_mut()
-        .ok_or_else(|| "structured tracing subscriber is not initialized".to_string())?;
+    let Some(handle) = handle.as_mut() else {
+        return if tracer.is_none() {
+            // Disabling is intentionally idempotent: persisted telemetry can
+            // be turned off before logging initialization has installed the
+            // optional reload layer.
+            Ok(())
+        } else {
+            Err("structured tracing subscriber is not initialized".to_string())
+        };
+    };
     handle
         .reload(tracer.map(|tracer| tracing_opentelemetry::layer().with_tracer(tracer)))
         .map_err(|error| format!("native OTLP layer reload failed: {error}"))
@@ -334,5 +341,11 @@ mod tests {
         assert_eq!(parse_level("ERROR"), Level::ERROR);
         assert_eq!(parse_level("trace"), Level::TRACE);
         assert_eq!(parse_level("nonsense"), Level::INFO);
+    }
+
+    #[cfg(feature = "otel-export")]
+    #[test]
+    fn disabling_otel_before_subscriber_initialization_is_idempotent() {
+        assert!(configure_otel_tracer(None).is_ok());
     }
 }

@@ -69,14 +69,11 @@ const SKIP_EXTS: &[&str] = &[
 /// Whether `rel` (a forward-slash, repo-relative path) should be excluded.
 pub fn is_filtered(rel: &str) -> bool {
     let norm = rel.replace('\\', "/");
-    if norm
-        .split('/')
-        .any(|seg| SKIP_DIRS.iter().any(|d| seg == *d))
-    {
+    if norm.split('/').any(|seg| SKIP_DIRS.contains(&seg)) {
         return true;
     }
     let base = norm.rsplit('/').next().unwrap_or(&norm);
-    if SKIP_FILES.iter().any(|f| base == *f) {
+    if SKIP_FILES.contains(&base) {
         return true;
     }
     if base.starts_with(".env") {

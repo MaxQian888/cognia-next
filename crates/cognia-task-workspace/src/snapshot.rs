@@ -306,6 +306,8 @@ fn binary_hint_from_path(rel_path: &str) -> bool {
     !(media.starts_with("text/") || media == "application/json" || media == "image/svg+xml")
 }
 
+type GitBackedCapture = (WorkspaceSnapshot, HashMap<String, Vec<u8>>);
+
 /// Capture `root` using Git as the content store.
 ///
 /// `Ok(None)` means "not a Git worktree we can read" and asks the caller to
@@ -313,7 +315,7 @@ fn binary_hint_from_path(rel_path: &str) -> bool {
 fn capture_git_backed(
     canonical_root: &Path,
     policy: &ResourceTrackingPolicy,
-) -> Result<Option<(WorkspaceSnapshot, HashMap<String, Vec<u8>>)>, String> {
+) -> Result<Option<GitBackedCapture>, String> {
     let Some(head) = git_stdout(canonical_root, &["rev-parse", "HEAD"]) else {
         return Ok(None);
     };
@@ -1250,7 +1252,7 @@ mod tests {
         let (snapshot, _) = capture(dir.path()).unwrap();
         let hash = snapshot.entries["tracked.txt"].hash.clone();
 
-        let resolved = git_read_blobs(dir.path(), &[hash.clone()]).unwrap();
+        let resolved = git_read_blobs(dir.path(), std::slice::from_ref(&hash)).unwrap();
         assert_eq!(
             resolved.get(&hash).map(Vec::as_slice),
             Some(&b"committed\n"[..])
@@ -1261,7 +1263,7 @@ mod tests {
     fn git_read_blobs_omits_objects_the_repository_does_not_have() {
         let dir = git_fixture(|_| {});
         let absent = "0".repeat(40);
-        let resolved = git_read_blobs(dir.path(), &[absent.clone()]).unwrap();
+        let resolved = git_read_blobs(dir.path(), std::slice::from_ref(&absent)).unwrap();
         assert!(resolved.is_empty());
     }
 

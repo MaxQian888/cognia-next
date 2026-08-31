@@ -474,6 +474,7 @@ pub struct ModelFileSpec {
 ///   `oar-ocr` v0.7.0 GitHub release, as documented by oar-ocr 0.9.x in
 ///   docs/models.md (the HF PaddlePaddle repos ship Paddle-format files
 ///   only, no ONNX).
+///
 /// Mirroring the file names used by `crate::backend::ocrs::*_MODEL_FILE` /
 /// `crate::backend::paddle::*` so downloader and loader agree.
 pub fn model_spec(backend: &str, variant: Option<&str>) -> Option<Vec<ModelFileSpec>> {

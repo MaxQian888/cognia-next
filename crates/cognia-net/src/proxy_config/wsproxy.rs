@@ -182,11 +182,11 @@ async fn connect_socks5(
         (Some(u), Some(p)) if !u.is_empty() && !p.is_empty() => {
             tokio_socks::tcp::Socks5Stream::connect_with_password(proxy_addr.as_str(), target, u, p)
                 .await
-                .map_err(|e| IoError::new(ErrorKind::Other, e.to_string()))?
+                .map_err(|e| IoError::other(e.to_string()))?
         }
         _ => tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), target)
             .await
-            .map_err(|e| IoError::new(ErrorKind::Other, e.to_string()))?,
+            .map_err(|e| IoError::other(e.to_string()))?,
     };
     Ok(Box::new(stream))
 }

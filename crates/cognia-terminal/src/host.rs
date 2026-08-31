@@ -228,7 +228,7 @@ pub struct HostSessionInfo {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HostEvent {
     SessionSnapshot {
-        session: HostSessionInfo,
+        session: Box<HostSessionInfo>,
     },
     Output {
         session_id: String,
@@ -464,10 +464,8 @@ impl CommandCapture {
                     self.line.pop();
                 }
                 0x15 => self.line.clear(),
-                0x20..=0x7e | 0x80..=0xff => {
-                    if self.line.len() < 64 * 1024 {
-                        self.line.push(byte);
-                    }
+                0x20..=0x7e | 0x80..=0xff if self.line.len() < 64 * 1024 => {
+                    self.line.push(byte);
                 }
                 _ => {}
             }
@@ -1044,7 +1042,7 @@ impl TerminalHost {
             .map(|client| client.sender.clone())
         {
             let _ = sender.try_send(HostEvent::SessionSnapshot {
-                session: info.clone(),
+                session: Box::new(info.clone()),
             });
         }
         Ok(info)
@@ -1157,7 +1155,7 @@ impl TerminalHost {
             }
         }
         let _ = sender.try_send(HostEvent::SessionSnapshot {
-            session: info.clone(),
+            session: Box::new(info.clone()),
         });
         // Every attachment (the new one included) learns the roster changed.
         broadcast_participants(&self.inner, session_id);
@@ -1872,7 +1870,7 @@ fn broadcast_participants(inner: &TerminalHostInner, session_id: &str) {
     };
     for sender in recipients {
         let _ = sender.try_send(HostEvent::SessionSnapshot {
-            session: info.clone(),
+            session: Box::new(info.clone()),
         });
     }
 }
@@ -1935,9 +1933,7 @@ fn release_flow_for(
     session: &mut HostedSession,
     connection: Uuid,
 ) -> Option<Arc<dyn HostedTerminalProcess>> {
-    if session.flow_paused_by.remove(&connection).is_none() {
-        return None;
-    }
+    session.flow_paused_by.remove(&connection)?;
     if session.flow_paused_by.is_empty() {
         Some(Arc::clone(&session.process))
     } else {

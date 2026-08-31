@@ -22,7 +22,7 @@ type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 pub fn verify_token(provided: Option<&str>, expected: &str) -> Result<(), SigError> {
     match provided {
         None => Err(SigError::Missing),
-        Some(token) if token.is_empty() => Err(SigError::Missing),
+        Some("") => Err(SigError::Missing),
         Some(token) => {
             // Constant-time compare — the verification token is a long-lived,
             // high-value shared secret (it is the only gate on plaintext-mode

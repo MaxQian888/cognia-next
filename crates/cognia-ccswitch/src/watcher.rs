@@ -9,7 +9,7 @@
 //! `Mutex<Option<RecommendedWatcher>>` — there is exactly one db, so unlike
 //! the git subsystem we don't key by path.
 
-use std::path::PathBuf;
+use std::path::Path;
 use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -52,7 +52,7 @@ impl CcswitchWatcherState {
 /// Whether a changed path under the watched directory is the cc-switch
 /// database (including its `-wal` / `-shm` sidecars). Anything else in the
 /// `.cc-switch/` directory (logs, the app store, temp files) is ignored.
-fn path_is_db(db_path: &PathBuf, changed: &std::path::Path) -> bool {
+fn path_is_db(db_path: &Path, changed: &Path) -> bool {
     let Some(db_name) = db_path.file_name().and_then(|s| s.to_str()) else {
         return false;
     };
@@ -159,6 +159,7 @@ pub fn ccswitch_watch_stop(state: tauri::State<'_, CcswitchWatcherState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn db_file_and_sidecars_are_relevant() {

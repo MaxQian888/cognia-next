@@ -59,8 +59,8 @@ ctrlc = "3"
 # the sticky status panel. `default-features = false` keeps timezone
 # parsing & serde out of the binary — we only need `Local::now()`.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-cognia-observability = { path = "../cognia-observability" }
-cognia-headless-contract = { path = "../cognia-headless-contract" }
+cognia-observability = { version = "0.1.0", path = "../cognia-observability" }
+cognia-headless-contract = { version = "0.1.0", path = "../cognia-headless-contract" }
 uuid = { version = "1", features = ["v4"] }
 url = "2"
 

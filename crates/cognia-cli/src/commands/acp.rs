@@ -528,12 +528,7 @@ mod tests {
             .unwrap();
             ws.send(Message::Close(None)).unwrap();
             // Drain until the close handshake completes.
-            loop {
-                match ws.read() {
-                    Ok(_) => continue,
-                    Err(_) => break,
-                }
-            }
+            while ws.read().is_ok() {}
         });
 
         let stream = TcpStream::connect(addr).unwrap();

@@ -27,6 +27,10 @@ ignore = [
   # the two runtime DoS paths are unreachable. Remove when xcb upgrades.
   { id = "RUSTSEC-2026-0194", reason = "xcb build-only parser consumes crate-owned protocol XML" },
   { id = "RUSTSEC-2026-0195", reason = "xcb build-only parser consumes crate-owned protocol XML" },
+  # matrix-sdk 0.18 pulls bitmaps through imbl. The affected raw-byte
+  # conversion/mutation APIs are not used by imbl, eyeball-im, matrix-sdk, or
+  # Cognia; no maintained replacement or patched release exists yet.
+  { id = "RUSTSEC-2025-0167", reason = "matrix-sdk transitive dependency; affected Bitmap raw-byte APIs are unreachable" },
 ]
 
 [bans]
@@ -43,15 +47,18 @@ highlight = "all"
 # Permissive licenses this project is happy to ship.
 allow = [
   "MIT",
+  "MIT-0",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
   "BSD-2-Clause",
   "BSD-3-Clause",
+  "bzip2-1.0.6",
   "ISC",
   "Unicode-3.0",
   "Unicode-DFS-2016",
   "CC0-1.0",
   "MPL-2.0",
+  "NCSA",
   "Zlib",
   "OpenSSL",
   "BSL-1.0",

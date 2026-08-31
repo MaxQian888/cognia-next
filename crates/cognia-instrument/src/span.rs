@@ -98,7 +98,6 @@ mod tests {
 
     #[test]
     fn guard_records_on_drop() {
-        REGISTRY.reset();
         {
             let _g = guard("test.guard.drop");
         }
@@ -110,7 +109,6 @@ mod tests {
 
     #[test]
     fn guard_fail_marks_error() {
-        REGISTRY.reset();
         {
             let mut g = guard("test.guard.fail");
             g.fail();
@@ -122,7 +120,6 @@ mod tests {
 
     #[test]
     fn record_writes_directly() {
-        REGISTRY.reset();
         record("test.record", Duration::from_millis(5), false);
         let snap = REGISTRY.snapshot();
         let row = snap.iter().find(|r| r.name == "test.record").unwrap();
@@ -132,7 +129,6 @@ mod tests {
 
     #[tokio::test]
     async fn timed_records_ok_and_err() {
-        REGISTRY.reset();
         let ok: Result<u8, u8> = timed("test.timed.ok", async { Ok(1) }).await;
         let err: Result<u8, u8> = timed("test.timed.err", async { Err(2) }).await;
         assert!(ok.is_ok());

@@ -8,15 +8,14 @@
 //! reliability telemetry.
 //!
 //! Layout:
-//!   - `server`         — axum routes + middleware (loopback/LAN Host, no
-//!                        Origin/Referer, IPv4 allowlist, constant-time key
-//!                        auth, global + per-key rate limit).
-//!   - `execute`        — candidate resolution + upstream request plumbing.
-//!   - `translate`      — inbound-format ⇄ upstream-protocol translation.
-//!   - `snapshot`       — the routing + credential snapshot pushed by the
-//!                        renderer.
-//!   - `api_keys`       — keyring-backed scoped API keys.
-//!   - `keyed_rate_limit` — per-key request budget.
+//! - `server` — axum routes + middleware (loopback/LAN Host, no
+//!   Origin/Referer, IPv4 allowlist, constant-time key auth, global + per-key
+//!   rate limit).
+//! - `execute` — candidate resolution + upstream request plumbing.
+//! - `translate` — inbound-format ⇄ upstream-protocol translation.
+//! - `snapshot` — the routing + credential snapshot pushed by the renderer.
+//! - `api_keys` — keyring-backed scoped API keys.
+//! - `keyed_rate_limit` — per-key request budget.
 //!
 //! Config persistence: the non-secret [`GatewayConfig`] is mirrored to
 //! `<app_data>/cognia/gateway-config.json` so port / allowlist / timeouts /
@@ -741,10 +740,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cognia-gw-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("gateway-config.json");
-        let mut cfg = GatewayConfig::default();
-        cfg.port = 50055;
-        cfg.enabled = true;
-        cfg.request_timeout_secs = 42;
+        let cfg = GatewayConfig {
+            port: 50055,
+            enabled: true,
+            request_timeout_secs: 42,
+            ..GatewayConfig::default()
+        };
         std::fs::write(&path, serde_json::to_string(&cfg).unwrap()).unwrap();
 
         state.hydrate_from_disk(path);

@@ -1,5 +1,6 @@
 target/
 Cargo.lock
+src/bindings.rs
 .cognia/
 *.wasm
 *.sig

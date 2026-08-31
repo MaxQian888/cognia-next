@@ -22,7 +22,7 @@ pub struct ExternalBridgeSettings {
 }
 
 /// Live status returned by `mcp_server_status`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerStatus {
     /// Whether the HTTP listener is currently bound and accepting requests.
@@ -31,16 +31,6 @@ pub struct McpServerStatus {
     pub port: Option<u16>,
     /// ISO-8601 timestamp of when the server was last started.
     pub started_at: Option<String>,
-}
-
-impl Default for McpServerStatus {
-    fn default() -> Self {
-        Self {
-            running: false,
-            port: None,
-            started_at: None,
-        }
-    }
 }
 
 /// Errors that the MCP server commands surface to the renderer.

@@ -558,6 +558,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     async fn fixture(server_uri: &str) -> PineconeBackend {
+        super::super::initialize_direct_proxy();
         let b = PineconeBackend::new("test-key".into(), "rag".into(), Some("ns".into()))
             .await
             .expect("build");

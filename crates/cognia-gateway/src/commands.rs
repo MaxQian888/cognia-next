@@ -209,8 +209,10 @@ mod tests {
     #[test]
     fn update_config_round_trips() {
         let state = GatewayState::new();
-        let mut cfg = GatewayConfig::default();
-        cfg.rate_limit_per_min = 120;
+        let cfg = GatewayConfig {
+            rate_limit_per_min: 120,
+            ..GatewayConfig::default()
+        };
         state.update_config(cfg).unwrap();
         assert_eq!(state.config().rate_limit_per_min, 120);
     }

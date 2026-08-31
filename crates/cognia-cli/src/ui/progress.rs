@@ -78,12 +78,11 @@ mod tests {
         // Force is_tty=false by constructing manually rather than
         // through `RuntimeUi::new` (which probes stdout).
         let _ = flags;
-        let ui = RuntimeUi::new(UiFlags {
+        RuntimeUi::new(UiFlags {
             color: ColorMode::Never,
             quiet: true,
             ..UiFlags::default()
-        });
-        ui
+        })
     }
 
     #[test]

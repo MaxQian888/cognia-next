@@ -199,11 +199,9 @@ fn count_first_existing(conn: &Connection, candidates: &[&str]) -> Result<u64, C
 fn pick_str(row: &Row, available: &HashSet<String>, names: &[&str]) -> Option<String> {
     for n in names {
         if available.contains(*n) {
-            if let Ok(v) = row.get::<_, Option<String>>(*n) {
-                if let Some(s) = v {
-                    if !s.is_empty() {
-                        return Some(s);
-                    }
+            if let Ok(Some(s)) = row.get::<_, Option<String>>(*n) {
+                if !s.is_empty() {
+                    return Some(s);
                 }
             }
         }
@@ -233,6 +231,7 @@ fn json_pick(obj: &serde_json::Value, keys: &[&str]) -> Option<String> {
 ///   - `{"env": {...}}`                  → claude / claude-desktop / gemini env vars
 ///   - `{"auth": {...}, "config": "…"}`  → codex auth.json + config.toml string
 ///   - `{"options": {...}}`              → opencode provider options
+///
 /// Flat columns win — only fields still `None` are filled. Invalid JSON is
 /// tolerated and leaves the provider untouched.
 fn enrich_from_settings_config(p: &mut CcswitchProvider, raw: &str) {
@@ -305,6 +304,7 @@ fn enrich_from_settings_config(p: &mut CcswitchProvider, raw: &str) {
 ///     first `:` splits, so header values may themselves contain colons/commas.
 ///   - `ANTHROPIC_BETA`: comma-separated beta flags, folded into one
 ///     `anthropic-beta` header.
+///
 /// The dominant payload here is `anthropic-beta: context-1m-2025-08-07`, which
 /// downstream turns into the 1M context-window capability.
 fn merge_custom_headers(p: &mut CcswitchProvider, env: &serde_json::Value) {

@@ -48,11 +48,11 @@ use tokio::task::JoinHandle;
 use super::proxy_common::{generate_token, token_matches, RateLimitOutcome, RateLimiter};
 
 use cognia_automation::automation::dispatcher::{run_gated_enf, Enforcement, GateContext};
-use cognia_automation::automation::permission::Surface;
+use cognia_automation::automation::permission::{ScreenshotScalingSettings, Surface};
 use cognia_automation::automation::session::{
     ActionRequest, AppLocator, ElementHandle, GetAppStateOptions,
 };
-use cognia_automation::automation::types::{AutomationError, Locator};
+use cognia_automation::automation::types::{AutomationError, Locator, Rect};
 use cognia_automation::automation::worker::AutomationHandle;
 
 /// Live proxy handle. Drop aborts the listener task; closing the listener
@@ -296,12 +296,20 @@ async fn dispatch(
     enforcement: &Enforcement,
 ) -> ProxyResponse {
     let id = req.id.clone();
+    // ADR-0020 W1. The renderer path reads this same setting in
+    // `desktop_get_app_state`; the MCP proxy is a second entry into the very
+    // same worker, so it has to hand the capture the same decision or an MCP
+    // client would receive credential pixels the desktop path blacks out.
+    // Sampled before the ungated probe below so no future addition to that
+    // early-return list can silently skip it.
+    let redact_credential_windows = enforcement.gate.settings().redact_screenshots;
+    let scaling = enforcement.gate.settings().screenshot_scaling;
 
     // `desktop_capabilities` is a harmless probe (mirrors the ungated
     // `desktop_capabilities` Tauri command) — let it through without a gate so
     // an MCP client can always discover what the backend supports.
     if req.command == "desktop_capabilities" {
-        return match run(req, handle).await {
+        return match run(req, handle, redact_credential_windows, scaling).await {
             Ok(value) => ProxyResponse {
                 id,
                 ok: true,
@@ -344,7 +352,7 @@ async fn dispatch(
         session_key: None,
     };
     let result = run_gated_enf(None, enforcement, gctx, &gate_command, move || async move {
-        run(req, handle)
+        run(req, handle, redact_credential_windows, scaling)
             .await
             .map_err(|message| AutomationError::Internal { message })
     })
@@ -365,7 +373,12 @@ async fn dispatch(
     }
 }
 
-async fn run(req: ProxyRequest, handle: &AutomationHandle) -> Result<serde_json::Value, String> {
+async fn run(
+    req: ProxyRequest,
+    handle: &AutomationHandle,
+    redact_credential_windows: bool,
+    scaling: ScreenshotScalingSettings,
+) -> Result<serde_json::Value, String> {
     match req.command.as_str() {
         "desktop_capabilities" => {
             let caps = handle.capabilities().await.map_err(stringify_err)?;
@@ -378,7 +391,14 @@ async fn run(req: ProxyRequest, handle: &AutomationHandle) -> Result<serde_json:
         "desktop_get_app_state" => {
             let args: GetAppStateArgs = from_value(req.args)?;
             let state = handle
-                .get_app_state(args.session_id, args.turn_key, args.locator, args.options)
+                .get_app_state(
+                    args.session_id,
+                    args.turn_key,
+                    args.locator,
+                    args.options,
+                    redact_credential_windows,
+                    scaling,
+                )
                 .await
                 .map_err(stringify_err)?;
             Ok(serde_json::to_value(state).map_err(|e| e.to_string())?)
@@ -413,6 +433,14 @@ async fn run(req: ProxyRequest, handle: &AutomationHandle) -> Result<serde_json:
                 .map_err(stringify_err)?;
             Ok(serde_json::to_value(result).map_err(|e| e.to_string())?)
         }
+        "desktop_zoom" => {
+            let args: ZoomArgs = from_value(req.args)?;
+            let zoomed = handle
+                .zoom_region(args.session_id, args.lineage_id, args.revision, args.region)
+                .await
+                .map_err(stringify_err)?;
+            Ok(serde_json::to_value(zoomed).map_err(|e| e.to_string())?)
+        }
         other => Err(format!("unknown automation command '{other}'")),
     }
 }
@@ -437,6 +465,15 @@ struct GetAppStateArgs {
     locator: AppLocator,
     #[serde(default)]
     options: GetAppStateOptions,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ZoomArgs {
+    session_id: String,
+    lineage_id: String,
+    revision: u64,
+    region: Rect,
 }
 
 #[derive(Deserialize)]
@@ -502,14 +539,16 @@ mod tests {
     }
 
     fn stub_enf_with(mcp_tier: Tier) -> Enforcement {
-        let mut settings = AutomationSettings::default();
+        let mut settings = AutomationSettings {
+            enabled: true,
+            ..AutomationSettings::default()
+        };
         // The engine defaults to disabled (`enabled = false`), which makes the
         // gate deny *every* driving call (with `PermissionDenied`) before the
         // tier is even consulted. Enable it so the MCP-surface tier actually
         // governs the call — otherwise `Tier::Whitelist` (meant to be allow-all
         // here) never reaches the worker and the command never gets a chance to
         // report "unknown automation command".
-        settings.enabled = true;
         settings.per_surface.mcp.tier = mcp_tier;
         Enforcement {
             gate: PermissionGate::new(settings),

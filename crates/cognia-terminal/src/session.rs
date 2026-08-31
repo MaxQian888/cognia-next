@@ -38,17 +38,12 @@ use cognia_automation::sandbox::launcher::LaunchScope;
 /// Where the bytes ultimately came from. `Local` = Tauri Channel
 /// consumer in the same process; `Remote` = LAN WebSocket consumer
 /// against the durable desktop host (ADR-0014/0015).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionOrigin {
+    #[default]
     Local,
     Remote,
-}
-
-impl Default for SessionOrigin {
-    fn default() -> Self {
-        Self::Local
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

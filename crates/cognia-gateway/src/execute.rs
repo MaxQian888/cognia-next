@@ -199,6 +199,7 @@ pub fn is_executable_protocol(protocol: &str) -> bool {
 ///   1. an alias from the snapshot → its pre-ordered entries,
 ///   2. `provider:model` literal,
 ///   3. a model id owned by exactly one enabled provider.
+///
 /// Disabled providers and non-executable protocols are skipped.
 pub fn resolve_candidates(snapshot: &RoutingSnapshot, model: &str) -> Vec<Candidate> {
     let mut out = Vec::new();

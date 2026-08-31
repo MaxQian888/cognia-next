@@ -528,6 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_collection_posts_to_v1_collections() {
+        super::super::initialize_direct_proxy();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/collections"))
@@ -552,6 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn query_distances_become_scores() {
+        super::super::initialize_direct_proxy();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/v1/collections/c/query"))

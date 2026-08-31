@@ -318,7 +318,10 @@ mod tests {
             .await;
         });
 
-        let client = reqwest::Client::new();
+        // This test owns a loopback origin and must not inherit the
+        // process-wide fail-closed proxy environment exercised by parallel
+        // proxy-policy tests.
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let url = format!("http://{address}/v1/events");
         let mut seen: Vec<SseEvent> = Vec::new();
         let delivered = stream_sse_get(

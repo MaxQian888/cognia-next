@@ -424,7 +424,7 @@ fn substitute_vscode_extension_name(content: &str, target_name: &str) -> String 
 }
 
 fn humanize(name: &str) -> String {
-    name.split(|c: char| c == '-' || c == '_')
+    name.split(['-', '_'])
         .filter(|w| !w.is_empty())
         .map(|w| {
             let mut c = w.chars();
@@ -442,6 +442,19 @@ fn humanize(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn find_file<'a>(files: &'a [TemplateFile], path: &str) -> &'a TemplateFile {
+        files
+            .iter()
+            .find(|file| file.rel_path.as_path() == Path::new(path))
+            .unwrap_or_else(|| panic!("missing template file: {path}"))
+    }
+
+    fn has_file(files: &[TemplateFile], path: &str) -> bool {
+        files
+            .iter()
+            .any(|file| file.rel_path.as_path() == Path::new(path))
+    }
 
     #[test]
     fn parse_accepts_known_kinds() {
@@ -471,10 +484,7 @@ mod tests {
         // the invariant across all of them.
         for kind in TemplateKind::ALL {
             let files = files_for(kind, "probe");
-            let gi = files
-                .iter()
-                .find(|f| f.rel_path == PathBuf::from(".gitignore"))
-                .unwrap_or_else(|| panic!("{kind:?} template must ship a .gitignore"));
+            let gi = find_file(&files, ".gitignore");
             assert!(
                 gi.content.lines().any(|l| l.trim() == ".cognia/"),
                 "{kind:?} template's .gitignore must ignore .cognia/ — \
@@ -494,15 +504,9 @@ mod tests {
                 f.rel_path.display()
             );
         }
-        let cargo = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("Cargo.toml"))
-            .unwrap();
+        let cargo = find_file(&files, "Cargo.toml");
         assert!(cargo.content.contains(r#"name = "my-plugin""#));
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         assert!(pj.content.contains(r#""id": "my-plugin""#));
     }
 
@@ -513,10 +517,7 @@ mod tests {
         // hyphenated package name. Before the fix a scaffold named
         // `hello-wasm` shipped `wasmMain: "cognia_plugin_template.wasm"`.
         let files = files_for(TemplateKind::Wasm, "hello-wasm");
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         assert!(
             pj.content.contains(r#""wasmMain": "hello_wasm.wasm""#),
             "wasmMain should be the underscored artifact name, got:\n{}",
@@ -533,10 +534,7 @@ mod tests {
         // ships `capabilities: []` while its code implements a tool, which is a
         // latent bug the linter would rightly flag as dead weight.
         let files = files_for(TemplateKind::Wasm, "probe");
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         let m: serde_json::Value = serde_json::from_str(&pj.content).unwrap();
         let caps = m["capabilities"]
             .as_array()
@@ -562,15 +560,9 @@ mod tests {
         assert!(names.iter().any(|n| n == "package.json"));
         assert!(names.iter().any(|n| n.ends_with("index.ts")));
         assert!(names.iter().any(|n| n.ends_with("index.test.ts")));
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         assert!(pj.content.contains(r#""id": "my-plugin""#));
-        let pkg = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("package.json"))
-            .unwrap();
+        let pkg = find_file(&files, "package.json");
         assert!(pkg.content.contains(r#""name": "my-plugin""#));
     }
 
@@ -584,17 +576,11 @@ mod tests {
         for expected in ["plugin.json", "main.py", "README.md", ".gitignore"] {
             assert!(names.iter().any(|n| n == expected), "missing: {expected}");
         }
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         assert!(pj.content.contains(r#""id": "my-plugin""#));
         assert!(pj.content.contains(r#""type": "python""#));
         assert!(pj.content.contains(r#""pythonMain": "main.py""#));
-        let main = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("main.py"))
-            .unwrap();
+        let main = find_file(&files, "main.py");
         assert!(main.content.contains("from cognia import tool"));
         assert!(main.content.contains("template_echo"));
     }
@@ -610,15 +596,9 @@ mod tests {
             "README.md",
             ".gitignore",
         ] {
-            assert!(
-                files.iter().any(|f| f.rel_path == PathBuf::from(expected)),
-                "missing: {expected}"
-            );
+            assert!(has_file(&files, expected), "missing: {expected}");
         }
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         assert!(pj.content.contains(r#""id": "my-plugin""#));
         assert!(pj.content.contains(r#""type": "hybrid""#));
         assert!(pj.content.contains(r#""main": "frontend/index.js""#));
@@ -637,15 +617,9 @@ mod tests {
             "README.md",
             ".gitignore",
         ] {
-            assert!(
-                files.iter().any(|f| f.rel_path == PathBuf::from(expected)),
-                "missing: {expected}"
-            );
+            assert!(has_file(&files, expected), "missing: {expected}");
         }
-        let pj = files
-            .iter()
-            .find(|f| f.rel_path == PathBuf::from("plugin.json"))
-            .unwrap();
+        let pj = find_file(&files, "plugin.json");
         assert!(pj.content.contains(r#""id": "my-plugin""#));
         assert!(pj.content.contains(r#""type": "vscode-extension""#));
         assert!(pj
@@ -680,6 +654,10 @@ mod tests {
                 "template must not depend on the unpublished {unresolvable}"
             );
         }
+        // The vendored SDK declaration surface re-exports ACP protocol types,
+        // so standalone author projects must be able to resolve that published
+        // peer without relying on this repository's node_modules.
+        assert!(ts::PACKAGE_JSON.contains(r#""@agentclientprotocol/sdk": "^1.4.0""#));
         // They stay external at build time — the host hands out its instances.
         assert!(ts::PACKAGE_JSON.contains("--external:@cognia/plugin-sdk"));
         assert!(ts::PACKAGE_JSON.contains("--external:@cognia/plugin-ui"));

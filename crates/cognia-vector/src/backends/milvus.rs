@@ -376,6 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_collection_posts_v2_endpoint() {
+        super::super::initialize_direct_proxy();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v2/vectordb/collections/create"))
@@ -399,6 +400,7 @@ mod tests {
 
     #[tokio::test]
     async fn search_returns_translated_hits() {
+        super::super::initialize_direct_proxy();
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v2/vectordb/entities/search"))

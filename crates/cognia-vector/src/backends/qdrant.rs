@@ -44,10 +44,8 @@ impl QdrantBackend {
             Some(qdrant::r#match::MatchValue::Keyword(s.to_string()))
         } else if let Some(i) = value.as_i64() {
             Some(qdrant::r#match::MatchValue::Integer(i))
-        } else if let Some(b) = value.as_bool() {
-            Some(qdrant::r#match::MatchValue::Boolean(b))
         } else {
-            None
+            value.as_bool().map(qdrant::r#match::MatchValue::Boolean)
         }
     }
 

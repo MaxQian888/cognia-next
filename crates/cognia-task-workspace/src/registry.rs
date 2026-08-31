@@ -292,6 +292,10 @@ impl WorkspaceRegistry {
     ///
     /// The lock reason is derived deterministically from the `workspace_id`
     /// so a subsequent `remove_workspace` call can validate it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the Registry row contract stays explicit at this persistence boundary"
+    )]
     pub fn insert(
         &self,
         owner_type: WorkspaceOwnerType,
@@ -321,6 +325,10 @@ impl WorkspaceRegistry {
     ///
     /// Provisioners need the id to construct the signed Git lock reason in
     /// the same `git worktree add` invocation that creates the directory.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the Registry row contract stays explicit at this persistence boundary"
+    )]
     pub fn insert_reserved(
         &self,
         workspace_id: String,
@@ -666,6 +674,10 @@ impl WorkspaceRegistry {
 
     /// Record a sensitive-path decision. On `Granted` the grant is added to
     /// both SQLite and the in-memory index. Every call appends an audit row.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "all audit fields are explicit inputs to the immutable decision record"
+    )]
     pub fn record_sensitive_decision(
         &self,
         workspace_id: &str,

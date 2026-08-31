@@ -90,7 +90,7 @@ pub fn run(
 fn run_passes(diagnostics: &[Diagnostic], warnings_as_errors: bool) -> bool {
     let has_error = diagnostics.iter().any(|d| d.severity == Severity::Error);
     let has_warning = diagnostics.iter().any(|d| d.severity == Severity::Warning);
-    !has_error && !(warnings_as_errors && has_warning)
+    !(has_error || warnings_as_errors && has_warning)
 }
 
 /// Library entry used by `commands::build::run` to pre-validate before building.

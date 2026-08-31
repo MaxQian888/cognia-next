@@ -313,9 +313,12 @@ mod tests {
     /// simulating a concurrent `upsert`/`remove` landing in the lock-free fire
     /// window. `core` is filled in after construction (the core owns the
     /// emitter, so the reference is set once both exist).
+    type RaceOnFire =
+        dyn Fn(&AlarmDaemonCore<TestEntry, RaceEmitter>, &str) + Send + Sync + 'static;
+
     struct RaceEmitter {
         core: Mutex<Option<AlarmDaemonCore<TestEntry, RaceEmitter>>>,
-        on_fire: Box<dyn Fn(&AlarmDaemonCore<TestEntry, RaceEmitter>, &str) + Send + Sync>,
+        on_fire: Box<RaceOnFire>,
         fired: Mutex<usize>,
         reinsert: bool,
     }

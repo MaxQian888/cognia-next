@@ -30,7 +30,7 @@ cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["oidc"] }
 futures-util = "0.3"
 hex = "0.4"
 ed25519-dalek = "3"
-jsonwebtoken = "11"
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 parking_lot = "0.12"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rcgen = { version = "0.14", features = ["pem", "x509-parser"] }

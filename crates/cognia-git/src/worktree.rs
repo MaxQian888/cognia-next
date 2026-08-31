@@ -236,104 +236,69 @@ fn extract_lock_reason(porcelain: &str, target_path: &str) -> Option<String> {
 /// blank line; each is a `worktree <path>` line plus optional `HEAD <sha>`,
 /// `branch refs/heads/<name>` (or `detached`), `bare`, `locked`, `prunable`
 /// lines. The main worktree is always emitted first by git.
-fn parse_worktree_list(porcelain: &str) -> Vec<GitWorktree> {
-    let mut out: Vec<GitWorktree> = Vec::new();
-    let mut path: Option<String> = None;
-    let mut head: Option<String> = None;
-    let mut branch: Option<String> = None;
-    let mut locked = false;
-    let mut lock_reason: Option<String> = None;
-    let mut prunable = false;
-    let mut prune_reason: Option<String> = None;
+#[derive(Default)]
+struct WorktreeFields {
+    path: Option<String>,
+    head: Option<String>,
+    branch: Option<String>,
+    locked: bool,
+    lock_reason: Option<String>,
+    prunable: bool,
+    prune_reason: Option<String>,
+}
 
-    fn flush(
-        out: &mut Vec<GitWorktree>,
-        path: &mut Option<String>,
-        head: &mut Option<String>,
-        branch: &mut Option<String>,
-        locked: &mut bool,
-        lock_reason: &mut Option<String>,
-        prunable: &mut bool,
-        prune_reason: &mut Option<String>,
-    ) {
-        if let Some(p) = path.take() {
+impl WorktreeFields {
+    fn flush_into(&mut self, out: &mut Vec<GitWorktree>) {
+        if let Some(path) = self.path.take() {
             let is_main = out.is_empty();
             out.push(GitWorktree {
-                path: p,
-                branch: branch.take(),
-                head: head.take(),
-                locked: std::mem::take(locked),
-                lock_reason: lock_reason.take(),
-                prunable: std::mem::take(prunable),
-                prune_reason: prune_reason.take(),
+                path,
+                branch: self.branch.take(),
+                head: self.head.take(),
+                locked: std::mem::take(&mut self.locked),
+                lock_reason: self.lock_reason.take(),
+                prunable: std::mem::take(&mut self.prunable),
+                prune_reason: self.prune_reason.take(),
                 is_main,
             });
         } else {
-            // No `worktree` line seen for this block — drop stray fields.
-            *head = None;
-            *branch = None;
-            *locked = false;
-            *lock_reason = None;
-            *prunable = false;
-            *prune_reason = None;
+            *self = Self::default();
         }
     }
+}
+
+fn parse_worktree_list(porcelain: &str) -> Vec<GitWorktree> {
+    let mut out: Vec<GitWorktree> = Vec::new();
+    let mut fields = WorktreeFields::default();
 
     for raw in porcelain_fields(porcelain) {
         let line = raw.trim_end();
         if line.is_empty() {
-            flush(
-                &mut out,
-                &mut path,
-                &mut head,
-                &mut branch,
-                &mut locked,
-                &mut lock_reason,
-                &mut prunable,
-                &mut prune_reason,
-            );
+            fields.flush_into(&mut out);
             continue;
         }
         if let Some(rest) = line.strip_prefix("worktree ") {
             // A new record without a separating blank line — flush the prior.
-            flush(
-                &mut out,
-                &mut path,
-                &mut head,
-                &mut branch,
-                &mut locked,
-                &mut lock_reason,
-                &mut prunable,
-                &mut prune_reason,
-            );
-            path = Some(rest.to_string());
+            fields.flush_into(&mut out);
+            fields.path = Some(rest.to_string());
         } else if let Some(rest) = line.strip_prefix("HEAD ") {
-            head = Some(rest.to_string());
+            fields.head = Some(rest.to_string());
         } else if let Some(rest) = line.strip_prefix("branch ") {
-            branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
+            fields.branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
         } else if line == "locked" {
-            locked = true;
+            fields.locked = true;
         } else if let Some(rest) = line.strip_prefix("locked ") {
-            locked = true;
-            lock_reason = Some(rest.to_string());
+            fields.locked = true;
+            fields.lock_reason = Some(rest.to_string());
         } else if line == "prunable" {
-            prunable = true;
+            fields.prunable = true;
         } else if let Some(rest) = line.strip_prefix("prunable ") {
-            prunable = true;
-            prune_reason = Some(rest.to_string());
+            fields.prunable = true;
+            fields.prune_reason = Some(rest.to_string());
         }
         // `detached` / `bare` leave branch as `None`.
     }
-    flush(
-        &mut out,
-        &mut path,
-        &mut head,
-        &mut branch,
-        &mut locked,
-        &mut lock_reason,
-        &mut prunable,
-        &mut prune_reason,
-    );
+    fields.flush_into(&mut out);
     out
 }
 

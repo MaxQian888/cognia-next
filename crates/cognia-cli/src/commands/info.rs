@@ -22,10 +22,11 @@ const API_VERSION_SECTION: &str = "cognia:api-version";
 /// `cognia plugin info` — inspect a built bundle or unpacked plugin directory.
 ///
 /// Phase 2 surfaces:
-///   * `--json` ⇒ structured JSON with `schemaVersion: 1`.
-///   * `--detailed` ⇒ comfy-table file list + full signature breakdown.
-///   * default ⇒ compact human report: manifest summary, file count +
-///                 total size, one-line signature status.
+///
+/// * `--json` ⇒ structured JSON with `schemaVersion: 1`.
+/// * `--detailed` ⇒ comfy-table file list + full signature breakdown.
+/// * default ⇒ compact human report: manifest summary, file count + total
+///   size, one-line signature status.
 pub fn run(input: PathBuf, json: bool, detailed: bool, ui: &mut RuntimeUi) -> Result<()> {
     let report = match inspect_path(&input) {
         Ok(report) => report,
@@ -571,9 +572,8 @@ fn print_signature_line(sig: &SignatureStatus) {
         }
         SignatureStatus::NoPublicKey => {
             println!(
-                "Signature: {}{}",
-                style::warn_prefix(),
-                "`.sig` present but plugin.json lacks `author.publicKey`"
+                "Signature: {}`.sig` present but plugin.json lacks `author.publicKey`",
+                style::warn_prefix()
             );
         }
         SignatureStatus::Valid { fingerprint, .. } => {
@@ -889,7 +889,7 @@ mod tests {
         std::fs::write(&path, &bundle).unwrap();
         let report = inspect(&path, &bundle).unwrap();
         // plugin.json (manifest len) + 4 + 2.
-        let m_size = manifest.as_bytes().len() as u64;
+        let m_size = manifest.len() as u64;
         assert_eq!(report.total_entry_bytes(), m_size + 4 + 2);
     }
 }

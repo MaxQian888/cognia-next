@@ -301,7 +301,7 @@ impl MacOSScheduler {
 
     /// Convert cron expression to launchd CalendarInterval
     fn cron_to_calendar_interval(expression: &str) -> Result<String> {
-        let parts: Vec<&str> = expression.trim().split_whitespace().collect();
+        let parts: Vec<&str> = expression.split_whitespace().collect();
         if parts.len() != 5 {
             return Err(SchedulerError::InvalidCron(format!(
                 "launchd requires exactly 5 fields, got {}",

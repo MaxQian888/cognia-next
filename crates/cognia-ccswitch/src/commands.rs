@@ -84,26 +84,26 @@ pub fn ccswitch_status(manual_data_dir: Option<String>) -> CcswitchStatus {
 pub fn ccswitch_list_providers(
     manual_data_dir: Option<String>,
 ) -> Result<Vec<CcswitchProvider>, String> {
-    with_conn(manual_data_dir.as_deref(), |c| db_list_providers(c))
+    with_conn(manual_data_dir.as_deref(), db_list_providers)
 }
 
 #[tauri::command]
 pub fn ccswitch_list_mcp_servers(
     manual_data_dir: Option<String>,
 ) -> Result<Vec<CcswitchMcpServer>, String> {
-    with_conn(manual_data_dir.as_deref(), |c| db_list_mcp_servers(c))
+    with_conn(manual_data_dir.as_deref(), db_list_mcp_servers)
 }
 
 #[tauri::command]
 pub fn ccswitch_list_prompts(
     manual_data_dir: Option<String>,
 ) -> Result<Vec<CcswitchPrompt>, String> {
-    with_conn(manual_data_dir.as_deref(), |c| db_list_prompts(c))
+    with_conn(manual_data_dir.as_deref(), db_list_prompts)
 }
 
 #[tauri::command]
 pub fn ccswitch_list_skills(manual_data_dir: Option<String>) -> Result<Vec<CcswitchSkill>, String> {
-    with_conn(manual_data_dir.as_deref(), |c| db_list_skills(c))
+    with_conn(manual_data_dir.as_deref(), db_list_skills)
 }
 
 fn with_conn<T, F>(manual_data_dir: Option<&str>, f: F) -> Result<T, String>

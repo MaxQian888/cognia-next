@@ -490,8 +490,10 @@ mod tests {
 
     #[test]
     fn config_validation_rejects_invalid_allowlist_entries() {
-        let mut cfg = GatewayConfig::default();
-        cfg.allowlist = vec!["not-a-cidr".into()];
+        let cfg = GatewayConfig {
+            allowlist: vec!["not-a-cidr".into()],
+            ..GatewayConfig::default()
+        };
 
         let err = cfg.validate().unwrap_err();
 
@@ -500,8 +502,10 @@ mod tests {
 
     #[test]
     fn config_validation_rejects_zero_rate_limit() {
-        let mut cfg = GatewayConfig::default();
-        cfg.rate_limit_per_min = 0;
+        let cfg = GatewayConfig {
+            rate_limit_per_min: 0,
+            ..GatewayConfig::default()
+        };
 
         let err = cfg.validate().unwrap_err();
 
@@ -510,8 +514,10 @@ mod tests {
 
     #[test]
     fn config_validation_rejects_zero_connect_timeout() {
-        let mut cfg = GatewayConfig::default();
-        cfg.connect_timeout_secs = 0;
+        let cfg = GatewayConfig {
+            connect_timeout_secs: 0,
+            ..GatewayConfig::default()
+        };
 
         let err = cfg.validate().unwrap_err();
 
