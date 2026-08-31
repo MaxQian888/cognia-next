@@ -1484,9 +1484,16 @@ pub fn run() {
             automation::commands::desktop_cursor_position,
             automation::commands::desktop_pick_at_point,
             automation::commands::automation_execute,
+            cua_sandbox::cua_sandbox_create,
             cua_sandbox::cua_sandbox_start,
+            cua_sandbox::cua_sandbox_suspend,
+            cua_sandbox::cua_sandbox_resume,
             cua_sandbox::cua_sandbox_stop,
+            cua_sandbox::cua_sandbox_delete,
+            cua_sandbox::cua_sandbox_inspect,
             cua_sandbox::cua_sandbox_health,
+            cua_sandbox::cua_sandbox_exec,
+            cua_sandbox::cua_sandbox_read_file,
             automation::commands::automation_audit_snapshot,
             automation::commands::automation_policy_get,
             automation::commands::automation_policy_set,
@@ -2274,13 +2281,17 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<cli_bridge::CliBridgeServerState>();
                 cli_bridge::shutdown(state.inner());
-                // ADR-0020 remote-target — stop any running cua sandbox
-                // containers so we don't leak them past app exit.
+                // ADR-0020 remote-target. Drop the cached driver connections
+                // and leave the containers running. A sandbox the user started
+                // is a machine they expect to still be there next launch, and
+                // `start` adopts it by its deterministic name rather than
+                // creating a second one. Stopping here would silently discard
+                // whatever the machine was in the middle of.
                 let cua = app_handle
                     .state::<cua_sandbox::CuaSandboxRegistry>()
                     .inner()
                     .clone();
-                tauri::async_runtime::block_on(cua.shutdown_all());
+                tauri::async_runtime::block_on(cua.disconnect_all());
                 // ADR-0106 — a quit mid-recording must leave a recoverable
                 // bundle rather than a half-written one. `interrupt_blocking`
                 // detaches the input hook and stamps the journal `Interrupted`
