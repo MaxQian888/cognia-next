@@ -402,7 +402,6 @@
   "components/workflow/editor/bulk-node-inspector.tsx": 1,
   "components/workflow/editor/chat/workflow-proposal-card.tsx": 2,
   "components/workflow/editor/edges/smart-edge.tsx": 1,
-  "components/workflow/editor/empty-state.tsx": 2,
   "components/workflow/editor/flow-canvas.tsx": 1,
   "components/workflow/editor/inspector-panel.tsx": 1,
   "components/workflow/editor/inspector/data/data-json-view.tsx": 1,

@@ -125,11 +125,12 @@ function buildWorkflow(): VisualWorkflow {
   }
 }
 
-function renderCanvas(mode: "read" | "edit", connectActive = false) {
+function renderCanvas(mode: "read" | "edit", connectActive = false, orientationLocked = true) {
   const store = createEditorStore(buildWorkflow())
   const onNodeTap = jest.fn()
   const onEdgeTap = jest.fn()
   const onPaneTap = jest.fn()
+  const onLongPress = jest.fn()
   const onInit = jest.fn()
   render(
     <MobileCanvas
@@ -139,10 +140,12 @@ function renderCanvas(mode: "read" | "edit", connectActive = false) {
       onNodeTap={onNodeTap}
       onEdgeTap={onEdgeTap}
       onPaneTap={onPaneTap}
+      onLongPress={onLongPress}
+      orientationLocked={orientationLocked}
       onInit={onInit}
     />
   )
-  return { store, onNodeTap, onEdgeTap, onPaneTap, onInit }
+  return { store, onNodeTap, onEdgeTap, onPaneTap, onLongPress, onInit }
 }
 
 function getMockRf() {
@@ -172,6 +175,8 @@ describe("<MobileCanvas />", () => {
         onNodeTap={jest.fn()}
         onEdgeTap={jest.fn()}
         onPaneTap={jest.fn()}
+        onLongPress={jest.fn()}
+        orientationLocked={true}
         onInit={jest.fn()}
       />
     )
@@ -236,6 +241,8 @@ describe("<MobileCanvas />", () => {
         onNodeTap={jest.fn()}
         onEdgeTap={jest.fn()}
         onPaneTap={jest.fn()}
+        onLongPress={jest.fn()}
+        orientationLocked={true}
         onInit={jest.fn()}
       />
     )
@@ -263,6 +270,8 @@ describe("<MobileCanvas />", () => {
         onNodeTap={jest.fn()}
         onEdgeTap={jest.fn()}
         onPaneTap={jest.fn()}
+        onLongPress={jest.fn()}
+        orientationLocked={true}
         onInit={jest.fn()}
       />
     )
@@ -281,6 +290,8 @@ describe("<MobileCanvas />", () => {
         onNodeTap={jest.fn()}
         onEdgeTap={jest.fn()}
         onPaneTap={jest.fn()}
+        onLongPress={jest.fn()}
+        orientationLocked={true}
         onInit={jest.fn()}
       />
     )
@@ -328,5 +339,26 @@ describe("<MobileCanvas />", () => {
     const { act } = jest.requireActual("@testing-library/react") as typeof import("@testing-library/react")
     act(() => store.getState().setViewport({ x: 5, y: 6, zoom: 1 }))
     expect(rf.setViewport).not.toHaveBeenCalled()
+  })
+
+  it("registers the container renderers, not just the plain card", () => {
+    // `react-flow-converter` assigns `loopContainer` / `groupContainer` to
+    // `flow.loop@2` and `annotation.group@2`, so registering only
+    // `workflowNode` meant a desktop-authored graph opened on a phone with its
+    // loop bodies and group frames falling through to React Flow's default.
+    renderCanvas("read")
+    const { __propsRef } = jest.requireMock("@xyflow/react") as {
+      __propsRef: { current: Record<string, unknown> | null }
+    }
+    const types = Object.keys((__propsRef.current?.nodeTypes as Record<string, unknown>) ?? {})
+    expect(types).toEqual(expect.arrayContaining(["workflowNode", "loopContainer", "groupContainer"]))
+  })
+
+  it("leaves the orientation alone once the user opts out of the lock", () => {
+    lockMock.mockClear()
+    unlockMock.mockClear()
+    renderCanvas("read", false, false)
+    expect(lockMock).not.toHaveBeenCalled()
+    expect(unlockMock).toHaveBeenCalled()
   })
 })

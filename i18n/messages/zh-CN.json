@@ -18210,6 +18210,21 @@
         "compact": "紧凑行距"
       },
       "editor": {
+        "actions": {
+          "addNode": "添加节点",
+          "configure": "配置",
+          "copy": "拷贝",
+          "delete": "删除节点",
+          "deleteConnection": "删除连线",
+          "duplicate": "复制为副本",
+          "fitView": "适应视图",
+          "paste": "粘贴",
+          "runFrom": "从此处开始运行",
+          "runOnly": "只运行该节点",
+          "titleCanvas": "画布",
+          "titleEdge": "连线",
+          "titleNode": "节点"
+        },
         "addNode": "添加节点",
         "autoLayout": "自动排布",
         "autoLayoutFailed": "无法自动排布。",
@@ -18235,6 +18250,8 @@
         "menu": "更多操作",
         "modeEdit": "编辑",
         "modeRead": "查看",
+        "orientationLock": "锁定横屏",
+        "orientationUnlock": "允许竖屏",
         "publicationInvalidated": "工作流已保存，但因可调用接口发生变化而自动下架。请重新发布以开放新契约。",
         "redo": "重做",
         "run": "运行",

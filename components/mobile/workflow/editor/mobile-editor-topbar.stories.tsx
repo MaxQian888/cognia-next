@@ -22,6 +22,8 @@ const meta = {
     onToggleMode: fn(),
     onOpenCopilot: fn(),
     onOpenWorkbench: fn(),
+    orientationLocked: true,
+    onToggleOrientationLock: fn(),
   },
   decorators: [
     (Story) => (

@@ -32,6 +32,7 @@ import {
   LayoutGrid as AutoLayoutIcon,
   Maximize2 as FitViewIcon,
   Magnet as SnapIcon,
+  RectangleHorizontal as OrientationIcon,
   Download as ExportIcon,
   Upload as ImportIcon,
   History as HistoryIcon,
@@ -67,6 +68,9 @@ export interface MobileEditorTopbarProps {
   onOpenCopilot: () => void
   /** Open the shared Context Workbench. */
   onOpenWorkbench: () => void
+  /** Landscape is the editor's default. This is the way out of it. */
+  orientationLocked: boolean
+  onToggleOrientationLock: () => void
 }
 
 export function MobileEditorTopbar({
@@ -76,6 +80,8 @@ export function MobileEditorTopbar({
   onToggleMode,
   onOpenCopilot,
   onOpenWorkbench,
+  orientationLocked,
+  onToggleOrientationLock,
 }: MobileEditorTopbarProps) {
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
@@ -320,6 +326,13 @@ export function MobileEditorTopbar({
           <DropdownMenuItem onSelect={handleToggleSnap}>
             <SnapIcon className="mr-2 size-4" aria-hidden="true" />
             {snapToGrid ? t("snapOn") : t("snapOff")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={onToggleOrientationLock}
+            data-testid="mobile-editor-orientation"
+          >
+            <OrientationIcon className="mr-2 size-4" aria-hidden="true" />
+            {orientationLocked ? t("orientationUnlock") : t("orientationLock")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild data-testid="mobile-editor-run-history">

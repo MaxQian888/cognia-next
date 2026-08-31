@@ -21,6 +21,7 @@ jest.mock("./mobile-canvas", () => ({
     const onNodeTap = props.onNodeTap as (id: string) => void
     const onEdgeTap = props.onEdgeTap as (id: string) => void
     const onPaneTap = props.onPaneTap as () => void
+    const onLongPress = props.onLongPress as (t: { kind: string; id?: string }) => void
     const onInit = props.onInit as (rf: unknown) => void
     return (
       <div data-testid="canvas" data-mode={String(props.mode)} data-connect={String(props.connectActive)}>
@@ -33,6 +34,12 @@ jest.mock("./mobile-canvas", () => ({
           edge
         </button>
         <button data-testid="tap-pane" onClick={() => onPaneTap()}>pane</button>
+        <button data-testid="hold-n1" onClick={() => onLongPress({ kind: "node", id: "n1" })}>
+          hold n1
+        </button>
+        <button data-testid="hold-pane" onClick={() => onLongPress({ kind: "pane" })}>
+          hold pane
+        </button>
         <button
           data-testid="do-init"
           onClick={() => onInit({ screenToFlowPosition: (p: unknown) => p, fitView: fitViewMock })}
@@ -288,5 +295,36 @@ describe("<MobileWorkflowEditor />", () => {
     fireEvent.click(screen.getByTestId("tap-edge"))
     expect(capturedStore?.getState().selectedEdgeIds).toEqual([])
     expect(screen.queryByTestId("mobile-edge-delete")).toBeNull()
+  })
+
+  it("opens the action sheet on a long press and deletes the held node", () => {
+    // A phone could only delete a node by opening its inspector and finding
+    // the button. Every other destructive gesture in this app is a long press.
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    fireEvent.click(screen.getByTestId("hold-n1"))
+    expect(screen.getByTestId("mobile-canvas-actions")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("mobile-canvas-action-delete"))
+    expect(capturedStore?.getState().nodes.some((n) => n.id === "n1")).toBe(false)
+  })
+
+  it("duplicates the held node and selects the copy", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    const before = capturedStore!.getState().nodes.length
+    fireEvent.click(screen.getByTestId("hold-n1"))
+    fireEvent.click(screen.getByTestId("mobile-canvas-action-duplicate"))
+    const after = capturedStore!.getState()
+    expect(after.nodes.length).toBe(before + 1)
+    expect(after.selectedNodeIds).toHaveLength(1)
+    expect(after.selectedNodeIds[0]).not.toBe("n1")
+  })
+
+  it("offers the canvas actions when the press landed on empty space", () => {
+    render(<MobileWorkflowEditor workflow={buildWorkflow()} />)
+    fireEvent.click(screen.getByTestId("toggle-mode"))
+    fireEvent.click(screen.getByTestId("hold-pane"))
+    expect(screen.getByTestId("mobile-canvas-action-addNode")).toBeInTheDocument()
+    expect(screen.queryByTestId("mobile-canvas-action-delete")).toBeNull()
   })
 })

@@ -1,5 +1,6 @@
 "use client"
 
+import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { WorkflowIcon } from "lucide-react"
 import Link from "next/link"
@@ -23,32 +24,36 @@ export function EditorEmptyState({
       </EmptyHeader>
       <EmptyTitle>{t("title")}</EmptyTitle>
       <EmptyDescription>{t("description")}</EmptyDescription>
+      {/* The shared Button rather than three hand-rolled ones: each carried its
+          own radius, border and tint, which is exactly what ADR-0148 counts as
+          a bare panel. `pointer-events-auto` because the Empty above is
+          click-through so the canvas stays usable underneath. */}
       <div className="flex flex-wrap items-center justify-center gap-2">
         {onAskCopilot ? (
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={onAskCopilot}
-            className="pointer-events-auto rounded-md border bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+            className="pointer-events-auto"
             data-testid="wf-empty-ask-copilot"
           >
             {t("askCopilot")}
-          </button>
+          </Button>
         ) : null}
         {onAddNode ? (
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="outline"
             onClick={onAddNode}
-            className="pointer-events-auto rounded-md border bg-card px-3 py-1.5 text-sm hover:bg-accent"
+            className="pointer-events-auto"
           >
             {t("addManualTrigger")}
-          </button>
+          </Button>
         ) : null}
-        <Link
-          href="/settings?section=workflows&wfTab=templates"
-          className="pointer-events-auto rounded-md border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          {t("browseTemplates")}
-        </Link>
+        <Button asChild size="sm" variant="ghost" className="pointer-events-auto">
+          <Link href="/settings?section=workflows&wfTab=templates">{t("browseTemplates")}</Link>
+        </Button>
       </div>
     </Empty>
   )

@@ -18210,6 +18210,21 @@
         "compact": "Compact rows"
       },
       "editor": {
+        "actions": {
+          "addNode": "Add node",
+          "configure": "Configure",
+          "copy": "Copy",
+          "delete": "Delete node",
+          "deleteConnection": "Delete connection",
+          "duplicate": "Duplicate",
+          "fitView": "Fit to view",
+          "paste": "Paste",
+          "runFrom": "Run from here",
+          "runOnly": "Run only this node",
+          "titleCanvas": "Canvas",
+          "titleEdge": "Connection",
+          "titleNode": "Node"
+        },
         "addNode": "Add node",
         "autoLayout": "Auto-arrange",
         "autoLayoutFailed": "Auto-arrange unavailable.",
@@ -18235,6 +18250,8 @@
         "menu": "More actions",
         "modeEdit": "Edit",
         "modeRead": "View",
+        "orientationLock": "Lock to landscape",
+        "orientationUnlock": "Allow portrait",
         "publicationInvalidated": "Workflow saved and unpublished because its callable interface changed. Publish it again to expose the new contract.",
         "redo": "Redo",
         "run": "Run",

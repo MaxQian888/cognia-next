@@ -19,6 +19,17 @@ import { useCallback, useEffect, useRef } from "react"
 
 import { impact } from "@/lib/capacitor/haptics"
 
+/**
+ * Hold time and movement tolerance for a long press, exported so a surface
+ * that cannot use the wrapper component still presses at the same pace.
+ *
+ * The workflow canvas is one: `<LongPress>` renders a `<span>` and hands its
+ * callback no event, and the canvas needs both a block-level box and the
+ * pressed element in order to tell a node from an edge from empty space.
+ */
+export const LONG_PRESS_DELAY_MS = 500
+export const LONG_PRESS_TOLERANCE_PX = 10
+
 export interface LongPressProps {
   onLongPress: () => void
   /** Hold time before the gesture fires (ms). */
@@ -34,8 +45,8 @@ export interface LongPressProps {
 
 export function LongPress({
   onLongPress,
-  delayMs = 500,
-  tolerancePx = 10,
+  delayMs = LONG_PRESS_DELAY_MS,
+  tolerancePx = LONG_PRESS_TOLERANCE_PX,
   silent = false,
   className,
   children,

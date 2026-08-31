@@ -93,6 +93,8 @@ function renderTopbar(mode: "read" | "edit" = "read") {
       onToggleMode={onToggleMode}
       onOpenCopilot={onOpenCopilot}
       onOpenWorkbench={onOpenWorkbench}
+      orientationLocked={true}
+      onToggleOrientationLock={jest.fn()}
     />
   )
   return { store, onToggleMode, onOpenCopilot, onOpenWorkbench }

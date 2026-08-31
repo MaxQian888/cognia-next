@@ -29,7 +29,15 @@ import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+import {
+  buildClipboardEnvelope,
+  parseClipboard,
+  serializeClipboard,
+} from "@/lib/workflow/editor/clipboard"
+
 import { MobileCanvas, type WorkflowFlowInstance } from "./mobile-canvas"
+import { MobileCanvasActionSheet } from "./mobile-canvas-action-sheet"
+import type { CanvasPressTarget } from "./use-canvas-long-press"
 import { MobileEditorTopbar } from "./mobile-editor-topbar"
 import { MobileNodePaletteSheet } from "./mobile-node-palette-sheet"
 import { MobileNodeInspectorDrawer } from "./mobile-node-inspector-drawer"
@@ -43,6 +51,10 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [copilotOpen, setCopilotOpen] = useState(false)
+  const [pressTarget, setPressTarget] = useState<CanvasPressTarget | null>(null)
+  const [canPaste, setCanPaste] = useState(false)
+  // Landscape is the editor's default, not a rule imposed on the user.
+  const [orientationLocked, setOrientationLocked] = useState(true)
   const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [rf, setRf] = useState<WorkflowFlowInstance | null>(null)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
@@ -99,6 +111,26 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
       setInspectorOpen(false)
     },
     [mode, store, tapConnect]
+  )
+
+  /**
+   * Long press opens the action sheet. The clipboard is probed here rather than
+   * inside the sheet because reading it is async and permission-gated: a
+   * "Paste" row that appears a beat late, or appears and then fails, is worse
+   * than one that is simply absent.
+   */
+  const onLongPress = useCallback(
+    (target: CanvasPressTarget) => {
+      if (tapConnect.active) return
+      if (target.kind === "pane") {
+        void navigator.clipboard
+          ?.readText()
+          .then((text) => setCanPaste(parseClipboard(text) !== null))
+          .catch(() => setCanPaste(false))
+      }
+      setPressTarget(target)
+    },
+    [tapConnect]
   )
 
   const onPaneTap = useCallback(() => {
@@ -159,6 +191,8 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         mode={mode}
         onToggleMode={onToggleMode}
         onOpenCopilot={() => setCopilotOpen(true)}
+        orientationLocked={orientationLocked}
+        onToggleOrientationLock={() => setOrientationLocked((v) => !v)}
         onOpenWorkbench={() => setWorkbenchOpen(true)}
       />
       <div ref={canvasAreaRef} className="relative min-h-0 flex-1">
@@ -169,6 +203,8 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           onNodeTap={onNodeTap}
           onEdgeTap={onEdgeTap}
           onPaneTap={onPaneTap}
+          onLongPress={onLongPress}
+          orientationLocked={orientationLocked}
           onInit={setRf}
         />
         {mode === "edit" && !tapConnect.active ? (
@@ -222,6 +258,48 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           </Button>
         ) : null}
       </div>
+      <MobileCanvasActionSheet
+        target={pressTarget}
+        onOpenChange={(open) => (open ? undefined : setPressTarget(null))}
+        canPaste={canPaste}
+        onAddNode={() => setPaletteOpen(true)}
+        onConfigure={(id) => {
+          store.getState().setSelectedNodes([id])
+          setInspectorOpen(true)
+        }}
+        onDuplicate={(id) => {
+          const created = store.getState().duplicateNodes([id])
+          if (created.length > 0) store.getState().setSelectedNodes(created)
+        }}
+        onCopy={(id) => {
+          const node = store.getState().nodes.find((n) => n.id === id)
+          if (!node) return
+          void navigator.clipboard
+            ?.writeText(serializeClipboard(buildClipboardEnvelope([node], [], [node.id])))
+            .catch(() => {})
+        }}
+        onPaste={() => {
+          void navigator.clipboard
+            ?.readText()
+            .then((text) => {
+              const envelope = parseClipboard(text)
+              if (envelope) store.getState().pasteFromEnvelope(envelope)
+            })
+            .catch(() => {})
+        }}
+        onRunFrom={(id) => store.getState().requestRunFromStep(id)}
+        onRunOnly={(id) => store.getState().requestRunSingleStep(id)}
+        onDeleteNode={(id) => {
+          store.getState().removeNodes([id])
+          store.getState().clearSelection()
+          setInspectorOpen(false)
+        }}
+        onDeleteEdge={(id) => {
+          store.getState().removeEdges([id])
+          store.getState().clearSelection()
+        }}
+        onFitView={() => rf?.fitView({ duration: 240, padding: 0.2 })}
+      />
       <MobileNodePaletteSheet open={paletteOpen} onOpenChange={setPaletteOpen} onAdd={addAtCenter} />
       <MobileNodeInspectorDrawer
         open={inspectorOpen && selectedId != null}

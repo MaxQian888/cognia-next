@@ -36,6 +36,8 @@ const meta = {
     onNodeTap: fn(),
     onEdgeTap: fn(),
     onPaneTap: fn(),
+    orientationLocked: true,
+    onLongPress: fn(),
     onInit: fn(),
   },
   decorators: [
