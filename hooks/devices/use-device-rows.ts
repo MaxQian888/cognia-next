@@ -46,7 +46,6 @@ import { getFriendlyDeviceLabel } from "@/lib/device/device-identity"
 import { getMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { isTauri, transport } from "@/lib/tauri"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
-import { useSettingsStore } from "@/stores/settings"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
 import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
 
@@ -163,13 +162,6 @@ export function useDeviceRows(): UseDeviceRowsResult {
   const { hosts, activeHostId } = useRemoteHostStore(
     useShallow((state) => ({ hosts: state.hosts, activeHostId: state.activeHostId }))
   )
-  /**
-   * Saved SSH hosts come from settings, not from a device registry: nothing
-   * enrolls them and nothing pings them. They are listed so the console is the
-   * one place every remote machine appears, and their rows say plainly that a
-   * shell is all they offer.
-   */
-  const sshHosts = useSettingsStore((state) => state.settings.terminalSettings?.sshHosts)
 
   const [hostDevices, setHostDevices] = useState<Map<string, HostDeviceSummaryInput> | null>(null)
   const [workers, setWorkers] = useState<WorkerInput[]>([])
@@ -233,7 +225,6 @@ export function useDeviceRows(): UseDeviceRowsResult {
       pairedDevices: pairedDevices ?? [],
       hostDevices: hostDevices ?? undefined,
       remoteHosts: hosts as unknown as readonly RemoteHostInput[],
-      sshHosts: sshHosts ?? [],
       workers,
       presence: readPresence(deviceIds),
       sandboxConnections: connections,
@@ -246,7 +237,6 @@ export function useDeviceRows(): UseDeviceRowsResult {
     pairedDevices,
     hostDevices,
     hosts,
-    sshHosts,
     workers,
     connections,
     activeHostId,
