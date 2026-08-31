@@ -171,13 +171,36 @@ impl SandboxedExec for LinuxSandboxBackend {
         }
 
         let timeout_secs = command.timeout.as_secs();
-        let wait_future = child.wait_with_output();
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| SandboxError::BackendFailed {
+                reason: "bwrap stdout pipe was unavailable".into(),
+            })?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| SandboxError::BackendFailed {
+                reason: "bwrap stderr pipe was unavailable".into(),
+            })?;
+        let stdout_task = tokio::spawn(crate::sandbox::output::read_capped(stdout));
+        let stderr_task = tokio::spawn(crate::sandbox::output::read_capped(stderr));
+        let wait_future = child.wait();
         let timed_out;
-        let output = if timeout_secs == 0 {
+        let status = if timeout_secs == 0 {
             timed_out = false;
-            wait_future.await.map_err(|e| SandboxError::BackendFailed {
-                reason: format!("wait failed: {e}"),
-            })?
+            match wait_future.await {
+                Ok(out) => out,
+                Err(e) => {
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                    return Err(SandboxError::BackendFailed {
+                        reason: format!("wait failed: {e}"),
+                    });
+                }
+            }
         } else {
             match timeout(Duration::from_secs(timeout_secs), wait_future).await {
                 Ok(Ok(out)) => {
@@ -185,24 +208,49 @@ impl SandboxedExec for LinuxSandboxBackend {
                     out
                 }
                 Ok(Err(e)) => {
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
                     return Err(SandboxError::BackendFailed {
                         reason: format!("wait failed: {e}"),
                     });
                 }
                 Err(_) => {
-                    return Err(SandboxError::Timeout {
-                        seconds: timeout_secs,
-                    });
+                    let _ = child.start_kill();
+                    timed_out = true;
+                    match child.wait().await {
+                        Ok(out) => out,
+                        Err(e) => {
+                            stdout_task.abort();
+                            stderr_task.abort();
+                            let _ = stdout_task.await;
+                            let _ = stderr_task.await;
+                            return Err(SandboxError::BackendFailed {
+                                reason: format!("wait after timeout failed: {e}"),
+                            });
+                        }
+                    }
                 }
             }
         };
+        let (stdout, stdout_truncated) =
+            stdout_task.await.map_err(|e| SandboxError::BackendFailed {
+                reason: format!("stdout capture task failed: {e}"),
+            })?;
+        let (stderr, stderr_truncated) =
+            stderr_task.await.map_err(|e| SandboxError::BackendFailed {
+                reason: format!("stderr capture task failed: {e}"),
+            })?;
 
         Ok(SandboxResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code: status.code().unwrap_or(-1),
+            stdout,
+            stderr,
             duration: started.elapsed(),
             timed_out,
+            stdout_truncated,
+            stderr_truncated,
         })
     }
 
@@ -449,6 +497,38 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    #[tokio::test]
+    async fn timeout_returns_truthful_result_when_bwrap_is_available() {
+        let backend = LinuxSandboxBackend::new(None);
+        if !backend.is_available() {
+            return;
+        }
+        let result = backend
+            .run(
+                SandboxCommand {
+                    argv: vec!["/usr/bin/tail".into(), "-f".into(), "/dev/null".into()],
+                    cwd: PathBuf::from("/tmp"),
+                    env: BTreeMap::new(),
+                    stdin: None,
+                    timeout: Duration::from_secs(1),
+                },
+                SandboxPolicy::Bash {
+                    writable: vec![PathBuf::from("/tmp")],
+                    readable: vec![],
+                    network: NetworkPolicy::Off,
+                    max_cpu_seconds: 0,
+                    max_memory_mb: 0,
+                },
+            )
+            .await
+            .expect("timeout is a result, not a backend error");
+
+        assert!(result.timed_out);
+        assert_eq!(result.exit_code, -1);
+        assert!(result.stdout.is_empty());
+        assert!(!result.stdout_truncated);
+    }
 
     fn cmd() -> SandboxCommand {
         SandboxCommand {

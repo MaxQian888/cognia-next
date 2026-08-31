@@ -10,7 +10,7 @@
 //! and the Tauri command can reach it.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::permission::AutomationSettings;
 use super::policy::{Policy, PolicyState};
@@ -81,14 +81,14 @@ pub fn save_policy(policy: &Policy) {
     }
 }
 
-fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> std::io::Result<()> {
+fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let plan = cognia_core::fs_atomic::AtomicWritePlan {
-        path: path.clone(),
+        path: path.to_path_buf(),
         expected_mtime: None,
         tmp_suffix: "tmp".into(),
         backup_suffix: "bak".into(),
@@ -97,7 +97,7 @@ fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> std::io::Result
         .map(|_| {
             cognia_core::fs_atomic::rotate_backups(path, BACKUP_KEEP);
         })
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        .map_err(|e| std::io::Error::other(e.to_string()))
 }
 
 #[cfg(test)]
@@ -129,8 +129,10 @@ mod tests {
     fn settings_roundtrip_via_json() {
         // The persistence is plain serde_json round-trips; assert the shape
         // survives so a future field rename doesn't silently drop the tier.
-        let mut settings = AutomationSettings::default();
-        settings.enabled = true;
+        let mut settings = AutomationSettings {
+            enabled: true,
+            ..AutomationSettings::default()
+        };
         settings.per_surface.mcp.tier = Tier::Whitelist;
         let json = serde_json::to_string_pretty(&settings).unwrap();
         let back: AutomationSettings = serde_json::from_str(&json).unwrap();
@@ -148,8 +150,10 @@ mod tests {
 
     #[test]
     fn policy_roundtrip_and_compile() {
-        let mut policy = Policy::default();
-        policy.allowed_process_names = vec!["chrome.exe".into()];
+        let policy = Policy {
+            allowed_process_names: vec!["chrome.exe".into()],
+            ..Policy::default()
+        };
         let json = serde_json::to_string_pretty(&policy).unwrap();
         let back: Policy = serde_json::from_str(&json).unwrap();
         assert_eq!(back.allowed_process_names, vec!["chrome.exe".to_string()]);

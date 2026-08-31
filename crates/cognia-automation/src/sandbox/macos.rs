@@ -141,13 +141,36 @@ impl SandboxedExec for MacOsSandboxBackend {
         // Capture the pid BEFORE `wait_with_output` consumes the child, so the
         // timeout branch can signal the process group.
         let child_pid = child.id();
-        let wait_future = child.wait_with_output();
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| SandboxError::BackendFailed {
+                reason: "sandbox-exec stdout pipe was unavailable".into(),
+            })?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| SandboxError::BackendFailed {
+                reason: "sandbox-exec stderr pipe was unavailable".into(),
+            })?;
+        let stdout_task = tokio::spawn(crate::sandbox::output::read_capped(stdout));
+        let stderr_task = tokio::spawn(crate::sandbox::output::read_capped(stderr));
+        let wait_future = child.wait();
         let timed_out;
-        let output = if timeout_secs == 0 {
+        let status = if timeout_secs == 0 {
             timed_out = false;
-            wait_future.await.map_err(|e| SandboxError::BackendFailed {
-                reason: format!("wait failed: {e}"),
-            })?
+            match wait_future.await {
+                Ok(out) => out,
+                Err(e) => {
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                    return Err(SandboxError::BackendFailed {
+                        reason: format!("wait failed: {e}"),
+                    });
+                }
+            }
         } else {
             match timeout(Duration::from_secs(timeout_secs), wait_future).await {
                 Ok(Ok(out)) => {
@@ -155,6 +178,10 @@ impl SandboxedExec for MacOsSandboxBackend {
                     out
                 }
                 Ok(Err(e)) => {
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
                     return Err(SandboxError::BackendFailed {
                         reason: format!("wait failed: {e}"),
                     });
@@ -168,19 +195,39 @@ impl SandboxedExec for MacOsSandboxBackend {
                             libc::kill(-(pid as i32), libc::SIGKILL);
                         }
                     }
-                    return Err(SandboxError::Timeout {
-                        seconds: timeout_secs,
-                    });
+                    timed_out = true;
+                    match child.wait().await {
+                        Ok(out) => out,
+                        Err(e) => {
+                            stdout_task.abort();
+                            stderr_task.abort();
+                            let _ = stdout_task.await;
+                            let _ = stderr_task.await;
+                            return Err(SandboxError::BackendFailed {
+                                reason: format!("wait after timeout failed: {e}"),
+                            });
+                        }
+                    }
                 }
             }
         };
+        let (stdout, stdout_truncated) =
+            stdout_task.await.map_err(|e| SandboxError::BackendFailed {
+                reason: format!("stdout capture task failed: {e}"),
+            })?;
+        let (stderr, stderr_truncated) =
+            stderr_task.await.map_err(|e| SandboxError::BackendFailed {
+                reason: format!("stderr capture task failed: {e}"),
+            })?;
 
         Ok(SandboxResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            exit_code: status.code().unwrap_or(-1),
+            stdout,
+            stderr,
             duration: started.elapsed(),
             timed_out,
+            stdout_truncated,
+            stderr_truncated,
         })
     }
 

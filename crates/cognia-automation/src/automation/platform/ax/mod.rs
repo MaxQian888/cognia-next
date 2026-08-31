@@ -433,7 +433,7 @@ impl AutomationBackend for AxBackend {
             });
         }
         let id = self.next_subscription.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut events = self.events.lock().map_err(|error| poisoned(error))?;
+        let mut events = self.events.lock().map_err(poisoned)?;
         if events.is_none() {
             *events = Some(
                 observer::AxObserverHandle::install(id)
@@ -441,15 +441,12 @@ impl AutomationBackend for AxBackend {
             );
         }
         drop(events);
-        self.subscriptions
-            .lock()
-            .map_err(|error| poisoned(error))?
-            .insert(id, f);
+        self.subscriptions.lock().map_err(poisoned)?.insert(id, f);
         Ok(SubscriptionId(id))
     }
 
     fn unsubscribe(&self, s: SubscriptionId) -> Result<()> {
-        let mut subscriptions = self.subscriptions.lock().map_err(|error| poisoned(error))?;
+        let mut subscriptions = self.subscriptions.lock().map_err(poisoned)?;
         if subscriptions.remove(&s.0).is_none() {
             return Err(AutomationError::BackendError {
                 message: format!("unsubscribe: unknown subscription id {}", s.0),
@@ -460,7 +457,7 @@ impl AutomationBackend for AxBackend {
         if empty {
             // Last one out stops the thread; an idle observer would keep
             // re-targeting on every app switch for nobody.
-            self.events.lock().map_err(|error| poisoned(error))?.take();
+            self.events.lock().map_err(poisoned)?.take();
         }
         Ok(())
     }
@@ -628,10 +625,24 @@ impl AutomationBackend for AxBackend {
         let app = AXUIElement::application(pid as i32);
         raw::set_messaging_timeout(&app, PREFLIGHT_TIMEOUT_SECONDS);
         let focused = raw::focused_ui_element(&app);
-        let secure_field = focused
+        let source_subrole = focused.as_ref().and_then(|element| {
+            element
+                .subrole()
+                .ok()
+                .map(|value| value.to_string())
+                .filter(|value| !value.is_empty())
+        });
+        let source_role = focused
             .as_ref()
-            .and_then(|element| element.subrole().ok())
+            .and_then(|element| element.role().ok())
+            .map(|value| value.to_string());
+        let secure_field = source_subrole
+            .as_deref()
             .is_some_and(|subrole| subrole == "AXSecureTextField");
+        let editable = !secure_field
+            && source_role
+                .as_deref()
+                .is_some_and(|role| matches!(role, "AXTextArea" | "AXTextField" | "AXComboBox"));
         Ok(SelectionPreflight {
             pid: Some(pid),
             process_name: str_attr(app.title()),
@@ -646,6 +657,8 @@ impl AutomationBackend for AxBackend {
                 .as_ref()
                 .filter(|_| !secure_field)
                 .and_then(raw::web_area_url),
+            source_subrole,
+            editable,
             secure_field,
             trusted: true,
         })
@@ -877,7 +890,7 @@ fn read_focused_window() -> Result<FocusedSnapshot> {
 ///
 /// Narrow re-export of `raw::is_trusted` so the recorder's preflight can report
 /// the grant without opening the whole `raw` FFI module up.
-pub(crate) fn accessibility_trusted() -> bool {
+pub fn accessibility_trusted() -> bool {
     raw::is_trusted()
 }
 

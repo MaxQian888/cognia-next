@@ -29,6 +29,12 @@ impl UninstalledSandboxBackend {
     }
 }
 
+impl Default for UninstalledSandboxBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn detect_os() -> &'static str {
     if cfg!(target_os = "windows") {
         "windows"

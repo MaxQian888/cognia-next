@@ -61,11 +61,11 @@ pub struct MatchFields<'a> {
 }
 
 fn ci_eq(have: Option<&str>, want: &str) -> bool {
-    have.map_or(false, |s| s.trim().eq_ignore_ascii_case(want.trim()))
+    have.is_some_and(|s| s.trim().eq_ignore_ascii_case(want.trim()))
 }
 
 fn ci_contains(have: Option<&str>, want: &str) -> bool {
-    have.map_or(false, |s| s.to_lowercase().contains(&want.to_lowercase()))
+    have.is_some_and(|s| s.to_lowercase().contains(&want.to_lowercase()))
 }
 
 /// Whether `fields` satisfy every constraint set on `locator`. A locator with

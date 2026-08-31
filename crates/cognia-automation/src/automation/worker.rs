@@ -30,13 +30,14 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
 use super::backend::AutomationBackend;
+use super::permission::ScreenshotScalingSettings;
 use super::policy::{self, Decision, HardTargetFacts};
 use super::selection::TextSelectionSnapshot;
 use super::session::{
     ActionEvidence, ActionMethod, ActionPolicyDecision, ActionRequest, ActionResult, ActionStatus,
     ActionStrategy, AppLocator, CapturedUiState, CoordinateSpace, ElementHandle, ExpandedElements,
     GetAppStateOptions, PreparedAction, SessionError, UiAction, UiSessionManager, UiStateRevision,
-    UiSurface, UiTreeNode, UiTreeProjectionKind,
+    UiSurface, UiTreeNode, UiTreeProjectionKind, ZoomedRegion,
 };
 use super::types::*;
 
@@ -152,6 +153,12 @@ enum Request {
         turn_binding: String,
         locator: AppLocator,
         options: GetAppStateOptions,
+        /// `AutomationSettings::redact_screenshots`. The credential-window
+        /// probe itself runs next to the capture, on this thread.
+        redact_credential_windows: bool,
+        /// `AutomationSettings::screenshot_scaling`. Bounds the frame the
+        /// caller is shown. The captured frame is kept as the zoom source.
+        scaling: ScreenshotScalingSettings,
         reply: oneshot::Sender<Result<UiStateRevision>>,
     },
     QueryElements {
@@ -172,6 +179,13 @@ enum Request {
         request: ActionRequest,
         turn_binding: String,
         reply: oneshot::Sender<Result<ActionResult>>,
+    },
+    ZoomRegion {
+        session_id: String,
+        lineage_id: String,
+        revision: u64,
+        region: Rect,
+        reply: oneshot::Sender<Result<ZoomedRegion>>,
     },
     Shutdown,
 }
@@ -411,6 +425,8 @@ fn dispatch(
             turn_binding,
             locator,
             options,
+            redact_credential_windows,
+            scaling,
             reply,
         } => {
             let _ = reply.send(capture_app_state(
@@ -420,6 +436,8 @@ fn dispatch(
                 turn_binding,
                 locator,
                 options,
+                redact_credential_windows,
+                scaling,
             ));
         }
         Request::QueryElements {
@@ -432,6 +450,18 @@ fn dispatch(
         } => {
             let result = sessions
                 .query_elements(&session_id, &lineage_id, revision, &locator, limit)
+                .map_err(map_session_error);
+            let _ = reply.send(result);
+        }
+        Request::ZoomRegion {
+            session_id,
+            lineage_id,
+            revision,
+            region,
+            reply,
+        } => {
+            let result = sessions
+                .zoom_region(&session_id, &lineage_id, revision, region)
                 .map_err(map_session_error);
             let _ = reply.send(result);
         }
@@ -463,6 +493,55 @@ fn dispatch(
     DispatchControl::Continue
 }
 
+/// Apply ADR-0020 W1 credential-window redaction to a freshly captured frame.
+///
+/// The redaction is baked into the frame the session STORES, not into the copy
+/// that leaves the command. That distinction is the whole point: `zoom` crops
+/// the stored frame, so redacting only the outgoing revision would black out a
+/// password prompt in `get_app_state` and then hand back the real pixels on
+/// the very next `zoom` against the same revision. The `desktop_screenshot`
+/// path keeps its own redaction because it never stores anything.
+pub(crate) fn redact_captured_frame(shot: Screenshot, redact: bool) -> Result<Screenshot> {
+    if redact {
+        super::platform::shared::screenshot::redact_screenshot(shot)
+    } else {
+        Ok(shot)
+    }
+}
+
+/// Split a captured frame into the one the caller is shown and the one `zoom`
+/// crops.
+///
+/// Squeezing a whole high-resolution desktop into a vision budget is what
+/// collapses grounding accuracy, and sending it at native resolution instead
+/// is what makes every turn expensive. Keeping both resolves the trade rather
+/// than picking a side: the shown frame respects the operator's budget, and
+/// nothing it threw away is lost, because `zoom` reads the captured frame.
+///
+/// The second copy is only retained when the scaling actually shrank
+/// something. A frame already inside the budget has nothing to recover, and
+/// holding a duplicate of it would be pure memory.
+fn split_model_frame(
+    captured: Option<Screenshot>,
+    scaling: ScreenshotScalingSettings,
+) -> Result<(Option<Screenshot>, Option<Screenshot>)> {
+    let Some(captured) = captured else {
+        return Ok((None, None));
+    };
+    if !scaling.enabled {
+        return Ok((Some(captured), None));
+    }
+    let shown = super::platform::shared::screenshot::downscale_encoded(
+        captured.clone(),
+        scaling.max_width,
+        scaling.max_height,
+    )?;
+    if shown.width == captured.width && shown.height == captured.height {
+        return Ok((Some(captured), None));
+    }
+    Ok((Some(shown), Some(captured)))
+}
+
 fn capture_app_state(
     backend: &dyn AutomationBackend,
     sessions: &mut UiSessionManager,
@@ -470,6 +549,8 @@ fn capture_app_state(
     turn_binding: String,
     locator: AppLocator,
     options: GetAppStateOptions,
+    redact_credential_windows: bool,
+    scaling: ScreenshotScalingSettings,
 ) -> Result<UiStateRevision> {
     let (requested_bundle, requested_process) = match &locator {
         AppLocator::BundleId { bundle_id } => (Some(bundle_id.as_str()), None),
@@ -518,9 +599,21 @@ fn capture_app_state(
 
     let application_screenshot =
         Some(backend.screenshot_application(&app, roots.first(), ScreenshotOpts::default())?);
-    let screenshot = application_screenshot
+    // ADR-0020 W1 redaction happens HERE, at the capture, and not at the
+    // command boundary where the operator setting is read. See
+    // `redact_captured_frame` for why the distinction is load-bearing.
+    let redact_now = redact_credential_windows
+        && super::platform::shared::credential_window::is_credential_window_focused();
+    let captured_frame = application_screenshot
         .as_ref()
-        .map(|capture| capture.screenshot.clone());
+        .map(|capture| capture.screenshot.clone())
+        .map(|shot| redact_captured_frame(shot, redact_now))
+        .transpose()?;
+    // Settings -> Automation -> Behavior -> screenshot scaling. `screenshot`
+    // from here on is the frame the caller is SHOWN, and `pixel_width` /
+    // `pixel_height` below are read off it, which is what keeps every pixel
+    // coordinate crossing this session in a single space.
+    let (screenshot, zoom_source) = split_model_frame(captured_frame, scaling)?;
     let capabilities = backend.capabilities();
     let monitor = capabilities
         .monitors
@@ -588,6 +681,7 @@ fn capture_app_state(
             session_id,
             turn_binding,
             app,
+            zoom_source,
             surface: UiSurface {
                 window_id: application_screenshot
                     .as_ref()
@@ -735,7 +829,10 @@ fn perform_session_action(
                     turn_binding: prepared.turn_binding.clone(),
                     app: prepared.state.app.clone(),
                     surface: prepared.state.surface.clone(),
+                    // The post-action revision carries no frame, so there is
+                    // nothing for `zoom` to crop until the caller re-reads.
                     screenshot: None,
+                    zoom_source: None,
                     roots,
                     captured_at: unix_time_millis(),
                     max_nodes: match prepared.state.projection {
@@ -1199,12 +1296,16 @@ impl AutomationHandle {
         turn_binding: String,
         locator: AppLocator,
         options: GetAppStateOptions,
+        redact_credential_windows: bool,
+        scaling: ScreenshotScalingSettings,
     ) -> Result<UiStateRevision> {
         round_trip(&self.tx, |reply| Request::GetAppState {
             session_id,
             turn_binding,
             locator,
             options,
+            redact_credential_windows,
+            scaling,
             reply,
         })
         .await
@@ -1224,6 +1325,23 @@ impl AutomationHandle {
             revision,
             locator,
             limit,
+            reply,
+        })
+        .await
+    }
+
+    pub async fn zoom_region(
+        &self,
+        session_id: String,
+        lineage_id: String,
+        revision: u64,
+        region: Rect,
+    ) -> Result<ZoomedRegion> {
+        round_trip(&self.tx, |reply| Request::ZoomRegion {
+            session_id,
+            lineage_id,
+            revision,
+            region,
             reply,
         })
         .await
@@ -1514,6 +1632,12 @@ mod tests {
                     display_name: "Notes".into(),
                 },
                 GetAppStateOptions::default(),
+                false,
+                ScreenshotScalingSettings {
+                    enabled: false,
+                    max_width: 0,
+                    max_height: 0,
+                },
             )
             .await
             .expect("app state");
@@ -1540,6 +1664,12 @@ mod tests {
                     display_name: "Notes".into(),
                 },
                 GetAppStateOptions::default(),
+                false,
+                ScreenshotScalingSettings {
+                    enabled: false,
+                    max_width: 0,
+                    max_height: 0,
+                },
             )
             .await
             .expect("app state");
@@ -1611,5 +1741,120 @@ mod tests {
             "builder must have rebuilt the backend"
         );
         h.shutdown().await;
+    }
+
+    fn frame(width: u32, height: u32) -> Screenshot {
+        Screenshot {
+            bytes: "original-pixels".into(),
+            width,
+            height,
+            captured_at: 1_700_000_000,
+            format: ImageFormat::Png,
+            source_width: None,
+            source_height: None,
+        }
+    }
+
+    fn scaling(enabled: bool, max_width: u32, max_height: u32) -> ScreenshotScalingSettings {
+        ScreenshotScalingSettings {
+            enabled,
+            max_width,
+            max_height,
+        }
+    }
+
+    /// A real encoded PNG, because `split_model_frame` decodes and re-encodes.
+    fn encoded_frame(width: u32, height: u32) -> Screenshot {
+        use base64::Engine as _;
+        let image = xcap::image::RgbaImage::from_fn(width, height, |x, y| {
+            xcap::image::Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255])
+        });
+        let mut out = Vec::new();
+        xcap::image::DynamicImage::ImageRgba8(image)
+            .write_to(
+                &mut std::io::Cursor::new(&mut out),
+                xcap::image::ImageFormat::Png,
+            )
+            .expect("encode");
+        Screenshot {
+            bytes: base64::engine::general_purpose::STANDARD.encode(&out),
+            width,
+            height,
+            captured_at: 1_700_000_000,
+            format: ImageFormat::Png,
+            source_width: None,
+            source_height: None,
+        }
+    }
+
+    #[test]
+    fn split_model_frame_keeps_one_copy_when_scaling_is_off() {
+        let (shown, zoom_source) =
+            split_model_frame(Some(encoded_frame(64, 48)), scaling(false, 16, 16)).expect("split");
+        assert_eq!(shown.map(|shot| (shot.width, shot.height)), Some((64, 48)));
+        // Nothing was dropped, so a second copy would be pure memory.
+        assert!(zoom_source.is_none());
+    }
+
+    #[test]
+    fn split_model_frame_keeps_one_copy_when_the_frame_already_fits() {
+        let (shown, zoom_source) =
+            split_model_frame(Some(encoded_frame(64, 48)), scaling(true, 1_280, 800))
+                .expect("split");
+        assert_eq!(shown.map(|shot| (shot.width, shot.height)), Some((64, 48)));
+        assert!(zoom_source.is_none());
+    }
+
+    #[test]
+    fn split_model_frame_shrinks_what_is_shown_and_keeps_the_capture_for_zoom() {
+        let (shown, zoom_source) =
+            split_model_frame(Some(encoded_frame(200, 100)), scaling(true, 100, 100))
+                .expect("split");
+        let shown = shown.expect("shown frame");
+        assert_eq!((shown.width, shown.height), (100, 50));
+        // The renderer's coordinate read-out relies on this stamp to tell the
+        // operator what the capture actually was.
+        assert_eq!(
+            (shown.source_width, shown.source_height),
+            (Some(200), Some(100))
+        );
+        let source = zoom_source.expect("zoom source");
+        assert_eq!((source.width, source.height), (200, 100));
+    }
+
+    #[test]
+    fn split_model_frame_passes_an_absent_frame_straight_through() {
+        let (shown, zoom_source) = split_model_frame(None, scaling(true, 100, 100)).expect("split");
+        assert!(shown.is_none());
+        assert!(zoom_source.is_none());
+    }
+
+    #[test]
+    fn redact_captured_frame_is_a_pass_through_when_the_setting_is_off() {
+        let original = frame(320, 200);
+        let out = redact_captured_frame(original.clone(), false).expect("pass through");
+        assert_eq!(out.bytes, original.bytes);
+    }
+
+    #[test]
+    fn redact_captured_frame_blacks_the_pixels_and_keeps_the_geometry() {
+        let out = redact_captured_frame(frame(64, 48), true).expect("redacted");
+        // Geometry has to survive, because a pixel target is validated against
+        // the frame dimensions and would be rejected outright if they moved.
+        assert_eq!((out.width, out.height), (64, 48));
+        assert_eq!(out.format, ImageFormat::Png);
+        assert_eq!(out.captured_at, 1_700_000_000);
+        assert_ne!(out.bytes, "original-pixels");
+
+        use base64::Engine as _;
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(&out.bytes)
+            .expect("base64");
+        let decoded = xcap::image::load_from_memory(&raw).expect("png").to_rgba8();
+        assert_eq!(decoded.dimensions(), (64, 48));
+        assert!(
+            decoded.pixels().all(|pixel| pixel.0 == [0, 0, 0, 0]),
+            "every pixel must be blank, otherwise the redaction leaks"
+        );
     }
 }

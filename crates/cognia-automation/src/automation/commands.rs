@@ -468,12 +468,21 @@ pub async fn desktop_get_app_state(
         .turn_key
         .clone()
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    // ADR-0020 W1. Only the operator setting is read here. The credential
+    // window probe and the redaction itself run inside the worker capture, so
+    // the frame the session STORES is already redacted. Do not move the
+    // redaction back to this boundary: `zoom` crops the stored frame, and a
+    // revision-local redaction would be undone by the next `zoom` call.
     let redact_enabled = state.gate.settings().redact_screenshots;
     // Settings → Automation → Behavior → "Skip unchanged screenshots". Read
     // here (not inside the closure) for the same reason as redaction: the
     // macro body borrows `state` and the setting must be sampled once per call.
     let dedup_enabled = state.gate.settings().screenshot_dedup;
     let dedup_surface = ctx.surface();
+    // Settings -> Automation -> Behavior. Bounds the frame handed to the
+    // caller. `desktop_screenshot` reads the same setting, and the capture
+    // keeps the full-resolution frame so `zoom` still reads native pixels.
+    let scaling = state.gate.settings().screenshot_scaling;
     command_body!(
         app,
         state,
@@ -487,19 +496,13 @@ pub async fn desktop_get_app_state(
                     turn_binding.clone(),
                     locator.clone(),
                     options.clone(),
+                    redact_enabled,
+                    scaling,
                 )
                 .await?;
-            if redact_enabled
-                && super::platform::shared::credential_window::is_credential_window_focused()
-            {
-                revision.screenshot = revision
-                    .screenshot
-                    .map(super::platform::shared::screenshot::redact_screenshot)
-                    .transpose()?;
-            }
-            // AFTER redaction, so a redacted frame is compared as the model
-            // will actually see it — two consecutive redacted captures are one
-            // black image and dedupe correctly.
+            // Runs after redaction, so a redacted frame is compared as the
+            // model will actually see it: two consecutive redacted captures
+            // are one black image and dedupe correctly.
             state
                 .screenshot_dedup
                 .apply(&mut revision, dedup_enabled, dedup_surface);
@@ -553,6 +556,46 @@ pub async fn desktop_query_elements(
                 locator.clone(),
                 limit,
             )
+            .await
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoomArgs {
+    pub session_id: String,
+    pub lineage_id: String,
+    pub revision: u64,
+    pub region: Rect,
+    #[serde(default)]
+    pub ctx: CallContext,
+}
+
+/// Crop the current revision's frame to one region.
+///
+/// Read-only and gated exactly like the other capture-bearing reads: it
+/// exposes pixels the caller has already been shown, but it still exposes
+/// screen content, so it goes through the same permission / consent / audit
+/// path rather than around it.
+#[tauri::command]
+pub async fn desktop_zoom(
+    app: tauri::AppHandle,
+    state: State<'_, AutomationState>,
+    args: ZoomArgs,
+) -> std::result::Result<super::session::ZoomedRegion, String> {
+    let ctx = args.ctx;
+    let session_id = args.session_id;
+    let lineage_id = args.lineage_id;
+    let revision = args.revision;
+    let region = args.region;
+    command_body!(
+        app,
+        state,
+        ctx,
+        "zoom",
+        state
+            .handle
+            .zoom_region(session_id.clone(), lineage_id.clone(), revision, region)
             .await
     )
 }
@@ -832,20 +875,44 @@ pub async fn desktop_type(
     }
 }
 
-/// Clipboard-paste fast path: save current clipboard text → write `text` →
-/// send the platform paste chord → restore the previous clipboard. Far
+/// Clipboard-paste fast path: snapshot current clipboard text/image → write
+/// `text` → send the platform paste chord → restore the previous clipboard. Far
 /// faster than char-by-char `type` for long text and avoids leaking
 /// keystrokes to per-key hooks. Restore is best-effort — a non-text
-/// clipboard reads as `Err`, in which case we skip restore rather than
-/// fail the paste.
-async fn paste_via_clipboard(
+/// clipboard reads as `Err`, in which case we clear our temporary text after
+/// the target consumed it rather than leaving generated content behind.
+static CLIPBOARD_PASTE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn clipboard_value_is_still_temporary(
+    current: tauri_plugin_clipboard_manager::Result<String>,
+    temporary: &str,
+) -> bool {
+    current.is_ok_and(|value| value == temporary)
+}
+
+pub async fn paste_via_clipboard(
     app: &tauri::AppHandle,
     handle: &AutomationHandle,
     text: &str,
 ) -> Result<()> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
 
-    let previous = app.clipboard().read_text().ok();
+    let _transaction = CLIPBOARD_PASTE_LOCK.lock().await;
+    enum ClipboardSnapshot {
+        Text(String),
+        Image(tauri::image::Image<'static>),
+        Empty,
+    }
+    let previous = app
+        .clipboard()
+        .read_text()
+        .map(ClipboardSnapshot::Text)
+        .or_else(|_| {
+            app.clipboard()
+                .read_image()
+                .map(|image| ClipboardSnapshot::Image(image.to_owned()))
+        })
+        .unwrap_or(ClipboardSnapshot::Empty);
     app.clipboard()
         .write_text(text.to_string())
         .map_err(|e| AutomationError::BackendError {
@@ -859,9 +926,20 @@ async fn paste_via_clipboard(
     let sent = handle.send_keys(KeyChord(chord.into())).await;
     // Give the target app time to consume the clipboard before restore.
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    if let Some(prev) = previous {
-        let _ = app.clipboard().write_text(prev);
+    if !clipboard_value_is_still_temporary(app.clipboard().read_text(), text) {
+        return Err(AutomationError::BackendError {
+            message: "clipboard changed during paste; refusing to overwrite the newer value".into(),
+        });
     }
+    let restored = match previous {
+        ClipboardSnapshot::Text(previous) => app.clipboard().write_text(previous),
+        ClipboardSnapshot::Image(previous) => app.clipboard().write_image(&previous),
+        ClipboardSnapshot::Empty => app.clipboard().clear(),
+    }
+    .map_err(|error| AutomationError::BackendError {
+        message: format!("clipboard restore failed: {error}"),
+    });
+    restored?;
     sent
 }
 
@@ -1932,5 +2010,17 @@ mod tests {
         assert!(facts.target_url.is_none());
         assert!(facts.click_x.is_none());
         assert!(facts.click_y.is_none());
+    }
+
+    #[test]
+    fn clipboard_restore_only_runs_while_the_temporary_value_is_still_owned() {
+        assert!(clipboard_value_is_still_temporary(
+            Ok("generated".into()),
+            "generated"
+        ));
+        assert!(!clipboard_value_is_still_temporary(
+            Ok("user copied something else".into()),
+            "generated"
+        ));
     }
 }

@@ -62,10 +62,11 @@ pub struct SandboxCommand {
 /// `sandbox-exec` uses `(allow|deny) network*`; Windows currently carries the
 /// network choice in the runner payload while process / filesystem confinement
 /// is provided by the restricted-token + low-integrity + Job Object runner.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NetworkPolicy {
     /// No network at all.
+    #[default]
     Off,
     /// Only the listed hosts are reachable. Each entry is a DNS name (e.g.
     /// `api.anthropic.com`); the backend translates to firewall rules.
@@ -75,12 +76,6 @@ pub enum NetworkPolicy {
     },
     /// Unrestricted egress.
     On,
-}
-
-impl Default for NetworkPolicy {
-    fn default() -> Self {
-        NetworkPolicy::Off
-    }
 }
 
 /// What the sandbox is constraining for THIS tool call. Distinct variants
@@ -133,9 +128,8 @@ pub enum SandboxPolicy {
     },
 }
 
-/// Result of a successful sandboxed execution. Stdout / stderr are returned
-/// verbatim — no truncation in V1 (the renderer renders them inside the
-/// tool-result message envelope and can elide there if needed).
+/// Result of a successful sandboxed execution. Each output stream is bounded
+/// to one million UTF-8 bytes before it crosses the native tool boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxResult {
     /// Process exit code (0 = success). On signal termination, backends
@@ -150,6 +144,12 @@ pub struct SandboxResult {
     pub duration: Duration,
     /// True if the command was killed by the timeout watchdog.
     pub timed_out: bool,
+    /// True when stdout exceeded the per-stream transport cap.
+    #[serde(default)]
+    pub stdout_truncated: bool,
+    /// True when stderr exceeded the per-stream transport cap.
+    #[serde(default)]
+    pub stderr_truncated: bool,
 }
 
 /// Refusal or runtime failure. Surfaced to the renderer verbatim via the

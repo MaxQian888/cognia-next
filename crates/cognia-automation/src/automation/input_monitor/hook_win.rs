@@ -25,9 +25,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId,
     PostThreadMessageW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, HC_ACTION,
-    KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SYSKEYDOWN,
+    KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
 };
 
 /// `ToUnicodeEx` flag bit 2: translate without mutating the keyboard state.
@@ -62,6 +62,9 @@ fn send(sig: InputEvent) {
 unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
+        if info.flags & LLMHF_INJECTED != 0 {
+            return CallNextHookEx(None, code, wparam, lparam);
+        }
         let (x, y) = (info.pt.x, info.pt.y);
         let ts = now_ms();
         let sig = match wparam.0 as u32 {
@@ -163,6 +166,9 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
         match wparam.0 as u32 {
             WM_KEYDOWN | WM_SYSKEYDOWN => {
                 let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+                if info.flags.contains(LLKHF_INJECTED) {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
                 send(InputEvent::KeyDown {
                     vk: info.vkCode,
                     text: decode_unicode(info),

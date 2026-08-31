@@ -35,6 +35,7 @@ test("session remote target flows through resolve + runtime ref to the executor 
     getMicrovmAdapter: jest.fn(() => null),
     executeOsSandbox: jest.fn(),
     makeRef: jest.fn(() => "sandbox-runtime:remote"),
+    recordAudit: jest.fn(async () => undefined),
   })
   const ref = await runtime.bindSession({
     sessionId: "sess-remote",

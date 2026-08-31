@@ -42,6 +42,9 @@ use super::types::*;
 use super::worker::AutomationHandle;
 use crate::cua_sandbox::CuaSandboxRegistry;
 
+pub type ConsentEventSink =
+    Arc<dyn Fn(&ConsentRequestEvent) -> std::result::Result<(), String> + Send + Sync>;
+
 /// Everything the gate / policy / audit pipeline needs about a call, owned so
 /// the future has no borrow ties to the caller's `CallContext`. Built from the
 /// renderer `CallContext` (via the `command_body!` macro) or assembled by the
@@ -97,8 +100,7 @@ pub struct Enforcement {
     pub policy: PolicyState,
     /// Headless consent event sink. Desktop calls use `AppHandle::emit` and
     /// leave this unset; cognia-server publishes onto its authenticated bus.
-    pub consent_event_sink:
-        Option<Arc<dyn Fn(&ConsentRequestEvent) -> std::result::Result<(), String> + Send + Sync>>,
+    pub consent_event_sink: Option<ConsentEventSink>,
 }
 
 /// Largest base64 thumbnail payload we will attach to a consent request.
@@ -221,6 +223,23 @@ where
     .await
 }
 
+/// Identity of a driving call for loop detection: what was asked, and where.
+///
+/// Coordinates are included so that clicking the same wrong pixel repeatedly
+/// is caught, while walking down a list — same command, moving target — is
+/// not. Two calls only look identical when they really would have the same
+/// effect.
+fn rate_signature(command: &str, target: &TargetMeta, gctx: &GateContext) -> String {
+    format!(
+        "{command}|{}|{}|{}|{}|{}",
+        target.process_name.as_deref().unwrap_or(""),
+        target.window_title.as_deref().unwrap_or(""),
+        gctx.click_x.map(|v| v.to_string()).unwrap_or_default(),
+        gctx.click_y.map(|v| v.to_string()).unwrap_or_default(),
+        gctx.command_detail.as_deref().unwrap_or(""),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_gated_impl<T, F, Fut>(
     app: Option<&AppHandle>,
@@ -229,9 +248,7 @@ async fn run_gated_impl<T, F, Fut>(
     consent: &ConsentBroker,
     policy: &PolicyState,
     handle: Option<&AutomationHandle>,
-    consent_event_sink: Option<
-        &Arc<dyn Fn(&ConsentRequestEvent) -> std::result::Result<(), String> + Send + Sync>,
-    >,
+    consent_event_sink: Option<&ConsentEventSink>,
     gctx: GateContext,
     command: &str,
     do_call: F,
@@ -265,6 +282,24 @@ where
 
     let initial = gate.evaluate(&call);
     let decision = maybe_upgrade_to_consent(initial, gctx.force_tier, &call);
+
+    // Runaway-loop backstop. Checked after the tier decision so a call the
+    // gate already refuses does not consume budget, and before consent so a
+    // looping agent cannot spend the operator's attention on 150 identical
+    // prompts. Denials travel the normal audit path below.
+    //
+    // The check is PURE. The permit is spent by `record_rate` at each of the
+    // two points a call actually executes, because consent sits in between:
+    // an action the operator declines never touched the machine and must not
+    // count toward the loop cap.
+    let rate_signature = rate_signature(command, &target, &gctx);
+    let decision = match &decision {
+        Decision::Deny(_) => decision,
+        _ => match gate.check_rate(&call, &rate_signature) {
+            Some(err) => Decision::Deny(err),
+            None => decision,
+        },
+    };
 
     match decision {
         Decision::Deny(err) => {
@@ -342,6 +377,7 @@ where
                     }
                     return Err(typed);
                 }
+                gate.record_rate(&call, &rate_signature);
                 let result = do_call().await;
                 let entry = AuditEntry {
                     id: String::new(),
@@ -399,6 +435,7 @@ where
                 }
                 return Err(typed);
             }
+            gate.record_rate(&call, &rate_signature);
             let result = do_call().await;
             let entry = record_allow(
                 audit,

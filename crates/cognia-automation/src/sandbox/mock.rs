@@ -48,8 +48,10 @@ pub struct MockSandboxBackend {
 
 impl MockSandboxBackend {
     pub fn new() -> Self {
-        let mut inner = Inner::default();
-        inner.available = true;
+        let inner = Inner {
+            available: true,
+            ..Inner::default()
+        };
         Self {
             inner: Arc::new(Mutex::new(inner)),
         }
@@ -97,6 +99,8 @@ impl SandboxedExec for MockSandboxBackend {
             stderr: String::new(),
             duration: Duration::from_millis(0),
             timed_out: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
         })
     }
 
@@ -205,6 +209,8 @@ mod tests {
             stderr: String::new(),
             duration: Duration::from_millis(0),
             timed_out: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
         })
     }
 

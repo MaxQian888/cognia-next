@@ -35,6 +35,7 @@ import type {
   MouseButton,
   PatternKind,
   Point,
+  Rect,
   ResolvedApplication,
   Screenshot,
   ScreenshotOpts,
@@ -45,6 +46,7 @@ import type {
   UiStateRevision,
   UiTreeNode,
   WindowOp,
+  ZoomedRegion,
 } from "./types"
 
 /** Tauri event name carrying live UI events from the Rust watcher threads. */
@@ -197,6 +199,28 @@ export const desktop = {
   ): Promise<UiStateRevision> {
     return transport.call<UiStateRevision>("desktop_get_app_state", {
       args: { sessionId, locator, options, ctx },
+    })
+  },
+
+  /**
+   * Crop the current revision's frame to one region, at the resolution it was
+   * captured. Grounding on a high-resolution screen collapses when the whole
+   * desktop is squeezed into a vision budget; looking again at just the region
+   * of interest is the cheapest known remedy.
+   */
+  zoom(
+    state: Pick<UiStateRevision, "sessionId" | "lineageId" | "revision">,
+    region: Rect,
+    ctx: CallContext = {}
+  ): Promise<ZoomedRegion> {
+    return transport.call<ZoomedRegion>("desktop_zoom", {
+      args: {
+        sessionId: state.sessionId,
+        lineageId: state.lineageId,
+        revision: state.revision,
+        region,
+        ctx,
+      },
     })
   },
 

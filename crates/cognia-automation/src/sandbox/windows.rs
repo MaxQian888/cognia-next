@@ -181,12 +181,24 @@ impl SandboxedExec for WindowsSandboxBackend {
             serde_json::from_slice(&output.stdout).map_err(|err| SandboxError::BackendFailed {
                 reason: format!("parse runner JSON failed: {err}"),
             })?;
+        let (stdout, stdout_truncated) = crate::sandbox::output::truncate_utf8(
+            parsed.stdout,
+            crate::sandbox::output::MAX_OUTPUT_BYTES,
+            parsed.stdout_truncated,
+        );
+        let (stderr, stderr_truncated) = crate::sandbox::output::truncate_utf8(
+            parsed.stderr,
+            crate::sandbox::output::MAX_OUTPUT_BYTES,
+            parsed.stderr_truncated,
+        );
         Ok(SandboxResult {
             exit_code: parsed.exit_code,
-            stdout: parsed.stdout,
-            stderr: parsed.stderr,
+            stdout,
+            stderr,
             duration: Duration::from_millis(parsed.duration_ms),
             timed_out: parsed.timed_out,
+            stdout_truncated,
+            stderr_truncated,
         })
     }
 
@@ -254,6 +266,10 @@ struct RunnerOutput {
     duration_ms: u64,
     #[serde(default)]
     timed_out: bool,
+    #[serde(default)]
+    stdout_truncated: bool,
+    #[serde(default)]
+    stderr_truncated: bool,
 }
 
 fn build_runner_payload<'a>(

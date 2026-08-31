@@ -36,6 +36,32 @@ export interface Capabilities {
  * `mouseMove` / `pickAtPoint` use, so a caller can target a specific
  * monitor by offsetting into its rect.
  */
+/**
+ * The model-facing action contract lives in `./action-schemas` as zod schemas,
+ * because the same definition has to serve three consumers: the JSON Schema the
+ * plugin tools publish, these TypeScript types, and the parity test that pins
+ * the union against the Rust enum. Re-exported here so existing importers of
+ * `lib/automation/types` are unaffected.
+ */
+import type { ElementHandle, MouseButton, UiTreeProjectionKind } from "./action-schemas"
+
+export type {
+  ActionRequest,
+  ActionStrategy,
+  ActionTarget,
+  AppLocator,
+  DragOpts,
+  ElementHandle,
+  GetAppStateOptions,
+  Locator,
+  MouseButton,
+  PixelTarget,
+  Point,
+  ScrollOpts,
+  UiAction,
+  UiTreeProjectionKind,
+} from "./action-schemas"
+
 export interface MonitorInfo {
   id: string
   name: string
@@ -47,18 +73,25 @@ export interface MonitorInfo {
   scaleFactor: number
 }
 
-export interface ElementRef {
-  /** Opaque ref — pass it back unchanged. */
-  0: string
-}
+/**
+ * Opaque backend element reference — pass it back unchanged.
+ *
+ * Rust declares this as `pub struct ElementRef(pub String)`. serde renders a
+ * newtype struct transparently, so it crosses the wire as a bare JSON string.
+ * This was previously modelled as the one-element tuple `{0: string}`, which
+ * meant `elementRef()` produced `["…"]` where the backend expected `"…"` and
+ * `elementRefValue()` returned the first *character* of a real ref. Both
+ * helpers are now identities, kept so existing call sites stay valid.
+ */
+export type ElementRef = string
 
 /** Helper to construct an ElementRef from a raw string. */
 export function elementRef(raw: string): ElementRef {
-  return [raw] as unknown as ElementRef
+  return raw
 }
 
 export function elementRefValue(r: ElementRef): string {
-  return (r as unknown as string[])[0]
+  return r
 }
 
 export interface Rect {
@@ -81,19 +114,6 @@ export interface ElementInfo {
   processName: string | null
   windowTitle: string | null
   children: ElementInfo[] | null
-}
-
-export interface Locator {
-  name?: string
-  nameContains?: string
-  automationId?: string
-  controlType?: string
-  className?: string
-  processId?: number
-  processName?: string
-  windowTitleContains?: string
-  depth?: number
-  from?: ElementRef
 }
 
 export interface TreeOpts {
@@ -130,11 +150,6 @@ export interface Screenshot {
   sourceHeight?: number
 }
 
-export type AppLocator =
-  | { kind: "bundleId"; bundleId: string }
-  | { kind: "path"; path: string }
-  | { kind: "displayName"; displayName: string }
-
 export interface ResolvedApplication {
   bundleId: string | null
   path: string | null
@@ -152,24 +167,6 @@ export interface UiSurface {
   pixelHeight: number
   scaleFactor: number
   coordinateSpace: CoordinateSpace
-}
-
-export interface GetAppStateOptions {
-  disableDiff?: boolean
-  allowLaunch?: boolean
-  maxNodes?: number
-  maxDepth?: number
-  projection?: UiTreeProjectionKind
-}
-
-export type UiTreeProjectionKind = "model" | "inspector"
-
-export interface ElementHandle {
-  sessionId: string
-  lineageId: string
-  revision: number
-  index: number
-  fingerprint: string
 }
 
 export interface UiTreeNode {
@@ -244,40 +241,34 @@ export interface UiStateRevision {
   screenshotNote?: string
 }
 
-export interface ExpandedElements {
-  nodes: UiTreeNode[]
-  continuationToken: string | null
-}
-
-export type ActionStrategy = "semantic" | "pixel" | "auto"
-
-export interface PixelTarget {
+/**
+ * One `zoom` result: a crop of the revision's frame, plus where that crop sits
+ * inside it. `region` is in the pixel space of the frame the caller was shown,
+ * and `scale` converts a point measured in the crop back into that space.
+ */
+export interface ZoomedRegion {
   sessionId: string
   lineageId: string
   revision: number
-  point: Point
-  screenshotWidth: number
-  screenshotHeight: number
+  screenshot: Screenshot
+  /**
+   * Where the crop sits, in the pixel space of the frame the caller was shown.
+   * Without it a zoom is worse than useless for grounding: the caller would
+   * report coordinates in crop space and the click would land elsewhere.
+   */
+  region: Rect
+  /**
+   * Crop pixels per `region` pixel. The crop is taken from the frame as
+   * captured, which is larger than the frame the caller was shown whenever
+   * screenshot scaling is on, so a point read off the crop maps back with
+   * `region.origin + cropPoint / scale`. It is `1` when nothing was scaled.
+   */
+  scale: number
 }
 
-export type ActionTarget =
-  { kind: "element"; handle: ElementHandle } | { kind: "pixel"; target: PixelTarget }
-
-export type UiAction =
-  | { kind: "click"; button?: MouseButton; count?: number }
-  | { kind: "drag"; to: Point; opts?: DragOpts }
-  | { kind: "scroll"; opts?: ScrollOpts }
-  | { kind: "pressKey"; chord: KeyChord }
-  | { kind: "typeText"; text: string }
-  | { kind: "setValue"; value: string }
-  | { kind: "selectText"; start: number; end: number }
-  | { kind: "secondaryAction"; name: string }
-
-export interface ActionRequest {
-  turnToken: string
-  target: ActionTarget
-  action: UiAction
-  strategy: ActionStrategy
+export interface ExpandedElements {
+  nodes: UiTreeNode[]
+  continuationToken: string | null
 }
 
 export type ActionStatus = "delivered" | "notDelivered" | "refused" | "unknown"
@@ -307,15 +298,16 @@ export interface ActionResult {
 export type ClickTarget =
   { kind: "element"; elementRef: ElementRef } | { kind: "point"; x: number; y: number }
 
-export type MouseButton = "left" | "right" | "middle"
-
-export interface KeyChord {
-  /** Format: `"ctrl+shift+t"`, `"alt+F4"`, `"Enter"`. */
-  0: string
-}
+/**
+ * Key chord, e.g. `"ctrl+shift+t"`, `"alt+F4"`, `"Enter"`.
+ *
+ * Rust `pub struct KeyChord(pub String)` — a newtype struct, so this is a bare
+ * JSON string on the wire, not a one-element tuple. See {@link ElementRef}.
+ */
+export type KeyChord = string
 
 export function keyChord(raw: string): KeyChord {
-  return [raw] as unknown as KeyChord
+  return raw
 }
 
 export interface ClickOpts {
@@ -339,20 +331,6 @@ export interface ClickOpts {
   count?: 1 | 2 | 3
 }
 
-/** 2D screen coordinate, mirror of Rust `automation::types::Point`. */
-export interface Point {
-  x: number
-  y: number
-}
-
-export interface DragOpts {
-  button?: MouseButton
-  /** Total move duration in milliseconds (default ~150). */
-  durationMs?: number
-  /** Number of interpolated waypoints (default ~12). */
-  steps?: number
-}
-
 /**
  * Scroll target — either a point on the screen or an element. For
  * elements, the backend prefers UIA `ScrollPattern` / `ScrollItemPattern`
@@ -365,10 +343,6 @@ export type ScrollTarget =
  * Scroll deltas. Positive `dy` scrolls down; positive `dx` scrolls right.
  * Magnitude is in OS-native wheel units (typically 120 per notch).
  */
-export interface ScrollOpts {
-  dx?: number
-  dy?: number
-}
 
 /** Mouse button transition for `mouse_button` direct down/up control. */
 export type ButtonTransition = "down" | "up"

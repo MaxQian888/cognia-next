@@ -17,26 +17,22 @@
 //! is a UX optimization that lets the renderer short-circuit obvious denies
 //! before the IPC hop.
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use super::types::AutomationError;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Tier {
+    #[default]
     Off,
     Whitelist,
     PerCall,
-}
-
-impl Default for Tier {
-    fn default() -> Self {
-        Tier::Off
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -180,10 +176,16 @@ impl Default for AuditSettings {
 /// (`tests/e2e/mobile/chat-render-perf.spec.ts`) put a number on it: an
 /// un-scaled Retina frame inlines as several MB of base64 into
 /// `messages.parts`, and a session's worth of them costs gigabytes of renderer
-/// heap. Coordinates survive the change because `lib/automation/coordinate-
-/// scaler.ts` already maps model space back to physical pixels off the
-/// `source_width`/`source_height` stamped below — that path existed for this
-/// setting and was simply never exercised by default.
+/// heap.
+///
+/// Coordinates survive the change because nothing has to be mapped back.
+/// `desktop_screenshot` stamps `source_width`/`source_height` when it shrinks
+/// a frame, and the app session goes further: `UiSurface::pixel_width` /
+/// `pixel_height` describe the frame the caller was actually shown, so
+/// `session::pixel_to_global_point` stays a pure ratio into
+/// `logical_bounds` whatever the scale is. Detail is not lost either, because
+/// `zoom` crops the full-resolution capture the session kept
+/// (`SessionRecord::zoom_source`) rather than the frame that was shown.
 ///
 /// Must stay in step with `defaultAutomationSettings()` in
 /// `lib/automation/client.ts`: whichever side answers first wins, so a
@@ -418,6 +420,52 @@ fn consent_prompt(call: &Call<'_>) -> ConsentPrompt {
     }
 }
 
+/// Runaway-loop protection for driving automation calls.
+///
+/// A stuck agent's signature failure is a tight loop: it misreads the screen,
+/// clicks the same wrong pixel, sees no change, and repeats until something
+/// else stops it. Nothing in the stack noticed — the permission tier, the
+/// whitelist and the per-action policy all evaluate one call in isolation, and
+/// a session grant makes every repeat free.
+///
+/// Thresholds are deliberately far above human-plausible rates rather than
+/// tuned to "reasonable" automation. This is a backstop against a loop, not a
+/// pacing mechanism, and a false positive here would break a legitimate flow
+/// (holding a key to scroll a long list is genuinely dozens of identical
+/// calls). Reads are never limited: throttling `get_app_state` would starve
+/// the agent of exactly the feedback it needs to break out of a loop.
+const DRIVING_CALLS_PER_MINUTE: usize = 150;
+const MAX_IDENTICAL_REPEATS: usize = 20;
+const RATE_WINDOW: Duration = Duration::from_secs(60);
+const IDENTICAL_WINDOW: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Default)]
+struct RateState {
+    /// (when, signature) for driving calls inside the rolling window.
+    recent: VecDeque<(Instant, String)>,
+}
+
+impl RateState {
+    fn prune(&mut self, now: Instant) {
+        while let Some((at, _)) = self.recent.front() {
+            if now.duration_since(*at) > RATE_WINDOW {
+                self.recent.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Consecutive tail entries matching `signature` within `IDENTICAL_WINDOW`.
+    fn trailing_repeats(&self, signature: &str, now: Instant) -> usize {
+        self.recent
+            .iter()
+            .rev()
+            .take_while(|(at, sig)| sig == signature && now.duration_since(*at) <= IDENTICAL_WINDOW)
+            .count()
+    }
+}
+
 /// Thread-safe permission gate. Hold one of these in the Tauri state and
 /// call `evaluate` from every command.
 #[derive(Clone)]
@@ -428,6 +476,8 @@ pub struct PermissionGate {
     /// inspection included — is rejected with `KillSwitchActive` until the
     /// operator re-enables the engine. Not persisted: a restart starts clear.
     kill_switch: Arc<AtomicBool>,
+    /// Rolling history of driving calls, for runaway-loop detection.
+    rate: Arc<Mutex<RateState>>,
 }
 
 impl PermissionGate {
@@ -435,11 +485,71 @@ impl PermissionGate {
         Self {
             inner: Arc::new(RwLock::new(settings)),
             kill_switch: Arc::new(AtomicBool::new(false)),
+            rate: Arc::new(Mutex::new(RateState::default())),
         }
     }
 
     pub fn settings(&self) -> AutomationSettings {
         self.inner.read().clone()
+    }
+
+    /// Report whether a driving call should be refused as a runaway loop.
+    /// Read-only calls are never limited. Returns `None` to proceed.
+    ///
+    /// PURE: this does not spend budget. Call it after the tier decision (a
+    /// call the tier already denied should not be measured at all), and pair
+    /// it with `record_rate` at the point the call actually runs. A denial
+    /// here must still travel the normal audit path so the operator can see
+    /// why the run stopped.
+    pub fn check_rate(&self, call: &Call, signature: &str) -> Option<AutomationError> {
+        if call.kind() != CallKind::Driving {
+            return None;
+        }
+        let now = Instant::now();
+        let mut state = self.rate.lock();
+        state.prune(now);
+
+        let repeats = state.trailing_repeats(signature, now);
+        if repeats >= MAX_IDENTICAL_REPEATS {
+            return Some(AutomationError::PermissionDenied {
+                reason: format!(
+                    "the same action was repeated {repeats} times with no variation — \
+                     stopping a likely loop. Re-read the screen before retrying."
+                ),
+            });
+        }
+        if state.recent.len() >= DRIVING_CALLS_PER_MINUTE {
+            return Some(AutomationError::PermissionDenied {
+                reason: format!(
+                    "automation rate limit reached ({DRIVING_CALLS_PER_MINUTE} actions per \
+                     minute). This usually means a stuck loop rather than real work."
+                ),
+            });
+        }
+
+        None
+    }
+
+    /// Spend one driving-call permit, immediately before the call executes.
+    ///
+    /// Separate from `check_rate` because consent sits between the two: an
+    /// action the operator refuses at the overlay never touched the machine,
+    /// so counting it would let twenty declined prompts trip the "likely loop"
+    /// cap and refuse the twenty-first before anything had ever run.
+    pub fn record_rate(&self, call: &Call, signature: &str) {
+        if call.kind() != CallKind::Driving {
+            return;
+        }
+        let now = Instant::now();
+        let mut state = self.rate.lock();
+        state.prune(now);
+        state.recent.push_back((now, signature.to_string()));
+    }
+
+    /// Drop the recorded history. The kill switch calls this so a fresh run
+    /// after an emergency stop is not refused by the previous run's budget.
+    pub fn reset_rate(&self) {
+        self.rate.lock().recent.clear();
     }
 
     /// Mutate the persisted settings. Deliberately does NOT touch the kill
@@ -543,10 +653,9 @@ impl PermissionGate {
         let active = whitelist_opt.unwrap_or(&s.whitelist);
         if !active.is_empty()
             && (call.target.process_name.is_some() || call.target.window_title.is_some())
+            && !active.matches(&call.target)
         {
-            if !active.matches(&call.target) {
-                return Decision::Deny(AutomationError::WhitelistMiss);
-            }
+            return Decision::Deny(AutomationError::WhitelistMiss);
         }
 
         // Always-consent calls, regardless of tier (once the surface is
@@ -612,6 +721,119 @@ pub fn maybe_upgrade_to_consent(
 
 #[cfg(test)]
 mod tests {
+    fn rate_driving_call() -> Call<'static> {
+        Call {
+            command: "click",
+            surface: Surface::ComputerUse,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        }
+    }
+
+    fn rate_read_call() -> Call<'static> {
+        Call {
+            command: "get_app_state",
+            surface: Surface::ComputerUse,
+            plugin_id: None,
+            target: TargetMeta::default(),
+        }
+    }
+
+    /// The dispatcher's shape: check, then spend only if the call runs.
+    fn admit(gate: &PermissionGate, call: &Call<'_>, signature: &str) -> Option<AutomationError> {
+        match gate.check_rate(call, signature) {
+            Some(err) => Some(err),
+            None => {
+                gate.record_rate(call, signature);
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn rate_limiter_ignores_reads() {
+        // Throttling `get_app_state` would starve the agent of exactly the
+        // feedback it needs to notice it is stuck.
+        let gate = PermissionGate::new(AutomationSettings::default());
+        for _ in 0..(DRIVING_CALLS_PER_MINUTE * 2) {
+            assert!(admit(&gate, &rate_read_call(), "read").is_none());
+        }
+    }
+
+    #[test]
+    fn a_call_that_never_runs_does_not_spend_budget() {
+        // Consent sits between the check and the call. Twenty declined
+        // overlays touched nothing, so the twenty-first must not be refused
+        // as a loop.
+        let gate = PermissionGate::new(AutomationSettings::default());
+        for _ in 0..(MAX_IDENTICAL_REPEATS * 2) {
+            assert!(gate
+                .check_rate(&rate_driving_call(), "click|Notes||100|200|")
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn rate_limiter_stops_a_repeated_identical_action() {
+        let gate = PermissionGate::new(AutomationSettings::default());
+        for i in 0..MAX_IDENTICAL_REPEATS {
+            assert!(
+                admit(&gate, &rate_driving_call(), "click|Notes||100|200|").is_none(),
+                "call {i} should be allowed"
+            );
+        }
+        let denied = admit(&gate, &rate_driving_call(), "click|Notes||100|200|");
+        assert!(
+            matches!(denied, Some(AutomationError::PermissionDenied { .. })),
+            "the {}th identical action must be refused",
+            MAX_IDENTICAL_REPEATS + 1
+        );
+    }
+
+    #[test]
+    fn rate_limiter_allows_a_moving_target() {
+        // Walking down a list is the same command against a different target
+        // every time. That is real work, not a loop.
+        let gate = PermissionGate::new(AutomationSettings::default());
+        for i in 0..(MAX_IDENTICAL_REPEATS * 2) {
+            let signature = format!("click|Notes||100|{i}|");
+            assert!(
+                admit(&gate, &rate_driving_call(), &signature).is_none(),
+                "moving target {i} should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn rate_limiter_caps_total_driving_calls() {
+        let gate = PermissionGate::new(AutomationSettings::default());
+        // Vary the signature so the identical-repeat rule never fires and the
+        // per-minute cap is what we are actually measuring.
+        for i in 0..DRIVING_CALLS_PER_MINUTE {
+            let signature = format!("click|Notes||{i}|{i}|");
+            assert!(admit(&gate, &rate_driving_call(), &signature).is_none());
+        }
+        let denied = admit(&gate, &rate_driving_call(), "click|Notes||9999|9999|");
+        assert!(matches!(
+            denied,
+            Some(AutomationError::PermissionDenied { .. })
+        ));
+    }
+
+    #[test]
+    fn reset_rate_clears_the_budget() {
+        // An emergency stop must not leave the limiter refusing the operator's
+        // own first retry.
+        let gate = PermissionGate::new(AutomationSettings::default());
+        for i in 0..DRIVING_CALLS_PER_MINUTE {
+            let signature = format!("click|Notes||{i}|{i}|");
+            let _ = admit(&gate, &rate_driving_call(), &signature);
+        }
+        assert!(admit(&gate, &rate_driving_call(), "click|x||1|1|").is_some());
+        gate.reset_rate();
+        assert!(admit(&gate, &rate_driving_call(), "click|x||1|1|").is_none());
+    }
+
     use super::*;
 
     #[test]

@@ -8,7 +8,7 @@
 use uiautomation::types::TreeScope;
 use uiautomation::UIAutomation;
 
-use crate::automation::backend::AutomationBackend;
+use crate::automation::backend::{AutomationBackend, SelectionPreflight};
 use crate::automation::types::*;
 
 mod element;
@@ -39,6 +39,42 @@ impl UiaBackend {
                 .map_err(|err| format!("UIA event subsystem failed: {err}"))?,
         })
     }
+}
+
+fn process_name(pid: u32) -> Option<String> {
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let mut buffer = vec![0_u16; 32_768];
+    let mut len = buffer.len() as u32;
+    let result = unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            PWSTR(buffer.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    let _ = unsafe { CloseHandle(handle) };
+    result.ok()?;
+    let path = String::from_utf16(&buffer[..len as usize]).ok()?;
+    std::path::Path::new(&path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::to_string)
+}
+
+fn web_document_url(control_type: Option<&str>, value: &str) -> Option<String> {
+    if control_type != Some("Document") {
+        return None;
+    }
+    let parsed = url::Url::parse(value).ok()?;
+    matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
 }
 
 impl AutomationBackend for UiaBackend {
@@ -212,6 +248,11 @@ impl AutomationBackend for UiaBackend {
             }
         })?;
         let focused_info = element_info(&self.cache, &focused);
+        let source_process = focused
+            .get_process_id()
+            .ok()
+            .and_then(process_name)
+            .or(focused_info.process_name.clone());
         let Some((_container, ranges)) =
             text_selection::selected_ranges(&self.automation, &focused)
         else {
@@ -222,10 +263,69 @@ impl AutomationBackend for UiaBackend {
         };
         Ok(build_text_selection(
             &text,
-            focused_info.process_name.as_deref().unwrap_or("Unknown"),
+            source_process.as_deref().unwrap_or("Unknown"),
             focused_info.window_title.as_deref(),
             text_selection::last_visible_bounds(&ranges),
         ))
+    }
+
+    fn selection_preflight(&self) -> Result<SelectionPreflight> {
+        use uiautomation::patterns::UIValuePattern;
+
+        let focused = self.automation.get_focused_element().map_err(|error| {
+            AutomationError::BackendError {
+                message: format!("get_focused_element: {error}"),
+            }
+        })?;
+        let secure_field = focused.is_password().unwrap_or(false);
+        let source_subrole = focused
+            .get_control_type()
+            .ok()
+            .map(|control_type| format!("{control_type:?}"));
+        let editable = !secure_field
+            && focused
+                .get_pattern::<UIValuePattern>()
+                .ok()
+                .and_then(|pattern| pattern.is_readonly().ok())
+                .is_some_and(|read_only| !read_only);
+        let walker = self.automation.get_control_view_walker().ok();
+        let mut ancestor = focused.clone();
+        let mut window_title = None;
+        let mut source_url = None;
+        for _ in 0..=8 {
+            let control_type = ancestor
+                .get_control_type()
+                .ok()
+                .map(|value| format!("{value:?}"));
+            if window_title.is_none() && control_type.as_deref() == Some("Window") {
+                window_title = ancestor.get_name().ok().filter(|value| !value.is_empty());
+            }
+            if source_url.is_none() {
+                source_url = ancestor
+                    .get_pattern::<UIValuePattern>()
+                    .ok()
+                    .and_then(|pattern| pattern.get_value().ok())
+                    .and_then(|value| web_document_url(control_type.as_deref(), &value));
+            }
+            let Some(parent) = walker
+                .as_ref()
+                .and_then(|walker| walker.get_parent(&ancestor).ok())
+            else {
+                break;
+            };
+            ancestor = parent;
+        }
+        let pid = focused.get_process_id().ok();
+        Ok(SelectionPreflight {
+            pid,
+            process_name: pid.and_then(process_name),
+            window_title,
+            source_url,
+            source_subrole,
+            editable,
+            secure_field,
+            trusted: true,
+        })
     }
 
     // ── M5 completion primitives ─────────────────────────────────────────
@@ -298,6 +398,24 @@ impl AutomationBackend for UiaBackend {
                 message: format!("element_from_point({}, {}): {e}", point.x, point.y),
             })?;
         Ok(element_info(&self.cache, &elt))
+    }
+}
+
+#[cfg(test)]
+mod selection_preflight_tests {
+    use super::web_document_url;
+
+    #[test]
+    fn source_url_only_comes_from_a_document_control() {
+        assert_eq!(
+            web_document_url(Some("Document"), "https://example.com/path"),
+            Some("https://example.com/path".into())
+        );
+        assert_eq!(
+            web_document_url(Some("Edit"), "https://example.com/path"),
+            None
+        );
+        assert_eq!(web_document_url(Some("Document"), "file:///private"), None);
     }
 }
 

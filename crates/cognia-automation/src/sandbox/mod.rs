@@ -24,6 +24,7 @@ pub mod linux;
 pub mod macos;
 pub mod mock;
 pub mod net_proxy;
+pub mod output;
 pub mod paths;
 pub mod policy;
 pub mod protected;
@@ -373,6 +374,23 @@ pub const SANDBOX_PLUGIN_ID: &str = "cognia-sandboxed-tools";
 /// network scope) and never looked at a grant at all.
 pub const SANDBOX_REQUIRED_GRANTS: [&str; 2] = ["native:filesystem", "native:process"];
 
+fn sandbox_audit_reason(
+    termination: &str,
+    provider: &str,
+    requested_timeout_seconds: u64,
+    result: Option<&crate::sandbox::types::SandboxResult>,
+) -> String {
+    format!(
+        "tier=os;provider={provider};termination={termination};requested_timeout_seconds={requested_timeout_seconds};timeout={};stdout_truncated={};stderr_truncated={};exit_code={}",
+        result.is_some_and(|value| value.timed_out),
+        result.is_some_and(|value| value.stdout_truncated),
+        result.is_some_and(|value| value.stderr_truncated),
+        result
+            .map(|value| value.exit_code.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )
+}
+
 /// Why a sandbox call was refused before it reached the OS sandbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SandboxAdmission {
@@ -469,6 +487,8 @@ pub async fn sandbox_exec(
     let started = Instant::now();
     let stripped = tool.strip_prefix("sandbox_").unwrap_or(&tool).to_string();
     let cwd_label = command.cwd.to_string_lossy().into_owned();
+    let requested_timeout_seconds = command.timeout.as_secs();
+    let backend_id = current_backend().health().backend;
 
     // Permission gate. This runs BEFORE the policy check so a revoked grant
     // denies regardless of how well-formed the request is, and before any
@@ -482,10 +502,14 @@ pub async fn sandbox_exec(
             surface: Surface::Sandbox,
             plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
             command: tool.clone(),
-            process_name: None,
+            process_name: Some(format!("os:{backend_id}")),
             window_title: Some(cwd_label.clone()),
             decision: AuditDecision::Deny,
-            reason: Some(admission.audit_reason().to_string()),
+            reason: Some(format!(
+                "{};{}",
+                admission.audit_reason(),
+                sandbox_audit_reason("refused", &backend_id, requested_timeout_seconds, None)
+            )),
             duration_ms: started.elapsed().as_millis() as u64,
             error: Some(msg.clone()),
         });
@@ -503,10 +527,13 @@ pub async fn sandbox_exec(
                 surface: Surface::Sandbox,
                 plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
                 command: tool.clone(),
-                process_name: None,
+                process_name: Some(format!("os:{backend_id}")),
                 window_title: Some(cwd_label.clone()),
                 decision: AuditDecision::Deny,
-                reason: Some("invalid_policy".into()),
+                reason: Some(format!(
+                    "invalid_policy;{}",
+                    sandbox_audit_reason("refused", &backend_id, requested_timeout_seconds, None)
+                )),
                 duration_ms: started.elapsed().as_millis() as u64,
                 error: Some(msg.clone()),
             });
@@ -523,10 +550,21 @@ pub async fn sandbox_exec(
             surface: Surface::Sandbox,
             plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
             command: tool.clone(),
-            process_name: None,
+            process_name: Some(format!("os:{backend_id}")),
             window_title: Some(cwd_label),
             decision: AuditDecision::Allow,
-            reason: None,
+            reason: Some(sandbox_audit_reason(
+                if result.timed_out {
+                    "timeout"
+                } else if result.exit_code == 0 {
+                    "completed"
+                } else {
+                    "exit_nonzero"
+                },
+                &backend_id,
+                requested_timeout_seconds,
+                Some(result),
+            )),
             duration_ms: result.duration.as_millis() as u64,
             error: if result.exit_code == 0 {
                 None
@@ -540,10 +578,18 @@ pub async fn sandbox_exec(
             surface: Surface::Sandbox,
             plugin_id: Some(SANDBOX_PLUGIN_ID.to_string()),
             command: tool.clone(),
-            process_name: None,
+            process_name: Some(format!("os:{backend_id}")),
             window_title: Some(cwd_label),
             decision: AuditDecision::Deny,
-            reason: Some("backend_error".into()),
+            reason: Some(format!(
+                "backend_error;{}",
+                sandbox_audit_reason(
+                    "backend_error",
+                    &backend_id,
+                    requested_timeout_seconds,
+                    None
+                )
+            )),
             duration_ms: started.elapsed().as_millis() as u64,
             error: Some(err.to_string()),
         },
@@ -774,6 +820,7 @@ mod tests {
 mod admission_tests {
     use super::*;
     use crate::automation::record::plugin_facts::PluginFacts;
+    use std::time::Duration;
 
     fn facts(installed: bool, enabled: bool, granted: &[&str]) -> PluginFacts {
         PluginFacts {
@@ -854,5 +901,23 @@ mod admission_tests {
             ["native:filesystem", "native:process"]
         );
         assert_eq!(SANDBOX_PLUGIN_ID, "cognia-sandboxed-tools");
+    }
+
+    #[test]
+    fn audit_reason_carries_effective_backend_and_result_limits() {
+        let result = crate::sandbox::types::SandboxResult {
+            exit_code: 137,
+            stdout: String::new(),
+            stderr: String::new(),
+            duration: Duration::from_secs(4),
+            timed_out: true,
+            stdout_truncated: true,
+            stderr_truncated: false,
+        };
+
+        assert_eq!(
+            sandbox_audit_reason("timeout", "macos-sandbox-exec", 30, Some(&result)),
+            "tier=os;provider=macos-sandbox-exec;termination=timeout;requested_timeout_seconds=30;timeout=true;stdout_truncated=true;stderr_truncated=false;exit_code=137"
+        );
     }
 }

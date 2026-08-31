@@ -314,14 +314,12 @@ impl ConsentBroker {
         // `is_one_shot` is checked here as well as in `has_session_grant`, so a
         // grant for such a prompt is never even written — a stale entry could
         // otherwise outlive a future change to the read path.
-        if allow && persist {
-            if !prompt.is_one_shot() {
-                let expiry = Instant::now() + clamp_grant_duration(grant_duration_ms);
-                self.inner
-                    .lock()
-                    .session_grants
-                    .insert(GrantKey::from_prompt(&prompt), expiry);
-            }
+        if allow && persist && !prompt.is_one_shot() {
+            let expiry = Instant::now() + clamp_grant_duration(grant_duration_ms);
+            self.inner
+                .lock()
+                .session_grants
+                .insert(GrantKey::from_prompt(&prompt), expiry);
         }
     }
 

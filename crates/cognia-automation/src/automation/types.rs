@@ -643,6 +643,35 @@ pub enum ActionOutput {
 mod tests {
     use super::*;
 
+    #[test]
+    fn newtype_refs_serialize_as_bare_strings() {
+        // `ElementRef` and `KeyChord` are newtype structs, and serde renders a
+        // newtype struct transparently — so both cross the wire as a plain JSON
+        // string. The TypeScript mirror used to declare them as the
+        // one-element tuple `{0: string}`, which meant the renderer sent
+        // `["ctrl+c"]` where this side expects `"ctrl+c"`, and read the first
+        // *character* back out of a real ref. Pin the shape so the two sides
+        // cannot drift again.
+        assert_eq!(
+            serde_json::to_string(&ElementRef("abc".into())).unwrap(),
+            "\"abc\""
+        );
+        assert_eq!(
+            serde_json::to_string(&KeyChord("ctrl+c".into())).unwrap(),
+            "\"ctrl+c\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ElementRef>("\"abc\"").unwrap(),
+            ElementRef("abc".into())
+        );
+        assert_eq!(
+            serde_json::from_str::<KeyChord>("\"ctrl+c\"").unwrap(),
+            KeyChord("ctrl+c".into())
+        );
+        // The old tuple shape must NOT round-trip — that is the whole point.
+        assert!(serde_json::from_str::<ElementRef>("[\"abc\"]").is_err());
+    }
+
     fn roundtrip<T: Serialize + for<'de> Deserialize<'de> + std::fmt::Debug>(value: &T) -> T {
         let json = serde_json::to_string(value).expect("serialize");
         serde_json::from_str(&json).expect("deserialize")
@@ -702,8 +731,10 @@ mod tests {
 
     #[test]
     fn locator_omits_none_fields() {
-        let mut l = Locator::default();
-        l.name = Some("OK".into());
+        let l = Locator {
+            name: Some("OK".into()),
+            ..Locator::default()
+        };
         let json = serde_json::to_string(&l).unwrap();
         // serde keeps None fields as null by default; this assertion just
         // ensures the field name is camelCased correctly.

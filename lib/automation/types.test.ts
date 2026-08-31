@@ -46,11 +46,24 @@ describe("element ref helpers", () => {
     const r = elementRef("abc")
     expect(elementRefValue(r)).toBe("abc")
   })
+
+  it("is a bare string on the wire, not a one-element tuple", () => {
+    // Rust declares `pub struct ElementRef(pub String)`. serde renders a
+    // newtype struct transparently, so the wire value is `"abc"`. Modelling it
+    // as `["abc"]` meant the renderer sent a shape the backend rejects, and
+    // `elementRefValue` read back the first *character* of a real ref.
+    // Pinned on the Rust side too, in `types.rs`:
+    // `newtype_refs_serialize_as_bare_strings`.
+    expect(JSON.stringify(elementRef("abc"))).toBe('"abc"')
+  })
 })
 
 describe("keyChord helper", () => {
-  it("wraps a raw string", () => {
-    expect(keyChord("ctrl+t")).toEqual(["ctrl+t"])
+  it("is a bare string on the wire", () => {
+    // Same newtype-struct reasoning as ElementRef above. This assertion used to
+    // demand `["ctrl+t"]`, which is exactly the shape the Rust side refuses.
+    expect(keyChord("ctrl+t")).toBe("ctrl+t")
+    expect(JSON.stringify(keyChord("ctrl+t"))).toBe('"ctrl+t"')
   })
 })
 

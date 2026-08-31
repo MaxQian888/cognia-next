@@ -202,7 +202,7 @@ pub fn list_monitors() -> Vec<MonitorInfo> {
         .collect()
 }
 
-fn clamp_crop_region(region: Rect, full_w: u32, full_h: u32) -> (u32, u32, u32, u32) {
+pub(crate) fn clamp_crop_region(region: Rect, full_w: u32, full_h: u32) -> (u32, u32, u32, u32) {
     let x = i64::from(region.x).clamp(0, i64::from(full_w)) as u32;
     let y = i64::from(region.y).clamp(0, i64::from(full_h)) as u32;
     let w = i64::from(region.width)
@@ -258,6 +258,66 @@ pub fn downscale_encoded(shot: Screenshot, max_w: u32, max_h: u32) -> Result<Scr
         height: nh,
         captured_at: shot.captured_at,
         format: shot.format,
+        source_width: Some(shot.width),
+        source_height: Some(shot.height),
+    })
+}
+
+/// Crop an already-encoded `Screenshot` to `region`, expressed in the shot's
+/// OWN pixel space (top-left origin), then re-encode.
+///
+/// This is the `zoom` primitive. Grounding accuracy on high-resolution screens
+/// collapses when a whole desktop is squeezed into a model's vision budget —
+/// small controls end up a few pixels across. Handing back just the region of
+/// interest, at the resolution it was captured, is the cheapest known fix:
+/// published crop-and-reground results roughly double single-step grounding
+/// accuracy on professional-application screenshots.
+///
+/// The region is clamped to the image rather than rejected, because the model
+/// is estimating a box off a picture — asking it to be pixel-exact about the
+/// edges would fail calls for no benefit. An empty intersection IS an error,
+/// though: that means the model is looking somewhere the frame does not cover,
+/// and silently returning the whole screen would hide that.
+pub fn crop_encoded(shot: Screenshot, region: Rect) -> Result<Screenshot> {
+    let raw = general_purpose::STANDARD.decode(&shot.bytes).map_err(|e| {
+        AutomationError::BackendError {
+            message: format!("zoom: b64 decode failed: {e}"),
+        }
+    })?;
+    let img = image::load_from_memory(&raw)
+        .map_err(|e| AutomationError::BackendError {
+            message: format!("zoom: image decode failed: {e}"),
+        })?
+        .to_rgba8();
+
+    let (x, y, w, h) = clamp_crop_region(region, img.width(), img.height());
+    if w == 0 || h == 0 {
+        return Err(AutomationError::BackendError {
+            message: format!(
+                "zoom: region {}x{} at ({},{}) does not intersect the {}x{} frame",
+                region.width,
+                region.height,
+                region.x,
+                region.y,
+                img.width(),
+                img.height()
+            ),
+        });
+    }
+
+    let cropped = image::imageops::crop_imm(&img, x, y, w, h).to_image();
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    encode(&cropped, shot.format, &mut out)?;
+    Ok(Screenshot {
+        bytes: general_purpose::STANDARD.encode(&out),
+        width: w,
+        height: h,
+        captured_at: shot.captured_at,
+        format: shot.format,
+        // The crop is a window onto the frame the model already measured
+        // against, so report that frame as the source. A caller mapping a
+        // point back out of a zoom needs the offset too — which is why the
+        // session layer returns the clamped region alongside this image.
         source_width: Some(shot.width),
         source_height: Some(shot.height),
     })
@@ -326,6 +386,58 @@ mod tests {
             source_width: None,
             source_height: None,
         }
+    }
+
+    #[test]
+    fn crop_encoded_returns_just_the_region() {
+        let out = crop_encoded(
+            encoded_shot(1600, 1200),
+            Rect {
+                x: 100,
+                y: 200,
+                width: 320,
+                height: 240,
+            },
+        )
+        .unwrap();
+        assert_eq!((out.width, out.height), (320, 240));
+        // The source dims describe the frame the crop came out of, so a caller
+        // can still reason about where the region sits.
+        assert_eq!(out.source_width, Some(1600));
+        assert_eq!(out.source_height, Some(1200));
+    }
+
+    #[test]
+    fn crop_encoded_clamps_an_overhanging_region() {
+        // The model is estimating a box off a picture; demanding pixel-exact
+        // edges would fail calls for no benefit.
+        let out = crop_encoded(
+            encoded_shot(100, 100),
+            Rect {
+                x: 80,
+                y: 80,
+                width: 400,
+                height: 400,
+            },
+        )
+        .unwrap();
+        assert_eq!((out.width, out.height), (20, 20));
+    }
+
+    #[test]
+    fn crop_encoded_rejects_a_region_outside_the_frame() {
+        // An empty intersection means the model is looking somewhere the frame
+        // does not cover. Silently returning the whole screen would hide that.
+        let err = crop_encoded(
+            encoded_shot(100, 100),
+            Rect {
+                x: 500,
+                y: 500,
+                width: 10,
+                height: 10,
+            },
+        );
+        assert!(err.is_err());
     }
 
     #[test]

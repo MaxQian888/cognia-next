@@ -66,21 +66,55 @@ pub trait AutomationBackend {
             });
         }
         let screenshot = self.screenshot(opts)?;
-        let logical_bounds = window_hint
-            .and_then(|hint| hint.bounding_rect)
-            .or(focus.bounding_rect)
-            .unwrap_or(Rect {
+
+        // `self.screenshot(..)` captures a whole monitor, not this
+        // application's window. Reporting the *window's* rect as
+        // `logical_bounds` while `pixel_width` / `pixel_height` describe the
+        // whole screen makes `session::pixel_to_global_point` rescale every
+        // model-supplied coordinate through the wrong rectangle: the model
+        // reads a point off a full-screen frame and the backend lands it
+        // somewhere inside the window's bounds instead. That is a silent,
+        // systematic click offset — no error, just the wrong place — so
+        // describe the surface actually captured and let the caller see that
+        // this platform has no per-window capture yet.
+        //
+        // macOS overrides this method with a real ScreenCaptureKit
+        // per-window stream; Windows and Linux land here.
+        let capabilities = self.capabilities();
+        let monitor = capabilities
+            .monitors
+            .iter()
+            .find(|candidate| candidate.is_primary)
+            .or_else(|| capabilities.monitors.first());
+        let scale_factor = monitor
+            .map(|candidate| f64::from(candidate.scale_factor))
+            .filter(|scale| *scale > 0.0)
+            .unwrap_or(1.0);
+        let to_logical = |value: f64| (value / scale_factor).round() as i32;
+        let logical_bounds = monitor.map_or(
+            Rect {
                 x: 0,
                 y: 0,
                 width: i32::try_from(screenshot.width).unwrap_or(i32::MAX),
                 height: i32::try_from(screenshot.height).unwrap_or(i32::MAX),
-            });
+            },
+            |candidate| Rect {
+                x: to_logical(f64::from(candidate.x)),
+                y: to_logical(f64::from(candidate.y)),
+                width: to_logical(f64::from(candidate.width)),
+                height: to_logical(f64::from(candidate.height)),
+            },
+        );
+        // The window rect is deliberately unused: keeping it would reintroduce
+        // the mismatch above. It stays in the signature because the macOS
+        // override uses it to pick which window to stream.
+        let _ = window_hint;
         Ok(ApplicationScreenshot {
             screenshot,
             window_id: None,
-            display_id: None,
+            display_id: monitor.map(|candidate| candidate.id.clone()),
             logical_bounds,
-            scale_factor: 0.0,
+            scale_factor,
         })
     }
 
@@ -215,6 +249,10 @@ pub struct SelectionPreflight {
     /// application exposes one. Read from AX, never AppleScript — the latter
     /// triggers an Apple Events permission prompt per target application.
     pub source_url: Option<String>,
+    /// Native role/subrole used to classify editability without reading text.
+    pub source_subrole: Option<String>,
+    /// Conservative platform answer: false whenever writability is unknown.
+    pub editable: bool,
     /// The focused control is a password field. Never read from it.
     pub secure_field: bool,
     /// Whether the platform's accessibility permission is currently granted.
@@ -303,6 +341,217 @@ impl AutomationBackend for StubBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A backend that can capture a monitor and report focus, so the default
+    /// `screenshot_application` can actually run. Everything else is
+    /// unsupported — this exists only to pin the coordinate space.
+    struct FullScreenBackend {
+        window: Rect,
+    }
+
+    const MONITOR_W: u32 = 3840;
+    const MONITOR_H: u32 = 2160;
+    const MONITOR_SCALE: f32 = 2.0;
+
+    impl AutomationBackend for FullScreenBackend {
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                platform: Platform::Windows,
+                has_uia: true,
+                has_input_sim: true,
+                has_screenshot: true,
+                has_events: true,
+                has_a11y_tree: true,
+                monitors: vec![MonitorInfo {
+                    id: "monitor-1".into(),
+                    name: "Primary".into(),
+                    x: 0,
+                    y: 0,
+                    width: MONITOR_W,
+                    height: MONITOR_H,
+                    is_primary: true,
+                    scale_factor: MONITOR_SCALE,
+                }],
+            }
+        }
+        fn get_focus(&self) -> Result<ElementInfo> {
+            Ok(element_info(Some(42), Some(self.window)))
+        }
+        fn screenshot(&self, _opts: ScreenshotOpts) -> Result<Screenshot> {
+            Ok(Screenshot {
+                bytes: "AAA".into(),
+                width: MONITOR_W,
+                height: MONITOR_H,
+                captured_at: 0,
+                format: ImageFormat::Png,
+                source_width: None,
+                source_height: None,
+            })
+        }
+        fn read_tree(&self, _r: Option<ElementRef>, _o: TreeOpts) -> Result<Vec<ElementInfo>> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn find(&self, _l: &Locator) -> Result<Option<ElementRef>> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn click(&self, _t: ClickTarget, _o: ClickOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn type_text(&self, _t: &str, _o: TypeOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn send_keys(&self, _c: &KeyChord) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn invoke_pattern(
+            &self,
+            _t: ElementRef,
+            _p: PatternKind,
+            _a: serde_json::Value,
+        ) -> Result<serde_json::Value> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn window_op(&self, _t: ElementRef, _o: WindowOp) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn subscribe_events(&self, _f: EventFilter) -> Result<SubscriptionId> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn unsubscribe(&self, _s: SubscriptionId) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn mouse_move(&self, _p: Point) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn drag(&self, _f: Point, _t: Point, _o: DragOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn scroll(&self, _t: ScrollTarget, _o: ScrollOpts) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn hold_key(&self, _c: &KeyChord, _d: u32) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn mouse_button(&self, _b: MouseButton, _t: ButtonTransition) -> Result<()> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn cursor_position(&self) -> Result<Point> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+        fn pick_at_point(&self, _p: Point) -> Result<ElementInfo> {
+            Err(AutomationError::UnsupportedPlatform)
+        }
+    }
+
+    fn element_info(process_id: Option<u32>, bounding_rect: Option<Rect>) -> ElementInfo {
+        ElementInfo {
+            element_ref: ElementRef("fake".into()),
+            name: None,
+            automation_id: None,
+            control_type: None,
+            class_name: None,
+            bounding_rect,
+            is_enabled: true,
+            is_focused: true,
+            process_id,
+            process_name: None,
+            window_title: None,
+            children: None,
+        }
+    }
+
+    fn app() -> ResolvedApplication {
+        ResolvedApplication {
+            bundle_id: None,
+            path: None,
+            display_name: "Fake".into(),
+            process_id: 42,
+        }
+    }
+
+    #[test]
+    fn default_application_screenshot_describes_the_monitor_it_captured() {
+        // The capture is the whole monitor, so `logical_bounds` must be the
+        // monitor's logical rect. Reporting the focused *window's* rect here
+        // while the pixels cover the whole screen made
+        // `session::pixel_to_global_point` rescale every model coordinate
+        // through the wrong rectangle — a silent, systematic click offset.
+        let backend = FullScreenBackend {
+            window: Rect {
+                x: 100,
+                y: 50,
+                width: 400,
+                height: 300,
+            },
+        };
+        let capture = backend
+            .screenshot_application(&app(), None, ScreenshotOpts::default())
+            .expect("capture");
+
+        assert_eq!(
+            capture.logical_bounds,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            "logical_bounds must describe the captured monitor, not the window"
+        );
+        assert_eq!(capture.scale_factor, f64::from(MONITOR_SCALE));
+        assert_eq!(capture.display_id.as_deref(), Some("monitor-1"));
+        assert_eq!(
+            capture.window_id, None,
+            "no per-window capture on this path"
+        );
+    }
+
+    #[test]
+    fn default_application_screenshot_ignores_the_window_hint() {
+        // Honouring the hint is exactly what produced the mismatch: the hint
+        // describes a window this path did not capture.
+        let backend = FullScreenBackend {
+            window: Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+        };
+        let hint = element_info(
+            None,
+            Some(Rect {
+                x: 900,
+                y: 900,
+                width: 20,
+                height: 20,
+            }),
+        );
+        let capture = backend
+            .screenshot_application(&app(), Some(&hint), ScreenshotOpts::default())
+            .expect("capture");
+        assert_eq!(capture.logical_bounds.width, 1920);
+        assert_eq!(capture.logical_bounds.x, 0);
+    }
+
+    #[test]
+    fn default_application_screenshot_refuses_a_background_app() {
+        let backend = FullScreenBackend {
+            window: Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+        };
+        let other = ResolvedApplication {
+            process_id: 7,
+            ..app()
+        };
+        assert!(backend
+            .screenshot_application(&other, None, ScreenshotOpts::default())
+            .is_err());
+    }
 
     #[test]
     fn stub_backend_reports_unsupported() {

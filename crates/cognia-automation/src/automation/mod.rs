@@ -112,7 +112,7 @@ pub fn make_default_backend_with_app(app: Option<AppHandle>) -> Box<dyn Automati
         match platform::uia::UiaBackend::new() {
             Ok(b) => Box::new(b),
             Err(err) => {
-                let msg = format!("{err}");
+                let msg = err.to_string();
                 log::warn!("uia backend init failed ({msg}); falling back to stub backend",);
                 record_init_failure(app.as_ref(), Platform::Windows, msg);
                 Box::new(backend::StubBackend {
@@ -126,7 +126,7 @@ pub fn make_default_backend_with_app(app: Option<AppHandle>) -> Box<dyn Automati
         match platform::ax::AxBackend::new() {
             Ok(b) => Box::new(b),
             Err(err) => {
-                let msg = format!("{err}");
+                let msg = err.to_string();
                 log::warn!("ax backend init failed ({msg}); falling back to stub backend");
                 record_init_failure(app.as_ref(), Platform::Macos, msg);
                 Box::new(backend::StubBackend {

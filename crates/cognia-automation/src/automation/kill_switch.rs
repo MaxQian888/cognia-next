@@ -89,13 +89,17 @@ pub fn engage<R: tauri::Runtime>(
     //    starts from a screen it has not seen, so the first `get_app_state`
     //    must carry a real image rather than "unchanged since revision N".
     state.screenshot_dedup.clear();
+    // 7. Forget the driving-call history too. The next run must not inherit
+    //    the budget the stopped run burned, or an emergency stop would leave
+    //    the rate limiter refusing the operator's own first retry.
+    state.gate.reset_rate();
 
     let event = KillSwitchEvent {
         cause,
         at: super::commands::now_ms(),
         interrupted_recording_id,
     };
-    // 7. One event, one payload, whichever trigger fired.
+    // 8. One event, one payload, whichever trigger fired.
     let _ = app.emit(KILL_SWITCH_EVENT, &event);
     event
 }
