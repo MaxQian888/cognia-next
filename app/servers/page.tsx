@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useTranslations } from "next-intl"
 import { LogOutIcon, PlugZapIcon, RefreshCwIcon, RocketIcon, ServerCogIcon } from "lucide-react"
 
@@ -21,9 +22,18 @@ import { OpsConnectPanel } from "@/components/servers/ops-connect-panel"
 import { useServerOps } from "@/components/servers/ops-context"
 import { ServerFleet, type FleetFilter } from "@/components/servers/server-fleet"
 import { Badge } from "@/components/ui/badge"
+import { ServersMobileBody } from "@/components/mobile/servers/servers-mobile-body"
 import type { Operation } from "@/lib/server-ops/client"
 
 export default function ServersPage() {
+  const compact = useCompactLayout()
+  // Same dispatch `app/devices/page.tsx` uses. Chosen by available width, not
+  // by platform: a narrow desktop window has the same problem a phone does.
+  if (compact) return <ServersMobileBody />
+  return <ServersWideBody />
+}
+
+function ServersWideBody() {
   const t = useTranslations("servers")
   const ops = useServerOps()
   const [filter, setFilter] = useState<FleetFilter>("all")

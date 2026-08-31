@@ -16,6 +16,8 @@ import { useTranslations } from "next-intl"
 import { ArrowLeftIcon, LogOutIcon, PlugZapIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
+import { ServerDetailMobileBody } from "@/components/mobile/servers/server-detail-mobile-body"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { ConnectAgentDialog } from "@/components/servers/connect-agent-dialog"
@@ -40,6 +42,7 @@ function ServerDetailRoute() {
   const params = useSearchParams()
   const serverId = params.get("id") ?? ""
   const ops = useServerOps()
+  const compact = useCompactLayout()
   /**
    * Keyed by the server it was loaded for, so a stale response for the previous
    * target is discarded during render rather than cleared by a second effect —
@@ -129,6 +132,40 @@ function ServerDetailRoute() {
     )
   }
 
+  const actions = {
+    onBackup: () => void ops.backup(server.id),
+    onPreflight: () => void ops.preflight(server.id),
+    onCollectStatus: (includeRuntimeUsage: boolean) =>
+      void ops.collectStatus(server.id, includeRuntimeUsage),
+    onCollectLogs: () => void ops.collectLogs(server.id),
+    onRestore: (recoveryPointId: string) => void ops.restore(server.id, recoveryPointId),
+    onRollback: () => void ops.rollback(server.id),
+    onRotateKey: (keyVersion: string) => void ops.rotateKey(server.id, keyVersion),
+    onUpgrade: (release: {
+      serverImage: string
+      runnerImage: string
+      workspaceRuntimeImage: string
+    }) => void ops.upgrade(server.id, release),
+  }
+
+  /**
+   * The compact body owns its own chrome and the enrollment dialog, so the
+   * branch is here rather than inside the shell. Every action above is shared
+   * verbatim: a phone that could read a target but not roll it back would be
+   * this route telling the user to go and find a laptop.
+   */
+  if (compact) {
+    return (
+      <ServerDetailMobileBody
+        server={server}
+        backups={backups}
+        logs={logs}
+        loadingDetail={loadingDetail}
+        actions={actions}
+      />
+    )
+  }
+
   return (
     <>
       <FeaturePageShell
@@ -197,18 +234,7 @@ function ServerDetailRoute() {
           backups={backups}
           logs={logs}
           loadingDetail={loadingDetail}
-          actions={{
-            onBackup: () => void ops.backup(server.id),
-            onPreflight: () => void ops.preflight(server.id),
-            onCollectStatus: (includeRuntimeUsage) =>
-              void ops.collectStatus(server.id, includeRuntimeUsage),
-            onCollectLogs: () => void ops.collectLogs(server.id),
-            onRestore: (recoveryPointId) => void ops.restore(server.id, recoveryPointId),
-            onRollback: () => void ops.rollback(server.id),
-            onRotateKey: (keyVersion) => void ops.rotateKey(server.id, keyVersion),
-            onUpgrade: (release) => void ops.upgrade(server.id, release),
-            onConnectAgent: () => setEnrollOpen(true),
-          }}
+          actions={{ ...actions, onConnectAgent: () => setEnrollOpen(true) }}
         />
       </FeaturePageShell>
 
