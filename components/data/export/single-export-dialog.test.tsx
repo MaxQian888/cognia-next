@@ -21,6 +21,9 @@ jest.mock("@/lib/db/schema", () => ({
     messages: { where: () => ({ equals: () => ({ sortBy: async () => [] }) }) },
   }),
 }))
+jest.mock("@/lib/twin/export-provenance", () => ({
+  resolveSessionTwinProvenance: jest.fn(async () => undefined),
+}))
 
 const mockRenderChatToPng = jest.fn()
 class FakeTooLong extends Error {}

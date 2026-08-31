@@ -116,6 +116,8 @@ export function SingleExportDialog({
         .equals(session.id)
         .sortBy("createdAt")
       const wallpaperDataUrl = await resolveThemeWallpaper(theme, withWallpaper)
+      const { resolveSessionTwinProvenance } = await import("@/lib/twin/export-provenance")
+      const provenance = await resolveSessionTwinProvenance(session, messages)
       const { renderChatToPng, ChatPngTooLongError } = await import("@/lib/export/html/chat-png")
       try {
         const blob = await renderChatToPng({
@@ -127,6 +129,7 @@ export function SingleExportDialog({
           includeMetadata,
           includeTimestamps,
           wallpaperDataUrl,
+          provenance,
         })
         const slug =
           session.title

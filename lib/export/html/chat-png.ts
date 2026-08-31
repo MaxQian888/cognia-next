@@ -9,6 +9,9 @@
 import html2canvas from "html2canvas-pro"
 import { exportToBeautifulHtml, type BeautifulHtmlOptions } from "./beautiful-html"
 import { THEMES } from "./syntax-themes"
+import type { ShareProvenance } from "@/lib/share/types"
+import { enforceExportDisclosure } from "@/lib/export/disclosure"
+import { embedPngTwinProvenance } from "./png-metadata"
 
 /** Canvas rasterization gets unreliable past ~16k px; bail before that. */
 export const MAX_PNG_HEIGHT_PX = 16000
@@ -33,8 +36,10 @@ export function pngBackground(options: BeautifulHtmlOptions): string {
  * Render a chat export to a PNG Blob. Throws {@link ChatPngTooLongError} when
  * the rendered height exceeds {@link MAX_PNG_HEIGHT_PX}.
  */
-export async function renderChatToPng(options: BeautifulHtmlOptions): Promise<Blob> {
-  const html = exportToBeautifulHtml(options)
+export async function renderChatToPng(
+  options: BeautifulHtmlOptions & { provenance?: ShareProvenance[] }
+): Promise<Blob> {
+  const html = enforceExportDisclosure(exportToBeautifulHtml(options), "html", options.provenance)
   const iframe = document.createElement("iframe")
   iframe.setAttribute("aria-hidden", "true")
   iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${CAPTURE_WIDTH_PX}px;height:10px;border:0;visibility:hidden`
@@ -60,9 +65,10 @@ export async function renderChatToPng(options: BeautifulHtmlOptions): Promise<Bl
       windowWidth: CAPTURE_WIDTH_PX,
       logging: false,
     })
-    return await new Promise<Blob>((resolve, reject) => {
+    const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/png")
     })
+    return await embedPngTwinProvenance(blob, options.provenance)
   } finally {
     document.body.removeChild(iframe)
   }

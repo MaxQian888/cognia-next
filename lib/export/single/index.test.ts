@@ -24,6 +24,17 @@ const messages: StoredMessage[] = []
 const date = new Date("2024-01-01T00:00:00Z")
 
 describe("renderSingleExport", () => {
+  it("forces a visible Digital Twin marker when provenance is present", () => {
+    const out = renderSingleExport({
+      format: "text",
+      session,
+      messages,
+      exportedAt: date,
+      provenance: [{ source: "digital-twin", sourceId: "twin-1", disclosure: "ai-generated" }],
+    })
+    expect(out.content).toContain("[AI-generated · Digital Twin]")
+  })
+
   it("renders markdown with slug-derived filename", () => {
     const out = renderSingleExport({
       format: "markdown",

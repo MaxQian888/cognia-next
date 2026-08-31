@@ -9,6 +9,7 @@ import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { getDb } from "@/lib/db/schema"
 import type { UIMessage } from "ai"
 import type { StoredMessage } from "@cognia/agent-config-types"
+import { resolveSessionTwinProvenance } from "@/lib/twin/export-provenance"
 
 export interface BatchExportOptions {
   /** Sessions to export. */
@@ -51,6 +52,7 @@ export async function exportBatch(opts: BatchExportOptions): Promise<BatchExport
     // has everything it needs.
     const rows = await getDb().messages.where("sessionId").equals(session.id).sortBy("createdAt")
     const messages = rows.length > 0 ? rows : reconstitute(uiMessages, session.id)
+    const provenance = await resolveSessionTwinProvenance(session, messages)
 
     const rendered = renderSingleExport({
       format: opts.format,
@@ -61,6 +63,7 @@ export async function exportBatch(opts: BatchExportOptions): Promise<BatchExport
       customTheme: opts.customTheme,
       includeMetadata: opts.includeMetadata,
       includeTimestamps: opts.includeTimestamps,
+      provenance,
     })
 
     // Disambiguate identical filenames (two sessions called "Hello world").

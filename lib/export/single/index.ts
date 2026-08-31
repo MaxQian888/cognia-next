@@ -13,6 +13,8 @@ import { exportToBeautifulHtml, type BeautifulHtmlOptions } from "@/lib/export/h
 import { exportToAnimatedHtml } from "@/lib/export/html/animated-html"
 import { exportToJsonlPerMessage, exportToJsonlChat } from "@/lib/export/jsonl"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
+import type { ShareProvenance } from "@/lib/share/types"
+import { enforceExportDisclosure } from "@/lib/export/disclosure"
 
 export type SingleExportFormat =
   "markdown" | "json" | "text" | "html" | "animated" | "jsonl" | "jsonl-chat"
@@ -37,6 +39,8 @@ export interface SingleExportOptions {
    * the caller passes only the visible thread. Ignored by other formats.
    */
   includeAllBranches?: boolean
+  /** Host-owned provenance used to force visible/structured disclosure. */
+  provenance?: ShareProvenance[]
 }
 
 export interface SingleExportResult {
@@ -48,6 +52,10 @@ export interface SingleExportResult {
 export function renderSingleExport(opts: SingleExportOptions): SingleExportResult {
   const exportedAt = opts.exportedAt ?? new Date()
   const slug = slugify(opts.session.title) || "conversation"
+  const finalize = (result: SingleExportResult): SingleExportResult => ({
+    ...result,
+    content: enforceExportDisclosure(result.content, opts.format, opts.provenance),
+  })
 
   switch (opts.format) {
     case "markdown": {
@@ -58,7 +66,7 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         includeMetadata: opts.includeMetadata,
         includeTokens: opts.includeTokens,
       } satisfies RichExportData)
-      return { content, filename: `${slug}.md`, mimeType: "text/markdown" }
+      return finalize({ content, filename: `${slug}.md`, mimeType: "text/markdown" })
     }
     case "json": {
       const content = exportToRichJSON({
@@ -66,7 +74,7 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         messages: opts.messages,
         exportedAt,
       })
-      return { content, filename: `${slug}.json`, mimeType: "application/json" }
+      return finalize({ content, filename: `${slug}.json`, mimeType: "application/json" })
     }
     case "text": {
       const content = exportToPlainText({
@@ -74,7 +82,7 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         messages: opts.messages,
         exportedAt,
       })
-      return { content, filename: `${slug}.txt`, mimeType: "text/plain" }
+      return finalize({ content, filename: `${slug}.txt`, mimeType: "text/plain" })
     }
     case "html": {
       const html = exportToBeautifulHtml({
@@ -87,7 +95,7 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         includeTimestamps: opts.includeTimestamps,
         wallpaperDataUrl: opts.wallpaperDataUrl,
       } satisfies BeautifulHtmlOptions)
-      return { content: html, filename: `${slug}.html`, mimeType: "text/html" }
+      return finalize({ content: html, filename: `${slug}.html`, mimeType: "text/html" })
     }
     case "animated": {
       const html = exportToAnimatedHtml({
@@ -100,19 +108,23 @@ export function renderSingleExport(opts: SingleExportOptions): SingleExportResul
         includeTimestamps: opts.includeTimestamps,
         wallpaperDataUrl: opts.wallpaperDataUrl,
       })
-      return {
+      return finalize({
         content: html,
         filename: `${slug}.animated.html`,
         mimeType: "text/html",
-      }
+      })
     }
     case "jsonl": {
       const content = exportToJsonlPerMessage(opts.messages, opts.includeAllBranches ?? false)
-      return { content, filename: `${slug}.jsonl`, mimeType: "application/x-ndjson" }
+      return finalize({ content, filename: `${slug}.jsonl`, mimeType: "application/x-ndjson" })
     }
     case "jsonl-chat": {
       const content = exportToJsonlChat(opts.messages, opts.includeAllBranches ?? false)
-      return { content, filename: `${slug}.chat.jsonl`, mimeType: "application/x-ndjson" }
+      return finalize({
+        content,
+        filename: `${slug}.chat.jsonl`,
+        mimeType: "application/x-ndjson",
+      })
     }
   }
 }

@@ -14,6 +14,9 @@ jest.mock("jszip", () => {
 jest.mock("@/lib/db/messages", () => ({
   listMessages: jest.fn(),
 }))
+jest.mock("@/lib/twin/export-provenance", () => ({
+  resolveSessionTwinProvenance: jest.fn(async () => undefined),
+}))
 jest.mock("@/lib/export/single", () => ({
   renderSingleExport: jest.fn(() => ({
     content: "x",
