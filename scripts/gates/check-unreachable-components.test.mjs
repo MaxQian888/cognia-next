@@ -2,14 +2,19 @@ import { strict as assert } from "node:assert"
 import { describe, it } from "node:test"
 
 import {
+  ALL_BINDINGS,
   diffAgainstBaseline,
+  extractImportBindings,
   extractImportSpecifiers,
   filterExistingFiles,
   findUnreachable,
   isGatedComponent,
   isProductionFile,
+  isPureReexportBarrel,
+  parseBarrelReexports,
   platformVariantBase,
   resolveSpecifier,
+  stripComments,
 } from "./check-unreachable-components.mjs"
 
 it("filters tracked files that are deleted in the working tree", () => {
@@ -255,5 +260,162 @@ describe("findUnreachable — build-target variants", () => {
   it("still reports an orphan variant with no default beside it", () => {
     const files = ["app/layout.tsx", "components/runtime/shell.mobile.tsx"]
     assert.deepEqual(findUnreachable(files, io), ["components/runtime/shell.mobile.tsx"])
+  })
+})
+
+describe("stripComments", () => {
+  it("removes a doc block", () => {
+    assert.equal(stripComments("/** hi */\nexport {}").trim(), "export {}")
+  })
+
+  it("does not treat a slash-star inside a line comment as a block opener", () => {
+    // A real line in `app/layout.tsx` mentions `geist/font/*`. Stripping
+    // blocks first swallowed everything to the next `*/`, 140 lines away.
+    const source = [
+      "// mentions geist/font/* here",
+      'import { A } from "./a"',
+      "const x = 1 /* real */",
+      "const y = 2",
+    ].join("\n")
+    const out = stripComments(source)
+    assert.ok(out.includes('import { A } from "./a"'))
+    assert.ok(out.includes("const y = 2"))
+    assert.ok(!out.includes("real"))
+  })
+})
+
+describe("isPureReexportBarrel", () => {
+  it("accepts a file that is only re-exports, doc block and all", () => {
+    assert.equal(
+      isPureReexportBarrel('/** Barrel. */\nexport { A } from "./a"\nexport * from "./b"\n'),
+      true
+    )
+  })
+
+  it("rejects a file that also declares something", () => {
+    assert.equal(isPureReexportBarrel('export { A } from "./a"\nexport const B = 1\n'), false)
+  })
+
+  it("rejects a file with no re-exports at all", () => {
+    assert.equal(isPureReexportBarrel('import { A } from "./a"\nexport const B = A\n'), false)
+  })
+})
+
+describe("parseBarrelReexports", () => {
+  it("maps each exported name to the module it comes from", () => {
+    const { named } = parseBarrelReexports('export { A, B as C } from "./ab"\n')
+    assert.deepEqual(named.get("A"), { spec: "./ab", local: "A" })
+    // The importer asks for `C`; inside `./ab` the name is `A`... `B`.
+    assert.deepEqual(named.get("C"), { spec: "./ab", local: "B" })
+  })
+
+  it("keeps type-only re-exports", () => {
+    const { named } = parseBarrelReexports('export { type T } from "./t"\n')
+    assert.deepEqual(named.get("T"), { spec: "./t", local: "T" })
+  })
+
+  it("collects wildcards separately", () => {
+    const { wildcards } = parseBarrelReexports('export * from "./everything"\n')
+    assert.deepEqual(wildcards, ["./everything"])
+  })
+})
+
+describe("extractImportBindings", () => {
+  it("records named imports per specifier", () => {
+    const b = extractImportBindings('import { A, B as C } from "./x"')
+    assert.deepEqual([...b.get("./x")], ["A", "B"])
+  })
+
+  it("records a default import as `default`", () => {
+    assert.deepEqual([...extractImportBindings('import R from "react"').get("react")], ["default"])
+  })
+
+  it("treats a namespace or side-effect import as every binding", () => {
+    assert.deepEqual(
+      [...extractImportBindings('import * as N from "./n"').get("./n")],
+      [ALL_BINDINGS]
+    )
+    assert.deepEqual([...extractImportBindings('import "./side"').get("./side")], [ALL_BINDINGS])
+  })
+})
+
+describe("findUnreachable — barrels confer nothing on their own", () => {
+  const read = (map) => ({ read: (p) => map[p] ?? "" })
+
+  it("flags a component only a barrel re-exports, when nobody asks for it", () => {
+    // This is the hole that kept a 1020-line dead DevTools panel in the tree:
+    // `components/plugins/index.ts` re-exported it, and that barrel is
+    // imported once, for a completely different symbol.
+    const files = [
+      "components/index.ts",
+      "components/used.tsx",
+      "components/dead.tsx",
+      "app/page.tsx",
+    ]
+    const io = read({
+      "components/index.ts": 'export { Used } from "./used"\nexport { Dead } from "./dead"\n',
+      "app/page.tsx": 'import { Used } from "@/components"',
+    })
+    assert.deepEqual(findUnreachable(files, io), ["components/dead.tsx"])
+  })
+
+  it("keeps the barrel itself reachable when something imports it", () => {
+    const files = ["components/index.ts", "components/used.tsx", "app/page.tsx"]
+    const io = read({
+      "components/index.ts": 'export { Used } from "./used"\n',
+      "app/page.tsx": 'import { Used } from "@/components"',
+    })
+    assert.deepEqual(findUnreachable(files, io), [])
+  })
+
+  it("flags a barrel nothing imports", () => {
+    const files = ["components/index.ts", "components/thing.tsx", "app/page.tsx"]
+    const io = read({
+      "components/index.ts": 'export { Thing } from "./thing"\n',
+      "app/page.tsx": "export default function P() { return null }",
+    })
+    assert.deepEqual(findUnreachable(files, io), ["components/index.ts"])
+  })
+
+  it("follows a rename through the barrel to the right module", () => {
+    const files = ["components/index.ts", "components/a.tsx", "components/b.tsx", "app/page.tsx"]
+    const io = read({
+      "components/index.ts": 'export { A as Renamed } from "./a"\nexport { B } from "./b"\n',
+      "app/page.tsx": 'import { Renamed } from "@/components"',
+    })
+    assert.deepEqual(findUnreachable(files, io), ["components/b.tsx"])
+  })
+
+  it("pulls everything through a nested barrel chain", () => {
+    const files = [
+      "components/index.ts",
+      "components/inner/index.ts",
+      "components/inner/deep.tsx",
+      "app/page.tsx",
+    ]
+    const io = read({
+      "components/index.ts": 'export { Deep } from "./inner"\n',
+      "components/inner/index.ts": 'export { Deep } from "./deep"\n',
+      "app/page.tsx": 'import { Deep } from "@/components"',
+    })
+    assert.deepEqual(findUnreachable(files, io), [])
+  })
+
+  it("treats a namespace import of a barrel as asking for everything", () => {
+    const files = ["components/index.ts", "components/a.tsx", "components/b.tsx", "app/page.tsx"]
+    const io = read({
+      "components/index.ts": 'export { A } from "./a"\nexport { B } from "./b"\n',
+      "app/page.tsx": 'import * as All from "@/components"',
+    })
+    assert.deepEqual(findUnreachable(files, io), [])
+  })
+
+  it("treats a wildcard re-export as reaching its module", () => {
+    const files = ["components/index.ts", "components/a.tsx", "app/page.tsx"]
+    const io = read({
+      "components/index.ts": 'export * from "./a"\n',
+      "app/page.tsx": 'import { Anything } from "@/components"',
+    })
+    assert.deepEqual(findUnreachable(files, io), [])
   })
 })

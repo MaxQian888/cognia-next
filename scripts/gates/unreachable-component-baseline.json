@@ -1,7 +1,14 @@
 {
   "version": 1,
-  "note": "Components with zero production importers, recorded when the gate landed. This list may only shrink: `pnpm audit:unreachable-components` fails when a new one appears. Either mount the component or delete it (with its test and story). Regenerate with `pnpm audit:unreachable-components -- --write-baseline`.",
+  "note": "Components with zero production importers. This list may only shrink: `pnpm audit:unreachable-components` fails when a new one appears. Either mount the component or delete it (with its test and story). Regenerate with `pnpm audit:unreachable-components -- --write-baseline`, which is only legitimate when the gate's own definition changes, not to admit a new offender. It last grew when the gate learned that a pure re-export barrel confers no reachability, which exposed components nothing had ever asked the barrel for.",
   "files": [
+    "components/a2ui/academic/index.ts",
+    "components/a2ui/app-gallery.tsx",
+    "components/a2ui/data/index.ts",
+    "components/a2ui/display/index.ts",
+    "components/a2ui/form/index.ts",
+    "components/a2ui/layout/index.ts",
+    "components/a2ui/quick-app-builder.tsx",
     "components/account/account-switcher.tsx",
     "components/mobile/settings/mobile-settings-panel.tsx",
     "components/terminal/ai-shell/index.ts"

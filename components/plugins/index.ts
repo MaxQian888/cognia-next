@@ -13,7 +13,6 @@
 
 // Top-level shell / infrastructure
 export { PluginPanel } from "./plugin-panel"
-export { PluginPanelProvider, usePluginPanel } from "./plugin-panel-context"
 export { PluginPanelToolbar } from "./plugin-panel-toolbar"
 export { PluginPanelGrid } from "./plugin-panel-grid"
 export { PluginCard } from "./plugin-card"
