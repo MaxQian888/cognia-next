@@ -54,10 +54,16 @@ import {
   FoldVerticalIcon,
   HashIcon,
   GaugeIcon,
+  LayersIcon,
+  LightbulbIcon,
+  MessagesSquareIcon,
+  TableIcon,
+  TrendingUpIcon,
   RefreshCwIcon,
   RepeatIcon,
   Share2Icon,
   UnfoldVerticalIcon,
+  WalletIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -82,6 +88,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { StatCard } from "@/components/scheduler/stat-card"
 import { UsageHeatmap } from "@/components/usage/usage-heatmap"
+import { UsageAttributionRow } from "@/components/usage/usage-attribution-row"
+import { UsageBudgetMeters } from "@/components/usage/usage-budget-meters"
+import { useCostBudgetStatus } from "@/hooks/usage/use-cost-budget-status"
 import { cn } from "@/lib/utils"
 
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
@@ -119,15 +128,24 @@ import {
   aggregateByDay,
   aggregateByModel,
   aggregateBySession,
+  aggregateBySurface,
   analyzeUsageContributors,
   buildUsageFilename,
   filterByRange,
+  formatBucketCost,
   toUsageCsv,
   toUsageJson,
   type ModelUsageRow,
+  type SurfaceUsageRow,
   type UsageContributors,
 } from "@/lib/usage/session-analytics"
-import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
+import {
+  shareOfCost,
+  shareOfTokens,
+  summarizeSpend,
+  type UsageSpendTotals,
+} from "@/lib/usage/usage-report"
+import { USAGE_SURFACES, type SessionUsageRow, type UsageSurface } from "@/lib/db/session-usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
@@ -147,8 +165,17 @@ const RANGES = [
 
 type RangeKey = (typeof RANGES)[number]["key"]
 
-const SURFACE_FILTERS = ["all", "chat", "workflow", "agent-team"] as const
-type SurfaceFilter = (typeof SURFACE_FILTERS)[number]
+/**
+ * The filter's value space is "all" plus every metered surface.
+ *
+ * It used to be a hard-coded `["all", "chat", "workflow", "agent-team"]`, which
+ * quietly capped the tab at three of the fifteen surfaces `sessionUsage`
+ * records. An embedding sweep, an OCR batch or a connector auto-reply all spend
+ * real money, all get written, and none of them could be isolated here. The
+ * rendered chips are still narrowed to the surfaces that actually appear in the
+ * selected range, so the row only ever shows options with rows behind them.
+ */
+type SurfaceFilter = "all" | UsageSurface
 
 /** How the cost-over-time section draws the same daily aggregates. */
 const COST_VIEWS = ["heatmap", "bar"] as const
@@ -170,7 +197,17 @@ function filterBySurface(
 /* ── Section folding ────────────────────────────────────────────────────── */
 
 /** Ids of the collapsible sections, in render order. */
-const SECTION_IDS = ["window", "trend", "models", "insights", "cost", "sessions", "raw"] as const
+const SECTION_IDS = [
+  "budget",
+  "window",
+  "trend",
+  "models",
+  "surfaces",
+  "insights",
+  "cost",
+  "sessions",
+  "raw",
+] as const
 type SectionId = (typeof SECTION_IDS)[number]
 
 /**
@@ -179,7 +216,9 @@ type SectionId = (typeof SECTION_IDS)[number]
  * the raw snapshot table only opens in `detailed`.
  */
 function defaultOpenForMode(id: SectionId, mode: UsageDisplayMode): boolean {
-  if (id === "window") return true
+  // The budget is open at every density: a ceiling you are close to is the one
+  // thing on this tab that changes what happens on your next send.
+  if (id === "window" || id === "budget") return true
   if (id === "raw") return mode === "detailed"
   return mode !== "simplified"
 }
@@ -228,23 +267,40 @@ export function SubscriptionUsageTab() {
   // same window's countdown ticked at two different moments.
   const now = useSubscriptionNow()
 
+  const rangeRows = useMemo(
+    () => filterByRange(sessionRows, rangeDays, now),
+    [sessionRows, rangeDays, now]
+  )
+
+  // Which surfaces actually appear in-range. Drives the filter row so it only
+  // ever offers an option that has rows behind it, in the canonical
+  // `USAGE_SURFACES` order rather than in first-seen order (which made the
+  // chips reshuffle whenever a new surface spent something).
+  const availableSurfaces = useMemo(() => {
+    const seen = new Set<UsageSurface>()
+    for (const row of rangeRows) seen.add(row.surface ?? "chat")
+    return USAGE_SURFACES.filter((id) => seen.has(id))
+  }, [rangeRows])
+
+  // A filter pinned to a surface that fell out of the range would otherwise show
+  // an empty tab with no way back except re-picking "all".
+  const effectiveSurface: SurfaceFilter =
+    surface !== "all" && !availableSurfaces.includes(surface) ? "all" : surface
+
   const filteredSessionRows = useMemo(
-    () => filterBySurface(filterByRange(sessionRows, rangeDays, now), surface),
-    [sessionRows, rangeDays, now, surface]
+    () => filterBySurface(rangeRows, effectiveSurface),
+    [rangeRows, effectiveSurface]
   )
   const models = useMemo(() => aggregateByModel(filteredSessionRows), [filteredSessionRows])
+  const surfaces = useMemo(() => aggregateBySurface(filteredSessionRows), [filteredSessionRows])
+  // One pass for the headline numbers. The stat grid used to re-reduce the model
+  // rows, so this tab and the `/usage` card computed the same five figures with
+  // two different accumulators and only one of them tracked unpriced turns.
+  const totals = useMemo(() => summarizeSpend(filteredSessionRows), [filteredSessionRows])
   const contributors = useMemo(
     () => analyzeUsageContributors(filteredSessionRows),
     [filteredSessionRows]
   )
-  // Which surfaces actually appear in-range — drives the filter's visibility so
-  // the toggle only shows up once non-chat usage exists.
-  const availableSurfaces = useMemo(() => {
-    const rangeRows = filterByRange(sessionRows, rangeDays, now)
-    const set = new Set<UsageSurface>()
-    for (const r of rangeRows) set.add(r.surface ?? "chat")
-    return set
-  }, [sessionRows, rangeDays, now])
 
   if (!tabReady) {
     return (
@@ -268,27 +324,34 @@ export function SubscriptionUsageTab() {
 
   return (
     <div className="space-y-4" data-testid="usage-tab" data-mode={mode}>
-      <UsageToolbar
-        range={range}
-        onRange={setRange}
-        surface={surface}
-        onSurface={setSurface}
-        availableSurfaces={availableSurfaces}
-        exportRows={filteredSessionRows}
-        onExpandAll={() => setAllSections(true)}
-        onCollapseAll={() => setAllSections(false)}
-      />
+      {/* Sticky: every section below is filtered by this row, and on a 90-day
+          view the toolbar scrolled away long before the tables it controls. */}
+      <div className="sticky top-0 z-10 -mx-1 bg-background/85 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+        <UsageToolbar
+          range={range}
+          onRange={setRange}
+          surface={effectiveSurface}
+          onSurface={setSurface}
+          availableSurfaces={availableSurfaces}
+          exportRows={filteredSessionRows}
+          onExpandAll={() => setAllSections(true)}
+          onCollapseAll={() => setAllSections(false)}
+        />
+      </div>
       {/* Was the one section on this tab rendered outside `MotionReveal`, so it
           popped in while everything below it faded up in sequence. */}
       <MotionReveal index={0}>
         <BalancesSection now={now} />
       </MotionReveal>
-      {models.length > 0 && (
+      {totals.turns > 0 && (
         <MotionReveal index={1}>
-          <UsageStatGrid models={models} />
+          <UsageStatGrid totals={totals} />
         </MotionReveal>
       )}
       <MotionReveal index={2}>
+        <BudgetCard open={isOpen("budget")} onToggle={() => toggleSection("budget")} />
+      </MotionReveal>
+      <MotionReveal index={3}>
         <CurrentWindowCard
           latest={latest}
           now={now}
@@ -296,7 +359,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("window")}
         />
       </MotionReveal>
-      <MotionReveal index={3}>
+      <MotionReveal index={4}>
         <UtilizationTrendCard
           rows={snapshotRows}
           rangeDays={rangeDays}
@@ -305,7 +368,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("trend")}
         />
       </MotionReveal>
-      <MotionReveal index={4}>
+      <MotionReveal index={5}>
         <ModelBreakdownCard
           models={models}
           mode={mode}
@@ -313,14 +376,27 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("models")}
         />
       </MotionReveal>
-      <MotionReveal index={5}>
-        <InsightsCard
-          contributors={contributors}
-          open={isOpen("insights")}
-          onToggle={() => toggleSection("insights")}
-        />
-      </MotionReveal>
-      <MotionReveal index={6}>
+      {/* Two narrow, list-shaped sections. Side by side on a wide pane they read
+          as one "where did it go" band instead of two more full-width slabs. */}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <MotionReveal index={6}>
+          <SurfaceBreakdownCard
+            surfaces={surfaces}
+            totals={totals}
+            mode={mode}
+            open={isOpen("surfaces")}
+            onToggle={() => toggleSection("surfaces")}
+          />
+        </MotionReveal>
+        <MotionReveal index={7}>
+          <InsightsCard
+            contributors={contributors}
+            open={isOpen("insights")}
+            onToggle={() => toggleSection("insights")}
+          />
+        </MotionReveal>
+      </div>
+      <MotionReveal index={8}>
         <CostOverTimeCard
           rows={filteredSessionRows}
           rangeDays={rangeDays}
@@ -329,7 +405,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("cost")}
         />
       </MotionReveal>
-      <MotionReveal index={7}>
+      <MotionReveal index={9}>
         <TopSessionsCard
           rows={filteredSessionRows}
           mode={mode}
@@ -337,7 +413,7 @@ export function SubscriptionUsageTab() {
           onToggle={() => toggleSection("sessions")}
         />
       </MotionReveal>
-      <MotionReveal index={8}>
+      <MotionReveal index={10}>
         <RawSamplesCard
           rows={snapshotRows}
           rangeDays={rangeDays}
@@ -365,6 +441,8 @@ function UsageSection({
   onToggle,
   children,
   testid,
+  icon,
+  badge,
 }: {
   title: string
   description?: string
@@ -372,9 +450,13 @@ function UsageSection({
   onToggle: () => void
   children: React.ReactNode
   testid?: string
+  /** Leading glyph, so a collapsed stack of cards is scannable by shape. */
+  icon?: React.ReactNode
+  /** Status pill kept visible while the section is folded shut. */
+  badge?: React.ReactNode
 }) {
   return (
-    <Card data-testid={testid}>
+    <Card data-testid={testid} className="h-full">
       <CardHeader
         className="cursor-pointer pb-3 transition-colors hover:bg-muted/50"
         role="button"
@@ -390,8 +472,12 @@ function UsageSection({
         data-testid={testid ? `${testid}-header` : undefined}
       >
         <div className="flex items-center justify-between gap-2">
+          {icon ? <span className="mt-0.5 self-start">{icon}</span> : null}
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-base">{title}</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <span className="min-w-0 truncate">{title}</span>
+              {badge}
+            </CardTitle>
             {description && (
               <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
             )}
@@ -427,7 +513,7 @@ function UsageToolbar({
   onRange: (key: RangeKey) => void
   surface: SurfaceFilter
   onSurface: (key: SurfaceFilter) => void
-  availableSurfaces: Set<UsageSurface>
+  availableSurfaces: readonly UsageSurface[]
   exportRows: SessionUsageRow[]
   onExpandAll: () => void
   onCollapseAll: () => void
@@ -440,8 +526,10 @@ function UsageToolbar({
     downloadBlob(new Blob([content], { type: mime }), buildUsageFilename(format))
   }
 
-  // Only worth showing the surface toggle once spend exists beyond plain chat.
-  const showSurface = availableSurfaces.has("workflow") || availableSurfaces.has("agent-team")
+  // Only worth showing the toggle once more than one surface has spent
+  // anything: a single chip that filters to everything is a control with
+  // nothing behind it.
+  const showSurface = availableSurfaces.length > 1
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -462,21 +550,21 @@ function UsageToolbar({
         </div>
         {showSurface && (
           <div
-            className="flex gap-1"
+            className="flex flex-wrap gap-1"
             role="group"
             aria-label={t("surface.label")}
             data-testid="usage-surface-filter"
           >
-            {SURFACE_FILTERS.map((s) => (
+            {(["all", ...availableSurfaces] as const).map((id) => (
               <Button
-                key={s}
-                variant={surface === s ? "default" : "ghost"}
+                key={id}
+                variant={surface === id ? "default" : "ghost"}
                 size="sm"
-                onClick={() => onSurface(s)}
-                data-testid={`usage-surface-${s}`}
-                aria-pressed={surface === s}
+                onClick={() => onSurface(id)}
+                data-testid={`usage-surface-${id}`}
+                aria-pressed={surface === id}
               >
-                {t(`surface.${s === "all" ? "all" : surfaceLabelKey(s)}`)}
+                {t(`surface.${id === "all" ? "all" : surfaceLabelKey(id)}`)}
               </Button>
             ))}
           </div>
@@ -599,88 +687,127 @@ function UsageStatCard({
   )
 }
 
-function UsageStatGrid({ models }: { models: ModelUsageRow[] }) {
+/**
+ * The five headline figures, read straight off {@link summarizeSpend}.
+ *
+ * They used to be re-derived here by reducing the model rows, which duplicated
+ * the accumulator in `usage-report.ts` and quietly disagreed with it: the local
+ * version summed only input + output + cache-read (dropping cache writes) and
+ * had no notion of a turn nobody could price, so an unpriced run showed a
+ * settled dollar figure that was really a floor.
+ */
+function UsageStatGrid({ totals }: { totals: UsageSpendTotals }) {
   const t = useTranslations("subscription.usage.models")
-  const totals = useMemo(
-    () =>
-      models.reduce(
-        (acc, m) => {
-          acc.tokens += m.inputTokens + m.outputTokens + m.cacheReadTokens
-          acc.cost += m.costUsd
-          acc.turns += m.turns
-          acc.input += m.inputTokens
-          acc.cacheRead += m.cacheReadTokens
-          acc.output += m.outputTokens
-          acc.duration += m.durationMs
-          return acc
-        },
-        { tokens: 0, cost: 0, turns: 0, input: 0, cacheRead: 0, output: 0, duration: 0 }
-      ),
-    [models]
-  )
-  // Same ratio convention as lib/db/agent-traces.ts traceSummary:
-  // cacheRead / (input + cacheRead), 0 when no input recorded.
-  const cacheHitRate =
-    totals.input + totals.cacheRead > 0 ? totals.cacheRead / (totals.input + totals.cacheRead) : 0
-  // Aggregate output-token throughput; null when no turn reported a duration.
-  const speed = tokensPerSecond(totals.output, totals.duration)
+  const tokens =
+    totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheCreationTokens
+  // Aggregate output-token throughput. Null when no turn reported a duration.
+  const speed = tokensPerSecond(totals.outputTokens, totals.durationMs)
+  const cacheHit = totals.cacheHitRate
 
   return (
-    <div
-      className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
-      data-testid="usage-stat-grid"
-    >
-      <UsageStatCard
-        label={t("totalTokens")}
-        value={totals.tokens}
-        format={formatTokens}
-        icon={<HashIcon className="h-5 w-5 text-blue-500" aria-hidden />}
-        valueClassName="text-blue-500"
-        accentGradient="from-blue-500 to-sky-400"
-        iconBgClassName="bg-blue-500/10"
-        testid="usage-model-stat-tokens"
-      />
-      <UsageStatCard
-        label={t("totalCost")}
-        value={totals.cost}
-        format={(n) => formatCostInCurrency(n, "USD")}
-        icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
-        valueClassName="text-violet-500"
-        accentGradient="from-violet-500 to-purple-400"
-        iconBgClassName="bg-violet-500/10"
-        testid="usage-model-stat-cost"
-      />
-      <UsageStatCard
-        label={t("totalTurns")}
-        value={totals.turns}
-        format={(n) => String(Math.round(n))}
-        icon={<RepeatIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
-        valueClassName="text-emerald-500"
-        accentGradient="from-emerald-500 to-green-400"
-        iconBgClassName="bg-emerald-500/10"
-        testid="usage-model-stat-turns"
-      />
-      <UsageStatCard
-        label={t("cacheHitRate")}
-        value={cacheHitRate * 100}
-        format={(n) => `${Math.round(n)}%`}
-        icon={<DatabaseZapIcon className="h-5 w-5 text-amber-500" aria-hidden />}
-        valueClassName="text-amber-500"
-        accentGradient="from-amber-500 to-yellow-400"
-        iconBgClassName="bg-amber-500/10"
-        testid="usage-model-stat-cache-hit-rate"
-      />
-      <UsageStatCard
-        label={t("speed")}
-        value={speed ?? 0}
-        format={(n) => (speed == null ? "—" : t("speedUnit", { value: formatTokensPerSec(n) }))}
-        icon={<GaugeIcon className="h-5 w-5 text-cyan-500" aria-hidden />}
-        valueClassName="text-cyan-500"
-        accentGradient="from-cyan-500 to-sky-400"
-        iconBgClassName="bg-cyan-500/10"
-        testid="usage-model-stat-speed"
-      />
+    <div className="space-y-2">
+      <div
+        className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+        data-testid="usage-stat-grid"
+      >
+        <UsageStatCard
+          label={t("totalTokens")}
+          value={tokens}
+          format={formatTokens}
+          icon={<HashIcon className="h-5 w-5 text-blue-500" aria-hidden />}
+          valueClassName="text-blue-500"
+          accentGradient="from-blue-500 to-sky-400"
+          iconBgClassName="bg-blue-500/10"
+          testid="usage-model-stat-tokens"
+        />
+        <UsageStatCard
+          label={t("totalCost")}
+          value={totals.costUsd}
+          // Through the shared bucket formatter, so a range containing turns no
+          // pricing layer knew renders as a lower bound rather than as a total.
+          format={(n) => formatBucketCost(n, totals.unpricedTurns, totals.turns)}
+          icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
+          valueClassName="text-violet-500"
+          accentGradient="from-violet-500 to-purple-400"
+          iconBgClassName="bg-violet-500/10"
+          testid="usage-model-stat-cost"
+        />
+        <UsageStatCard
+          label={t("totalTurns")}
+          value={totals.turns}
+          format={(n) => String(Math.round(n))}
+          icon={<RepeatIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
+          valueClassName="text-emerald-500"
+          accentGradient="from-emerald-500 to-green-400"
+          iconBgClassName="bg-emerald-500/10"
+          testid="usage-model-stat-turns"
+        />
+        <UsageStatCard
+          label={t("cacheHitRate")}
+          value={(cacheHit ?? 0) * 100}
+          format={(n) => (cacheHit == null ? "—" : `${Math.round(n)}%`)}
+          icon={<DatabaseZapIcon className="h-5 w-5 text-amber-500" aria-hidden />}
+          valueClassName="text-amber-500"
+          accentGradient="from-amber-500 to-yellow-400"
+          iconBgClassName="bg-amber-500/10"
+          testid="usage-model-stat-cache-hit-rate"
+        />
+        <UsageStatCard
+          label={t("speed")}
+          value={speed ?? 0}
+          format={(n) => (speed == null ? "—" : t("speedUnit", { value: formatTokensPerSec(n) }))}
+          icon={<GaugeIcon className="h-5 w-5 text-cyan-500" aria-hidden />}
+          valueClassName="text-cyan-500"
+          accentGradient="from-cyan-500 to-sky-400"
+          iconBgClassName="bg-cyan-500/10"
+          testid="usage-model-stat-speed"
+        />
+      </div>
+      {totals.unpricedTurns > 0 && (
+        <p className="text-[11px] text-muted-foreground" data-testid="usage-unpriced-note">
+          {t("unpricedNote", { turns: totals.unpricedTurns })}
+        </p>
+      )}
     </div>
+  )
+}
+
+/* ── Spending limits ───────────────────────────────────────────────────── */
+
+/**
+ * Live spend against the configured USD ceilings.
+ *
+ * The ceilings are edited in Settings and enforced in the send gate, and until
+ * now nothing showed them next to the spend they cap. This is the tab that
+ * already explains where the money went, so it is where "and how much of the
+ * limit is left" belongs. The rows come from the shared `UsageBudgetMeters`,
+ * so the editor and this card can never show two different numbers.
+ */
+function BudgetCard({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const t = useTranslations("subscription.usage.budget")
+  const { configured, worst } = useCostBudgetStatus()
+
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-budget-section"
+      icon={<WalletIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+      badge={
+        configured && worst && worst.level !== "ok" ? (
+          <Badge
+            variant={worst.level === "warning" ? "secondary" : "destructive"}
+            data-testid="usage-budget-worst"
+          >
+            {t(`level.${worst.level}`)}
+          </Badge>
+        ) : null
+      }
+    >
+      <UsageBudgetMeters emptyHint={t("empty")} />
+    </UsageSection>
   )
 }
 
@@ -738,6 +865,7 @@ function CurrentWindowCard({
       open={open}
       onToggle={onToggle}
       testid="usage-window-section"
+      icon={<GaugeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       {resolved.windows.length === 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -849,6 +977,7 @@ function UtilizationTrendCard({
       open={open}
       onToggle={onToggle}
       testid="usage-trend-section"
+      icon={<TrendingUpIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       {series.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-trend-empty">
@@ -931,7 +1060,19 @@ function ModelBreakdownCard({
   const colors = useThemeColors()
   const { reduce } = useFlowMotion()
   const showCacheWrite = mode === "detailed"
-  const totalCost = useMemo(() => models.reduce((acc, m) => acc + m.costUsd, 0), [models])
+  const totals = useMemo(
+    () =>
+      models.reduce(
+        (acc, m) => {
+          acc.costUsd += m.costUsd
+          acc.turns += m.turns
+          acc.unpricedTurns += m.unpricedTurns
+          return acc
+        },
+        { costUsd: 0, turns: 0, unpricedTurns: 0 }
+      ),
+    [models]
+  )
 
   if (models.length === 0) {
     return (
@@ -961,6 +1102,7 @@ function ModelBreakdownCard({
       open={open}
       onToggle={onToggle}
       testid="usage-models-section"
+      icon={<HashIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       <div className="grid gap-4 lg:grid-cols-2">
         {donut.length > 0 && (
@@ -1002,7 +1144,7 @@ function ModelBreakdownCard({
                 {t("donutCenter")}
               </span>
               <span className="text-lg font-bold tabular-nums">
-                {formatCostInCurrency(totalCost, "USD")}
+                {formatBucketCost(totals.costUsd, totals.unpricedTurns, totals.turns)}
               </span>
             </div>
           </div>
@@ -1020,6 +1162,11 @@ function ModelBreakdownCard({
                 {showCacheWrite && (
                   <TableHead className="hidden text-right sm:table-cell">
                     {t("colCacheWrite")}
+                  </TableHead>
+                )}
+                {showCacheWrite && (
+                  <TableHead className="hidden text-right sm:table-cell">
+                    {t("colReasoning")}
                   </TableHead>
                 )}
                 <TableHead className="hidden text-right sm:table-cell">{t("colSpeed")}</TableHead>
@@ -1047,6 +1194,11 @@ function ModelBreakdownCard({
                       {formatTokens(m.cacheCreationTokens)}
                     </TableCell>
                   )}
+                  {showCacheWrite && (
+                    <TableCell className="hidden text-right text-xs tabular-nums sm:table-cell">
+                      {m.reasoningTokens > 0 ? formatTokens(m.reasoningTokens) : "—"}
+                    </TableCell>
+                  )}
                   <TableCell className="hidden text-right text-xs tabular-nums sm:table-cell">
                     {(() => {
                       const s = tokensPerSecond(m.outputTokens, m.durationMs)
@@ -1054,7 +1206,7 @@ function ModelBreakdownCard({
                     })()}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs">
-                    {formatCostInCurrency(m.costUsd, "USD")}
+                    {formatBucketCost(m.costUsd, m.unpricedTurns, m.turns)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -1062,6 +1214,91 @@ function ModelBreakdownCard({
           </Table>
         </div>
       </div>
+    </UsageSection>
+  )
+}
+
+/* ── Per-surface attribution ───────────────────────────────────────────── */
+
+/**
+ * Where the quota actually went, by producing surface.
+ *
+ * `aggregateBySurface` calls this "the honest answer to what is using my
+ * quota", and it was already computed for the `/usage` transcript card and for
+ * the CLI. The dashboard, which is the surface people open to ask exactly that
+ * question, only had a filter: it could hide the other surfaces but never rank
+ * them. Chat, an agent team, a scheduled workflow and a connector auto-reply
+ * all draw on the same plan, and this axis is the only one that separates them.
+ *
+ * Rows are the shared `UsageAttributionRow`, so they rank and render exactly as
+ * they do in the transcript card.
+ */
+function SurfaceBreakdownCard({
+  surfaces,
+  totals,
+  mode,
+  open,
+  onToggle,
+}: {
+  surfaces: SurfaceUsageRow[]
+  totals: UsageSpendTotals
+  mode: UsageDisplayMode
+  open: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslations("subscription.usage.bySurface")
+  const tSurface = useTranslations("subscription.usage.surface")
+  const { reduce } = useFlowMotion()
+
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-surfaces-section"
+      icon={<LayersIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+    >
+      {surfaces.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="usage-surfaces-empty">
+          {t("empty")}
+        </p>
+      ) : (
+        <ul className="space-y-2.5" data-testid="usage-surfaces-list">
+          {surfaces.map((row) => {
+            // Rank by cost where cost is known, else by tokens. A local or free
+            // model can dominate the token budget at $0, and a 0% row would
+            // bury exactly the surface worth looking at.
+            const share = shareOfCost(row, totals) ?? shareOfTokens(row, totals)
+            return (
+              <UsageAttributionRow
+                key={row.surface}
+                id={row.surface}
+                testidPrefix="usage-surface-row"
+                label={tSurface(surfaceLabelKey(row.surface))}
+                pct={share == null ? null : Math.round(share * 100)}
+                costUsd={row.costUsd}
+                unpricedTurns={row.unpricedTurns}
+                turns={row.turns}
+                reduce={reduce}
+                detail={
+                  mode === "simplified"
+                    ? undefined
+                    : t("rowDetail", {
+                        turns: row.turns,
+                        tokens: formatTokens(
+                          row.inputTokens +
+                            row.outputTokens +
+                            row.cacheReadTokens +
+                            row.cacheCreationTokens
+                        ),
+                      })
+                }
+              />
+            )
+          })}
+        </ul>
+      )}
     </UsageSection>
   )
 }
@@ -1092,6 +1329,7 @@ function InsightsCard({
       open={open}
       onToggle={onToggle}
       testid="usage-insights-section"
+      icon={<LightbulbIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       {items.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-insights-empty">
@@ -1153,6 +1391,7 @@ function CostOverTimeCard({
       open={open}
       onToggle={onToggle}
       testid="usage-cost-section"
+      icon={<CoinsIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       <ToggleGroup
         type="single"
@@ -1235,10 +1474,14 @@ function TopSessionsCard({
   const [titles, setTitles] = useState<Map<string, ChatSession>>(new Map())
   const showSplit = mode === "detailed"
 
+  // Keep every session that recorded a turn, not only the ones with a positive
+  // cost. The old `costUsd > 0` filter dropped exactly the sessions someone
+  // hunting unexplained spend needs: a run on a model no pricing layer knew
+  // contributes 0 and would vanish from a table titled "top sessions".
   const summaries = useMemo(
     () =>
       aggregateBySession(rows)
-        .filter((s) => s.costUsd > 0)
+        .filter((s) => s.turns > 0)
         .slice(0, 10),
     [rows]
   )
@@ -1265,6 +1508,7 @@ function TopSessionsCard({
       open={open}
       onToggle={onToggle}
       testid="usage-sessions-section"
+      icon={<MessagesSquareIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       {summaries.length === 0 ? (
         <p
@@ -1312,7 +1556,7 @@ function TopSessionsCard({
                   )}
                   <TableCell className="text-right text-xs">{formatTokens(s.tokens)}</TableCell>
                   <TableCell className="text-right font-mono text-xs">
-                    {formatCostInCurrency(s.costUsd, "USD")}
+                    {formatBucketCost(s.costUsd, s.unpricedTurns, s.turns)}
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
@@ -1363,6 +1607,7 @@ function RawSamplesCard({
       open={open}
       onToggle={onToggle}
       testid="usage-raw-section"
+      icon={<TableIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     >
       {filtered.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-raw-empty">

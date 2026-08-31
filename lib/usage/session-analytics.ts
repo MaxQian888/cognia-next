@@ -15,7 +15,7 @@
  */
 
 import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
-import type { DailyUsage } from "@/types/system/usage"
+import { formatCost, type DailyUsage } from "@/types/system/usage"
 import type { ModelPricing } from "@cognia/provider-types/provider"
 import {
   DEFAULT_CACHE_READ_MULT,
@@ -250,6 +250,30 @@ export function bucketTokens(
   return b.inputTokens + b.outputTokens + b.cacheReadTokens + b.cacheCreationTokens
 }
 
+/**
+ * Em dash for "we do not know". Never used for a measured zero — a real $0.00
+ * (a free or local model) is a fact, and rendering it as "—" would hide it.
+ */
+export const UNKNOWN_COST = "—"
+
+/**
+ * Money for a bucket, honest about provenance.
+ *
+ * A bucket containing turns that no pricing layer could price contributes 0 for
+ * those turns, so its total is a LOWER BOUND and renders with a "≥". A bucket
+ * whose turns are ALL unpriced gets no figure at all — "$0.00" would read as
+ * free, which is the one thing we know it is not.
+ *
+ * The single definition behind every aggregate cost read-out: the `/usage`
+ * transcript card rendered the marker and the Usage dashboard did not, so the
+ * same rows claimed a settled total in one view and a lower bound in the other.
+ */
+export function formatBucketCost(costUsd: number, unpricedTurns: number, turns: number): string {
+  if (turns > 0 && unpricedTurns >= turns) return UNKNOWN_COST
+  const base = formatCost(costUsd)
+  return unpricedTurns > 0 ? `≥ ${base}` : base
+}
+
 /** Bucket rows by model, descending by cost (ties: total tokens, then name). */
 export function aggregateByModel(
   rows: readonly SessionUsageRow[],
@@ -415,6 +439,17 @@ export interface SessionUsageSummary {
   /** Output tokens — surfaced as a detailed-mode column. */
   outputTokens: number
   costUsd: number
+  /**
+   * Turns in this session that no pricing layer could price. Same contract as
+   * {@link ModelUsageRow.unpricedTurns}: `costUsd` is a LOWER BOUND whenever
+   * this is above zero, so callers must render it through
+   * {@link formatBucketCost} rather than as a settled figure.
+   *
+   * Without it the top-sessions table could only defend itself by filtering on
+   * `costUsd > 0`, which silently dropped every session run on an unpriced
+   * model — exactly the session someone hunting unexplained spend needs.
+   */
+  unpricedTurns: number
 }
 
 /**
@@ -435,12 +470,15 @@ export function aggregateBySession(
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
+      unpricedTurns: 0,
     }
+    const cost = effectiveCostUsdDetailed(r, resolve)
     slot.turns += 1
     slot.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens
     slot.inputTokens += r.inputTokens
     slot.outputTokens += r.outputTokens
-    slot.costUsd += effectiveCostUsd(r, resolve)
+    slot.costUsd += cost.cost
+    if (!cost.known) slot.unpricedTurns += 1
     map.set(r.sessionId, slot)
   }
   return [...map.values()].sort(

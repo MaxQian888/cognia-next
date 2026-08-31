@@ -464,6 +464,58 @@ describe("SubscriptionUsageTab", () => {
     expect(screen.queryByTestId("usage-model-row-chat-model")).not.toBeInTheDocument()
   })
 
+  it("offers a chip for every metered surface present in range, not just three", async () => {
+    const user = userEvent.setup()
+    setup({
+      sessionRows: [
+        usageRow({ messageId: "c1", surface: "chat" }),
+        usageRow({ messageId: "o1", surface: "ocr", model: "ocr-model" }),
+        usageRow({ messageId: "e1", surface: "embedding", model: "embed-model" }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    // These three used to be unreachable: the filter row was hard-coded to
+    // all / chat / workflow / agent-team.
+    expect(screen.getByTestId("usage-surface-ocr")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-surface-embedding")).toBeInTheDocument()
+    // …and a surface with no rows in range is not offered.
+    expect(screen.queryByTestId("usage-surface-workflow")).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId("usage-surface-ocr"))
+    expect(screen.getByTestId("usage-model-row-ocr-model")).toBeInTheDocument()
+    expect(screen.queryByTestId("usage-model-row-embed-model")).not.toBeInTheDocument()
+  })
+
+  it("ranks the producing surfaces against each other", () => {
+    setup({
+      sessionRows: [
+        usageRow({ messageId: "c1", surface: "chat", costUsd: 3 }),
+        usageRow({ messageId: "w1", surface: "workflow", costUsd: 1 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    const chat = screen.getByTestId("usage-surface-row-chat")
+    expect(chat).toHaveTextContent("75%")
+    expect(chat).toHaveTextContent("$3.00")
+    expect(screen.getByTestId("usage-surface-row-workflow")).toHaveTextContent("25%")
+  })
+
+  it("renders an aggregate holding unpriced turns as a lower bound", () => {
+    setup({
+      sessionRows: [
+        usageRow({ messageId: "p1", model: "priced", costUsd: 2 }),
+        // No cost and a model no price table knows: an unpriced turn.
+        usageRow({ messageId: "u1", model: "who-knows-1", costUsd: 0 }),
+      ],
+    })
+    render(<SubscriptionUsageTab />)
+    expect(screen.getByTestId("usage-unpriced-note")).toBeInTheDocument()
+    expect(screen.getByTestId("usage-model-stat-cost")).toHaveTextContent("≥ $2.00")
+    // The fully-unpriced model's own row shows no figure rather than "$0.00".
+    const unpriced = screen.getByTestId("usage-model-row-who-knows-1")
+    expect(unpriced).not.toHaveTextContent("$0.00")
+  })
+
   it("collapses charts and tables by default in simplified mode", () => {
     currentMode = "simplified"
     setup()

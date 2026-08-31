@@ -1,0 +1,9 @@
+{
+  "loading": "Reading spend…",
+  "scope": {
+    "dayGlobal": "Today, all providers",
+    "monthGlobal": "This month, all providers",
+    "dayProvider": "Today · {provider}",
+    "monthProvider": "This month · {provider}"
+  }
+}

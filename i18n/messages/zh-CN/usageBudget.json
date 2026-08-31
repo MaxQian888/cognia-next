@@ -1,0 +1,9 @@
+{
+  "loading": "正在读取花费…",
+  "scope": {
+    "dayGlobal": "今日 · 全部提供商",
+    "monthGlobal": "本月 · 全部提供商",
+    "dayProvider": "今日 · {provider}",
+    "monthProvider": "本月 · {provider}"
+  }
+}
