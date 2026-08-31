@@ -356,7 +356,8 @@
     "unsupportedAction": "No live adapter implements this action for the imported provider",
     "workspaceContainerPath": "Path inside the machine",
     "workspaceHostPath": "Host directory to mount",
-    "workspaceMountHelp": "Both are needed together. Without a mount, shell and file work inside the machine cannot reach any host path."
+    "workspaceMountHelp": "Both are needed together. Without a mount, shell and file work inside the machine cannot reach any host path.",
+    "noAdapter": "Provider declared, no adapter wired"
   },
   "screenOff": {
     "activeMonitor": {

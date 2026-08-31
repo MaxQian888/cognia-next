@@ -4008,6 +4008,7 @@
       "name": "Name",
       "networkMode": "Network mode",
       "networkModeHelp": "Use `none` to cut the machine off from the network. Leave blank for Docker's default.",
+      "noAdapter": "Provider declared, no adapter wired",
       "persistsAfterQuit": "A running machine stays running after you quit the app, and is picked up again on the next launch.",
       "policyCpus": "CPU limit",
       "policyFrozen": "Docker fixes these when the container is created. Changing them needs a new machine.",
@@ -9043,6 +9044,21 @@
     "runtime": {
       "activateHost": "Activate this host",
       "isRoutingTarget": "Execution from this window currently routes here.",
+      "machines": {
+        "error": "{count} failed",
+        "idleCost": "A running machine keeps consuming CPU and memory until it is suspended or stopped, including across app restarts.",
+        "openShell": "Shell into {name}",
+        "paused": "{count} paused",
+        "running": "{count} running",
+        "shellFailed": "Could not open a shell in the machine",
+        "shellState": {
+          "absent": "Docker has no container for {name} any more. Start it below to create one.",
+          "paused": "{name} is paused. Resume it below, and its memory comes back with it.",
+          "stopped": "{name} is stopped. Start it below. Anything not on a bind mount is still there."
+        },
+        "shellWrongHost": "A shell into a machine runs where the machine does. These belong to this computer, and the terminal is currently pointed somewhere else.",
+        "total": "{count, plural, =0 {No machines} one {# machine} other {# machines}}"
+      },
       "probeEmpty": "This host reports no worktrees.",
       "probeFailed": "Could not read this host: {error}",
       "probeLocked": "Locked",

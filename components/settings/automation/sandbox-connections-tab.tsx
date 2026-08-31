@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
+import { hasSandboxAdapter } from "@/lib/sandbox/adapter-registry"
 import type { SandboxHealthStatus } from "@/lib/db/sandbox-connections"
 import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
 import { SandboxConnectionSheet } from "./sandbox-connection-sheet"
@@ -157,6 +158,19 @@ export function SandboxConnectionsTab() {
                   <Badge variant={statusVariant(conn.lastHealthStatus)}>
                     {statusLabel[conn.lastHealthStatus]}
                   </Badge>
+                  {/*
+                    `cua-cloud` and `lume` are declared in the provider union
+                    and absent from `ADAPTERS`: documentation is not an
+                    implementation, and ADR-0020 records both as deferred. A
+                    row for one is formattable and unusable, so it says so
+                    rather than presenting a full set of controls that every
+                    one of them would refuse.
+                  */}
+                  {hasSandboxAdapter(conn) ? null : (
+                    <Badge variant="outline" data-testid={`sandbox-no-adapter-${conn.id}`}>
+                      {t("noAdapter")}
+                    </Badge>
+                  )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
                   {sandboxConnectionSummary(conn)}

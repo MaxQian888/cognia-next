@@ -60,3 +60,45 @@ describe("sandboxAdapterFactoryFor", () => {
     expect(adapterPairs()).toEqual(["docker:computer-server"])
   })
 })
+
+/**
+ * The dormancy contract for the two providers that are declared and not
+ * implemented (CLAUDE.md rule 7, axis three).
+ *
+ * `cua-cloud` and `lume` are in the `SandboxConnectionProvider` union, have
+ * config shapes, and are formatted by `sandboxConnectionSummary`. What they do
+ * not have is an adapter, and ADR-0020 records both as deferred. Pinning it
+ * here means adding one to `ADAPTERS` is a deliberate act with a test to
+ * update, and removing the UI label that says so fails a test rather than
+ * quietly presenting a machine that can never start.
+ */
+describe("providers that are declared but not implemented", () => {
+  function connectionFor(provider: "cua-cloud" | "lume"): SandboxConnectionRow {
+    const config =
+      provider === "cua-cloud"
+        ? { provider: "cua-cloud" as const, instanceName: "inst-1" }
+        : { provider: "lume" as const, vmName: "vm-1" }
+    return {
+      id: `conn-${provider}`,
+      name: provider,
+      provider,
+      driver: "cua-driver",
+      config,
+      state: "stopped",
+      capabilities: defaultSandboxCapabilities(provider, "cua-driver"),
+      lastHealthStatus: "unknown",
+      createdAt: 0,
+      updatedAt: 0,
+    } as SandboxConnectionRow
+  }
+
+  it.each(["cua-cloud", "lume"] as const)("has no adapter for %s", (provider) => {
+    const row = connectionFor(provider)
+    expect(sandboxAdapterFactoryFor(row)).toBeNull()
+    expect(hasSandboxAdapter(row)).toBe(false)
+  })
+
+  it("lists docker as the only implemented pair", () => {
+    expect(adapterPairs()).toEqual(["docker:computer-server"])
+  })
+})

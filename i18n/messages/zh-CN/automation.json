@@ -356,7 +356,8 @@
     "unsupportedAction": "当前导入的提供商没有实现此操作的实时适配器",
     "workspaceContainerPath": "机器内的路径",
     "workspaceHostPath": "要挂载的宿主目录",
-    "workspaceMountHelp": "两项必须同时填写。不挂载目录，机器内的 shell 与文件操作就无法访问任何宿主路径。"
+    "workspaceMountHelp": "两项必须同时填写。不挂载目录，机器内的 shell 与文件操作就无法访问任何宿主路径。",
+    "noAdapter": "已声明的 provider，尚未接入适配器"
   },
   "screenOff": {
     "activeMonitor": {

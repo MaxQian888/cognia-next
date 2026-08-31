@@ -271,7 +271,22 @@
     "timingAuthorityHint": "设置后，只有这台机器会武装定时任务。保持关闭则每台主机各自武装；重复触发会被确定性幂等键吸收。",
     "timingAuthorityAria": "将 {label} 设为定时调度权威",
     "routing": "执行路由",
-    "tierCount": "可用 {available}/{total}"
+    "tierCount": "可用 {available}/{total}",
+    "machines": {
+      "total": "{count, plural, =0 {没有机器} other {# 台机器}}",
+      "running": "{count} 台运行中",
+      "paused": "{count} 台已挂起",
+      "error": "{count} 台故障",
+      "idleCost": "运行中的机器会持续占用 CPU 与内存，直到被挂起或停止，重启应用也不会改变这一点。",
+      "openShell": "进入 {name} 的 shell",
+      "shellWrongHost": "进入机器的 shell 会在机器所在的电脑上运行。这些机器属于本机，而终端当前指向了别处。",
+      "shellFailed": "无法在该机器中打开 shell",
+      "shellState": {
+        "paused": "{name} 已挂起。请在下方恢复，它的内存会一并回来。",
+        "stopped": "{name} 已停止。请在下方启动。不在绑定挂载上的内容依然还在。",
+        "absent": "Docker 中已经没有 {name} 对应的容器了。请在下方启动以重新创建。"
+      }
+    }
   },
   "activity": {
     "dispatch": "派发队列",

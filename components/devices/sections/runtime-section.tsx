@@ -36,7 +36,9 @@ import {
   LayersIcon,
   PlugZapIcon,
   RadarIcon,
+  SquareTerminalIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -52,6 +54,9 @@ import {
   writeExecutionAuthorityConfig,
 } from "@/lib/placement/authority"
 import type { DeviceRow } from "@/lib/devices/types"
+import { openMachineShell } from "@/lib/sandbox/machine-shell"
+import type { SandboxConnectionRow, SandboxLifecycleState } from "@/types/sandbox"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { cn } from "@/lib/utils"
 
@@ -293,9 +298,153 @@ function HostProbeResult({ probe }: { probe: ReturnType<typeof useHostProbe>["st
   )
 }
 
+/**
+ * Which lifecycle states a reader is actually scanning for.
+ *
+ * Eleven states is the right vocabulary for an adapter and the wrong one for a
+ * summary line, so they fold into four. `error` is deliberately not folded
+ * into "stopped": one is a machine you turned off and the other is a machine
+ * that failed, and only the second needs looking at.
+ */
+function foldMachineState(state: SandboxLifecycleState): "running" | "paused" | "error" | "off" {
+  switch (state) {
+    case "running":
+      return "running"
+    case "suspended":
+    case "suspending":
+    case "resuming":
+      return "paused"
+    case "error":
+      return "error"
+    default:
+      return "off"
+  }
+}
+
+/**
+ * The count line over the machine registry.
+ *
+ * `DeviceRuntimeSummary.sandbox.connections` was computed on every row from the
+ * start and read by nothing: the card below it embeds the settings tab, which
+ * fetches the same connections itself. So the fleet-level read, the one thing a
+ * console owes over a settings page, was the half that was missing.
+ *
+ * A running machine keeps consuming resources, which ADR-0160 accepted as the
+ * cost of machines that survive an app exit. Saying how many are up is the
+ * cheapest way to make that cost visible.
+ */
+function MachineSummary({
+  connections,
+  onOpenShell,
+  shellAvailable,
+}: {
+  connections: readonly SandboxConnectionRow[]
+  onOpenShell: (connection: SandboxConnectionRow) => void
+  shellAvailable: boolean
+}) {
+  const t = useTranslations("devices")
+  if (connections.length === 0) return null
+
+  const counts = { running: 0, paused: 0, error: 0, off: 0 }
+  for (const connection of connections) counts[foldMachineState(connection.state)] += 1
+  const runnable = connections.filter((connection) => connection.state === "running")
+
+  return (
+    <div className="space-y-2" data-testid="device-machine-summary">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline" className="font-normal">
+          {t("runtime.machines.total", { count: connections.length })}
+        </Badge>
+        {counts.running > 0 ? (
+          <Badge variant="outline" className="font-normal text-emerald-600 dark:text-emerald-400">
+            {t("runtime.machines.running", { count: counts.running })}
+          </Badge>
+        ) : null}
+        {counts.paused > 0 ? (
+          <Badge variant="outline" className="font-normal">
+            {t("runtime.machines.paused", { count: counts.paused })}
+          </Badge>
+        ) : null}
+        {counts.error > 0 ? (
+          <Badge variant="outline" className="font-normal text-destructive">
+            {t("runtime.machines.error", { count: counts.error })}
+          </Badge>
+        ) : null}
+      </div>
+
+      {counts.running > 0 ? (
+        <p className="text-[11px] text-muted-foreground">{t("runtime.machines.idleCost")}</p>
+      ) : null}
+
+      {/*
+        A shell into the machine, which ADR-0160 proved `docker exec` can carry
+        and nothing offered. Only running machines are listed: a paused or
+        stopped one is started from the registry below, which owns the
+        lifecycle.
+      */}
+      {runnable.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {runnable.map((connection) => (
+            <Button
+              key={connection.id}
+              size="sm"
+              variant="outline"
+              disabled={!shellAvailable}
+              onClick={() => onOpenShell(connection)}
+              data-testid={`device-machine-shell-${connection.id}`}
+            >
+              <SquareTerminalIcon className="size-3.5" />
+              {t("runtime.machines.openShell", { name: connection.name })}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
+      {/*
+        Stated rather than left to a disabled button. The machines belong to
+        the computer running this renderer and the terminal follows the routing
+        target, so the two can be different computers.
+      */}
+      {runnable.length > 0 && !shellAvailable ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="device-machine-shell-blocked">
+          {t("runtime.machines.shellWrongHost")}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function RuntimeSection({ row }: { row: DeviceRow }) {
   const t = useTranslations("devices")
   const sandboxSupported = row.runtime.sandbox.support === "supported"
+  // A shell lands on whichever machine the terminal routes to, and the
+  // containers are always on this one, so the two have to be the same box.
+  const shellAvailable = row.runtime.isRoutingTarget && row.isSelf
+
+  const onOpenShell = useCallback(
+    (connection: SandboxConnectionRow) => {
+      void (async () => {
+        const outcome = await openMachineShell({
+          connectionId: connection.id,
+          name: connection.name,
+          // Read at call time, like the dock does: subscribing the whole store
+          // here would re-render this card on every keystroke in any terminal.
+          store: useTerminalStore.getState(),
+        })
+        if (outcome.kind === "opened") return
+        if (outcome.kind === "not-running") {
+          toast.error(t(`runtime.machines.shellState.${outcome.state}`, { name: connection.name }))
+          return
+        }
+        if (outcome.kind === "wrong-host") {
+          toast.error(t("runtime.machines.shellWrongHost"))
+          return
+        }
+        toast.error(t("runtime.machines.shellFailed"), { description: outcome.message })
+      })()
+    },
+    [t]
+  )
 
   return (
     <>
@@ -307,7 +456,12 @@ export function RuntimeSection({ row }: { row: DeviceRow }) {
           would give the reader two headers and two borders for one thing.
           Only the explanation we write ourselves needs a frame from us. */}
       {sandboxSupported ? (
-        <div className="min-w-0 @3xl/device-pane:col-span-2" data-testid="device-sandbox">
+        <div className="min-w-0 space-y-2 @3xl/device-pane:col-span-2" data-testid="device-sandbox">
+          <MachineSummary
+            connections={row.runtime.sandbox.connections}
+            onOpenShell={onOpenShell}
+            shellAvailable={shellAvailable}
+          />
           <SandboxConnectionsTab />
         </div>
       ) : (

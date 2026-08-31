@@ -271,7 +271,22 @@
     "timingAuthorityHint": "When set, only this machine arms scheduled work. Leave it off and every host arms its own; duplicates are absorbed by the deterministic idempotency key.",
     "timingAuthorityAria": "Make {label} the scheduled timing authority",
     "routing": "Execution routing",
-    "tierCount": "{available}/{total} available"
+    "tierCount": "{available}/{total} available",
+    "machines": {
+      "total": "{count, plural, =0 {No machines} one {# machine} other {# machines}}",
+      "running": "{count} running",
+      "paused": "{count} paused",
+      "error": "{count} failed",
+      "idleCost": "A running machine keeps consuming CPU and memory until it is suspended or stopped, including across app restarts.",
+      "openShell": "Shell into {name}",
+      "shellWrongHost": "A shell into a machine runs where the machine does. These belong to this computer, and the terminal is currently pointed somewhere else.",
+      "shellFailed": "Could not open a shell in the machine",
+      "shellState": {
+        "paused": "{name} is paused. Resume it below, and its memory comes back with it.",
+        "stopped": "{name} is stopped. Start it below. Anything not on a bind mount is still there.",
+        "absent": "Docker has no container for {name} any more. Start it below to create one."
+      }
+    }
   },
   "activity": {
     "dispatch": "Dispatch queue",

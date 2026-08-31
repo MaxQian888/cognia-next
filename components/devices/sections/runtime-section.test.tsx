@@ -318,3 +318,98 @@ describe("RuntimeSection — timing authority", () => {
     })
   })
 })
+
+/**
+ * `DeviceRuntimeSummary.sandbox.connections` was computed on every row from the
+ * start and read by nothing: the card below it embeds the settings tab, which
+ * fetches the same connections itself. The fleet-level read, which is the one
+ * thing a console owes over a settings page, was the half that was missing.
+ */
+describe("RuntimeSection — machines", () => {
+  function machine(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "m1",
+      name: "home-docker",
+      provider: "docker",
+      driver: "computer-server",
+      config: { provider: "docker", image: "img", host: "127.0.0.1" },
+      state: "running",
+      capabilities: {},
+      lastHealthStatus: "ok",
+      createdAt: 0,
+      updatedAt: 0,
+      ...overrides,
+    } as never
+  }
+
+  function withMachines(connections: unknown[], overrides: Partial<DeviceRow> = {}) {
+    const base = row(overrides)
+    return {
+      ...base,
+      runtime: {
+        ...base.runtime,
+        sandbox: { ...base.runtime.sandbox, connections: connections as never },
+      },
+    }
+  }
+
+  it("renders nothing at all when the device has no machines", () => {
+    render(<RuntimeSection row={row()} />)
+    expect(screen.queryByTestId("device-machine-summary")).not.toBeInTheDocument()
+  })
+
+  it("counts machines by folded lifecycle state", () => {
+    render(
+      <RuntimeSection
+        row={withMachines([
+          machine(),
+          machine({ id: "m2", name: "b", state: "running" }),
+          machine({ id: "m3", name: "c", state: "suspended" }),
+          machine({ id: "m4", name: "d", state: "error" }),
+          machine({ id: "m5", name: "e", state: "stopped" }),
+        ])}
+      />
+    )
+    const summary = screen.getByTestId("device-machine-summary")
+    expect(summary).toHaveTextContent("2 running")
+    expect(summary).toHaveTextContent("1 paused")
+    expect(summary).toHaveTextContent("1 failed")
+  })
+
+  /**
+   * ADR-0160 accepted an idle machine consuming resources as the cost of
+   * machines that survive an app exit. Saying how many are up is the cheapest
+   * way to make that cost visible.
+   */
+  it("states the idle cost only while something is actually running", () => {
+    render(<RuntimeSection row={withMachines([machine()])} />)
+    expect(screen.getByTestId("device-machine-summary")).toHaveTextContent(/keeps consuming/)
+  })
+
+  it("says nothing about idle cost when every machine is off", () => {
+    render(<RuntimeSection row={withMachines([machine({ state: "stopped" })])} />)
+    expect(screen.getByTestId("device-machine-summary")).not.toHaveTextContent(/keeps consuming/)
+  })
+
+  it("offers a shell only into machines that are running", () => {
+    render(
+      <RuntimeSection
+        row={withMachines([machine(), machine({ id: "m2", name: "b", state: "suspended" })])}
+      />
+    )
+    expect(screen.getByTestId("device-machine-shell-m1")).toBeInTheDocument()
+    expect(screen.queryByTestId("device-machine-shell-m2")).not.toBeInTheDocument()
+  })
+
+  /**
+   * `cua_sandbox_*` is `target: "client"`, so the machines belong to the
+   * computer running this renderer while the terminal follows the routing
+   * target. Rendering the button disabled with the reason keeps "not from
+   * here" apart from "this machine has no shell".
+   */
+  it("disables the shell and says why when the terminal points elsewhere", () => {
+    render(<RuntimeSection row={withMachines([machine()], { isSelf: false })} />)
+    expect(screen.getByTestId("device-machine-shell-m1")).toBeDisabled()
+    expect(screen.getByTestId("device-machine-shell-blocked")).toBeInTheDocument()
+  })
+})
