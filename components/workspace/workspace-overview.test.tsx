@@ -26,7 +26,27 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   ),
 }))
 jest.mock("@/components/feature-shell/feature-page-header", () => ({
-  FeaturePageHeader: ({ title }: { title: string }) => <h1>{title}</h1>,
+  // `controls` is rendered because the workspace switcher lives there now.
+  FeaturePageHeader: ({ title, controls }: { title: string; controls?: React.ReactNode }) => (
+    <>
+      <h1>{title}</h1>
+      {controls}
+    </>
+  ),
+}))
+jest.mock("./workspace-picker-list", () => ({
+  useWorkspacePickerDialogs: () => ({
+    actions: {},
+    element: <div data-testid="workspace-picker-dialogs" />,
+  }),
+  WorkspacePickerList: () => <div data-testid="workspace-picker-list" />,
+}))
+jest.mock("@/components/settings/project-environment-manager", () => ({
+  ProjectEnvironmentManager: () => <section data-testid="project-environment-manager-stub" />,
+}))
+const listWorkspaceEnvironmentsMock = jest.fn()
+jest.mock("@/lib/task-workspace/client", () => ({
+  listWorkspaceEnvironments: (...args: unknown[]) => listWorkspaceEnvironmentsMock(...args),
 }))
 jest.mock("./workspace-environment-list", () => ({
   WorkspaceEnvironmentList: () => <section data-testid="workspace-environments-stub" />,
@@ -69,7 +89,7 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
 }))
 
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorkspaceOverview } from "./workspace-overview"
 
@@ -84,6 +104,8 @@ beforeEach(() => {
   trustedResult = []
   manageDialogProps = null
   storeState = { activeProjectId: "w1", projects: [] }
+  listWorkspaceEnvironmentsMock.mockReset()
+  listWorkspaceEnvironmentsMock.mockResolvedValue([])
 })
 
 describe("WorkspaceOverview", () => {
@@ -109,7 +131,7 @@ describe("WorkspaceOverview", () => {
   it("counts only unstarted and started issues as open", () => {
     issuesResult = [issue("todo"), issue("in_progress"), issue("done"), issue("canceled")]
     render(<WorkspaceOverview />)
-    expect(screen.getByTestId("workspace-open-issues")).toHaveTextContent("2")
+    expect(screen.getByTestId("workspace-stat-open-issues")).toHaveTextContent("2")
   })
 
   it("breaks issues down across every status, including empty ones", () => {
@@ -130,7 +152,7 @@ describe("WorkspaceOverview", () => {
     const link = screen.getByTestId("workspace-project-p1")
     expect(link).toHaveAttribute("href", "/projects?id=p1")
     expect(link).toHaveTextContent("MERC")
-    expect(screen.getByTestId("workspace-project-count")).toHaveTextContent("1")
+    expect(screen.getByTestId("workspace-stat-projects")).toHaveTextContent("1")
   })
 
   it("lists the workspace's mounted roots with their trust state", () => {
@@ -157,7 +179,7 @@ describe("WorkspaceOverview", () => {
   it("counts issues with an active run as agents working", () => {
     runningResult = new Set(["i1", "i2"])
     render(<WorkspaceOverview />)
-    expect(screen.getByTestId("workspace-agents-working")).toHaveTextContent("2")
+    expect(screen.getByTestId("workspace-stat-agents-working")).toHaveTextContent("2")
   })
 
   it("opens the ONE root editor (the manage dialog) instead of editing roots here", () => {
@@ -168,5 +190,73 @@ describe("WorkspaceOverview", () => {
     fireEvent.click(screen.getByTestId("workspace-manage-link"))
     expect(screen.getByTestId("manage-dialog-stub")).toBeInTheDocument()
     act(() => manageDialogProps!.onOpenChange(false))
+  })
+
+  /**
+   * The rail switcher lives inside a nav sheet that only `/` mounts on a
+   * phone, so this page could describe a workspace with no way to change
+   * which one it was describing.
+   */
+  it("carries the workspace switcher in its header", () => {
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-switcher-trigger")).toBeInTheDocument()
+  })
+
+  /**
+   * A Drawer or Popover unmounts its children on close, so the picker's
+   * dialogs have to be mounted by the page, not inside the trigger.
+   */
+  it("mounts the picker's dialogs outside the popover", () => {
+    render(<WorkspaceOverview />)
+    expect(screen.getByTestId("workspace-picker-dialogs")).toBeInTheDocument()
+  })
+
+  it("counts this workspace's environments, ignoring rows another project owns", async () => {
+    listWorkspaceEnvironmentsMock.mockResolvedValue([
+      { environmentId: "a", projectId: "w1" },
+      { environmentId: "b", projectId: "w1" },
+      { environmentId: "c", projectId: "other" },
+    ])
+    render(<WorkspaceOverview />)
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-stat-environments")).toHaveTextContent("2")
+    )
+  })
+
+  /**
+   * A host that cannot answer must leave the tile unknown. Reporting 0 would
+   * say "this workspace has no worktrees", which is a different claim.
+   */
+  it("leaves the environment tile unknown when the host cannot answer", async () => {
+    listWorkspaceEnvironmentsMock.mockRejectedValue(new Error("no host"))
+    render(<WorkspaceOverview />)
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-stat-environments")).not.toHaveTextContent("0")
+    )
+  })
+
+  /**
+   * `ProjectEnvironmentManager` was reachable only from chat, through the
+   * session settings sheet, so the repo-config and provisioning offers had no
+   * entry from the page about the workspace they configure.
+   */
+  it("offers the repo config and provisioning rules beside the environments", async () => {
+    const user = userEvent.setup()
+    storeState = {
+      activeProjectId: "w1",
+      projects: [
+        { id: "w1", name: "Repo", roots: [{ id: "r1", path: "/tmp/repo", isPrimary: true }] },
+      ],
+    }
+    render(<WorkspaceOverview />)
+    await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
+    expect(screen.getByTestId("project-environment-manager-stub")).toBeInTheDocument()
+  })
+
+  it("does not offer provisioning rules for a workspace with no root", async () => {
+    const user = userEvent.setup()
+    render(<WorkspaceOverview />)
+    await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
+    expect(screen.queryByTestId("project-environment-manager-stub")).not.toBeInTheDocument()
   })
 })

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+`/workspace` now reads as the workspace's home rather than a stack of unlabelled sections. It carries the workspace switcher in its header, so the page about a workspace finally offers a way to change which workspace it is describing (on a phone the rail switcher lives inside a nav sheet only the chat route mounts, which left this page describing something you could not switch). Its numbers now include how many execution environments the workspace owns, which is the only hint the Environments tab existed. Every block sits in the shared console card, so the page matches the device console instead of inventing its own spacing, and it reflows against its own pane rather than the window. The Environments tab also offers the repository's declared configuration and its provisioning rules, which until now were reachable only from chat through the session settings sheet, so the page about the workspace could show you the worktrees but not the rules that produce them.
