@@ -35,9 +35,20 @@ import type { PluginManifest } from "@/types/plugin"
 export interface PluginCompatibilityBadgeProps {
   manifest: PluginManifest | Record<string, unknown> | undefined
   className?: string
+  /**
+   * Applied to the label text only, so a dense caller can collapse the badge
+   * to its icon at narrow widths and let the tooltip carry the words. The
+   * class is the caller's, because only the caller knows which container
+   * query it sits in.
+   */
+  labelClassName?: string
 }
 
-export function PluginCompatibilityBadge({ manifest, className }: PluginCompatibilityBadgeProps) {
+export function PluginCompatibilityBadge({
+  manifest,
+  className,
+  labelClassName,
+}: PluginCompatibilityBadgeProps) {
   const t = useTranslations("plugins.compatibility")
   const profile = usePluginRuntimeProfile()
 
@@ -67,13 +78,26 @@ export function PluginCompatibilityBadge({ manifest, className }: PluginCompatib
       <Tooltip>
         <TooltipTrigger asChild>
           <Badge
-            variant={blocked ? "destructive" : "secondary"}
-            className={cn("shrink-0 gap-1 text-xs", className)}
+            // Outline rather than a solid destructive block: on a browser
+            // build this appears on most rows (a plugin that declares no
+            // browser compatibility genuinely is not started here), and a wall
+            // of red reads as breakage rather than as the fact it states. The
+            // row already carries a status pill for the plugin's own health.
+            variant="outline"
+            className={cn(
+              "shrink-0 gap-1 text-xs",
+              blocked
+                ? "border-destructive/40 text-destructive"
+                : "border-amber-500/40 text-amber-700 dark:text-amber-300",
+              className
+            )}
             data-testid="plugin-compatibility-badge"
             data-severity={worst.severity}
           >
-            <Icon className="size-3" />
-            {blocked ? t("blockedLabel") : t("degradedLabel")}
+            <Icon className="size-3 shrink-0" />
+            <span className={labelClassName}>
+              {blocked ? t("blockedLabel") : t("degradedLabel")}
+            </span>
           </Badge>
         </TooltipTrigger>
         <TooltipContent>

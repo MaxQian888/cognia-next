@@ -155,7 +155,13 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
                 {permissionCount}
               </span>
             )}
-            <PluginCompatibilityBadge manifest={plugin.manifest} />
+            {/* Icon-only until the list has room: the words are long, they
+                repeat on every row on a browser build, and the tooltip says
+                the same thing. */}
+            <PluginCompatibilityBadge
+              manifest={plugin.manifest}
+              labelClassName="hidden @xl/plugin-list:inline"
+            />
             <PluginSignatureBadge state={signatureState} compact />
             {errored && (
               <TriangleAlertIcon
