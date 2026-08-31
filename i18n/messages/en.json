@@ -9024,7 +9024,7 @@
       "tierAvailable": "Available",
       "tierCount": "{available}/{total} available",
       "tierReason": {
-        "cuaDesktopRetired": "Withdrawn. A bound desktop proves remote GUI isolation only, so shell and file work would not be sandboxed. Existing sessions that still carry this tier are refused at bind time.",
+        "cuaDesktopNoConnection": "Needs a bound machine that carries shell and file execution. A Docker connection provides it through `docker exec`, which runs inside the container. Cloud and Lume connections have no adapter yet, so they offer the remote desktop only.",
         "microvmAdapterMissing": "No microVM adapter is registered. Activate the E2B sandbox plugin; without it a microVM request is refused outright rather than falling back to the host.",
         "osBackendUnavailable": "The OS sandbox backend is not installed on this machine."
       },
@@ -21865,6 +21865,8 @@
     },
     "sections": {
       "agent-packages": "Agent packages",
+      "desktopOnly": "Desktop only",
+      "desktopOnlyHint": "This section needs the Cognia desktop app.",
       "detailSheetLabel": "Plugin detail",
       "devtools": "Devtools",
       "discover": "Discover",
@@ -21936,6 +21938,8 @@
     "title": "Plugins",
     "toolbar": {
       "checkUpdates": "Check for updates",
+      "desktopOnlyGroupHint": "These install from disk or a git checkout, which runs in the desktop backend.",
+      "desktopOnlyHint": "Needs the Cognia desktop app",
       "fromFile": "From file…",
       "fromFileSourceLabel": "Local files ({count})",
       "fromGithub": "From GitHub…",

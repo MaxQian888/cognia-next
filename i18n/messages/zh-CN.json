@@ -9024,7 +9024,7 @@
       "tierAvailable": "可用",
       "tierCount": "可用 {available}/{total}",
       "tierReason": {
-        "cuaDesktopRetired": "已撤回。绑定桌面只能证明远程 GUI 隔离，shell 与文件操作并未被沙盒化。仍带有该档位的历史会话会在绑定时被拒绝。",
+        "cuaDesktopNoConnection": "需要一台已绑定、且支持 shell 与文件执行的机器。Docker 连接通过 `docker exec` 提供，命令确实在容器内执行。云端与 Lume 连接目前没有适配器，只能提供远程桌面。",
         "microvmAdapterMissing": "未注册 microVM 适配器。请启用 E2B 沙盒插件；没有它时 microVM 请求会被直接拒绝，而不会回退到宿主执行。",
         "osBackendUnavailable": "本机未安装操作系统沙盒后端。"
       },
@@ -21865,6 +21865,8 @@
     },
     "sections": {
       "agent-packages": "Agent 扩展包",
+      "desktopOnly": "仅桌面端",
+      "desktopOnlyHint": "该分区需要 Cognia 桌面应用。",
       "detailSheetLabel": "插件详情",
       "devtools": "开发工具",
       "discover": "发现",
@@ -21936,6 +21938,8 @@
     "title": "插件",
     "toolbar": {
       "checkUpdates": "检查更新",
+      "desktopOnlyGroupHint": "这些安装方式要读取磁盘或 git 检出，只能在桌面端后台执行。",
+      "desktopOnlyHint": "需要 Cognia 桌面应用",
       "fromFile": "从文件…",
       "fromFileSourceLabel": "本地文件 ({count})",
       "fromGithub": "从 GitHub…",
