@@ -27,12 +27,14 @@ import { isTauri } from "@/lib/tauri"
 import { useProjectStore } from "@/stores/project/project-store"
 import { primaryRootOf, allRootPaths } from "@/lib/workspace/roots"
 import { isWorkspaceTrusted } from "@/lib/db/trusted-workspaces"
-import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
+import { openFolderAsWorkspace, openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import type { Project } from "@/types"
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 import { NewWorkspaceDialog } from "@/components/workspace/new-workspace-dialog"
 import { AdoptWorkspacesDialog } from "@/components/workspace/adopt-workspaces-dialog"
 import { useAdoptionCandidates } from "@/hooks/workspace/use-adoption-candidates"
+import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
+import { WorkspaceFolderPicker } from "./workspace-folder-picker"
 
 // Above this count the flat list stops being scannable, so we surface the
 // search field and a "Recent" quick-access group. Below it the whole list fits
@@ -74,12 +76,22 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const [manageOpen, setManageOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [adoptOpen, setAdoptOpen] = useState(false)
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   // Directories the app is already working in that no workspace owns. Collected
   // here rather than inside the dialog so the entry can carry the count — the
   // gap is invisible until something says how big it is.
   const { candidates: adoptable } = useAdoptionCandidates()
-  // project id → has any untrusted root (desktop only).
+  // project id → has any untrusted root.
   const [untrustedMap, setUntrustedMap] = useState<Record<string, boolean>>({})
+  const gate = useWorkspaceCommandGate()
+  // Two ways to reach a directory, and they are not the same question. The
+  // desktop has a native dialog; a paired phone or browser has no local
+  // filesystem worth opening but CAN walk the host's, which is the machine the
+  // agent will actually run on. Only an unpaired browser has neither, and
+  // there the entry is genuinely absent rather than disabled: there is no host
+  // to grant, so "disabled with a reason" would have no reason to give.
+  const canBrowseHost = gate("fs_list_workspace_dir").available
+  const canOpenFolder = isTauri() || canBrowseHost
 
   const visible = useMemo(
     () => projects.filter((p) => !p.isArchived).sort((a, b) => a.name.localeCompare(b.name)),
@@ -112,9 +124,15 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const showRecent = isLarge && !trimmed && recent.length > 0
   const showPinned = !trimmed && pinned.length > 0
 
-  // Resolve per-workspace trust badges lazily (desktop only).
+  // Resolve per-workspace trust badges lazily.
+  //
+  // This used to early-return off Tauri, so a paired phone or browser showed
+  // every workspace as trusted. `isWorkspaceTrusted` reads the Dexie
+  // `trustedWorkspaces` table, which is present on every shell and syncs, so
+  // the gate was answering a question nobody asked. Trust is exactly the badge
+  // a remote client most needs, because it is the one driving a real host.
   useEffect(() => {
-    if (!isTauri() || visible.length === 0) return
+    if (visible.length === 0) return
     let cancelled = false
     void Promise.all(
       visible.map(async (p) => {
@@ -151,6 +169,12 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   }
   const handleOpenFolder = async () => {
     handleOpenChange(false)
+    if (!isTauri()) {
+      // Reuses the same browser the manage dialog opens, which walks the host
+      // over `fs_list_workspace_dir`. It had exactly one caller before this.
+      setFolderPickerOpen(true)
+      return
+    }
     await openFolderAsWorkspace()
   }
 
@@ -342,7 +366,7 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
           </ScrollArea>
 
           <Separator className="my-1" />
-          {isTauri() && (
+          {canOpenFolder && (
             <button
               type="button"
               onClick={() => void handleOpenFolder()}
@@ -399,6 +423,11 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
         </PopoverContent>
       </Popover>
 
+      <WorkspaceFolderPicker
+        open={folderPickerOpen}
+        onOpenChange={setFolderPickerOpen}
+        onSelect={(path) => openPathAsWorkspace(path)}
+      />
       <NewWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AdoptWorkspacesDialog open={adoptOpen} onOpenChange={setAdoptOpen} />
       <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />

@@ -18,6 +18,9 @@ jest.mock("@/lib/git/commands", () => ({
 jest.mock("@/lib/files/file-bridge", () => ({
   pickDirectory: () => pickDirectory(),
 }))
+// Which shell this is decides whether a directory picker exists at all.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+const isTauriMock = jest.requireMock("@/lib/tauri").isTauri as jest.Mock
 jest.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
@@ -46,6 +49,7 @@ jest.mock("@/components/workspace/workspace-environment-list", () => ({
 
 beforeEach(() => {
   jest.clearAllMocks()
+  isTauriMock.mockReturnValue(true)
   gitWorktreeAdd.mockResolvedValue(undefined)
   pickDirectory.mockResolvedValue("/work/feature-b")
 })
@@ -170,5 +174,31 @@ describe("WorktreePanel", () => {
   it("does not render the inventory while closed", () => {
     render(<WorktreePanel open={false} rootDir="/repo" onOpenChange={() => {}} />)
     expect(screen.queryByTestId("canonical-workspace-inventory")).not.toBeInTheDocument()
+  })
+
+  it("makes the path field the control when no directory picker exists", async () => {
+    // `pickDirectory` resolves to null off Tauri, so the button used to open
+    // nothing and report nothing, and the field beside it was read-only. The
+    // form was impossible to complete on web and mobile.
+    isTauriMock.mockReturnValue(false)
+    render(<WorktreePanel open rootDir="/repo" onOpenChange={() => {}} />)
+
+    expect(screen.queryByTestId("worktree-pick-directory")).not.toBeInTheDocument()
+
+    const pathField = screen.getByTestId("worktree-path")
+    expect(pathField).not.toHaveAttribute("readonly")
+
+    await userEvent.type(screen.getByTestId("worktree-branch"), "feature-c")
+    await userEvent.type(pathField, "/work/feature-c")
+    fireEvent.click(screen.getByTestId("worktree-create"))
+
+    await waitFor(() => expect(gitWorktreeAdd).toHaveBeenCalled())
+    expect(gitWorktreeAdd).toHaveBeenCalledWith(
+      "/repo",
+      "/work/feature-c",
+      "feature-c",
+      undefined,
+      expect.objectContaining({ ownerType: "user" })
+    )
   })
 })

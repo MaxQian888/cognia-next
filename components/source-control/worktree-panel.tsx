@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import { pickDirectory } from "@/lib/files/file-bridge"
+import { isTauri } from "@/lib/tauri"
 import { gitWorktreeAdd, runGitUserAction } from "@/lib/git/commands"
 import { isRemoteGitTarget } from "@/lib/git/target"
 import { asGitError } from "@/types/git"
@@ -48,6 +49,13 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
   const [refreshKey, setRefreshKey] = useState(0)
   const remote = isRemoteGitTarget(rootDir)
   const can = canMutate ?? (() => true)
+  // `remote` answers "does this target take a relative path", which is not the
+  // same question as "is there a directory picker". The button used to be
+  // shown for every non-remote target, but `pickDirectory` resolves to null
+  // off Tauri, so on web and mobile it opened nothing and reported nothing.
+  // That is exactly the present-and-inert control `DirectoryField` documents
+  // as the failure to avoid, so the field is the control there.
+  const hasNativePicker = isTauri()
 
   const chooseDirectory = async () => {
     try {
@@ -117,15 +125,18 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
               <Input
                 id="worktree-path"
                 value={path}
-                readOnly={!remote}
-                onChange={(event) => remote && setPath(event.target.value)}
+                // Read-only only where the picker fills it. Without a picker
+                // the field is the only way to name a directory, and leaving
+                // it read-only made the form impossible to complete.
+                readOnly={!remote && hasNativePicker}
+                onChange={(event) => (remote || !hasNativePicker) && setPath(event.target.value)}
                 placeholder={
                   remote ? t("worktrees.relativePathPlaceholder") : t("worktrees.pathPlaceholder")
                 }
                 className="min-w-0"
                 data-testid="worktree-path"
               />
-              {!remote ? (
+              {!remote && hasNativePicker ? (
                 <Button
                   type="button"
                   variant="outline"

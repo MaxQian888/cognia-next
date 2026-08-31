@@ -83,7 +83,7 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
   const [manualDir, setManualDir] = useState("")
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  // path → trusted? (only meaningful on desktop). Undefined while loading.
+  // path → trusted? Undefined while loading.
   const [trustMap, setTrustMap] = useState<Record<string, boolean>>({})
   const desktop = isTauri()
 
@@ -106,9 +106,9 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [editing])
 
-  // Load per-root trust state for the edited workspace (desktop only).
+  // Load per-root trust state for the edited workspace.
   useEffect(() => {
-    if (!isTauri() || roots.length === 0) {
+    if (roots.length === 0) {
       return
     }
     let cancelled = false
@@ -373,30 +373,35 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
                                       onChange={(e) => setLabel(r.id, e.target.value)}
                                       className="h-8 text-xs"
                                     />
-                                    {desktop &&
-                                      (trusted ? (
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-8 shrink-0 gap-1 text-emerald-600"
-                                          onClick={() => void handleRevoke(r.path)}
-                                        >
-                                          <ShieldCheckIcon className="size-3.5" />
-                                          {t("trustedBadge")}
-                                        </Button>
-                                      ) : (
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-8 shrink-0 gap-1"
-                                          onClick={() => void handleTrust(r.path)}
-                                        >
-                                          <ShieldAlertIcon className="size-3.5 text-amber-500" />
-                                          {t("trustRoot")}
-                                        </Button>
-                                      ))}
+                                    {/* Trust is a Dexie row (`trustedWorkspaces`),
+                                        not a native call, so this used to be
+                                        hidden on the one shell that needs it
+                                        most: a phone or browser driving a real
+                                        host. `handleTrust`/`handleRevoke` are
+                                        plain table writes. */}
+                                    {trusted ? (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 shrink-0 gap-1 text-emerald-600"
+                                        onClick={() => void handleRevoke(r.path)}
+                                      >
+                                        <ShieldCheckIcon className="size-3.5" />
+                                        {t("trustedBadge")}
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 shrink-0 gap-1"
+                                        onClick={() => void handleTrust(r.path)}
+                                      >
+                                        <ShieldAlertIcon className="size-3.5 text-amber-500" />
+                                        {t("trustRoot")}
+                                      </Button>
+                                    )}
                                   </div>
                                 </li>
                               )

@@ -21,6 +21,19 @@ jest.mock("@/lib/db/trusted-workspaces", () => ({
   revokeWorkspaceTrust: jest.fn(async () => undefined),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+// The switcher asks per command whether the host can be browsed, so the test
+// has to say which shell it is. `target: null` is a native execution host.
+const gateMock = jest.fn(() => ({ available: true, reason: null }))
+jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
+  useWorkspaceCommandGate: () => gateMock,
+}))
+const folderPickerMock = jest.fn()
+jest.mock("./workspace-folder-picker", () => ({
+  WorkspaceFolderPicker: (props: { open: boolean }) => {
+    folderPickerMock(props)
+    return props.open ? <div data-testid="remote-folder-picker" /> : null
+  },
+}))
 const listWorkspaceEnvironmentsMock = jest.fn(async () => [] as unknown[])
 jest.mock("@/lib/task-workspace/client", () => ({
   listWorkspaceEnvironments: () => listWorkspaceEnvironmentsMock(),
@@ -73,6 +86,8 @@ function makeProject(id: string, over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
+  gateMock.mockReturnValue({ available: true, reason: null })
+  folderPickerMock.mockClear()
   openDialogMock.mockReset()
   localStorage.clear()
   listWorkspaceEnvironmentsMock.mockReset()
@@ -318,11 +333,30 @@ describe("WorkspaceSwitcher", () => {
     expect(useProjectStore.getState().activeProjectId).toBe(projects[0].id)
   })
 
-  it("hides the open-folder action on web", () => {
+  it("hides the open-folder action on an unpaired browser", () => {
+    // No native dialog and no host to walk, so the entry is genuinely absent
+    // rather than disabled: there would be no reason to show alongside it.
     isTauriMock.mockReturnValue(false)
+    gateMock.mockReturnValue({ available: false, reason: "unsupported" })
     renderSwitcher()
     fireEvent.click(screen.getByTestId("workspace-switcher"))
     expect(screen.queryByTestId("workspace-switcher-open-folder")).not.toBeInTheDocument()
+  })
+
+  it("browses the paired host instead of hiding open-folder on a companion", async () => {
+    // A phone has no local filesystem worth opening, but it can walk the
+    // machine the agent will actually run on. The remote browser already
+    // existed and had exactly one caller.
+    isTauriMock.mockReturnValue(false)
+    gateMock.mockReturnValue({ available: true, reason: null })
+    renderSwitcher()
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("workspace-switcher-open-folder"))
+    })
+    expect(screen.getByTestId("remote-folder-picker")).toBeInTheDocument()
+    // and it must not have reached for the native dialog
+    expect(openDialogMock).not.toHaveBeenCalled()
   })
 
   it("offers to adopt a folder in use that no workspace owns", async () => {
