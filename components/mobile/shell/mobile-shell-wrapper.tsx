@@ -166,6 +166,13 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     // viewport height that chain collapses to zero and the route paints a blank
     // strip — which no overflow check would catch.
     pathname === "/sites" ||
+    // `/devices` and `/servers` for exactly the same reason as `/sites`. Both
+    // are `FeaturePageShell` fleet consoles and both are reachable on a phone
+    // (`/devices` from the `/me` list, `/servers` from the rail), so without a
+    // definite height they were reachable *and* blank.
+    pathname === "/devices" ||
+    pathname === "/servers" ||
+    pathname.startsWith("/servers/") ||
     pathname.startsWith("/a2ui/") ||
     pathname === "/me/terminal" ||
     pathname === "/onboarding" ||

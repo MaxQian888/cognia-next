@@ -484,6 +484,29 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
   })
 
+  it.each(["/devices", "/servers"])(
+    "gives the %s fleet console a definite full-viewport height with the tab bar",
+    (route) => {
+      pathnameMock.mockReturnValue(route)
+      const { container } = render(
+        <MobileShellWrapper>
+          <div>console</div>
+        </MobileShellWrapper>
+      )
+      // Both are `FeaturePageShell` consoles reachable on a phone, so without
+      // the definite-height column their `h-full min-h-0 flex-1` chain
+      // collapses and the route renders as a blank strip.
+      expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute(
+        "data-full-viewport",
+        "true"
+      )
+      const inner = container.querySelector("[data-testid='mobile-shell-wrapper'] > div")
+      expect(inner?.className).toContain("h-[100dvh]")
+      expect(inner?.className).not.toContain("min-h-[100dvh]")
+      expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
+    }
+  )
+
   it("keeps the document-scroll min-height on the /workflows list (not full-viewport)", () => {
     pathnameMock.mockReturnValue("/workflows")
     const { container } = render(
