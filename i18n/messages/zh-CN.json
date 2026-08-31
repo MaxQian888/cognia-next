@@ -21184,12 +21184,12 @@
         "waiting": "正在等待服务"
       },
       "logs": {
-        "aria": "Python 宿主日志条目",
+        "aria": "插件运行时日志条目",
         "clear": "清空",
-        "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
+        "empty": "还没有输出。插件通过宿主打日志后会出现在这里；Python 插件则要等它的宿主跑起来。",
         "exited": "宿主进程已退出",
-        "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
-        "streamEnd": "— 流式输出结束 —"
+        "runtimeStrip": "Python {version} · 已加载 {plugins}（{lazy} 空闲）· {calls} 次调用",
+        "streamEnd": "— 流结束 —"
       },
       "metaAuthor": "作者",
       "metaCreatedAt": "安装时间",
@@ -21360,9 +21360,16 @@
         "version": "包版本 {version}"
       },
       "runtimeLogs": {
-        "filter": "{pluginId} generation {generation} 的结构化日志",
-        "title": "Runtime 日志",
-        "waiting": "完成带 generation 证明的激活后显示日志。"
+        "clear": "清空",
+        "empty": "还没有日志。",
+        "filter": "{pluginId} 的结构化日志，generation {generation}",
+        "missing": {
+          "wasm-no-channel": "WASM 插件没有 per-plugin 输出通道。宿主用抛错上报失败，会出现在上方的尝试诊断里，而不是这里。",
+          "vscode-no-channel": "VS Code 扩展宿主不提供 output channel。`window:outputChannelAppend` 在明确不可用清单里，扩展往那里写会拿到能力错误，什么都不会被缓冲。"
+        },
+        "title": "运行时日志",
+        "unverified": "正在显示 {pluginId} 的全部 generation。尚未验证过任何一次激活，这些行可能来自上一次加载。",
+        "waiting": "启动一次开发会话即可看到该插件的输出。"
       },
       "sessionState": {
         "idle": "空闲",

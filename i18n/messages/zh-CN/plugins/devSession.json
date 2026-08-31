@@ -39,9 +39,16 @@
     "version": "包版本 {version}"
   },
   "runtimeLogs": {
-    "filter": "{pluginId} generation {generation} 的结构化日志",
-    "title": "Runtime 日志",
-    "waiting": "完成带 generation 证明的激活后显示日志。"
+    "clear": "清空",
+    "empty": "还没有日志。",
+    "filter": "{pluginId} 的结构化日志，generation {generation}",
+    "missing": {
+      "wasm-no-channel": "WASM 插件没有 per-plugin 输出通道。宿主用抛错上报失败，会出现在上方的尝试诊断里，而不是这里。",
+      "vscode-no-channel": "VS Code 扩展宿主不提供 output channel。`window:outputChannelAppend` 在明确不可用清单里，扩展往那里写会拿到能力错误，什么都不会被缓冲。"
+    },
+    "title": "运行时日志",
+    "unverified": "正在显示 {pluginId} 的全部 generation。尚未验证过任何一次激活，这些行可能来自上一次加载。",
+    "waiting": "启动一次开发会话即可看到该插件的输出。"
   },
   "sessionState": {
     "idle": "空闲",

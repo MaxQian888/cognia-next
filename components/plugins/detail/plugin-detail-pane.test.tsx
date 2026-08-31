@@ -105,15 +105,30 @@ describe("PluginDetailPane", () => {
     expect(screen.queryByTestId("capabilities")).not.toBeInTheDocument()
   })
 
-  it("shows the Logs section only for python/hybrid plugins", () => {
-    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
-    const { unmount } = render(<PluginDetailPane />)
-    expect(screen.queryByTestId("plugin-detail-section-logs")).not.toBeInTheDocument()
-    unmount()
-    mockPlugin = { ...makePlugin(), type: "python" }
-    render(<PluginDetailPane />)
-    expect(screen.getByTestId("plugin-detail-section-logs")).toBeInTheDocument()
-  })
+  it.each(["frontend", "python", "hybrid"] as const)(
+    "shows the Logs section for %s, whose host has an output channel",
+    (type) => {
+      // It used to be python-only, which hid the frontend half of a hybrid
+      // plugin's output and left frontend authors with no log surface here at
+      // all.
+      mockPlugin = { ...makePlugin(), type }
+      usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+      render(<PluginDetailPane />)
+      expect(screen.getByTestId("plugin-detail-section-logs")).toBeInTheDocument()
+    }
+  )
+
+  it.each(["wasm", "vscode-extension"] as const)(
+    "hides the Logs section for %s, whose host serves no output channel",
+    (type) => {
+      // An empty tab would read as a broken reader rather than an absent
+      // channel, so the tab is withheld instead.
+      mockPlugin = { ...makePlugin(), type }
+      usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+      render(<PluginDetailPane />)
+      expect(screen.queryByTestId("plugin-detail-section-logs")).not.toBeInTheDocument()
+    }
+  )
 
   it("renders the not-found hint when detailPluginId is set but the row is missing", () => {
     mockPlugin = undefined

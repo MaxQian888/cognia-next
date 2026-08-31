@@ -18,7 +18,25 @@ jest.mock("@/lib/plugin/core/manager", () => ({
 }))
 
 import { appendPythonEvent, __resetPythonLogBufferForTesting } from "@/lib/plugin/python/log-buffer"
+import { getPluginDebugger, resetPluginDebugger } from "@/lib/plugin/devtools/debugger"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
+import type { PluginType } from "@/types/plugin"
 import { PluginDetailLogs } from "./plugin-detail-logs"
+
+/** The Python runtime strip is gated on the plugin actually having a host. */
+function seedPlugin(type: PluginType) {
+  usePluginStore.setState({
+    plugins: {
+      demo: {
+        manifest: { id: "demo", name: "Demo", version: "1.0.0", type },
+        status: "enabled",
+        source: "local",
+        path: "/plugins/demo",
+        config: {},
+      },
+    },
+  } as never)
+}
 
 /** Render and flush the async runtime-info effect (avoids act warnings). */
 async function renderLogs() {
@@ -31,6 +49,8 @@ async function renderLogs() {
 describe("PluginDetailLogs", () => {
   beforeEach(() => {
     __resetPythonLogBufferForTesting()
+    resetPluginDebugger()
+    seedPlugin("python")
     getRuntimeInfoMock.mockReset()
     getRuntimeInfoMock.mockResolvedValue({
       available: true,
@@ -106,6 +126,48 @@ describe("PluginDetailLogs", () => {
 
   it("hides the runtime strip when the manager is unavailable", async () => {
     getRuntimeInfoMock.mockRejectedValue(new Error("web mode"))
+    await renderLogs()
+    expect(screen.queryByTestId("python-runtime-strip")).not.toBeInTheDocument()
+  })
+})
+
+describe("PluginDetailLogs — merged runtimes", () => {
+  beforeEach(() => {
+    __resetPythonLogBufferForTesting()
+    resetPluginDebugger()
+    getRuntimeInfoMock.mockReset().mockResolvedValue(null)
+  })
+
+  it("shows a frontend plugin's output, which this tab never used to reach", async () => {
+    // The tab read the python buffer directly and was python-gated, so a
+    // frontend plugin's `ctx.logger` output was reachable only from the
+    // DevTools workbench, behind a verified-activation gate.
+    seedPlugin("frontend")
+    const dbg = getPluginDebugger()
+    dbg.startSession("demo", 1)
+    dbg.log("demo", "warn", "from the renderer")
+    await renderLogs()
+    const line = screen.getByText("from the renderer")
+    expect(line.closest("li")).toHaveAttribute("data-runtime", "frontend")
+  })
+
+  it("shows both halves of a hybrid plugin, tagged by host", async () => {
+    seedPlugin("hybrid")
+    const dbg = getPluginDebugger()
+    dbg.startSession("demo", 1)
+    dbg.log("demo", "info", "renderer side")
+    appendPythonEvent({ pluginId: "demo", kind: "log", data: { line: "host side" } }, 1)
+    await renderLogs()
+    expect(screen.getByText("renderer side").closest("li")).toHaveAttribute(
+      "data-runtime",
+      "frontend"
+    )
+    expect(screen.getByText("host side").closest("li")).toHaveAttribute("data-runtime", "python")
+  })
+
+  it("hides the Python runtime strip for a plugin with no Python host", async () => {
+    seedPlugin("frontend")
+    getRuntimeInfoMock.mockResolvedValue({ version: "3.14.0", plugin_count: 1 })
     await renderLogs()
     expect(screen.queryByTestId("python-runtime-strip")).not.toBeInTheDocument()
   })

@@ -63,12 +63,12 @@
     "waiting": "正在等待服务"
   },
   "logs": {
-    "aria": "Python 宿主日志条目",
+    "aria": "插件运行时日志条目",
     "clear": "清空",
-    "empty": "暂无宿主活动。Python 宿主运行后,日志、pip 安装进度和流式输出会显示在这里。",
+    "empty": "还没有输出。插件通过宿主打日志后会出现在这里；Python 插件则要等它的宿主跑起来。",
     "exited": "宿主进程已退出",
-    "runtimeStrip": "Python {version} · 已加载 {plugins} 个({lazy} 个闲置)· {calls} 次调用",
-    "streamEnd": "— 流式输出结束 —"
+    "runtimeStrip": "Python {version} · 已加载 {plugins}（{lazy} 空闲）· {calls} 次调用",
+    "streamEnd": "— 流结束 —"
   },
   "metaAuthor": "作者",
   "metaCreatedAt": "安装时间",

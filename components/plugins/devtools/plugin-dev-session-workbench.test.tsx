@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
 import enMessages from "@/i18n/messages/en.json"
-import type { LogEntry } from "@/lib/plugin/devtools/debugger"
+import type { PluginRuntimeLogEntry } from "@/lib/plugin/devtools/runtime-log-stream"
 import { useDevProjectStore } from "@/stores/plugins/dev-project-store"
 import { usePluginDevSessionStore } from "@/stores/plugins/plugin-dev-session-store"
 
@@ -48,8 +48,11 @@ const mockToastError = jest.fn()
 jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 const mockGetLogs = jest.fn()
 const mockOnLog = jest.fn()
-jest.mock("@/lib/plugin/devtools/debugger", () => ({
-  getPluginDebugger: () => ({ getLogs: mockGetLogs, onLog: mockOnLog }),
+jest.mock("@/lib/plugin/devtools/runtime-log-stream", () => ({
+  ...jest.requireActual("@/lib/plugin/devtools/runtime-log-stream"),
+  getPluginRuntimeLogs: (...args: unknown[]) => mockGetLogs(...args),
+  subscribePluginRuntimeLogs: (...args: unknown[]) => mockOnLog(...args),
+  clearPluginRuntimeLogs: jest.fn(),
 }))
 const setPanelOpen = jest.fn()
 const setActiveSession = jest.fn()
@@ -191,6 +194,94 @@ describe("PluginDevSessionWorkbench", () => {
     expect(screen.getByTestId("plugin-dev-session-workbench")).toBeInTheDocument()
   })
 
+  describe("runtime logs", () => {
+    function seedFailedReload(pluginType: "frontend" | "python" | "wasm" | "vscode-extension") {
+      usePluginDevSessionStore.getState().recordReloadResult({
+        schemaVersion: 1,
+        ok: false,
+        outcome: "failed",
+        stage: "verify",
+        sessionId: "session-a",
+        attempt: 1,
+        pluginId: "demo.plugin",
+        pluginType,
+        error: {
+          code: "activation_failed",
+          message: "boom",
+          action: "retry",
+          retriable: true,
+        },
+      })
+    }
+
+    it("shows every generation, and says so, when no activation has been verified", async () => {
+      // The previous behaviour was to show nothing at all without an
+      // activation proof, so a plugin whose reload kept failing gave its
+      // author an empty card and no output to debug it with.
+      seedFailedReload("frontend")
+      mockGetLogs.mockReturnValue([
+        {
+          id: "log-1",
+          pluginId: "demo.plugin",
+          runtime: "frontend",
+          generation: "2",
+          level: "error",
+          message: "threw during activate",
+          timestamp: 1,
+        },
+      ])
+      renderWorkbench()
+      await userEvent.click(screen.getByRole("tab", { name: "Diagnostics" }))
+      expect(await screen.findByText(/threw during activate/)).toBeInTheDocument()
+      expect(screen.getByTestId("runtime-logs-scope")).toHaveTextContent(
+        /No activation has been verified yet/
+      )
+      expect(mockGetLogs).toHaveBeenCalledWith("demo.plugin", { generation: null, limit: 200 })
+    })
+
+    it("tags each line with the runtime that produced it", async () => {
+      // A hybrid plugin emits from two hosts at once.
+      seedFailedReload("python")
+      mockGetLogs.mockReturnValue([
+        {
+          id: "log-1",
+          pluginId: "demo.plugin",
+          runtime: "python",
+          generation: null,
+          level: "info",
+          message: "from the host",
+          timestamp: 1,
+        },
+      ])
+      renderWorkbench()
+      await userEvent.click(screen.getByRole("tab", { name: "Diagnostics" }))
+      const line = await screen.findByText(/from the host/)
+      expect(line.closest("li")).toHaveAttribute("data-runtime", "python")
+    })
+
+    it.each([
+      ["wasm", /no per-plugin output channel/i],
+      ["vscode-extension", /explicitly-unavailable list/i],
+    ] as const)(
+      "explains why %s produces no logs instead of showing an empty list",
+      async (type, expected) => {
+        seedFailedReload(type)
+        renderWorkbench()
+        await userEvent.click(screen.getByRole("tab", { name: "Diagnostics" }))
+        expect(screen.getByTestId("runtime-logs-scope")).toHaveTextContent(expected)
+        expect(mockGetLogs).not.toHaveBeenCalled()
+      }
+    )
+
+    it("says nothing was logged rather than leaving the card blank", async () => {
+      seedFailedReload("frontend")
+      mockGetLogs.mockReturnValue([])
+      renderWorkbench()
+      await userEvent.click(screen.getByRole("tab", { name: "Diagnostics" }))
+      expect(await screen.findByTestId("runtime-logs-empty")).toBeInTheDocument()
+    })
+  })
+
   it("shows attempt duration, diagnostics, and generation-filtered runtime logs", async () => {
     usePluginDevSessionStore.getState().ingest({
       schemaVersion: 1,
@@ -201,19 +292,20 @@ describe("PluginDevSessionWorkbench", () => {
       durationMs: 321,
       occurredAt: new Date().toISOString(),
     })
-    const initialLog: LogEntry = {
+    const initialLog: PluginRuntimeLogEntry = {
       id: "log-1",
       pluginId: "demo.plugin",
-      generation: 5,
+      runtime: "frontend",
+      generation: "5",
       level: "info",
       message: "runtime ready",
-      args: [],
       timestamp: 1,
     }
-    mockGetLogs.mockReturnValue([initialLog])
-    let logHandler: ((entry: LogEntry) => void) | undefined
-    mockOnLog.mockImplementation((handler) => {
-      logHandler = handler
+    let visible: PluginRuntimeLogEntry[] = [initialLog]
+    mockGetLogs.mockImplementation(() => visible)
+    let onChange: (() => void) | undefined
+    mockOnLog.mockImplementation((_pluginId: string, handler: () => void) => {
+      onChange = handler
       return jest.fn()
     })
     renderWorkbench()
@@ -242,14 +334,16 @@ describe("PluginDevSessionWorkbench", () => {
       })
     })
     expect(await screen.findByText("runtime ready")).toBeInTheDocument()
-    expect(mockGetLogs).toHaveBeenCalledWith("demo.plugin", { generation: 5, limit: 100 })
+    expect(mockGetLogs).toHaveBeenCalledWith("demo.plugin", { generation: 5, limit: 200 })
 
     act(() => {
-      logHandler?.({ ...initialLog, id: "ignored", pluginId: "other.plugin" })
-      logHandler?.({ ...initialLog, id: "log-2", level: "error", message: "runtime failed" })
+      visible = [
+        initialLog,
+        { ...initialLog, id: "log-2", level: "error", message: "runtime failed" },
+      ]
+      onChange?.()
     })
-    await waitFor(() => expect(screen.getByText("runtime failed")).toBeInTheDocument())
-    expect(screen.queryByText("ignored")).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/runtime failed/)).toBeInTheDocument())
 
     await userEvent.click(screen.getByRole("tab", { name: "Advanced diagnostics" }))
     expect(screen.getByTestId("lifecycle")).toBeInTheDocument()

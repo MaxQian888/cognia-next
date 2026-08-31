@@ -34,6 +34,7 @@ import { PluginDetailConfigure } from "./plugin-detail-configure"
 import { PluginDetailPermissions } from "./plugin-detail-permissions"
 import { PluginDetailData } from "./plugin-detail-data"
 import { PluginDetailLogs } from "./plugin-detail-logs"
+import { logSourcesFor } from "@/lib/plugin/devtools/runtime-log-stream"
 
 interface SectionDef {
   value: Exclude<PluginDetailSubTab, "overview">
@@ -41,7 +42,8 @@ interface SectionDef {
   icon: ComponentType<{ className?: string }>
   render: (pluginId: string) => ReactNode
   /** Only render for python/hybrid plugins (the host subprocess log source). */
-  pythonOnly?: boolean
+  /** Hidden for runtimes whose host serves no log channel (wasm, vscode). */
+  requiresLogChannel?: boolean
 }
 
 const SECTIONS: ReadonlyArray<SectionDef> = [
@@ -74,7 +76,7 @@ const SECTIONS: ReadonlyArray<SectionDef> = [
     labelKey: "subtab.logs",
     icon: ScrollTextIcon,
     render: (id) => <PluginDetailLogs pluginId={id} />,
-    pythonOnly: true,
+    requiresLogChannel: true,
   },
 ]
 
@@ -118,8 +120,12 @@ function PluginDetailPaneContent({ pluginId }: { pluginId: string }) {
   }
 
   const plugin = rowState.row
-  const hasPythonHost = plugin.type === "python" || plugin.type === "hybrid"
-  const sections = SECTIONS.filter((s) => !s.pythonOnly || hasPythonHost)
+  // The Logs tab used to be python-only, which hid the frontend half of a
+  // hybrid plugin's output. It now follows whatever the merged runtime-log
+  // stream can actually read, so wasm and vscode-extension still get no tab
+  // rather than an empty one.
+  const hasLogChannel = logSourcesFor(plugin.type).runtimes.length > 0
+  const sections = SECTIONS.filter((s) => !s.requiresLogChannel || hasLogChannel)
 
   return (
     <div className="flex h-full min-h-0 flex-col">

@@ -21184,9 +21184,9 @@
         "waiting": "Waiting for service"
       },
       "logs": {
-        "aria": "Python host log entries",
+        "aria": "Plugin runtime log entries",
         "clear": "Clear",
-        "empty": "No host activity yet. Logs, pip progress, and streaming output appear here once the Python host runs.",
+        "empty": "No output yet. Lines appear here once the plugin logs through the host, and for a Python plugin once its host runs.",
         "exited": "Host process exited",
         "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
         "streamEnd": "— stream ended —"
@@ -21360,9 +21360,16 @@
         "version": "Package {version}"
       },
       "runtimeLogs": {
+        "clear": "Clear",
+        "empty": "Nothing logged yet.",
         "filter": "Structured logs for {pluginId}, generation {generation}",
+        "missing": {
+          "wasm-no-channel": "WASM plugins have no per-plugin output channel. The host reports failures by throwing, which surfaces in attempt diagnostics above rather than here.",
+          "vscode-no-channel": "The VS Code extension host does not serve output channels. `window:outputChannelAppend` is on its explicitly-unavailable list, so an extension writing there gets a capability error and nothing is buffered."
+        },
         "title": "Runtime logs",
-        "waiting": "Logs appear after a generation-backed activation succeeds."
+        "unverified": "Showing every generation for {pluginId}. No activation has been verified yet, so these lines may come from an earlier load.",
+        "waiting": "Start a development session to see this plugin's output."
       },
       "sessionState": {
         "idle": "Idle",

@@ -20,7 +20,13 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCogniaCliStatus } from "@/hooks/plugins/use-cognia-cli-status"
-import { getPluginDebugger, type LogEntry } from "@/lib/plugin/devtools/debugger"
+import {
+  clearPluginRuntimeLogs,
+  getPluginRuntimeLogs,
+  logSourcesFor,
+  subscribePluginRuntimeLogs,
+  type PluginRuntimeLogEntry,
+} from "@/lib/plugin/devtools/runtime-log-stream"
 import { getLiveSession } from "@/lib/terminal/session-registry"
 import { launchCognia } from "@/lib/terminal/run-cognia"
 import { useDevProjectStore } from "@/stores/plugins/dev-project-store"
@@ -34,6 +40,9 @@ import { CogniaCliLauncher } from "./cognia-cli-launcher"
 import { CogniaCliStatusCard } from "./cognia-cli-status-card"
 import { LocalPluginDropzone } from "./local-plugin-dropzone"
 import { ManifestValidator } from "./manifest-validator"
+
+/** Newest lines kept in view. The rings themselves are larger. */
+const RUNTIME_LOG_LIMIT = 200
 
 const STAGES: PluginDevAttemptStage[] = [
   "detected",
@@ -314,44 +323,87 @@ function AttemptDiagnostics() {
 function RuntimeLogs() {
   const t = useTranslations("plugins.devSession")
   const session = usePluginDevSessionStore((state) => state.sessions[0])
+  const pluginId = session?.pluginId
+  const pluginType = session?.pluginType
   const proof = session?.attempts[0]?.activationProof
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  const generation = proof?.generation ?? null
+  const [entries, setEntries] = useState<PluginRuntimeLogEntry[]>([])
+
+  const missingReason = pluginType ? logSourcesFor(pluginType).missingReason : undefined
 
   useEffect(() => {
-    if (!session?.pluginId || !proof) {
+    if (!pluginId || missingReason) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLogs([])
+      setEntries([])
       return
     }
-    const pluginId = session.pluginId
-    const generation = proof.generation
-    const debugger_ = getPluginDebugger()
-    setLogs(debugger_.getLogs(pluginId, { generation, limit: 100 }))
-    return debugger_.onLog((entry) => {
-      if (entry.pluginId !== pluginId || entry.generation !== generation) return
-      setLogs((current) => [...current, entry].slice(-100))
-    })
-  }, [proof, session?.pluginId])
+    const read = () =>
+      setEntries(getPluginRuntimeLogs(pluginId, { generation, limit: RUNTIME_LOG_LIMIT }))
+    read()
+    return subscribePluginRuntimeLogs(pluginId, read)
+  }, [pluginId, generation, missingReason])
 
   return (
     <Card className="p-4" data-testid="dev-session-runtime-logs">
-      <h3 className="text-sm font-semibold">{t("runtimeLogs.title")}</h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {proof
-          ? t("runtimeLogs.filter", {
-              pluginId: session?.pluginId ?? "",
-              generation: proof.generation,
-            })
-          : t("runtimeLogs.waiting")}
-      </p>
-      {logs.length > 0 && (
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">{t("runtimeLogs.title")}</h3>
+          <p className="mt-1 text-xs text-muted-foreground" data-testid="runtime-logs-scope">
+            {!pluginId
+              ? t("runtimeLogs.waiting")
+              : missingReason
+                ? t(`runtimeLogs.missing.${missingReason}` as never)
+                : proof
+                  ? t("runtimeLogs.filter", { pluginId, generation: proof.generation })
+                  : // Before this, no verified activation meant no logs at all, so a
+                    // Python plugin author watched an empty card while their output
+                    // sat on the plugin detail page. Show everything and say so.
+                    t("runtimeLogs.unverified", { pluginId })}
+          </p>
+        </div>
+        {pluginId && !missingReason && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={entries.length === 0}
+            onClick={() => {
+              clearPluginRuntimeLogs(pluginId)
+              setEntries([])
+            }}
+          >
+            {t("runtimeLogs.clear")}
+          </Button>
+        )}
+      </div>
+
+      {pluginId && !missingReason && entries.length === 0 && (
+        <p className="mt-3 text-sm text-muted-foreground" data-testid="runtime-logs-empty">
+          {t("runtimeLogs.empty")}
+        </p>
+      )}
+
+      {entries.length > 0 && (
         <ul className="mt-3 max-h-72 divide-y overflow-y-auto rounded-md border">
-          {logs.map((entry) => (
-            <li key={entry.id} className="flex gap-2 px-3 py-2 font-mono text-xs">
+          {entries.map((entry) => (
+            <li
+              key={entry.id}
+              className="flex gap-2 px-3 py-2 font-mono text-xs"
+              data-runtime={entry.runtime}
+            >
               <Badge variant={entry.level === "error" ? "destructive" : "outline"}>
                 {entry.level}
               </Badge>
-              <span className="min-w-0 flex-1 break-words">{entry.message}</span>
+              {/*
+                Which runtime produced the line. A hybrid plugin emits from two
+                hosts at once, and without this its Python and frontend output
+                are indistinguishable.
+              */}
+              <span className="shrink-0 text-[10px] uppercase text-muted-foreground">
+                {entry.runtime}
+              </span>
+              <span className="min-w-0 flex-1 break-words">
+                {entry.kind ?? ""} {entry.message}
+              </span>
             </li>
           ))}
         </ul>

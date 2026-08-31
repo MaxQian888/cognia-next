@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+A plugin's output now reads the same wherever you look at it. Its logs were split across two screens with different gates: a frontend plugin's `ctx.logger` lines were reachable only from the DevTools Dev Session workbench and only after an activation had been verified, while a Python plugin's host output lived on the plugin detail page and never appeared in DevTools at all. A Python author watching the workbench saw an empty Runtime Logs card while their real output sat one page away, and a hybrid plugin only ever showed half of what it emitted. Both surfaces now read one merged, time-ordered stream, and every line says which host produced it. The workbench no longer hides everything until an activation is verified: with no proof it shows all generations and says so, which is exactly the situation where an author needs the output most. The detail page's Logs tab, previously Python-only, now appears for frontend and hybrid plugins too. `wasm` and `vscode-extension` genuinely have no per-plugin output channel, and DevTools now says which and why instead of rendering an empty list.
