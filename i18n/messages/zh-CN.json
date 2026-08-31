@@ -25509,7 +25509,22 @@
     "workflowScriptReadOnlyTitle": "工作流托管任务",
     "workflowTriggerNotFound": "未找到该工作流触发器。",
     "workingDir": "工作目录",
-    "yes": "是"
+    "yes": "是",
+    "workspaceMove": {
+      "cleared": "该日程现在归属所有工作区。",
+      "failed": "移动日程失败：{error}",
+      "hint": "决定该日程归属哪个工作区列表，以及在哪个目录下运行。",
+      "label": "工作区",
+      "missingWorkspace": "工作区已不存在（{id}）",
+      "moved": "日程已移动。",
+      "placeholder": "选择工作区",
+      "refused": {
+        "remote-host": "该日程属于已配对的宿主，其工作区与本设备的并不相同。",
+        "same-workspace": "日程已在该工作区中。",
+        "task-running": "有运行正在进行，请等待其结束后再移动日程。"
+      },
+      "unbound": "所有工作区"
+    }
   },
   "searchCache": {
     "allProviders": "全部 Provider",

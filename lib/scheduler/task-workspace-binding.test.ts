@@ -2,6 +2,7 @@ import {
   resolveTaskWorkspace,
   taskVisibleInWorkspace,
   WORKSPACE_LOOKUP_TIMEOUT_MS,
+  workspaceScopeForSchedulerHost,
 } from "./task-workspace-binding"
 
 const deps = (over: Partial<Parameters<typeof resolveTaskWorkspace>[1]> = {}) => ({
@@ -108,5 +109,33 @@ describe("taskVisibleInWorkspace", () => {
   it("shows everything when no workspace is being viewed", () => {
     expect(taskVisibleInWorkspace({ projectId: "w2" }, null)).toBe(true)
     expect(taskVisibleInWorkspace({ projectId: "w2" }, undefined)).toBe(true)
+  })
+})
+
+describe("workspaceScopeForSchedulerHost", () => {
+  it("scopes to the active workspace when the schedules are this device's", () => {
+    expect(workspaceScopeForSchedulerHost("local", "ws_a")).toBe("ws_a")
+  })
+
+  it("does not scope a paired host's schedules by a local workspace id", () => {
+    // `projects` is absent from COMPANION_SYNC_TABLES and `activeProjectId` is
+    // `desktop-only`, so the local id names nothing over there. Passing it
+    // matched no binding and hid every attributed schedule on the host.
+    expect(workspaceScopeForSchedulerHost("paired", "ws_a")).toBeUndefined()
+  })
+
+  it("is undefined when this device has no active workspace", () => {
+    expect(workspaceScopeForSchedulerHost("local", null)).toBeUndefined()
+    expect(workspaceScopeForSchedulerHost("local", undefined)).toBeUndefined()
+  })
+
+  it("composes with taskVisibleInWorkspace so a host's bindings survive the round trip", () => {
+    const hostTask = { projectId: "ws_on_the_host" }
+    const scope = workspaceScopeForSchedulerHost("paired", "ws_local")
+    expect(taskVisibleInWorkspace(hostTask, scope)).toBe(true)
+    // ...and the same task is correctly hidden when both sides are local.
+    expect(
+      taskVisibleInWorkspace(hostTask, workspaceScopeForSchedulerHost("local", "ws_local"))
+    ).toBe(false)
   })
 })

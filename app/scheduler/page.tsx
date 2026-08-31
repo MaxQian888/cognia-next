@@ -14,6 +14,8 @@ import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { consumeScheduledTaskDraft } from "@/lib/scheduler/task-draft-handoff"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
+import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
+import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
 import { useBreakpoint } from "@/hooks/ui"
 import {
   BackfillDialog,
@@ -56,6 +58,10 @@ export default function SchedulerPage() {
   const router = useRouter()
   const t = useTranslations("scheduler")
   const schedulerHost = getSchedulerDataSource().host
+  // Reactive view of the same choice. `getSchedulerDataSource()` is read once
+  // per render and does not re-run when the host bar flips the target, which
+  // is fine for the promotion copy below but not for what the list shows.
+  const { target: schedulerHostTarget } = useSchedulerHostTarget()
   const {
     tasks,
     executions,
@@ -229,7 +235,11 @@ export default function SchedulerPage() {
   // maintained; an UNATTRIBUTED row (no workspace — one written before
   // scheduler v5, a backup, a system task) shows everywhere, because hiding it
   // would make it invisible in every workspace at once.
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const localProjectId = useProjectStore((s) => s.activeProjectId)
+  // One rule, shared with `/me/scheduler`: a local workspace id names nothing
+  // on a paired host. See `workspaceScopeForSchedulerHost`.
+  const workspaceScope = workspaceScopeForSchedulerHost(schedulerHostTarget, localProjectId)
+
   const facets = useMemo(
     () =>
       deriveUnifiedFacets(unifiedItems, {
@@ -237,9 +247,9 @@ export default function SchedulerPage() {
         status: statusFilter,
         kinds: selectedKinds,
         loopOnly,
-        projectId: activeProjectId ?? undefined,
+        projectId: workspaceScope,
       }),
-    [unifiedItems, searchQuery, statusFilter, selectedKinds, loopOnly, activeProjectId]
+    [unifiedItems, searchQuery, statusFilter, selectedKinds, loopOnly, workspaceScope]
   )
   const visibleItems = facets.visibleItems
 

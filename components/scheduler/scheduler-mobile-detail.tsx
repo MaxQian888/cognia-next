@@ -34,6 +34,7 @@ import { TaskStatsCards } from "./task-stats-cards"
 import { TaskExecutionChart, toChartPointsFromExecutions } from "./task-execution-chart"
 import { TaskExecutionHistory } from "./task-execution-history"
 import { TaskConfiguration } from "./task-configuration"
+import { TaskWorkspaceMove } from "./task-workspace-move"
 import { TaskNotificationDisplay } from "./task-notification-display"
 import { TaskTagsDisplay } from "./task-tags-display"
 import { UnifiedTaskDetailView } from "./unified-task-detail-view"
@@ -195,6 +196,10 @@ export function SchedulerMobileDetailView({
               }
               canCancelExecution={isPluginExecutionActive}
             />
+            {/* This view composes its own body rather than delegating to
+                `TaskDetailView`, so mounting the workspace control there alone
+                left `/me/scheduler` and both mobile detail paths without it. */}
+            <TaskWorkspaceMove task={task} />
             <TaskConfiguration task={task} />
             <TaskNotificationDisplay notification={task.notification} />
             <TaskTagsDisplay tags={task.tags ?? []} />

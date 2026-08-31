@@ -48,6 +48,7 @@ import { TaskStatsCards } from "./task-stats-cards"
 import { TaskExecutionChart, toChartPointsFromExecutions } from "./task-execution-chart"
 import { TaskExecutionHistory } from "./task-execution-history"
 import { TaskConfiguration } from "./task-configuration"
+import { TaskWorkspaceMove } from "./task-workspace-move"
 import { TaskNotificationDisplay } from "./task-notification-display"
 import { TaskTagsDisplay } from "./task-tags-display"
 import { TaskDependencyGraph } from "./task-dependency-graph"
@@ -356,6 +357,14 @@ export function TaskDetailView({
               }
               canCancelExecution={isPluginExecutionActive}
             />
+          </div>
+
+          {/* The owning workspace, above the read-only configuration block.
+              It is editable rather than displayed because a schedule bound to
+              the wrong workspace is invisible from every other one, so there
+              was nowhere to correct it from. */}
+          <div className="mt-5" data-testid="task-workspace-section">
+            <TaskWorkspaceMove task={task} />
           </div>
 
           <div className="mt-5">

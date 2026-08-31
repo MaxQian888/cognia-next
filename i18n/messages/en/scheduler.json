@@ -1103,5 +1103,20 @@
   "workflowScriptReadOnlyTitle": "Workflow-managed task",
   "workflowTriggerNotFound": "Workflow trigger not found.",
   "workingDir": "Working Directory",
-  "yes": "Yes"
+  "yes": "Yes",
+  "workspaceMove": {
+    "label": "Workspace",
+    "placeholder": "Select a workspace",
+    "unbound": "Every workspace",
+    "missingWorkspace": "Missing workspace ({id})",
+    "hint": "Which workspace this schedule is listed under, and whose folder it runs in.",
+    "moved": "Schedule moved.",
+    "cleared": "Schedule now belongs to every workspace.",
+    "failed": "Could not move the schedule: {error}",
+    "refused": {
+      "same-workspace": "The schedule is already there.",
+      "remote-host": "This schedule belongs to a paired host, whose workspaces are not the ones on this device.",
+      "task-running": "A run is in flight. Wait for it to finish before moving the schedule."
+    }
+  }
 }

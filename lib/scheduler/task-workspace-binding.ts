@@ -106,6 +106,28 @@ export function taskVisibleInWorkspace(
 }
 
 /**
+ * Which workspace id, if any, may scope a list of schedules.
+ *
+ * Workspace ids are LOCAL. `projects` is absent from `COMPANION_SYNC_TABLES`
+ * and `activeProjectId` is categorised `desktop-only` in the settings-sync
+ * map, so this device's active workspace names nothing on a paired host.
+ *
+ * Both scheduler pages used to pass the local id unconditionally. Against a
+ * paired host that compared a local id with the host's own bindings and
+ * matched none of them, so every attributed schedule over there was filtered
+ * out of a list that still counted it. Returning null there means "show the
+ * host's schedules unscoped", which is the only honest answer until workspace
+ * identity crosses the pairing boundary.
+ */
+export function workspaceScopeForSchedulerHost(
+  hostTarget: "local" | "paired",
+  localProjectId: string | null | undefined
+): string | undefined {
+  if (hostTarget !== "local") return undefined
+  return localProjectId ?? undefined
+}
+
+/**
  * The session-workspace reader the boot backfill uses.
  *
  * Named separately from the private default so the scheduler can hand it to

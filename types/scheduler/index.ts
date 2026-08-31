@@ -754,6 +754,16 @@ export interface CreateScheduledTaskInput {
 export interface UpdateScheduledTaskInput {
   name?: string
   description?: string
+  /**
+   * Re-bind the owning workspace. `null` clears the binding (the schedule
+   * belongs to every workspace again), `undefined` leaves it untouched, the
+   * same convention `endAt` uses.
+   *
+   * Creation resolved this automatically and nothing could change it
+   * afterwards, so a schedule attributed to the wrong workspace was invisible
+   * from every other one and uncorrectable from the one that owned it.
+   */
+  projectId?: string | null
   trigger?: Partial<TaskTrigger>
   payload?: ScheduledTaskPayload
   config?: Partial<TaskExecutionConfig>

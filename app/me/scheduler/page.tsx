@@ -58,6 +58,8 @@ import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { usePlatform } from "@/hooks/use-platform"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
+import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { cn } from "@/lib/utils"
 import {
@@ -136,18 +138,22 @@ export default function MobileSchedulerPage() {
   // Derived: filter by search / kind / status / workspace. Shares the desktop
   // page's filtering engine (`lib/scheduler/unified-filter.ts`) so the two
   // surfaces can't drift on what "active" or a search hit means.
-  const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const localProjectId = useProjectStore((s) => s.activeProjectId)
+  // Same rule as the desktop page, and it matters more here: a paired phone
+  // reads the HOST's schedules while `activeProjectId` stays this device's.
+  const { target: schedulerHostTarget } = useSchedulerHostTarget()
+  const workspaceScope = workspaceScopeForSchedulerHost(schedulerHostTarget, localProjectId)
   const visibleItems = useMemo(
     () =>
       filterUnifiedItems(unifiedItems, {
         search: searchQuery,
         status: isUnifiedStatusFilter(activeFilter) ? activeFilter : "all",
         kinds: selectedKinds,
-        // Same workspace scope as the desktop page — an unattributed row still
+        // Same workspace scope as the desktop page. An unattributed row still
         // shows everywhere. See `taskVisibleInWorkspace`.
-        projectId: activeProjectId ?? undefined,
+        projectId: workspaceScope,
       }),
-    [unifiedItems, selectedKinds, activeFilter, searchQuery, activeProjectId]
+    [unifiedItems, selectedKinds, activeFilter, searchQuery, workspaceScope]
   )
 
   const grouped = useMemo(() => {

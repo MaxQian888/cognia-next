@@ -1175,6 +1175,9 @@ class TaskSchedulerImpl {
       ...(input.tags !== undefined && { tags: input.tags }),
       // endAt: null clears the bound, undefined leaves it untouched
       ...(input.endAt !== undefined && { endAt: input.endAt ?? undefined }),
+      // Same convention for the owning workspace: null un-binds the schedule
+      // (it belongs to every workspace again), undefined leaves it alone.
+      ...(input.projectId !== undefined && { projectId: input.projectId ?? undefined }),
       ...(input.onSuccessTaskIds !== undefined && { onSuccessTaskIds: input.onSuccessTaskIds }),
       ...(input.onFailureTaskIds !== undefined && { onFailureTaskIds: input.onFailureTaskIds }),
       updatedAt: now,
