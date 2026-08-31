@@ -16,7 +16,7 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Trash2Icon, UsersIcon } from "lucide-react"
+import { ChevronRightIcon, Trash2Icon, UsersIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -36,7 +36,10 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
 import { StatusBadge } from "@/components/status-badge"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { AgentTeamSettings } from "@/components/agent/workspace/settings"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { cn } from "@/lib/utils"
 
 export interface SquadDetailPanelProps {
   squadId: string
@@ -52,6 +55,7 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
   const [descDraft, setDescDraft] = useState<string | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const members = useMemo(
     () =>
@@ -190,6 +194,38 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
           </AlertDialogContent>
         </AlertDialog>
       </div>
+
+      {/*
+        The deep governance knobs, as ONE collapsed group rather than nine more
+        rows. The objection above is to fanning them out across the library, not
+        to their being reachable: they were only ever editable from a tab of
+        `/agent-teams/workspace`, which ADR-0140 retired and took out of
+        navigation, so every one of them was about to become unreachable.
+
+        `AgentTeamSettings` is mounted whole rather than its nine sections being
+        re-listed here. It already composes them, each section already persists
+        eagerly through the store, and a second composition would be two places
+        to add the tenth.
+      */}
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ml-2 h-8 w-full justify-start text-xs"
+            data-testid="squad-advanced-toggle"
+          >
+            <ChevronRightIcon
+              aria-hidden
+              className={cn("size-3.5 transition-transform", advancedOpen && "rotate-90")}
+            />
+            {t("advanced")}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2" data-testid="squad-advanced">
+          <AgentTeamSettings team={squad} />
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }

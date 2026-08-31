@@ -13,7 +13,8 @@
     "nameLabel": "名称",
     "noMembersDescription": "可以从模板添加成员，或在该小队自己的运行界面里添加。",
     "noMembersTitle": "还没有成员",
-    "rosterLabel": "成员"
+    "rosterLabel": "成员",
+    "advanced": "高级治理"
   },
   "nav": {
     "create": "新建小队",

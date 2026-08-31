@@ -13,7 +13,8 @@
     "nameLabel": "Name",
     "noMembersDescription": "Add teammates from a template, or from the Squad's own run surface.",
     "noMembersTitle": "No members yet",
-    "rosterLabel": "Members"
+    "rosterLabel": "Members",
+    "advanced": "Advanced governance"
   },
   "nav": {
     "create": "New Squad",

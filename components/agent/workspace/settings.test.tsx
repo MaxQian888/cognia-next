@@ -90,22 +90,15 @@ describe("AgentTeamSettings", () => {
     )
   })
 
-  it("delete button stays disabled until the team name is typed", async () => {
+  /**
+   * Deletion moved out. The danger zone here redirected to `/agent-teams`, a
+   * route ADR-0140 retired, while `SquadDetailPanel` already had a delete with
+   * its own type-to-confirm. Two delete paths over one entity is the
+   * double-entry-point defect, and this was the copy aimed at a dead route.
+   */
+  it("no longer offers a second way to delete the squad", () => {
     render(<AgentTeamSettings team={baseTeam} />)
-    // Open the delete dialog
-    const triggers = screen.getAllByRole("button", { name: /Delete permanently/i })
-    await userEvent.click(triggers[0])
-    // The dialog action button should be present + disabled
-    const dialogAction = screen.getAllByRole("button", { name: /Delete permanently/i }).at(-1)
-    expect(dialogAction).toBeDisabled()
-    // Type the confirm text
-    const confirmInput = screen.getByPlaceholderText(baseTeam.name) as HTMLInputElement
-    fireEvent.change(confirmInput, { target: { value: baseTeam.name } })
-    const dialogActionEnabled = screen
-      .getAllByRole("button", { name: /Delete permanently/i })
-      .at(-1)
-    expect(dialogActionEnabled).not.toBeDisabled()
-    await userEvent.click(dialogActionEnabled!)
-    expect(deleteTeamMock).toHaveBeenCalledWith("team_x")
+    expect(screen.queryByRole("button", { name: /Delete permanently/i })).not.toBeInTheDocument()
+    expect(deleteTeamMock).not.toHaveBeenCalled()
   })
 })

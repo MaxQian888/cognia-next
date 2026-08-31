@@ -1,19 +1,25 @@
 "use client"
 
 /**
- * Workspace settings tab composer.
+ * One Squad's governance, as nine collapsed accordion sections.
  *
- * Splits what was a single flat card stack into four collapsible accordion
- * sections — Overview / Plugins / Governance / Memory — each in its own
- * file under `settings/`. The historical save / delete path stays on this
- * file because the Overview state lives here; the new sections persist
- * their patches eagerly through the store so they need no save button.
+ * Overview / Plugins / Governance / Execution / Ultracode / Worktrees / PR
+ * feedback / Stacked delivery / Memory, each in its own file under `settings/`.
+ * Every section persists eagerly through the store, so there is no save button
+ * and no shared draft state here.
+ *
+ * It no longer owns deletion. The danger zone here redirected to
+ * `/agent-teams`, a route ADR-0140 retired, and `SquadDetailPanel` already had
+ * a delete with a type-to-confirm. Two delete paths over one entity is the
+ * double-entry-point defect, and this was the copy pointing at a dead route.
+ *
+ * Mounted by `components/settings/squads/squad-detail-panel.tsx`. That file
+ * says the deep knobs must not be "fanned out" across the library, which is
+ * why they arrive as one collapsed group under Advanced rather than as nine
+ * more rows.
  */
 
-import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { useRouter } from "next/navigation"
-import { AlertTriangleIcon } from "lucide-react"
 
 import {
   Accordion,
@@ -21,14 +27,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import { toast } from "sonner"
 
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
-import { createLogger } from "@cognia/logging"
 
 import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"
@@ -41,9 +41,6 @@ import { StackedDeliverySection } from "./settings/section-stacked-delivery"
 import { MemorySection } from "./settings/section-memory"
 import { TeamKnowledgeTwinsCard } from "./settings/team-knowledge-twins-card"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
-import { ConfirmActionDialog } from "./settings/confirm-action-dialog"
-
-const log = createLogger("agentTeams.settings")
 
 export interface AgentTeamSettingsProps {
   team: AgentTeam
@@ -51,21 +48,9 @@ export interface AgentTeamSettingsProps {
 
 export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
   const t = useTranslations("agentTeamsWorkspace.settings")
-  const tCommon = useTranslations("agentTeamsWorkspace")
-  const router = useRouter()
-
-  const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
-  const [deleteOpen, setDeleteOpen] = useState(false)
-
-  const handleDelete = () => {
-    deleteTeam(team.id)
-    log.info("team_deleted", { id: team.id })
-    toast.success(tCommon("teamDeleted", { name: team.name }))
-    router.push("/agent-teams")
-  }
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-4" data-testid="workspace-settings">
+    <div className="w-full space-y-4" data-testid="workspace-settings">
       <SettingsSaveIndicator teamId={team.id} />
       <Accordion type="multiple" defaultValue={["overview"]} className="space-y-2">
         <AccordionItem value="overview" className="border-none">
@@ -150,32 +135,6 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionContent>
         </AccordionItem>
       </Accordion>
-
-      <Separator />
-
-      {/* Danger Zone */}
-      <Card className="space-y-3 border-destructive/30 p-4">
-        <div className="flex items-center gap-2">
-          <AlertTriangleIcon className="size-4 text-destructive" />
-          <p className="text-sm font-medium text-destructive">{t("dangerZone")}</p>
-        </div>
-        <p className="text-xs text-muted-foreground">{t("deleteWarning")}</p>
-        <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
-          {t("deleteAction")}
-        </Button>
-        <ConfirmActionDialog
-          open={deleteOpen}
-          onOpenChange={setDeleteOpen}
-          title={tCommon("deleteTeam")}
-          description={t("deleteWarning")}
-          confirmLabel={t("deleteAction")}
-          cancelLabel={t("cancel")}
-          typeToConfirm={team.name}
-          typeToConfirmLabel={t("typeToConfirm", { name: team.name })}
-          typeToConfirmPlaceholder={team.name}
-          onConfirm={handleDelete}
-        />
-      </Card>
     </div>
   )
 }

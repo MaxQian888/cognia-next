@@ -1,107 +1,64 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
+    vars ? `${key}:${JSON.stringify(vars)}` : key,
+}))
+
+/**
+ * Stubbed rather than rendered: the real composition is nine sections over the
+ * store, and what this file pins is that the group is mounted and collapsed,
+ * not what is inside it. `settings.test.tsx` covers the contents.
+ */
+jest.mock("@/components/agent/workspace/settings", () => ({
+  AgentTeamSettings: ({ team }: { team: { id: string } }) => (
+    <div data-testid="agent-team-settings">{team.id}</div>
+  ),
+}))
+
+const squad = { id: "squad-1", name: "Delivery", description: "" }
+const store = {
+  teams: { "squad-1": squad },
+  teammates: {},
+  updateTeam: jest.fn(),
+  deleteTeam: jest.fn(),
+}
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: (selector: (state: unknown) => unknown) => selector(store),
+}))
+
 import { SquadDetailPanel } from "./squad-detail-panel"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
-function squad(over: Partial<AgentTeam> = {}): AgentTeam {
-  // `teammateIds` and `config` are load-bearing for `deleteTeam`, which walks
-  // the roster to shut live members down before cleanup.
-  return {
-    id: "sq-1",
-    name: "Research",
-    description: "Digs things up",
-    teammateIds: [],
-    taskIds: [],
-    messageIds: [],
-    config: {},
-    ...over,
-  } as AgentTeam
-}
-
-function member(over: Partial<AgentTeammate> = {}): AgentTeammate {
-  return {
-    id: "m1",
-    teamId: "sq-1",
-    name: "Scout",
-    status: "idle",
-    progress: 0,
-    ...over,
-  } as AgentTeammate
-}
-
-function seed(teams: AgentTeam[], members: AgentTeammate[] = []) {
-  useAgentTeamStore.setState({
-    teams: Object.fromEntries(teams.map((t) => [t.id, t])) as never,
-    teammates: Object.fromEntries(members.map((m) => [m.id, m])) as never,
-  })
-}
-
-beforeEach(() => seed([squad()]))
-
-describe("SquadDetailPanel", () => {
-  it("shows the Squad's name and description", () => {
-    render(<SquadDetailPanel squadId="sq-1" />)
-    expect(screen.getByLabelText(/name/i)).toHaveValue("Research")
-    expect(screen.getByLabelText(/description/i)).toHaveValue("Digs things up")
+describe("SquadDetailPanel advanced governance", () => {
+  /**
+   * Nine sections of squad configuration were editable only from a tab of
+   * `/agent-teams/workspace`, which ADR-0140 retired and took out of
+   * navigation. Without a home here they become unreachable when the route
+   * goes.
+   */
+  it("carries the governance sections the retired workspace owned", async () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    await userEvent.click(screen.getByTestId("squad-advanced-toggle"))
+    expect(screen.getByTestId("agent-team-settings")).toHaveTextContent("squad-1")
   })
 
-  it("commits a rename on blur, not on every keystroke", async () => {
-    // Writing through on each keystroke fights the input's own cursor.
-    render(<SquadDetailPanel squadId="sq-1" />)
-    const input = screen.getByLabelText(/name/i)
-    await userEvent.clear(input)
-    await userEvent.type(input, "Refactor Crew")
-    expect(useAgentTeamStore.getState().teams["sq-1"]!.name).toBe("Research")
-    fireEvent.blur(input)
-    expect(useAgentTeamStore.getState().teams["sq-1"]!.name).toBe("Refactor Crew")
+  /**
+   * This panel's own header refuses to fan the deep knobs out across the
+   * library. One collapsed group is the compromise, so it must start closed.
+   */
+  it("keeps them collapsed until asked for", () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    expect(screen.queryByTestId("agent-team-settings")).not.toBeInTheDocument()
   })
 
-  it("refuses an empty name, which would leave an unclickable rail row", async () => {
-    render(<SquadDetailPanel squadId="sq-1" />)
-    const input = screen.getByLabelText(/name/i)
-    await userEvent.clear(input)
-    fireEvent.blur(input)
-    expect(useAgentTeamStore.getState().teams["sq-1"]!.name).toBe("Research")
-  })
-
-  it("lists members name-sorted and leaves other Squads' members out", () => {
-    seed(
-      [squad()],
-      [
-        member({ id: "b", name: "Bravo" }),
-        member({ id: "a", name: "Alpha" }),
-        member({ id: "x", name: "Zulu", teamId: "sq-2" }),
-      ]
-    )
-    render(<SquadDetailPanel squadId="sq-1" />)
-    const rows = screen.getAllByTestId("squad-detail-member")
-    expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent("Alpha")
-  })
-
-  it("says the roster is empty rather than rendering an empty box", () => {
-    render(<SquadDetailPanel squadId="sq-1" />)
-    expect(screen.getByTestId("squad-detail-empty-roster")).toBeInTheDocument()
-  })
-
-  it("asks before deleting, then reports the deletion so the caller can move on", async () => {
-    const onDeleted = jest.fn()
-    render(<SquadDetailPanel squadId="sq-1" onDeleted={onDeleted} />)
-    await userEvent.click(screen.getByTestId("squad-delete"))
-    // Nothing gone yet — the confirm is the point.
-    expect(useAgentTeamStore.getState().teams["sq-1"]).toBeDefined()
-    await userEvent.click(screen.getByRole("button", { name: /^delete$/i }))
-    expect(useAgentTeamStore.getState().teams["sq-1"]).toBeUndefined()
-    expect(onDeleted).toHaveBeenCalledWith("sq-1")
-  })
-
-  it("says so when the Squad went away under an open pane", () => {
-    seed([])
-    render(<SquadDetailPanel squadId="sq-1" />)
-    expect(screen.getByTestId("squad-detail-missing")).toBeInTheDocument()
+  /** Deletion lives here, and only here. */
+  it("is the one delete path for a squad", async () => {
+    render(<SquadDetailPanel squadId="squad-1" />)
+    expect(screen.getByTestId("squad-delete")).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId("squad-advanced-toggle"))
+    expect(screen.getAllByTestId("squad-delete")).toHaveLength(1)
   })
 })
