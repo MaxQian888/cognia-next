@@ -8487,30 +8487,6 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "plugin_dev_server_start",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
-      "name": "plugin_dev_server_stop",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
       "name": "plugin_dev_server_unwatch",
       "target": "client",
       "operation": "side-effect",
@@ -9184,18 +9160,6 @@
     },
     {
       "name": "plugin_read_verification",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
-      "name": "plugin_reload",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",

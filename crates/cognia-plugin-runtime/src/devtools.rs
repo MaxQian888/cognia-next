@@ -1,9 +1,20 @@
-//! Plugin devtools Tauri commands (Batch 3d, gated behind `debug_assertions`).
+//! Plugin devtools Tauri commands.
 //!
-//! These handlers back the in-app plugin developer experience: a hot-reload
-//! file watcher, a small dev-server status surface, and a `plugin_reload`
-//! command that emits a `plugin-hot-reload:<pluginId>` event the TS side
-//! listens for.
+//! These handlers back the in-app plugin developer experience: a filesystem
+//! watcher for locally-sourced plugins, and a listing of what the runtime has
+//! loaded.
+//!
+//! They are registered unconditionally. An earlier version of this comment
+//! claimed they were `debug_assertions`-gated, which was never true of the
+//! code.
+//!
+//! `plugin_dev_server_start` / `plugin_dev_server_stop` used to live here.
+//! They set an in-memory `running` flag and returned: no port was bound and no
+//! server existed, while the renderer built a `getUrl()` / `getWebSocketUrl()`
+//! / `connectedClients` API on top of them. `plugin_reload` also went, since
+//! the `plugin-hot-reload:<id>` event it emitted had exactly one listener and
+//! that module is gone. Reloading is now the verified cli-bridge round-trip in
+//! `lib/cli-bridge/handlers/plugin-dev-reload.ts`.
 //!
 //! ADR 0016 P1-7 (2026-05-17) — `plugin_watch_start` / `plugin_dev_server_watch`
 //! now hold a real `notify::RecommendedWatcher` instead of a stub
@@ -13,24 +24,11 @@
 use std::path::{Path, PathBuf};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use super::{PluginError, PluginRuntimeState, Result};
-
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DevServerStatus {
-    pub running: bool,
-    pub host: String,
-    pub port: u16,
-}
-
-/// In-process status holder. Kept inside this module so the broader
-/// `PluginRuntimeState` doesn't gain a devtools-specific field.
-static DEV_SERVER_STATUS: once_cell::sync::Lazy<RwLock<DevServerStatus>> =
-    once_cell::sync::Lazy::new(|| RwLock::new(DevServerStatus::default()));
 
 /// Active filesystem watchers. We keep a small handful — one for the
 /// top-level `plugin_watch_start` (driven by `file-watch.ts`) and a per-id
@@ -104,39 +102,6 @@ impl FileChangePayload {
             })
             .collect()
     }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DevServerConfig {
-    #[serde(default)]
-    pub host: Option<String>,
-    #[serde(default)]
-    pub port: Option<u16>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DevServerStartResult {
-    pub host: String,
-    pub port: u16,
-}
-
-#[tauri::command]
-pub async fn plugin_dev_server_start(config: DevServerConfig) -> Result<DevServerStartResult> {
-    let host = config.host.unwrap_or_else(|| "127.0.0.1".into());
-    let port = config.port.unwrap_or(0);
-    let mut status = DEV_SERVER_STATUS.write();
-    status.running = true;
-    status.host = host.clone();
-    status.port = port;
-    Ok(DevServerStartResult { host, port })
-}
-
-#[tauri::command]
-pub async fn plugin_dev_server_stop() -> Result<()> {
-    *DEV_SERVER_STATUS.write() = DevServerStatus::default();
-    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -231,14 +196,6 @@ pub async fn plugin_watch_stop() -> Result<()> {
 }
 
 #[tauri::command]
-pub async fn plugin_reload(app: AppHandle, plugin_id: String) -> Result<()> {
-    let event = format!("plugin-hot-reload:{plugin_id}");
-    app.emit(&event, ())
-        .map_err(|e| super::PluginError::Internal(format!("emit reload event: {e}")))?;
-    Ok(())
-}
-
-#[tauri::command]
 pub async fn plugin_list_dev_plugins(state: State<'_, PluginRuntimeState>) -> Result<Vec<String>> {
     Ok(state.plugins.read().keys().cloned().collect())
 }
@@ -269,20 +226,6 @@ fn start_watcher(app: &AppHandle, paths: Vec<String>) -> Result<RecommendedWatch
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn dev_server_start_then_stop_resets_status() {
-        plugin_dev_server_start(DevServerConfig {
-            host: Some("127.0.0.1".into()),
-            port: Some(7777),
-        })
-        .await
-        .unwrap();
-        assert!(DEV_SERVER_STATUS.read().running);
-        assert_eq!(DEV_SERVER_STATUS.read().port, 7777);
-        plugin_dev_server_stop().await.unwrap();
-        assert!(!DEV_SERVER_STATUS.read().running);
-    }
 
     #[test]
     fn payload_kind_from_create_event() {
