@@ -827,16 +827,23 @@ export function WorkspaceEnvironmentList({
                           className="flex flex-col gap-2 border p-3"
                         >
                           <div className="min-w-0">{renderIdentity(row)}</div>
+                          {/*
+                            The card has no column headers, so an unlabelled
+                            placeholder is noise rather than information: a bare
+                            dash beside the ownership badge says nothing the
+                            reader can decode. The table keeps its placeholders,
+                            because there the header names the column.
+                          */}
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             {renderKind(row)}
-                            {presentation === "page" ? (
+                            {presentation === "page" && row.state ? (
                               <span className="text-xs text-muted-foreground">
-                                {row.state ? t(`states.${row.state}`) : t("stateNone")}
+                                {t(`states.${row.state}`)}
                               </span>
                             ) : null}
-                            {presentation === "page" ? (
+                            {presentation === "page" && row.base ? (
                               <span className="font-mono text-xs text-muted-foreground">
-                                {row.base ? t(`bases.${row.base.kind}`) : t("baseNone")}
+                                {t(`bases.${row.base.kind}`)}
                               </span>
                             ) : null}
                           </div>
