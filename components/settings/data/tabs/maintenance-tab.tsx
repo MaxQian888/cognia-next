@@ -45,10 +45,17 @@ import {
 } from "@/lib/telemetry/events/settings"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import {
+  getWorkspaceLifecyclePolicy,
   listWorkspaceMaintenanceEvents,
   runWorkspaceMaintenance,
+  setWorkspaceLifecyclePolicy,
 } from "@/lib/task-workspace/client"
-import type { WorkspaceMaintenanceEvent } from "@/lib/task-workspace/types"
+import { runWorkspaceUserAction } from "@/lib/task-workspace/user-action"
+import { useWorkspaceActionController } from "@/hooks/use-workspace-action-controller"
+import type {
+  WorkspaceLifecyclePolicy,
+  WorkspaceMaintenanceEvent,
+} from "@/lib/task-workspace/types"
 
 const CLEAR_TARGETS: { value: ClearableTable | "all"; label: string }[] = [
   { value: "sessions", label: "Conversations + messages" },
@@ -65,11 +72,150 @@ export function MaintenanceTab() {
   return (
     <div className="space-y-6">
       <CleanupBlock />
+      <WorkspaceLifecyclePolicyBlock />
       <WorkspaceMaintenanceBlock />
       <RetentionBlock />
       <ClearBlock />
       <PrivacyBlock />
     </div>
+  )
+}
+
+/**
+ * The rules the maintenance run below actually enforces.
+ *
+ * `task_workspace_policy_get` / `_set` and the whole `WorkspaceLifecyclePolicy`
+ * were implemented in Rust and reachable over the companion transport, and had
+ * exactly one caller in the repo: their own unit test. So "Run maintenance"
+ * existed and the three numbers deciding what it would reclaim did not, which
+ * meant a machine could accumulate worktree directories with nothing on screen
+ * saying how many it would keep.
+ *
+ * All three values must be greater than zero: the host rejects a zero
+ * (`service.rs::set_workspace_lifecycle_policy`), so refusing it here is the
+ * difference between a disabled Save and a raw Rust error string.
+ */
+function WorkspaceLifecyclePolicyBlock() {
+  const t = useTranslations("settings.data.workspaceLifecycle")
+  const [policy, setPolicy] = useState<WorkspaceLifecyclePolicy | null>(null)
+  const [draft, setDraft] = useState<Record<keyof WorkspaceLifecyclePolicy, string> | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const { error, setError, run, busy } = useWorkspaceActionController()
+
+  useEffect(() => {
+    let cancelled = false
+    void getWorkspaceLifecyclePolicy().then(
+      (next) => {
+        if (cancelled) return
+        setPolicy(next)
+        setDraft({
+          activeDirectoryCap: String(next.activeDirectoryCap),
+          snapshotRetentionDays: String(next.snapshotRetentionDays),
+          blobBudgetBytes: String(next.blobBudgetBytes),
+        })
+      },
+      () => {
+        // A host that cannot answer the read is not an error worth shouting
+        // about here; the block simply has nothing to show.
+        if (!cancelled) setUnavailable(true)
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const parsed = draft
+    ? {
+        activeDirectoryCap: Math.floor(Number(draft.activeDirectoryCap)),
+        snapshotRetentionDays: Math.floor(Number(draft.snapshotRetentionDays)),
+        blobBudgetBytes: Math.floor(Number(draft.blobBudgetBytes)),
+      }
+    : null
+  const valid =
+    parsed !== null && Object.values(parsed).every((value) => Number.isFinite(value) && value > 0)
+  const dirty =
+    policy !== null &&
+    parsed !== null &&
+    (Object.keys(parsed) as (keyof WorkspaceLifecyclePolicy)[]).some(
+      (key) => parsed[key] !== policy[key]
+    )
+
+  const save = async () => {
+    if (!valid || !parsed) return
+    setSaved(false)
+    const next = await run("workspace-lifecycle-policy", () =>
+      runWorkspaceUserAction("task_workspace_policy_set", () => setWorkspaceLifecyclePolicy(parsed))
+    )
+    if (!next) return
+    setPolicy(next)
+    setSaved(true)
+  }
+
+  if (unavailable || !draft) return null
+
+  const field = (key: keyof WorkspaceLifecyclePolicy) => (
+    <div className="grid gap-1.5">
+      <Label className="text-xs" htmlFor={`workspace-lifecycle-${key}`}>
+        {t(`fields.${key}`)}
+      </Label>
+      <Input
+        id={`workspace-lifecycle-${key}`}
+        type="number"
+        min={1}
+        inputMode="numeric"
+        value={draft[key]}
+        data-testid={`workspace-lifecycle-${key}`}
+        onChange={(event) => {
+          setSaved(false)
+          setError(null)
+          setDraft((current) => (current ? { ...current, [key]: event.target.value } : current))
+        }}
+        className="h-8"
+      />
+      <p className="text-[11px] text-muted-foreground">{t(`hints.${key}`)}</p>
+    </div>
+  )
+
+  return (
+    <Card className="space-y-3 p-4" data-testid="workspace-lifecycle-policy">
+      <div className="flex items-center gap-2">
+        <RotateCcwIcon className="size-4" />
+        <Label className="text-sm">{t("title")}</Label>
+      </div>
+      <p className="text-xs text-muted-foreground">{t("description")}</p>
+
+      <div className="grid gap-3 @md:grid-cols-3">
+        {field("activeDirectoryCap")}
+        {field("snapshotRetentionDays")}
+        {field("blobBudgetBytes")}
+      </div>
+
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {!valid ? (
+        <p className="text-xs text-destructive" role="alert">
+          {t("mustBePositive")}
+        </p>
+      ) : null}
+
+      <div className="flex items-center justify-end gap-3">
+        {saved ? <span className="text-xs text-muted-foreground">{t("saved")}</span> : null}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!valid || !dirty || busy}
+          onClick={() => void save()}
+          data-testid="workspace-lifecycle-save"
+        >
+          {t("save")}
+        </Button>
+      </div>
+    </Card>
   )
 }
 

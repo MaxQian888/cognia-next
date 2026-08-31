@@ -31627,6 +31627,23 @@
         "runNow": "Run workspace maintenance",
         "running": "Running…",
         "title": "Managed workspace maintenance"
+      },
+      "workspaceLifecycle": {
+        "description": "What the maintenance run below reclaims. A worktree directory with no run attached is removed once the machine is over the cap, oldest first.",
+        "fields": {
+          "activeDirectoryCap": "Worktree directories kept",
+          "blobBudgetBytes": "Content store budget (bytes)",
+          "snapshotRetentionDays": "Snapshot retention (days)"
+        },
+        "hints": {
+          "activeDirectoryCap": "How many materialized worktrees stay on disk before the oldest are reclaimed.",
+          "blobBudgetBytes": "Ceiling for the content-addressed store backing those snapshots.",
+          "snapshotRetentionDays": "How long a settled run's snapshot can still be restored from."
+        },
+        "mustBePositive": "Each value must be greater than zero.",
+        "save": "Save",
+        "saved": "Saved",
+        "title": "Worktree lifecycle"
       }
     },
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",

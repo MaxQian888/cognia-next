@@ -665,5 +665,22 @@
     "urlPlaceholder": "https://dav.example.com",
     "usernameLabel": "Username",
     "usernamePlaceholder": "your-username"
+  },
+  "workspaceLifecycle": {
+    "title": "Worktree lifecycle",
+    "description": "What the maintenance run below reclaims. A worktree directory with no run attached is removed once the machine is over the cap, oldest first.",
+    "fields": {
+      "activeDirectoryCap": "Worktree directories kept",
+      "snapshotRetentionDays": "Snapshot retention (days)",
+      "blobBudgetBytes": "Content store budget (bytes)"
+    },
+    "hints": {
+      "activeDirectoryCap": "How many materialized worktrees stay on disk before the oldest are reclaimed.",
+      "snapshotRetentionDays": "How long a settled run's snapshot can still be restored from.",
+      "blobBudgetBytes": "Ceiling for the content-addressed store backing those snapshots."
+    },
+    "mustBePositive": "Each value must be greater than zero.",
+    "save": "Save",
+    "saved": "Saved"
   }
 }
