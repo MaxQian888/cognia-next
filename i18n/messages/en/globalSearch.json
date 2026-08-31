@@ -18,7 +18,11 @@
     "openSettings": "Open settings",
     "switchToDark": "Switch to dark theme",
     "switchToLight": "Switch to light theme",
-    "toggleSidebar": "Toggle sidebar"
+    "toggleSidebar": "Toggle sidebar",
+    "openFolderNeedsHost": "Pair with a host to browse folders. This device has no filesystem to open.",
+    "newWorkspace": "New workspace",
+    "adoptWorkspaces": "Adopt detected folders",
+    "manageWorkspaceRoots": "Manage workspace folders"
   },
   "badges": {
     "archived": "Archived",

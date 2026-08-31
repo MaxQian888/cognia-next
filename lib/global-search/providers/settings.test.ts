@@ -14,6 +14,7 @@ const ctxAll = () =>
       hasApiKey: false,
       pluginQuickActions: [],
       workbenchPanels: [],
+      canBrowseHostFolders: true,
     },
   })
 
@@ -33,6 +34,7 @@ describe("settings provider", () => {
           hasApiKey: false,
           pluginQuickActions: [],
           workbenchPanels: [],
+          canBrowseHostFolders: true,
         },
       })
     )
@@ -86,6 +88,7 @@ describe("settings provider", () => {
         hasApiKey: false,
         pluginQuickActions: [],
         workbenchPanels: [],
+        canBrowseHostFolders: true,
       },
     })
     const rows = settingsCandidates(ctx, {

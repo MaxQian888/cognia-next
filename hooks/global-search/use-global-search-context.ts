@@ -19,6 +19,8 @@ import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
 import { useSettingsSectionReachability } from "@/hooks/settings/use-settings-section-reachability"
 import { useRecorderAvailable } from "@/hooks/skills/use-skill-recorder"
 import { usePlatform } from "@/hooks/use-platform"
+import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import {
   getActiveContextRevision,
   getActiveWorkbenchPanels,
@@ -61,9 +63,11 @@ export function useGlobalSearchContext({
   const t = useTranslations() as RootTranslator
   const locale = useLocale()
   const platform = usePlatform()
+  const runtimeSnapshot = useRuntimeSnapshot()
   const { theme } = useTheme()
   const { sections } = useSettingsSectionReachability()
   const recorderAvailable = useRecorderAvailable()
+  const workspaceDirGate = useWorkspaceCommandGate()
   const pluginQuickActions = usePluginQuickActions("palette")
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   // Which skills this workspace actually loads. Search demotes rather than
@@ -105,6 +109,7 @@ export function useGlobalSearchContext({
       now: now.getTime(),
       activeProjectId: activeProjectId ?? null,
       activeSessionId: activeSessionId ?? null,
+      runtimeSnapshot,
       sessions,
       workspaces,
       capabilityOverlay,
@@ -116,6 +121,8 @@ export function useGlobalSearchContext({
         hasApiKey,
         pluginQuickActions,
         workbenchPanels,
+        // Same rule the workspace switcher applies, read from the same gate.
+        canBrowseHostFolders: isTauri() || workspaceDirGate("fs_list_workspace_dir").available,
       },
     }),
     [
@@ -125,12 +132,14 @@ export function useGlobalSearchContext({
       now,
       activeProjectId,
       activeSessionId,
+      runtimeSnapshot,
       sessions,
       workspaces,
       capabilityOverlay,
       scope,
       sections,
       recorderAvailable,
+      workspaceDirGate,
       theme,
       hasApiKey,
       pluginQuickActions,

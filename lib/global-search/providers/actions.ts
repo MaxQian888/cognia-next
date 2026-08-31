@@ -9,6 +9,8 @@ import {
   CheckIcon,
   DownloadIcon,
   FolderOpenIcon,
+  FolderPlusIcon,
+  FolderSearchIcon,
   GlobeIcon,
   KeyRoundIcon,
   MoonIcon,
@@ -17,6 +19,7 @@ import {
   RefreshCwIcon,
   ServerIcon,
   SettingsIcon,
+  SlidersHorizontalIcon,
   SparklesIcon,
   SunIcon,
   Trash2Icon,
@@ -38,6 +41,9 @@ export type BuiltinCommandId =
   | "toggle-theme"
   | "toggle-sidebar"
   | "open-folder"
+  | "new-workspace"
+  | "adopt-workspaces"
+  | "manage-workspace-roots"
   | "open-recorder"
   | "open-browser"
   | "check-updates"
@@ -106,7 +112,39 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
       title: t("globalSearch.actions.openFolder"),
       keywords: ["folder", "workspace", "open", "directory", "文件夹", "工作区"],
       icon: { lucide: FolderOpenIcon },
-      extra: ctx.isTauri ? undefined : { disabledReason: t("globalSearch.actions.desktopOnly") },
+      /*
+        Gated on whether a folder can be chosen AT ALL, not on `isTauri`. A
+        paired phone or browser walks the host's filesystem through the same
+        picker the workspace switcher opens; only an unpaired browser has
+        nowhere to look. The old `isTauri` gate meant the switcher offered this
+        and the palette refused it, on the same device, in the same second.
+      */
+      extra: ctx.host.canBrowseHostFolders
+        ? undefined
+        : { disabledReason: t("globalSearch.actions.openFolderNeedsHost") },
+    },
+    /*
+      The other three entries of the switcher's footer. They existed only inside
+      a Popover in the desktop rail and a Drawer on `/`, so on any other mobile
+      route there was no way to create, adopt or manage a workspace at all.
+    */
+    {
+      id: "new-workspace",
+      title: t("globalSearch.actions.newWorkspace"),
+      keywords: ["workspace", "project", "new", "create", "工作区", "新建"],
+      icon: { lucide: FolderPlusIcon },
+    },
+    {
+      id: "adopt-workspaces",
+      title: t("globalSearch.actions.adoptWorkspaces"),
+      keywords: ["adopt", "detected", "folders", "workspace", "收编", "工作区"],
+      icon: { lucide: FolderSearchIcon },
+    },
+    {
+      id: "manage-workspace-roots",
+      title: t("globalSearch.actions.manageWorkspaceRoots"),
+      keywords: ["manage", "roots", "folders", "workspace", "工作区", "根目录"],
+      icon: { lucide: SlidersHorizontalIcon },
     },
     ...(ctx.host.recorderAvailable
       ? [

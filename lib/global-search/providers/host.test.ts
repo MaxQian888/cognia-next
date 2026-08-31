@@ -12,6 +12,7 @@ const host = (over: Partial<ReturnType<typeof makeTestContext>["host"]>) =>
       hasApiKey: false,
       pluginQuickActions: [],
       workbenchPanels: [],
+      canBrowseHostFolders: true,
       ...over,
     },
   })

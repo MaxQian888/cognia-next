@@ -11788,6 +11788,7 @@
   },
   "globalSearch": {
     "actions": {
+      "adoptWorkspaces": "Adopt detected folders",
       "checkUpdates": "Check for updates",
       "clearChat": "Clear current conversation",
       "clearRecents": "Clear recent searches",
@@ -11798,11 +11799,14 @@
       "manageMcp": "Manage MCP servers",
       "manageSkills": "Manage skills",
       "manageTeams": "Manage teams",
+      "manageWorkspaceRoots": "Manage workspace folders",
       "newChat": "New chat",
       "newChatHint": "starts a persisted conversation",
+      "newWorkspace": "New workspace",
       "openBrowser": "Open the browser",
       "openBrowserHint": "Preview a page and comment on it",
       "openFolder": "Open folder as workspace…",
+      "openFolderNeedsHost": "Pair with a host to browse folders. This device has no filesystem to open.",
       "openSettings": "Open settings",
       "switchToDark": "Switch to dark theme",
       "switchToLight": "Switch to light theme",

@@ -17,6 +17,7 @@ import type { LucideIcon } from "lucide-react"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import type { Snippet } from "@/lib/chat/search/snippet"
 import type { Platform } from "@/lib/platform/detect"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 import type { WorkspaceCapabilityOverlay } from "@/lib/workspace/capability-overlay"
 import type { QuickActionEntry } from "@/lib/plugin/registries/quick-action-registry"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -309,6 +310,17 @@ export interface GlobalSearchContext {
   capabilityOverlay?: WorkspaceCapabilityOverlay
   /** The scope the dialog is showing — providers may project differently. */
   scope: GlobalSearchScope
+  /**
+   * What this client can reach right now (`lib/runtime/operation-availability`).
+   *
+   * The navigation provider needs it for the same reason the rail does: without
+   * a snapshot, `getSidebarCatalog` drops every `standalone: "hidden"` surface
+   * unconditionally, so a PAIRED phone or browser could not find
+   * `/source-control`, `/browser` or `/performance` in the palette even though
+   * the host it is paired to offers all three. On mobile the palette is often
+   * the only way in, so the omission was total.
+   */
+  runtimeSnapshot: RuntimeSnapshot
   /** Host capabilities the dialog resolved (settings reachability etc.). */
   host: GlobalSearchHostContext
 }
@@ -325,6 +337,17 @@ export interface GlobalSearchHostContext {
   pluginQuickActions: readonly QuickActionEntry[]
   /** Panels of the workbench in front, with their labels already resolved. */
   workbenchPanels: readonly { id: string; label: string; activity?: string }[]
+  /**
+   * Whether a folder can be chosen for a workspace at all on this client.
+   *
+   * NOT `isTauri`. The desktop has a native chooser, and a paired phone or
+   * browser has no local filesystem worth opening but CAN walk the HOST's,
+   * which is the machine the agent runs on. Only an unpaired browser has
+   * neither. `WorkspacePickerList` has always made exactly this call, and the
+   * palette made a different one, so the switcher offered the folder picker on
+   * a paired phone while the palette said "desktop only".
+   */
+  canBrowseHostFolders: boolean
 }
 
 export interface GlobalSearchProviderInput {

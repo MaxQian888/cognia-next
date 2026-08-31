@@ -28,6 +28,7 @@ const ctx = (scope: GlobalSearchContext["scope"] = "all"): GlobalSearchContext =
   activeSessionId: null,
   sessions: [],
   workspaces: [],
+  runtimeSnapshot: { target: null, vaultState: "unavailable", connectionState: "offline" },
   scope,
   host: {
     reachableSettingsSections: new Set(),
@@ -36,6 +37,7 @@ const ctx = (scope: GlobalSearchContext["scope"] = "all"): GlobalSearchContext =
     hasApiKey: false,
     pluginQuickActions: [],
     workbenchPanels: [],
+    canBrowseHostFolders: true,
   },
 })
 

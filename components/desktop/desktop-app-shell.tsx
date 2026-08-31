@@ -39,6 +39,7 @@ import { StatusBar } from "@/components/desktop/status-bar"
 import { TitleBar } from "@/components/desktop/title-bar"
 import { FindBar } from "@/components/desktop/find-bar"
 import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
+import { WorkspaceDialogHost } from "@/components/workspace/workspace-dialog-host"
 import { ShellLayoutNotice } from "@/components/desktop/shell-layout-notice"
 import { WindowFocusTracker } from "@/components/desktop/window-focus-tracker"
 import { WindowResizeEdges } from "@/components/desktop/window-resize-edges"
@@ -257,6 +258,10 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
           reference in chat with the terminal closed wrote to the store and showed
           nothing at all. */}
         <FileViewerDialog />
+        {/* The four workspace editors, mounted once so the command palette
+            can open one. The palette closes before it runs an action, so it
+            cannot mount what the action opens. */}
+        <WorkspaceDialogHost />
         <ShellLayoutNotice />
         {/* Collapses to zero height on the same clock rather than unmounting —
           hiding it used to drop 24px out of the window in one frame. */}

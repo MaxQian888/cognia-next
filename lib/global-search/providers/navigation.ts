@@ -42,17 +42,23 @@ export function navigationCandidates(ctx: GlobalSearchContext): NavCandidate[] {
       action: { type: "switch-guild", kind: "canvas" },
     },
   ]
-  const pages = getSidebarCatalog(ctx.platform).map((item: SidebarCatalogItem): NavCandidate => ({
-    id: `page:${item.id}`,
-    title: ctx.t(`desktop.guildRail.${item.i18nKey}`),
-    route: item.route,
-    // `aliasKey` carries a localized, comma-separated alias list — the retired
-    // name of a surface this one absorbed. Without it, a page that swallowed
-    // another simply stops answering to the old name.
-    keywords: [item.id, item.route, item.group, ...aliasesFor(ctx, item.aliasKey)],
-    icon: { lucide: item.Icon },
-    action: { type: "navigate", href: item.route },
-  }))
+  // The snapshot is what tells the catalog which `standalone: "hidden"`
+  // surfaces this client can actually reach. Calling without it, as this did,
+  // drops all of them unconditionally, so a paired phone could not find
+  // `/source-control` here even though its host serves it.
+  const pages = getSidebarCatalog(ctx.platform, ctx.runtimeSnapshot).map(
+    (item: SidebarCatalogItem): NavCandidate => ({
+      id: `page:${item.id}`,
+      title: ctx.t(`desktop.guildRail.${item.i18nKey}`),
+      route: item.route,
+      // `aliasKey` carries a localized, comma-separated alias list — the retired
+      // name of a surface this one absorbed. Without it, a page that swallowed
+      // another simply stops answering to the old name.
+      keywords: [item.id, item.route, item.group, ...aliasesFor(ctx, item.aliasKey)],
+      icon: { lucide: item.Icon },
+      action: { type: "navigate", href: item.route },
+    })
+  )
   return [...guilds, ...pages]
 }
 

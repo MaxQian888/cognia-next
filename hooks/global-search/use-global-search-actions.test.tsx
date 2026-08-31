@@ -90,6 +90,7 @@ jest.mock("@/stores/ui", () => ({ useUIStore: { getState: () => uiState } }))
 
 import { focusSession, useGlobalSearchActions } from "./use-global-search-actions"
 import { onComposerReferenceRequest } from "@/lib/chat/composer-reference-request"
+import { onWorkspaceDialogRequest } from "@/lib/workspace/workspace-dialog-request"
 
 const sessions = [
   { id: "s1", title: "A", projectId: "p1" },
@@ -269,8 +270,21 @@ describe("useGlobalSearchActions", () => {
     expect(setTheme).toHaveBeenCalledWith("light")
     await run("toggle-sidebar")
     expect(uiState.toggleSidebar).toHaveBeenCalled()
+    /*
+      All four workspace editors now go through the request seam, because the
+      palette closes before running an action and cannot mount what it opens.
+      The always-mounted `WorkspaceDialogHost` is what decides native chooser
+      vs the picker that walks a paired host's filesystem.
+    */
+    const dialogRequests: string[] = []
+    const stopListening = onWorkspaceDialogRequest(({ kind }) => dialogRequests.push(kind))
     await run("open-folder")
-    expect(openFolder).toHaveBeenCalled()
+    await run("new-workspace")
+    await run("adopt-workspaces")
+    await run("manage-workspace-roots")
+    stopListening()
+    expect(dialogRequests).toEqual(["openFolder", "newWorkspace", "adopt", "manage"])
+
     await run("open-recorder")
     expect(openRecorder).toHaveBeenCalledWith("palette")
 
@@ -300,15 +314,21 @@ describe("useGlobalSearchActions", () => {
     expect(clearAllRecents).toHaveBeenCalled()
     await run("unknown-command")
 
-    // Off the desktop, folder + updates degrade to a toast.
+    // Off the desktop, updates degrade to a toast.
+    //
+    // The folder picker deliberately does NOT: it asks the dialog host, which
+    // opens the native chooser on the desktop and the host-filesystem picker on
+    // a paired client. Refusing here is what made the palette contradict the
+    // workspace switcher on the same device.
     isTauriMock.mockReturnValue(false)
-    openFolder.mockClear()
     checkForUpdate.mockClear()
+    const offDesktopRequests: string[] = []
+    const stopOffDesktop = onWorkspaceDialogRequest(({ kind }) => offDesktopRequests.push(kind))
     await run("open-folder")
-    expect(toast.info).toHaveBeenCalledWith("toasts.openFolderDesktopOnly")
+    stopOffDesktop()
+    expect(offDesktopRequests).toEqual(["openFolder"])
     await run("check-updates")
     expect(toast.info).toHaveBeenCalledWith("toasts.updatesDesktopOnly")
-    expect(openFolder).not.toHaveBeenCalled()
     expect(checkForUpdate).not.toHaveBeenCalled()
   })
 

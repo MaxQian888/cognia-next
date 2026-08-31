@@ -11788,6 +11788,7 @@
   },
   "globalSearch": {
     "actions": {
+      "adoptWorkspaces": "收编已检测到的文件夹",
       "checkUpdates": "检查更新",
       "clearChat": "清空当前会话",
       "clearRecents": "清除最近搜索",
@@ -11798,11 +11799,14 @@
       "manageMcp": "管理 MCP 服务器",
       "manageSkills": "管理技能",
       "manageTeams": "管理团队",
+      "manageWorkspaceRoots": "管理工作区文件夹",
       "newChat": "新建会话",
       "newChatHint": "开始一段持久化的对话",
+      "newWorkspace": "新建工作区",
       "openBrowser": "打开浏览器",
       "openBrowserHint": "预览页面并对其批注",
       "openFolder": "打开文件夹为工作区…",
+      "openFolderNeedsHost": "配对一台主机后才能浏览文件夹。本设备没有可打开的文件系统。",
       "openSettings": "打开设置",
       "switchToDark": "切换到深色主题",
       "switchToLight": "切换到浅色主题",

@@ -30,6 +30,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
 import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
+import { WorkspaceDialogHost } from "@/components/workspace/workspace-dialog-host"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
@@ -228,6 +229,10 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
           the two places a file link is clicked. Self-gating on its own store,
           so an unopened viewer costs nothing. */}
       <FileViewerDialog />
+      {/* Same reason as the file viewer above: the compact shell never
+          reaches `DesktopAppShell`, and the palette that asks for these is
+          mounted on every route here. */}
+      <WorkspaceDialogHost />
       {/* Same reasoning for the unified global search (ADR-0129): ⌘K and the
           `command-palette-request` seam must answer on `/settings`, `/inbox`
           and `/me/*` too. The host renders nothing on `/`, where

@@ -32,10 +32,10 @@ import { getQuickAction, runQuickAction } from "@/lib/plugin/registries/quick-ac
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { isTauri } from "@/lib/tauri"
 import { checkForUpdate } from "@/lib/tauri/updater"
-import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { openRecorder } from "@/stores/skills/recorder-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
+import { requestWorkspaceDialog } from "@/lib/workspace/workspace-dialog-request"
 import { useUIStore } from "@/stores/ui"
 import { requestComposerReference } from "@/lib/chat/composer-reference-request"
 
@@ -159,14 +159,27 @@ export function useGlobalSearchActions({
         case "toggle-sidebar":
           useUIStore.getState().toggleSidebar()
           return
-        case "open-folder": {
-          if (!isTauri()) {
-            toast.info(t("toasts.openFolderDesktopOnly"))
-            return
-          }
-          await openFolderAsWorkspace()
+        /*
+          All four go through the always-mounted `WorkspaceDialogHost`, which
+          owns `useWorkspacePickerDialogs`. The palette closes before running an
+          action, so it cannot mount what an action opens, and the host is the
+          one place that decides native chooser vs host-filesystem picker. This
+          used to call `openFolderAsWorkspace` directly and refuse anything that
+          was not Tauri, which is why a paired phone was told "desktop only" by
+          the palette and offered the picker by the switcher.
+        */
+        case "open-folder":
+          requestWorkspaceDialog("openFolder")
           return
-        }
+        case "new-workspace":
+          requestWorkspaceDialog("newWorkspace")
+          return
+        case "adopt-workspaces":
+          requestWorkspaceDialog("adopt")
+          return
+        case "manage-workspace-roots":
+          requestWorkspaceDialog("manage")
+          return
         case "open-recorder":
           openRecorder("palette")
           return

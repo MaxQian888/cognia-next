@@ -34,6 +34,9 @@ export function makeTestContext(over: Partial<GlobalSearchContext> = {}): Global
     sessions: [],
     workspaces: [],
     scope: "all",
+    // The default fixture is a desktop host, so everything is reachable. A
+    // test that wants a degraded client says so.
+    runtimeSnapshot: { target: null, vaultState: "unavailable", connectionState: "offline" },
     host: {
       reachableSettingsSections: new Set(),
       recorderAvailable: false,
@@ -41,6 +44,7 @@ export function makeTestContext(over: Partial<GlobalSearchContext> = {}): Global
       hasApiKey: false,
       pluginQuickActions: [],
       workbenchPanels: [],
+      canBrowseHostFolders: true,
     },
     ...over,
   }

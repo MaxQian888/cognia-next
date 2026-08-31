@@ -18,7 +18,11 @@
     "openSettings": "打开设置",
     "switchToDark": "切换到深色主题",
     "switchToLight": "切换到浅色主题",
-    "toggleSidebar": "切换侧栏"
+    "toggleSidebar": "切换侧栏",
+    "openFolderNeedsHost": "配对一台主机后才能浏览文件夹。本设备没有可打开的文件系统。",
+    "newWorkspace": "新建工作区",
+    "adoptWorkspaces": "收编已检测到的文件夹",
+    "manageWorkspaceRoots": "管理工作区文件夹"
   },
   "badges": {
     "archived": "已归档",
