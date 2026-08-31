@@ -52,6 +52,34 @@ it("counts only the live bindings and links to the cockpit", async () => {
   expect(chip.closest("a")).toHaveAttribute("href", "/agent-runs")
 })
 
+// `/agent-runs` alone opens the list with nothing selected. One live run is
+// unambiguous, so the chip names it.
+it("deep-links to the run itself when exactly one is live", async () => {
+  rows.mockResolvedValue([{ status: "active", runId: "run_1" }])
+  render(<ActiveDelegationsChip conversationKey="telegram:tg-1:9" />)
+  const chip = await screen.findByTestId("active-delegations-chip")
+  expect(chip.closest("a")).toHaveAttribute("href", "/agent-runs?run=run_1")
+})
+
+it("falls back to the list when several are live, because the list is the answer", async () => {
+  rows.mockResolvedValue([
+    { status: "active", runId: "run_1" },
+    { status: "degraded", runId: "run_2" },
+  ])
+  render(<ActiveDelegationsChip conversationKey="telegram:tg-1:9" />)
+  const chip = await screen.findByTestId("active-delegations-chip")
+  expect(chip.closest("a")).toHaveAttribute("href", "/agent-runs")
+})
+
+// A binding with no run id cannot be deep-linked, and guessing one would send
+// the reader to an empty detail pane.
+it("falls back to the list when the single binding has no run id", async () => {
+  rows.mockResolvedValue([{ status: "active" }])
+  render(<ActiveDelegationsChip conversationKey="telegram:tg-1:9" />)
+  const chip = await screen.findByTestId("active-delegations-chip")
+  expect(chip.closest("a")).toHaveAttribute("href", "/agent-runs")
+})
+
 // A degraded run is still running. Hiding it would take away the one route to
 // the cockpit at exactly the moment the thread stopped reporting progress.
 it("counts a degraded run as live", async () => {

@@ -1,7 +1,7 @@
 {
   "activeDelegations": {
     "count": "{count, plural, one {# run} other {# runs}}",
-    "tooltip": "{count, plural, one {# delegated run is still going. Open the cockpit to steer or stop it.} other {# delegated runs are still going. Open the cockpit to steer or stop them.}}"
+    "tooltip": "{count, plural, one {# run started from this conversation is still going. Open the cockpit to steer or stop it.} other {# runs started from this conversation are still going. Open the cockpit to steer or stop them.}}"
   },
   "activity": {
     "assignment": {

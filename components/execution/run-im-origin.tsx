@@ -40,7 +40,14 @@ export function useRunImOrigin(runId: string | undefined) {
         if (!binding.conversationKey) continue
         try {
           const { platform } = parseConversationKey(binding.conversationKey)
-          return { conversationKey: binding.conversationKey, platform: platform as PlatformKind }
+          return {
+            conversationKey: binding.conversationKey,
+            platform: platform as PlatformKind,
+            // The message that started the run, when the binding recorded one.
+            // Without it the link lands at the bottom of a thread that may be
+            // hundreds of messages past the request being asked about.
+            sourceMessageId: binding.sourceMessageId,
+          }
         } catch {
           // An unparseable key is a corrupt row, not a reason to claim the run
           // has no origin at all. Keep looking.
@@ -56,9 +63,13 @@ export function RunImOrigin({ runId }: RunImOriginProps) {
   const origin = useRunImOrigin(runId)
   if (!origin) return null
 
+  const href =
+    `/inbox/c?key=${encodeURIComponent(origin.conversationKey)}` +
+    (origin.sourceMessageId ? `&messageId=${encodeURIComponent(origin.sourceMessageId)}` : "")
+
   return (
     <Link
-      href={`/inbox/c?key=${encodeURIComponent(origin.conversationKey)}`}
+      href={href}
       className="inline-flex min-w-0 items-center gap-1.5 text-xs hover:underline"
       data-testid="run-im-origin"
       data-conversation-key={origin.conversationKey}

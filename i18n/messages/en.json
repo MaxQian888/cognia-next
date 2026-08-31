@@ -12382,7 +12382,7 @@
   "inbox": {
     "activeDelegations": {
       "count": "{count, plural, one {# run} other {# runs}}",
-      "tooltip": "{count, plural, one {# delegated run is still going. Open the cockpit to steer or stop it.} other {# delegated runs are still going. Open the cockpit to steer or stop them.}}"
+      "tooltip": "{count, plural, one {# run started from this conversation is still going. Open the cockpit to steer or stop it.} other {# runs started from this conversation are still going. Open the cockpit to steer or stop them.}}"
     },
     "activity": {
       "assignment": {
@@ -21810,6 +21810,18 @@
       "sortBy": "Sort by",
       "totalBadge": "{count} total"
     },
+    "permissionRequest": {
+      "allow": "Allow",
+      "apiHint": "The plugin asked for this at runtime, outside its declared permissions.",
+      "deny": "Deny",
+      "denyOnDismissHint": "Closing this denies the request.",
+      "manifestHint": "This permission is declared in the plugin's manifest.",
+      "noReason": "The plugin gave no reason.",
+      "permissionLabel": "Permission",
+      "queued": "{count} more waiting",
+      "reasonLabel": "Reason",
+      "title": "{plugin} is asking for a permission"
+    },
     "permissionReview": {
       "auditEmpty": "No audit events for this plugin yet.",
       "auditLogTitle": "Recent audit events",
@@ -22092,7 +22104,12 @@
       "installAll": "Install all",
       "recheck": "Re-check",
       "title": "Plugin updates",
-      "upToDate": "All plugins are up to date."
+      "upToDate": "All plugins are up to date.",
+      "updatesAvailable": {
+        "description": "Auto-update is set to notify only, so nothing was installed.",
+        "review": "Review",
+        "title": "{count, plural, =1 {1 plugin update available} other {# plugin updates available}}"
+      }
     },
     "view": {
       "card": "Cards",
@@ -28839,7 +28856,7 @@
           },
           "tier": {
             "cuaDesktop": "Bound sandbox desktop",
-            "cuaDesktopUnavailable": "Unavailable: this desktop currently proves remote GUI isolation only; sandbox shell and file operations are disabled.",
+            "cuaDesktopNeedsBoundDesktop": "Runs shell and file work inside the bound desktop. Needs a bound machine whose provider carries it, so pick a sandbox connection under Computer Use first.",
             "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
             "inherit": "Inherit app default",
             "label": "Sandbox tier",

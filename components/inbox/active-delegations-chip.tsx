@@ -10,6 +10,11 @@
  * `executionRunBindings` is indexed by `conversationKey` and has held the
  * answer since ADR-0089.
  *
+ * Deliberately says "runs", not "delegations". That table also carries
+ * workflow runs and the agent-state bridge, so a conversation can have a run
+ * bound to it that nobody delegated. Counting them all is right, and calling
+ * them all delegations is not.
+ *
  * Renders nothing when the conversation has no live run, which is the common
  * case. It lives in the header's overflow popover rather than the strip: the
  * strip is at its control budget (`lib/ui/chrome-budget.ts`), and this is
@@ -40,17 +45,26 @@ export interface ActiveDelegationsChipProps {
 
 export function ActiveDelegationsChip({ conversationKey }: ActiveDelegationsChipProps) {
   const t = useTranslations("inbox.activeDelegations")
-  const count =
+  const live =
     useLiveQuery(async () => {
-      if (typeof window === "undefined") return 0
+      if (typeof window === "undefined") return []
       const rows = await getDb()
         .executionRunBindings.where("conversationKey")
         .equals(conversationKey)
         .toArray()
-      return rows.filter((row) => LIVE_STATUSES.has(row.status)).length
-    }, [conversationKey]) ?? 0
+      return rows.filter((row) => LIVE_STATUSES.has(row.status))
+    }, [conversationKey]) ?? []
 
+  const count = live.length
   if (count === 0) return null
+
+  // `/agent-runs` alone opens the list with nothing selected. With exactly one
+  // live run there is no ambiguity about which one the reader means, so name
+  // it; with several, the list IS the answer.
+  const href =
+    count === 1 && live[0]?.runId
+      ? `/agent-runs?run=${encodeURIComponent(live[0].runId)}`
+      : "/agent-runs"
 
   return (
     <Tooltip>
@@ -62,7 +76,7 @@ export function ActiveDelegationsChip({ conversationKey }: ActiveDelegationsChip
           data-count={count}
           asChild
         >
-          <Link href="/agent-runs">
+          <Link href={href}>
             <PlayCircleIcon className="size-3" aria-hidden />
             {t("count", { count })}
           </Link>

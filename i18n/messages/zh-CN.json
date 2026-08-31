@@ -12382,7 +12382,7 @@
   "inbox": {
     "activeDelegations": {
       "count": "{count, plural, other {# 个运行中}}",
-      "tooltip": "{count, plural, other {本会话有 # 个委派任务还在跑。打开运行台可以干预或停止。}}"
+      "tooltip": "{count, plural, other {本会话发起的 # 个任务还在跑。打开运行台可以干预或停止。}}"
     },
     "activity": {
       "assignment": {
@@ -21810,6 +21810,18 @@
       "sortBy": "排序",
       "totalBadge": "共 {count}"
     },
+    "permissionRequest": {
+      "allow": "允许",
+      "apiHint": "该插件在运行时临时请求，不在已声明的权限之内。",
+      "deny": "拒绝",
+      "denyOnDismissHint": "关闭此对话框即视为拒绝。",
+      "manifestHint": "该权限在插件清单中已声明。",
+      "noReason": "该插件未说明原因。",
+      "permissionLabel": "权限",
+      "queued": "还有 {count} 项等待处理",
+      "reasonLabel": "原因",
+      "title": "{plugin} 正在请求一项权限"
+    },
     "permissionReview": {
       "auditEmpty": "尚无审计事件。",
       "auditLogTitle": "最近审计事件",
@@ -22092,7 +22104,12 @@
       "installAll": "全部安装",
       "recheck": "重新检查",
       "title": "插件更新",
-      "upToDate": "全部插件均为最新版本。"
+      "upToDate": "全部插件均为最新版本。",
+      "updatesAvailable": {
+        "description": "自动更新设置为仅通知，未安装任何内容。",
+        "review": "去查看",
+        "title": "{count, plural, other {有 # 个插件可更新}}"
+      }
     },
     "view": {
       "card": "卡片",
@@ -28839,7 +28856,7 @@
           },
           "tier": {
             "cuaDesktop": "绑定的沙箱桌面",
-            "cuaDesktopUnavailable": "暂不可用：该桌面目前只能证明远程 GUI 隔离，沙箱 shell 与文件操作已禁用。",
+            "cuaDesktopNeedsBoundDesktop": "让 shell 与文件操作在绑定的桌面内执行。需要一台所属 provider 支持该能力的已绑定机器，请先在「Computer Use」下选择一个沙盒连接。",
             "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
             "inherit": "继承应用默认",
             "label": "沙盒层级",

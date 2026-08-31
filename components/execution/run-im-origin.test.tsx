@@ -50,6 +50,26 @@ it("links to the conversation the run came from", async () => {
   expect(screen.getByTestId("platform-badge")).toHaveAttribute("data-platform", "telegram")
 })
 
+// Without the message id the link lands at the bottom of a thread that may be
+// hundreds of messages past the request being asked about.
+it("lands on the message that started the run when the binding recorded one", async () => {
+  mockListBindings.mockResolvedValue([
+    { conversationKey: "telegram:tg-1:9", sourceMessageId: "m_42" },
+  ])
+  render(<RunImOrigin runId="run_1" />)
+  expect(await screen.findByTestId("run-im-origin")).toHaveAttribute(
+    "href",
+    "/inbox/c?key=telegram%3Atg-1%3A9&messageId=m_42"
+  )
+})
+
+it("still links to the conversation when no source message was recorded", async () => {
+  mockListBindings.mockResolvedValue([{ conversationKey: "telegram:tg-1:9" }])
+  render(<RunImOrigin runId="run_1" />)
+  const href = (await screen.findByTestId("run-im-origin")).getAttribute("href")
+  expect(href).toBe("/inbox/c?key=telegram%3Atg-1%3A9")
+})
+
 // A corrupt key is not a reason to claim the run has no origin at all.
 it("skips an unparseable binding and keeps looking", async () => {
   mockListBindings.mockResolvedValue([
