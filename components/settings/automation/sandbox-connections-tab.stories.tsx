@@ -4,10 +4,13 @@ import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { clearDb, seedDb } from "@/lib/storybook/seed-db"
 import { createSandboxConnectionRow } from "@/lib/db/sandbox-connections"
 
-// Dexie-reading via `useSandboxConnections` (`sandboxConnections` table). The
-// lifecycle buttons need the Tauri shell (Docker orchestration is Rust), so
-// they render disabled in the Storybook browser. Default is an empty registry;
-// the populated story seeds a couple of rows with different health states.
+// Dexie-reading via `useSandboxConnections` (`sandboxConnections` table).
+// Each row carries its lifecycle state and its health separately, and opens a
+// detail sheet holding every lifecycle action. Those actions need the Tauri
+// shell, because Docker orchestration is Rust and the `cua_sandbox_*` commands
+// are client-local, so they render disabled in the Storybook browser. Default
+// is an empty registry. The populated story seeds a couple of rows with
+// contrasting states.
 const meta = {
   title: "Settings/Automation/SandboxConnectionsTab",
   component: SandboxConnectionsTab,
