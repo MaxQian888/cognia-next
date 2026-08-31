@@ -35,6 +35,8 @@ interface ProviderSidebarItemProps {
   onClick: (providerId: string) => void
   modelCount?: number
   diagnosticStatus?: ProviderDiagnosticBadgeStatus
+  tabIndex?: number
+  onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement>
 }
 
 /**
@@ -107,6 +109,8 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
   onClick,
   modelCount,
   diagnosticStatus,
+  tabIndex,
+  onKeyDown,
 }: ProviderSidebarItemProps) {
   const t = useTranslations("providers.sidebar")
   const handleClick = useCallback(() => onClick(providerId), [onClick, providerId])
@@ -122,6 +126,11 @@ export const ProviderSidebarItem = React.memo(function ProviderSidebarItem({
       variant="ghost"
       id={`provider-${providerId}`}
       onClick={handleClick}
+      onKeyDown={onKeyDown}
+      tabIndex={tabIndex}
+      role="option"
+      aria-selected={isSelected}
+      data-provider-row
       className={cn(
         "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal transition-all duration-200",
         isSelected

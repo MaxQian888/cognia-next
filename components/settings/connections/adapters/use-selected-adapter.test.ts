@@ -15,7 +15,7 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/",
 }))
 
-import { useSelectedAdapter } from "./use-selected-adapter"
+import { usePendingPlatform, useSelectedAdapter } from "./use-selected-adapter"
 
 function mockUrl(params: string) {
   mockSearchParams = new URLSearchParams(params)
@@ -89,5 +89,38 @@ describe("useSelectedAdapter", () => {
     expect(mockReplace).toHaveBeenCalledWith("?adapter=lark-1&adapterTab=health", {
       scroll: false,
     })
+  })
+})
+
+describe("usePendingPlatform", () => {
+  it("is null when the URL asks for no platform", () => {
+    const { result } = renderHook(() => usePendingPlatform())
+    expect(result.current.pendingPlatform).toBeNull()
+  })
+
+  it("reads the platform the URL asked to land on", () => {
+    mockUrl("connectionsTab=adapters&platform=telegram")
+    const { result } = renderHook(() => usePendingPlatform())
+    expect(result.current.pendingPlatform).toBe("telegram")
+  })
+
+  it("consumes the param without disturbing the rest of the URL", () => {
+    // One-shot instruction, not a selection: leaving it set would reopen the
+    // add dialog on every re-render and on a browser back.
+    mockUrl("section=connections&connectionsTab=adapters&platform=telegram")
+    const { result } = renderHook(() => usePendingPlatform())
+    act(() => result.current.clearPendingPlatform())
+    expect(mockReplace).toHaveBeenCalledTimes(1)
+    const next = new URLSearchParams(mockReplace.mock.calls[0][0].slice(1))
+    expect(next.get("platform")).toBeNull()
+    expect(next.get("connectionsTab")).toBe("adapters")
+    expect(next.get("section")).toBe("connections")
+  })
+
+  it("does not touch the URL when there is nothing to clear", () => {
+    mockUrl("connectionsTab=adapters")
+    const { result } = renderHook(() => usePendingPlatform())
+    act(() => result.current.clearPendingPlatform())
+    expect(mockReplace).not.toHaveBeenCalled()
   })
 })

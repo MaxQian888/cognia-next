@@ -62,6 +62,26 @@ function statusBadgeVariant(status: string | undefined): "destructive" | "outlin
   return "outline"
 }
 
+const CAPABILITY_LABEL_KEYS: Record<string, string> = {
+  vision: "modelsTab.capability.vision",
+  tools: "modelsTab.capability.tools",
+  reasoning: "modelsTab.capability.reasoning",
+  audio: "modelsTab.capability.audio",
+  structured: "modelsTab.capability.structured",
+  attachment: "modelsTab.capability.attachment",
+  interleaved: "modelsTab.capability.interleaved",
+}
+
+const LIFECYCLE_LABEL_KEYS: Record<string, string> = {
+  beta: "modelsTab.lifecycle.beta",
+  preview: "modelsTab.lifecycle.preview",
+  experimental: "modelsTab.lifecycle.experimental",
+  deprecated: "modelsTab.lifecycle.deprecated",
+  retired: "modelsTab.lifecycle.retired",
+  legacy: "modelsTab.lifecycle.legacy",
+  sunset: "modelsTab.lifecycle.sunset",
+}
+
 export interface ProviderModelsTabProps {
   providerId: string
   models: ModelConfig[]
@@ -138,7 +158,7 @@ function ModelCard({
   metadataLoading = false,
   diagnosticStatus,
 }: ModelCardProps) {
-  const t = useTranslations("providers.sidebar")
+  const t = useTranslations("providers")
   const caps: string[] = model.capabilities ?? []
   const variants = model.variants ?? []
   const statusVariant = statusBadgeVariant(model.status)
@@ -166,7 +186,9 @@ function ModelCard({
             </span>
             {statusVariant && model.status && (
               <Badge variant={statusVariant} className="text-[10px] px-1.5 py-0 capitalize">
-                {model.status}
+                {LIFECYCLE_LABEL_KEYS[model.status.toLowerCase()]
+                  ? t(LIFECYCLE_LABEL_KEYS[model.status.toLowerCase()])
+                  : model.status}
               </Badge>
             )}
             {model.openWeights && (
@@ -186,7 +208,9 @@ function ModelCard({
                   diagnosticStatus === "stale" && "text-muted-foreground"
                 )}
               >
-                {t(`diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`)}
+                {t(
+                  `sidebar.diagnostic${diagnosticStatus[0].toUpperCase()}${diagnosticStatus.slice(1)}`
+                )}
               </Badge>
             )}
           </div>
@@ -221,7 +245,9 @@ function ModelCard({
           <div className="flex flex-wrap gap-1">
             {caps.map((cap) => (
               <Badge key={cap} variant="secondary" className="text-xs px-1.5 py-0">
-                {cap}
+                {CAPABILITY_LABEL_KEYS[cap.toLowerCase()]
+                  ? t(CAPABILITY_LABEL_KEYS[cap.toLowerCase()])
+                  : cap}
               </Badge>
             ))}
           </div>
@@ -287,6 +313,7 @@ export function ProviderModelsTab({
   const [capFilters, setCapFilters] = useState<string[]>([])
   const [enabledOnly, setEnabledOnly] = useState(false)
   const [sort, setSort] = useState<SortMode>("default")
+  const allModelsEnabled = enabledModels.length === 0
 
   /* Capabilities present across the provider's models — drives the chip row. */
   const availableCaps = useMemo(() => {
@@ -308,7 +335,7 @@ export function ProviderModelsTab({
         const caps = new Set(m.capabilities ?? [])
         if (!capFilters.every((c) => caps.has(c))) return false
       }
-      if (enabledOnly && !enabledSet.has(m.id)) return false
+      if (enabledOnly && !allModelsEnabled && !enabledSet.has(m.id)) return false
       return true
     })
 
@@ -320,19 +347,29 @@ export function ProviderModelsTab({
       result.sort((a, b) => (b.releaseDate ?? "").localeCompare(a.releaseDate ?? ""))
     }
     return result
-  }, [models, search, capFilters, enabledOnly, sort, enabledModels])
+  }, [models, search, capFilters, enabledOnly, sort, enabledModels, allModelsEnabled])
 
   const enabledTotal = useMemo(
-    () => models.filter((m) => enabledModels.includes(m.id)).length,
-    [models, enabledModels]
+    () =>
+      allModelsEnabled ? models.length : models.filter((m) => enabledModels.includes(m.id)).length,
+    [allModelsEnabled, models, enabledModels]
   )
 
   /* Toggle a single model */
   const handleToggle = (modelId: string, enabled: boolean) => {
+    if (allModelsEnabled) {
+      if (!enabled)
+        onEnabledModelsChange(models.map((model) => model.id).filter((id) => id !== modelId))
+      return
+    }
     if (enabled) {
-      onEnabledModelsChange([...enabledModels, modelId])
+      onEnabledModelsChange([...new Set([...enabledModels, modelId])])
     } else {
-      onEnabledModelsChange(enabledModels.filter((id) => id !== modelId))
+      const next = enabledModels.filter((id) => id !== modelId)
+      // Same contract guard as `handleDeselectAll`: empty means "all enabled",
+      // so turning the LAST switch off would flip every model back on. Keep the
+      // one being switched off as the explicit list instead.
+      onEnabledModelsChange(next.length > 0 ? next : [modelId])
     }
   }
 
@@ -354,13 +391,21 @@ export function ProviderModelsTab({
   const filteredIds = filtered.map((m) => m.id)
 
   const handleSelectAll = () => {
+    if (allModelsEnabled || filteredIds.length === models.length) {
+      onEnabledModelsChange([])
+      return
+    }
     // Keep existing enabled models outside the filtered set, add all filtered ones
     const outside = enabledModels.filter((id) => !filteredIds.includes(id))
     onEnabledModelsChange([...outside, ...filteredIds])
   }
 
   const handleDeselectAll = () => {
-    onEnabledModelsChange(enabledModels.filter((id) => !filteredIds.includes(id)))
+    const current = allModelsEnabled ? models.map((model) => model.id) : enabledModels
+    const next = current.filter((id) => !filteredIds.includes(id))
+    // Empty means "all enabled" by contract, so keep one explicit model when
+    // a full-list batch disable would otherwise silently turn everything on.
+    onEnabledModelsChange(next.length > 0 ? next : current.slice(0, 1))
   }
 
   const sortLabel = t(
@@ -537,7 +582,7 @@ export function ProviderModelsTab({
               <ModelCard
                 key={model.id}
                 model={model}
-                isEnabled={enabledModels.includes(model.id)}
+                isEnabled={allModelsEnabled || enabledModels.includes(model.id)}
                 onToggle={handleToggle}
                 contextLabel={t("modelsTab.contextWindow")}
                 knowledgeLabel={t("modelsTab.knowledgeCutoff")}

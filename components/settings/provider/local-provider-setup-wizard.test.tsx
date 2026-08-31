@@ -123,10 +123,9 @@ describe("LocalProviderSetupWizard", () => {
 
       await waitFor(() => {
         expect(screen.getByText("Installation Steps")).toBeInTheDocument()
-        expect(screen.getByText("Download Ollama from the official website")).toBeInTheDocument()
+        expect(screen.getByText("Download the installer")).toBeInTheDocument()
         expect(screen.getByText("Run the installer")).toBeInTheDocument()
-        expect(screen.getByText("Start Ollama with `ollama serve`")).toBeInTheDocument()
-        expect(screen.getByText("Pull a model with `ollama pull llama3.2`")).toBeInTheDocument()
+        expect(screen.getByText("Start the application")).toBeInTheDocument()
       })
     })
 

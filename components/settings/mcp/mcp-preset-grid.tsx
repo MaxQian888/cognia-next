@@ -15,6 +15,12 @@ import { searchRegistry } from "@/lib/mcp/registry/client"
 interface Props {
   existingNames: string[]
   onPresetSelected: (preset: McpPreset, values: Record<string, string>) => void
+  /**
+   * Catalog id to land on, from the `?preset=` deep link that the Discover
+   * preset inspector emits. Seeds the search box so the card is visible, and
+   * opens its configure step when it has fields to fill.
+   */
+  initialPresetId?: string
 }
 
 /** Debounce before hitting the network, so typing doesn't fire a request a key. */
@@ -86,18 +92,50 @@ function useRegistrySearch(query: string, activeTag: string | null): RegistrySta
 }
 
 /**
+ * Pre-fill a preset's configure step from whatever the definition already
+ * carries, so a field the preset hard-codes shows up filled instead of blank.
+ */
+function seedFieldValues(preset: McpPreset): Record<string, string> {
+  const initial: Record<string, string> = {}
+  const env = (preset.config.env as Record<string, string> | undefined) ?? {}
+  const headers = (preset.config.headers as Record<string, string> | undefined) ?? {}
+  const presetUrl = typeof preset.config.url === "string" ? preset.config.url : ""
+  for (const f of preset.fields) {
+    if (f.placement === "env") initial[f.key] = env[f.key] ?? ""
+    else if (f.placement === "header") initial[f.key] = headers[f.key] ?? ""
+    else if (f.placement === "url") initial[f.key] = presetUrl
+    else initial[f.key] = ""
+  }
+  return initial
+}
+
+/**
  * The MCP preset "market" — the catalog from the legacy gallery dialog,
  * flattened into a full tab. Search + tag filtering pick a preset; presets
  * that require fields drop into an inline configure step before emitting
  * `onPresetSelected`. Field-less presets (and "Custom") emit immediately.
  */
-export function McpPresetGrid({ existingNames, onPresetSelected }: Props) {
+export function McpPresetGrid({ existingNames, onPresetSelected, initialPresetId }: Props) {
   const t = useTranslations("mcp.gallery")
-  const [selected, setSelected] = useState<McpPreset | null>(null)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [query, setQuery] = useState("")
-  const [activeTag, setActiveTag] = useState<string | null>(null)
   const catalog = useMemo(() => listMcpPresetCatalog(), [])
+
+  // `?preset=` lands on the card, not merely on the tab. Resolved as INITIAL
+  // state rather than in an effect: the id is present on the first render (it
+  // comes from the URL), so an effect would only re-render, and would then
+  // need a ref to stop reopening the configure step on every keystroke.
+  const deepLinked = initialPresetId
+    ? (catalog.find((entry) => entry.id === initialPresetId) ?? null)
+    : null
+  const configurableDeepLink = deepLinked && deepLinked.fields.length > 0 ? deepLinked : null
+
+  const [selected, setSelected] = useState<McpPreset | null>(configurableDeepLink)
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    configurableDeepLink ? seedFieldValues(configurableDeepLink) : {}
+  )
+  // Seeded so that backing out of the configure step leaves the user looking
+  // at the card they asked for rather than the whole catalog.
+  const [query, setQuery] = useState(deepLinked?.name ?? "")
+  const [activeTag, setActiveTag] = useState<string | null>(null)
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
@@ -127,17 +165,7 @@ export function McpPresetGrid({ existingNames, onPresetSelected }: Props) {
       return
     }
     setSelected(preset)
-    const initial: Record<string, string> = {}
-    const env = (preset.config.env as Record<string, string> | undefined) ?? {}
-    const headers = (preset.config.headers as Record<string, string> | undefined) ?? {}
-    const presetUrl = typeof preset.config.url === "string" ? preset.config.url : ""
-    for (const f of preset.fields) {
-      if (f.placement === "env") initial[f.key] = env[f.key] ?? ""
-      else if (f.placement === "header") initial[f.key] = headers[f.key] ?? ""
-      else if (f.placement === "url") initial[f.key] = presetUrl
-      else initial[f.key] = ""
-    }
-    setValues(initial)
+    setValues(seedFieldValues(preset))
   }
 
   const handleSubmit = () => {

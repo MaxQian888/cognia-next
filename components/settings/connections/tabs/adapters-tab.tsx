@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { BotIcon, MenuIcon, PlusIcon } from "lucide-react"
@@ -28,7 +28,7 @@ import { AdapterDetailPanel } from "../adapters/adapter-detail-panel"
 import { AdapterSidebar, type AdapterStatusFilter } from "../adapters/adapter-sidebar"
 import { getPlatformMeta } from "../adapters/platform-meta"
 import { AddConnectorGrid } from "../adapters/add-connector-grid"
-import { useSelectedAdapter } from "../adapters/use-selected-adapter"
+import { usePendingPlatform, useSelectedAdapter } from "../adapters/use-selected-adapter"
 import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
 import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
 
@@ -94,6 +94,7 @@ export function AdaptersTab() {
   const [statusFilter, setStatusFilter] = useState<AdapterStatusFilter>("all")
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
   const { selectedAdapterId, setSelectedAdapterId } = useSelectedAdapter()
+  const { pendingPlatform, clearPendingPlatform } = usePendingPlatform()
 
   const adapters = useLiveQuery<AdapterInstanceRow[]>(
     () =>
@@ -191,6 +192,38 @@ export function AdaptersTab() {
       setEditing({ kind, row: null })
     }
   }
+
+  // `?platform=<kind>` arrives from surfaces that browse the platform CATALOG
+  // rather than this list: the Discover connector inspector, the Inbox health
+  // popover, the Feishu docs row. The user picked a platform, so land them on
+  // their first instance of it, or straight in the "add" dialog when they have
+  // none. Consumed on arrival so a re-render cannot reopen the dialog behind
+  // them.
+  //
+  // This one cannot be derived into initial state the way the MCP preset deep
+  // link is: the decision needs `adapters`, which arrives from an async Dexie
+  // read, so on first render there is nothing yet to decide against. Reacting
+  // to that arrival is exactly what an effect is for.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!pendingPlatform || !adapters) return
+    clearPendingPlatform()
+    if (!isPlatformKind(pendingPlatform)) return
+    const existing = adapters.find((row) => row.type === pendingPlatform)
+    if (existing) {
+      setSelectedAdapterId(existing.id)
+      return
+    }
+    // No instance yet. A configurable kind opens its own dialog. A planned or
+    // plugin-less kind has no dialog to open, so fall back to the picker,
+    // where it renders as a disabled "Planned" card that explains itself.
+    if (isConfigurableKind(pendingPlatform) || pluginKinds.includes(pendingPlatform)) {
+      setEditing({ kind: pendingPlatform, row: null })
+    } else {
+      setAddOpen(true)
+    }
+  }, [pendingPlatform, adapters, pluginKinds, clearPendingPlatform, setSelectedAdapterId])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const closeDialog = (open: boolean) => {
     if (!open) setEditing(null)

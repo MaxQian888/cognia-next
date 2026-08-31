@@ -22,6 +22,7 @@ jest.mock("next-intl", () => ({
       "detailPanel.warning": "Warning",
       "detailPanel.warningHint": "Configured but not verified",
       "sidebar.statusUntested": "Not tested",
+      "sidebar.moreActions": "More provider actions",
       verificationLimitedShort: "Limited",
       delete: "Delete",
       "tabs.config": "Config",
@@ -91,7 +92,7 @@ describe("ProviderDetailPanel", () => {
     // Radix activates a tab on mousedown, not click.
     const openModels = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Models" }))
 
-    it("lets the tab triggers share the pane width instead of overflowing it", () => {
+    it("keeps full tab labels in a horizontally scrollable strip", () => {
       const { container } = render(
         <ProviderDetailPanel
           provider={{ id: "openai", name: "OpenAI" }}
@@ -100,10 +101,10 @@ describe("ProviderDetailPanel", () => {
         />
       )
       const list = container.querySelector('[data-slot="tabs-list"]')
-      expect(list).toHaveClass("w-full", "min-w-0")
+      expect(list).toHaveClass("w-full", "min-w-0", "overflow-x-auto")
       container
         .querySelectorAll('[data-slot="tabs-trigger"]')
-        .forEach((trigger) => expect(trigger).toHaveClass("min-w-0", "flex-1"))
+        .forEach((trigger) => expect(trigger).toHaveClass("flex-none", "whitespace-nowrap"))
     })
 
     it("keeps the Models tab out of the shared scroller so it can pin its own toolbar", () => {
@@ -248,7 +249,7 @@ describe("ProviderDetailPanel", () => {
     expect(screen.getByText("Not configured")).toBeInTheDocument()
   })
 
-  it("renders the custom delete action and forwards the click", () => {
+  it("renders the custom delete action in the overflow menu and forwards the click", async () => {
     const onDelete = jest.fn()
     render(
       <ProviderDetailPanel
@@ -257,7 +258,12 @@ describe("ProviderDetailPanel", () => {
         onDelete={onDelete}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    fireEvent.pointerDown(screen.getByRole("button", { name: "More provider actions" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    })
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }))
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
 

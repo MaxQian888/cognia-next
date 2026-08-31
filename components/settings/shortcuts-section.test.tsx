@@ -3,7 +3,8 @@ import { ShortcutsSection } from "./shortcuts-section"
 import { __resetShortcutStoreForTesting, useShortcutStore } from "@/lib/shortcuts/registry"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string, vars?: { fallback?: string }) => vars?.fallback ?? key,
+  useTranslations: () => (key: string, vars?: { fallback?: string }) =>
+    key === "selectionShowToolbar" ? "Show toolbar for current selection" : (vars?.fallback ?? key),
 }))
 
 jest.mock("@/lib/tauri", () => ({
@@ -27,6 +28,7 @@ describe("ShortcutsSection", () => {
     expect(screen.getByText("Show / hide window")).toBeInTheDocument()
     expect(screen.getByText("Open log panel")).toBeInTheDocument()
     expect(screen.getByText("Automation kill switch")).toBeInTheDocument()
+    expect(screen.getByText("Show toolbar for current selection")).toBeInTheDocument()
     expect(screen.getByText("Capture copied selection")).toBeInTheDocument()
   })
 

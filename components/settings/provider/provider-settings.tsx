@@ -6,7 +6,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { createPortal } from "react-dom"
 import {
   Plus,
-  Menu,
+  ArrowLeft,
   Settings,
   Key,
   PlugZap,
@@ -28,7 +28,6 @@ import {
   SettingsBlock,
   SettingsField,
 } from "@/components/settings/common/settings-block"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,6 +51,7 @@ import { useProviderManager, type ProviderHealth } from "@/hooks/ai/use-provider
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 import { buildBuiltInProviderModelDiscoverySnapshot } from "@cognia/provider-core/providers/model-discovery"
+import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { CustomProviderSettings, ProviderUIPreferences } from "@cognia/provider-types/provider"
 import type { LocalProviderName, LocalModelInfo } from "@cognia/provider-types/local-provider"
@@ -551,7 +551,30 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // pane. Comparison is a peer of the detail view (it spans providers), so it
   // takes the column over instead of stacking a dialog on top of it.
   const [compareOpen, setCompareOpen] = useState(false)
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  // Optimistic for the duration of the write, and not one render longer.
+  // `setProviderUIPreferences` is queued behind every other provider mutation,
+  // so reading the persisted value straight through would make the tab switch
+  // visibly lag the click. Keeping the local copy indefinitely was the other
+  // failure: it shadowed the preference permanently, so a workspace change
+  // from anywhere else (settings sync, a restore, another surface) never
+  // reached this component. Releasing it when the write settles gives instant
+  // feedback and leaves the store as the single source of truth.
+  const [workspaceOverride, setWorkspaceOverride] = useState<"providers" | "routing" | null>(null)
+  const selectWorkspace = useCallback(
+    (workspace: "providers" | "routing") => {
+      setWorkspaceOverride(workspace)
+      // `Promise.resolve` because the release must happen even if the action
+      // ever returns a non-promise. An override that is never released is the
+      // permanent shadow this replaced.
+      void Promise.resolve(setProviderUIPreferences({ workspace })).finally(() =>
+        // Only if a later click has not already claimed the override.
+        setWorkspaceOverride((current) => (current === workspace ? null : current))
+      )
+    },
+    [setProviderUIPreferences]
+  )
+  const activeWorkspace = workspaceOverride ?? s.uiPreferences.workspace ?? "providers"
   const [testingConnection, setTestingConnection] = useState<Record<string, boolean>>({})
   const batchCancelRequested = useRef(false)
   const [batchVerification, setBatchVerification] = useState({
@@ -958,20 +981,39 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
   // `discoveredModels`) carry far more. Fold those dynamic sources in — deduped
   // by id, static first — so the Default Model dropdown actually lists the models
   // a dynamic provider can serve instead of an empty/stale set.
-  const configModelOptions = useMemo<Array<{ id: string; name: string }>>(() => {
+  const configModelOptions = useMemo<
+    Array<{ id: string; name: string; source: "catalog" | "discovered" | "user" }>
+  >(() => {
     if (!selectedBuiltIn || !selectedId) return []
-    const byId = new Map<string, string>()
-    for (const m of selectedBuiltIn.models) byId.set(m.id, m.name)
+    const byId = new Map<
+      string,
+      { id: string; name: string; source: "catalog" | "discovered" | "user" }
+    >()
+    for (const m of selectedBuiltIn.models) {
+      byId.set(m.id, { id: m.id, name: m.name, source: "catalog" })
+    }
     for (const m of selectedSettings?.discoveredModels ?? []) {
-      byId.set(m.id, m.name ?? m.id)
+      byId.set(m.id, { id: m.id, name: m.name ?? m.id, source: "discovered" })
     }
     if (selectedId === "openrouter") {
       for (const m of openRouterCatalogRow?.models ?? []) {
-        byId.set(m.id, m.name ?? m.id)
+        if (!byId.has(m.id)) {
+          byId.set(m.id, { id: m.id, name: m.name ?? m.id, source: "catalog" })
+        }
       }
     }
-    return Array.from(byId, ([id, name]) => ({ id, name }))
-  }, [selectedBuiltIn, selectedId, selectedSettings?.discoveredModels, openRouterCatalogRow])
+    const manual = selectedSettings?.defaultModel
+    if (manual && !byId.has(manual)) {
+      byId.set(manual, { id: manual, name: manual, source: "user" })
+    }
+    return [...byId.values()]
+  }, [
+    selectedBuiltIn,
+    selectedId,
+    selectedSettings?.discoveredModels,
+    selectedSettings?.defaultModel,
+    openRouterCatalogRow,
+  ])
 
   const persistLocalProviderModels = useCallback(
     async (models: LocalModelInfo[]) => {
@@ -1075,13 +1117,21 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
       selectedId={selectedId}
       onSelect={(id) => {
         void s.setSelectedProviderId(id)
+        selectWorkspace("providers")
         setCompareOpen(false)
-        setMobileSheetOpen(false)
+        setMobileDetailOpen(true)
       }}
       onCompareClick={() => {
         setCompareOpen(true)
-        setMobileSheetOpen(false)
+        setMobileDetailOpen(true)
       }}
+      onRoutingClick={() => {
+        selectWorkspace("routing")
+        setCompareOpen(false)
+        setMobileDetailOpen(true)
+      }}
+      routingSelected={activeWorkspace === "routing"}
+      globalTotal={s.filteredProviders.length + s.visibleCustomProviderIds.length}
       categoryFilter={categoryFilter}
       onCategoryChange={setCategoryFilter}
       statusFilter={statusFilter}
@@ -1221,28 +1271,9 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
         data-testid="provider-layout"
       >
         {isMobile ? (
-          /* ── Mobile top bar ─────────────────────────────────────────── */
-          <div className="flex items-center gap-2">
-            <Sheet open={mobileSheetOpen} onOpenChange={setMobileSheetOpen}>
-              <SheetTrigger asChild>
-                <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
-                  <Menu className="h-4 w-4" />
-                  {t("mobile.openProviders")}
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[300px] p-0">
-                <SheetHeader className="px-3 pt-3">
-                  <SheetTitle className="text-sm">{t("title")}</SheetTitle>
-                </SheetHeader>
-                {sidebar}
-              </SheetContent>
-            </Sheet>
-            {selectedId && (
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{selectedName ?? selectedId}</p>
-              </div>
-            )}
-          </div>
+          !mobileDetailOpen && (
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border">{sidebar}</div>
+          )
         ) : (
           /* ── Desktop rail + drag handle ─────────────────────────────── */
           <div className="relative flex min-h-0 flex-col overflow-hidden rounded-lg border">
@@ -1283,364 +1314,403 @@ export function ProviderSettings({ headerActionsTarget }: ProviderSettingsProps 
             Children that sized themselves with `md:`/`sm:` were reading the
             window and laying out 2- and 4-column grids into a ~430px pane at
             the md breakpoint. Same fix the subscription pane already uses. */}
-        <div className="@container/provider-pane flex min-h-0 flex-col overflow-hidden rounded-lg border">
-          {/* Selecting a provider swapped this whole subtree instantly, which is
+        {(!isMobile || mobileDetailOpen) && (
+          <div className="@container/provider-pane flex min-h-0 flex-col overflow-hidden rounded-lg border">
+            {/* Selecting a provider swapped this whole subtree instantly, which is
               exactly what `PanelTransition` exists for — Appearance and
               Subscription already crossfade their master/detail bodies with it.
               Keyed on the selection (plus the empty state) so the outgoing pane
               fades out before the incoming one settles. It collapses to a plain
               wrapper under reduced motion. */}
-          <PanelTransition
-            activeKey={compareOpen ? "__compare__" : (selectedId ?? "__empty__")}
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            {compareOpen ? (
-              <ProviderComparisonView
-                onBack={() => setCompareOpen(false)}
-                initialSelectedModelKeys={s.uiPreferences.comparisonModelKeys}
-                onSelectedModelKeysChange={(comparisonModelKeys) => {
-                  void setProviderUIPreferences({ comparisonModelKeys })
-                }}
-              />
-            ) : selectedId === null ? (
-              <div className="flex h-full items-center justify-center">
-                <div className="flex flex-col items-center gap-4 py-12 text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
-                    <Settings className="h-8 w-8 text-muted-foreground/40" />
+            <PanelTransition
+              activeKey={
+                activeWorkspace === "routing"
+                  ? "__routing__"
+                  : compareOpen
+                    ? "__compare__"
+                    : (selectedId ?? "__empty__")
+              }
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              {activeWorkspace === "routing" ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
+                    {isMobile && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                        onClick={() => setMobileDetailOpen(false)}
+                        aria-label={t("mobile.backToProviders")}
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Route className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <h3 className="text-base font-semibold">{t("sidebar.routing")}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {t("routingWorkspaceDescription")}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-base font-semibold text-foreground">
-                      {t("detailPanel.emptyTitle")}
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {t("detailPanel.emptyDescription")}
-                    </p>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                    <div className="mx-auto w-full max-w-4xl">
+                      <RoutingTab />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <ProviderDetailPanel
-                // Explicit key: `PanelTransition` only remounts when motion is
-                // enabled, so under reduced motion the active tab / revealed
-                // key state leaked from one provider to the next.
-                key={selectedId}
-                provider={
-                  selectedBuiltIn
-                    ? {
-                        id: selectedId,
-                        name: selectedBuiltIn.name,
-                        modelCount: selectedBuiltIn.models.length,
-                      }
-                    : selectedCustom
+              ) : compareOpen ? (
+                <ProviderComparisonView
+                  onBack={() => {
+                    setCompareOpen(false)
+                    if (isMobile) setMobileDetailOpen(false)
+                  }}
+                  initialSelectedModelKeys={s.uiPreferences.comparisonModelKeys}
+                  onSelectedModelKeysChange={(comparisonModelKeys) => {
+                    void setProviderUIPreferences({ comparisonModelKeys })
+                  }}
+                />
+              ) : selectedId === null ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="flex flex-col items-center gap-4 py-12 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+                      <Settings className="h-8 w-8 text-muted-foreground/40" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-foreground">
+                        {t("detailPanel.emptyTitle")}
+                      </h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {t("detailPanel.emptyDescription")}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <ProviderDetailPanel
+                  // Explicit key: `PanelTransition` only remounts when motion is
+                  // enabled, so under reduced motion the active tab / revealed
+                  // key state leaked from one provider to the next.
+                  key={selectedId}
+                  provider={
+                    selectedBuiltIn
                       ? {
                           id: selectedId,
-                          name: selectedCustom.customName,
-                          modelCount: selectedCustom.customModels?.length ?? 0,
+                          name: selectedBuiltIn.name,
+                          modelCount: selectedBuiltIn.models.length,
                         }
-                      : null
-                }
-                isEnabled={isEnabled}
-                canEnable={canEnable}
-                enableBlockedReason={enableBlockedReason}
-                isCustom={isCustom}
-                isDefault={selectedId === defaultProvider}
-                onSetDefault={
-                  canSetDefault ? () => void s.setDefaultProvider(selectedId) : undefined
-                }
-                setDefaultBlockedReason={setDefaultBlockedReason}
-                connectionStatus={
-                  isCustom
-                    ? (() => {
-                        const testOutcome = s.customTestResults[selectedId]
-                        const effectiveTest = preferLiveHealth(
-                          liveProviderHealth[selectedId],
-                          testOutcome === "success"
-                            ? true
-                            : testOutcome === "error"
-                              ? false
-                              : undefined,
-                          testOutcome
-                        )
-                        return deriveStatus(
-                          selectedCustom?.apiKey,
-                          selectedCustom?.baseURL,
-                          effectiveTest.ok,
-                          effectiveTest.outcome
-                        )
-                      })()
-                    : (() => {
-                        const test = s.testResults[selectedId]
-                        const effectiveTest = preferLiveHealth(
-                          liveProviderHealth[selectedId],
-                          test?.success,
-                          test?.outcome
-                        )
-                        return deriveStatus(
-                          selectedSettings?.apiKey,
-                          selectedSettings?.baseURL,
-                          effectiveTest.ok,
-                          effectiveTest.outcome,
-                          selectedId === "bedrock" && !!selectedSettings?.bedrock
-                            ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
-                            : false,
-                          selectedSettings?.verificationStatus ?? null
-                        )
-                      })()
-                }
-                onToggleEnabled={(next) => {
-                  if (next && !canEnable) return
-                  if (isCustom && selectedCustom) {
-                    void s.updateCustomProvider(selectedId, { enabled: next })
-                  } else {
-                    void setProviderConfig(selectedId, { enabled: next })
+                      : selectedCustom
+                        ? {
+                            id: selectedId,
+                            name: selectedCustom.customName,
+                            modelCount: selectedCustom.customModels?.length ?? 0,
+                          }
+                        : null
                   }
-                }}
-                onDelete={isCustom ? () => setPendingDeleteId(selectedId) : undefined}
-                configTab={
-                  // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
-                  // and gets its own dashboard, but it stays INSIDE the shared
-                  // detail shell so it keeps the header, enable switch, default
-                  // badge and status the rest of the list has.
-                  isLocalProvider ? (
-                    <div className="space-y-6">
-                      {selectedReadiness && (
-                        <ProviderSetupChecklist
-                          checklist={selectedReadiness.setupChecklist}
-                          isLocalEngine
-                        />
-                      )}
-                      <LocalProviderSettings providerId={selectedId as LocalProviderName} />
-                    </div>
-                  ) : isCustom && selectedCustom ? (
-                    <div className="space-y-6">
-                      {selectedReadiness && (
-                        <ProviderSetupChecklist
-                          checklist={selectedReadiness.setupChecklist}
-                          onVerify={() => void s.testCustomProvider(selectedId)}
-                          isVerifying={!!s.testingCustomProviders[selectedId]}
-                        />
-                      )}
-                      <CustomProviderInlineConfig
-                        cp={selectedCustom}
-                        onApiKeyChange={(key) =>
-                          void s.updateCustomProvider(selectedId, { apiKey: key })
-                        }
-                        onBaseURLChange={(url) =>
-                          void s.updateCustomProvider(selectedId, { baseURL: url })
-                        }
-                        onDefaultModelChange={(model) =>
-                          void s.updateCustomProvider(selectedId, { defaultModel: model })
-                        }
-                        onEditClick={handleEditCustom}
-                        onTestConnection={() => void s.testCustomProvider(selectedId)}
-                        testResult={s.customTestResults[selectedId] ?? null}
-                        testMessage={s.customTestMessages[selectedId] ?? null}
-                        isTesting={!!s.testingCustomProviders[selectedId]}
-                      />
-                    </div>
-                  ) : selectedBuiltIn ? (
-                    <div className="space-y-6">
-                      {selectedReadiness && (
-                        <ProviderSetupChecklist
-                          checklist={selectedReadiness.setupChecklist}
-                          onVerify={handleTestConnection}
-                          isVerifying={!!s.testingProviders[selectedId]}
-                        />
-                      )}
-                      <ProviderConfigTab
-                        providerId={selectedId}
-                        settings={
-                          selectedSettings ?? {
-                            providerId: selectedId,
-                            enabled: false,
-                            defaultModel: selectedBuiltIn.defaultModel,
+                  isEnabled={isEnabled}
+                  canEnable={canEnable}
+                  enableBlockedReason={enableBlockedReason}
+                  isCustom={isCustom}
+                  isDefault={selectedId === defaultProvider}
+                  onSetDefault={
+                    canSetDefault ? () => void s.setDefaultProvider(selectedId) : undefined
+                  }
+                  setDefaultBlockedReason={setDefaultBlockedReason}
+                  connectionStatus={
+                    isCustom
+                      ? (() => {
+                          const testOutcome = s.customTestResults[selectedId]
+                          const effectiveTest = preferLiveHealth(
+                            liveProviderHealth[selectedId],
+                            testOutcome === "success"
+                              ? true
+                              : testOutcome === "error"
+                                ? false
+                                : undefined,
+                            testOutcome
+                          )
+                          return deriveStatus(
+                            selectedCustom?.apiKey,
+                            selectedCustom?.baseURL,
+                            effectiveTest.ok,
+                            effectiveTest.outcome
+                          )
+                        })()
+                      : (() => {
+                          const test = s.testResults[selectedId]
+                          const effectiveTest = preferLiveHealth(
+                            liveProviderHealth[selectedId],
+                            test?.success,
+                            test?.outcome
+                          )
+                          return deriveStatus(
+                            selectedSettings?.apiKey,
+                            selectedSettings?.baseURL,
+                            effectiveTest.ok,
+                            effectiveTest.outcome,
+                            selectedId === "bedrock" && !!selectedSettings?.bedrock
+                              ? validateBedrockConnectionSettings(selectedSettings.bedrock).valid
+                              : false,
+                            selectedSettings?.verificationStatus ?? null
+                          )
+                        })()
+                  }
+                  onToggleEnabled={(next) => {
+                    if (next && !canEnable) return
+                    if (isCustom && selectedCustom) {
+                      void s.updateCustomProvider(selectedId, { enabled: next })
+                    } else {
+                      void setProviderConfig(selectedId, { enabled: next })
+                    }
+                  }}
+                  onDelete={isCustom ? () => setPendingDeleteId(selectedId) : undefined}
+                  onBack={isMobile ? () => setMobileDetailOpen(false) : undefined}
+                  configTab={
+                    // A local engine (Ollama, LM Studio, llama.cpp, …) is keyless
+                    // and gets its own dashboard, but it stays INSIDE the shared
+                    // detail shell so it keeps the header, enable switch, default
+                    // badge and status the rest of the list has.
+                    isLocalProvider ? (
+                      <div className="space-y-6">
+                        {selectedReadiness && (
+                          <ProviderSetupChecklist
+                            checklist={selectedReadiness.setupChecklist}
+                            isLocalEngine
+                          />
+                        )}
+                        <LocalProviderSettings providerId={selectedId as LocalProviderName} />
+                      </div>
+                    ) : isCustom && selectedCustom ? (
+                      <div className="space-y-6">
+                        {selectedReadiness && (
+                          <ProviderSetupChecklist
+                            checklist={selectedReadiness.setupChecklist}
+                            onVerify={() => void s.testCustomProvider(selectedId)}
+                            isVerifying={!!s.testingCustomProviders[selectedId]}
+                          />
+                        )}
+                        <CustomProviderInlineConfig
+                          cp={selectedCustom}
+                          onApiKeyChange={(key) =>
+                            void s.updateCustomProvider(selectedId, { apiKey: key })
                           }
-                        }
-                        providerModels={configModelOptions}
-                        providerDashboardUrl={selectedBuiltIn.dashboardUrl}
-                        providerDocsUrl={selectedBuiltIn.docsUrl}
-                        onApiKeyChange={(key) =>
-                          void setProviderConfig(selectedId, { apiKey: key })
-                        }
-                        onBaseURLChange={(url) =>
-                          void setProviderConfig(selectedId, { baseURL: url })
-                        }
-                        onBedrockSettingsChange={(bedrock) =>
-                          void setProviderConfig(selectedId, {
-                            bedrock,
-                            apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
-                            baseURL: bedrock.baseURL,
-                          })
-                        }
-                        onApiProtocolChange={(protocol) =>
-                          void setProviderConfig(selectedId, { apiProtocol: protocol })
-                        }
-                        onApiFlavorChange={(apiFlavor) =>
-                          void setProviderConfig(selectedId, { apiFlavor })
-                        }
-                        onCustomHeadersChange={(customHeaders) =>
-                          void setProviderConfig(selectedId, { customHeaders })
-                        }
-                        onDefaultModelChange={(model) =>
-                          void setProviderConfig(selectedId, { defaultModel: model })
-                        }
-                        onTestConnection={async () => {
-                          const result = await s.testProvider(selectedId)
-                          return {
-                            success: !!result?.success,
-                            latency: result?.latency_ms,
-                            error: result?.success ? undefined : result?.message,
-                            outcome: result?.outcome,
+                          onBaseURLChange={(url) =>
+                            void s.updateCustomProvider(selectedId, { baseURL: url })
                           }
-                        }}
-                        testResult={configTestResult}
-                        isTesting={!!s.testingProviders[selectedId]}
-                        onAddApiKey={(key) => {
-                          const pool = selectedSettings?.apiKeys ?? []
-                          void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
-                        }}
-                        onRemoveApiKey={(index) => {
-                          const pool = selectedSettings?.apiKeys ?? []
-                          void setProviderConfig(selectedId, {
-                            apiKeys: pool.filter((_, i) => i !== index),
-                          })
-                        }}
-                        onReorderApiKeys={(from, to) => {
-                          const pool = [...(selectedSettings?.apiKeys ?? [])]
-                          const [moved] = pool.splice(from, 1)
-                          if (moved === undefined) return
-                          pool.splice(to, 0, moved)
-                          void setProviderConfig(selectedId, { apiKeys: pool })
-                        }}
-                        onToggleRotation={(enabled) =>
-                          void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
-                        }
-                        onRotationStrategyChange={(strategy) =>
-                          void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
-                        }
-                      />
-                      {/* Self-gates on the catalog's `supportsOAuth` and renders
+                          onDefaultModelChange={(model) =>
+                            void s.updateCustomProvider(selectedId, { defaultModel: model })
+                          }
+                          onEditClick={handleEditCustom}
+                          onTestConnection={() => void s.testCustomProvider(selectedId)}
+                          testResult={s.customTestResults[selectedId] ?? null}
+                          testMessage={s.customTestMessages[selectedId] ?? null}
+                          isTesting={!!s.testingCustomProviders[selectedId]}
+                        />
+                      </div>
+                    ) : selectedBuiltIn ? (
+                      <div className="space-y-6">
+                        {selectedReadiness && (
+                          <ProviderSetupChecklist
+                            checklist={selectedReadiness.setupChecklist}
+                            onVerify={handleTestConnection}
+                            isVerifying={!!s.testingProviders[selectedId]}
+                          />
+                        )}
+                        <ProviderConfigTab
+                          providerId={selectedId}
+                          settings={
+                            selectedSettings ?? {
+                              providerId: selectedId,
+                              enabled: false,
+                              defaultModel: selectedBuiltIn.defaultModel,
+                            }
+                          }
+                          providerModels={configModelOptions}
+                          providerDashboardUrl={selectedBuiltIn.dashboardUrl}
+                          providerDocsUrl={selectedBuiltIn.docsUrl}
+                          onApiKeyChange={(key) =>
+                            void setProviderConfig(selectedId, { apiKey: key })
+                          }
+                          onBaseURLChange={(url) =>
+                            void setProviderConfig(selectedId, { baseURL: url })
+                          }
+                          onBedrockSettingsChange={(bedrock) =>
+                            void setProviderConfig(selectedId, {
+                              bedrock,
+                              apiKey: bedrock.authMode === "api-key" ? bedrock.apiKey : undefined,
+                              baseURL: bedrock.baseURL,
+                            })
+                          }
+                          onApiProtocolChange={(protocol) =>
+                            void setProviderConfig(selectedId, { apiProtocol: protocol })
+                          }
+                          onApiFlavorChange={(apiFlavor) =>
+                            void setProviderConfig(selectedId, { apiFlavor })
+                          }
+                          onCustomHeadersChange={(customHeaders) =>
+                            void setProviderConfig(selectedId, { customHeaders })
+                          }
+                          onDefaultModelChange={(model) =>
+                            void setProviderConfig(selectedId, { defaultModel: model })
+                          }
+                          onTestConnection={async () => {
+                            const result = await s.testProvider(selectedId)
+                            return {
+                              success: !!result?.success,
+                              latency: result?.latency_ms,
+                              error: result?.success ? undefined : result?.message,
+                              outcome: result?.outcome,
+                            }
+                          }}
+                          testResult={configTestResult}
+                          isTesting={!!s.testingProviders[selectedId]}
+                          onAddApiKey={(key) => {
+                            const pool = selectedSettings?.apiKeys ?? []
+                            void setProviderConfig(selectedId, { apiKeys: [...pool, key] })
+                          }}
+                          onRemoveApiKey={(index) => {
+                            const pool = selectedSettings?.apiKeys ?? []
+                            void setProviderConfig(selectedId, {
+                              apiKeys: pool.filter((_, i) => i !== index),
+                            })
+                          }}
+                          onReorderApiKeys={(from, to) => {
+                            const pool = [...(selectedSettings?.apiKeys ?? [])]
+                            const [moved] = pool.splice(from, 1)
+                            if (moved === undefined) return
+                            pool.splice(to, 0, moved)
+                            void setProviderConfig(selectedId, { apiKeys: pool })
+                          }}
+                          onToggleRotation={(enabled) =>
+                            void setProviderConfig(selectedId, { apiKeyRotationEnabled: enabled })
+                          }
+                          onRotationStrategyChange={(strategy) =>
+                            void setProviderConfig(selectedId, { apiKeyRotationStrategy: strategy })
+                          }
+                        />
+                        {/* Self-gates on the catalog's `supportsOAuth` and renders
                         null otherwise, so mounting it for every built-in is
                         safe and picks up any future OAuth provider for free.
                         Until now nothing rendered it, which left
                         `oauthConnected` / `oauthExpiresAt` unreachable from the
                         UI even though both are persisted on the settings row. */}
-                      <OAuthLoginButton providerId={selectedId} />
-                      {/* Provider-specific panels. Both shipped with a catalog
+                        <OAuthLoginButton providerId={selectedId} />
+                        {/* Provider-specific panels. Both shipped with a catalog
                         entry and a full settings schema but were never mounted,
                         so every field they expose was unreachable. */}
-                      {selectedId === "openrouter" && (
-                        <>
-                          <OpenRouterSettings />
-                          <OpenRouterKeyManagement />
-                        </>
-                      )}
-                      {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
-                    </div>
-                  ) : (
-                    <div
-                      className="text-sm text-muted-foreground"
-                      data-testid="unknown-provider-placeholder"
-                    >
-                      {t("unknownProviderType")}
-                    </div>
-                  )
-                }
-                modelsTab={
-                  isLocalProvider ? (
-                    <LocalProviderModelManager
-                      providerId={selectedId as LocalProviderName}
-                      baseUrl={selectedSettings?.baseURL || selectedBuiltIn?.defaultBaseURL}
-                      apiKey={selectedSettings?.apiKey}
-                      customHeaders={selectedSettings?.customHeaders}
-                      selectedModel={selectedSettings?.defaultModel}
-                      onModelSelect={(modelId) =>
-                        void setProviderConfig(selectedId, { defaultModel: modelId })
-                      }
-                      onModelsChange={(models) => void persistLocalProviderModels(models)}
-                    />
-                  ) : isCustom ? (
-                    // The Models slot is fill-height (it owns its own scroller),
-                    // so these text fallbacks bring their own padding.
-                    <div className="p-4 text-sm text-muted-foreground">
-                      {t("customProviderModelsManaged")}
-                    </div>
-                  ) : selectedBuiltIn ? (
-                    <ProviderModelsTab
+                        {selectedId === "openrouter" && (
+                          <>
+                            <OpenRouterSettings />
+                            <OpenRouterKeyManagement />
+                          </>
+                        )}
+                        {selectedId === "cliproxyapi" && <CLIProxyAPISettings />}
+                      </div>
+                    ) : (
+                      <div
+                        className="text-sm text-muted-foreground"
+                        data-testid="unknown-provider-placeholder"
+                      >
+                        {t("unknownProviderType")}
+                      </div>
+                    )
+                  }
+                  modelsTab={
+                    isLocalProvider ? (
+                      <LocalProviderModelManager
+                        providerId={selectedId as LocalProviderName}
+                        baseUrl={selectedSettings?.baseURL || selectedBuiltIn?.defaultBaseURL}
+                        apiKey={selectedSettings?.apiKey}
+                        customHeaders={selectedSettings?.customHeaders}
+                        selectedModel={selectedSettings?.defaultModel}
+                        onModelSelect={(modelId) =>
+                          void setProviderConfig(selectedId, { defaultModel: modelId })
+                        }
+                        onModelsChange={(models) => void persistLocalProviderModels(models)}
+                      />
+                    ) : isCustom ? (
+                      // The Models slot is fill-height (it owns its own scroller),
+                      // so these text fallbacks bring their own padding.
+                      <div className="p-4 text-sm text-muted-foreground">
+                        {t("customProviderModelsManaged")}
+                      </div>
+                    ) : selectedBuiltIn ? (
+                      <ProviderModelsTab
+                        providerId={selectedId}
+                        models={enrichedBuiltInModels}
+                        enabledModels={selectedSettings?.enabledModels ?? []}
+                        onEnabledModelsChange={(ids) =>
+                          void setProviderConfig(selectedId, { enabledModels: ids })
+                        }
+                        onRefreshModels={handleRefreshModels}
+                        isRefreshing={!!testingConnection[selectedId]}
+                        onTestConnection={handleTestConnection}
+                        isTesting={!!s.testingProviders[selectedId]}
+                        metadataLoading={modelsDevLoading}
+                        diagnosticStatusByModel={modelDiagnosticBadges}
+                      />
+                    ) : (
+                      <div className="p-4 text-sm text-muted-foreground">
+                        {t("noModelsAvailable")}
+                      </div>
+                    )
+                  }
+                  costTab={
+                    isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />
+                  }
+                  diagnosticsTab={
+                    <ProviderDiagnosticsTab
                       providerId={selectedId}
-                      models={enrichedBuiltInModels}
-                      enabledModels={selectedSettings?.enabledModels ?? []}
-                      onEnabledModelsChange={(ids) =>
-                        void setProviderConfig(selectedId, { enabledModels: ids })
+                      providerName={selectedName ?? selectedId}
+                      modelIds={
+                        isCustom
+                          ? (selectedCustom?.customModels ?? [])
+                          : enrichedBuiltInModels.map((model) => model.id)
                       }
-                      onRefreshModels={handleRefreshModels}
-                      isRefreshing={!!testingConnection[selectedId]}
-                      onTestConnection={handleTestConnection}
-                      isTesting={!!s.testingProviders[selectedId]}
-                      metadataLoading={modelsDevLoading}
-                      diagnosticStatusByModel={modelDiagnosticBadges}
+                      defaultModel={selectedSettings?.defaultModel ?? selectedCustom?.defaultModel}
                     />
-                  ) : (
-                    <div className="p-4 text-sm text-muted-foreground">
-                      {t("noModelsAvailable")}
-                    </div>
-                  )
-                }
-                costTab={isLocalProvider ? undefined : <ProviderCostTab providerId={selectedId} />}
-                diagnosticsTab={
-                  <ProviderDiagnosticsTab
-                    providerId={selectedId}
-                    providerName={selectedName ?? selectedId}
-                    modelIds={
-                      isCustom
-                        ? (selectedCustom?.customModels ?? [])
-                        : enrichedBuiltInModels.map((model) => model.id)
-                    }
-                    defaultModel={selectedSettings?.defaultModel ?? selectedCustom?.defaultModel}
-                  />
-                }
-                advancedTab={
-                  isLocalProvider ? undefined : (
-                    /* Flat sections, not a nested tab strip. Tabs inside a tab
-                       made "Advanced" a second navigation level whose state was
-                       invisible from the outside — a user who left the panel on
-                       Routing came back to it with no indication why Parameters
-                       had disappeared. Both are now on one page, each foldable. */
+                  }
+                  advancedTab={
                     <ProviderSectionStack>
                       <ProviderSection
                         collapsible
                         icon={SlidersHorizontal}
                         title={t("tabs.parameters")}
                       >
-                        {selectedSettings ? (
-                          <ProviderParametersTab
-                            providerId={selectedId}
-                            settings={selectedSettings}
-                          />
-                        ) : (
-                          <div
-                            className="py-4 text-center text-xs text-muted-foreground"
-                            data-testid="parameters-placeholder"
-                          >
-                            {t("configureProviderForParameters")}
-                          </div>
-                        )}
-                      </ProviderSection>
-                      <ProviderSection
-                        collapsible
-                        defaultOpen={false}
-                        icon={Route}
-                        title={t("tabs.routing")}
-                      >
-                        <RoutingTab />
+                        <ProviderParametersTab
+                          providerId={selectedId}
+                          settings={
+                            (isCustom ? selectedCustom : selectedSettings) ?? {
+                              providerId: selectedId,
+                              enabled: false,
+                              defaultModel:
+                                selectedBuiltIn?.defaultModel ?? selectedCustom?.defaultModel ?? "",
+                            }
+                          }
+                          schema={getSchemaForProvider(
+                            selectedId,
+                            Object.fromEntries(
+                              Object.values(s.customProviders).map((provider) => [
+                                provider.id,
+                                { apiProtocol: provider.apiProtocol, name: provider.name },
+                              ])
+                            )
+                          )}
+                          onSettingsChange={(patch) =>
+                            isCustom
+                              ? s.updateCustomProvider(selectedId, patch)
+                              : setProviderConfig(selectedId, patch)
+                          }
+                        />
                       </ProviderSection>
                     </ProviderSectionStack>
-                  )
-                }
-              />
-            )}
-          </PanelTransition>
-        </div>
+                  }
+                />
+              )}
+            </PanelTransition>
+          </div>
+        )}
       </div>
 
       {/* ── Dialogs ────────────────────────────────────────────────────── */}

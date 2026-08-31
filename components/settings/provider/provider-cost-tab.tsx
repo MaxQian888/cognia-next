@@ -31,6 +31,7 @@ import {
   localDayString,
   type ProviderCostDailyRow,
 } from "@/lib/db/provider-cost-daily"
+import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -42,38 +43,29 @@ type Period = "7d" | "30d"
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
-/** Abbreviate large token counts: 1200000 → "1.2M", 500000 → "500K", 999 → "999" */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
-    const val = n / 1_000_000
-    return `${Number.isInteger(val) ? val : val.toFixed(1)}M`
-  }
-  if (n >= 1_000) {
-    const val = n / 1_000
-    return `${Number.isInteger(val) ? val : val.toFixed(0)}K`
-  }
-  return String(n)
-}
-
-/** Format cost in USD with 2 decimal places */
+/**
+ * Token and money formatting come from `types/system/usage`, the same pair the
+ * Usage dashboard and the `/usage` card use. This file used to carry private
+ * copies whose thresholds differed (a bare `Intl` currency call, and a token
+ * abbreviator that rounded 1.2M differently), so the identical spend could read
+ * two ways depending on which panel you opened.
+ */
 function formatCost(cost: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(cost)
+  return formatCostInCurrency(cost, "USD")
 }
 
-/** Return ISO date strings for the past N days (including today) */
-function getPastDays(n: number): Set<string> {
+/**
+ * The day keys for the past N days, INCLUDING today, in the same LOCAL calendar
+ * the rollup writes (`localDayString`).
+ *
+ * This used to build keys with `toISOString().slice(0, 10)`, which is UTC. East
+ * of Greenwich that names tomorrow for most of the evening and west of it names
+ * yesterday for part of the morning, so the period filter dropped or duplicated
+ * a day's spend against rows keyed by local day.
+ */
+function getPastDays(n: number, now: number): Set<string> {
   const dates = new Set<string>()
-  const today = new Date()
-  for (let i = 0; i < n; i++) {
-    const d = new Date(today)
-    d.setDate(today.getDate() - i)
-    dates.add(d.toISOString().slice(0, 10))
-  }
+  for (let i = 0; i < n; i++) dates.add(localDayString(now - i * 86_400_000))
   return dates
 }
 
@@ -206,7 +198,11 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       if (!key.startsWith(`${providerId}:`)) continue
       const modelId = key.slice(providerId.length + 1)
       for (const e of entries) {
-        const cur = bucket(modelId, e.at.slice(0, 10))
+        // `e.at` is an ISO instant, so slicing it would key the legacy entry by
+        // its UTC day while every rollup row and the period filter use the
+        // LOCAL day. Two day vocabularies in one bucket map is how a turn lands
+        // in a day the filter then discards.
+        const cur = bucket(modelId, localDayString(Date.parse(e.at)))
         cur.calls += 1
         cur.inputTokens += e.promptTokens
         cur.outputTokens += e.completionTokens
@@ -257,7 +253,7 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
   const rows: ModelRow[] = useMemo(() => {
     if (!providerStats) return []
 
-    const pastDays = getPastDays(period === "7d" ? 7 : 30)
+    const pastDays = getPastDays(period === "7d" ? 7 : 30, rangeNow)
 
     return Object.entries(providerStats).map(([modelId, entry]) => {
       // Aggregate dailyStats for the selected period
@@ -289,7 +285,7 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
 
       return { modelId, callCount, inputTokens, outputTokens, estimatedCost, pricing }
     })
-  }, [providerStats, period, pricingMap])
+  }, [providerStats, period, pricingMap, rangeNow])
 
   // Overview totals — use full lifetime stats for total calls + tokens,
   // period-filtered rows for cost (matches what user is viewing)

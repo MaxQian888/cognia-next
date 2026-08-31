@@ -14,6 +14,9 @@ jest.mock("next-intl", () => ({
       "sidebar.statusLabel": "Filter by status",
       "sidebar.statusAll": "All status",
       "sidebar.statusConnected": "Connected",
+      "sidebar.statusWarning": "Warning",
+      "sidebar.statusLimited": "Limited",
+      "sidebar.statusUntested": "Not tested",
       "sidebar.statusUnconfigured": "Unconfigured",
       "sidebar.statusError": "Error",
       "sidebar.noMatches": "No providers match these filters.",
@@ -29,7 +32,9 @@ jest.mock("next-intl", () => ({
       "sidebar.sortStatus": "Status",
       "sidebar.sortLastUsed": "Recently used",
     }
-    if (key === "sidebar.stats") return `${params?.total} providers · ${params?.active} connected`
+    if (key === "sidebar.stats") {
+      return `${params?.filtered} shown of ${params?.total} · ${params?.active} connected`
+    }
     return map[key] ?? key
   },
 }))
@@ -102,9 +107,18 @@ describe("ProviderSidebar", () => {
     expect(screen.getByText("Google")).toBeInTheDocument()
   })
 
+  it("moves focus and selection through the provider list with arrow keys", () => {
+    render(<ProviderSidebar {...defaultProps} />)
+    const options = screen.getAllByRole("option")
+    options[0].focus()
+    fireEvent.keyDown(options[0], { key: "ArrowDown" })
+    expect(options[1]).toHaveFocus()
+    expect(defaultProps.onSelect).toHaveBeenCalledWith("anthropic")
+  })
+
   it("shows correct stats", () => {
     render(<ProviderSidebar {...defaultProps} />)
-    expect(screen.getByText("3 providers · 2 connected")).toBeInTheDocument()
+    expect(screen.getByText("3 shown of 3 · 2 connected")).toBeInTheDocument()
   })
 
   it("renders search input", () => {
@@ -132,7 +146,6 @@ describe("ProviderSidebar", () => {
     const trigger = screen.getByTestId("provider-sort-trigger")
     // Radix opens the menu on a primary-button pointerdown; keyboard works too.
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" })
-    fireEvent.keyDown(trigger, { key: "Enter" })
     const statusItem = await screen.findByTestId("provider-sort-status")
     fireEvent.click(statusItem)
     expect(onSortByChange).toHaveBeenCalledWith("status")
@@ -235,7 +248,7 @@ describe("ProviderSidebar", () => {
     expect(screen.getByText("Anthropic")).toBeInTheDocument()
     expect(screen.queryByText("Google")).not.toBeInTheDocument()
     // Stats reflect the narrowed set.
-    expect(screen.getByText("2 providers · 2 connected")).toBeInTheDocument()
+    expect(screen.getByText("2 shown of 3 · 2 connected")).toBeInTheDocument()
     expect(defaultProps.onStatusFilterChange).toHaveBeenCalledWith("connected")
   })
 
@@ -250,7 +263,7 @@ describe("ProviderSidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Unconfigured" }))
     expect(screen.getByText("Google")).toBeInTheDocument()
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument()
-    expect(screen.getByText("1 providers · 0 connected")).toBeInTheDocument()
+    expect(screen.getByText("1 shown of 3 · 0 connected")).toBeInTheDocument()
   })
 
   it("adds overflow guards so the desktop sidebar stays within its layout bounds", () => {

@@ -2,7 +2,7 @@
 
 import React, { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Search, BarChart3, ArrowUpDown, Check } from "lucide-react"
+import { Search, BarChart3, ArrowUpDown, Check, Route, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -33,6 +33,9 @@ const SORT_OPTIONS: ReadonlyArray<{ value: ProviderSortBy; key: string }> = [
 const STATUS_FILTERS = [
   { value: "all", key: "statusAll" },
   { value: "connected", key: "statusConnected" },
+  { value: "warning", key: "statusWarning" },
+  { value: "limited", key: "statusLimited" },
+  { value: "untested", key: "statusUntested" },
   { value: "not-configured", key: "statusUnconfigured" },
   { value: "error", key: "statusError" },
 ] as const
@@ -52,6 +55,9 @@ interface ProviderSidebarProps {
   selectedId: string | null
   onSelect: (id: string) => void
   onCompareClick: () => void
+  onRoutingClick?: () => void
+  routingSelected?: boolean
+  globalTotal?: number
   categoryFilter: string
   onCategoryChange: (category: string) => void
   /** Controlled status filter — the parent owns it so it can persist it and
@@ -84,6 +90,9 @@ export function ProviderSidebar({
   selectedId,
   onSelect,
   onCompareClick,
+  onRoutingClick,
+  routingSelected = false,
+  globalTotal = providers.length,
   categoryFilter,
   onCategoryChange,
   statusFilter = "all",
@@ -106,7 +115,7 @@ export function ProviderSidebar({
     [providers, statusFilter]
   )
 
-  const total = visibleProviders.length
+  const filteredTotal = visibleProviders.length
   const active = visibleProviders.filter((p) => p.status === "connected").length
 
   // Whether SOMETHING the user chose is hiding rows — the parent's search /
@@ -213,6 +222,18 @@ export function ProviderSidebar({
               {t(`sidebar.${key}`)}
             </Button>
           ))}
+          {filtersNarrowTheList && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 flex-none gap-1 px-2 text-xs"
+              onClick={clearFilters}
+            >
+              <X className="h-3 w-3" />
+              {t("sidebar.clearFilters")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -229,22 +250,23 @@ export function ProviderSidebar({
           clipped by the right edge. Forcing that wrapper back to `block` makes
           rows respect the rail width and truncate instead. Same fix as
           `components/desktop/channel-list.tsx`. */}
-      <ScrollArea className="min-h-0 flex-1 overflow-x-hidden p-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
+      <ScrollArea
+        role="listbox"
+        aria-label={t("sidebar.providerListLabel")}
+        className="min-h-0 flex-1 overflow-x-hidden p-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
+      >
         {visibleProviders.length === 0 ? (
           filtersNarrowTheList ? (
             // A filtered-to-nothing list used to render as a blank box with no
             // explanation and no way out.
             <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
               <p className="text-xs text-muted-foreground">{t("sidebar.noMatches")}</p>
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={clearFilters}>
-                {t("sidebar.clearFilters")}
-              </Button>
             </div>
           ) : (
             emptyState
           )
         ) : (
-          visibleProviders.map((p) => (
+          visibleProviders.map((p, index) => (
             <ProviderSidebarItem
               key={p.id}
               providerId={p.id}
@@ -256,13 +278,47 @@ export function ProviderSidebar({
               onClick={onSelect}
               modelCount={p.modelCount}
               diagnosticStatus={p.diagnosticStatus}
+              tabIndex={p.id === selectedId || (selectedId === null && index === 0) ? 0 : -1}
+              onKeyDown={(event) => {
+                if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return
+                event.preventDefault()
+                const rows = Array.from(
+                  event.currentTarget
+                    .closest('[role="listbox"]')
+                    ?.querySelectorAll<HTMLElement>("[data-provider-row]") ?? []
+                )
+                const current = rows.indexOf(event.currentTarget)
+                const target =
+                  event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? rows.length - 1
+                      : event.key === "ArrowDown"
+                        ? Math.min(rows.length - 1, current + 1)
+                        : Math.max(0, current - 1)
+                rows[target]?.focus()
+                const targetProvider = visibleProviders[target]
+                if (targetProvider) onSelect(targetProvider.id)
+              }}
             />
           ))
         )}
       </ScrollArea>
 
-      {/* Model Compare button */}
-      <div className="min-w-0 border-t px-3 py-2">
+      {/* Cross-provider workspaces */}
+      <div className="min-w-0 space-y-1 border-t px-3 py-2">
+        {onRoutingClick && (
+          <Button
+            variant={routingSelected ? "secondary" : "ghost"}
+            size="sm"
+            onClick={onRoutingClick}
+            aria-current={routingSelected ? "page" : undefined}
+            className="w-full justify-start"
+          >
+            <Route className="mr-2 h-4 w-4" />
+            {t("sidebar.routing")}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={onCompareClick} className="w-full justify-start">
           <BarChart3 className="mr-2 h-4 w-4" />
           {t("sidebar.modelCompare")}
@@ -271,7 +327,7 @@ export function ProviderSidebar({
 
       {/* Stats bar */}
       <div className="min-w-0 border-t px-3 py-2 text-xs text-muted-foreground">
-        {t("sidebar.stats", { total, active })}
+        {t("sidebar.stats", { filtered: filteredTotal, total: globalTotal, active })}
       </div>
     </div>
   )

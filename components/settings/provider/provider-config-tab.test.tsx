@@ -199,13 +199,20 @@ describe("ProviderConfigTab", () => {
     expect(urlInput).toBeTruthy()
   })
 
-  // 3. Default model selector with options from providerModels
-  it("renders default model selector with options from providerModels", () => {
-    render(<ProviderConfigTab {...defaultProps} />)
-    expect(screen.getByTestId("select")).toBeInTheDocument()
-    expect(screen.getByTestId("select-item-gpt-4o")).toBeInTheDocument()
-    expect(screen.getByTestId("select-item-gpt-4-turbo")).toBeInTheDocument()
-    expect(screen.getByTestId("select-item-gpt-3.5-turbo")).toBeInTheDocument()
+  // 3. Searchable default-model picker preserves manual ids
+  it("renders searchable model suggestions and accepts a manual model id", () => {
+    const onDefaultModelChange = jest.fn()
+    const { container } = render(
+      <ProviderConfigTab {...defaultProps} onDefaultModelChange={onDefaultModelChange} />
+    )
+    const picker = screen.getByRole("combobox", { name: "Default Model" })
+    expect(picker).toHaveAttribute("list", "provider-openai-default-model-options")
+    expect(container.querySelector('option[value="gpt-4o"]')).toBeInTheDocument()
+    expect(container.querySelector('option[value="gpt-4-turbo"]')).toBeInTheDocument()
+
+    fireEvent.change(picker, { target: { value: "account-only-model" } })
+    fireEvent.blur(picker)
+    expect(onDefaultModelChange).toHaveBeenCalledWith("account-only-model")
   })
 
   // 4. Shows connection success card when testResult.success is true

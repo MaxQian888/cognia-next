@@ -25,8 +25,9 @@ const BUILT_IN_DEFAULTS: Array<{ id: string; chord: Chord; label: string }> = [
 ]
 
 /**
- * The selection-toolbar chords: the clipboard capture that starts it, plus the
- * six action chords mirroring `SELECTION_ACTION_SHORTCUTS` in
+ * The selection-toolbar scope: direct live-selection activation, clipboard
+ * compatibility capture, plus the six action chords mirroring
+ * `SELECTION_ACTION_SHORTCUTS` in
  * `src-tauri/src/selection_toolbar.rs`.
  *
  * The six actions are bound only while the toolbar is running, and
@@ -35,6 +36,12 @@ const BUILT_IN_DEFAULTS: Array<{ id: string; chord: Chord; label: string }> = [
  * has somewhere to re-bind them — which is here.
  */
 const SELECTION_SHORTCUT_DEFAULTS = [
+  {
+    id: "selection.showToolbar",
+    chord: "alt+shift+space",
+    labelKey: "selectionShowToolbar",
+    fallback: "selectionShowToolbar",
+  },
   {
     id: "selection.captureClipboard",
     chord: "alt+shift+c",

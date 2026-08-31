@@ -15,7 +15,6 @@ import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import {
   addPairedDevice,
-  listPairedDevices,
   setLockedComputerUseAllowed,
   setRemoteControlAllowed,
   setRemoteTerminalAllowed,

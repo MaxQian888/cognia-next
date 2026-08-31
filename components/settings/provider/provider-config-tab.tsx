@@ -103,7 +103,11 @@ export interface TestResult {
 export interface ProviderConfigTabProps {
   providerId: string
   settings: UserProviderSettings
-  providerModels?: Array<{ id: string; name: string }>
+  providerModels?: Array<{
+    id: string
+    name: string
+    source?: "catalog" | "discovered" | "user"
+  }>
   providerDashboardUrl?: string
   providerDocsUrl?: string
   onApiKeyChange: (key: string) => void
@@ -553,6 +557,10 @@ export function ProviderConfigTab({
   }, [onTestConnection])
 
   const defaultModel = settings.defaultModel ?? ""
+  const defaultModelField = useDraftField(defaultModel, onDefaultModelChange, {
+    identity: `${providerId}:default-model`,
+    debounceMs: 300,
+  })
   const hasRotationSupport = !!(onToggleRotation || onAddApiKey || onRemoveApiKey)
   const isBedrock = providerId === "bedrock"
 
@@ -778,22 +786,27 @@ export function ProviderConfigTab({
           description={t("configTab.defaultModelDescription")}
           testid="provider-default-model"
         >
-          <Select value={defaultModel} onValueChange={onDefaultModelChange}>
-            <SelectTrigger
-              id={defaultModelInputId}
-              className="w-full text-sm"
-              aria-label={t("configTab.defaultModelLabel")}
-            >
-              <SelectValue placeholder={t("configTab.selectModel")} />
-            </SelectTrigger>
-            <SelectContent>
-              {providerModels.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            id={defaultModelInputId}
+            list={`${defaultModelInputId}-options`}
+            value={defaultModelField.value}
+            onChange={(event) => defaultModelField.onChange(event.target.value)}
+            onBlur={defaultModelField.onBlur}
+            onKeyDown={defaultModelField.onKeyDown}
+            placeholder={t("configTab.selectModel")}
+            aria-label={t("configTab.defaultModelLabel")}
+            autoComplete="off"
+          />
+          <datalist id={`${defaultModelInputId}-options`}>
+            {providerModels.map((model) => (
+              <option
+                key={model.id}
+                value={model.id}
+                label={`${model.name} — ${t(`configTab.modelSource.${model.source ?? "catalog"}`)}`}
+              />
+            ))}
+          </datalist>
+          <p className="text-xs text-muted-foreground">{t("configTab.defaultModelManualHint")}</p>
         </SettingsBlock>
       )}
 

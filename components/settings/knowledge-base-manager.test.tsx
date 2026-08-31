@@ -23,6 +23,7 @@ jest.mock("@/lib/project-knowledge/ingest/ingest-file", () => ({
   hashContent: (value: string) => `hash-${value.length}`,
 }))
 jest.mock("@/lib/twin/ingest/dispatch", () => ({
+  ...jest.requireActual("@/lib/twin/ingest/dispatch"),
   dispatchSource: () => ({ kind: "document" }),
 }))
 
@@ -164,6 +165,30 @@ it("imports a supported text file with automatic format detection", async () => 
     )
   )
   expect(ingestMock).toHaveBeenCalledWith({ sourceId: "source-new", deps })
+})
+
+it("uses the canonical file-format catalog for extensions and selectable formats", async () => {
+  render(<KnowledgeBaseManager knowledgeBases={knowledgeBases} />)
+  await screen.findByText("No sources imported into this Knowledge Base.")
+
+  const fileInput = screen.getByLabelText("Source file")
+  expect(fileInput).toHaveAttribute("accept", expect.stringContaining(".txt"))
+  expect(fileInput).toHaveAttribute("accept", expect.stringContaining(".yaml"))
+
+  fireEvent.click(screen.getByRole("combobox", { name: "Source format" }))
+  expect(screen.queryByRole("option", { name: "Git repo" })).toBeNull()
+  fireEvent.keyDown(document, { key: "Escape" })
+
+  const file = new File(["plain note"], "note.txt", { type: "text/plain" })
+  Object.defineProperty(file, "text", { value: jest.fn(async () => "plain note") })
+  fireEvent.change(fileInput, { target: { files: [file] } })
+  fireEvent.click(screen.getByRole("button", { name: "Import file" }))
+
+  await waitFor(() =>
+    expect(createSourceMock).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "note.txt", format: "markdown" })
+    )
+  )
 })
 
 it("keeps a newly added source pending when no indexing backend is configured", async () => {

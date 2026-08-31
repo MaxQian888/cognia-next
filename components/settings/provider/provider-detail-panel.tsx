@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { Settings, Star, Trash2 } from "lucide-react"
+import { ArrowLeft, MoreHorizontal, Settings, Star, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -9,6 +9,12 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { hasBrandIcon } from "@/components/icons/brand-icon"
 import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 import { cn } from "@/lib/utils"
@@ -29,6 +35,7 @@ interface ProviderDetailPanelProps {
   provider: ProviderDetailPanelProvider | null
   onToggleEnabled?: (enabled: boolean) => void
   onDelete?: () => void
+  onBack?: () => void
   /** This provider is the app-wide default for new chats. */
   isDefault?: boolean
   /**
@@ -61,6 +68,7 @@ export function ProviderDetailPanel({
   provider,
   onToggleEnabled,
   onDelete,
+  onBack,
   isDefault,
   onSetDefault,
   setDefaultBlockedReason,
@@ -111,6 +119,17 @@ export function ProviderDetailPanel({
       {/* `flex-wrap`: on a narrow pane (mobile, or a wide rail) the action
           cluster drops under the title instead of squeezing it to nothing. */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
+        {onBack && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            onClick={onBack}
+            aria-label={t("mobile.backToProviders")}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        )}
         {hasBrandIcon(provider.id) || provider.icon == null ? (
           <ProviderIcon providerId={provider.id} label={provider.name} size={40} />
         ) : (
@@ -220,17 +239,6 @@ export function ProviderDetailPanel({
                 {t("detailPanel.notConfigured")}
               </Badge>
             )}
-            {isCustom && onDelete && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                onClick={onDelete}
-                aria-label={t("delete")}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
             {!isEnabled && !canEnable && enableBlockedReason ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -255,6 +263,29 @@ export function ProviderDetailPanel({
                 aria-label={t("detailPanel.enableSwitchAria")}
               />
             )}
+            {isCustom && onDelete && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground"
+                    aria-label={t("sidebar.moreActions")}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onSelect={onDelete}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {t("delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </TooltipProvider>
       </div>
@@ -275,15 +306,15 @@ export function ProviderDetailPanel({
             `truncate` let a label give up width on a narrow pane instead of
             pushing the strip past the right edge, where it was clipped with no
             scroll affordance. `title` keeps the full label reachable. */}
-        <TabsList className="flex w-full min-w-0 shrink-0 justify-start rounded-none border-b bg-transparent px-4">
+        <TabsList className="flex w-full min-w-0 shrink-0 justify-start overflow-x-auto rounded-none border-b bg-transparent px-4">
           {visibleTabs.map((key) => (
             <TabsTrigger
               key={key}
               value={key}
               title={t(`tabs.${key}`)}
-              className="min-w-0 flex-1 px-1.5"
+              className="flex-none whitespace-nowrap px-3"
             >
-              <span className="truncate">{t(`tabs.${key}`)}</span>
+              <span>{t(`tabs.${key}`)}</span>
             </TabsTrigger>
           ))}
         </TabsList>

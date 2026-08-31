@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
+import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ClipboardPasteIcon, PlusIcon, ServerIcon, ShareIcon } from "lucide-react"
@@ -77,10 +78,33 @@ export function McpPanel({ className }: { className?: string }) {
   const tGallery = useTranslations("mcp.gallery")
   const activeTab = useMcpPanelStore((s) => s.activeTab)
   const setActiveTab = useMcpPanelStore((s) => s.setActiveTab)
+  const openDetail = useMcpPanelStore((s) => s.openDetail)
   const openCreate = useMcpPanelStore((s) => s.openCreate)
   const setTransferOpen = useMcpPanelStore((s) => s.setTransferOpen)
   const openExport = useMcpPanelStore((s) => s.openExport)
   const reduce = useReducedMotion()
+
+  // Two deep links land here, and both used to have nowhere to arrive.
+  //
+  // `?preset=<id>` comes from the Discover preset inspector, whose "Add MCP
+  // server" button pointed at `/settings/external-bridge?preset=`: a route
+  // that does not exist and a param nothing read.
+  //
+  // `?server=<id>` comes from an external service pointing at the MCP row it
+  // provisioned. A managed server is created disabled and untrusted on
+  // purpose, so the service card's only honest next step is "here is the row,
+  // review it" — which needs the detail pane to actually open.
+  const searchParams = useSearchParams()
+  const pendingPreset = searchParams.get("preset")
+  const pendingServer = searchParams.get("server")
+  useEffect(() => {
+    if (pendingServer) {
+      setActiveTab("my-servers")
+      openDetail(pendingServer)
+      return
+    }
+    if (pendingPreset) setActiveTab("presets")
+  }, [pendingPreset, pendingServer, setActiveTab, openDetail])
 
   // Lowercased names of the servers already configured, so the Preset Market can
   // flag / disable presets that are already added and warn on duplicates. The
@@ -178,7 +202,11 @@ export function McpPanel({ className }: { className?: string }) {
             {activeTab === "my-servers" && <McpMyServersTab />}
             {activeTab === "presets" && (
               <div className="min-h-0 w-full flex-1 overflow-y-auto p-3 sm:p-4">
-                <McpPresetGrid existingNames={existingNames} onPresetSelected={onPresetSelected} />
+                <McpPresetGrid
+                  existingNames={existingNames}
+                  onPresetSelected={onPresetSelected}
+                  initialPresetId={pendingPreset ?? undefined}
+                />
               </div>
             )}
             {activeTab === "agents" && (

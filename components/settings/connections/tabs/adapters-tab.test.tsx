@@ -89,6 +89,8 @@ jest.mock("dexie-react-hooks", () => ({
 
 // Control the selected-adapter URL state (shared module with AdapterListRow).
 let selectedAdapterIdValue: string | null = null
+let pendingPlatformValue: string | null = null
+const mockClearPendingPlatform = jest.fn()
 const mockSetSelectedAdapterId = jest.fn()
 jest.mock("../adapters/use-selected-adapter", () => ({
   useSelectedAdapter: () => ({
@@ -96,6 +98,10 @@ jest.mock("../adapters/use-selected-adapter", () => ({
     setSelectedAdapterId: mockSetSelectedAdapterId,
     activeTab: "config",
     setActiveTab: jest.fn(),
+  }),
+  usePendingPlatform: () => ({
+    pendingPlatform: pendingPlatformValue,
+    clearPendingPlatform: mockClearPendingPlatform,
   }),
 }))
 
@@ -151,6 +157,8 @@ function setupAdapterQueries(opts: {
 beforeEach(() => {
   jest.clearAllMocks()
   selectedAdapterIdValue = null
+  pendingPlatformValue = null
+  mockClearPendingPlatform.mockClear()
   setupAdapterQueries({ adapters: [baseAdapter] })
 })
 
@@ -500,5 +508,47 @@ describe("AdaptersTab", () => {
     render(<AdaptersTab />)
     fireEvent.click(screen.getByText("Configure"))
     expect(await screen.findByTestId("plugin-connector-dialog")).toHaveTextContent("acme")
+  })
+})
+
+describe("AdaptersTab — ?platform= landing", () => {
+  // Emitted by surfaces that browse the platform CATALOG rather than this
+  // list: the Discover connector inspector, the Inbox health popover, the
+  // Feishu docs row. Before this the param was written by one call site and
+  // read by none, on a `/settings/connections` path that does not exist.
+
+  it("selects the first configured instance of the platform", async () => {
+    pendingPlatformValue = "telegram"
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    await waitFor(() => expect(mockSetSelectedAdapterId).toHaveBeenCalledWith("cai_test_1"))
+    // Consumed on arrival, so a re-render cannot act on it twice.
+    expect(mockClearPendingPlatform).toHaveBeenCalled()
+  })
+
+  it("opens the add dialog when that platform has no instance yet", async () => {
+    pendingPlatformValue = "matrix"
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    await waitFor(() => expect(screen.getByText(/add matrix connector/i)).toBeInTheDocument())
+    expect(mockSetSelectedAdapterId).not.toHaveBeenCalled()
+  })
+
+  it("falls back to the picker for a platform with no dialog to open", async () => {
+    // A `planned` kind has no factory and no form. The picker at least renders
+    // it as a disabled card that explains itself.
+    pendingPlatformValue = "kook"
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    await waitFor(() => expect(screen.getByTestId("add-connector-grid")).toBeInTheDocument())
+  })
+
+  it("ignores a platform outside the known vocabulary", async () => {
+    pendingPlatformValue = "not-a-platform"
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    await waitFor(() => expect(mockClearPendingPlatform).toHaveBeenCalled())
+    expect(screen.queryByTestId("add-connector-grid")).not.toBeInTheDocument()
+    expect(mockSetSelectedAdapterId).not.toHaveBeenCalled()
   })
 })

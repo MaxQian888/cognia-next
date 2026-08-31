@@ -51,6 +51,15 @@ describe("densityForWidth", () => {
     expect(densityForWidth(SETTINGS_PANE_TIERS.icon - 1)).toBe("sheet")
   })
 
+  it.each([
+    [420, "sheet"],
+    [520, "icon"],
+    [740, "compact"],
+    [920, "full"],
+  ] as const)("uses the expected responsive layout at %dpx", (width, density) => {
+    expect(densityForWidth(width)).toBe(density)
+  })
+
   it("puts the tiers in ascending order", () => {
     // The CSS below duplicates these numbers as `@[Npx]/settings-pane`
     // variants; reordering them here without reordering the class string

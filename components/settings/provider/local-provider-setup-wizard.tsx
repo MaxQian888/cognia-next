@@ -63,9 +63,13 @@ export function LocalProviderSetupWizard({
 
   const config = LOCAL_PROVIDER_CONFIGS[providerId]
   const instructions = getInstallInstructions(providerId)
-  const localizedInstructions = t.raw(`setupWizard.providers.${providerId}`) as {
-    title: string
-    steps: string[]
+  const localizedInstructions = {
+    title: t("setupWizard.installProvider", { provider: config.name }),
+    steps: [
+      t("setupWizard.stepDownloadInstaller"),
+      t("setupWizard.stepRunInstaller"),
+      t("setupWizard.stepStartApplication"),
+    ],
   }
   const effectiveBaseUrl = baseUrl?.trim() || config.defaultBaseURL
 
@@ -179,6 +183,7 @@ export function LocalProviderSetupWizard({
         size="icon"
         className="h-6 w-6 flex-shrink-0"
         onClick={() => copyCommand(command)}
+        aria-label={t("setupWizard.copyCommand")}
       >
         {copiedCommand === command ? (
           <Check className="h-3 w-3 text-green-500" />

@@ -8,9 +8,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
-import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DynamicParameterForm } from "./dynamic-parameter-form"
-import type { ModelConfig, UserProviderSettings } from "@cognia/provider-types"
+import type {
+  ModelConfig,
+  ProviderParameterSchema,
+  UserProviderSettings,
+} from "@cognia/provider-types"
 
 const SECTION_ICONS = {
   inference: Sliders,
@@ -45,6 +48,7 @@ function SectionTrigger({ category, label, count, onReset, resetLabel }: Section
         className="h-6 w-6 mr-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         onClick={onReset}
         title={resetLabel}
+        aria-label={resetLabel}
       >
         <RotateCcw className="h-3 w-3" />
       </Button>
@@ -55,22 +59,20 @@ function SectionTrigger({ category, label, count, onReset, resetLabel }: Section
 interface ProviderParametersTabProps {
   providerId: string
   settings: UserProviderSettings
+  schema?: ProviderParameterSchema
+  onSettingsChange: (patch: Partial<UserProviderSettings>) => void | Promise<void>
   modelConfig?: ModelConfig
 }
 
 export function ProviderParametersTab({
   providerId,
   settings,
+  schema: providedSchema,
+  onSettingsChange,
   modelConfig,
 }: ProviderParametersTabProps) {
   const t = useTranslations("providerParams")
-  const schema = getSchemaForProvider(providerId)
-
-  const setProviderInferenceDefaults = useSettingsStore((s) => s.setProviderInferenceDefaults)
-  const setProviderSpecificParam = useSettingsStore((s) => s.setProviderSpecificParam)
-  const setProviderConnectionParams = useSettingsStore((s) => s.setProviderConnectionParams)
-  const setProviderAdvancedParam = useSettingsStore((s) => s.setProviderAdvancedParam)
-  const resetProviderParams = useSettingsStore((s) => s.resetProviderParams)
+  const schema = providedSchema ?? getSchemaForProvider(providerId)
 
   const inferenceValues: Record<string, unknown> = (settings.inferenceDefaults ?? {}) as Record<
     string,
@@ -90,19 +92,27 @@ export function ProviderParametersTab({
     schema.parameters.filter((p) => p.category === category).length
 
   const handleInferenceChange = (key: string, value: unknown) => {
-    setProviderInferenceDefaults(providerId, { [key]: value })
+    void onSettingsChange({
+      inferenceDefaults: { ...(settings.inferenceDefaults ?? {}), [key]: value },
+    })
   }
 
   const handleProviderSpecificChange = (key: string, value: unknown) => {
-    setProviderSpecificParam(providerId, key, value)
+    void onSettingsChange({
+      providerSpecificParams: { ...(settings.providerSpecificParams ?? {}), [key]: value },
+    })
   }
 
   const handleConnectionChange = (key: string, value: unknown) => {
-    setProviderConnectionParams(providerId, { [key]: value })
+    void onSettingsChange({
+      connectionParams: { ...(settings.connectionParams ?? {}), [key]: value },
+    })
   }
 
   const handleAdvancedChange = (key: string, value: unknown) => {
-    setProviderAdvancedParam(providerId, key, value)
+    void onSettingsChange({
+      advancedParams: { ...(settings.advancedParams ?? {}), [key]: value },
+    })
   }
 
   return (
@@ -115,12 +125,14 @@ export function ProviderParametersTab({
           count={paramCount("inference")}
           resetLabel={t("resetAll")}
           onReset={() => {
-            setProviderInferenceDefaults(providerId, {
-              temperature: undefined,
-              maxTokens: undefined,
-              topP: undefined,
-              frequencyPenalty: undefined,
-              presencePenalty: undefined,
+            void onSettingsChange({
+              inferenceDefaults: {
+                temperature: undefined,
+                maxTokens: undefined,
+                topP: undefined,
+                frequencyPenalty: undefined,
+                presencePenalty: undefined,
+              },
             })
           }}
         />
@@ -146,9 +158,13 @@ export function ProviderParametersTab({
               count={paramCount("provider-specific")}
               resetLabel={t("resetAll")}
               onReset={() => {
-                schema.parameters
-                  .filter((p) => p.category === "provider-specific")
-                  .forEach((p) => setProviderSpecificParam(providerId, p.key, undefined))
+                void onSettingsChange({
+                  providerSpecificParams: Object.fromEntries(
+                    schema.parameters
+                      .filter((parameter) => parameter.category === "provider-specific")
+                      .map((parameter) => [parameter.key, undefined])
+                  ),
+                })
               }}
             />
             <CollapsibleContent className="px-2 pt-2">
@@ -173,10 +189,11 @@ export function ProviderParametersTab({
           count={paramCount("connection")}
           resetLabel={t("resetAll")}
           onReset={() => {
-            setProviderConnectionParams(providerId, {
-              timeout: undefined,
-              maxRetries: undefined,
-              retryDelay: undefined,
+            void onSettingsChange({
+              connectionParams: {
+                maxRetries: undefined,
+                concurrentLimit: undefined,
+              },
             })
           }}
         />
@@ -202,9 +219,13 @@ export function ProviderParametersTab({
               count={paramCount("advanced")}
               resetLabel={t("resetAll")}
               onReset={() => {
-                schema.parameters
-                  .filter((p) => p.category === "advanced")
-                  .forEach((p) => setProviderAdvancedParam(providerId, p.key, undefined))
+                void onSettingsChange({
+                  advancedParams: Object.fromEntries(
+                    schema.parameters
+                      .filter((parameter) => parameter.category === "advanced")
+                      .map((parameter) => [parameter.key, undefined])
+                  ),
+                })
               }}
             />
             <CollapsibleContent className="px-2 pt-2">
@@ -226,7 +247,14 @@ export function ProviderParametersTab({
           variant="outline"
           size="sm"
           className="w-full"
-          onClick={() => resetProviderParams(providerId)}
+          onClick={() =>
+            void onSettingsChange({
+              inferenceDefaults: undefined,
+              providerSpecificParams: undefined,
+              connectionParams: undefined,
+              advancedParams: undefined,
+            })
+          }
         >
           <RotateCcw className="h-3.5 w-3.5 mr-2" />
           {t("resetAll")}

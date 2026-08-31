@@ -33,6 +33,12 @@ import {
 } from "@/lib/db/external-services"
 import { connectBrowserSite } from "@/lib/external-services/providers/browser"
 import type { ServiceConnection } from "@/types/external-service"
+import {
+  buildServiceViews,
+  orphanServiceConnections,
+  type ServiceProviderView,
+} from "@/lib/external-services/service-view"
+import { ServiceCard } from "./service-card"
 
 const INSTALL_STEPS = ["install", "connect", "discover", "validate", "enable", "manage"] as const
 
@@ -55,11 +61,18 @@ export function ExternalServicesSection() {
   const [allowUploads, setAllowUploads] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const connectedServiceKeys = new Set(
-    connections.map((connection) => `${connection.pluginId ?? "user"}:${connection.serviceId}`)
+  // One entry per service with its providers merged in, rather than the old
+  // pair of disjoint lists. "Available services" excluded any service that had
+  // a connection row, and reconciliation creates one per MCP provider at
+  // install time, so a bundled service was never available and never
+  // actionable. See `lib/external-services/service-view.ts`.
+  const serviceViews = useMemo(
+    () => buildServiceViews(services, connections),
+    [services, connections]
   )
-  const availableServices = services.filter(
-    (service) => !connectedServiceKeys.has(`${service.pluginId}:${service.definition.id}`)
+  const orphans = useMemo(
+    () => orphanServiceConnections(services, connections),
+    [services, connections]
   )
 
   const resetForm = () => {
@@ -92,6 +105,10 @@ export function ExternalServicesSection() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const toggleProvider = async (provider: ServiceProviderView) => {
+    if (provider.connection) await toggleConnection(provider.connection)
   }
 
   const toggleConnection = async (connection: ServiceConnection) => {
@@ -196,46 +213,46 @@ export function ExternalServicesSection() {
         ))}
       </ol>
 
-      <section className="space-y-3" aria-labelledby="service-connections-heading">
-        <h3 id="service-connections-heading" className="text-sm font-semibold">
-          {t("connections.title")}
+      <section className="space-y-3" aria-labelledby="external-services-heading">
+        <h3 id="external-services-heading" className="text-sm font-semibold">
+          {t("services.title")}
         </h3>
-        {connections.length === 0 ? (
-          <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-            {t("connections.empty")}
+        {serviceViews.length === 0 ? (
+          <p className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
+            {t("services.empty")}
           </p>
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
-            {connections.map((connection) => (
-              <ConnectionCard
-                key={connection.id}
-                connection={connection}
-                onToggle={() => void toggleConnection(connection)}
+            {serviceViews.map((service) => (
+              <ServiceCard
+                key={service.key}
+                service={service}
+                onToggleProvider={(provider) => void toggleProvider(provider)}
               />
             ))}
           </div>
         )}
       </section>
 
-      {availableServices.length > 0 && (
-        <section className="space-y-3" aria-labelledby="available-services-heading">
-          <h3 id="available-services-heading" className="text-sm font-semibold">
-            {t("available.title")}
-          </h3>
+      {/* Websites the user connected by hand have no catalog definition, and a
+       * row orphaned by a removed plugin has nothing left to group under. Both
+       * would disappear from a purely catalog-driven render, so they keep a
+       * section of their own where they can still be paused or cleaned up. */}
+      {orphans.length > 0 && (
+        <section className="space-y-3" aria-labelledby="orphan-connections-heading">
+          <div className="space-y-0.5">
+            <h3 id="orphan-connections-heading" className="text-sm font-semibold">
+              {t("orphans.title")}
+            </h3>
+            <p className="text-muted-foreground text-xs">{t("orphans.description")}</p>
+          </div>
           <div className="grid gap-3 lg:grid-cols-2">
-            {availableServices.map((service) => (
-              <Card key={`${service.pluginId}:${service.definition.id}`}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">{service.definition.label}</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-wrap gap-1.5">
-                  {service.definition.providers.map((provider) => (
-                    <Badge key={provider.id} variant="secondary">
-                      {provider.kind} · {t(`availability.${provider.availability ?? "supported"}`)}
-                    </Badge>
-                  ))}
-                </CardContent>
-              </Card>
+            {orphans.map((connection) => (
+              <ConnectionCard
+                key={connection.id}
+                connection={connection}
+                onToggle={() => void toggleConnection(connection)}
+              />
             ))}
           </div>
         </section>

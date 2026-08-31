@@ -68,4 +68,43 @@ export function useSelectedAdapter(): UseSelectedAdapterResult {
   return { selectedAdapterId, setSelectedAdapterId, activeTab, setActiveTab }
 }
 
+const PLATFORM_PARAM = "platform"
+
+export interface UsePendingPlatformResult {
+  /**
+   * Platform kind the URL asked us to land on, or null. Cleared as soon as the
+   * tab has acted on it so a re-render (or a browser back) cannot reopen the
+   * same dialog.
+   */
+  pendingPlatform: string | null
+  clearPendingPlatform: () => void
+}
+
+/**
+ * `?platform=<kind>` support for links that point at a PLATFORM rather than at
+ * a configured instance, which is what "Open settings" on a Discover connector
+ * card means: the user picked Telegram in the catalog, not one of their two
+ * Telegram bots.
+ *
+ * Separate from `useSelectedAdapter` because it is a one-shot instruction
+ * rather than a selection. `?adapter=` describes where you are and survives a
+ * reload. `?platform=` describes what you just asked for, and is consumed on
+ * arrival.
+ */
+export function usePendingPlatform(): UsePendingPlatformResult {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const pendingPlatform = searchParams.get(PLATFORM_PARAM)
+
+  const clearPendingPlatform = useCallback(() => {
+    const next = new URLSearchParams(searchParams.toString())
+    if (!next.has(PLATFORM_PARAM)) return
+    next.delete(PLATFORM_PARAM)
+    const query = next.toString()
+    router.replace(query ? `?${query}` : "?", { scroll: false })
+  }, [router, searchParams])
+
+  return { pendingPlatform, clearPendingPlatform }
+}
+
 export const ADAPTER_DETAIL_TABS = ALL_TABS

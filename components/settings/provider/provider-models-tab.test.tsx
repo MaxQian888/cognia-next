@@ -34,6 +34,9 @@ jest.mock("next-intl", () => ({
       "modelsTab.sortName": "Name",
       "modelsTab.sortContext": "Context",
       "modelsTab.sortRelease": "Newest",
+      "modelsTab.capability.vision": "Vision",
+      "modelsTab.lifecycle.deprecated": "Deprecated",
+      "modelsTab.lifecycle.beta": "Beta",
     }
     return map[key] ?? key
   },
@@ -233,11 +236,45 @@ describe("ProviderModelsTab", () => {
 
   it("disabling a model removes it from enabled list", () => {
     const onEnabledModelsChange = jest.fn()
-    render(<ProviderModelsTab {...defaultProps} onEnabledModelsChange={onEnabledModelsChange} />)
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        enabledModels={["gpt-4o", "gpt-4o-mini"]}
+        onEnabledModelsChange={onEnabledModelsChange}
+      />
+    )
     const switches = screen.getAllByTestId("switch")
     const enabledSwitch = switches.find((s) => s.getAttribute("aria-label") === "gpt-4o")
     fireEvent.click(enabledSwitch!)
     expect(onEnabledModelsChange).toHaveBeenCalledWith(expect.not.arrayContaining(["gpt-4o"]))
+  })
+
+  // An empty whitelist means "all enabled", so emptying it by switching the
+  // last model off would turn every OTHER model back on. The switch bounces
+  // back instead, and the list stays explicit.
+  it("refuses to empty the whitelist when the last enabled model is switched off", () => {
+    const onEnabledModelsChange = jest.fn()
+    render(<ProviderModelsTab {...defaultProps} onEnabledModelsChange={onEnabledModelsChange} />)
+    const switches = screen.getAllByTestId("switch")
+    fireEvent.click(switches.find((s) => s.getAttribute("aria-label") === "gpt-4o")!)
+    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o"])
+  })
+
+  it("treats an empty whitelist as all enabled and materializes the first disable", () => {
+    const onEnabledModelsChange = jest.fn()
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        enabledModels={[]}
+        onEnabledModelsChange={onEnabledModelsChange}
+      />
+    )
+    const switches = screen.getAllByTestId("switch")
+    expect(switches).toHaveLength(mockModels.length)
+    switches.forEach((modelSwitch) => expect(modelSwitch).toBeChecked())
+
+    fireEvent.click(switches.find((item) => item.getAttribute("aria-label") === "gpt-4o-mini")!)
+    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o", "o1"])
   })
 
   // ── 5. Shows empty state when models array is empty ───────────────────────
@@ -302,7 +339,7 @@ describe("ProviderModelsTab", () => {
     expect(screen.queryByText("Deselect All")).not.toBeInTheDocument()
   })
 
-  it("Select All enables all visible (filtered) models", () => {
+  it("Select All preserves the canonical empty list when all models are enabled", () => {
     const onEnabledModelsChange = jest.fn()
     render(
       <ProviderModelsTab
@@ -312,12 +349,10 @@ describe("ProviderModelsTab", () => {
       />
     )
     fireEvent.click(screen.getByText("Select All"))
-    expect(onEnabledModelsChange).toHaveBeenCalledWith(
-      expect.arrayContaining(["gpt-4o", "gpt-4o-mini", "o1"])
-    )
+    expect(onEnabledModelsChange).toHaveBeenCalledWith([])
   })
 
-  it("Deselect All disables all visible (filtered) models", () => {
+  it("Deselect All keeps one explicit model because empty means all enabled", () => {
     const onEnabledModelsChange = jest.fn()
     render(
       <ProviderModelsTab
@@ -327,7 +362,7 @@ describe("ProviderModelsTab", () => {
       />
     )
     fireEvent.click(screen.getByText("Deselect All"))
-    expect(onEnabledModelsChange).toHaveBeenCalledWith([])
+    expect(onEnabledModelsChange).toHaveBeenCalledWith(["gpt-4o"])
   })
 
   it("Select All with search only enables filtered models", () => {
@@ -335,7 +370,7 @@ describe("ProviderModelsTab", () => {
     render(
       <ProviderModelsTab
         {...defaultProps}
-        enabledModels={[]}
+        enabledModels={["o1"]}
         onEnabledModelsChange={onEnabledModelsChange}
       />
     )
@@ -345,7 +380,7 @@ describe("ProviderModelsTab", () => {
     const called = onEnabledModelsChange.mock.calls[0][0] as string[]
     expect(called).toContain("gpt-4o")
     expect(called).toContain("gpt-4o-mini")
-    expect(called).not.toContain("o1")
+    expect(called).toContain("o1")
   })
 
   // "Enable Selected" / "Disable Selected" were removed: they ran the exact
@@ -383,7 +418,7 @@ describe("ProviderModelsTab", () => {
 
   it("renders a status badge for non-stable models", () => {
     render(<ProviderModelsTab {...defaultProps} models={[metaModel]} />)
-    expect(screen.getByText("deprecated")).toBeInTheDocument()
+    expect(screen.getByText("Deprecated")).toBeInTheDocument()
   })
 
   it("renders an outline status badge for preview states like beta", () => {
@@ -394,7 +429,7 @@ describe("ProviderModelsTab", () => {
         enabledModels={[]}
       />
     )
-    expect(screen.getByText("beta")).toBeInTheDocument()
+    expect(screen.getByText("Beta")).toBeInTheDocument()
   })
 
   it("formats sub-1K context windows verbatim", () => {

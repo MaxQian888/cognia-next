@@ -24,7 +24,13 @@ import {
 } from "@/lib/db/knowledge-bases"
 import { hashContent } from "@/lib/project-knowledge/ingest/ingest-file"
 import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/build-deps"
-import { dispatchSource } from "@/lib/twin/ingest/dispatch"
+import {
+  BINARY_TWIN_FORMATS,
+  detectSourceFormat,
+  dispatchSource,
+  listSupportedExtensions,
+  listSupportedFormats,
+} from "@/lib/twin/ingest"
 import {
   ingestKnowledgeBaseSource,
   rebuildKnowledgeBaseIndex,
@@ -37,75 +43,13 @@ import type {
 } from "@/types/knowledge-base"
 import type { TwinSourceFormat } from "@/types/twin"
 
-const SUPPORTED_FORMATS: TwinSourceFormat[] = [
-  "markdown",
-  "pdf",
-  "docx",
-  "xlsx",
-  "pptx",
-  "odt",
-  "odp",
-  "html",
-  "csv",
-  "epub",
-  "rtf",
-  "code",
-  "chatgpt-export",
-  "claude-export",
-  "gemini-export",
-  "slack-export",
-  "lark-export",
-  "dingtalk-export",
-  "wechat-export",
-  "mbox",
-  "eml",
-  "git-repo",
-]
+const SUPPORTED_FILE_FORMATS = listSupportedFormats().filter(
+  (item): item is TwinSourceFormat => item !== "git-repo"
+)
 
-const FORMAT_BY_EXTENSION: Record<string, TwinSourceFormat> = {
-  md: "markdown",
-  markdown: "markdown",
-  pdf: "pdf",
-  docx: "docx",
-  xlsx: "xlsx",
-  pptx: "pptx",
-  odt: "odt",
-  odp: "odp",
-  html: "html",
-  htm: "html",
-  csv: "csv",
-  epub: "epub",
-  rtf: "rtf",
-  mbox: "mbox",
-  eml: "eml",
-  ts: "code",
-  tsx: "code",
-  js: "code",
-  jsx: "code",
-  py: "code",
-  rs: "code",
-  go: "code",
-  java: "code",
-  c: "code",
-  cpp: "code",
-  h: "code",
-  css: "code",
-  sh: "code",
-}
-
-const BINARY_FORMATS = new Set<TwinSourceFormat>([
-  "pdf",
-  "docx",
-  "xlsx",
-  "pptx",
-  "odt",
-  "odp",
-  "epub",
-])
-
-function inferFormat(filename: string): TwinSourceFormat | undefined {
-  return FORMAT_BY_EXTENSION[filename.split(".").pop()?.toLowerCase() ?? ""]
-}
+const FILE_PICKER_ACCEPT = listSupportedExtensions()
+  .map((extension) => `.${extension}`)
+  .join(",")
 
 function encodeBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
@@ -211,14 +155,14 @@ export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: Knowl
 
   const importFile = async () => {
     if (!activeSelectedId || !file) return
-    const resolvedFormat = format === "auto" ? inferFormat(file.name) : format
+    const resolvedFormat = format === "auto" ? detectSourceFormat(file.name) : format
     if (!resolvedFormat) {
       toast.error(t("unsupportedFormat"))
       return
     }
     setBusy(true)
     try {
-      const binary = BINARY_FORMATS.has(resolvedFormat)
+      const binary = BINARY_TWIN_FORMATS.has(resolvedFormat)
       const sourceContent = binary ? encodeBase64(await file.arrayBuffer()) : await file.text()
       const source = await createKnowledgeBaseSource({
         knowledgeBaseId: activeSelectedId,
@@ -326,6 +270,7 @@ export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: Knowl
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <Input
           type="file"
+          accept={FILE_PICKER_ACCEPT}
           onChange={(event) => setFile(event.target.files?.[0] ?? null)}
           aria-label={t("file")}
         />
@@ -335,7 +280,7 @@ export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: Knowl
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="auto">{t("formatAuto")}</SelectItem>
-            {SUPPORTED_FORMATS.map((item) => (
+            {SUPPORTED_FILE_FORMATS.map((item) => (
               <SelectItem key={item} value={item}>
                 {t(`formats.${item}`)}
               </SelectItem>
@@ -383,7 +328,7 @@ export function KnowledgeBaseManager({ knowledgeBases }: { knowledgeBases: Knowl
                     </p>
                   )}
                 </div>
-                <div className="flex gap-1">
+                <div className="flex w-full justify-end gap-1 sm:w-auto">
                   <Button
                     type="button"
                     variant="ghost"

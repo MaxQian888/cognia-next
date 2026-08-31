@@ -388,6 +388,7 @@ jest.mock("./provider-sidebar", () => ({
     categoryFilter,
     onCategoryChange,
     onCompareClick,
+    onRoutingClick,
     onSortByChange,
     emptyState,
     hasActiveFilters,
@@ -400,6 +401,7 @@ jest.mock("./provider-sidebar", () => ({
     categoryFilter?: string
     onCategoryChange?: (c: string) => void
     onCompareClick?: () => void
+    onRoutingClick?: () => void
     onSortByChange?: (sortBy: string) => void
     emptyState?: React.ReactNode
     hasActiveFilters?: boolean
@@ -431,6 +433,11 @@ jest.mock("./provider-sidebar", () => ({
       {onCompareClick && (
         <button data-testid="mock-compare" onClick={onCompareClick}>
           compare
+        </button>
+      )}
+      {onRoutingClick && (
+        <button data-testid="mock-routing-workspace" onClick={onRoutingClick}>
+          routing
         </button>
       )}
       {onSortByChange && (
@@ -627,7 +634,9 @@ jest.mock("./provider-models-tab", () => ({
 }))
 jest.mock("./provider-cost-tab", () => ({ ProviderCostTab: () => null }))
 jest.mock("./provider-parameters-tab", () => ({ ProviderParametersTab: () => null }))
-jest.mock("./routing-tab", () => ({ RoutingTab: () => null }))
+jest.mock("./routing-tab", () => ({
+  RoutingTab: () => <div data-testid="routing-workspace" />,
+}))
 jest.mock("./provider-diagnostics-tab", () => ({
   ProviderDiagnosticsTab: ({ providerId }: { providerId: string }) => (
     <div data-testid="mock-provider-diagnostics">{providerId}</div>
@@ -809,7 +818,7 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     expect(handle).toHaveAttribute("aria-valuenow", "376")
   })
 
-  it("renders the rail only inside the sheet on mobile — no hidden desktop copy", async () => {
+  it("uses canonical list-to-detail navigation on mobile", async () => {
     mockIsMobile = true
     try {
       mockHookState = makeHookState({
@@ -817,12 +826,14 @@ describe("ProviderSettings (cognia-next slim port)", () => {
         selectedProviderId: "openai",
       })
       render(<ProviderSettings />)
-      // Sheet closed: zero rails mounted (the desktop column is not rendered).
-      expect(screen.queryAllByTestId("provider-sidebar")).toHaveLength(0)
+      expect(screen.queryAllByTestId("provider-sidebar")).toHaveLength(1)
       expect(screen.queryByTestId("provider-rail-resize-handle")).toBeNull()
-      // The mobile top bar names the selection (the detail panel mock also
-      // renders the name, hence "some").
-      expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0)
+      expect(screen.queryByTestId("provider-detail-panel")).toBeNull()
+      fireEvent.click(screen.getByTestId("provider-sidebar-item-openai"))
+      expect(screen.getByTestId("provider-detail-panel")).toHaveAttribute(
+        "data-provider-id",
+        "openai"
+      )
     } finally {
       mockIsMobile = false
     }
@@ -836,6 +847,17 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     render(<ProviderSettings />)
     fireEvent.click(screen.getByTestId("mock-sort-status"))
     expect(mockSetProviderUIPreferences).toHaveBeenCalledWith({ sortBy: "status" })
+  })
+
+  it("opens and persists the dedicated routing workspace", () => {
+    mockHookState = makeHookState({
+      filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
+      selectedProviderId: "openai",
+    })
+    render(<ProviderSettings />)
+    fireEvent.click(screen.getByTestId("mock-routing-workspace"))
+    expect(screen.getByTestId("routing-workspace")).toBeInTheDocument()
+    expect(mockSetProviderUIPreferences).toHaveBeenCalledWith({ workspace: "routing" })
   })
 
   it("shows the setup checklist for an unconfigured built-in and hides it once complete", () => {
@@ -957,13 +979,13 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     const { findByTestId } = render(<ProviderSettings />)
     await findByTestId("local-provider-settings")
 
-    // Local engines keep a provider-specific model manager, but cost + advanced
-    // remain cloud-only because they assume per-token pricing and routing knobs.
+    // Local engines keep their model manager and source-neutral inference /
+    // connection parameters, but cost remains cloud-only.
     expect(screen.getByTestId("provider-detail-models-tab")).toContainElement(
       screen.getByTestId("local-provider-model-manager")
     )
     expect(screen.getByTestId("provider-detail-cost-tab")).toBeEmptyDOMElement()
-    expect(screen.getByTestId("provider-detail-advanced-tab")).toBeEmptyDOMElement()
+    expect(screen.getByTestId("provider-detail-advanced-tab")).not.toBeEmptyDOMElement()
   })
 
   it("persists a local engine's discovered models only when the set changed", async () => {
@@ -1297,16 +1319,14 @@ describe("ProviderSettings (cognia-next slim port)", () => {
     )
   })
 
-  it("renders the parameters placeholder when no settings exist for the selected provider", () => {
+  it("renders provider parameters from synthesized defaults when no row exists yet", () => {
     mockHookState = makeHookState({
       filteredProviders: [["openai", { name: "OpenAI", defaultModel: "gpt-4o" }]],
       selectedProviderId: "openai",
     })
     render(<ProviderSettings />)
-    // The i18n mock renders "", so assert on the placeholder element itself.
-    expect(screen.getByTestId("provider-detail-advanced-tab")).toContainElement(
-      screen.getByTestId("parameters-placeholder")
-    )
+    expect(screen.queryByTestId("parameters-placeholder")).toBeNull()
+    expect(screen.getByTestId("provider-detail-advanced-tab")).not.toBeEmptyDOMElement()
   })
 
   it("lays Advanced out as flat sections rather than a tab strip inside a tab", () => {

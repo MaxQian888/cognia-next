@@ -14,7 +14,6 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -51,6 +50,15 @@ const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {
 /** Default base URL for a protocol; plugin protocols have none. */
 function defaultBaseUrlFor(protocol: ApiProtocol): string {
   return PROTOCOL_DEFAULT_BASE_URLS[protocol] ?? ""
+}
+
+function isValidProviderUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim())
+    return url.protocol === "http:" || url.protocol === "https:"
+  } catch {
+    return false
+  }
 }
 
 interface CustomProviderDialogProps {
@@ -224,8 +232,9 @@ export function CustomProviderDialog({
   }
 
   const handleTestConnection = async () => {
-    if (!baseURL || !apiKey) return
-    await runConnectionTest(baseURL, apiKey, apiProtocol, defaultModel || models[0])
+    const modelId = defaultModel || availableModels[0]?.id
+    if (!isValidProviderUrl(baseURL) || !modelId) return
+    await runConnectionTest(baseURL.trim(), apiKey.trim(), apiProtocol, modelId)
   }
 
   const handleDiscoverModels = async () => {
@@ -256,14 +265,16 @@ export function CustomProviderDialog({
         setDefaultModel(nextAvailableModels[0]?.id || "")
       }
     } catch (error) {
-      setDiscoveryError(error instanceof Error ? error.message : "Failed to fetch models")
+      setDiscoveryError(error instanceof Error ? error.message : t("modelDiscoveryFailed"))
     } finally {
       setDiscoveringModels(false)
     }
   }
 
   const handleSave = async () => {
-    if (!name.trim() || !baseURL.trim() || availableModels.length === 0 || isSaving) return
+    if (!name.trim() || !isValidProviderUrl(baseURL) || availableModels.length === 0 || isSaving) {
+      return
+    }
 
     const providerData = {
       providerId: editingProviderId || "",
@@ -318,7 +329,10 @@ export function CustomProviderDialog({
   }
 
   const isEditing = !!editingProviderId
-  const canSave = name.trim() && baseURL.trim() && availableModels.length > 0
+  const selectedTestModel = defaultModel || availableModels[0]?.id
+  const validBaseURL = isValidProviderUrl(baseURL)
+  const canTest = validBaseURL && !!selectedTestModel
+  const canSave = !!name.trim() && canTest
 
   return (
     <Dialog
@@ -427,13 +441,18 @@ export function CustomProviderDialog({
               }}
               placeholder={
                 apiProtocol === "anthropic"
-                  ? "https://api.anthropic.com/v1"
+                  ? t("baseURLPlaceholderAnthropic")
                   : apiProtocol === "gemini"
-                    ? "https://generativelanguage.googleapis.com/v1beta"
-                    : "https://api.example.com/v1"
+                    ? t("baseURLPlaceholderGemini")
+                    : t("baseURLPlaceholderOpenAI")
               }
             />
             <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
+            {baseURL.trim() && !validBaseURL && (
+              <p role="alert" className="text-xs text-destructive">
+                {t("invalidBaseURL")}
+              </p>
+            )}
           </div>
 
           {/* Custom transport headers (ADR-0090 Phase 1) */}
@@ -449,7 +468,7 @@ export function CustomProviderDialog({
 
           {/* API Key */}
           <div className="space-y-2">
-            <Label htmlFor="api-key">{t("apiKey")}</Label>
+            <Label htmlFor="api-key">{t("apiKeyOptional")}</Label>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Input
@@ -474,6 +493,7 @@ export function CustomProviderDialog({
                   onClick={() =>
                     showKey ? setShowKey(false) : void revealSecret(() => setShowKey(true))
                   }
+                  aria-label={showKey ? t("hideApiKey") : t("showApiKey")}
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
@@ -481,7 +501,7 @@ export function CustomProviderDialog({
               <Button
                 variant="outline"
                 onClick={handleTestConnection}
-                disabled={!baseURL || !apiKey || testing}
+                disabled={!canTest || testing}
               >
                 {testing ? tc("loading") : t("test")}
               </Button>
@@ -524,6 +544,7 @@ export function CustomProviderDialog({
               />
               <Button variant="outline" size="icon" onClick={handleAddModel}>
                 <Plus className="h-4 w-4" />
+                <span className="sr-only">{t("addModel")}</span>
               </Button>
             </div>
 
@@ -538,16 +559,19 @@ export function CustomProviderDialog({
                 {availableModels.map((model) => (
                   <div key={model.id} className="border rounded-md p-2">
                     <div className="flex items-center justify-between">
-                      <Badge
+                      <Button
+                        type="button"
+                        size="sm"
                         variant={model.id === defaultModel ? "default" : "secondary"}
-                        className="cursor-pointer"
+                        className="h-auto min-w-0 justify-start whitespace-normal px-2 py-1 text-left"
+                        aria-pressed={model.id === defaultModel}
                         onClick={() => setDefaultModel(model.id)}
                       >
                         {model.name}
                         {model.id === defaultModel && (
                           <span className="ml-1 text-xs">({t("default")})</span>
                         )}
-                      </Badge>
+                      </Button>
                       <div className="flex items-center gap-1">
                         <Button
                           variant="ghost"
@@ -558,7 +582,8 @@ export function CustomProviderDialog({
                               expandedModelSettings === model.id ? null : model.id
                             )
                           }
-                          title={t("modelSettings") || "Model Settings"}
+                          title={t("modelSettings")}
+                          aria-label={t("modelSettingsFor", { model: model.name })}
                         >
                           <Settings2 className="h-3 w-3" />
                         </Button>
@@ -567,6 +592,7 @@ export function CustomProviderDialog({
                           size="icon"
                           className="h-6 w-6 hover:text-destructive"
                           onClick={() => handleRemoveModel(model.id)}
+                          aria-label={t("removeModel", { name: model.name })}
                         >
                           <X className="h-3 w-3" />
                         </Button>
@@ -576,11 +602,9 @@ export function CustomProviderDialog({
                     {/* Expandable Model Settings */}
                     {expandedModelSettings === model.id && (
                       <div className="mt-2 pt-2 border-t space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <div>
-                            <Label className="text-xs">
-                              {t("contextLength") || "Context Length"}
-                            </Label>
+                            <Label className="text-xs">{t("contextLength")}</Label>
                             <Input
                               type="number"
                               className="h-7 text-xs"
@@ -598,9 +622,7 @@ export function CustomProviderDialog({
                             />
                           </div>
                           <div>
-                            <Label className="text-xs">
-                              {t("maxOutputTokens") || "Max Output"}
-                            </Label>
+                            <Label className="text-xs">{t("maxOutputTokens")}</Label>
                             <Input
                               type="number"
                               className="h-7 text-xs"
@@ -620,9 +642,9 @@ export function CustomProviderDialog({
                             />
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <div>
-                            <Label className="text-xs">{t("inputPricing") || "Input $/1M"}</Label>
+                            <Label className="text-xs">{t("inputPricing")}</Label>
                             <Input
                               type="number"
                               step="0.01"
@@ -646,7 +668,7 @@ export function CustomProviderDialog({
                             />
                           </div>
                           <div>
-                            <Label className="text-xs">{t("outputPricing") || "Output $/1M"}</Label>
+                            <Label className="text-xs">{t("outputPricing")}</Label>
                             <Input
                               type="number"
                               step="0.01"

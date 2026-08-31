@@ -153,7 +153,7 @@ describe("CustomProviderDialog", () => {
 
   it("displays API key input", () => {
     render(<CustomProviderDialog {...defaultProps} />)
-    expect(screen.getByText("apiKey")).toBeInTheDocument()
+    expect(screen.getByText("apiKeyOptional")).toBeInTheDocument()
   })
 
   it("displays models section", () => {
@@ -376,7 +376,29 @@ describe("CustomProviderDialog", () => {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 10))
       })
+      fireEvent.change(screen.getByPlaceholderText("modelPlaceholder"), {
+        target: { value: "gateway-model" },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "addModel" }))
     }
+
+    it("permits a base-URL-only test for a keyless gateway", async () => {
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "http://localhost:11434/v1" },
+      })
+
+      fireEvent.click(screen.getByText("test"))
+
+      await waitFor(() =>
+        expect(apiTest.testCustomProviderConnectionByProtocol).toHaveBeenCalledWith(
+          "http://localhost:11434/v1",
+          "",
+          "openai",
+          "gateway-model"
+        )
+      )
+    })
 
     it("shows the ConnectionStatusCard success state and forwards latency", async () => {
       apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
