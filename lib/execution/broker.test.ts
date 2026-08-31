@@ -168,6 +168,166 @@ describe("ExecutionBroker — continuation exemption", () => {
     a.release("ok")
     expect(broker.isAtCapacity()).toBe(false)
   })
+
+  it("isAtCapacity answers for the provider lane when one is named", async () => {
+    // The chat send path uses this as a pre-check for an immediate acquire, so
+    // a saturated lane has to read as "at capacity". Without the providerId the
+    // pool alone answers, the send proceeds, and the acquire then parks.
+    const broker = makeBroker(4)
+    const a = await broker.acquire(req({ providerId: "openai", providerLimit: 1, sessionId: "s1" }))
+    expect(broker.isAtCapacity("ai-turn", "fresh")).toBe(false)
+    expect(broker.isAtCapacity("ai-turn", "fresh", "openai")).toBe(true)
+    expect(broker.isAtCapacity("ai-turn", "fresh", "anthropic")).toBe(false)
+    // An unknown provider has no lane yet, so it cannot be saturated.
+    expect(broker.isAtCapacity("ai-turn", "fresh", "never-seen")).toBe(false)
+    a.release("ok")
+    expect(broker.isAtCapacity("ai-turn", "fresh", "openai")).toBe(false)
+  })
+})
+
+describe("ExecutionBroker — provider admission", () => {
+  // The nested attempt is reached FROM the outer one, which cannot release
+  // until it resolves. If a saturated provider lane could park it, the pair
+  // deadlocks: the outer never finishes and never errors.
+  it("admits a resource-exempt nested attempt even when its provider lane is full", async () => {
+    const broker = makeBroker(1)
+    const first = await broker.acquire(
+      req({ providerId: "openai", providerLimit: 1, sessionId: "outer" })
+    )
+    const nested = await broker.acquire(
+      req({
+        providerId: "openai",
+        providerLimit: 1,
+        sessionId: "nested",
+        exempt: true,
+      })
+    )
+
+    expect(nested.exempt).toBe(true)
+    // The outer leg still owns the only shared permit, and the nested one
+    // consumed none. Both hold a provider permit, so the lane reads as
+    // over-subscribed and keeps every non-exempt caller waiting.
+    expect(broker.permitsInUse()).toBe(1)
+    expect(broker.providerPermitsInUse("openai")).toBe(2)
+
+    nested.release("ok")
+    first.release("ok")
+    expect(broker.providerPermitsInUse("openai")).toBe(0)
+  })
+
+  it("steps over a provider-blocked waiter to admit one for a free provider", async () => {
+    const broker = makeBroker(2)
+    // Holds the only openai lane permit for the whole test.
+    const laneHolder = await broker.acquire(
+      req({ providerId: "openai", providerLimit: 1, sessionId: "openai-1" })
+    )
+    // Holds the second shared permit, so both waiters below have to queue.
+    const filler = await broker.acquire(req({ sessionId: "filler" }))
+
+    let blockedResolved = false
+    const blocked = broker
+      .acquire(req({ providerId: "openai", providerLimit: 1, sessionId: "openai-2" }))
+      .then((lease) => {
+        blockedResolved = true
+        return lease
+      })
+    let otherResolved = false
+    const other = broker
+      .acquire(req({ providerId: "anthropic", sessionId: "anthropic-1" }))
+      .then((lease) => {
+        otherResolved = true
+        return lease
+      })
+    await Promise.resolve()
+    expect(blockedResolved).toBe(false)
+    expect(otherResolved).toBe(false)
+
+    // One shared permit frees. The queue head wants the saturated openai lane,
+    // but the anthropic waiter behind it is unrelated and must not wait for a
+    // provider it never named.
+    filler.release("ok")
+    ;(await other).release("ok")
+    expect(otherResolved).toBe(true)
+    expect(blockedResolved).toBe(false)
+
+    laneHolder.release("ok")
+    ;(await blocked).release("ok")
+    expect(broker.providerPermitsInUse("openai")).toBe(0)
+  })
+
+  it("queues requests beyond a provider limit without blocking another provider", async () => {
+    const broker = makeBroker(4)
+    const first = await broker.acquire(
+      req({ providerId: "openai", providerLimit: 1, sessionId: "openai-1" })
+    )
+    let secondResolved = false
+    const secondPromise = broker
+      .acquire(req({ providerId: "openai", providerLimit: 1, sessionId: "openai-2" }))
+      .then((lease) => {
+        secondResolved = true
+        return lease
+      })
+    await Promise.resolve()
+
+    expect(secondResolved).toBe(false)
+    expect(broker.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: "openai",
+          providerLimit: 1,
+          waitingForProvider: true,
+          state: "queued",
+        }),
+      ])
+    )
+
+    const anthropic = await broker.acquire(
+      req({ providerId: "anthropic", providerLimit: 1, sessionId: "anthropic-1" })
+    )
+    first.release("ok")
+    const second = await secondPromise
+    expect(secondResolved).toBe(true)
+
+    anthropic.release("ok")
+    second.release("ok")
+    expect(broker.providerPermitsInUse("openai")).toBe(0)
+  })
+
+  it("releases a provider permit when a queued or running request is cancelled", async () => {
+    const broker = makeBroker(3)
+    const running = await broker.acquire(
+      req({ providerId: "openai", providerLimit: 1, sessionId: "running" })
+    )
+    const queued = broker.acquire(
+      req({ providerId: "openai", providerLimit: 1, sessionId: "queued" })
+    )
+    await Promise.resolve()
+    const queuedId = broker.list().find((leg) => leg.waitingForProvider)?.id
+    expect(queuedId).toBeDefined()
+    broker.cancel(queuedId!)
+    await expect(queued).rejects.toBeInstanceOf(ExecutionAbortError)
+
+    expect(broker.providerPermitsInUse("openai")).toBe(1)
+    running.release("cancelled")
+    expect(broker.providerPermitsInUse("openai")).toBe(0)
+  })
+
+  it("uses the stricter of global and provider limits", async () => {
+    const broker = makeBroker(1)
+    const first = await broker.acquire(req({ providerId: "openai", providerLimit: 5 }))
+    let admitted = false
+    const secondPromise = broker
+      .acquire(req({ providerId: "openai", providerLimit: 5 }))
+      .then((lease) => {
+        admitted = true
+        return lease
+      })
+    await Promise.resolve()
+    expect(admitted).toBe(false)
+    first.release("ok")
+    const second = await secondPromise
+    second.release("ok")
+  })
 })
 
 describe("ExecutionBroker — cancellation", () => {

@@ -394,6 +394,7 @@ describe("handlePluginToolExec — unified invokePluginTool path", () => {
           checkWithConsent: async () => overrides?.consentAnswer ?? true,
         }),
         getBroker: () => ({ request: async () => overrides?.consentAnswer ?? true }),
+        resolveSandboxRuntimeRef: () => "sandbox-runtime:test",
       },
     }
   }
@@ -698,17 +699,36 @@ describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
   it("routes the Skill tool to the skill resolver, before the plugin registry", async () => {
     const execute = jest.fn()
     __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
-    __setSkillToolDepsForTesting(() => ({
-      getCatalogSkill: (id) =>
-        id === "web-research" ? { id, name: "Web research", content: "Body." } : undefined,
-    }))
-    const response = await handlePluginToolExec(
-      makeRequest({ name: "Skill", args: { name: "web-research" } })
-    )
-    expect(execute).not.toHaveBeenCalled()
-    expect(response.error).toBeUndefined()
-    expect(String(response.result)).toContain("Web research")
-    __setPluginToolResolverForTesting(null)
+    const scopedSkill: Skill = {
+      id: "web-research",
+      name: "Web research",
+      content: "Body.",
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    createSkillLoadContext({
+      sessionId: "session-1",
+      allowedSkillIds: [scopedSkill.id],
+      getSkill: async () => scopedSkill,
+      listResources: async () => [],
+      recordUsage: async () => undefined,
+    })
+    try {
+      const response = await handlePluginToolExec(
+        makeRequest({ name: "Skill", args: { name: "web-research" } })
+      )
+      expect(execute).not.toHaveBeenCalled()
+      expect(response.error).toBeUndefined()
+      expect(response.result).toEqual(
+        expect.objectContaining({
+          ok: true,
+          skill: expect.objectContaining({ name: "Web research" }),
+        })
+      )
+    } finally {
+      releaseSkillLoadContext("session-1")
+      __setPluginToolResolverForTesting(null)
+    }
   })
 
   it("threads sessionId into progressive skill loading scope", async () => {
@@ -724,6 +744,8 @@ describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
     }
     createSkillLoadContext({
       sessionId: "scope-A",
+      turnId: "turn-1",
+      attemptId: "a2",
       allowedSkillIds: [scopedSkill.id],
       getSkill: async (id) => (id === scopedSkill.id ? scopedSkill : undefined),
       listResources: async () => [],
@@ -740,9 +762,22 @@ describe("handlePluginToolExec — Skill / SlashCommand built-ins", () => {
           name: "load_skill",
           args: { skill_id: scopedSkill.id },
           sessionId: "scope-A",
+          turnId: "turn-1",
+          attemptId: "a2",
         })
       )
       expect(allowed.result).toMatchObject({ ok: true, skill: { id: scopedSkill.id } })
+
+      const stale = await handlePluginToolExec(
+        makeRequest({
+          name: "load_skill",
+          args: { skill_id: scopedSkill.id },
+          sessionId: "scope-A",
+          turnId: "turn-1",
+          attemptId: "a1",
+        })
+      )
+      expect(stale.result).toMatchObject({ ok: false, code: "stale_context" })
 
       const denied = await handlePluginToolExec(
         makeRequest({

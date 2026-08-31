@@ -26,8 +26,13 @@
 // and the child inherits its own config exactly as codex-cli would.
 
 import { getSettings } from "@/lib/db/settings"
-import { refreshCodexAccountIfStale } from "@/lib/subscription/codex/refresh"
-import { getActiveAccount } from "@/lib/subscription/core/transport"
+import {
+  assertCodexAccountLifecycleReady,
+  CodexReauthenticationRequiredError,
+  normalizeCodexLifecycleError,
+  refreshCodexAccountIfStale,
+} from "@/lib/subscription/codex/refresh"
+import { getAccount, getActiveAccount } from "@/lib/subscription/core/transport"
 import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import {
   DEFAULT_CODEX_SUBSCRIPTION_SETTINGS,
@@ -96,6 +101,8 @@ async function codexEnvOverlay(
   // Active account path. The Rust-side `env_for_sidecar` already folded the
   // resolved preset (base URL, headers, model mapping) into `snapshot.env`.
   if (snapshot.activeAccountId && snapshot.env.length > 0) {
+    const account = await getAccount("codex", snapshot.activeAccountId)
+    if (account) assertCodexAccountLifecycleReady(account)
     if (settings.autoRefreshNearExpiry) {
       const refreshed = await maybeRefreshActiveCodex(snapshot.activeAccountId)
       if (refreshed) snapshot = refreshed
@@ -142,6 +149,8 @@ async function maybeRefreshActiveCodex(accountId: string): Promise<ActiveSnapsho
     if (!fresh) return null
     return await getActiveAccount("codex")
   } catch (err) {
+    const lifecycleError = normalizeCodexLifecycleError(err)
+    if (lifecycleError instanceof CodexReauthenticationRequiredError) throw lifecycleError
     console.warn("env-builder: codex auto-refresh failed:", err)
     return null
   }

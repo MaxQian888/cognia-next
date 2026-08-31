@@ -34,7 +34,6 @@
  *   injected host filesystem and the server secret-store auto-key (T-A6).
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
  *   reconciles native install/restore/uninstall events from cognia-server.
- * - `twin-job-worker` — drains enabled Twin ingest/distill jobs in a headless brain.
  * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
  *   events plane so the Rust cron daemon / webhook router in cognia-server
  *   actually start workflow runs (host-neutral `installTriggerBridge`).
@@ -53,10 +52,10 @@
  *
  * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
- * - `sandbox-session-runtime` — owns only immutable in-memory placement refs;
- *   the canonical plugin runtime owns E2B process lifetime and disposes the
- *   shared sandbox pool on plugin deactivation, so there is no independent
- *   bootstrap or teardown effect to register here.
+ * - `sandbox-session-runtime` — owns only immutable in-memory placement refs.
+ *   Plugin deactivation drains existing E2B owners; the registered
+ *   `plugin-runtime` teardown emits `APP_CLOSING` and force-disposes active and
+ *   draining adapters, so there is no independent runtime entry to register.
  * - `companion-boot` — the CLIENT side of the companion protocol (pairing,
  *   sync-down into a phone); a brain is the server side.
  * - `companion-outbound-runner` — drains phone-originated writes from the
@@ -100,6 +99,14 @@
  * - `session-import-watch-initializer` — owns a Tauri filesystem watcher over
  *   desktop external-agent history paths; its commands are client-local and
  *   internal-only in the canonical protocol manifest.
+ * - `vector-credential-migration-initializer` — migrates browser localStorage
+ *   secrets into the desktop OS keyring; headless hosts have neither source
+ *   storage nor a renderer-owned credential settings store to rehydrate.
+ * - `twin-job-worker` — Twin vector stores currently dispatch through Tauri
+ *   commands. The headless bridge is a response/event transport rather than a
+ *   general command RPC surface, so registering the renderer worker here would
+ *   start a runtime whose first vector operation always fails. Re-enable only
+ *   with an explicit server-side vector adapter.
  * - `worker-runtime-initializer` — attaches the WebView through a Tauri IPC
  *   `Channel`; the brain-side bridge-owned worker pool is installed and torn
  *   down by `serveCommand` after its authenticated bridge connects.
@@ -116,7 +123,6 @@ import "./backup-scheduler"
 import "./plugin-runtime"
 import "./managed-ide-broker"
 import "./memory-job-worker"
-import "./twin-job-worker"
 import "./integration-runtime"
 import "./performance-runtime"
 import "./workflow-trigger-bridge"

@@ -722,6 +722,8 @@ function pluginToolToAiSdkTool(
     reviewToolOutput,
     remoteExecutionContext,
     sandboxRuntimeRef,
+    turnId,
+    attemptId,
   }
 ) {
   const namespaced = `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`
@@ -750,6 +752,8 @@ function pluginToolToAiSdkTool(
         toolUseId,
         name: manifest.name,
         args: effective,
+        ...(turnId ? { turnId } : {}),
+        ...(attemptId ? { attemptId } : {}),
         ...(sandboxRuntimeRef ? { sandboxRuntimeRef } : {}),
         ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
       })
@@ -933,6 +937,8 @@ export function buildAiSdkTools({
           reviewToolOutput,
           remoteExecutionContext: sendOptions.remoteExecutionContext,
           sandboxRuntimeRef: sendOptions.sandboxRuntimeRef,
+          turnId: sendOptions.turnId,
+          attemptId: sendOptions.execution?.identity?.attemptId,
         }),
         { serverName: PLUGIN_TOOLS_SERVER_NAME }
       )

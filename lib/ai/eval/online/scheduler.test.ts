@@ -33,6 +33,17 @@ function harness(overrides: Record<string, unknown> = {}) {
 }
 
 describe("startOnlineEvalScheduler", () => {
+  it("uses browser timers without binding them to the dependency object", async () => {
+    const { deps } = harness({
+      setIntervalFn: function (this: unknown) {
+        if (this !== undefined) throw new TypeError("Illegal invocation")
+        return 7 as unknown as ReturnType<typeof setInterval>
+      } as unknown as typeof setInterval,
+    })
+
+    await expect(startOnlineEvalScheduler(deps)).resolves.toBeInstanceOf(Function)
+  })
+
   it("drains once at boot so work stranded by a previous session is picked up", async () => {
     // A row left `queued` by a closed session can never be pruned, because the
     // sweep only reaches settled rows.

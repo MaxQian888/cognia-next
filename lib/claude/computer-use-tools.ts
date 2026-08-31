@@ -30,11 +30,17 @@ import type { Character, SendOptions } from "@cognia/agent-config-types"
 /**
  * ADR-0020 W3 — plugin tool names that the chat-side `canUseTool` modal
  * can suppress when a session grant is present (or the operator chose
- * `chatConsentMode: "auto"`). Mirror of the constant in
- * `hooks/chat/use-claude-chat.ts` — kept in two places because both
- * sides have to agree on the name set and the file boundary makes
- * sharing awkward (a third lib file just for one constant would be
- * worse than the duplication, and the names rarely change).
+ * `chatConsentMode: "auto"`), and the set the IM ceiling denies wholesale.
+ *
+ * Both bare and MCP-prefixed spellings, because the name reaching the gate
+ * depends on which rail the call arrived on.
+ *
+ * `wait` is deliberately absent: it declares `requiresApproval: false`, so it
+ * never reaches the approval modal and has nothing to suppress.
+ *
+ * (This used to claim a mirror in `hooks/chat/use-claude-chat.ts`. There is no
+ * such copy — that file no longer mentions computer use at all;
+ * `hooks/chat/claude-chat-tool-hooks.ts` imports this constant directly.)
  */
 export const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
   "list_apps",
@@ -42,6 +48,7 @@ export const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
   "query_elements",
   "expand_element",
   "perform_action",
+  "zoom",
   "find_text",
   "click_text",
   "mcp__cognia-plugin-tools__list_apps",
@@ -49,6 +56,7 @@ export const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
   "mcp__cognia-plugin-tools__query_elements",
   "mcp__cognia-plugin-tools__expand_element",
   "mcp__cognia-plugin-tools__perform_action",
+  "mcp__cognia-plugin-tools__zoom",
   "mcp__cognia-plugin-tools__find_text",
   "mcp__cognia-plugin-tools__click_text",
 ] as const

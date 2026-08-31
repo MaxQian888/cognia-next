@@ -76,6 +76,11 @@ interface ResourcePool {
   queue: ManagedLease[]
 }
 
+interface ProviderPool {
+  limit: number
+  inUse: number
+}
+
 interface ManagedLease {
   id: string
   request: ExecutionLeaseRequest
@@ -99,6 +104,8 @@ interface ManagedLease {
    * is something the user can act on.
    */
   waitingForSlot?: boolean
+  waitingForProvider?: boolean
+  heldProvider?: string
   /** Resolve/reject for a still-queued acquire. Cleared once admitted. */
   resolve?: (lease: ExecutionLease) => void
   reject?: (err: unknown) => void
@@ -121,6 +128,7 @@ const DEFAULT_RESOURCE: ExecutionResourceClass = "ai-turn"
 
 export class ExecutionBroker {
   private readonly pools = new Map<ExecutionResourceClass, ResourcePool>()
+  private readonly providerPools = new Map<string, ProviderPool>()
   private readonly active = new Map<string, ManagedLease>()
   private readonly snapshotListeners = new Set<SnapshotListener>()
   private readonly eventListeners = new Set<EventListener>()
@@ -181,6 +189,12 @@ export class ExecutionBroker {
     const resource = request.resource ?? DEFAULT_RESOURCE
     const pool = this.poolFor(resource)
     const weight = normalizeWeight(request.weight)
+    const providerLimit = normalizeProviderLimit(request.providerLimit)
+    if (request.providerId && providerLimit !== undefined) {
+      const existingProviderPool = this.providerPools.get(request.providerId)
+      if (existingProviderPool) existingProviderPool.limit = providerLimit
+      else this.providerPools.set(request.providerId, { limit: providerLimit, inUse: 0 })
+    }
 
     if (request.signal?.aborted) {
       return Promise.reject(new ExecutionAbortError("aborted before acquire"))
@@ -216,8 +230,14 @@ export class ExecutionBroker {
 
     this.active.set(id, managed)
 
+    // Unconditional: the continuation exemption is a LIVENESS guarantee, not a
+    // scheduling preference. A nested turn is only ever reached from a leg that
+    // is already running and cannot release until the nested one resolves, so
+    // parking an exempt leg on any queue (the shared pool or a provider lane)
+    // deadlocks the pair. It still takes a provider permit inside `admit`, so
+    // the lane accounting stays honest and non-exempt legs keep waiting on it.
     if (exempt) {
-      this.admit(managed, pool, /* consumePermit */ false)
+      this.admit(managed, pool, /* consumeResourcePermit */ false)
       return Promise.resolve(managed.lease)
     }
 
@@ -238,12 +258,13 @@ export class ExecutionBroker {
       })
     }
 
-    if (pool.inUse + weight <= pool.limit) {
-      this.admit(managed, pool, /* consumePermit */ true)
+    if ((exempt || pool.inUse + weight <= pool.limit) && this.canTakeProvider(managed)) {
+      this.admit(managed, pool, /* consumeResourcePermit */ !exempt)
       return Promise.resolve(managed.lease)
     }
 
     // No room — register as queued (observable) and resolve when drained.
+    managed.waitingForProvider = !this.canTakeProvider(managed)
     this.markDirty()
     return new Promise<ExecutionLease>((resolve, reject) => {
       managed.resolve = resolve
@@ -254,6 +275,7 @@ export class ExecutionBroker {
 
   private queueForSlot(slotKey: string, managed: ManagedLease): void {
     managed.waitingForSlot = true
+    managed.waitingForProvider = false
     const queue = this.slotQueues.get(slotKey)
     if (queue) queue.push(managed)
     else this.slotQueues.set(slotKey, [managed])
@@ -283,14 +305,15 @@ export class ExecutionBroker {
       if (queue.length === 0) this.slotQueues.delete(slotKey)
       if (head.cancelled || head.released) continue
       const pool = this.poolFor(head.resource)
-      if (pool.inUse + head.weight <= pool.limit) {
-        this.admit(head, pool, /* consumePermit */ true)
+      if ((head.exempt || pool.inUse + head.weight <= pool.limit) && this.canTakeProvider(head)) {
+        this.admit(head, pool, /* consumeResourcePermit */ !head.exempt)
       } else {
         // Parked on the pool queue with the slot still free — `drain` re-checks
         // the slot before admitting, so a leg that overtakes it here cannot
         // strand this one outside the mutual exclusion. It is now waiting on a
         // PERMIT, so the panel must stop blaming the directory.
         head.waitingForSlot = false
+        head.waitingForProvider = !this.canTakeProvider(head)
         pool.queue.push(head)
         this.markDirty()
       }
@@ -299,10 +322,18 @@ export class ExecutionBroker {
     this.slotQueues.delete(slotKey)
   }
 
-  private admit(managed: ManagedLease, pool: ResourcePool, consumePermit: boolean): void {
+  private admit(managed: ManagedLease, pool: ResourcePool, consumeResourcePermit: boolean): void {
     managed.state = "running"
     managed.waitingForSlot = false
-    if (consumePermit) pool.inUse += managed.weight
+    managed.waitingForProvider = false
+    if (consumeResourcePermit) {
+      pool.inUse += managed.weight
+    }
+    const providerPool = this.providerPoolFor(managed)
+    if (providerPool && managed.request.providerId) {
+      providerPool.inUse += 1
+      managed.heldProvider = managed.request.providerId
+    }
     // Claimed here, not at acquire: a leg that is only pool-queued must not
     // hold a directory nobody is working in.
     const slotKey = managed.request.slotKey
@@ -365,8 +396,15 @@ export class ExecutionBroker {
     }
 
     const pool = this.poolFor(managed.resource)
-    if (managed.state === "running" && !managed.exempt) {
-      pool.inUse = Math.max(0, pool.inUse - managed.weight)
+    let freedProvider: string | undefined
+    if (managed.state === "running") {
+      if (!managed.exempt) pool.inUse = Math.max(0, pool.inUse - managed.weight)
+      if (managed.heldProvider) {
+        const providerPool = this.providerPools.get(managed.heldProvider)
+        if (providerPool) providerPool.inUse = Math.max(0, providerPool.inUse - 1)
+        freedProvider = managed.heldProvider
+        managed.heldProvider = undefined
+      }
     } else if (managed.state === "queued") {
       // Defensive: a still-queued lease released directly — drop it from the
       // waiter list so the queue can't resurrect it.
@@ -387,7 +425,13 @@ export class ExecutionBroker {
     this.emit({ type: "leg-completed", snapshot: this.snapshotOf(managed), outcome: finalOutcome })
 
     // A freed permit may let queued waiters in.
-    if (managed.state === "running" && !managed.exempt) this.drain(pool)
+    if (managed.state === "running") this.drain(pool)
+    // A provider lane is NOT scoped to one resource pool, so a returned provider
+    // permit can unblock a leg parked on some OTHER pool's queue. Draining only
+    // this leg's pool left that waiter stranded (and still reporting
+    // `waitingForProvider`) until an unrelated release happened to touch its own
+    // pool. Runs after the own-pool drain so same-pool waiters keep their place.
+    if (freedProvider) this.drainProviderWaiters(freedProvider, pool)
     // A freed directory may let the next leg into it — after the pool drain,
     // so a waiter that has been queued longer keeps its place.
     if (heldSlot) this.drainSlot(heldSlot)
@@ -417,7 +461,11 @@ export class ExecutionBroker {
       // moving a waiter across queues is the holder's job to do once — not
       // something every unrelated release should repeat.
       const pool = this.poolFor(head.resource)
-      if (head.cancelled || head.released || pool.inUse + head.weight <= pool.limit) {
+      if (
+        head.cancelled ||
+        head.released ||
+        ((head.exempt || pool.inUse + head.weight <= pool.limit) && this.canTakeProvider(head))
+      ) {
         this.drainSlot(slotKey)
       }
     }
@@ -437,27 +485,65 @@ export class ExecutionBroker {
   }
 
   private drain(pool: ResourcePool): void {
-    // FIFO with head-of-line blocking: if the head doesn't fit, stop (keeps
-    // admission order deterministic and starvation-free for equal weights).
-    while (pool.queue.length > 0) {
-      const head = pool.queue[0]
+    // FIFO with head-of-line blocking on the SHARED permit: if the head doesn't
+    // fit, stop (keeps admission order deterministic and starvation-free for
+    // equal weights).
+    //
+    // A provider lane is NOT shared, so a leg parked on a saturated one is
+    // stepped over instead of stalling everything behind it: those waiters may
+    // name a different provider whose lane is wide open, and blocking them on
+    // an unrelated provider's turn is not admission order, it is a stall.
+    let index = 0
+    while (index < pool.queue.length) {
+      const head = pool.queue[index]
       if (head.cancelled) {
-        pool.queue.shift()
+        pool.queue.splice(index, 1)
         continue
       }
-      if (pool.inUse + head.weight > pool.limit) break
+      if (!head.exempt && pool.inUse + head.weight > pool.limit) break
+      if (!this.canTakeProvider(head)) {
+        if (!head.waitingForProvider) {
+          head.waitingForProvider = true
+          this.markDirty()
+        }
+        index += 1
+        continue
+      }
       // A permit is not enough. A leg reaches this queue while its slot is
       // FREE (the slot branch in `acquire` only fires when the slot is held),
       // and `drainSlot` parks a slot waiter here when no permit was available —
       // so by the time a permit frees, someone else may hold the directory.
       // Admitting anyway is how two legs ended up in one working tree.
       if (!this.canTakeSlot(head)) {
-        pool.queue.shift()
+        pool.queue.splice(index, 1)
         this.queueForSlot(head.request.slotKey!, head)
         continue
       }
-      pool.queue.shift()
-      this.admit(head, pool, /* consumePermit */ true)
+      pool.queue.splice(index, 1)
+      this.admit(head, pool, /* consumeResourcePermit */ !head.exempt)
+    }
+  }
+
+  /**
+   * Drain every pool other than `alreadyDrained` that has a waiter naming
+   * `providerId`.
+   *
+   * A provider lane is keyed by provider, not by resource class, so the leg that
+   * returns a provider permit is not necessarily in the same pool as the leg
+   * waiting for it. `release` drains its own pool. This covers the rest. Pools
+   * with no waiter on this provider are skipped, so an unrelated queue is never
+   * re-walked.
+   *
+   * `ExecutionResourceClass` has one member today, so this is currently a
+   * no-op guard rather than a live path. It is here because the alternative
+   * failure is silent: the second member of that union would strand a waiter on
+   * a free permit with nothing in the type system to catch it.
+   */
+  private drainProviderWaiters(providerId: string, alreadyDrained: ResourcePool): void {
+    for (const pool of this.pools.values()) {
+      if (pool === alreadyDrained) continue
+      if (!pool.queue.some((waiter) => waiter.request.providerId === providerId)) continue
+      this.drain(pool)
     }
   }
 
@@ -471,6 +557,21 @@ export class ExecutionBroker {
     const slotKey = managed.request.slotKey
     if (!slotKey || managed.exempt) return true
     return !this.slotHolders.has(slotKey)
+  }
+
+  private providerPoolFor(managed: ManagedLease): ProviderPool | undefined {
+    if (
+      !managed.request.providerId ||
+      normalizeProviderLimit(managed.request.providerLimit) === undefined
+    ) {
+      return undefined
+    }
+    return this.providerPools.get(managed.request.providerId)
+  }
+
+  private canTakeProvider(managed: ManagedLease): boolean {
+    const providerPool = this.providerPoolFor(managed)
+    return !providerPool || providerPool.inUse < providerPool.limit
   }
 
   // ── Cancellation ────────────────────────────────────────────────────────
@@ -561,11 +662,24 @@ export class ExecutionBroker {
    * exceed the limit. A leg for an already-active `sessionId` is a continuation
    * and never at capacity. This is the broker-backed replacement for
    * `selectIsAtStreamCap`.
+   *
+   * `providerId` extends the same question to the provider lane. Callers that
+   * use this as a pre-check for an immediate `acquire` (the chat send path) MUST
+   * pass it: the shared pool having room says nothing about a saturated lane,
+   * and without it the send proceeds, appends the user message, and then blocks
+   * inside `acquire` with nothing on screen to explain the wait.
    */
-  isAtCapacity(resource: ExecutionResourceClass = DEFAULT_RESOURCE, sessionId?: string): boolean {
+  isAtCapacity(
+    resource: ExecutionResourceClass = DEFAULT_RESOURCE,
+    sessionId?: string,
+    providerId?: string
+  ): boolean {
     if (sessionId && this.hasActiveSession(sessionId, resource)) return false
     const pool = this.poolFor(resource)
-    return pool.inUse + 1 > pool.limit
+    if (pool.inUse + 1 > pool.limit) return true
+    if (!providerId) return false
+    const providerPool = this.providerPools.get(providerId)
+    return providerPool ? providerPool.inUse >= providerPool.limit : false
   }
 
   /** Number of running legs (including exempt continuations). */
@@ -582,6 +696,11 @@ export class ExecutionBroker {
   /** Sum of weights of running, non-exempt legs (permits currently held). */
   permitsInUse(resource: ExecutionResourceClass = DEFAULT_RESOURCE): number {
     return this.poolFor(resource).inUse
+  }
+
+  /** Provider-scoped permits currently held by running, non-exempt legs. */
+  providerPermitsInUse(providerId: string): number {
+    return this.providerPools.get(providerId)?.inUse ?? 0
   }
 
   /** Permits available before the next non-exempt leg must queue. */
@@ -646,9 +765,15 @@ export class ExecutionBroker {
       ...(m.request.runId ? { runId: m.request.runId } : {}),
       ...(m.request.taskId ? { taskId: m.request.taskId } : {}),
       ...(m.request.projectId ? { projectId: m.request.projectId } : {}),
+      ...(m.request.providerId ? { providerId: m.request.providerId } : {}),
+      ...(normalizeProviderLimit(m.request.providerLimit) !== undefined
+        ? { providerLimit: normalizeProviderLimit(m.request.providerLimit) }
+        : {}),
       ...(m.request.slotKey ? { slotKey: m.request.slotKey } : {}),
       ...(m.heldSlot ? { holdsSlot: true } : {}),
       ...(m.waitingForSlot ? { waitingForSlot: true } : {}),
+      ...(m.waitingForProvider ? { waitingForProvider: true } : {}),
+      ...(m.heldProvider ? { holdsProvider: true } : {}),
       weight: m.weight,
       exempt: m.exempt,
       state: m.state,
@@ -691,6 +816,11 @@ export class ExecutionBroker {
 function normalizeWeight(weight: number | undefined): number {
   if (weight == null || !Number.isFinite(weight)) return 1
   return Math.max(1, Math.floor(weight))
+}
+
+function normalizeProviderLimit(limit: number | undefined): number | undefined {
+  if (limit == null || !Number.isFinite(limit)) return undefined
+  return Math.max(1, Math.floor(limit))
 }
 
 // ── Singleton ───────────────────────────────────────────────────────────

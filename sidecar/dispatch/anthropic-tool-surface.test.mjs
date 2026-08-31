@@ -33,6 +33,8 @@ test("plugin tool bridge preserves the immutable sandbox runtime reference", () 
     tools: [],
     emit: () => {},
     sessionId: "s1",
+    turnId: "turn-1",
+    attemptId: "attempt-2",
     sandboxRuntimeRef: "sandbox-runtime:anthropic",
     pendingPluginToolCalls: new Map(),
     alwaysLoad: true,
@@ -40,4 +42,6 @@ test("plugin tool bridge preserves the immutable sandbox runtime reference", () 
   })
 
   assert.equal(options.sandboxRuntimeRef, "sandbox-runtime:anthropic")
+  assert.equal(options.turnId, "turn-1")
+  assert.equal(options.attemptId, "attempt-2")
 })

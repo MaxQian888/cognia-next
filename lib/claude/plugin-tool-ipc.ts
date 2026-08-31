@@ -111,6 +111,8 @@ export interface PluginToolExecRequest {
   toolUseId: string
   name: string
   args: Record<string, unknown>
+  turnId?: string
+  attemptId?: string
   sandboxRuntimeRef?: string
   /** Cooperative cancellation for direct renderer callers such as live voice. */
   abortSignal?: AbortSignal
@@ -706,7 +708,11 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         await resolveSkillToolDeps(),
-        { sessionId: request.sessionId }
+        {
+          sessionId: request.sessionId,
+          turnId: request.turnId,
+          attemptId: request.attemptId,
+        }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }
     }

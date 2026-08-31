@@ -1,4 +1,9 @@
-import { acquireChatLease, releaseChatLease, __resetChatLeasesForTesting } from "./chat-lease"
+import {
+  acquireChatLease,
+  releaseChatLease,
+  switchChatLeaseProvider,
+  __resetChatLeasesForTesting,
+} from "./chat-lease"
 import { ExecutionBroker, __resetExecutionBrokerForTesting, getExecutionBroker } from "./broker"
 import { useChatStore } from "@/stores/chat"
 import { interruptSession } from "@/lib/claude/ipc"
@@ -101,6 +106,60 @@ describe("chat-lease", () => {
     // Second call is a no-op.
     expect(() => releaseChatLease("s")).not.toThrow()
     expect(() => releaseChatLease("never-held")).not.toThrow()
+  })
+
+  it("moves a held turn onto the fallback provider lane", async () => {
+    const broker = getExecutionBroker()
+    const outcomes: string[] = []
+    broker.onEvent((event) => {
+      if (event.type === "leg-completed") outcomes.push(event.outcome)
+    })
+    await acquireChatLease({
+      sessionId: "s",
+      label: "x",
+      providerId: "openai",
+      providerLimit: 1,
+    })
+    expect(broker.providerPermitsInUse("openai")).toBe(1)
+
+    await switchChatLeaseProvider("s", "anthropic", 2)
+
+    expect(outcomes).toEqual(["error"])
+    expect(broker.providerPermitsInUse("openai")).toBe(0)
+    expect(broker.providerPermitsInUse("anthropic")).toBe(1)
+    expect(broker.list()[0]).toMatchObject({
+      providerId: "anthropic",
+      providerLimit: 2,
+      sessionId: "s",
+    })
+  })
+
+  it("switches lanes without queueing behind a saturated pool", async () => {
+    // The regression: releasing first hands the freed permit to whatever is
+    // already queued, so the re-acquire for a turn that is mid-flight parks
+    // behind it and the routing fallback never issues its retry.
+    __resetExecutionBrokerForTesting(new ExecutionBroker({ limits: { "ai-turn": 1 } }))
+    const broker = getExecutionBroker()
+    await acquireChatLease({
+      sessionId: "s",
+      label: "x",
+      providerId: "openai",
+      providerLimit: 1,
+    })
+    // A background leg queued behind the only permit, ready to take it.
+    let queuedAdmitted = false
+    void broker.acquire({ kind: "chat", label: "queued", sessionId: "other" }).then(() => {
+      queuedAdmitted = true
+    })
+    await Promise.resolve()
+    expect(queuedAdmitted).toBe(false)
+
+    await switchChatLeaseProvider("s", "anthropic", 1)
+
+    expect(broker.providerPermitsInUse("anthropic")).toBe(1)
+    expect(broker.list()).toContainEqual(
+      expect.objectContaining({ sessionId: "s", providerId: "anthropic" })
+    )
   })
 
   it("reset releases held leases and detaches the watcher", async () => {

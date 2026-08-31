@@ -98,6 +98,8 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
       if (pendingEntry) pendingEntry.resolve({ result: `got: ${msg.args.text}` })
     },
     sessionId: "sess-1",
+    turnId: "turn-1",
+    attemptId: "attempt-2",
     sandboxRuntimeRef: "sandbox-runtime:one",
     pendingPluginToolCalls: pending,
   })
@@ -112,6 +114,8 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
   assert.equal(emitted.length, 1)
   assert.equal(emitted[0].type, "plugin_tool_exec")
   assert.equal(emitted[0].sessionId, "sess-1")
+  assert.equal(emitted[0].turnId, "turn-1")
+  assert.equal(emitted[0].attemptId, "attempt-2")
   assert.equal(emitted[0].sandboxRuntimeRef, "sandbox-runtime:one")
   assert.equal(emitted[0].name, "echo")
   assert.deepEqual(emitted[0].args, { text: "hi" })
@@ -342,4 +346,40 @@ test("jsonSchemaPropToZod keeps mixed-type enums exact", () => {
     assert.equal(schema.safeParse(value).success, true, `expected ${String(value)} to parse`)
   }
   assert.equal(schema.safeParse("2").success, false)
+})
+
+test("jsonSchemaPropToZod maps oneOf to a real union", () => {
+  // The model-visible MCP schema is derived from THIS zod shape, not from the
+  // manifest JSON Schema. Before `oneOf` was handled, every discriminated
+  // union fell through to `z.unknown()` — which is how computer-use's entire
+  // action vocabulary reached the model as an opaque object.
+  const schema = jsonSchemaPropToZod(
+    {
+      oneOf: [
+        { type: "object", properties: { kind: { const: "click" } }, required: ["kind"] },
+        {
+          type: "object",
+          properties: { kind: { const: "pressKey" }, chord: { type: "string" } },
+          required: ["kind", "chord"],
+        },
+      ],
+    },
+    true
+  )
+  assert.equal(schema.safeParse({ kind: "click" }).success, true)
+  assert.equal(schema.safeParse({ kind: "pressKey", chord: "ctrl+c" }).success, true)
+  assert.equal(schema.safeParse({ kind: "nope" }).success, false)
+})
+
+test("jsonSchemaPropToZod treats anyOf like oneOf", () => {
+  const schema = jsonSchemaPropToZod({ anyOf: [{ type: "string" }, { type: "number" }] }, true)
+  assert.equal(schema.safeParse("a").success, true)
+  assert.equal(schema.safeParse(3).success, true)
+  assert.equal(schema.safeParse(true).success, false)
+})
+
+test("jsonSchemaPropToZod keeps a single-branch oneOf as that branch", () => {
+  const schema = jsonSchemaPropToZod({ oneOf: [{ type: "string" }] }, true)
+  assert.equal(schema.safeParse("a").success, true)
+  assert.equal(schema.safeParse(1).success, false)
 })

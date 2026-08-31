@@ -25,7 +25,7 @@ export interface VisualOutputChannels {
    * somewhere to open. False for a session bound to an IM connector, where a
    * fenced artifact arrives as raw text.
    */
-  artifacts: boolean
+  artifacts: "tools" | "fenced" | "disabled"
   /** A2UI surfaces are enabled for this send. */
   a2ui: boolean
 }
@@ -47,7 +47,7 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
     "  the `diagram-design` skill.",
   ]
 
-  if (channels.artifacts) {
+  if (channels.artifacts === "tools") {
     lines.push(
       "- **Quantitative** — a trend, a comparison, a share of a total, a correlation:",
       '  call `artifact_create` with `type: "chart"`. It opens in the dock themed,',
@@ -60,11 +60,20 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
       "- Never hand-draw a chart as SVG while the dock is available. A drawing is a",
       "  picture of a chart; the artifact is the chart."
     )
+  } else if (channels.artifacts === "fenced") {
+    lines.push(
+      "- **Quantitative**: emit one supported fenced chart payload for Cognia's",
+      "  detector to lift into the dock. Use `{name,value}` for pie/doughnut and",
+      "  `{x,y}` for scatter. Do not name unavailable artifact tools, and never expose raw",
+      "  JSON or HTML outside the fenced payload.",
+      "- **Editable documents**: answer inline; direct canvas authoring is unavailable."
+    )
   } else {
     lines.push(
-      "- **Quantitative**: a compact markdown table, or a `mermaid` chart shape. This",
-      "  channel has no artifact dock — a chart or canvas artifact arrives as raw",
-      "  JSON, so do not emit one."
+      "- **Quantitative**: prefer an A2UI Chart when this channel supports it; otherwise",
+      "  use a compact markdown table. There is no artifact dock or permitted authoring",
+      "  route here, so never emit raw chart JSON or HTML.",
+      "- **Editable documents**: answer inline; do not emit a canvas payload."
     )
   }
 

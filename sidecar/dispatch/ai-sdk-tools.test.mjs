@@ -55,6 +55,8 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
     // without wiring a `pendingApprovals` channel.
     sendOptions: {
       permissionMode: "bypassPermissions",
+      turnId: "turn-1",
+      execution: { identity: { attemptId: "attempt-2" } },
       sandboxRuntimeRef: "sandbox-runtime:ai-sdk",
       pluginTools: [
         {
@@ -80,6 +82,8 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
   assert.equal(event.name, "my_plugin_tool")
   assert.deepEqual(event.args, { q: "hi" })
   assert.equal(event.sandboxRuntimeRef, "sandbox-runtime:ai-sdk")
+  assert.equal(event.turnId, "turn-1")
+  assert.equal(event.attemptId, "attempt-2")
   assert.equal(pendingPluginToolCalls.size, 1)
 
   // Resolve the round-trip the way claude-host's plugin_tool_response would.
@@ -502,6 +506,10 @@ test("createToolPermissionGate: plan mode allows subagent dispatch + load_skill 
   })
   await gate("mcp__cognia-plugin-tools__Task", { subagentId: "Plan", prompt: "design" })
   await gate("mcp__cognia-plugin-tools__load_skill", { name: "some-skill" })
+  await gate("mcp__cognia-plugin-tools__load_skill_resource", {
+    skill_id: "some-skill",
+    path: "references/rubric.md",
+  })
   // A mutating plugin tool stays denied even though dispatch is now permitted.
   await assert.rejects(gate("mcp__cognia-plugin-tools__file_write", {}), /plan mode/)
 })

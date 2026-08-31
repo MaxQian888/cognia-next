@@ -24,6 +24,7 @@ import { interruptSession } from "@/lib/claude/ipc"
 
 interface HeldChatLease {
   lease: ExecutionLease
+  params: AcquireChatLeaseParams
   /** Set once the session has been observed in an active state. We only release
    *  after that, so a still-`idle` status right after acquire (before `send`
    *  flips it to `streaming`) can't trigger a premature release. */
@@ -82,6 +83,8 @@ export interface AcquireChatLeaseParams {
    *  work runs under per-member sub-session ids, not `sessionId` itself.
    */
   onCancel?: () => void
+  providerId?: string
+  providerLimit?: number
 }
 
 /**
@@ -103,13 +106,67 @@ export async function acquireChatLease(
     sessionId: params.sessionId,
     ...(params.projectId ? { projectId: params.projectId } : {}),
     ...(params.slotKey ? { slotKey: params.slotKey } : {}),
+    ...(params.providerId ? { providerId: params.providerId } : {}),
+    ...(params.providerLimit ? { providerLimit: params.providerLimit } : {}),
   })
   // A broker-side cancel aborts the lease signal — bridge it to an interrupt so
   // the live turn actually stops. (A normal release never fires `abort`.)
   const onCancel =
     params.onCancel ?? (() => void interruptSession(params.sessionId).catch(() => undefined))
   lease.signal.addEventListener("abort", () => onCancel(), { once: true })
-  held.set(params.sessionId, { lease, sawActive: false })
+  held.set(params.sessionId, { lease, params, sawActive: false })
+}
+
+/**
+ * Hand a foreground turn from a failed provider lane to its fallback lane.
+ *
+ * The replacement is acquired BEFORE the old lease is released. Releasing first
+ * looks safer, but `ExecutionBroker.release` calls `drain` synchronously, so the
+ * freed permit is handed to whatever was already queued and the re-acquire for a
+ * turn that is mid-flight lands at the back of that queue. The routing fallback
+ * then never reaches `sendPrompt` and the user's turn stalls instead of failing
+ * over.
+ *
+ * Acquiring first cannot deadlock: the old lease is still running for this
+ * session, so the broker's continuation exemption (`hasActiveSession`) admits
+ * the replacement immediately without waiting on the shared pool, the slot, or
+ * the fallback provider's lane. The old lease is released straight afterwards,
+ * which returns its permits and drains whoever was waiting on them.
+ */
+export async function switchChatLeaseProvider(
+  sessionId: string,
+  providerId: string | undefined,
+  providerLimit: number | undefined,
+  broker: ExecutionBroker = getExecutionBroker()
+): Promise<void> {
+  const current = held.get(sessionId)
+  if (!current) return
+  if (current.params.providerId === providerId && current.params.providerLimit === providerLimit) {
+    return
+  }
+  const {
+    providerId: _previousProviderId,
+    providerLimit: _previousProviderLimit,
+    ...sharedParams
+  } = current.params
+  const nextParams: AcquireChatLeaseParams = {
+    ...sharedParams,
+    ...(providerId ? { providerId } : {}),
+    ...(providerLimit ? { providerLimit } : {}),
+  }
+  // `acquireChatLease` is a no-op while an entry is held for the session, so the
+  // slot has to be free before it runs. The lease object stays in hand, which is
+  // what keeps the exemption alive and lets the old lane be released on failure.
+  held.delete(sessionId)
+  try {
+    await acquireChatLease(nextParams, broker)
+  } catch (error) {
+    // Keep the turn on the lane it already has rather than leaving it holding
+    // nothing at all.
+    held.set(sessionId, current)
+    throw error
+  }
+  current.lease.release("error")
 }
 
 /**

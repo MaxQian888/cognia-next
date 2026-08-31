@@ -128,6 +128,22 @@ describe("resolveProviderAttemptOptions", () => {
     expect(result.protocolAdapterSpec).toMatchObject({ kind: "declarative" })
   })
 
+  it("carries a valid provider concurrency limit into the execution attempt", async () => {
+    await expect(
+      resolveProviderAttemptOptions(
+        "openai",
+        settings("openai", { connectionParams: { concurrentLimit: 3 } })
+      )
+    ).resolves.toMatchObject({ concurrentLimit: 3 })
+
+    await expect(
+      resolveProviderAttemptOptions(
+        "openai",
+        settings("openai", { connectionParams: { concurrentLimit: 0 } })
+      )
+    ).resolves.not.toHaveProperty("concurrentLimit")
+  })
+
   it("forwards the provider's static customHeaders and lets vault relay headers win", async () => {
     mockResolveFeatureProvider.mockReturnValue(
       resolved({ headers: { "x-tenant": "acme", "x-shared": "from-settings" } })

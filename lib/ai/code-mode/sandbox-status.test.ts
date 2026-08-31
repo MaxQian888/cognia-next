@@ -1,5 +1,9 @@
 const mockCall = jest.fn()
+const mockUpdateAvailability = jest.fn()
 jest.mock("@/lib/tauri", () => ({ transport: { call: (...a: unknown[]) => mockCall(...a) } }))
+jest.mock("@/lib/sandbox/runtime-availability", () => ({
+  updateOsSandboxAvailability: (...a: unknown[]) => mockUpdateAvailability(...a),
+}))
 
 import {
   __resetCodeSandboxStatus,
@@ -9,6 +13,7 @@ import {
 
 beforeEach(() => {
   mockCall.mockReset()
+  mockUpdateAvailability.mockReset()
   __resetCodeSandboxStatus()
 })
 
@@ -24,6 +29,11 @@ describe("codeSandboxStatus", () => {
   it("reports confinement when the probe confirms it", async () => {
     mockCall.mockResolvedValue({ confined: true, backend: "macos-sandbox-exec", detail: "ok" })
     await expect(codeSandboxStatus()).resolves.toEqual({
+      confined: true,
+      backend: "macos-sandbox-exec",
+      detail: "ok",
+    })
+    expect(mockUpdateAvailability).toHaveBeenCalledWith({
       confined: true,
       backend: "macos-sandbox-exec",
       detail: "ok",
@@ -49,6 +59,11 @@ describe("codeSandboxStatus", () => {
   it("reports unconfined when the host has no such command", async () => {
     mockCall.mockRejectedValue(new Error("command not found"))
     await expect(codeSandboxStatus()).resolves.toEqual({
+      confined: false,
+      backend: "",
+      detail: "command not found",
+    })
+    expect(mockUpdateAvailability).toHaveBeenCalledWith({
       confined: false,
       backend: "",
       detail: "command not found",

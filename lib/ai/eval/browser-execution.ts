@@ -206,10 +206,14 @@ function agentTargetSpec(variant: EvalVariant): TargetSpec {
     }
   }
   if (variant.kind === "workflow") {
+    const workflowVersionId = variant.parameters?.workflowVersionId
     return {
       kind: "workflow",
       label: variant.name,
       workflowId: required(variant.targetId, "Workflow id"),
+      ...(typeof workflowVersionId === "string" && workflowVersionId.trim()
+        ? { versionId: workflowVersionId }
+        : {}),
     }
   }
   throw new Error(`Variant ${variant.id} is not an Agent target`)

@@ -41,6 +41,8 @@ export const WORKFLOW_COPILOT_ALLOWED_TOOLS: readonly string[] = [
   "mcp__cognia-plugin-tools__wf_list_connectors",
   "mcp__cognia-plugin-tools__wf_list_mcp_servers",
   "mcp__cognia-plugin-tools__wf_list_plugins",
+  // Scoped, read-only progressive reference loader for workflow-authoring.
+  "mcp__cognia-plugin-tools__load_skill_resource",
   // ── Node-kind catalog ────────────────────────────────────────────────
   "mcp__cognia-plugin-tools__wf_list_node_kinds",
   "mcp__cognia-plugin-tools__wf_describe_node_kind",
@@ -49,17 +51,10 @@ export const WORKFLOW_COPILOT_ALLOWED_TOOLS: readonly string[] = [
   "mcp__cognia-plugin-tools__wf_explain_last_run",
   // ── Batch mutation (propose → user Apply → commit) ────────────────────
   "mcp__cognia-plugin-tools__wf_propose_batch",
-  // `wf_batch_apply` stays available for the post-Apply commit path —
-  // the proposal card calls into the editor store directly so it does
-  // NOT round-trip through the tool, but the agent may still use it for
-  // small batches it has explicit user approval for.
-  "mcp__cognia-plugin-tools__wf_batch_apply",
   // ── Template scaffolding (still routes through proposal store) ────────
   "mcp__cognia-plugin-tools__wf_list_templates",
   "mcp__cognia-plugin-tools__wf_apply_template",
   // ── Layout / viewport (read-shaped — no semantic graph change) ────────
-  "mcp__cognia-plugin-tools__wf_auto_layout",
-  "mcp__cognia-plugin-tools__wf_group_nodes",
   "mcp__cognia-plugin-tools__wf_select_nodes",
   "mcp__cognia-plugin-tools__wf_focus_viewport",
   // ── Run control (each requires approval) ─────────────────────────────
@@ -98,6 +93,9 @@ export const WORKFLOW_COPILOT_DISALLOWED_TOOLS: readonly string[] = [
   "mcp__cognia-plugin-tools__wf_connect_edge",
   "mcp__cognia-plugin-tools__wf_disconnect_edge",
   "mcp__cognia-plugin-tools__wf_configure_node",
+  "mcp__cognia-plugin-tools__wf_batch_apply",
+  "mcp__cognia-plugin-tools__wf_auto_layout",
+  "mcp__cognia-plugin-tools__wf_group_nodes",
   // Plugin tools we explicitly do NOT want — anything in
   // `mcp__cognia-plugin-tools__` that isn't `wf_*`. Listing the
   // high-risk surfaces; finer-grained denials are handled by the implicit
@@ -150,7 +148,7 @@ const OPERATING_RULES = `# Operating rules
 3. **Look up node kinds before configuring them.** Before staging an \`add_node\` or \`configure_node\` op, call \`wf_describe_node_kind\` to confirm the params shape. Plugin-contributed kinds are prefixed (e.g., \`my-plugin.action.custom\`); the catalog returns their \`paramsSchema\`.
 4. **All graph changes go through \`wf_propose_batch\`.** Direct mutation tools are NOT available. Aggregate every op for one user intent into ONE batch (\`add_node\` + \`connect_edge\` + \`configure_node\` for a "new step" intent). Each batch renders a diff card the user reviews with Apply / Discard.
 5. **Explain failures, then propose fixes.** When the user asks about a broken graph or a failed run, call \`wf_explain_validation\` or \`wf_explain_last_run\` FIRST — they return human-readable issues with a \`jumpToNodeId\` and a \`suggestion\`. Use the suggestion as your starting point, then propose the fix.
-6. **Position new nodes sensibly.** ~280px to the right of the predecessor; ~160px vertical spacing for fan-outs. For a fresh graph start at (80, 200). After any batch with 2+ new nodes, call \`wf_auto_layout\` (LR direction) to tidy.
+6. **Position new nodes sensibly in the proposal.** ~280px to the right of the predecessor; ~160px vertical spacing for fan-outs. For a fresh graph start at (80, 200). Layout and grouping are graph changes too, so never call direct layout/group mutation tools.
 7. **Validation before run.** Before \`wf_run_workflow\` / \`wf_run_from_step\`, call \`wf_get_validation_errors\` to confirm the graph parses. If any node fails, surface the error and STOP — do not run a broken workflow.
 8. **Templates over hand-rolling.** When the user describes a pattern that matches a template (GitHub PR pipeline, scheduled report, webhook→AI→connector), call \`wf_list_templates\` then \`wf_apply_template\` with slot values you can infer. Ask the user only for the slots you cannot derive.
 9. **Never apologize for the lack of a tool.** If a request needs a capability outside your tool set, say so once, plainly, and redirect — do NOT improvise with a workaround that mutates the graph in ways the user didn't ask for.`
@@ -207,7 +205,7 @@ You:
 1. Call \`wf_list_connectors\` → confirm a Telegram adapter is configured (else stop and ask the user to add one).
 2. Call \`wf_describe_node_kind\` for \`trigger.connector.inbound\`, \`ai.prompt\`, \`action.connector.send\` so the params shapes are known.
 3. Call \`wf_propose_batch\` with three \`add_node\` ops + two \`connect_edge\` ops + three \`configure_node\` ops, naming the new ids deterministically so the connect ops can reference them inside the same batch.
-4. After the batch, call \`wf_auto_layout({ direction: "LR" })\` so the new chain lays out cleanly.
+4. Include readable LR positions in the proposal itself; do not mutate layout after staging.
 5. Reply with the summary and the resource ids you used.`
 
 /**

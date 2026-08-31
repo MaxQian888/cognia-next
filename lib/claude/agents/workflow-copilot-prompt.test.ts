@@ -26,6 +26,9 @@ const DIRECT_MUTATION_TOOLS = [
   "wf_connect_edge",
   "wf_disconnect_edge",
   "wf_configure_node",
+  "wf_batch_apply",
+  "wf_auto_layout",
+  "wf_group_nodes",
 ]
 
 describe("WORKFLOW_COPILOT_ALLOWED_TOOLS", () => {
@@ -52,13 +55,10 @@ describe("WORKFLOW_COPILOT_ALLOWED_TOOLS", () => {
       "wf_explain_last_run",
       // batch mutation (proposal flow)
       "wf_propose_batch",
-      "wf_batch_apply",
       // templates
       "wf_list_templates",
       "wf_apply_template",
       // layout + viewport
-      "wf_auto_layout",
-      "wf_group_nodes",
       "wf_select_nodes",
       "wf_focus_viewport",
       // run control
@@ -79,6 +79,9 @@ describe("WORKFLOW_COPILOT_ALLOWED_TOOLS", () => {
 
   it("contains the Read built-in so the templates dir is reachable", () => {
     expect(WORKFLOW_COPILOT_ALLOWED_TOOLS).toContain("Read")
+    expect(WORKFLOW_COPILOT_ALLOWED_TOOLS).toContain(
+      "mcp__cognia-plugin-tools__load_skill_resource"
+    )
   })
 
   it("does NOT include Bash, Write, or Edit", () => {

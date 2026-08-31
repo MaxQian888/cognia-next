@@ -7,7 +7,7 @@
 // non-empty `pluginTools` manifest in SendOptions.
 //
 // Wire protocol — sidecar → parent:
-//   { type: "plugin_tool_exec", sessionId, toolUseId, name, args }
+//   { type: "plugin_tool_exec", sessionId, turnId?, attemptId?, toolUseId, name, args }
 // Wire protocol — parent → sidecar (via claude-host.mjs):
 //   { type: "plugin_tool_response", sessionId, toolUseId, result?, error? }
 //
@@ -126,6 +126,8 @@ export function buildPluginToolsServer({
   alwaysLoad,
   alwaysLoadToolNames,
   remoteExecutionContext,
+  turnId,
+  attemptId,
 }) {
   if (!Array.isArray(tools) || tools.length === 0) return null
 
@@ -155,6 +157,8 @@ export function buildPluginToolsServer({
           toolUseId,
           name: t.name,
           args,
+          ...(turnId ? { turnId } : {}),
+          ...(attemptId ? { attemptId } : {}),
           ...(sandboxRuntimeRef ? { sandboxRuntimeRef } : {}),
           ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
         })
@@ -253,6 +257,20 @@ export function jsonSchemaPropToZod(prop, required) {
       }
     } else if (p.const !== undefined) {
       zodType = z.literal(/** @type {any} */ (p.const))
+    } else if (Array.isArray(p.oneOf) || Array.isArray(p.anyOf)) {
+      // A discriminated union renders as `oneOf`. Without this branch it fell
+      // to `z.unknown()` below, and because the model-visible MCP schema is
+      // derived from THIS zod shape (not from the manifest JSON Schema), every
+      // union-typed argument reached the model as an opaque blob — which is
+      // exactly how computer-use's whole action vocabulary went missing.
+      const variants = /** @type {unknown[]} */ (p.oneOf ?? p.anyOf)
+      const branches = variants.map((v) => jsonSchemaPropToZod(v, true))
+      zodType =
+        branches.length === 1
+          ? branches[0]
+          : branches.length > 1
+            ? z.union(/** @type {any} */ (branches))
+            : z.unknown()
     } else {
       switch (p.type) {
         case "string": {

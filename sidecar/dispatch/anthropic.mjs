@@ -171,6 +171,8 @@ export function anthropicPluginToolBridgeOptions({
   alwaysLoad,
   alwaysLoadToolNames,
   remoteExecutionContext,
+  turnId,
+  attemptId,
 }) {
   return {
     tools,
@@ -181,6 +183,8 @@ export function anthropicPluginToolBridgeOptions({
     alwaysLoad,
     alwaysLoadToolNames,
     remoteExecutionContext,
+    turnId,
+    attemptId,
   }
 }
 
@@ -355,6 +359,8 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         alwaysLoad: serverAlwaysLoad(PLUGIN_TOOLS_SERVER_NAME),
         alwaysLoadToolNames,
         remoteExecutionContext: sendOptions.remoteExecutionContext,
+        turnId: sendOptions.turnId,
+        attemptId: sendOptions.execution?.identity?.attemptId,
       })
     )
     if (pluginToolsServer) {

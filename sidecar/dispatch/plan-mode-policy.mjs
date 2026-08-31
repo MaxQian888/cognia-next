@@ -24,9 +24,15 @@
  * Permitting the dispatch CALL does not widen the read-only guarantee: the
  * dispatched child inherits `permissionMode: "plan"` (its own gate stays
  * read-only) and the built-in Explore/Plan agents additionally carry a
- * read-only tool allowlist. `load_skill` only reads a skill's instructions.
+ * read-only tool allowlist. The Skill loaders only read scoped instructions and
+ * resources.
  */
-export const PLAN_ALLOWED_PLUGIN_TOOLS = new Set(["dispatch_agent", "Task", "load_skill"])
+export const PLAN_ALLOWED_PLUGIN_TOOLS = new Set([
+  "dispatch_agent",
+  "Task",
+  "load_skill",
+  "load_skill_resource",
+])
 
 /** Split `mcp__<server>__<tool>` into its parts; bare names pass through. */
 export function splitToolName(toolName) {

@@ -47,6 +47,7 @@ describe("detectArtifactType", () => {
 
   it("identifies chart JSON", () => {
     expect(detectArtifactType('[{"name":"a","value":1}]').type).toBe("chart")
+    expect(detectArtifactType('{"type":"doughnut","data":[]}').type).toBe("chart")
   })
 
   it("identifies markdown documents by language hint", () => {

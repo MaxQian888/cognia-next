@@ -47,6 +47,7 @@ import type { PluginMessage } from "@/types/plugin/plugin"
 import { runWithExecutionLease, combineAbortSignals } from "@/lib/execution/admit"
 import type { ExecutionLeaseInfo } from "@/lib/execution/types"
 import type { RemoteExecutionContext } from "./remote-execution"
+import { releaseSkillLoadContext } from "@/lib/skills/runtime-loader"
 
 /**
  * Envelope-backed capture subscription (ADR-0090 Phase 3, flag-gated).
@@ -554,6 +555,10 @@ export async function runAndCaptureAssistantReply(
       ...(info?.taskId ? { taskId: info.taskId } : {}),
       ...(info?.projectId ? { projectId: info.projectId } : {}),
       ...(info?.weight ? { weight: info.weight } : {}),
+      ...(options?.provider ? { providerId: options.provider } : {}),
+      ...(options?.providerConcurrencyLimit
+        ? { providerLimit: options.providerConcurrencyLimit }
+        : {}),
     },
     (lease) => {
       // Combine the broker lease signal with any caller signal so a broker-side
@@ -643,7 +648,7 @@ async function captureAssistantReplyCore(
   // Identifies THIS turn on the wire. The sidecar echoes it on every
   // session-scoped event, so `onEvent` below can drop events left over from a
   // previous turn of the same session — see the filter for why that matters.
-  const turnId = crypto.randomUUID()
+  const turnId = options?.turnId ?? crypto.randomUUID()
 
   return new Promise<RunAndCaptureResult>((resolve, reject) => {
     let unlisten: (() => void) | null = null
@@ -827,6 +832,7 @@ async function captureAssistantReplyCore(
           /* DOM-shim differences — swallow */
         }
       }
+      releaseSkillLoadContext(sessionId)
     }
 
     const finishOk = (result: RunAndCaptureResult) => {

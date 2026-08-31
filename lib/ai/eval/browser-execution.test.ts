@@ -310,6 +310,11 @@ describe("browser evaluation task execution", () => {
     ["chat", { modelId: "model-a", targetId: "character-a" }, "chat"],
     ["team", { targetId: "team-a" }, "team"],
     ["workflow", { targetId: "workflow-a" }, "workflow"],
+    [
+      "workflow",
+      { targetId: "workflow-a", parameters: { workflowVersionId: "workflow-version-a" } },
+      "workflow",
+    ],
   ] as const)(
     "routes %s variants through isolated Agent adapters",
     async (kind, patch, targetKind) => {
@@ -340,7 +345,12 @@ describe("browser evaluation task execution", () => {
 
       await execute({ ...task, variantId: agentVariant.id }, new AbortController().signal)
       expect(mockCreateAgentTarget).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: targetKind }),
+        expect.objectContaining({
+          kind: targetKind,
+          ...(kind === "workflow" && "parameters" in patch
+            ? { versionId: "workflow-version-a" }
+            : {}),
+        }),
         expect.any(Object)
       )
     }

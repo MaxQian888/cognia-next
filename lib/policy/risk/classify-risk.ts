@@ -68,13 +68,31 @@ function normalizeToolId(id: string): string {
   return tail.trim().toLowerCase()
 }
 
-/** Screen / mouse / keyboard automation. See `plugins/computer-use/src/index.ts`. */
+/**
+ * Screen / mouse / keyboard automation. See `plugins/computer-use/src/index.ts`.
+ *
+ * The app-session tool names (`get_app_state` … `perform_action`) are the ones
+ * the plugin actually registers today. They were missing here, so every real
+ * computer-use call classified as ordinary and the risk→ceremony escalation
+ * never fired for the single most invasive capability in the product. The
+ * older `computer` / `computer_20251124` spellings stay for character packs and
+ * external-bridge callers that still name the pre-app-session tools.
+ */
 const COMPUTER_USE_TOOL_IDS = new Set([
+  // app-session surface (current)
+  "get_app_state",
+  "list_apps",
+  "query_elements",
+  "expand_element",
+  "perform_action",
+  "zoom",
+  // OCR fallback surface
+  "find_text",
+  "click_text",
+  // legacy / external spellings
   "computer",
   "computer_use",
   "computer_20251124",
-  "find_text",
-  "click_text",
   "screenshot",
 ])
 

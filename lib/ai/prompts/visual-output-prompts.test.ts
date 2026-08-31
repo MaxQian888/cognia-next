@@ -1,13 +1,13 @@
 import { buildVisualOutputSection } from "./visual-output-prompts"
 
 describe("buildVisualOutputSection", () => {
-  const inApp = { artifacts: true, a2ui: true }
-  const imThread = { artifacts: false, a2ui: true }
+  const inApp = { artifacts: "tools" as const, a2ui: true }
+  const imThread = { artifacts: "disabled" as const, a2ui: true }
 
   it("always routes structural work to mermaid, on every channel", () => {
     // The one channel that renders everywhere: inline in the message, no dock,
     // no connector capability needed.
-    for (const channels of [inApp, imThread, { artifacts: false, a2ui: false }]) {
+    for (const channels of [inApp, imThread, { artifacts: "disabled" as const, a2ui: false }]) {
       const section = buildVisualOutputSection(channels)!
       expect(section).toContain("`mermaid`")
       expect(section).toContain("diagram-design")
@@ -23,11 +23,24 @@ describe("buildVisualOutputSection", () => {
     expect(im).toContain("no artifact dock")
   })
 
+  it("uses the safe fallback when the user disables artifact authoring", () => {
+    const section = buildVisualOutputSection({ artifacts: "disabled", a2ui: true })!
+    expect(section).not.toContain("artifact_create")
+    expect(section).not.toContain("chart-design")
+    expect(section).toContain("markdown table")
+  })
+
+  it("uses a supported fenced payload only when authoring and auto-detection remain available", () => {
+    const section = buildVisualOutputSection({ artifacts: "fenced", a2ui: false })!
+    expect(section).toContain("fenced")
+    expect(section).not.toContain("artifact_create")
+    expect(section).toContain("never expose raw")
+  })
+
   it("offers canvas only where a dock exists", () => {
     expect(buildVisualOutputSection(inApp)).toContain("canvas_create")
-    // The IM branch still NAMES canvas — to say it will not work there.
     expect(buildVisualOutputSection(imThread)).not.toContain("canvas_create")
-    expect(buildVisualOutputSection(imThread)).toContain("canvas artifact arrives as raw")
+    expect(buildVisualOutputSection(imThread)).toContain("do not emit a canvas payload")
   })
 
   it("names the tools it expects, not a fence the detector has to notice", () => {
@@ -40,7 +53,7 @@ describe("buildVisualOutputSection", () => {
 
   it("names A2UI only when A2UI is enabled for the send", () => {
     expect(buildVisualOutputSection(inApp)).toContain("A2UI")
-    expect(buildVisualOutputSection({ artifacts: true, a2ui: false })).not.toContain("A2UI")
+    expect(buildVisualOutputSection({ artifacts: "tools", a2ui: false })).not.toContain("A2UI")
   })
 
   it("tells the model when NOT to draw anything at all", () => {

@@ -2,6 +2,8 @@
 
 import { transport } from "@/lib/tauri"
 import type { HeadlessPluginChange } from "@/lib/headless/types"
+import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
 
 import { registerHeadlessRuntime } from "../registry"
 
@@ -70,7 +72,12 @@ registerHeadlessRuntime({
       unsubscribe()
       disposePackWarnings()
       await pending
-      await runtime.stop?.()
+      emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
+      try {
+        await runtime.stop?.()
+      } finally {
+        await disposeMicrovmAdapters()
+      }
     }
   },
 })

@@ -442,13 +442,6 @@ export const DEFAULT_SUB_AGENT_CONFIG: SubAgentConfig = {
   maxSteps: 10,
   timeout: 300000, // 5 minutes
   priority: "normal",
-  inheritParentContext: true,
-  shareResults: true,
-  retryConfig: {
-    maxRetries: 2,
-    retryDelay: 1000,
-    exponentialBackoff: true,
-  },
 }
 
 /**

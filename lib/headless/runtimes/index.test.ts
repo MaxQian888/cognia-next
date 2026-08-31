@@ -9,6 +9,7 @@ describe("headless runtime roster", () => {
       expect(names[0]).toBe("host-event-publisher")
       expect(names).toContain("workflow-runtime")
       expect(names).toContain("workflow-trigger-bridge")
+      expect(names).not.toContain("twin-job-worker")
       expect(new Set(names).size).toBe(names.length)
     })
   })

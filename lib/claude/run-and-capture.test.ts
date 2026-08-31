@@ -150,6 +150,21 @@ describe("runAndCaptureAssistantReply", () => {
     expect(unlistenMock).toHaveBeenCalledTimes(1)
   })
 
+  it("preserves a caller-frozen turn id instead of reminting at dispatch", async () => {
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { turnId: "turn-frozen" },
+      { timeoutMs: 1_000 }
+    )
+    await flushUntilSubscribed()
+    await flushMicrotasks()
+    fire(assistantEvent("done"))
+    fire(sessionEnded())
+    await promise
+    expect(sendPromptMock).toHaveBeenCalledWith(SESSION, "hi", { turnId: "turn-frozen" })
+  })
+
   it("surfaces the SDK session id immediately as well as on the final result", async () => {
     const onSdkSessionId = jest.fn()
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
@@ -1728,15 +1743,27 @@ describe("runAndCaptureAssistantReply — execution broker admission", () => {
 
   it("registers a leg with the broker while the turn runs and releases it after", async () => {
     const broker = getExecutionBroker()
-    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {
-      timeoutMs: 1_000,
-      execution: { kind: "connector", label: "WeCom reply", projectId: "p1" },
-    })
+    const promise = runAndCaptureAssistantReply(
+      SESSION,
+      "hi",
+      { provider: "openai", providerConcurrencyLimit: 2 },
+      {
+        timeoutMs: 1_000,
+        execution: { kind: "connector", label: "WeCom reply", projectId: "p1" },
+      }
+    )
     await flushUntilSubscribed()
     await flushMicrotasks()
     expect(broker.countRunning()).toBe(1)
     const leg = broker.list()[0]
-    expect(leg).toMatchObject({ kind: "connector", label: "WeCom reply", projectId: "p1" })
+    expect(leg).toMatchObject({
+      kind: "connector",
+      label: "WeCom reply",
+      projectId: "p1",
+      providerId: "openai",
+      providerLimit: 2,
+      holdsProvider: true,
+    })
     expect(broker.hasActiveSession(SESSION)).toBe(true)
 
     fire(assistantEvent("done"))

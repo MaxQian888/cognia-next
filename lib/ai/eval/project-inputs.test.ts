@@ -62,8 +62,41 @@ describe("evaluation project inputs", () => {
       caseIds: ["case-text", "case-image"],
       holdoutCaseIds: ["case-image"],
       requiredModalities: ["text", "image", "tool"],
+      mediaClearance: "scanned",
     })
   })
+
+  it.each([
+    ["no attachments", [] as EvalCase["contentParts"], "local-only"],
+    [
+      "a local-only attachment",
+      [{ type: "asset", assetId: "local", mediaType: "image/png", privacy: "local-only" }],
+      "local-only",
+    ],
+    [
+      "a manually cleared attachment",
+      [{ type: "asset", assetId: "manual", mediaType: "image/png", privacy: "manual" }],
+      "manual",
+    ],
+  ] as const)(
+    "derives %s media clearance from pinned cases",
+    async (_label, contentParts, expected) => {
+      const selected = await loadEvalDatasetSelection(dataset.id, {
+        getDataset: async () => dataset,
+        listCases: async () => [{ ...cases[0], contentParts: [...(contentParts ?? [])] }],
+        snapshotVersion: async () => ({
+          id: "version-clearance",
+          datasetId: dataset.id,
+          version: dataset.version,
+          caseIds: [cases[0].id],
+          casesHash: "clearance",
+          createdAt: 3,
+        }),
+      })
+
+      expect(selected.mediaClearance).toBe(expected)
+    }
+  )
 
   it("uses the shared provider resolver instead of treating non-empty text as readiness", () => {
     const settings = {

@@ -20,6 +20,7 @@ import type { ModelMappingEntry } from "@cognia/provider-types/model-mapping"
 import { recordEvent } from "@cognia/agent-trace/emitter"
 import { RoutingAttemptController } from "@cognia/provider-routing/routing-attempt-controller"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import { switchChatLeaseProvider } from "@/lib/execution/chat-lease"
 import {
   classifyProviderErrorInfo,
   isTransientErrorClass,
@@ -91,6 +92,7 @@ async function issueRetry(
     providerCredentials: attemptOptions.providerCredentials,
     protocolAdapterSpec: attemptOptions.protocolAdapterSpec,
     modelParams: attemptOptions.modelParams,
+    providerConcurrencyLimit: attemptOptions.concurrentLimit,
     fallbackModel: undefined,
     aliasResolution: cached.options.aliasResolution
       ? {
@@ -113,6 +115,7 @@ async function issueRetry(
   })
 
   try {
+    await switchChatLeaseProvider(sessionId, nextEntry.providerId, attemptOptions.concurrentLimit)
     await sendPrompt(sessionId, cached.content, retryOptions)
     // Least-busy signal: the retry is now in flight against the next
     // provider (the failed attempt was settled by `session_ended`).

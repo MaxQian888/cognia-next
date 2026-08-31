@@ -1,10 +1,9 @@
 jest.mock("@/lib/subscription/core/transport", () => ({
   getActiveAccount: jest.fn(),
   getAccount: jest.fn(),
-  saveAccount: jest.fn(),
   setActiveAccount: jest.fn(),
   codexOauthDiscover: jest.fn(),
-  codexOauthRefresh: jest.fn(),
+  refreshManagedCodexAccount: jest.fn(),
 }))
 
 jest.mock("@/lib/db/settings", () => ({
@@ -20,16 +19,16 @@ import { buildAgentEnv } from "./env-builder"
 
 const mGetActive = transportMod.getActiveAccount as jest.Mock
 const mGetAccount = transportMod.getAccount as jest.Mock
-const mSaveAccount = transportMod.saveAccount as jest.Mock
 const mSetActive = transportMod.setActiveAccount as jest.Mock
 const mDiscover = transportMod.codexOauthDiscover as jest.Mock
-const mRefresh = transportMod.codexOauthRefresh as jest.Mock
+const mRefresh = transportMod.refreshManagedCodexAccount as jest.Mock
 const mGetSettings = getSettings as jest.Mock
 
 // Default: no codex settings persisted → env-builder uses the type defaults
 // (autoRefreshNearExpiry true).
 beforeEach(() => {
   mGetSettings.mockResolvedValue({})
+  mGetAccount.mockReset()
   mGetAccount.mockResolvedValue(undefined)
   mDiscover.mockResolvedValue(null)
 })
@@ -124,6 +123,32 @@ describe("buildAgentEnv — codex preset", () => {
     warn.mockRestore()
   })
 
+  it("blocks spawn when the active account requires reauthentication", async () => {
+    mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "stale"]]))
+    mGetAccount.mockResolvedValueOnce({
+      id: "a1",
+      credential: {
+        provider: "codex",
+        accessToken: "stale",
+        refreshToken: "revoked",
+        idTokenRaw: "",
+        expiresAtMs: 1,
+        authMode: "chatgpt",
+        storedAtMs: 0,
+      },
+      createdAtMs: 1,
+      lastUsedAtMs: 1,
+      authMetadata: {
+        reauthRequiredAtMs: 2,
+        reauthReason: "refresh_token_revoked",
+      },
+    })
+
+    await expect(buildAgentEnv(codexConfig())).rejects.toThrow(
+      "requires reauthentication (refresh_token_revoked)"
+    )
+  })
+
   it("preserves insertion order from the Rust-side env pairs", async () => {
     mGetActive.mockResolvedValueOnce(
       snapshot([
@@ -216,13 +241,19 @@ describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
     mGetActive
       .mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "stale"]], "a1"))
       .mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "new"]], "a1"))
-    mGetAccount.mockResolvedValueOnce(codexAccount(Date.now() - 1000, "r1"))
-    mRefresh.mockResolvedValueOnce({ access_token: "new", refresh_token: "r2", expires_in: 3600 })
+    mGetAccount.mockResolvedValue(codexAccount(Date.now() - 1000, "r1"))
+    mRefresh.mockResolvedValueOnce({
+      accessToken: "new",
+      refreshToken: "r2",
+      idTokenRaw: "",
+      expiresAtMs: Date.now() + 3_600_000,
+      authMode: "chatgpt",
+      storedAtMs: Date.now(),
+    })
 
     const env = await buildAgentEnv(codexConfig())
 
-    expect(mRefresh).toHaveBeenCalledWith("r1")
-    expect(mSaveAccount).toHaveBeenCalledTimes(1)
+    expect(mRefresh).toHaveBeenCalledWith("a1")
     expect(mSetActive).toHaveBeenCalledWith("codex", "a1")
     expect(env).toEqual({ CODEX_ACCESS_TOKEN: "new" })
   })
@@ -232,7 +263,7 @@ describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
       codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
     })
     mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "fresh"]], "a1"))
-    mGetAccount.mockResolvedValueOnce(codexAccount(Date.now() + 3_600_000, "r1"))
+    mGetAccount.mockResolvedValue(codexAccount(Date.now() + 3_600_000, "r1"))
 
     const env = await buildAgentEnv(codexConfig())
 
@@ -248,7 +279,7 @@ describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
 
     const env = await buildAgentEnv(codexConfig())
 
-    expect(mGetAccount).not.toHaveBeenCalled()
+    expect(mGetAccount).toHaveBeenCalledWith("codex", "a1")
     expect(mRefresh).not.toHaveBeenCalled()
     expect(env).toEqual({ CODEX_ACCESS_TOKEN: "stale" })
   })
@@ -258,7 +289,7 @@ describe("buildAgentEnv — codex autoRefreshNearExpiry", () => {
       codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
     })
     mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "stale"]], "a1"))
-    mGetAccount.mockResolvedValueOnce(codexAccount(Date.now() - 1000, "r1"))
+    mGetAccount.mockResolvedValue(codexAccount(Date.now() - 1000, "r1"))
     mRefresh.mockRejectedValueOnce(new Error("refresh 401"))
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
 

@@ -177,14 +177,6 @@ jest.mock("@/lib/claude/skills-bridge", () => ({
   renderResolvedSkillsSection: (...a: unknown[]) => mRenderResolvedSkillsSection(...a),
 }))
 
-// Surface-activation: keep the real selection/rendering by default (so the
-// existing surface tests use the real catalog), but make selectSurfaceSkills
-// overridable so a test can inject a skill that declares allowedTools.
-jest.mock("@/lib/skills/surface-activation", () => {
-  const actual = jest.requireActual("@/lib/skills/surface-activation")
-  return { ...actual, selectSurfaceSkills: jest.fn(actual.selectSurfaceSkills) }
-})
-
 // Desktop probe. Defaults to `false` — the same value the real `isTauri()`
 // returns under Jest — so every pre-existing expectation is unchanged; the
 // desktop-only vector tools flip it per-test.
@@ -228,8 +220,7 @@ import {
 } from "@/lib/db/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { getTeam } from "@/lib/db/teams"
-import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
-import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
+import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
 import { loggers } from "@cognia/logging"
 import * as standaloneMode from "@/lib/runtime/standalone-mode"
@@ -1401,6 +1392,25 @@ describe("resolveSendOptions — visual output routing (ADR-0139)", () => {
     expect(opts.appendSystemPrompt).toContain("no artifact dock")
     expect(opts.appendSystemPrompt).not.toContain("chart-design")
   })
+
+  it("does not advertise authoring when the user disables it", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { artifacts: { agentAuthoring: false } } as AppSettings,
+    })
+    expect(opts.appendSystemPrompt).toContain("markdown table")
+    expect(opts.appendSystemPrompt).not.toContain("artifact_create")
+    expect(opts.appendSystemPrompt).not.toContain("chart-design")
+  })
+
+  it("uses the fenced route when the final filter removes artifact tools", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", toolFilter: { mode: "allow", tools: ["Read"] } }),
+      appSettings: { artifacts: { agentAuthoring: true, autoCreate: true } } as AppSettings,
+    })
+    expect(opts.appendSystemPrompt).toContain("fenced chart payload")
+    expect(opts.appendSystemPrompt).not.toContain("artifact_create")
+  })
 })
 
 describe("resolveSendOptions — opencode vault auto-fallback", () => {
@@ -2065,7 +2075,9 @@ describe("resolveSendOptions — character + skills", () => {
       { id: "sk1", name: "Skill 1", content: "body", allowedTools: [] } as unknown as Skill,
     ])
     await resolveSendOptions({ character: ch, session: makeSession({ id: "s1" }) })
-    expect(mListSkillsByIds).not.toHaveBeenCalled()
+    expect(mListSkillsByIds).toHaveBeenCalledWith(
+      BUILT_IN_SKILL_CATALOG.map((entry) => builtinSkillId(entry))
+    )
   })
 
   it("skips skills altogether when the character has no skillIds", async () => {
@@ -3173,13 +3185,114 @@ describe("resolveSendOptions — surface-aware built-in skills", () => {
     expect(opts.appendSystemPrompt).toContain("## Goal-driven execution")
   })
 
-  it("unions an activated surface skill's allowedTools into the allowlist", async () => {
-    const base = BUILT_IN_SKILL_CATALOG.find((e) => e.id === "im-auto-reply")!
-    ;(selectSurfaceSkills as jest.Mock).mockReturnValueOnce([
-      { ...base, allowedTools: ["surface_tool_x"] },
-    ])
+  it("does not let an activated surface skill grant tools", async () => {
     const opts = await resolveSendOptions({ session: imSession() })
-    expect(opts.allowedTools).toEqual(expect.arrayContaining(["surface_tool_x"]))
+    expect(opts.allowedTools ?? []).not.toContain("surface_tool_x")
+  })
+
+  it("does not let a surface skill reopen a tool excluded by the final user filter", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        ...imSession(),
+        toolFilter: { mode: "allow", tools: ["Read"] },
+      }),
+    })
+    expect(opts.allowedTools).not.toContain("surface_tool_x")
+  })
+})
+
+describe("resolveSendOptions — unified built-in Skill delivery", () => {
+  it("offers a contextual chart catalog only when a deliverable artifact route exists", async () => {
+    const available = await resolveSendOptions({
+      session: makeSession({ id: "chart-session" }),
+      skillIntents: ["chart"],
+    })
+    expect(available.appendSystemPrompt).toContain("## Contextual skills")
+    expect(available.appendSystemPrompt).toContain("Chart Design")
+
+    const unavailable = await resolveSendOptions({
+      session: makeSession({ id: "chart-disabled" }),
+      skillIntents: ["chart"],
+      appSettings: { artifacts: { agentAuthoring: false, autoCreate: false } } as AppSettings,
+    })
+    expect(unavailable.appendSystemPrompt ?? "").not.toContain("Chart Design")
+  })
+
+  it("withholds the contextual catalog when the loader does not survive the clamp", async () => {
+    // A catalog is an instruction to call `load_skill`. The workflow copilot
+    // allowlist permits only `load_skill_resource`, so the finalizer strips the
+    // loader and the listed ids would name a route that is not there.
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "clamped-session",
+        toolFilter: { mode: "allow", tools: ["mcp__cognia-plugin-tools__load_skill_resource"] },
+      }),
+      skillRenderMode: "hybrid",
+      skillIntents: ["chart"],
+    })
+    // The manifest entry is still a candidate. The allowlist is the clamp that
+    // decides what the model can actually see.
+    expect(opts.allowedTools ?? []).not.toContain("load_skill")
+    expect(opts.allowedTools ?? []).not.toContain("mcp__cognia-plugin-tools__load_skill")
+    expect(opts.appendSystemPrompt ?? "").not.toContain("## Contextual skills")
+  })
+
+  it("keeps a persisted user-disabled built-in out of injection", async () => {
+    mListSkillsByIds.mockResolvedValue([
+      {
+        id: "skill_builtin_im_auto_reply",
+        canonicalId: "builtin:im-auto-reply",
+        name: "IM auto-reply etiquette",
+        content: "disabled body",
+        status: "disabled",
+      } as Skill,
+    ])
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "disabled-im",
+        platformBinding: {
+          adapterId: "tg-1",
+          platform: "telegram",
+          conversationKey: "c1",
+          conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 1 },
+        },
+      }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("IM auto-reply etiquette")
+  })
+
+  it("treats an onboarding card as a disabled-skill exception for one attempt", async () => {
+    mListSkillsByIds.mockResolvedValue([
+      {
+        id: "skill_builtin_cognia_onboarding",
+        canonicalId: "builtin:cognia-onboarding",
+        name: "First-run walkthrough",
+        content: "stored body",
+        status: "disabled",
+      } as Skill,
+    ])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "onboarding-session" }),
+      skillRenderMode: "hybrid",
+      skillIntents: ["onboarding.summarize-web"],
+      requestScopedSkillIds: ["builtin:cognia-onboarding"],
+      turnId: "turn-1",
+      executionIdentity: { attemptId: "a1" },
+    })
+    expect(opts.appendSystemPrompt).toContain("## First-run walkthrough")
+    expect(toolNames(opts)).toContain("load_skill")
+
+    const runtime = await import("@/lib/skills/runtime-loader")
+    try {
+      await expect(
+        runtime.loadSkillForSession(
+          { sessionId: "onboarding-session", turnId: "turn-1", attemptId: "a1" },
+          "cognia-onboarding"
+        )
+      ).resolves.toMatchObject({ ok: true })
+    } finally {
+      runtime.releaseSkillLoadContext("onboarding-session")
+    }
   })
 })
 
@@ -4755,7 +4868,7 @@ describe("resolveSendOptions — tool/MCP filter overlay", () => {
       }),
     })
     expect(new Set(opts.disallowedTools)).toEqual(new Set(["x", "b"]))
-    expect(new Set(opts.allowedTools)).toEqual(new Set(["a", "b"]))
+    expect(new Set(opts.allowedTools)).toEqual(new Set(["a"]))
   })
 
   it("session filter replaces the character filter", async () => {
@@ -4976,7 +5089,7 @@ describe("desktop-independent DI seams (standalone CLI)", () => {
         })
         expect(spy).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s1" }))
         expect(opts.model).toBe("patched-model")
-        expect(opts.appendSystemPrompt).toBe("PATCHED")
+        expect(opts.appendSystemPrompt).toContain("PATCHED")
       } finally {
         spy.mockRestore()
       }

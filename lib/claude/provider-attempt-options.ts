@@ -16,6 +16,7 @@ export interface ProviderAttemptOptions {
   protocolAdapterSpec?: SendOptions["protocolAdapterSpec"]
   modelParams?: SendOptions["modelParams"]
   defaultModel?: string
+  concurrentLimit?: number
 }
 
 async function resolveProtocolAdapterSpec(
@@ -171,6 +172,11 @@ export async function resolveProviderAttemptOptions(
       protocolAdapterSpec: await resolveProtocolAdapterSpec(resolution.protocol),
       ...(modelParams ? { modelParams } : {}),
       ...(resolution.model ? { defaultModel: resolution.model } : {}),
+      ...(typeof providerConfig?.connectionParams?.concurrentLimit === "number" &&
+      Number.isFinite(providerConfig.connectionParams.concurrentLimit) &&
+      providerConfig.connectionParams.concurrentLimit > 0
+        ? { concurrentLimit: Math.floor(providerConfig.connectionParams.concurrentLimit) }
+        : {}),
     }
   }
 

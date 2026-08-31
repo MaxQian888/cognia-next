@@ -39,8 +39,13 @@ import {
   renderSkillsCatalog,
   renderSkillsSection,
 } from "@/lib/db/skills"
-import { builtinSkillId, getCatalogSkill } from "@/lib/skills/built-in-catalog"
-import { selectSurfaceSkills, renderSurfaceSkillsSection } from "@/lib/skills/surface-activation"
+import {
+  BUILT_IN_SKILL_CATALOG,
+  builtinSkillId,
+  resolveBuiltinSkillIdentity,
+} from "@/lib/skills/built-in-catalog"
+import { builtInDescriptorSkill, resolveSkillDelivery } from "@/lib/skills/delivery"
+import { resolveResidentSkillHostPolicies } from "@/lib/skills/host-policy"
 import { recordPluginSkillUsage } from "@/lib/db/plugin-skill-usage"
 import {
   buildMcpServerMapResolved,
@@ -97,6 +102,7 @@ import { loadAgentEnvSecret } from "@/lib/agent/agent-env-keyring"
 import { namespacedA2UIToolNames } from "@/lib/a2ui/mcp-tool-schemas"
 import { A2UI_SYSTEM_PROMPT } from "@/lib/ai/prompts/a2ui-prompts"
 import { buildVisualOutputSection } from "@/lib/ai/prompts/visual-output-prompts"
+import { finalizeToolSurface } from "@/lib/claude/tool-surface-finalizer"
 import {
   createProviderSettingsSnapshot,
   resolveFeatureProvider,
@@ -353,7 +359,7 @@ function buildWorkflowSnapshotBlock(
   }
   lines.push("")
   lines.push(
-    "Use the wf_* MCP tools to read / mutate / lay out / run this workflow on the user's behalf. ALWAYS call wf_read_graph before referencing any node id you didn't just create."
+    "Use the wf_* MCP tools to read, propose reviewed graph changes, validate, and run this workflow. Route every graph mutation or layout change through wf_propose_batch; ALWAYS call wf_read_graph before referencing any node id you did not just propose."
   )
   return lines.join("\n")
 }
@@ -518,6 +524,10 @@ export interface BuildOptionsContext {
    * and ids already on the character are de-duped at resolve time.
    */
   ephemeralSkillIds?: string[]
+  /** Contextual built-in Skill intents resolved by the caller for this turn. */
+  skillIntents?: string[]
+  /** Host-authorized, request-scoped built-ins (for example onboarding cards). */
+  requestScopedSkillIds?: string[]
   /**
    * How resolved skills enter the system prompt:
    *   - `"full"` (default / absent) — each skill's whole markdown body is
@@ -552,7 +562,7 @@ export interface BuildOptionsContext {
    * `true` when a `/loop` run is driving this session's turns. Unlike
    * `activeGoal`, the loop has no per-turn Dexie row the resolver reads — the
    * loop driver (`lib/loop/turn-driver.ts`) sets this flag so the surface-aware
-   * built-in skills (lib/skills/surface-activation.ts) treat a loop the same as
+   * built-in Skill delivery treats a loop the same as
    * a goal (the `goal-loop` surface). Direct chat leaves it undefined.
    */
   activeLoop?: boolean
@@ -665,6 +675,8 @@ export interface BuildOptionsContext {
    * "workflow", team member sends "agent-team".
    */
   traceSurface?: SpanSurface
+  /** Frozen logical turn id shared by every attempt and plugin tool call. */
+  turnId?: string
   /** Final per-run identity supplied by durable execution owners before minting. */
   executionIdentity?: Partial<AgentExecutionIdentity>
   /**
@@ -1011,6 +1023,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // hand to `runAndCaptureAssistantReply`. Without a default, `agents: "chat"`
   // would match nothing — an unidentified turn never matches a narrowed hook.
   const opts: SendOptions = { agentKind: ctx.agentKind ?? "chat" }
+  if (ctx.turnId) opts.turnId = ctx.turnId
 
   // --- Resolve the active character -----------------------------------------
   let character = ctx.character ?? null
@@ -1037,6 +1050,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   let skills: Skill[] = []
   const characterSkillIds = character?.skillIds ?? []
   const ephemeralIds = ctx.ephemeralSkillIds ?? []
+  const explicitBuiltInSkillIds = ephemeralIds.filter((id) => resolveBuiltinSkillIdentity(id))
   if (characterSkillIds.length || ephemeralIds.length) {
     // Shared resolution (character ∪ ephemeral − session-disabled, deduped)
     // so the send path and the chat UI never drift on the effective set.
@@ -1058,6 +1072,22 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (session?.trialSkillId) {
     skills = await listSkillsByIds([session.trialSkillId])
   }
+  // Product built-ins are delivered exclusively by resolveSkillDelivery below.
+  // Keeping them in this legacy list would bypass descriptor triggers and
+  // duplicate request-scoped/injected bodies.
+  const enabledBuiltInSkillIds = new Set(
+    skills.flatMap((skill) => {
+      const identity =
+        resolveBuiltinSkillIdentity(skill.id) ??
+        resolveBuiltinSkillIdentity(skill.canonicalId ?? "")
+      return identity ? [identity.bundleId] : []
+    })
+  )
+  skills = skills.filter(
+    (skill) =>
+      !resolveBuiltinSkillIdentity(skill.id) &&
+      !resolveBuiltinSkillIdentity(skill.canonicalId ?? "")
+  )
   const explicitSkillIds = new Set(
     session?.trialSkillId ? [session.trialSkillId] : (ctx.ephemeralSkillIds ?? [])
   )
@@ -1359,6 +1389,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       opts.providerCredentials = attemptOptions.providerCredentials
       opts.protocolAdapterSpec = attemptOptions.protocolAdapterSpec
       opts.modelParams = attemptOptions.modelParams
+      opts.providerConcurrencyLimit = attemptOptions.concurrentLimit
       if (!opts.model && attemptOptions.defaultModel) opts.model = attemptOptions.defaultModel
       // Unresolved providers (no key, disabled, etc.) fall through with
       // `opts.provider` set but no credentials — for "anthropic" that means
@@ -1823,39 +1854,27 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // on demand via the caller's load tool. Absent / "full" keeps the legacy
   // whole-body append, so desktop behaviour is unchanged.
   let skillSection = ""
+  let progressiveCustomSkillHasResources = false
   if (ctx.skillRenderMode === "name") {
     skillSection = renderSkillsCatalog(skills, skillBudget)
   } else if (ctx.skillRenderMode === "hybrid") {
-    const [{ listResourcesForSkill }, runtime, tools] = await Promise.all([
+    const [{ listResourcesForSkill }, runtime] = await Promise.all([
       import("@/lib/db/skill-resources"),
       import("@/lib/skills/runtime-loader"),
-      import("@/lib/claude/skill-builtin-tools"),
     ])
     const resourcesById = new Map(
       await Promise.all(
         skills.map(async (skill) => [skill.id, await listResourcesForSkill(skill.id)] as const)
       )
     )
+    progressiveCustomSkillHasResources = [...resourcesById.values()].some(
+      (resources) => resources.length > 0
+    )
     const explicitSection = explicitSkills
       .map((skill) => runtime.renderSkillWithResources(skill, resourcesById.get(skill.id) ?? []))
       .join("\n\n")
     const catalogSection = renderSkillsCatalog(implicitSkills, skillBudget)
     skillSection = [explicitSection, catalogSection].filter(Boolean).join("\n\n")
-    if (session?.id && skills.length > 0) {
-      runtime.registerSkillLoadContext(session.id, {
-        skills,
-        explicitSkillIds: explicitSkills.map((skill) => skill.id),
-      })
-      opts.pluginTools = [
-        ...(opts.pluginTools ?? []),
-        ...tools.buildProgressiveSkillManifestEntries(
-          skills,
-          [...resourcesById.values()].some((resources) => resources.length > 0)
-        ),
-      ]
-    } else if (session?.id) {
-      runtime.clearSkillLoadContext(session.id)
-    }
   } else {
     skillSection = renderSkillsSection(skills, skillBudget)
   }
@@ -2350,29 +2369,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     opts.appendSystemPrompt = existing
       ? `${existing}\n\n${connectorCapabilityPrompt}`
       : connectorCapabilityPrompt
-  }
-
-  // ADR-0139 — which surface a picture should be. Resident rather than a skill:
-  // "chart artifact, mermaid fence, A2UI or canvas?" has to be answered BEFORE
-  // the model knows a skill exists, and a skill is only read once something
-  // thinks to load one. The per-surface contracts stay in the skills; only the
-  // routing is always on, and it is a short decision table.
-  //
-  // `artifacts` is false for an IM-bound session: there is no dock there, so a
-  // fenced chart or canvas artifact would reach the reader as raw JSON.
-  //
-  // Hoisted because the SAME answer has to gate the artifact tool manifest
-  // below. The routing prompt advertising a chart artifact while the tool that
-  // makes one is absent is the exact mismatch this file used to ship.
-  const visualOutputSection = buildVisualOutputSection({
-    artifacts: artifactsChannelAvailable,
-    a2ui: a2uiEnabled,
-  })
-  if (visualOutputSection) {
-    const existing = opts.appendSystemPrompt?.trim() ?? ""
-    opts.appendSystemPrompt = existing
-      ? `${existing}\n\n${visualOutputSection}`
-      : visualOutputSection
   }
 
   // --- MCP server subset ---------------------------------------------------
@@ -2915,8 +2911,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // The tools are desktop-only, require a confined workspace cwd/backend, and
   // remain available even when third-party plugin tools are disabled.
   const pluginConversionRequested =
-    skills.some((skill) => skill.canonicalId === "builtin:plugin-conversion") ||
-    appSettings?.selfInvokeTools?.skill === true
+    enabledBuiltInSkillIds.has("plugin-conversion") || appSettings?.selfInvokeTools?.skill === true
   if (pluginConversionRequested && !imSession && opts.cwd) {
     try {
       const { hasWorkspaceFsBackend } = await import("@/lib/files/workspace-backend")
@@ -3552,39 +3547,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
-  // --- Surface-aware built-in skills ---------------------------------------
-  // Auto-inject the function-guidance skill for whichever agent surface this
-  // turn is running on (IM auto-reply, computer-use, agent-team, digital-twin,
-  // goal/loop). The signals are facts already computed above; the catalog +
-  // selection live in lib/skills/. Workflow-editor is handled in its own prompt
-  // block below (that path clears appendSystemPrompt), so it's excluded here.
-  // Gated by `surfaceSkillsEnabled` (default on). Skills the user already
-  // enabled (present in `skills`) are skipped to avoid a duplicate section.
-  if ((appSettings?.surfaceSkillsEnabled ?? true) && session?.kind !== "workflow-editor") {
-    const picked = selectSurfaceSkills({
-      imBound: imSession,
-      computerUse: computerUseAllowedForChat,
-      agentTeam: session?.kind === "team",
-      digitalTwin: twinReplacedBase,
-      goalLoop: ctx.activeGoal?.status === "active" || ctx.activeLoop === true,
-    })
-    const alreadyEnabled = new Set(skills.map((s) => s.id))
-    const fresh = picked.filter((e) => !alreadyEnabled.has(builtinSkillId(e)))
-    const section = renderSurfaceSkillsSection(fresh)
-    if (section) {
-      const existing = opts.appendSystemPrompt?.trim() ?? ""
-      opts.appendSystemPrompt = existing ? `${existing}\n\n${section}` : section
-      // Union any tools the activated surface skills declare into the
-      // allowlist (already finalized above) — mirrors how chat & plugin
-      // skills widen it. Skills can only widen, never narrow.
-      const surfaceTools = fresh.flatMap((e) => e.allowedTools ?? [])
-      if (surfaceTools.length > 0) {
-        opts.allowedTools = [...new Set([...(opts.allowedTools ?? []), ...surfaceTools])]
-      }
-      void recordSkillUsage(fresh.map((e) => builtinSkillId(e))).catch(() => undefined)
-    }
-  }
-
   // --- Active /goal context (ADR-0013) -------------------------------------
   // When the resolving session has an active goal, append the goal's system
   // section (Codex-style <objective> wrap + injection warning) to
@@ -3785,22 +3747,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // every one of those layers in favour of the Workflow Copilot
       // identity.
       opts.systemPrompt = buildWorkflowCopilotPrompt(null)
-      // Surface-aware skill for this surface: the generic append path above is
-      // skipped for workflow-editor sessions (and cleared here), so inject the
-      // `workflow-authoring` guidance alongside the per-turn snapshot. Gated by
-      // the same `surfaceSkillsEnabled` toggle.
-      const workflowSkill =
-        (appSettings?.surfaceSkillsEnabled ?? true)
-          ? getCatalogSkill("workflow-authoring")
-          : undefined
-      const workflowSkillSection = workflowSkill
-        ? `## ${workflowSkill.name}\n\n${workflowSkill.content.trim()}`
-        : ""
-      opts.appendSystemPrompt =
-        [workflowSkillSection, snapshot ?? ""].filter(Boolean).join("\n\n") || undefined
-      if (workflowSkill) {
-        void recordSkillUsage([builtinSkillId(workflowSkill)]).catch(() => undefined)
-      }
+      opts.appendSystemPrompt = snapshot ?? undefined
       opts.allowedTools = [...WORKFLOW_COPILOT_ALLOWED_TOOLS]
       opts.disallowedTools = [...WORKFLOW_COPILOT_DISALLOWED_TOOLS]
       // Scope the built-in Read tool to the copilot-templates directory
@@ -4034,6 +3981,329 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     if (merged.permissionMode) {
       opts.permissionMode = merged.permissionMode
     }
+  }
+
+  // --- Unified built-in Skill delivery ------------------------------------
+  // Resolve descriptor triggers, persisted enablement, capability reasons,
+  // request scope, prompt delivery, resource scope, and loader scope once.
+  // Skill metadata contributes no tools: the candidate surface above is
+  // projected through the final user filter before capability checks, and the
+  // loader entries added below are themselves clamped by the single finalizer.
+  const projectedToolSurface = finalizeToolSurface(
+    {
+      allowedTools: opts.allowedTools,
+      disallowedTools: opts.disallowedTools,
+      toolSurface: opts.toolSurface,
+    },
+    toolFilter
+  )
+  const projectedAllowed = projectedToolSurface.allowedTools
+    ? new Set(projectedToolSurface.allowedTools)
+    : null
+  const projectedDenied = new Set(projectedToolSurface.disallowedTools ?? [])
+  const pluginToolNames = new Set((opts.pluginTools ?? []).map((tool) => tool.name))
+  const toolAliases = (name: string): string[] => [name, `mcp__cognia-plugin-tools__${name}`]
+  const projectedAllowsTool = (names: readonly string[]): boolean => {
+    if (projectedToolSurface.toolSurface === "none") return false
+    // Availability is decided per NAME, and a name's two aliases (bare and
+    // namespaced) denote the SAME tool, so denying either denies the tool.
+    // The old check asked whether EVERY alias of EVERY name was denied, which
+    // a plain `disallowedTools: ["WebSearch"]` never satisfies (the fabricated
+    // `mcp__…__WebSearch` is not a route anyone ever denies), so the capability
+    // read as available and a Skill described a route the finalizer stripped.
+    return names.some((name) => {
+      const aliases = toolAliases(name)
+      if (aliases.some((alias) => projectedDenied.has(alias))) return false
+      return projectedAllowed === null || aliases.some((alias) => projectedAllowed.has(alias))
+    })
+  }
+  const projectedPluginTool = (names: readonly string[]): boolean =>
+    names.some((name) => pluginToolNames.has(name)) && projectedAllowsTool(names)
+
+  let workspaceBackendAvailable = false
+  try {
+    workspaceBackendAvailable = (
+      await import("@/lib/files/workspace-backend")
+    ).hasWorkspaceFsBackend()
+  } catch {
+    workspaceBackendAvailable = false
+  }
+  const artifactTypeSettings = appSettings?.artifacts?.enabledTypes
+  const artifactFencedAvailable =
+    artifactAuthoringEnabled &&
+    appSettings?.artifacts?.autoCreate !== false &&
+    (!artifactTypeSettings ||
+      artifactTypeSettings.includes("chart") ||
+      artifactTypeSettings.includes("html"))
+  const artifactCapabilityAvailable =
+    projectedPluginTool(["artifact_create", "artifact_update"]) || artifactFencedAvailable
+  const webSearchAvailable =
+    webAccess.search === "cognia"
+      ? projectedPluginTool(["web_search"])
+      : webAccess.search === "native"
+        ? projectedAllowsTool(["WebSearch"])
+        : false
+  const webFetchAvailable =
+    webAccess.fetch === "cognia"
+      ? projectedPluginTool(["web_fetch"])
+      : webAccess.fetch === "native"
+        ? projectedAllowsTool(["WebFetch"])
+        : false
+
+  let persistedBuiltInRows: Skill[] = []
+  try {
+    persistedBuiltInRows =
+      (await listSkillsByIds(BUILT_IN_SKILL_CATALOG.map((entry) => builtinSkillId(entry)))) ?? []
+  } catch {
+    // A missing IndexedDB projection is equivalent to a new install: descriptor
+    // defaults apply, while the generated bodies/resources remain available.
+  }
+  const persistedByBundle = new Map(
+    persistedBuiltInRows.flatMap((row) => {
+      const identity =
+        resolveBuiltinSkillIdentity(row.id) ?? resolveBuiltinSkillIdentity(row.canonicalId ?? "")
+      return identity ? [[identity.bundleId, row] as const] : []
+    })
+  )
+  const skillStates = Object.fromEntries(
+    BUILT_IN_SKILL_CATALOG.flatMap((entry) => {
+      const row = persistedByBundle.get(entry.id)
+      const sessionDisabled = (session?.disabledSkillIds ?? []).some(
+        (id) => resolveBuiltinSkillIdentity(id)?.bundleId === entry.id
+      )
+      return row || sessionDisabled
+        ? [[entry.id, sessionDisabled ? "disabled" : (row?.status ?? "enabled")]]
+        : []
+    })
+  )
+  const surfaces = [
+    ...(imSession ? ["im-connector"] : []),
+    ...(computerUseAllowedForChat ? ["computer-use"] : []),
+    ...(session?.kind === "workflow-editor" ? ["workflow-editor"] : []),
+    ...(session?.kind === "team" ? ["agent-team"] : []),
+    ...(twinReplacedBase ? ["digital-twin"] : []),
+    ...(ctx.activeGoal?.status === "active" || ctx.activeLoop === true ? ["goal-loop"] : []),
+  ]
+  const skillDelivery = resolveSkillDelivery({
+    surfaces,
+    intents: ctx.skillIntents,
+    capabilities: {
+      agentDispatch: {
+        available:
+          session?.kind === "team" &&
+          (Object.keys(opts.agents ?? {}).length > 0 ||
+            projectedPluginTool([DISPATCH_AGENT_TOOL_NAME])),
+        reason: "No bounded team dispatch route is available for this turn",
+      },
+      artifactAuthoring: {
+        available: artifactCapabilityAvailable,
+        reason: "No artifact dock, renderer, or permitted artifact route is available",
+      },
+      cogniaCli: {
+        available: workspaceBackendAvailable && Boolean(opts.cwd),
+        reason: "The managed cognia CLI is unavailable outside a desktop workspace",
+      },
+      computerUse: {
+        available: computerUseAllowedForChat,
+        reason: "Computer Use is not authorized for this character and channel",
+      },
+      goalRuntime: {
+        available: ctx.activeGoal?.status === "active" || ctx.activeLoop === true,
+        reason: "There is no active goal or loop runtime",
+      },
+      imBinding: {
+        available: imSession,
+        reason: "This turn is not bound to an IM conversation",
+      },
+      ocr: {
+        available:
+          projectedPluginTool(["ocr.extract", "extract_screenshot_ocr"]) ||
+          ctx.skillIntents?.includes("verify-ocr-output") === true,
+        reason: "No permitted OCR route or OCR result is available",
+      },
+      pluginConversionTools: {
+        available: projectedPluginTool(["inspect_plugin_conversion", "apply_plugin_conversion"]),
+        reason: "The confined plugin conversion inspect/apply tools are unavailable",
+      },
+      screenCapture: {
+        available: projectedPluginTool(["take_screenshot", "extract_screenshot_ocr"]),
+        reason: "No permitted screen-capture route is available",
+      },
+      twinContext: {
+        available: twinReplacedBase,
+        reason: "No Digital Twin context was injected into this turn",
+      },
+      webFetch: {
+        available: webFetchAvailable,
+        reason: "No permitted native or Cognia web fetch route is available",
+      },
+      webSearch: {
+        available: webSearchAvailable,
+        reason: "No permitted native or Cognia web search route is available",
+      },
+      workflowEditorTools: {
+        available: session?.kind === "workflow-editor" && projectedPluginTool(["wf_propose_batch"]),
+        reason: "The workflow editor proposal tool is unavailable",
+      },
+      workspace: {
+        available: Boolean(opts.cwd),
+        reason: "No active workspace is available",
+      },
+      workspaceBackend: {
+        available: workspaceBackendAvailable && Boolean(opts.cwd),
+        reason: "No confined workspace backend is available",
+      },
+      workspaceRead: {
+        available: Boolean(opts.cwd) && projectedAllowsTool(["Read"]),
+        reason: "No permitted workspace Read route is available",
+      },
+    },
+    skillStates,
+    // Every built-in the user actually selected, not just the ad-hoc ones:
+    // `enabledBuiltInSkillIds` carries the ones that came in through
+    // `character.skillIds` (and the ADR-0106 trial), which are just as
+    // explicit as an attachment and must not wait for a descriptor trigger.
+    explicitSkillIds: [...explicitBuiltInSkillIds, ...enabledBuiltInSkillIds],
+    requestScopedSkillIds: ctx.requestScopedSkillIds,
+    surfaceSkillsEnabled: appSettings?.surfaceSkillsEnabled ?? true,
+  })
+  opts.residentSkillPolicies = resolveResidentSkillHostPolicies(skillDelivery.hostPolicies)
+  const deliveredBuiltIns = [
+    ...skillDelivery.injected,
+    ...skillDelivery.catalog,
+    ...skillDelivery.explicit,
+    ...skillDelivery.requestScoped,
+  ]
+  const deliveredBuiltInRows = deliveredBuiltIns.map((resolved) =>
+    builtInDescriptorSkill(
+      resolved,
+      persistedByBundle.get(resolved.bundleId)?.status ??
+        (resolved.entry.defaultEnabled ? "enabled" : "disabled")
+    )
+  )
+  const fullBuiltInRows = [
+    ...skillDelivery.injected,
+    ...skillDelivery.explicit,
+    ...skillDelivery.requestScoped,
+  ].map((resolved) => builtInDescriptorSkill(resolved, "enabled"))
+  const contextualCatalogRows = skillDelivery.catalog.map((resolved) =>
+    builtInDescriptorSkill(resolved, "enabled")
+  )
+  const builtInBodySection = fullBuiltInRows
+    .map((skill) => `## ${skill.name}\n\n${skill.content.trim()}`)
+    .join("\n\n")
+  // A catalog is an instruction to call `load_skill`. That tool is added to
+  // `pluginTools` below and then clamped by the same finalizer as everything
+  // else, so a session with a narrow allowlist (the workflow copilot permits
+  // only `load_skill_resource`) would be handed a list of skill ids and no way
+  // to load any of them. Describe only the route that survives the clamp.
+  // Literal rather than the imported constant so `skill-builtin-tools` stays a
+  // dynamic import here, the same way every other tool name in this file is
+  // written. `lib/claude/skill-builtin-tools.ts` owns the name.
+  const progressiveLoaderReachable = projectedAllowsTool(["load_skill"])
+  const builtInCatalogSection =
+    contextualCatalogRows.length && progressiveLoaderReachable
+      ? [
+          "## Contextual skills",
+          ...contextualCatalogRows.map(
+            (skill) =>
+              `- ${skill.id}: ${skill.name}${skill.description ? ` — ${skill.description}` : ""}`
+          ),
+        ].join("\n")
+      : ""
+  const builtInSection = [builtInBodySection, builtInCatalogSection].filter(Boolean).join("\n\n")
+  if (builtInSection) {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing ? `${existing}\n\n${builtInSection}` : builtInSection
+    void recordSkillUsage(deliveredBuiltInRows.map((skill) => skill.id)).catch(() => undefined)
+  }
+
+  if (session?.id && ctx.skillRenderMode === "hybrid") {
+    const runtime = await import("@/lib/skills/runtime-loader")
+    const scopedSkills = [...skills, ...deliveredBuiltInRows]
+    if (scopedSkills.length > 0) {
+      runtime.registerSkillLoadContext(session.id, {
+        skills: scopedSkills,
+        explicitSkillIds: [
+          ...explicitSkills.map((skill) => skill.id),
+          ...skillDelivery.explicit.map((skill) => skill.storageId),
+        ],
+        allowDisabledSkillIds: skillDelivery.requestScoped.map((skill) => skill.storageId),
+        turnId: ctx.turnId,
+        attemptId: ctx.executionIdentity?.attemptId,
+      })
+      const { buildProgressiveSkillManifestEntries } =
+        await import("@/lib/claude/skill-builtin-tools")
+      const existingToolNames = new Set((opts.pluginTools ?? []).map((tool) => tool.name))
+      const loaderEntries = buildProgressiveSkillManifestEntries(
+        scopedSkills,
+        progressiveCustomSkillHasResources || skillDelivery.resourceSkillIds.length > 0
+      ).filter((tool) => !existingToolNames.has(tool.name))
+      opts.pluginTools = [...(opts.pluginTools ?? []), ...loaderEntries]
+    } else {
+      runtime.clearSkillLoadContext(session.id)
+    }
+  } else if (session?.id && ctx.skillRenderMode !== "name") {
+    ;(await import("@/lib/skills/runtime-loader")).clearSkillLoadContext(session.id)
+  }
+
+  // Seal the user-selected tool policy after surface Skills, workflow overlays,
+  // plugin hooks, and parent ceilings have all contributed candidates. No code
+  // below this point may widen the model-visible tool surface.
+  const finalizedToolSurface = finalizeToolSurface(
+    {
+      allowedTools: opts.allowedTools,
+      disallowedTools: opts.disallowedTools,
+      toolSurface: opts.toolSurface,
+    },
+    toolFilter
+  )
+  if (finalizedToolSurface.allowedTools !== undefined) {
+    opts.allowedTools = finalizedToolSurface.allowedTools
+  } else {
+    delete opts.allowedTools
+  }
+  if (finalizedToolSurface.disallowedTools !== undefined) {
+    opts.disallowedTools = finalizedToolSurface.disallowedTools
+  } else {
+    delete opts.disallowedTools
+  }
+  if (finalizedToolSurface.toolSurface !== undefined) {
+    opts.toolSurface = finalizedToolSurface.toolSurface
+  }
+
+  // ADR-0139 — describe only the visual route that survived the final tool
+  // clamp. When the dock and detector exist but artifact tools were filtered,
+  // a supported fenced payload can still be lifted lazily. A user authoring
+  // opt-out disables both routes and falls back to A2UI/table/Mermaid.
+  const artifactToolNames = new Set([
+    "artifact_create",
+    "mcp__cognia-plugin-tools__artifact_create",
+  ])
+  const artifactToolCandidate = (opts.pluginTools ?? []).some(
+    (tool) => tool.name === "artifact_create"
+  )
+  const allowedTools = opts.allowedTools ?? []
+  const deniedTools = new Set(opts.disallowedTools ?? [])
+  const artifactToolAvailable =
+    artifactAuthoringEnabled &&
+    opts.toolSurface !== "none" &&
+    artifactToolCandidate &&
+    (allowedTools.length === 0 || allowedTools.some((tool) => artifactToolNames.has(tool))) &&
+    ![...artifactToolNames].some((tool) => deniedTools.has(tool))
+  // `artifactFencedAvailable` is resolved once, above, and reused here. It used
+  // to be recomputed under a second name, so a change to what counts as a
+  // fenced route had to be made twice, and doing it once would have
+  // desynchronised the Skill-delivery capability check from this prompt.
+  const visualOutputSection = buildVisualOutputSection({
+    artifacts: artifactToolAvailable ? "tools" : artifactFencedAvailable ? "fenced" : "disabled",
+    a2ui: a2uiEnabled,
+  })
+  if (visualOutputSection) {
+    const existing = opts.appendSystemPrompt?.trim() ?? ""
+    opts.appendSystemPrompt = existing
+      ? `${existing}\n\n${visualOutputSection}`
+      : visualOutputSection
   }
 
   // Deposit the ceiling this session ACTUALLY resolved to (post-clamp), keyed by

@@ -72,6 +72,14 @@ function deriveRequiredModalities(dataset: EvalDataset, cases: EvalCase[]): Eval
   return order.filter((item) => capabilities.has(item))
 }
 
+function deriveMediaClearance(cases: EvalCase[]): EvalProjectDataset["mediaClearance"] {
+  const clearances = cases.flatMap((item) =>
+    (item.contentParts ?? []).flatMap((part) => (part.type === "asset" ? [part.privacy] : []))
+  )
+  if (clearances.length === 0 || clearances.includes("local-only")) return "local-only"
+  return clearances.includes("manual") ? "manual" : "scanned"
+}
+
 export async function loadEvalDatasetSelection(
   datasetId: string,
   dependencies: EvalDatasetSelectionDependencies = defaultDatasetDependencies
@@ -91,6 +99,7 @@ export async function loadEvalDatasetSelection(
       .filter((item) => item.split === "test" || item.split === "holdout")
       .map((item) => item.id),
     requiredModalities: deriveRequiredModalities(dataset, cases),
+    mediaClearance: deriveMediaClearance(cases),
   }
 }
 

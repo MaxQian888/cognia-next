@@ -13,8 +13,11 @@
  * the call via {@link runSkillBuiltinTool}.
  */
 
-import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
-import { loadSkillForSession, loadSkillResourceForSession } from "@/lib/skills/runtime-loader"
+import {
+  loadSkillForSession,
+  loadSkillResourceForSession,
+  type SkillLoadScope,
+} from "@/lib/skills/runtime-loader"
 
 export const SKILL_TOOL_NAME = "Skill"
 export const LOAD_SKILL_TOOL_NAME = "load_skill"
@@ -51,12 +54,9 @@ const SKILL_SCHEMA = {
  * embeds the dispatchable subagent list).
  */
 export function buildSkillManifestEntries(): SkillBuiltinManifestEntry[] {
-  const list = BUILT_IN_SKILL_CATALOG.map((e) => `- ${e.id}: ${e.name}`).join("\n")
   const description =
-    "Load a skill's instructions into the conversation and then follow them. " +
-    "Call this when the task matches a skill. Built-in skills:\n" +
-    `${list}\n` +
-    "You may also pass a custom skill id or name."
+    "Compatibility alias for load_skill. Load a Skill available in this send and follow its " +
+    "instructions. The name must come from the scoped skills catalog; global catalog guessing is rejected."
   return [
     {
       name: SKILL_TOOL_NAME,
@@ -129,9 +129,9 @@ export interface ResolvedSkill {
 }
 
 export interface SkillToolRunDeps {
-  /** Resolve a built-in catalog skill by bundle id (sync, always available). */
+  /** @deprecated Legacy resolver retained for source compatibility; scoped loading ignores it. */
   getCatalogSkill?: (id: string) => ResolvedSkill | undefined
-  /** Resolve a custom (Dexie) skill by id or name. Optional (absent in CLI). */
+  /** @deprecated Legacy resolver retained for source compatibility; scoped loading ignores it. */
   loadCustomSkill?: (idOrName: string) => Promise<ResolvedSkill | undefined>
   listSkillResources?: import("@/lib/skills/runtime-loader").RuntimeLoaderDeps["listResources"]
   recordSkillUsage?: import("@/lib/skills/runtime-loader").RuntimeLoaderDeps["recordUsage"]
@@ -146,8 +146,12 @@ export async function runSkillBuiltinTool(
   name: string,
   args: Record<string, unknown>,
   deps: SkillToolRunDeps,
-  context?: { sessionId: string }
+  context?: SkillLoadScope
 ): Promise<unknown> {
+  const loaderScope: string | SkillLoadScope =
+    context?.turnId !== undefined || context?.attemptId !== undefined
+      ? (context ?? { sessionId: "" })
+      : (context?.sessionId ?? "")
   if (name === LOAD_SKILL_TOOL_NAME) {
     const skillId = String(args.skill_id ?? "").trim()
     if (!skillId) return { ok: false, code: "invalid_args", error: "skill_id is required." }
@@ -157,7 +161,7 @@ export async function runSkillBuiltinTool(
           recordUsage: deps.recordSkillUsage ?? (async () => undefined),
         }
       : undefined
-    return loadSkillForSession(context?.sessionId ?? "", skillId, runtimeDeps)
+    return loadSkillForSession(loaderScope, skillId, runtimeDeps)
   }
   if (name === LOAD_SKILL_RESOURCE_TOOL_NAME) {
     const skillId = String(args.skill_id ?? "").trim()
@@ -172,7 +176,7 @@ export async function runSkillBuiltinTool(
         }
       : undefined
     return loadSkillResourceForSession(
-      context?.sessionId ?? "",
+      loaderScope,
       skillId,
       path,
       typeof args.offset === "number" ? args.offset : 0,
@@ -183,18 +187,17 @@ export async function runSkillBuiltinTool(
   if (name !== SKILL_TOOL_NAME) return `Error: unknown skill tool: ${name}`
   const key = String(args?.name ?? "").trim()
   if (!key) return "Error: the Skill tool requires a `name` (skill id or name)."
-
-  let skill = deps.getCatalogSkill?.(key)
-  if (!skill && deps.loadCustomSkill) {
-    skill = await deps.loadCustomSkill(key)
-  }
-  if (!skill) {
-    return `Error: skill not found: "${key}". Pass one of the listed built-in skill ids, or a custom skill id/name.`
-  }
-
+  const runtimeDeps = deps.listSkillResources
+    ? {
+        listResources: deps.listSkillResources,
+        recordUsage: deps.recordSkillUsage ?? (async () => undefined),
+      }
+    : undefined
+  const loaded = await loadSkillForSession(loaderScope, key, runtimeDeps)
+  if (!loaded.ok) return loaded
   const inputNote =
     typeof args?.input === "string" && args.input.trim().length > 0
       ? `\n\nCaller-provided input:\n${args.input}`
       : ""
-  return `Skill "${skill.name}" loaded. Follow these instructions:\n\n${skill.content}${inputNote}`
+  return { ...loaded, content: loaded.content + inputNote }
 }

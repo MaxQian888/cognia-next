@@ -16,6 +16,7 @@
  */
 
 import { transport } from "@/lib/tauri"
+import { updateOsSandboxAvailability } from "@/lib/sandbox/runtime-availability"
 
 export interface CodeSandboxStatus {
   /** True only when confinement was exercised and observed to hold. */
@@ -39,15 +40,19 @@ let cached: Promise<CodeSandboxStatus> | null = null
 async function probe(): Promise<CodeSandboxStatus> {
   try {
     const raw = await transport.call<RawProbeReport>("sandbox_health_check")
-    return {
+    const status = {
       confined: raw?.confined === true,
       backend: raw?.backend ?? "",
       detail: raw?.detail ?? "",
     }
+    updateOsSandboxAvailability(status)
+    return status
   } catch (error) {
     // Web and mobile hosts have no such command. An IPC failure is not
     // "probably confined" — it is the fail-closed answer.
-    return { ...UNCONFINED, detail: error instanceof Error ? error.message : String(error) }
+    const status = { ...UNCONFINED, detail: error instanceof Error ? error.message : String(error) }
+    updateOsSandboxAvailability(status)
+    return status
   }
 }
 

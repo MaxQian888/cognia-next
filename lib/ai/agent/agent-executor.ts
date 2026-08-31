@@ -570,6 +570,7 @@ async function runToolEnabledStandalone(
           providerCredentials: resolvedAttempt.providerCredentials,
           protocolAdapterSpec: resolvedAttempt.protocolAdapterSpec,
           modelParams: resolvedAttempt.modelParams,
+          providerConcurrencyLimit: resolvedAttempt.concurrentLimit,
           fallbackModel: undefined,
           aliasResolution: sendOptions.aliasResolution
             ? {

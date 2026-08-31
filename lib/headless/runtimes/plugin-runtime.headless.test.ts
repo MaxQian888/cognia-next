@@ -9,6 +9,17 @@ jest.mock("@/lib/tauri", () => ({
   transport: { call: jest.fn(), subscribe: jest.fn() },
 }))
 
+const mockEmitSystemBusEvent = jest.fn()
+jest.mock("@/lib/plugin/messaging/message-bus", () => ({
+  SystemEvents: { APP_CLOSING: "app:closing" },
+  emitSystemBusEvent: (...args: unknown[]) => mockEmitSystemBusEvent(...args),
+}))
+
+const mockDisposeMicrovmAdapters = jest.fn(async () => undefined)
+jest.mock("@/lib/sandbox/microvm-bridge", () => ({
+  disposeMicrovmAdapters: () => mockDisposeMicrovmAdapters(),
+}))
+
 const mockDisposePackWarnings = jest.fn()
 const mockInstallPackWarningRefreshWiring = jest.fn(() => mockDisposePackWarnings)
 jest.mock("@/lib/plugin/character-pack/warning-refresh-wiring", () => ({
@@ -73,6 +84,22 @@ it("starts once, serializes same-account changes, and tears down the adapter", a
   expect(logs).toContainEqual(["warn", "plugin runtime ignored a malformed change event"])
   expect(unsubscribe).toHaveBeenCalledTimes(1)
   expect(adapter.stop).toHaveBeenCalledTimes(1)
+  expect(mockEmitSystemBusEvent).toHaveBeenCalledWith("app:closing", {})
+  expect(mockDisposeMicrovmAdapters).toHaveBeenCalledTimes(1)
+})
+
+it("force-disposes E2B adapters even when the headless plugin host stop fails", async () => {
+  mockSubscribe.mockReturnValue(() => undefined)
+  const adapter = {
+    start: jest.fn(async () => undefined),
+    reconcile: jest.fn(async () => undefined),
+    stop: jest.fn(async () => Promise.reject(new Error("stop failed"))),
+  }
+  const { ctx } = context(adapter)
+  const result = await bootstrapHeadlessRuntimes(ctx)
+
+  await expect(result.stop()).resolves.toBeUndefined()
+  expect(mockDisposeMicrovmAdapters).toHaveBeenCalledTimes(1)
 })
 
 it("reports the runtime as failed when the Node adapter is absent", async () => {

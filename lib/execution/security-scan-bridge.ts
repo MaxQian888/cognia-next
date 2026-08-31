@@ -29,23 +29,17 @@ import {
   runEventJournal,
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
-import type { ExecutionRunStatus } from "@/types/execution/run"
+import {
+  securityScanExecutionRunId,
+  securityScanRunStatus,
+  type SecurityScanRunRecord,
+} from "@cognia/plugin-sdk/api/security-findings"
 
-/** The shape this bridge needs, structurally — it does not import the plugin. */
-export interface SecurityScanRunRecord {
-  runId: string
-  target: string
-  startedAt: number
-  endedAt?: number
-  status: "running" | "done" | "error" | "cancelled"
-  findingsCount: number
-  /** The scan produced a report that could not be parsed. */
-  reportUnreadable?: boolean
-}
-
-export function securityScanExecutionRunId(sourceRunId: string): string {
-  return `execution:security-scan:${sourceRunId}`
-}
+export {
+  securityScanExecutionRunId,
+  securityScanRunStatus,
+  type SecurityScanRunRecord,
+} from "@cognia/plugin-sdk/api/security-findings"
 
 /**
  * A scan whose report could not be read is `failed`, not `completed`.
@@ -55,13 +49,6 @@ export function securityScanExecutionRunId(sourceRunId: string): string {
  * "done" — projecting it as `completed` here would put a green row in the
  * cockpit for a scan that may have found criticals.
  */
-export function securityScanRunStatus(record: SecurityScanRunRecord): ExecutionRunStatus {
-  if (record.status === "running") return "running"
-  if (record.status === "cancelled") return "cancelled"
-  if (record.status === "error" || record.reportUnreadable) return "failed"
-  return "completed"
-}
-
 const TERMINAL_EVENT = {
   completed: "run.completed",
   failed: "run.failed",

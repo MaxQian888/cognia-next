@@ -38,6 +38,13 @@ const mockApplicationWrite = jest.fn(async (...args: unknown[]) => {
 let mockSettings: Record<string, unknown> | null = null
 let mockAccountId: string | null = null
 let mockSavedApplication: Record<string, unknown> | undefined
+const mockRunOptions = {
+  models: ["model-a", "model-b"],
+  characters: [{ id: "character-a", name: "Character A" }],
+  teams: [{ id: "team-a", name: "Team A" }],
+  workflows: [{ id: "workflow-a", name: "Workflow A" }],
+  twins: [],
+}
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -142,6 +149,25 @@ jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (state: { unlockedAccountId: string | null }) => unknown) =>
     selector({ unlockedAccountId: mockAccountId }),
 }))
+jest.mock("@/hooks/eval/use-run-config-options", () => ({
+  useRunConfigOptions: () => mockRunOptions,
+}))
+jest.mock("@/lib/ai/model-options", () => ({
+  collectModelOptions: () => [
+    {
+      providerId: "provider-a",
+      providerName: "Provider A",
+      modelId: "model-a",
+      modelName: "Model A",
+    },
+    {
+      providerId: "provider-b",
+      providerName: "Provider B",
+      modelId: "model-b",
+      modelName: "Model B",
+    },
+  ],
+}))
 jest.mock("./eval-dashboard", () => ({ EvalDashboard: () => <div>LEGACY_DATASETS</div> }))
 jest.mock("./runs-compare-panel", () => ({ RunsComparePanel: () => <div>LEGACY_RUNS</div> }))
 jest.mock("./trace-annotation-panel", () => ({
@@ -234,6 +260,7 @@ describe("EvalLabWorkspace", () => {
     render(<EvalLabWorkspace />)
     const root = screen.getByTestId("eval-lab-workspace")
     expect(root).toHaveClass("overflow-hidden")
+    expect(root).toHaveClass("relative")
     expect(screen.getByTestId("eval-evidence-panel")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "lab.evidence.open" }))
@@ -281,9 +308,81 @@ describe("EvalLabWorkspace", () => {
     expect(budget).toHaveValue(25)
   })
 
+  it("edits and persists every decision-policy field without flattening custom policy data", async () => {
+    const user = userEvent.setup()
+    mockListProjects.mockResolvedValue([])
+    render(<EvalLabWorkspace />)
+    await user.click(screen.getByRole("button", { name: "lab.steps.scoring" }))
+
+    await user.click(screen.getByRole("button", { name: "lab.scoring.addDimension" }))
+    const metric = document.getElementById("eval-dimension-3-metric")
+    const weight = document.getElementById("eval-dimension-3-weight")
+    const direction = document.getElementById("eval-dimension-3-direction")
+    expect(metric).toBeInstanceOf(HTMLInputElement)
+    expect(weight).toBeInstanceOf(HTMLInputElement)
+    expect(direction).toBeInstanceOf(HTMLSelectElement)
+    await user.clear(metric as HTMLInputElement)
+    await user.type(metric as HTMLInputElement, "safety")
+    await user.clear(weight as HTMLInputElement)
+    await user.type(weight as HTMLInputElement, "0.4")
+    await user.selectOptions(direction as HTMLSelectElement, "minimize")
+
+    await user.click(screen.getByRole("button", { name: "lab.scoring.addConstraint" }))
+    expect(screen.getAllByLabelText("lab.scoring.operator")).toHaveLength(2)
+    await user.click(screen.getAllByRole("button", { name: "lab.scoring.removeConstraint" })[1])
+    expect(screen.getAllByLabelText("lab.scoring.operator")).toHaveLength(1)
+
+    for (const [label, value] of [
+      ["lab.scoring.confidence", "0.9"],
+      ["lab.scoring.minimumCases", "12"],
+      ["lab.scoring.retentionDays", "45"],
+    ] as const) {
+      const input = screen.getByLabelText(label)
+      await user.clear(input)
+      await user.type(input, value)
+    }
+
+    const judgeProvider = screen.getByLabelText("lab.scoring.judgeProvider")
+    const judgeModel = screen.getByLabelText("lab.scoring.judgeModel")
+    await user.type(judgeProvider, "provider-a")
+    await user.type(judgeModel, "model-a")
+    await user.clear(judgeProvider)
+    await user.type(judgeProvider, "provider-b")
+    expect(judgeModel).toHaveValue("")
+
+    await user.click(screen.getByRole("button", { name: "lab.steps.goal" }))
+    await user.click(screen.getByRole("button", { name: "lab.project.saveDraft" }))
+    await waitFor(() =>
+      expect(mockSaveProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          retentionDays: 45,
+          decisionPolicy: expect.objectContaining({
+            confidenceLevel: 0.9,
+            minimumEffectiveCases: 12,
+            dimensions: expect.arrayContaining([
+              { metric: "safety", direction: "minimize", weight: 0.4 },
+            ]),
+          }),
+        })
+      )
+    )
+  })
+
+  it("surfaces project action failures outside the run step", async () => {
+    const user = userEvent.setup()
+    mockSaveProject.mockRejectedValueOnce(new Error("storage unavailable"))
+    render(<EvalLabWorkspace />)
+
+    await user.click(screen.getByRole("button", { name: "lab.project.saveDraft" }))
+
+    expect(await screen.findByText("lab.actions.error")).toBeInTheDocument()
+    expect(screen.getByText("storage unavailable")).toBeInTheDocument()
+  })
+
   it("configures Agent target kinds, trusted locality, prices, and explicit capabilities", async () => {
     const user = userEvent.setup()
     render(<EvalLabWorkspace />)
+    await user.click(screen.getByRole("button", { name: "lab.steps.goal" }))
     await user.click(screen.getByRole("button", { name: "lab.mode.agent" }))
     await user.click(screen.getByRole("button", { name: "lab.steps.variants" }))
 
@@ -291,16 +390,68 @@ describe("EvalLabWorkspace", () => {
     await user.selectOptions(kinds[0], "workflow")
     expect(screen.getAllByLabelText("lab.variants.targetIds.workflow")[0]).toBeInTheDocument()
     await user.type(screen.getAllByLabelText("lab.variants.targetIds.workflow")[0], "workflow-1")
+    await user.type(screen.getAllByLabelText("lab.variants.workflowVersion")[0], "version-1")
+    expect(screen.getAllByLabelText("lab.variants.workflowVersion")[0]).toHaveValue("version-1")
+    await user.selectOptions(kinds[0], "team")
+    expect(screen.getAllByLabelText("lab.variants.targetIds.team")[0]).toHaveValue("")
+    expect(screen.queryByLabelText("lab.variants.workflowVersion")).not.toBeInTheDocument()
+    expect(
+      screen.getAllByRole("switch", { name: "lab.variants.capability.image" })[0]
+    ).toBeDisabled()
 
     expect(screen.getAllByText("lab.variants.cloudOrUnverified")[0]).toBeInTheDocument()
     expect(screen.getAllByLabelText("lab.variants.inputPrice")[0]).toBeInTheDocument()
     await user.type(screen.getAllByLabelText("lab.variants.inputPrice")[0], "1.5")
     await user.type(screen.getAllByLabelText("lab.variants.outputPrice")[0], "3")
-    await user.type(screen.getAllByLabelText("lab.variants.deployment")[0], "production-east")
-    await user.type(screen.getAllByLabelText("lab.variants.temperature")[0], "0.2")
-    await user.type(screen.getAllByLabelText("lab.variants.topP")[0], "0.9")
-    await user.type(screen.getAllByLabelText("lab.variants.maxOutputTokens")[0], "512")
-    await user.type(screen.getAllByLabelText("lab.variants.systemPrompt")[0], "Be concise")
+    expect(screen.queryByLabelText("lab.variants.deployment")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("lab.variants.temperature")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("lab.variants.topP")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("lab.variants.maxOutputTokens")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("lab.variants.systemPrompt")).not.toBeInTheDocument()
+  })
+
+  it("manages candidates and offers provider-scoped model and Agent target choices", async () => {
+    const user = userEvent.setup()
+    render(<EvalLabWorkspace />)
+    await user.click(screen.getByRole("button", { name: "lab.steps.variants" }))
+
+    expect(screen.getAllByLabelText("lab.variants.name")).toHaveLength(2)
+    expect(document.querySelector('#variant-a-model-ids option[value="model-a"]')).toHaveAttribute(
+      "label",
+      "Model A"
+    )
+    expect(screen.getAllByLabelText("lab.variants.temperature")).toHaveLength(2)
+    const firstProvider = screen.getAllByLabelText("lab.variants.provider")[0]
+    const firstModel = screen.getAllByLabelText("lab.variants.model")[0]
+    await user.type(firstProvider, "provider-a")
+    await user.type(firstModel, "model-a")
+    await user.clear(firstProvider)
+    await user.type(firstProvider, "provider-b")
+    expect(firstModel).toHaveValue("")
+    expect(document.querySelector('#variant-a-model-ids option[value="model-a"]')).toBeNull()
+    expect(document.querySelector('#variant-a-model-ids option[value="model-b"]')).toHaveAttribute(
+      "label",
+      "Model B"
+    )
+
+    await user.click(screen.getAllByRole("button", { name: "lab.variants.duplicate" })[0])
+    expect(screen.getAllByLabelText("lab.variants.name")).toHaveLength(3)
+    await user.clear(screen.getAllByLabelText("lab.variants.name")[2])
+    await user.type(screen.getAllByLabelText("lab.variants.name")[2], "Candidate C")
+    expect(screen.getByDisplayValue("Candidate C")).toBeInTheDocument()
+
+    await user.click(screen.getAllByRole("button", { name: "lab.variants.remove" })[2])
+    expect(screen.getAllByLabelText("lab.variants.name")).toHaveLength(2)
+    expect(screen.getAllByRole("button", { name: "lab.variants.remove" })[0]).toBeDisabled()
+
+    await user.click(screen.getByRole("button", { name: "lab.steps.goal" }))
+    await user.click(screen.getByRole("button", { name: "lab.mode.agent" }))
+    await user.click(screen.getByRole("button", { name: "lab.steps.variants" }))
+    const target = screen.getAllByLabelText("lab.variants.targetIds.chat")[0]
+    expect(target).toHaveAttribute("list", "variant-a-chat-targets")
+    expect(
+      document.querySelector('#variant-a-chat-targets option[value="character-a"]')
+    ).toHaveAttribute("label", "Character A")
   })
 
   it("navigates with persistent next and back actions", async () => {
@@ -532,10 +683,10 @@ describe("EvalLabWorkspace", () => {
       variants: [],
       decisionPolicy: {
         formal: false,
-        dimensions: [],
-        constraints: [],
-        confidenceLevel: 0.95,
-        minimumEffectiveCases: 30,
+        dimensions: [{ metric: "custom-quality", direction: "maximize" as const, weight: 7 }],
+        constraints: [{ metric: "custom-quality", operator: "gte" as const, value: 0.7 }],
+        confidenceLevel: 0.9,
+        minimumEffectiveCases: 12,
       },
       budget: { currency: "USD", hardCap: 12, confirmed: true },
       judgePolicy: {
@@ -578,7 +729,11 @@ describe("EvalLabWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "lab.project.saveDraft" }))
     expect(mockSaveProject).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "saved-project", name: "Saved selection" })
+      expect.objectContaining({
+        id: "saved-project",
+        name: "Saved selection",
+        decisionPolicy: saved.decisionPolicy,
+      })
     )
 
     const experimentPicker = await screen.findByLabelText("lab.project.experiments")
@@ -588,5 +743,14 @@ describe("EvalLabWorkspace", () => {
       expect(mockLatestApplication).toHaveBeenCalledWith("completed-experiment")
     })
     expect(screen.getByText("lab.review.title")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "lab.steps.goal" }))
+    await user.selectOptions(screen.getByLabelText("lab.project.saved"), "")
+    expect(screen.getByLabelText("lab.project.name")).toHaveValue("")
+    expect(screen.getByRole("button", { name: "lab.mode.model" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.queryByLabelText("lab.project.experiments")).not.toBeInTheDocument()
   })
 })

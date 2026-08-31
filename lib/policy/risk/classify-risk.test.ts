@@ -1,4 +1,5 @@
 import { classifyRisk, type RiskInput } from "./classify-risk"
+import { COMPUTER_USE_PLUGIN_TOOL_NAMES } from "@/lib/claude/computer-use-tools"
 import type { RiskSurfaceId } from "./risk-surfaces"
 
 /** A benign baseline: an analysis run with no tools and no capabilities. */
@@ -76,6 +77,20 @@ describe("classifyRisk", () => {
       expect(classifyRisk(i).tier).toBe("high")
       expect(surfaceIds(i)).toEqual(["computer-use"])
     })
+
+    it.each(COMPUTER_USE_PLUGIN_TOOL_NAMES)(
+      "classifies the live computer-use tool %s as computer-use",
+      (toolId) => {
+        // Regression guard. This set once listed only the pre-app-session
+        // spellings, so every real computer-use call classified as ordinary
+        // and the risk→ceremony escalation never fired for the most invasive
+        // capability in the product. Driving it off the shared constant means
+        // renaming or adding a tool cannot silently drop it out of the tier.
+        const i = input({ toolIds: [toolId] })
+        expect(classifyRisk(i).tier).toBe("high")
+        expect(surfaceIds(i)).toContain("computer-use")
+      }
+    )
 
     it("native-command → high when unsandboxed", () => {
       const i = input({ toolIds: ["bash"] })

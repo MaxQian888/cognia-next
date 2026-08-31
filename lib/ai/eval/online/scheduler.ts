@@ -53,7 +53,8 @@ export async function startOnlineEvalScheduler(
   // cannot reach.
   if (deps.hasPolicies()) await deps.drain(ONLINE_EVAL_DRAIN_BATCH).catch(() => undefined)
 
-  const timer = deps.setIntervalFn(() => {
+  const { setIntervalFn, clearIntervalFn } = deps
+  const timer = setIntervalFn(() => {
     void (async () => {
       try {
         await deps.refreshPolicies()
@@ -65,5 +66,5 @@ export async function startOnlineEvalScheduler(
     })()
   }, ONLINE_EVAL_DRAIN_INTERVAL_MS)
 
-  return () => deps.clearIntervalFn(timer)
+  return () => clearIntervalFn(timer)
 }

@@ -55,6 +55,10 @@ export interface ExecutionLeaseRequest {
   taskId?: string
   /** Workspace (Project) id this leg belongs to — drives per-project cancel. */
   projectId?: string
+  /** Provider used by this attempt, for per-provider admission and monitoring. */
+  providerId?: string
+  /** Optional positive per-provider ceiling. Unset leaves this lane unlimited. */
+  providerLimit?: number
   /**
    * The EXECUTION SLOT this leg mutates — a working tree, a sandbox, a remote
    * runtime. At most one leg holds a given slot at a time.
@@ -106,6 +110,12 @@ export interface ExecutionLegSnapshot {
   runId?: string
   taskId?: string
   projectId?: string
+  providerId?: string
+  providerLimit?: number
+  /** True while the global pool has room but this provider's lane is full. */
+  waitingForProvider?: boolean
+  /** True while this running leg consumes a provider-lane permit. */
+  holdsProvider?: boolean
   /**
    * The execution slot this leg wants. Present on the snapshot so a surface
    * can say WHY a leg is queued — waiting for a permit and waiting for a

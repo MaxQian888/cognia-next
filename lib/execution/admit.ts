@@ -8,41 +8,7 @@
 import { getExecutionBroker } from "./broker"
 import type { ExecutionBroker } from "./broker"
 import type { ExecutionLease, ExecutionLeaseRequest } from "./types"
-
-/**
- * Combine any number of `AbortSignal`s into one. The returned signal aborts as
- * soon as the FIRST input aborts. Call `cleanup()` when done to detach the
- * listeners (so a long-lived caller signal doesn't leak references). Returns
- * `undefined` when no live signal is supplied (nothing to combine).
- */
-export function combineAbortSignals(
-  ...signals: Array<AbortSignal | undefined | null>
-): { signal: AbortSignal; cleanup: () => void } | undefined {
-  const live = signals.filter((s): s is AbortSignal => Boolean(s))
-  if (live.length === 0) return undefined
-  if (live.length === 1) return { signal: live[0], cleanup: () => undefined }
-
-  const controller = new AbortController()
-  const onAbort = () => controller.abort()
-
-  const already = live.find((s) => s.aborted)
-  if (already) {
-    controller.abort()
-    return { signal: controller.signal, cleanup: () => undefined }
-  }
-
-  for (const s of live) s.addEventListener("abort", onAbort, { once: true })
-  const cleanup = () => {
-    for (const s of live) {
-      try {
-        s.removeEventListener("abort", onAbort)
-      } catch {
-        /* DOM-shim differences — swallow */
-      }
-    }
-  }
-  return { signal: controller.signal, cleanup }
-}
+export { combineAbortSignals } from "@cognia/plugin-sdk/api/abort"
 
 /**
  * Acquire a broker lease, run `fn` with it, and release exactly once — `"ok"`
