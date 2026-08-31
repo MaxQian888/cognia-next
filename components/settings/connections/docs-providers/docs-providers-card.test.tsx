@@ -10,10 +10,13 @@ jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn(async () => undefined
 jest.mock("@/lib/db/adapter-instances", () => ({ listAdapterInstancesByType: jest.fn() }))
 jest.mock("@/lib/docs-providers", () => ({
   ...jest.requireActual("@/lib/docs-providers/types"),
-  isDocsProviderHostSupported: jest.fn(() => true),
-  larkDocsProvider: { id: "lark", mentionPrefix: "lark:" },
-  googleDocsProvider: { id: "google", mentionPrefix: "gdoc:" },
+  larkDocsProvider: { id: "lark", mentionPrefix: "lark:", hosts: ["tauri"] },
+  googleDocsProvider: { id: "google", mentionPrefix: "gdoc:", hosts: ["tauri"] },
 }))
+// The card asks `docsProviderReach`, which asks the host profile. Driving the
+// profile (rather than a `hostSupported` boolean) is what lets these tests
+// tell a standalone browser apart from a paired companion.
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: jest.fn(() => "desktop") }))
 jest.mock("@/lib/docs-providers/providers/google/config", () => ({
   GOOGLE_DOCS_SCOPES: ["https://www.googleapis.com/auth/drive.readonly"],
   getGoogleDocsSettings: jest.fn(async () => ({})),
@@ -32,7 +35,8 @@ jest.mock("@/lib/docs-providers/providers/google/auth", () => ({
 import { toast } from "sonner"
 import { openUrl } from "@/lib/native/opener"
 import { listAdapterInstancesByType } from "@/lib/db/adapter-instances"
-import { DocsProviderError, isDocsProviderHostSupported } from "@/lib/docs-providers"
+import { DocsProviderError } from "@/lib/docs-providers"
+import { useHostProfile } from "@/hooks/use-host-profile"
 import {
   getGoogleDocsSettings,
   saveGoogleClientSecret,
@@ -44,7 +48,7 @@ import {
 } from "@/lib/docs-providers/providers/google/auth"
 import { DocsProvidersCard } from "./docs-providers-card"
 
-const hostSupportedMock = isDocsProviderHostSupported as jest.Mock
+const hostProfileMock = useHostProfile as jest.Mock
 const listAdaptersMock = listAdapterInstancesByType as jest.Mock
 const getSettingsMock = getGoogleDocsSettings as jest.Mock
 const beginAuthMock = beginGoogleDocsAuth as jest.Mock
@@ -60,18 +64,44 @@ function renderCard() {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  hostSupportedMock.mockReturnValue(true)
+  hostProfileMock.mockReturnValue("desktop")
   listAdaptersMock.mockResolvedValue([])
   getSettingsMock.mockResolvedValue({})
 })
 
 describe("DocsProvidersCard — host gating", () => {
-  it("explains why the feature is missing off the desktop shell", () => {
-    hostSupportedMock.mockReturnValue(false)
+  it("keeps both rows and names the reason off the desktop shell", () => {
+    hostProfileMock.mockReturnValue("mobile-companion")
     renderCard()
-    expect(screen.getByTestId("docs-providers-desktop-only")).toBeInTheDocument()
-    expect(screen.queryByTestId("docs-provider-google")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("docs-provider-lark")).not.toBeInTheDocument()
+    // Rendered, not removed: hiding them told a paired phone nothing about
+    // the desktop next to it that already holds both accounts.
+    expect(screen.getByTestId("docs-provider-lark")).toBeInTheDocument()
+    expect(screen.getByTestId("docs-provider-google")).toBeInTheDocument()
+    expect(screen.getByTestId("docs-provider-google-notice")).toHaveAttribute(
+      "data-cause",
+      "runs-on-host"
+    )
+  })
+
+  it("tells a standalone browser something different from a companion", () => {
+    hostProfileMock.mockReturnValue("web-standalone")
+    renderCard()
+    expect(screen.getByTestId("docs-provider-lark-notice")).toHaveAttribute(
+      "data-cause",
+      "no-runtime"
+    )
+  })
+
+  it("makes the Google controls inert rather than absent when blocked", () => {
+    hostProfileMock.mockReturnValue("web-standalone")
+    renderCard()
+    expect(screen.getByTestId("docs-provider-google-connect")).toBeDisabled()
+  })
+
+  it("renders no notice on the desktop shell", () => {
+    renderCard()
+    expect(screen.queryByTestId("docs-provider-google-notice")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("docs-provider-lark-notice")).not.toBeInTheDocument()
   })
 })
 
