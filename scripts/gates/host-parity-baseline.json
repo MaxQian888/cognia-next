@@ -56,7 +56,6 @@
     "A:lib/plugin/api/tray-api.ts",
     "A:lib/plugin/core/context.ts",
     "A:lib/plugin/core/manager.ts",
-    "A:lib/plugin/devtools/dev-server.ts",
     "A:lib/plugin/devtools/hot-reload.ts",
     "A:lib/plugin/launcher/launchPluginJs.ts",
     "A:lib/plugin/lifecycle/backup.ts",

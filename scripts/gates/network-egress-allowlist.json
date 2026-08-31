@@ -121,12 +121,6 @@
       "note": "Loads a plugin module from a convertFileSrc asset URL or a local path, never a remote origin."
     },
     {
-      "file": "lib/plugin/devtools/dev-server.ts",
-      "kind": "websocket",
-      "reason": "loopback",
-      "note": "Connects to the plugin dev server on localhost during plugin authoring."
-    },
-    {
       "file": "lib/signaling/client.ts",
       "kind": "websocket",
       "reason": "companion-pinned",
