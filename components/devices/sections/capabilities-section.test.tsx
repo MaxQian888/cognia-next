@@ -189,6 +189,27 @@ describe("CapabilitiesSection", () => {
  * of claim, and the cell said only which one it was, never who said it.
  */
 describe("CapabilitiesSection — where each answer came from", () => {
+  /**
+   * On this machine every answer is a local probe, so a per-cell token would be
+   * the same word twenty-one times. The header carries it once instead.
+   */
+  it("states a uniform source once on the group rather than on every cell", () => {
+    const { container } = render(
+      <CapabilitiesSection
+        row={row({
+          capabilities: [
+            cell({ id: "camera", state: "reported", source: "device-report" }),
+            cell({ id: "shell", state: "absent", source: "device-report" }),
+          ],
+        })}
+      />
+    )
+    expect(screen.getByTestId("capability-group-source-platform")).toHaveTextContent(
+      "device said so"
+    )
+    expect(container.querySelectorAll('[data-testid^="capability-source-"]')).toHaveLength(0)
+  })
+
   it("names the source beside every cell", () => {
     const { container } = render(
       <CapabilitiesSection

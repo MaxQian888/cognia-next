@@ -139,7 +139,8 @@
       "local": "This machine's capabilities are probed locally rather than reported.",
       "paired-device": "This device has not reported, and its platform is unknown, so there is no baseline to infer from.",
       "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
-      "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab."
+      "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab.",
+      "ssh-host": "An SSH server never reports anything and holds no capability set of ours. Nothing here is absent, it was simply never asked."
     },
     "title": "Capabilities",
     "source": {
@@ -160,7 +161,6 @@
     "unknownHostTitle": "Saved profile not found",
     "unknownHostBody": "Nothing in Settings → Terminal matches {ref}. The profile was renamed or removed after this row was listed; reopen Settings to add it back.",
     "facts": {
-      "address": "Address",
       "auth": "Authentication",
       "route": "Route",
       "forwards": "Port forwarding",
@@ -235,7 +235,8 @@
       "local": "This machine does not grant itself access.",
       "remote-host": "A remote host decides what this client may do; grants are administered on the host, not here.",
       "worker": "A worker's capabilities come from its enrollment. Revoke it from Settings → Fleet to withdraw them.",
-      "paired-device": "No grants to manage."
+      "paired-device": "No grants to manage.",
+      "ssh-host": "An SSH host is reached with a key or a password, not with a grant. Access is decided by the server's own configuration."
     },
     "title": "Access",
     "heldCount": "{held}/{total} granted",

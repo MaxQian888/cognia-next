@@ -154,3 +154,46 @@ describe("devices grant-state catalogue", () => {
     }
   })
 })
+
+/**
+ * Every device kind must have the two per-kind explanations, in both locales.
+ *
+ * `capabilities-section.tsx` renders `t(\`capabilities.noVocabulary.${row.kind}\`)`
+ * and `access-section.tsx` renders `t(\`access.notApplicable.${row.kind}\`)`.
+ * Both are dynamic, so `pnpm lint:i18n` cannot see them, and both were missing
+ * for `ssh-host` from the day that kind was added: an SSH row rendered
+ * `MISSING_MESSAGE` in two sections and every gate stayed green. Found by
+ * looking at the story, which is not a guarantee, so it is a test now.
+ *
+ * The kinds are read from the type's own declaration rather than a copy here,
+ * so a sixth kind fails on the day it is written.
+ */
+describe("devices per-kind explanations", () => {
+  function declaredKinds(): string[] {
+    const source = readFileSync(join(process.cwd(), "lib", "devices", "types.ts"), "utf8")
+    const declaration = /export type DeviceKind =([^\n]+)/.exec(source)?.[1] ?? ""
+    const kinds = declaration
+      .split("|")
+      .map((part) => part.trim().replaceAll('"', ""))
+      .filter(Boolean)
+    // A sweep that scanned nothing also passes an emptiness assertion.
+    expect(kinds.length).toBeGreaterThan(0)
+    return kinds
+  }
+
+  it.each(Object.keys(catalogues))("%s explains an empty capability matrix per kind", (locale) => {
+    const vocabulary = (
+      catalogues[locale]! as unknown as {
+        capabilities: { noVocabulary: Record<string, unknown> }
+      }
+    ).capabilities.noVocabulary
+    expect(declaredKinds().filter((kind) => typeof vocabulary[kind] !== "string")).toEqual([])
+  })
+
+  it.each(Object.keys(catalogues))("%s explains an absent grant list per kind", (locale) => {
+    const notApplicable = (
+      catalogues[locale]! as unknown as { access: { notApplicable: Record<string, unknown> } }
+    ).access.notApplicable
+    expect(declaredKinds().filter((kind) => typeof notApplicable[kind] !== "string")).toEqual([])
+  })
+})

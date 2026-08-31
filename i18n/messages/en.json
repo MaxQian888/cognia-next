@@ -8795,6 +8795,7 @@
         "local": "This machine does not grant itself access.",
         "paired-device": "No grants to manage.",
         "remote-host": "A remote host decides what this client may do; grants are administered on the host, not here.",
+        "ssh-host": "An SSH host is reached with a key or a password, not with a grant. Access is decided by the server's own configuration.",
         "worker": "A worker's capabilities come from its enrollment. Revoke it from Settings → Fleet to withdraw them."
       },
       "notApplicableTitle": "No grants to manage",
@@ -8879,6 +8880,7 @@
         "local": "This machine's capabilities are probed locally rather than reported.",
         "paired-device": "This device has not reported, and its platform is unknown, so there is no baseline to infer from.",
         "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
+        "ssh-host": "An SSH server never reports anything and holds no capability set of ours. Nothing here is absent, it was simply never asked.",
         "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab."
       },
       "noVocabularyTitle": "No capability vocabulary for this device",
@@ -9125,7 +9127,6 @@
       "credentialRequiredTitle": "Password not saved",
       "edit": "Edit in Settings",
       "facts": {
-        "address": "Address",
         "auth": "Authentication",
         "forwards": "Port forwarding",
         "hostKey": "Host key",

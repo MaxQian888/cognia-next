@@ -224,11 +224,14 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         </Alert>
       ) : null}
 
+      {/*
+        No address row below. The Overview card beside this one already renders
+        `row.baseUrl`, which is the same `user@host:port` in URL form, and the
+        route ends on the target anyway. Two cards holding one fact is how they
+        end up disagreeing.
+      */}
       {profile ? (
         <DeviceFactList>
-          <DeviceFactRow label={t("facts.address")} mono>
-            {`${profile.username}@${profile.host}:${profile.port}`}
-          </DeviceFactRow>
           <DeviceFactRow label={t("facts.auth")}>
             <SshAuthFact profile={profile} />
           </DeviceFactRow>

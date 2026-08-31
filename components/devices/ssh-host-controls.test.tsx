@@ -234,12 +234,21 @@ it("renders nothing for a row that is not an SSH host", () => {
  * in `SshHostProfile`, and none of them reached the screen. A directory that
  * lists a machine and can say nothing about it is a link, not a console.
  */
-it("states the address, the auth method and whether the secret is present", () => {
+it("states the auth method and whether the secret it needs is present", () => {
   sshHosts = [{ ...PROFILE, authMethod: "password", credentialRef: "s1" }]
   render(<SshHostControls row={row()} connect={jest.fn()} />)
-  expect(screen.getByText("deploy@10.0.4.21:22")).toBeInTheDocument()
   expect(screen.getByText("devices.ssh.auth.password")).toBeInTheDocument()
   expect(screen.getByText("devices.ssh.auth.passwordSaved")).toBeInTheDocument()
+})
+
+/**
+ * The Overview card beside this one already renders `row.baseUrl`, which is
+ * the same `user@host:port` in URL form. Two cards holding one fact is how
+ * they end up disagreeing.
+ */
+it("does not repeat the address the Overview card already carries", () => {
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.queryByText("deploy@10.0.4.21:22")).not.toBeInTheDocument()
 })
 
 it("separates a stored password from a missing one, because only one of them connects", () => {

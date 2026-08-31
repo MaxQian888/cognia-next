@@ -59,11 +59,33 @@ function CapabilityGroup({
   const t = useTranslations("devices")
   const sorted = useMemo(() => sortCapabilityCells(cells), [cells])
   const totals = useMemo(() => summarizeCapabilityCells(cells), [cells])
+  /**
+   * The one source every cell in this group shares, or `null` when they differ.
+   *
+   * On this machine every answer is a local probe, so a per-cell token would be
+   * the same word twenty-one times: noise that buries the states beside it.
+   * Where the sources actually differ, which is the case the field exists for,
+   * a paired device mixing `device-report` with `platform-baseline`, the token
+   * stays on the cell and this header says nothing.
+   */
+  const uniformSource = useMemo(() => {
+    const first = sorted[0]?.source ?? null
+    if (!first) return null
+    return sorted.every((cell) => cell.source === first) ? first : null
+  }, [sorted])
 
   return (
     <section data-testid={`capability-group-${group}`}>
       <h3 className="mb-1 flex items-baseline justify-between gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <span>{t(`capabilities.group.${group}`)}</span>
+        {uniformSource ? (
+          <span
+            className="text-[11px] font-normal normal-case"
+            data-testid={`capability-group-source-${group}`}
+          >
+            {t(`capabilities.source.${uniformSource}`)}
+          </span>
+        ) : null}
         {showCount ? (
           <span className="text-[11px] font-normal normal-case tabular-nums">
             {t("capabilities.reportedCount", {
@@ -108,12 +130,14 @@ function CapabilityGroup({
               only which one it was, never who said it. `source` was computed
               for every cell from the start and rendered nowhere.
             */}
-            <span
-              className="hidden shrink-0 text-[11px] text-muted-foreground @2xl/device-card:inline"
-              data-testid={`capability-source-${cell.id}`}
-            >
-              {t(`capabilities.source.${cell.source}`)}
-            </span>
+            {uniformSource ? null : (
+              <span
+                className="hidden shrink-0 text-[11px] text-muted-foreground @2xl/device-card:inline"
+                data-testid={`capability-source-${cell.id}`}
+              >
+                {t(`capabilities.source.${cell.source}`)}
+              </span>
+            )}
             <span className={cn("shrink-0 text-[11px]", capabilityToneClass(cell.state))}>
               {t(`capabilityState.${cell.state}`)}
             </span>

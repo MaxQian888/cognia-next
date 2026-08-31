@@ -8795,6 +8795,7 @@
         "local": "本机不会给自己授权。",
         "paired-device": "没有可管理的授权。",
         "remote-host": "远程主机自行决定本客户端可做什么；授权在主机侧管理，不在这里。",
+        "ssh-host": "SSH 主机用密钥或密码连接，而不是通过授权。访问权限由服务器自己的配置决定。",
         "worker": "Worker 的能力来自它的登记。若要撤销，请到「设置 → 机队」吊销它。"
       },
       "notApplicableTitle": "没有可管理的授权",
@@ -8879,6 +8880,7 @@
         "local": "本机能力由本地探测得出，不经上报。",
         "paired-device": "该设备未上报过，且平台未知，没有可推断的基线。",
         "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
+        "ssh-host": "SSH 服务器不会上报任何东西，也不持有我们这套能力集。这里没有「缺失」，只是从未被询问过。",
         "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。"
       },
       "noVocabularyTitle": "该设备没有可展示的能力词表",
@@ -9125,7 +9127,6 @@
       "credentialRequiredTitle": "未保存密码",
       "edit": "在设置中编辑",
       "facts": {
-        "address": "地址",
         "auth": "认证方式",
         "forwards": "端口转发",
         "hostKey": "主机密钥",

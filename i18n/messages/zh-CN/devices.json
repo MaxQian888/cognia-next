@@ -139,7 +139,8 @@
       "local": "本机能力由本地探测得出，不经上报。",
       "paired-device": "该设备未上报过，且平台未知，没有可推断的基线。",
       "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
-      "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。"
+      "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。",
+      "ssh-host": "SSH 服务器不会上报任何东西，也不持有我们这套能力集。这里没有「缺失」，只是从未被询问过。"
     },
     "title": "能力",
     "source": {
@@ -160,7 +161,6 @@
     "unknownHostTitle": "未找到已保存的配置",
     "unknownHostBody": "设置 → 终端中没有与 {ref} 匹配的配置。它可能在该行列出后被重命名或删除；请打开设置重新添加。",
     "facts": {
-      "address": "地址",
       "auth": "认证方式",
       "route": "连接路径",
       "forwards": "端口转发",
@@ -235,7 +235,8 @@
       "local": "本机不会给自己授权。",
       "remote-host": "远程主机自行决定本客户端可做什么；授权在主机侧管理，不在这里。",
       "worker": "Worker 的能力来自它的登记。若要撤销，请到「设置 → 机队」吊销它。",
-      "paired-device": "没有可管理的授权。"
+      "paired-device": "没有可管理的授权。",
+      "ssh-host": "SSH 主机用密钥或密码连接，而不是通过授权。访问权限由服务器自己的配置决定。"
     },
     "title": "访问授权",
     "heldCount": "已授权 {held}/{total}",
