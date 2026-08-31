@@ -9094,7 +9094,9 @@
       "localOnlyBody": "SSH 使用这台电脑自己的身份连接，因此配对的手机或浏览器无法打开。这里仍然列出它，是为了让机器清单完整。",
       "localOnlyTitle": "仅限本机",
       "shellOnly": "只有 shell。Agent、工作区与沙箱都不会经由 SSH 运行。",
-      "title": "SSH"
+      "title": "SSH",
+      "unknownHostBody": "设置 → 终端中没有与 {ref} 匹配的配置。它可能在该行列出后被重命名或删除；请打开设置重新添加。",
+      "unknownHostTitle": "未找到已保存的配置"
     },
     "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
     "standalonePair": "与主机配对",
@@ -9106,7 +9108,34 @@
       "shellTiers": "可用 Shell 档位"
     },
     "summary": "{total} 台中 {online} 台在线",
-    "title": "设备"
+    "title": "设备",
+    "wan": {
+      "description": "本机是否为该设备常驻一条中继连接，使其在任意网络下都能连上。",
+      "lastActivity": "最近活动",
+      "liveHint": "这里说明的是是否常驻连接，而不是设备此刻是否在响应。各连接的实时状态请见“中继设置”。",
+      "reason": {
+        "automatic": "该设备近期有活动，因此本机为它常驻一条中继连接，可从任意网络访问。",
+        "blocked": "该设备已暂停或已吊销，主机会拒绝它的请求，中继连接也无法处理任何调用。请先在“访问权限”中恢复它。",
+        "disabled": "设置中已为所有设备关闭中继连接，因此不会常驻任何连接，在此连接也不会生效。",
+        "dormant": "该设备已超过 30 天没有上线，因此本机不再为它常驻中继连接。每条连接都占用一个长期套接字且无法复用。配对信息、密钥与权限均未改动：可在下方立即连接，或等设备下次上线时自动恢复。",
+        "unmanaged": "只有桌面端会常驻中继连接。当前壳层无法得知本机是否为该设备保持了连接，也无法发起连接。",
+        "unprovisioned": "该设备配对时尚不支持中继连接，没有可加入的房间。重新配对即可获得。",
+        "woken": "正按你的要求为该设备常驻一条中继连接。它会保持到设备重新上线或应用重启，之后恢复默认规则。"
+      },
+      "settings": "中继设置",
+      "sleep": "取消常驻",
+      "state": {
+        "automatic": "已常驻",
+        "blocked": "已阻止",
+        "disabled": "已关闭",
+        "dormant": "未常驻",
+        "unmanaged": "本端不管理",
+        "unprovisioned": "不支持",
+        "woken": "按需常驻"
+      },
+      "title": "广域网连接",
+      "wake": "立即连接"
+    }
   },
   "diagnostics": {
     "action": {
@@ -16375,6 +16404,18 @@
         "turnTestButton": "测试供应商",
         "turnTestFailed": "TURN 供应商测试失败（{reason}）。",
         "turnTestSuccess": "TURN 供应商正常——{count} 个 ICE 服务器，有效期至 {expiresAt}。"
+      },
+      "workspaceRoots": {
+        "description": "该主机允许已连接客户端打开的目录，其余一律拒绝。",
+        "empty": "该主机没有报告任何目录，它运行的多半是加入此功能之前的版本。",
+        "hintDesktop": "在那台机器上，通过给工作区挂载文件夹来修改。",
+        "hintHeadless": "在启动服务器的地方修改：COGNIA_WORKSPACES_DIR，或 pnpm dev:headless --workspaces-dir PATH。主机只在启动时读取一次，改完需要重启。",
+        "loadError": "无法从该主机读取允许的目录。",
+        "loading": "正在读取允许的目录…",
+        "refresh": "重新读取允许的目录",
+        "sourceDesktop": "由当前项目注册",
+        "sourceHeadless": "服务器启动时固定",
+        "title": "该主机允许的目录"
       }
     },
     "composerPlus": {
@@ -21466,20 +21507,20 @@
         "warningsHeading": "警告"
       },
       "watch": {
-        "title": "监听插件目录",
         "description": "插件文件在磁盘上变化时就地重载，不必开着 CLI。",
-        "toggleLabel": "监听文件变化",
-        "watching": "正在监听 {count, plural, =0 {0 个插件} other {# 个插件}}",
-        "idle": "未监听",
         "desktopOnly": "监听插件目录需要 Cognia 桌面端。",
         "empty": "没有可监听的插件。从本地目录安装一个，或运行 `cognia plugin dev`。",
-        "skippedHeading": "未监听",
+        "idle": "未监听",
         "reason": {
+          "desktop-required": "只有桌面端能监听文件系统。",
           "needs-build": "需要先构建。应用内没有编译器，改源码不会产生新产物。请用 `cognia plugin dev`，它会先构建安装再请求重载。",
-          "not-local-source": "从安装包装的，磁盘上没有可监听的源码目录。",
-          "desktop-required": "只有桌面端能监听文件系统。"
+          "not-local-source": "从安装包装的，磁盘上没有可监听的源码目录。"
         },
-        "startFailed": "无法开始监听：{message}"
+        "skippedHeading": "未监听",
+        "startFailed": "无法开始监听：{message}",
+        "title": "监听插件目录",
+        "toggleLabel": "监听文件变化",
+        "watching": "正在监听 {count, plural, =0 {0 个插件} other {# 个插件}}"
       }
     },
     "devtoolsDisabled": {
@@ -47037,10 +47078,15 @@
         "loadRefused": "主机拒绝了这个路径，它只允许浏览自己的工作区根目录之内。",
         "loading": "正在加载文件夹…",
         "openFolder": "打开 {name}",
+        "openRootAction": "浏览 {path}",
         "pathLabel": "服务器路径",
         "pathPlaceholder": "/服务器上的路径",
+        "rootDesktop": "由当前项目注册",
+        "rootHeadless": "服务器启动时固定（COGNIA_WORKSPACES_DIR）",
+        "rootsLabel": "该主机允许的目录",
         "title": "选择服务器文件夹",
-        "up": "前往上一级文件夹"
+        "up": "前往上一级文件夹",
+        "upConfined": "该主机只允许浏览上面列出的目录。"
       },
       "removeDir": "移除目录",
       "removeRoot": "移除文件夹",
