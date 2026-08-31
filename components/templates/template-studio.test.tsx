@@ -303,4 +303,19 @@ describe("TemplateStudio", () => {
       expect(screen.queryByTestId("template-draft-editor")).not.toBeInTheDocument()
     })
   })
+
+  it("offers every domain in the filter, not only the six with adapters", async () => {
+    // The six catalog-only domains render a domain badge and carry i18n
+    // labels, but were absent from the filter, so half the catalog could be
+    // seen on a card and never filtered to.
+    mockPlatform = "tauri"
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+    const trigger = screen.getByLabelText("filters.domain")
+    fireEvent.click(trigger)
+    for (const domain of ["a2ui", "goal", "scheduler", "prompt", "subscription", "document"]) {
+      expect(screen.getByText(`domains.${domain}`)).toBeInTheDocument()
+    }
+  })
 })

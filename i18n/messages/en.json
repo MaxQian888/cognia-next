@@ -39720,6 +39720,7 @@
     "inspector": {
       "empty": "Select a template to inspect its definition and available actions.",
       "hash": "Content hash: {hash}",
+      "nodeGroup": "Node group — insert it from the workflow editor",
       "payload": "Portable payload",
       "readOnly": "Catalog only",
       "required": "(required)",

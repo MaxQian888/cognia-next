@@ -29,7 +29,12 @@ import type {
   TemplateTrust,
   TemplateVersionBump,
 } from "@/lib/templates/contracts"
-import { isTemplateInputId, listTemplateTokens } from "@/lib/templates/contracts"
+import {
+  TEMPLATE_CATALOG_ONLY_DOMAINS,
+  TEMPLATE_FULL_DOMAINS,
+  isTemplateInputId,
+  listTemplateTokens,
+} from "@/lib/templates/contracts"
 import type { InspectedTemplatePackage } from "@/lib/templates/package"
 import type { TemplatePreflightPlan, TemplateUpdatePlan } from "@/lib/templates/service"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
@@ -59,26 +64,44 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { isWorkflowNodeGroupDefinition } from "@/lib/workflow/node-groups/materialize"
+
 import { TemplateBindingField } from "./template-binding-field"
 import { PublishConfirmDialog, type PublishSuggestion } from "./publish-confirm-dialog"
 import { InstantiateConfirmDialog } from "./instantiate-confirm-dialog"
 import { TemplateInstanceCard } from "./template-instance-card"
 import { TemplateUpdateDialog } from "./template-update-dialog"
 
-const FULL_DOMAINS: TemplateDomain[] = [
-  "agentTeam",
-  "workflow",
-  "subagent",
-  "customMode",
-  "character",
-  "skill",
+/** Domains with a real adapter: these can be authored, published, instantiated. */
+const FULL_DOMAINS: TemplateDomain[] = [...TEMPLATE_FULL_DOMAINS]
+
+/**
+ * Every domain the filter offers.
+ *
+ * The six catalog-only domains are searchable projections with no adapter, so
+ * they are read-only here, but they render a domain badge and carry i18n
+ * labels. Leaving them out of the filter meant half the catalog could be seen
+ * on a card and never filtered to.
+ */
+const FILTERABLE_DOMAINS: TemplateDomain[] = [
+  ...TEMPLATE_FULL_DOMAINS,
+  ...TEMPLATE_CATALOG_ONLY_DOMAINS,
 ]
 
+/**
+ * Where a domain's real editor lives.
+ *
+ * Two of these used to carry `?mode=template-authoring`, a parameter nothing
+ * in the repository reads, and `customMode` pointed at `?section=agent`, which
+ * is not a `SettingsSectionId` (the catalog has `agents`, `agent-modes` and
+ * `agent-runtime`) so the shell silently fell back to AI connections. A link
+ * that lands somewhere unrelated is worse than one that lands on the list.
+ */
 const EDITOR_ROUTES: Record<string, string> = {
-  agentTeam: "/settings?section=squads&squadTab=templates",
-  workflow: "/workflows?mode=template-authoring",
+  agentTeam: "/settings?section=squads",
+  workflow: "/workflows",
   subagent: "/me/subagents",
-  customMode: "/settings?section=agent",
+  customMode: "/settings?section=agent-modes",
   character: "/discover?category=characters",
   skill: "/skills",
 }
@@ -123,8 +146,14 @@ function downloadPackage(bytes: Uint8Array, filename: string): void {
   const anchor = document.createElement("a")
   anchor.href = url
   anchor.download = filename
+  // In the document, and revoked on the next task rather than synchronously:
+  // some browsers ignore a click on a detached anchor, and revoking before the
+  // download has been handed off cancels it.
+  anchor.style.display = "none"
+  document.body.appendChild(anchor)
   anchor.click()
-  URL.revokeObjectURL(url)
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 /**
@@ -286,6 +315,12 @@ export function TemplateStudio() {
     if (!selected?.version) return
     await runtime.service.deprecate(selected.id, selected.version, status)
     setMessage(t(`messages.${status}`))
+  }
+
+  const selectDefinition = (contentHash: string) => {
+    setSelectionKey(`hash:${contentHash}`)
+    setBindings({})
+    setPlan(undefined)
   }
 
   const createDraft = async () => {
@@ -521,7 +556,7 @@ export function TemplateStudio() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{t("filters.allDomains")}</SelectItem>
-                    {FULL_DOMAINS.map((item) => (
+                    {FILTERABLE_DOMAINS.map((item) => (
                       <SelectItem key={item} value={item}>
                         {t(`domains.${item}`)}
                       </SelectItem>
@@ -551,18 +586,18 @@ export function TemplateStudio() {
                       key={`${definition.id}@${definition.version ?? definition.revision}`}
                       role="button"
                       tabIndex={0}
+                      // Selection was conveyed by a border alone, and Space did
+                      // nothing: a `role="button"` that only answers Enter is
+                      // half a button to anyone not using a mouse.
+                      aria-pressed={selected?.contentHash === definition.contentHash}
                       className={
                         selected?.contentHash === definition.contentHash ? "border-primary" : ""
                       }
-                      onClick={() => {
-                        setSelectionKey(`hash:${definition.contentHash}`)
-                        setBindings({})
-                        setPlan(undefined)
-                      }}
+                      onClick={() => selectDefinition(definition.contentHash)}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          setSelectionKey(`hash:${definition.contentHash}`)
-                        }
+                        if (event.key !== "Enter" && event.key !== " ") return
+                        event.preventDefault()
+                        selectDefinition(definition.contentHash)
                       }}
                     >
                       <CardHeader className="pb-2">
@@ -801,12 +836,23 @@ function TemplateInspector({
     )
   }
   const catalogOnly = !FULL_DOMAINS.includes(definition.domain)
+  /**
+   * A node group is `domain: "workflow"` but its payload is a subgraph, not a
+   * workflow: no `name`, no `nodes` at the top level the workflow adapter
+   * expects. Instantiating one routed that payload into `createWorkflow`, which
+   * reads `draft.name.trim()` and threw on `undefined`. Its inputs are also
+   * auto-derived graph ports (`input:nodeA:default`), all `required`, so
+   * preflight blocked until the user typed values for them. It belongs in the
+   * workflow editor's own templates tab, and here it reads only.
+   */
+  const nodeGroup = isWorkflowNodeGroupDefinition(definition)
+  const readOnly = catalogOnly || nodeGroup
   // A published release is immutable by construction (`DexieTemplateRepository`
   // refuses to overwrite one), and a catalog-only row is a projection of a
   // store this platform does not own. That leaves drafts — including the
   // conflict drafts a clashing save produces, which are otherwise unreachable.
   const editable =
-    !mobile && !catalogOnly && (definition.status === "draft" || definition.status === "conflict")
+    !mobile && !readOnly && (definition.status === "draft" || definition.status === "conflict")
   return (
     <Card className="h-fit">
       <CardHeader>
@@ -847,8 +893,10 @@ function TemplateInspector({
           </Alert>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          {catalogOnly ? (
-            <Badge variant="outline">{t("inspector.readOnly")}</Badge>
+          {readOnly ? (
+            <Badge variant="outline" data-testid="template-read-only">
+              {nodeGroup ? t("inspector.nodeGroup") : t("inspector.readOnly")}
+            </Badge>
           ) : (
             <Button variant="outline" onClick={onPreflight}>
               {t("actions.preflight")}
@@ -872,7 +920,7 @@ function TemplateInspector({
               so the only way to base a template on an existing one was to
               create a blank draft and retype it, and a published release could
               never be withdrawn. */}
-          {!mobile && !catalogOnly ? (
+          {!mobile && !readOnly ? (
             <Button variant="outline" onClick={onFork} data-testid="template-fork">
               <GitForkIcon className="size-4" />
               {t("actions.fork")}

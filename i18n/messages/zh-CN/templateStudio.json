@@ -117,6 +117,7 @@
   "inspector": {
     "empty": "请选择一个模板，以检查其定义和可用操作。",
     "hash": "内容哈希：{hash}",
+    "nodeGroup": "节点组，请在工作流编辑器里插入",
     "payload": "便携载荷",
     "readOnly": "仅目录",
     "required": "（必填）",
