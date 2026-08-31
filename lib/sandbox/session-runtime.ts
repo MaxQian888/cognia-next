@@ -1,6 +1,12 @@
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+import {
+  HOST_FALLBACK_RUNTIME_REF,
+  SandboxRuntimeError,
+  type SandboxRuntimeRef,
+} from "@cognia/plugin-sdk/api/sandbox"
 
 import type { CallContext } from "@/lib/automation/client"
+import type { AutomationAuditLogRow } from "@/lib/automation/audit"
 import { getSandboxConnection } from "@/lib/db/sandbox-connections"
 import { transport } from "@/lib/tauri"
 import type { SandboxConnectionRow, SandboxSessionBinding } from "@/types/sandbox"
@@ -15,32 +21,14 @@ import {
 } from "./microvm-bridge"
 import { clampPolicyRequest, isPathUnderRoot } from "./policy-bridge"
 
-export type SandboxRuntimeRef = string
 export type SandboxConfine = NonNullable<CallContext["sandboxConfine"]>
 
-export type SandboxRuntimeErrorCode =
-  | "invalid-binding"
-  | "target-not-found"
-  | "surface-disabled"
-  | "runtime-released"
-  | "microvm-unavailable"
-  /**
-   * The session asked for a placement that could not be established, and the
-   * surface refuses rather than running on this machine. Distinct from
-   * `surface-disabled` (the user turned the surface off) because the user
-   * turned this one ON and is owed an error, not a silent host downgrade.
-   */
-  | "placement-unavailable"
-
-export class SandboxRuntimeError extends Error {
-  readonly code: SandboxRuntimeErrorCode
-
-  constructor(code: SandboxRuntimeErrorCode, message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = "SandboxRuntimeError"
-    this.code = code
-  }
-}
+export {
+  HOST_FALLBACK_RUNTIME_REF,
+  SandboxRuntimeError,
+  type SandboxRuntimeErrorCode,
+  type SandboxRuntimeRef,
+} from "@cognia/plugin-sdk/api/sandbox"
 
 export type { MicrovmExecAdapter } from "./microvm-bridge"
 
@@ -59,6 +47,7 @@ export interface SandboxSessionRuntimeDeps {
   getMicrovmAdapter(): MicrovmExecAdapter | null
   executeOsSandbox(payload: MicrovmExecPayload): Promise<MicrovmResult>
   makeRef(): SandboxRuntimeRef
+  recordAudit?(row: AutomationAuditLogRow): Promise<void>
 }
 
 /**
@@ -74,6 +63,7 @@ interface UnplacedSurfaces {
 interface RuntimeRecord extends BindSandboxSessionInput {
   ref: SandboxRuntimeRef
   fingerprint: string
+  microvmAdapter?: MicrovmExecAdapter
   unplaced?: UnplacedSurfaces
 }
 
@@ -126,8 +116,6 @@ function operationContext(row: SandboxConnectionRow) {
  * resolved policy. This record reproduces exactly that placement so those
  * paths keep working; a chat send always has its own ref and never lands here.
  */
-export const HOST_FALLBACK_RUNTIME_REF: SandboxRuntimeRef = "sandbox-runtime:host-default"
-
 /** Sentinel owner. No real `ChatSession.id` can collide with it. */
 const HOST_FALLBACK_SESSION_ID = "__sandbox_host_fallback__"
 
@@ -152,6 +140,8 @@ const HOST_FALLBACK_RECORD: RuntimeRecord = Object.freeze({
 export class SandboxSessionRuntime {
   private readonly activeBySession = new Map<string, SandboxRuntimeRef>()
   private readonly records = new Map<SandboxRuntimeRef, RuntimeRecord>()
+  private readonly cleanupByRef = new Map<SandboxRuntimeRef, RuntimeRecord>()
+  private readonly cleanupInFlight = new Map<SandboxRuntimeRef, Promise<void>>()
   private readonly closedSessions = new Set<string>()
 
   constructor(private readonly deps: SandboxSessionRuntimeDeps) {
@@ -160,7 +150,7 @@ export class SandboxSessionRuntime {
 
   async bindSession(input: BindSandboxSessionInput): Promise<SandboxRuntimeRef> {
     if (this.closedSessions.has(input.sessionId)) {
-      const cleanupPending = [...this.records.values()].some(
+      const cleanupPending = [...this.cleanupByRef.values()].some(
         (record) => record.sessionId === input.sessionId
       )
       // Retry the cleanup that failed instead of refusing forever. A provider
@@ -188,15 +178,16 @@ export class SandboxSessionRuntime {
     await this.preflightMutableTarget(input)
 
     const ref = this.deps.makeRef()
+    let microvmAdapter: MicrovmExecAdapter | undefined
     if (input.sandboxEnabled && input.binding.shellTier === "microvm") {
-      const adapter = this.deps.getMicrovmAdapter()
-      if (!adapter) {
+      microvmAdapter = this.deps.getMicrovmAdapter() ?? undefined
+      if (!microvmAdapter) {
         throw new SandboxRuntimeError(
           "microvm-unavailable",
           "The microVM sandbox was explicitly selected, but no E2B execution adapter is registered."
         )
       }
-      await adapter.preflight?.(ref, input.workspaceRoot, input.sessionId)
+      await microvmAdapter.preflight?.(ref, input.workspaceRoot, input.sessionId)
     }
 
     const record: RuntimeRecord = Object.freeze({
@@ -206,6 +197,7 @@ export class SandboxSessionRuntime {
       confine: copyConfine(input.confine),
       ref,
       fingerprint: nextFingerprint,
+      ...(microvmAdapter ? { microvmAdapter } : {}),
     })
     this.records.set(ref, record)
     this.activeBySession.set(input.sessionId, ref)
@@ -315,11 +307,9 @@ export class SandboxSessionRuntime {
     if (!record) return
     this.records.delete(ref)
     if (record.binding.shellTier !== "microvm") return
-    const adapter = this.deps.getMicrovmAdapter()
-    if (!adapter?.release) return
-    void Promise.resolve()
-      .then(() => adapter.release!(ref))
-      .catch(() => undefined)
+    if (!record.microvmAdapter?.release) return
+    this.cleanupByRef.set(ref, record)
+    void this.releaseCleanupRecord(record).catch(() => undefined)
   }
 
   async decorateComputerUseContext(
@@ -363,16 +353,24 @@ export class SandboxSessionRuntime {
       )
     }
     if (record.unplaced?.sandbox) {
-      throw new SandboxRuntimeError(
+      const error = new SandboxRuntimeError(
         "placement-unavailable",
         `The "${record.binding.shellTier}" shell tier could not be placed, and sandboxed execution will not fall back to this machine: ${record.unplaced.sandbox}`
       )
+      if (record.binding.shellTier === "microvm") {
+        this.recordMicrovmAudit(payload, {
+          error,
+          durationMs: 0,
+          termination: "placement_unavailable",
+        })
+      }
+      throw error
     }
     switch (record.binding.shellTier) {
       case "os":
         return this.deps.executeOsSandbox(payload)
       case "microvm": {
-        const adapter = this.deps.getMicrovmAdapter()
+        const adapter = record.microvmAdapter
         if (!adapter) {
           throw new SandboxRuntimeError(
             "microvm-unavailable",
@@ -382,20 +380,36 @@ export class SandboxSessionRuntime {
         // Stamp the session ceiling so the adapter can tell an operator cap it
         // cannot honour from a per-call request that simply needs less than
         // the instance offers.
-        return adapter.execute(ref, {
-          ...payload,
-          ...(record.policy
-            ? {
-                ceiling: {
-                  ...(record.policy.network ? { network: record.policy.network } : {}),
-                  ...(record.policy.maxCpuSeconds
-                    ? { maxCpuSeconds: record.policy.maxCpuSeconds }
-                    : {}),
-                  ...(record.policy.maxMemoryMb ? { maxMemoryMb: record.policy.maxMemoryMb } : {}),
-                },
-              }
-            : {}),
-        })
+        const started = Date.now()
+        try {
+          const result = await adapter.execute(ref, {
+            ...payload,
+            ...(record.policy
+              ? {
+                  ceiling: {
+                    ...(record.policy.network ? { network: record.policy.network } : {}),
+                    ...(record.policy.maxCpuSeconds
+                      ? { maxCpuSeconds: record.policy.maxCpuSeconds }
+                      : {}),
+                    ...(record.policy.maxMemoryMb
+                      ? { maxMemoryMb: record.policy.maxMemoryMb }
+                      : {}),
+                  },
+                }
+              : {}),
+          })
+          this.recordMicrovmAudit(payload, {
+            result,
+            durationMs: Math.max(result.duration, Date.now() - started),
+          })
+          return result
+        } catch (error) {
+          this.recordMicrovmAudit(payload, {
+            error,
+            durationMs: Date.now() - started,
+          })
+          throw error
+        }
       }
       case "cua-desktop":
         // Unreachable in practice — `preflightMutableTarget` refuses this tier
@@ -426,26 +440,32 @@ export class SandboxSessionRuntime {
     if (sessionId === HOST_FALLBACK_SESSION_ID) return
     this.closedSessions.add(sessionId)
     this.activeBySession.delete(sessionId)
+    const previouslyRetired = [...this.cleanupByRef.values()].filter(
+      (record) => record.sessionId === sessionId
+    )
+    // A best-effort rebind retirement may still be settling when deletion
+    // arrives. Observe that attempt first, then retry the retained ledger
+    // entry below instead of treating the already-known failure as the
+    // deletion attempt itself.
+    await Promise.allSettled(
+      previouslyRetired.map((record) => this.cleanupInFlight.get(record.ref) ?? Promise.resolve())
+    )
     const owned = [...this.records.values()].filter((record) => record.sessionId === sessionId)
-    const adapter = this.deps.getMicrovmAdapter()
-    const failures: unknown[] = []
-    // `allSettled`, not `all`: one provider that refuses to close must not
-    // strand the other generations' records, which is what made a single
-    // failure brick the session id for the rest of the process lifetime.
-    // Records whose release DID fail are kept so the next attempt retries them.
-    const retained = new Set<SandboxRuntimeRef>()
-    if (adapter?.release) {
-      const pending = owned.filter((record) => record.binding.shellTier === "microvm")
-      const settled = await Promise.allSettled(pending.map((r) => adapter.release!(r.ref)))
-      settled.forEach((outcome, index) => {
-        if (outcome.status !== "rejected") return
-        failures.push(outcome.reason)
-        retained.add(pending[index].ref)
-      })
-    }
     for (const record of owned) {
-      if (!retained.has(record.ref)) this.records.delete(record.ref)
+      this.records.delete(record.ref)
+      if (record.binding.shellTier === "microvm" && record.microvmAdapter?.release) {
+        this.cleanupByRef.set(record.ref, record)
+      }
     }
+    const pending = [...this.cleanupByRef.values()].filter(
+      (record) => record.sessionId === sessionId
+    )
+    const settled = await Promise.allSettled(
+      pending.map((record) => this.releaseCleanupRecord(record))
+    )
+    const failures = settled.flatMap((outcome) =>
+      outcome.status === "rejected" ? [outcome.reason] : []
+    )
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) {
       throw new AggregateError(
@@ -456,6 +476,80 @@ export class SandboxSessionRuntime {
     // Nothing left to clean up — drop the tombstone so the set cannot grow
     // once per session id for the lifetime of the process.
     this.closedSessions.delete(sessionId)
+  }
+
+  private releaseCleanupRecord(record: RuntimeRecord): Promise<void> {
+    const existing = this.cleanupInFlight.get(record.ref)
+    if (existing) return existing
+    const release = record.microvmAdapter?.release
+    if (!release) {
+      this.cleanupByRef.delete(record.ref)
+      return Promise.resolve()
+    }
+    const pending = Promise.resolve()
+      .then(() => release.call(record.microvmAdapter, record.ref))
+      .then(() => {
+        this.cleanupByRef.delete(record.ref)
+      })
+      .finally(() => {
+        if (this.cleanupInFlight.get(record.ref) === pending) {
+          this.cleanupInFlight.delete(record.ref)
+        }
+      })
+    this.cleanupInFlight.set(record.ref, pending)
+    return pending
+  }
+
+  private recordMicrovmAudit(
+    payload: MicrovmExecPayload,
+    outcome: {
+      result?: MicrovmResult
+      error?: unknown
+      durationMs: number
+      termination?: string
+    }
+  ): void {
+    const result = outcome.result
+    const termination =
+      outcome.termination ??
+      (outcome.error
+        ? "provider_error"
+        : result?.timed_out
+          ? "timeout"
+          : result?.exit_code === 0
+            ? "completed"
+            : "exit_nonzero")
+    const reason = [
+      "tier=microvm",
+      "provider=e2b",
+      `termination=${termination}`,
+      `requested_timeout_seconds=${payload.command.timeout}`,
+      `timeout=${result?.timed_out ?? false}`,
+      `stdout_truncated=${result?.stdout_truncated ?? false}`,
+      `stderr_truncated=${result?.stderr_truncated ?? false}`,
+      `exit_code=${result?.exit_code ?? "none"}`,
+    ].join(";")
+    const row: AutomationAuditLogRow = {
+      id: globalThis.crypto?.randomUUID?.() ?? `sandbox-audit:${Date.now()}-${Math.random()}`,
+      ts: Date.now(),
+      surface: "sandbox",
+      pluginId: "cognia-sandboxed-tools",
+      command: payload.tool,
+      processName: "microvm:e2b",
+      windowTitle: payload.command.cwd,
+      decision: outcome.error ? "deny" : "allow",
+      reason,
+      durationMs: outcome.durationMs,
+      error:
+        outcome.error instanceof Error
+          ? outcome.error.message
+          : outcome.error == null
+            ? null
+            : String(outcome.error),
+    }
+    void this.deps.recordAudit?.(row).catch((error) => {
+      console.warn("sandbox microVM audit persist failed", error)
+    })
   }
 
   /**
@@ -477,6 +571,8 @@ export class SandboxSessionRuntime {
   __resetForTesting(): void {
     this.activeBySession.clear()
     this.records.clear()
+    this.cleanupByRef.clear()
+    this.cleanupInFlight.clear()
     this.closedSessions.clear()
     this.records.set(HOST_FALLBACK_RUNTIME_REF, HOST_FALLBACK_RECORD)
   }
@@ -547,10 +643,27 @@ async function executeOsSandbox(payload: MicrovmExecPayload): Promise<MicrovmRes
           : Array.from(new TextEncoder().encode(payload.command.stdin)),
     },
   }
+  if (osSandboxExecOverride) {
+    return osSandboxExecOverride(osPayload as unknown as MicrovmExecPayload)
+  }
   return transport.call<MicrovmResult>(
     "sandbox_exec",
     osPayload as unknown as Record<string, unknown>
   )
+}
+
+async function recordSandboxAudit(row: AutomationAuditLogRow): Promise<void> {
+  const { recordAuditRow } = await import("@/lib/automation/audit")
+  await recordAuditRow(row)
+}
+
+let osSandboxExecOverride: ((payload: MicrovmExecPayload) => Promise<MicrovmResult>) | undefined
+
+/** Test-only seam scoped to sandbox execution; avoids replacing host-wide IPC. */
+export function __setSandboxOsExecForTesting(
+  execute: ((payload: MicrovmExecPayload) => Promise<MicrovmResult>) | undefined
+): void {
+  osSandboxExecOverride = execute
 }
 
 export const sandboxSessionRuntime = new SandboxSessionRuntime({
@@ -558,9 +671,11 @@ export const sandboxSessionRuntime = new SandboxSessionRuntime({
   getMicrovmAdapter: defaultMicrovmAdapter,
   executeOsSandbox,
   makeRef: makeRuntimeRef,
+  recordAudit: recordSandboxAudit,
 })
 
 /** Test-only — wipe every binding held by the module singleton. */
 export function __resetSandboxSessionRuntimeForTesting(): void {
   sandboxSessionRuntime.__resetForTesting()
+  osSandboxExecOverride = undefined
 }

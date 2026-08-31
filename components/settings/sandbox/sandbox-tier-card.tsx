@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { saveSettings } from "@/lib/db/settings"
 import { useSettingsStore } from "@/stores/settings"
+import { useSandboxRuntimeAvailability } from "@/hooks/sandbox/use-sandbox-runtime-availability"
 
 const TIER_VALUES = ["os", "microvm"] as const
 type Tier = (typeof TIER_VALUES)[number]
@@ -25,6 +26,7 @@ function isTier(value: string): value is Tier {
 export function SandboxTierCard() {
   const t = useTranslations("settings.sandbox.tier")
   const settings = useSettingsStore((s) => s.settings)
+  const availability = useSandboxRuntimeAvailability()
   const groupId = useId()
   const current: Tier = settings?.sandboxTier ?? "os"
 
@@ -47,14 +49,31 @@ export function SandboxTierCard() {
         >
           {TIER_VALUES.map((tier) => {
             const id = `${groupId}-${tier}`
+            const runtime = availability[tier]
+            const reason =
+              tier === "microvm"
+                ? runtime.available
+                  ? t("availability.workspaceRequired")
+                  : t("availability.adapterMissing")
+                : runtime.available
+                  ? undefined
+                  : availability.os.reason === "probe-failed"
+                    ? t("availability.probeFailed")
+                    : t("availability.probeRequired")
             return (
               <div key={tier} className="flex items-start gap-3 py-2">
-                <RadioGroupItem id={id} value={tier} data-testid={`tier-${tier}`} />
+                <RadioGroupItem
+                  id={id}
+                  value={tier}
+                  disabled={!runtime.available}
+                  data-testid={`tier-${tier}`}
+                />
                 <div className="grid gap-1">
                   <Label htmlFor={id} className="text-sm font-medium">
                     {t(`${tier}.label`)}
                   </Label>
                   <p className="text-xs text-muted-foreground">{t(`${tier}.description`)}</p>
+                  {reason ? <p className="text-xs text-amber-600">{reason}</p> : null}
                 </div>
               </div>
             )

@@ -10,81 +10,48 @@
  *      §Strict mode).
  */
 
-/** One result row from a sandboxed exec call — shape mirrored from
- *  `src-tauri/src/sandbox/types.rs::SandboxResult`. */
-export interface MicrovmResult {
-  exit_code: number
-  stdout: string
-  stderr: string
-  duration: number
-  timed_out: boolean
-}
+export {
+  MicrovmAdapterError,
+  type MicrovmAdapterErrorCode,
+  type MicrovmCeiling,
+  type MicrovmCommand,
+  type MicrovmExecAdapter,
+  type MicrovmExecPayload,
+  type MicrovmRequest,
+  type MicrovmResult,
+} from "@cognia/plugin-sdk/api/sandbox"
 
-/** Single argv command shape (mirrors `cognia-sandboxed-tools`'s payload). */
-export interface MicrovmCommand {
-  argv: string[]
-  cwd: string
-  env: Record<string, string>
-  stdin: string | null
-  timeout: number
-}
-
-/** Per-call policy (mirrors `sandbox::policy::PolicyRequest`). */
-export interface MicrovmRequest {
-  writable: string[]
-  readable: string[]
-  targetFiles: string[]
-  maxCpuSeconds: number
-  maxMemoryMb: number
-  network: "off" | "on" | "allowlist"
-  networkHosts: string[]
-}
-
-/**
- * The session's resolved ceiling, as opposed to the per-call `request`. An
- * adapter needs both: `request.network === "off"` may mean "the operator
- * capped egress" or merely "this command needs no network", and only the
- * ceiling distinguishes them. Absent = no ceiling configured.
- */
-export interface MicrovmCeiling {
-  network?: "off" | "on" | "allowlist"
-  maxCpuSeconds?: number
-  maxMemoryMb?: number
-}
-
-/** Full payload an exec impl receives. */
-export interface MicrovmExecPayload {
-  tool: string
-  command: MicrovmCommand
-  request: MicrovmRequest
-  ceiling?: MicrovmCeiling
-}
-
-export type MicrovmAdapterErrorCode =
-  "workspace-unavailable" | "runtime-unbound" | "policy-not-attested" | "workspace-boundary"
-
-export class MicrovmAdapterError extends Error {
-  readonly code: MicrovmAdapterErrorCode
-
-  constructor(code: MicrovmAdapterErrorCode, message: string, options?: { cause?: unknown }) {
-    super(message, options)
-    this.name = "MicrovmAdapterError"
-    this.code = code
-  }
-}
-
-export interface MicrovmExecAdapter {
-  preflight?(ownerRef: string, workspaceRoot?: string, ownerGroup?: string): Promise<void> | void
-  execute(ownerRef: string, payload: MicrovmExecPayload): Promise<MicrovmResult>
-  release?(ownerRef: string): Promise<void> | void
-  dispose?(): Promise<void> | void
-}
+import type { MicrovmExecAdapter } from "@cognia/plugin-sdk/api/sandbox"
 
 let registeredImpl: MicrovmExecAdapter | null = null
+const drainingImpls = new Set<MicrovmExecAdapter>()
+const availabilityListeners = new Set<() => void>()
 
 /** Register the microvm exec adapter (called by the e2b plugin on activate). */
 export function setMicrovmExec(impl: MicrovmExecAdapter | null): void {
+  if (registeredImpl && registeredImpl !== impl) drainingImpls.add(registeredImpl)
   registeredImpl = impl
+  for (const listener of availabilityListeners) listener()
+}
+
+export function subscribeMicrovmAvailability(listener: () => void): () => void {
+  availabilityListeners.add(listener)
+  return () => availabilityListeners.delete(listener)
+}
+
+/** Force-clean active and draining adapters at the application exit boundary. */
+export async function disposeMicrovmAdapters(): Promise<void> {
+  const active = registeredImpl
+  registeredImpl = null
+  if (active) drainingImpls.add(active)
+  for (const listener of availabilityListeners) listener()
+  const adapters = [...drainingImpls]
+  const settled = await Promise.allSettled(
+    adapters.map((adapter) => Promise.resolve(adapter.dispose?.()))
+  )
+  settled.forEach((result, index) => {
+    if (result.status === "fulfilled") drainingImpls.delete(adapters[index])
+  })
 }
 
 /** Read the currently-registered microvm exec adapter, or null. */
@@ -95,4 +62,6 @@ export function getMicrovmExec(): MicrovmExecAdapter | null {
 /** Test-only — wipe the adapter registry. Never called in production. */
 export function __resetMicrovmBridgeForTesting(): void {
   registeredImpl = null
+  drainingImpls.clear()
+  availabilityListeners.clear()
 }

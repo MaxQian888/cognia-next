@@ -42,53 +42,20 @@ function caps(overrides: Partial<Record<SandboxLifecycleOperation, boolean>>): S
 }
 
 /**
- * Provider capabilities before the driver narrows them.
- *
- * - **docker** — local containers start/stop/delete cheaply but have no
- *   suspend/resume: a stopped container is not a suspended machine, and
- *   pretending otherwise would lose the desktop session silently.
- * - **cua-cloud** — full managed lifecycle including suspend/resume, which is
- *   the point of a cloud desktop (you pause it instead of paying for idle).
- * - **lume** — full local VM lifecycle; suspend/resume is a real VM snapshot.
+ * Capabilities backed by a production adapter in this repository. Provider
+ * documentation is not an implementation: compatibility rows stay readable,
+ * but only Docker/computer-server currently has lifecycle and GUI wiring.
  */
 const PROVIDER_CAPABILITIES: Record<SandboxConnectionProvider, SandboxCapabilities> = {
   docker: caps({
-    create: true,
-    connect: true,
     start: true,
     stop: true,
     delete: true,
     health: true,
     gui: true,
-    workspaceRead: true,
-    workspaceExec: true,
   }),
-  "cua-cloud": caps({
-    create: true,
-    connect: true,
-    start: true,
-    suspend: true,
-    resume: true,
-    stop: true,
-    delete: true,
-    health: true,
-    gui: true,
-    workspaceRead: true,
-    workspaceExec: true,
-  }),
-  lume: caps({
-    create: true,
-    connect: true,
-    start: true,
-    suspend: true,
-    resume: true,
-    stop: true,
-    delete: true,
-    health: true,
-    gui: true,
-    workspaceRead: true,
-    workspaceExec: true,
-  }),
+  "cua-cloud": caps({}),
+  lume: caps({}),
 }
 
 /**
@@ -103,6 +70,19 @@ const DRIVER_RESTRICTIONS: Partial<
   Record<SandboxConnectionDriver, Partial<Record<SandboxLifecycleOperation, boolean>>>
 > = {
   "computer-server": { workspaceRead: false, workspaceExec: false },
+  "cua-driver": {
+    create: false,
+    connect: false,
+    start: false,
+    suspend: false,
+    resume: false,
+    stop: false,
+    delete: false,
+    health: false,
+    gui: false,
+    workspaceRead: false,
+    workspaceExec: false,
+  },
 }
 
 /**

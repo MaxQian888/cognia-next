@@ -21,8 +21,8 @@ describe("defaultSandboxCapabilities", () => {
     }
   })
 
-  it("gives docker no suspend/resume — a stopped container is not a paused machine", () => {
-    const caps = defaultSandboxCapabilities("docker", "cua-driver")
+  it("exposes only the implemented Docker/computer-server operations", () => {
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(caps.suspend).toBe(false)
     expect(caps.resume).toBe(false)
     expect(caps.start).toBe(true)
@@ -30,27 +30,21 @@ describe("defaultSandboxCapabilities", () => {
     expect(caps.delete).toBe(true)
   })
 
-  it("gives cua-cloud and lume the full lifecycle including suspend/resume", () => {
+  it("keeps cua-cloud and lume rows readable without unsupported actions", () => {
     for (const provider of ["cua-cloud", "lume"] as const) {
       const caps = defaultSandboxCapabilities(provider, "cua-driver")
-      expect(caps.suspend).toBe(true)
-      expect(caps.resume).toBe(true)
-      expect(caps.create).toBe(true)
-      expect(caps.delete).toBe(true)
+      expect(Object.values(caps).every((value) => value === false)).toBe(true)
     }
   })
 
-  it("always allows health, so a broken machine can still be probed", () => {
-    for (const provider of PROVIDERS) {
-      for (const driver of DRIVERS) {
-        expect(defaultSandboxCapabilities(provider, driver).health).toBe(true)
-      }
-    }
+  it("does not advertise health without a registered lifecycle adapter", () => {
+    expect(defaultSandboxCapabilities("cua-cloud", "computer-server").health).toBe(false)
+    expect(defaultSandboxCapabilities("lume", "cua-driver").health).toBe(false)
   })
 
   it("lets the computer-server driver remove workspaceRead", () => {
     expect(defaultSandboxCapabilities("lume", "computer-server").workspaceRead).toBe(false)
-    expect(defaultSandboxCapabilities("lume", "cua-driver").workspaceRead).toBe(true)
+    expect(defaultSandboxCapabilities("lume", "cua-driver").workspaceRead).toBe(false)
   })
 
   it("keeps computer-server workspace shell and files disabled until a real adapter exists", () => {
@@ -59,13 +53,13 @@ describe("defaultSandboxCapabilities", () => {
     expect(caps.workspaceExec).toBe(false)
   })
 
-  it("a driver can only remove capabilities, never add them", () => {
+  it("keeps the unregistered cua-driver projection unavailable", () => {
     for (const provider of PROVIDERS) {
-      const permissive = defaultSandboxCapabilities(provider, "cua-driver")
-      const restricted = defaultSandboxCapabilities(provider, "computer-server")
-      for (const op of SANDBOX_LIFECYCLE_OPERATIONS) {
-        if (restricted[op]) expect(permissive[op]).toBe(true)
-      }
+      expect(
+        Object.values(defaultSandboxCapabilities(provider, "cua-driver")).every(
+          (value) => value === false
+        )
+      ).toBe(true)
     }
   })
 
@@ -77,7 +71,7 @@ describe("defaultSandboxCapabilities", () => {
 
 describe("narrowSandboxCapabilities", () => {
   it("removes the listed operations", () => {
-    const caps = defaultSandboxCapabilities("cua-cloud", "cua-driver")
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
     const narrowed = narrowSandboxCapabilities(caps, ["gui", "suspend"])
     expect(narrowed.gui).toBe(false)
     expect(narrowed.suspend).toBe(false)
@@ -87,23 +81,23 @@ describe("narrowSandboxCapabilities", () => {
   it("does not mutate the input", () => {
     const caps = defaultSandboxCapabilities("cua-cloud", "cua-driver")
     narrowSandboxCapabilities(caps, ["gui"])
-    expect(caps.gui).toBe(true)
+    expect(caps.gui).toBe(false)
   })
 
   it("is a no-op for an empty removal list", () => {
-    const caps = defaultSandboxCapabilities("docker", "cua-driver")
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(narrowSandboxCapabilities(caps, [])).toEqual(caps)
   })
 
   it("never re-enables an already-false capability", () => {
-    const caps = defaultSandboxCapabilities("docker", "cua-driver")
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(narrowSandboxCapabilities(caps, ["suspend"]).suspend).toBe(false)
   })
 })
 
 describe("supportsSandboxOperation", () => {
   it("reads the matrix", () => {
-    const caps = defaultSandboxCapabilities("docker", "cua-driver")
+    const caps = defaultSandboxCapabilities("docker", "computer-server")
     expect(supportsSandboxOperation(caps, "start")).toBe(true)
     expect(supportsSandboxOperation(caps, "suspend")).toBe(false)
   })

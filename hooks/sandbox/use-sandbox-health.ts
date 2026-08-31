@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { transport } from "@/lib/tauri"
+import { refreshCodeSandboxStatus } from "@/lib/ai/code-mode/sandbox-status"
 
 export interface SandboxHealth {
   available: boolean
@@ -46,12 +47,6 @@ export interface SandboxProbe {
 }
 
 const IDLE_PROBE: SandboxProbe = { status: "idle", backend: "", detail: "" }
-
-interface RawProbeReport {
-  backend: string
-  confined: boolean
-  detail: string
-}
 
 function normaliseHealth(raw: RawSandboxHealth | null | undefined): SandboxHealth {
   if (!raw) return DEFAULT_HEALTH
@@ -109,12 +104,12 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
   const verify = useCallback(async () => {
     setProbe((p) => ({ ...p, status: "running" }))
     try {
-      const raw = await transport.call<RawProbeReport>("sandbox_health_check")
+      const raw = await refreshCodeSandboxStatus()
       if (!aliveRef.current) return
       setProbe({
-        status: raw?.confined ? "ok" : "failed",
-        backend: raw?.backend ?? "",
-        detail: raw?.detail ?? "",
+        status: raw.confined ? "ok" : "failed",
+        backend: raw.backend,
+        detail: raw.detail,
       })
     } catch (err) {
       if (!aliveRef.current) return

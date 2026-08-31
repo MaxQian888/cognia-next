@@ -124,15 +124,25 @@ export function migrateSandboxConnectionRow(
  * Reads may only narrow those claims; they never widen an adapter handshake.
  */
 function normalizeStoredCapabilities(row: SandboxConnectionRow): SandboxConnectionRow {
-  if (row.driver !== "computer-server") return row
-  if (!row.capabilities.workspaceRead && !row.capabilities.workspaceExec) return row
+  const supported = defaultSandboxCapabilities(row.provider, row.driver)
+  const capabilities = Object.freeze(
+    Object.fromEntries(
+      Object.entries(row.capabilities).map(([operation, enabled]) => [
+        operation,
+        enabled && supported[operation as keyof typeof supported],
+      ])
+    )
+  ) as SandboxConnectionRow["capabilities"]
+  if (
+    Object.entries(capabilities).every(
+      ([operation, enabled]) => row.capabilities[operation as keyof typeof capabilities] === enabled
+    )
+  ) {
+    return row
+  }
   return {
     ...row,
-    capabilities: Object.freeze({
-      ...row.capabilities,
-      workspaceRead: false,
-      workspaceExec: false,
-    }),
+    capabilities,
   }
 }
 

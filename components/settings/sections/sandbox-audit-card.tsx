@@ -11,7 +11,7 @@ import { RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { getDb } from "@/lib/db/schema"
+import { listAuditRows } from "@/lib/automation/audit"
 
 interface AuditRow {
   id: string
@@ -30,13 +30,7 @@ const LIMIT = 50
 
 async function fetchRows(): Promise<AuditRow[]> {
   if (typeof window === "undefined") return []
-  const db = getDb()
-  const all = (await db.automationAuditLog
-    .orderBy("ts")
-    .reverse()
-    .limit(LIMIT * 4)
-    .toArray()) as unknown as AuditRow[]
-  return all.filter((row) => row.surface === "sandbox").slice(0, LIMIT)
+  return (await listAuditRows({ surface: "sandbox", limit: LIMIT })) as AuditRow[]
 }
 
 export function SandboxAuditCard() {

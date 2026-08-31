@@ -6,7 +6,9 @@ import {
   __resetMicrovmBridgeForTesting,
   getMicrovmExec,
   MicrovmAdapterError,
+  disposeMicrovmAdapters,
   setMicrovmExec,
+  subscribeMicrovmAvailability,
   type MicrovmExecAdapter,
 } from "./microvm-bridge"
 
@@ -48,5 +50,23 @@ describe("microvm exec registry", () => {
     setMicrovmExec({ execute: jest.fn() })
     setMicrovmExec(null)
     expect(getMicrovmExec()).toBeNull()
+  })
+
+  it("notifies availability consumers and force-disposes active and draining adapters", async () => {
+    const listener = jest.fn()
+    const unsubscribe = subscribeMicrovmAvailability(listener)
+    const first = { execute: jest.fn(), dispose: jest.fn(async () => undefined) }
+    const second = { execute: jest.fn(), dispose: jest.fn(async () => undefined) }
+
+    setMicrovmExec(first)
+    setMicrovmExec(second)
+    setMicrovmExec(null)
+    await disposeMicrovmAdapters()
+
+    expect(listener).toHaveBeenCalledTimes(4)
+    expect(first.dispose).toHaveBeenCalledTimes(1)
+    expect(second.dispose).toHaveBeenCalledTimes(1)
+    expect(getMicrovmExec()).toBeNull()
+    unsubscribe()
   })
 })

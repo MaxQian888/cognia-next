@@ -56,6 +56,35 @@ struct RunnerOutput {
     stderr: String,
     duration_ms: u64,
     timed_out: bool,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+}
+
+const MAX_OUTPUT_BYTES: usize = 1_000_000;
+const TRUNCATION_MARKER: &str = "\n... (truncated)";
+
+fn read_capture(path: &std::path::Path) -> (String, bool) {
+    use std::io::Read;
+
+    let Ok(file) = std::fs::File::open(path) else {
+        return (String::new(), false);
+    };
+    let mut bytes = Vec::with_capacity(8192);
+    let _ = file
+        .take((MAX_OUTPUT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes);
+    let truncated = bytes.len() > MAX_OUTPUT_BYTES;
+    bytes.truncate(MAX_OUTPUT_BYTES);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if !truncated && text.len() <= MAX_OUTPUT_BYTES {
+        return (text, false);
+    }
+    let content_cap = MAX_OUTPUT_BYTES.saturating_sub(TRUNCATION_MARKER.len());
+    let mut end = content_cap.min(text.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    (format!("{}{}", &text[..end], TRUNCATION_MARKER), true)
 }
 
 fn main() {
@@ -377,8 +406,8 @@ mod win {
         }
 
         // 7. Read + clean up the capture files.
-        let stdout = std::fs::read_to_string(&out_path).unwrap_or_default();
-        let stderr = std::fs::read_to_string(&err_path).unwrap_or_default();
+        let (stdout, stdout_truncated) = super::read_capture(&out_path);
+        let (stderr, stderr_truncated) = super::read_capture(&err_path);
         let _ = std::fs::remove_file(&out_path);
         let _ = std::fs::remove_file(&err_path);
 
@@ -388,6 +417,8 @@ mod win {
             stderr,
             duration_ms: started.elapsed().as_millis() as u64,
             timed_out,
+            stdout_truncated,
+            stderr_truncated,
         })
     }
 

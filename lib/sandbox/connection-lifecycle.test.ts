@@ -1,5 +1,6 @@
 import type { SandboxConnectionRow } from "@/types/sandbox"
 import {
+  hasSandboxConnectionLifecycleAdapter,
   runSandboxConnectionOperation,
   serializeSandboxConnectionOperation,
 } from "./connection-lifecycle"
@@ -63,6 +64,24 @@ describe("runSandboxConnectionOperation", () => {
     >({ code: "not-implemented", operation: "start" })
     expect(client.start).not.toHaveBeenCalled()
     expect(client.stop).not.toHaveBeenCalled()
+  })
+})
+
+describe("hasSandboxConnectionLifecycleAdapter", () => {
+  it("accepts only the implemented Docker/computer-server/config tuple", () => {
+    expect(hasSandboxConnectionLifecycleAdapter(row())).toBe(true)
+    expect(
+      hasSandboxConnectionLifecycleAdapter(
+        row({
+          provider: "cua-cloud",
+          config: { provider: "cua-cloud", instanceName: "desk" },
+        })
+      )
+    ).toBe(false)
+    expect(hasSandboxConnectionLifecycleAdapter(row({ driver: "cua-driver" }))).toBe(false)
+    expect(
+      hasSandboxConnectionLifecycleAdapter(row({ config: { provider: "lume", vmName: "compat" } }))
+    ).toBe(false)
   })
 })
 

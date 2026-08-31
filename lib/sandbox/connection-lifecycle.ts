@@ -25,6 +25,15 @@ export interface SandboxConnectionOperationResult {
 
 const operationTails = new Map<string, Promise<void>>()
 
+/** Whether this row is backed by the lifecycle adapter implemented here. */
+export function hasSandboxConnectionLifecycleAdapter(row: SandboxConnectionRow): boolean {
+  return (
+    row.provider === "docker" &&
+    row.driver === "computer-server" &&
+    row.config.provider === "docker"
+  )
+}
+
 /** Serialize lifecycle mutations per connection without coupling unrelated rows. */
 export function serializeSandboxConnectionOperation<T>(
   connectionId: string,
@@ -49,7 +58,7 @@ function adapterFor(
   result: SandboxConnectionOperationResult,
   operation: SupportedConnectionOperation
 ): SandboxProviderAdapter {
-  if (row.provider !== "docker" || row.driver !== "computer-server") {
+  if (!hasSandboxConnectionLifecycleAdapter(row)) {
     throw new SandboxCapabilityError({
       code: "not-implemented",
       operation,

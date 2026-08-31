@@ -48,6 +48,7 @@ function createDeps(): jest.Mocked<SandboxSessionRuntimeDeps> {
       timed_out: false,
     })),
     makeRef: jest.fn(() => "sandbox-runtime:test-ref"),
+    recordAudit: jest.fn(async () => undefined),
   }
 }
 
@@ -246,7 +247,7 @@ describe("SandboxSessionRuntime", () => {
     expect(deps.getConnection).not.toHaveBeenCalled()
   })
 
-  it("fails when the E2B adapter is missing at bind or disappears afterward", async () => {
+  it("rejects new microVM binds after unregister while bound owners keep their adapter", async () => {
     const deps = createDeps()
     const runtime = new SandboxSessionRuntime(deps)
     const input = {
@@ -265,13 +266,62 @@ describe("SandboxSessionRuntime", () => {
       preflight: jest.fn(async () => undefined),
       execute: jest.fn(),
     }
-    deps.getMicrovmAdapter.mockReturnValueOnce(adapter).mockReturnValue(null)
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
     const ref = await runtime.bindSession(input)
     expect(adapter.preflight).toHaveBeenCalledWith(ref, "/workspace", "microvm")
-    await expect(runtime.executeSandbox(ref, payload)).rejects.toMatchObject({
+    deps.getMicrovmAdapter.mockReturnValue(null)
+    adapter.execute.mockResolvedValue({
+      exit_code: 0,
+      stdout: "remote",
+      stderr: "",
+      duration: 1,
+      timed_out: false,
+    })
+    await expect(runtime.executeSandbox(ref, payload)).resolves.toMatchObject({ stdout: "remote" })
+    await expect(runtime.bindSession({ ...input, sessionId: "new-owner" })).rejects.toMatchObject({
       code: "microvm-unavailable",
     })
     expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+    expect(deps.recordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: "sandbox",
+        processName: "microvm:e2b",
+        decision: "allow",
+        reason:
+          "tier=microvm;provider=e2b;termination=completed;requested_timeout_seconds=30;timeout=false;stdout_truncated=false;stderr_truncated=false;exit_code=0",
+      })
+    )
+  })
+
+  it("audits microVM provider failures without changing the thrown error", async () => {
+    const deps = createDeps()
+    const failure = new Error("provider disconnected")
+    const adapter = {
+      preflight: jest.fn(async () => undefined),
+      execute: jest.fn(async () => {
+        throw failure
+      }),
+    }
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
+    const runtime = new SandboxSessionRuntime(deps)
+    const ref = await runtime.bindSession({
+      sessionId: "microvm-failure",
+      binding: { shellTier: "microvm", computerTarget: "local" },
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/workspace",
+    })
+
+    await expect(runtime.executeSandbox(ref, payload)).rejects.toBe(failure)
+    expect(deps.recordAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "deny",
+        error: "provider disconnected",
+        reason: expect.stringContaining("termination=provider_error"),
+      })
+    )
   })
 
   it("freezes policy intent and applies it to request and path checks", async () => {
@@ -500,6 +550,49 @@ describe("SandboxSessionRuntime", () => {
     expect(adapter.release).toHaveBeenCalledTimes(3)
   })
 
+  it("keeps a failed rebind retirement in the cleanup ledger for session release", async () => {
+    const deps = createDeps()
+    deps.makeRef
+      .mockReturnValueOnce("sandbox-runtime:old")
+      .mockReturnValueOnce("sandbox-runtime:new")
+    const adapter = {
+      execute: jest.fn(async () => ({
+        exit_code: 0,
+        stdout: "ok",
+        stderr: "",
+        duration: 1,
+        timed_out: false,
+      })),
+      preflight: jest.fn(async () => undefined),
+      release: jest
+        .fn<Promise<void>, [string]>()
+        .mockRejectedValueOnce(new Error("retire failed"))
+        .mockResolvedValue(undefined),
+    }
+    deps.getMicrovmAdapter.mockReturnValue(adapter)
+    const runtime = new SandboxSessionRuntime(deps)
+    const base = {
+      sessionId: "session-1",
+      binding: { shellTier: "microvm", computerTarget: "local" } as const,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/workspace",
+    }
+
+    await runtime.bindSession({ ...base, policy: null })
+    await runtime.bindSession({ ...base, policy: { network: "on" } })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    await expect(runtime.releaseSession("session-1")).resolves.toBeUndefined()
+    expect(adapter.release.mock.calls.map(([ownerRef]) => ownerRef)).toEqual([
+      "sandbox-runtime:old",
+      "sandbox-runtime:old",
+      "sandbox-runtime:new",
+    ])
+  })
+
   it("keeps releasing the other generations when one provider close fails", async () => {
     const deps = createDeps()
     deps.makeRef
@@ -569,6 +662,13 @@ describe("SandboxSessionRuntime", () => {
       })
       // The refusal is the point: nothing reached the host OS sandbox.
       expect(deps.executeOsSandbox).not.toHaveBeenCalled()
+      expect(deps.recordAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          decision: "deny",
+          error: expect.stringContaining("no live E2B workspace"),
+          reason: expect.stringContaining("termination=placement_unavailable"),
+        })
+      )
     })
 
     it("refuses a bound GUI target instead of driving the local desktop", async () => {

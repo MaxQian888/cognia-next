@@ -150,6 +150,45 @@ describe("migrateSandboxConnectionRow", () => {
     expect(migrateSandboxConnectionRow(normalized)).toBe(normalized)
   })
 
+  it("keeps implemented Docker lifecycle and GUI capabilities", () => {
+    const migrated = migrateSandboxConnectionRow(legacyRow())
+    expect(migrated.capabilities).toMatchObject({
+      start: true,
+      stop: true,
+      delete: true,
+      health: true,
+      gui: true,
+      workspaceRead: false,
+      workspaceExec: false,
+    })
+  })
+
+  it.each([
+    [
+      "cua-cloud",
+      { provider: "cua-cloud", instanceName: "desk-1", host: "cloud.example", port: 443 },
+    ],
+    ["lume", { provider: "lume", vmName: "compat-vm" }],
+  ] as const)(
+    "retains %s configuration while removing unsupported operations",
+    (provider, config) => {
+      const docker = migrateSandboxConnectionRow(legacyRow())
+      const imported = {
+        ...docker,
+        provider,
+        config,
+        capabilities: Object.fromEntries(
+          Object.keys(docker.capabilities).map((operation) => [operation, true])
+        ),
+      } as SandboxConnectionRow
+
+      const normalized = migrateSandboxConnectionRow(imported)
+
+      expect(normalized.config).toEqual(config)
+      expect(Object.values(normalized.capabilities).every((enabled) => !enabled)).toBe(true)
+    }
+  )
+
   it("does not clobber a config the user edited after migration", () => {
     const migrated = migrateSandboxConnectionRow(legacyRow())
     const edited: SandboxConnectionRow = {
