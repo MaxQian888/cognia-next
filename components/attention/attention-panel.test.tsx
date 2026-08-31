@@ -129,7 +129,7 @@ describe("AttentionPanel", () => {
     )
     fireEvent.click(screen.getByTestId("attention-trigger"))
     fireEvent.click(screen.getByRole("button", { name: "Open" }))
-    expect(pushMock).toHaveBeenCalledWith("/agent-teams/workspace?teamId=team-9")
+    expect(pushMock).toHaveBeenCalledWith("/squads?id=team-9")
   })
 
   it("fleet permission row renders inline Approve/Deny actions", async () => {

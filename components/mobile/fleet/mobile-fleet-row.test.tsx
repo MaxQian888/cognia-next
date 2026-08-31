@@ -82,7 +82,7 @@ describe("MobileFleetRow", () => {
     )
     expect(screen.getByRole("link")).toHaveAttribute(
       "href",
-      "/agent-teams/workspace?teamId=team%2Fa"
+      "/squads?id=team%2Fa"
     )
   })
 

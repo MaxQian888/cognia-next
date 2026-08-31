@@ -163,7 +163,7 @@ describe("AgentTeamTemplatesSection", () => {
         order: 0,
       })
     )
-    expect(routerPushMock).toHaveBeenCalledWith("/agent-teams/workspace?teamId=team-new")
+    expect(routerPushMock).toHaveBeenCalledWith("/squads?id=team-new")
   })
 
   it("New template button opens the editor and Save calls addTemplate", async () => {

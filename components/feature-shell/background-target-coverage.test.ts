@@ -10,6 +10,9 @@ import { appRoutePages, REPO_ROOT, reachesSource, routeSegment } from "./route-m
  * output at all.
  */
 const EXEMPT: Record<string, string> = {
+  // ADR-0140 retired `/agent-teams` and `/agent-teams/workspace`. Both render
+  // null and replace the URL with `/squads`, so there is nothing to paint.
+  "agent-teams": "redirect-only route — renders nothing",
   inbox: "redirect-only route — renders nothing",
   "deep-link": "invisible handoff route, redirects immediately",
   fleet: "transparent island window — wallpaper is force-disabled there",

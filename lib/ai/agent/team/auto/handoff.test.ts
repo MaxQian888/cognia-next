@@ -109,7 +109,7 @@ describe("materializeExternalHandoff", () => {
     expect(notify).toHaveBeenCalledTimes(1)
     const input = notify.mock.calls[0][0] as { href: string; level: string }
     expect(input.level).toBe("info")
-    expect(input.href).toBe(`/agent-teams/workspace?teamId=${result.teamId}`)
+    expect(input.href).toBe(`/squads?id=${result.teamId}`)
   })
 
   it("keeps the pickup stamp even when notification delivery fails", async () => {

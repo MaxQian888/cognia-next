@@ -90,7 +90,7 @@ export function RuntimePanel() {
       <AlertDescription>
         <p>{t("callout.body")}</p>
         <Button variant="link" size="sm" className="h-auto p-0 text-xs" asChild>
-          <Link href="/agent-teams">
+          <Link href="/settings?section=squads">
             {t("callout.cta")}
             <ArrowRightIcon className="ml-1 size-3" />
           </Link>

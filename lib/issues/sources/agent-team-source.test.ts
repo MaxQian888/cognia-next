@@ -106,7 +106,7 @@ describe("toUnifiedTeamTask", () => {
       createdAt: 100,
       updatedAt: 200,
       origin: {
-        deepLinkHref: "/agent-teams/workspace?teamId=team-1",
+        deepLinkHref: "/squads?id=team-1",
         sourceLabel: AGENT_TEAM_SOURCE_LABEL,
       },
     })

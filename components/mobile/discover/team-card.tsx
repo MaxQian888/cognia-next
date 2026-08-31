@@ -19,7 +19,7 @@ export function TeamCard({ team, className }: TeamCardProps) {
   const memberCount = team.members?.length ?? 0
   return (
     <Link
-      href={`/agent-teams/workspace?teamId=${encodeURIComponent(team.id)}`}
+      href={`/squads?id=${encodeURIComponent(team.id)}`}
       className="block"
       data-testid={`team-card-${team.id}`}
     >

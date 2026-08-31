@@ -257,14 +257,14 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByTestId("character-detail-sheet")).toBeInTheDocument()
   })
 
-  it("renders the team detail with a link to /agent-teams/{id}", () => {
+  it("renders the team detail with a link to the squad", () => {
     render(
       <DiscoverInspector category="teams" itemId={team.id} items={[teamItem]} onClose={jest.fn()} />
     )
     // `<Button asChild>` flattens into the child `<a>` from next/link, so
     // the testid lands on the anchor itself — no nested querySelector needed.
     const link = screen.getByTestId("discover-inspector-open-team")
-    expect(link).toHaveAttribute("href", "/agent-teams/workspace?teamId=t1")
+    expect(link).toHaveAttribute("href", "/squads?id=t1")
   })
 
   it("calls setSkillStatus + enqueue when toggling a skill", async () => {
@@ -668,7 +668,7 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByText("stdio")).toBeInTheDocument()
   })
 
-  it("renders a team template with member count and a link to /agent-teams", () => {
+  it("renders a team template with member count and a link to the squad library", () => {
     render(
       <DiscoverInspector
         category="teamTemplates"
@@ -680,7 +680,7 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("Parallel Review")
     expect(screen.getByTestId("discover-inspector-use-template")).toHaveAttribute(
       "href",
-      "/agent-teams"
+      "/settings?section=squads"
     )
     // Built-in template → getTemplateWarnings not consulted.
     expect(getTemplateWarningsMock).not.toHaveBeenCalled()

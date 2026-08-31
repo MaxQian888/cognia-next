@@ -40,7 +40,7 @@ export const AGENT_TEAM_RUN_ADAPTER_ID = "agent-team"
 
 /** Team workspace deep link — query param, never `[id]` (static export). */
 export function agentTeamWorkspaceHref(teamId: string): string {
-  return `/agent-teams/workspace?teamId=${encodeURIComponent(teamId)}`
+  return `/squads?id=${encodeURIComponent(teamId)}`
 }
 
 /** Team statuses during which the task snapshot is fixed. */

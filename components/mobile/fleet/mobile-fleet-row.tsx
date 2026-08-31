@@ -117,7 +117,7 @@ export function MobileFleetRow({ session }: { session: FleetSession }) {
 
         {session.origin === "managed-team" && session.agentTeamId ? (
           <Link
-            href={`/agent-teams/workspace?teamId=${encodeURIComponent(session.agentTeamId)}`}
+            href={`/squads?id=${encodeURIComponent(session.agentTeamId)}`}
             className="inline-flex text-xs font-medium text-primary underline-offset-4 hover:underline"
           >
             {t("openTeam")}

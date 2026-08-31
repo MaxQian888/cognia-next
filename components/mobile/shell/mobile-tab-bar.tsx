@@ -51,7 +51,7 @@ export const MOBILE_TABS: TabSpec[] = [
     id: "discover",
     href: "/discover",
     icon: CompassIcon,
-    matchPrefixes: ["/discover", "/agent-teams", "/twin"],
+    matchPrefixes: ["/discover", "/squads", "/twin"],
   },
   {
     id: "me",

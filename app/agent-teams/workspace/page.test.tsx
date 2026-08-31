@@ -9,7 +9,7 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(search),
 }))
 
-import AgentTeamsPage from "./page"
+import AgentTeamsWorkspacePage from "./page"
 
 /**
  * ADR-0140 retired this route. A redirect rather than a 404 because the id
@@ -17,32 +17,32 @@ import AgentTeamsPage from "./page"
  * `/squads?id=` still answers it. Dropping the id would land the reader on a
  * list and make them find it again.
  */
-describe("/agent-teams", () => {
+describe("/agent-teams/workspace", () => {
   beforeEach(() => {
     replace.mockClear()
     search = ""
   })
 
   it("sends a bare visit to the squad fleet", async () => {
-    render(<AgentTeamsPage />)
+    render(<AgentTeamsWorkspacePage />)
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/squads"))
   })
 
   it("carries a teamId through, the spelling the workspace route used", async () => {
     search = "teamId=squad-7"
-    render(<AgentTeamsPage />)
+    render(<AgentTeamsWorkspacePage />)
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/squads?id=squad-7"))
   })
 
   it("accepts the id spelling too", async () => {
     search = "id=squad-9"
-    render(<AgentTeamsPage />)
+    render(<AgentTeamsWorkspacePage />)
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/squads?id=squad-9"))
   })
 
   it("escapes an id that would otherwise break the query", async () => {
     search = "teamId=a%2Fb%20c"
-    render(<AgentTeamsPage />)
+    render(<AgentTeamsWorkspacePage />)
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/squads?id=a%2Fb%20c"))
   })
 })

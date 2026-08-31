@@ -160,17 +160,6 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
-    // The page `/squads` replaces. Still routable, and still declared, until
-    // its own removal lands — an undeclared route is treated as unavailable,
-    // which would break it for anyone holding a link.
-    id: "agent-teams",
-    route: "/agent-teams",
-    navigation: false,
-    standalone: "full",
-    companion: "remote",
-    offline: "cached-read",
-  },
-  {
     id: "scheduler",
     route: "/scheduler",
     navigation: true,
@@ -391,6 +380,12 @@ export const standaloneDevicesRequiresHost = {
 } as const
 
 export const INTERNAL_ROUTE_EXEMPTIONS = [
+  // ADR-0140 retired `/agent-teams` and `/agent-teams/workspace`. Both are now
+  // client-side redirects to `/squads` and nothing else, so there is no runtime
+  // to classify. They stay routable rather than 404ing because the team id in
+  // an old bookmark or an old message still resolves.
+  "/agent-teams",
+  "/agent-teams/workspace",
   "/deep-link",
   "/e2e/plugin-ui-surfaces",
   "/island",

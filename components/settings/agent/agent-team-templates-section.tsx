@@ -137,7 +137,7 @@ export function AgentTeamTemplatesSection() {
         createTask,
       })
       log.info("template_used", { templateId: template.id, teamId: team.id })
-      router.push(`/agent-teams/workspace?teamId=${team.id}`)
+      router.push(`/squads?id=${encodeURIComponent(team.id)}`)
     },
     [addTeammate, createTask, createTeam, router]
   )

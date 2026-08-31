@@ -44,8 +44,8 @@ describe("pickActiveTabId", () => {
   it("matches workflows for /workflows/abc", () => {
     expect(pickActiveTabId("/workflows/abc/runs")).toBe("workflows")
   })
-  it("matches discover for /agent-teams", () => {
-    expect(pickActiveTabId("/agent-teams/x")).toBe("discover")
+  it("matches discover for /squads", () => {
+    expect(pickActiveTabId("/squads")).toBe("discover")
   })
   it("matches me for /settings/foo (longest prefix wins over /)", () => {
     expect(pickActiveTabId("/settings/connections")).toBe("me")

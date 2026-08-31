@@ -63,11 +63,7 @@ function AttentionRow({ item, onNavigated }: { item: AttentionItem; onNavigated:
     onNavigated()
   }
   const openTeamWorkspace = () => {
-    router.push(
-      item.teamId
-        ? `/agent-teams/workspace?teamId=${encodeURIComponent(item.teamId)}`
-        : "/agent-teams/workspace"
-    )
+    router.push(item.teamId ? `/squads?id=${encodeURIComponent(item.teamId)}` : "/squads")
     onNavigated()
   }
   /**

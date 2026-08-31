@@ -43,10 +43,10 @@ describe("AgentTeamDispatchPart", () => {
     icons.forEach((svg) => expect(svg).toHaveAttribute("aria-hidden"))
   })
 
-  it("renders an Open-member link pointing at the focus query param", () => {
+  it("renders an Open-member link pointing at the character in Discover", () => {
     render(<AgentTeamDispatchPart part={base} />)
     const link = screen.getByTestId("dispatch-open") as HTMLAnchorElement
-    expect(link.getAttribute("href")).toBe("/agent-teams?focus=alice-id")
+    expect(link.getAttribute("href")).toBe("/discover?category=characters&item=alice-id")
   })
 
   it("preserves whitespace in the task (whitespace-pre-wrap)", () => {
@@ -68,7 +68,7 @@ describe("AgentTeamDispatchPart", () => {
       expect(screen.getByTestId("dispatch-to").textContent).toBe("Alice")
       expect(screen.queryByText(/Investigate the schema/)).toBeNull()
       const link = screen.getByTestId("dispatch-open") as HTMLAnchorElement
-      expect(link.getAttribute("href")).toBe("/agent-teams?focus=alice-id")
+      expect(link.getAttribute("href")).toBe("/discover?category=characters&item=alice-id")
     })
   })
 })

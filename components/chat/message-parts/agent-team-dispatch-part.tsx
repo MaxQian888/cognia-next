@@ -33,7 +33,11 @@ export const AgentTeamDispatchPart = memo(function AgentTeamDispatchPart({
 }: Props) {
   const t = useTranslations("chat.agentTeamDispatch")
   const compact = mode === "simplified"
-  const memberHref = `/agent-teams?focus=${part.to}`
+  // `part.to` is a CHARACTER id, not a squad. This used to point at
+  // `/agent-teams?focus=<character>`, a retired route with a parameter nothing
+  // read, so the link went to a page that could not honour it. Characters live
+  // in Discover, which takes `?category=…&item=…`.
+  const memberHref = `/discover?category=characters&item=${encodeURIComponent(part.to)}`
   return (
     <Card
       className={cn(

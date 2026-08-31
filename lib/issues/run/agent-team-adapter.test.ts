@@ -167,7 +167,7 @@ function makeDeps(over: Partial<AgentTeamRunAdapterDeps> = {}) {
 
 describe("helpers", () => {
   it("builds hrefs, maps priorities, knows the busy statuses", () => {
-    expect(agentTeamWorkspaceHref("t 1")).toBe("/agent-teams/workspace?teamId=t%201")
+    expect(agentTeamWorkspaceHref("t 1")).toBe("/squads?id=t%201")
     expect(issuePriorityToSubAgentPriority("urgent")).toBe("critical")
     expect(issuePriorityToSubAgentPriority("high")).toBe("high")
     expect(issuePriorityToSubAgentPriority("medium")).toBe("normal")
@@ -322,7 +322,7 @@ describe("cancel", () => {
 describe("collectDurableArtifacts", () => {
   it("always links the team workspace, then PRs / branches / sessions of the matching run", async () => {
     expect(await collectDurableArtifacts(run())).toEqual([
-      { label: "Team workspace", href: "/agent-teams/workspace?teamId=team-1" },
+      { label: "Team workspace", href: "/squads?id=team-1" },
     ])
 
     await createAgentTeamRun({
@@ -430,10 +430,10 @@ describe("collectDurableArtifacts", () => {
     })
 
     expect(await collectDurableArtifacts(run())).toEqual([
-      { label: "Team workspace", href: "/agent-teams/workspace?teamId=team-1" },
+      { label: "Team workspace", href: "/squads?id=team-1" },
       { label: "PR #7", href: "https://gh/pr/7" },
       { label: "Layer 2", href: "https://gh/pr/x" },
-      { label: "Branch feat/x", href: "/agent-teams/workspace?teamId=team-1&tab=worktrees" },
+      { label: "Branch feat/x", href: "/squads?id=team-1&tab=worktrees" },
       { label: "Session (mate)", href: "/?session=sess-1" },
     ])
     // Without a task ref every child run counts.

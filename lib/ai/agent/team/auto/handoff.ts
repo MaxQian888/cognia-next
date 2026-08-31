@@ -143,7 +143,7 @@ export async function materializeExternalHandoff(
       level: "info",
       title: "Team awaiting external pickup",
       body: `"${teamName}" is marked for external pickup — an external agent can claim it via the Cognia bridge (team_list / team_run).`,
-      href: `/agent-teams/workspace?teamId=${result.teamId}`,
+      href: `/squads?id=${result.teamId}`,
       sourceRef: { kind: "team-run", id: result.teamId },
     })
   } catch (err) {

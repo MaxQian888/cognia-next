@@ -11,7 +11,7 @@ describe("resolveRouteBootCapabilities", () => {
     ["/me/memory-settings", "", ["knowledge-agents"]],
     ["/me/agent-teams-settings", "", ["knowledge-agents"]],
     ["/me/ocr", "", ["knowledge-agents"]],
-    ["/agent-teams", "", ["knowledge-agents", "desktop-tools"]],
+    ["/squads", "", ["knowledge-agents", "desktop-tools"]],
     ["/me/scheduler", "", ["workflow-automation"]],
     ["/me/workflows-settings", "", ["workflow-automation"]],
     ["/me/a2ui", "", ["workflow-automation"]],

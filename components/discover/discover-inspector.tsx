@@ -228,7 +228,7 @@ function TeamInspector({ team }: { team: Team }) {
         className="self-start"
         data-testid="discover-inspector-open-team"
       >
-        <Link href={`/agent-teams/workspace?teamId=${encodeURIComponent(team.id)}`}>
+        <Link href={`/squads?id=${encodeURIComponent(team.id)}`}>
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>
@@ -913,7 +913,7 @@ function TeamTemplateInspector({ template }: { template: DiscoverTeamTemplate })
         className="self-start"
         data-testid="discover-inspector-use-template"
       >
-        <Link href="/agent-teams">
+        <Link href="/settings?section=squads">
           <ExternalLinkIcon className="size-4" />
           {t("inspector.useTemplate")}
         </Link>

@@ -26,30 +26,21 @@ jest.mock("next/navigation", () => ({
 }))
 
 jest.mock("@cognia/logging", () => {
-  const makeStub = () => ({
+  // Namespace-agnostic. Listing only the `loggers.*` names a suite happens to
+  // reach means the day an import chain grows a new one the whole file dies at
+  // load and zero tests run.
+  const child: Record<string, unknown> = {
     debug: jest.fn(),
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
     trace: jest.fn(),
-    fatal: jest.fn(),
-    child: () => makeStub(),
-  })
+  }
+  child.child = () => child
   return {
-    loggers: {
-      shell: {
-        info: (...args: unknown[]) => logInfo(...args),
-        warn: (...args: unknown[]) => logWarn(...args),
-        error: jest.fn(),
-        child: () => makeStub(),
-      },
-      ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), child: () => makeStub() },
-      // `agent` is reached transitively via the agent-team store import chain
-      // (actions.slice.ts calls `loggers.agent.child("team-store")` at module
-      // load); without it the whole suite fails to load.
-      agent: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), child: () => makeStub() },
-    },
-    createLogger: () => makeStub(),
+    createLogger: () => child,
+    logger: child,
+    loggers: new Proxy({} as Record<string, unknown>, { get: () => child }),
   }
 })
 

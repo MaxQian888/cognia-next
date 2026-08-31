@@ -34,7 +34,7 @@ describe("TeamCard", () => {
     render(<TeamCard team={mkTeam()} />)
     expect(screen.getByText("Research Squad")).toBeInTheDocument()
     const link = screen.getByTestId("team-card-t1")
-    expect(link).toHaveAttribute("href", "/agent-teams/workspace?teamId=t1")
+    expect(link).toHaveAttribute("href", "/squads?id=t1")
   })
 
   it("shows the member count and description", () => {
@@ -55,7 +55,7 @@ describe("TeamCard", () => {
     render(<TeamCard team={mkTeam({ id: "a/b c" })} />)
     expect(screen.getByTestId("team-card-a/b c")).toHaveAttribute(
       "href",
-      "/agent-teams/workspace?teamId=a%2Fb%20c"
+      "/squads?id=a%2Fb%20c"
     )
   })
 })
