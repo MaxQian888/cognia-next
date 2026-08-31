@@ -10,32 +10,40 @@
  * Code's Remote Explorer all put SSH targets in the same list as everything
  * else.
  *
- * Two things this deliberately does not do:
+ * What that directory owes the reader is the same thing it owes for every
+ * other machine: where it is, how it authenticates, what it goes through, and
+ * what it will open. Those four facts were all already in `SshHostProfile` and
+ * none of them were on screen, so the pane could show a Connect button for a
+ * bastion-backed host and never mention the bastion.
  *
- *  * **It does not edit.** Ports, keys, jump chains and forwarding rules stay
- *    in the Settings editor. A fleet view that grew a second, smaller form for
- *    the same profile would be two places to change a port.
- *  * **It does not pretend a phone can connect.** `ssh_terminal_*` is
- *    `target: "client"` with `capability: client.local`, and
- *    `TerminalHost::spawn_local` refuses a non-local identity, so a paired
- *    device or a browser genuinely cannot open one. The button renders,
- *    disabled, with the reason. Hiding it would merge "not supported here"
- *    with "you have no SSH hosts".
+ * One thing this deliberately does not do: **it does not edit.** Ports, keys,
+ * jump chains and forwarding rules stay in the Settings editor. A fleet view
+ * that grew a second, smaller form for the same profile would be two places to
+ * change a port.
  */
 
 import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { KeyRoundIcon, PlugZapIcon, SettingsIcon, TerminalIcon } from "lucide-react"
+import { ArrowRightIcon, KeyRoundIcon, PlugZapIcon, SettingsIcon, TerminalIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { DeviceRow } from "@/lib/devices/types"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
+import {
+  formatLocalForward,
+  formatRemoteForward,
+  resolveJumpChain,
+} from "@/lib/terminal/ssh-forwarding"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
+import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
 import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+
+import { DeviceFactList, DeviceFactRow } from "./device-visuals"
 
 /** Default geometry for a session opened from a console row rather than a pane. */
 const DEFAULT_ROWS = 24
@@ -63,6 +71,46 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
     [profileId, hosts]
   )
   const local = isTauri()
+
+  /**
+   * Resolved from the saved set, not from `launch`.
+   *
+   * `resolveSshHostLaunch` answers "can this be launched by id alone", and it
+   * says `credentialRequired` without handing back the profile. Deriving the
+   * facts from it would blank the whole card for a password host with nothing
+   * in the keyring, which is exactly the host a reader most needs described:
+   * they are about to go and fix it. Only `unknownHost` has no profile at all.
+   */
+  const profile = useMemo(
+    () => (profileId ? (hosts.find((host) => host.id === profileId) ?? null) : null),
+    [hosts, profileId]
+  )
+
+  /**
+   * The resolved chain, or `null` when it cannot be walked.
+   *
+   * `null` does not mean "direct". It means a missing profile, a cycle, or a
+   * chain past `MAX_JUMP_DEPTH`, all of which `buildForwardedConnectRequest`
+   * refuses. A direct host is a chain of length one, holding only itself.
+   */
+  const chain = useMemo(() => (profile ? resolveJumpChain(profile, hosts) : null), [profile, hosts])
+  const chainBroken = Boolean(profile?.jumpHostId) && chain === null
+
+  const forwards = useMemo(() => {
+    if (!profile) return []
+    return [
+      ...(profile.localForwards ?? []).map((forward) => ({
+        id: `local:${forward.id}`,
+        text: formatLocalForward(forward),
+        enabled: forward.enabled,
+      })),
+      ...(profile.remoteForwards ?? []).map((forward) => ({
+        id: `remote:${forward.id}`,
+        text: formatRemoteForward(forward),
+        enabled: forward.enabled,
+      })),
+    ]
+  }, [profile])
 
   const onConnect = useCallback(async () => {
     if (launch.kind !== "ready") return
@@ -121,11 +169,69 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         </Alert>
       ) : null}
 
+      {/*
+        A broken chain is its own failure, not a direct connection. Saying so
+        here matters more than anywhere else in this card, because the
+        alternative reading is that the bastion is fine and something else is
+        wrong, which sends the user looking in the wrong place.
+      */}
+      {chainBroken ? (
+        <Alert variant="destructive" data-testid="ssh-chain-broken">
+          <AlertTitle>{t("chainBrokenTitle")}</AlertTitle>
+          <AlertDescription>{t("chainBrokenBody")}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {profile ? (
+        <DeviceFactList>
+          <DeviceFactRow label={t("facts.address")} mono>
+            {`${profile.username}@${profile.host}:${profile.port}`}
+          </DeviceFactRow>
+          <DeviceFactRow label={t("facts.auth")}>
+            <SshAuthFact profile={profile} />
+          </DeviceFactRow>
+          <DeviceFactRow label={t("facts.route")}>
+            <SshRouteFact chain={chain} broken={chainBroken} />
+          </DeviceFactRow>
+        </DeviceFactList>
+      ) : null}
+
+      {profile ? (
+        <div className="space-y-1.5" data-testid="ssh-forwards">
+          <p className="text-[11px] leading-tight text-muted-foreground">{t("facts.forwards")}</p>
+          {forwards.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("forwardsNone")}</p>
+          ) : (
+            <ul className="space-y-1">
+              {forwards.map((forward) => (
+                <li key={forward.id} className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-[11px] break-all">{forward.text}</span>
+                  {/*
+                    A rule that exists and a rule that runs are different
+                    facts. `enabled` is read as a plain boolean on the Rust
+                    side and fails closed, so a disabled rule opens nothing and
+                    must not be drawn as though it did.
+                  */}
+                  <Badge variant="outline" className="font-normal">
+                    {forward.enabled ? t("forwardEnabled") : t("forwardDisabled")}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+          {/*
+            Both ends bind loopback and that is a constant rather than a
+            setting, so it is stated once instead of repeated per rule.
+          */}
+          <p className="text-[11px] text-muted-foreground">{t("forwardsLoopback")}</p>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
           onClick={() => void onConnect()}
-          disabled={!local || launch.kind !== "ready" || busy}
+          disabled={!local || launch.kind !== "ready" || chainBroken || busy}
           data-testid="ssh-connect"
         >
           {launch.kind === "credentialRequired" ? (
@@ -154,5 +260,76 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         {t("shellOnly")}
       </p>
     </div>
+  )
+}
+
+/**
+ * How this host authenticates, and whether the thing it needs is present.
+ *
+ * The second half is the point. "Password" alone does not tell you the connect
+ * button will fail, and `agent` needs nothing stored at all, so a single
+ * "secret saved" indicator across all three methods would be wrong for two of
+ * them.
+ */
+function SshAuthFact({ profile }: { profile: SshHostProfile }) {
+  const t = useTranslations("devices.ssh")
+  if (profile.authMethod === "agent") return <>{t("auth.agent")}</>
+  if (profile.authMethod === "privateKey") {
+    return (
+      <span className="flex flex-col gap-0.5">
+        <span>{t("auth.privateKey")}</span>
+        {profile.privateKeyPath ? (
+          <span className="font-mono text-[11px] font-normal break-all text-muted-foreground">
+            {profile.privateKeyPath}
+          </span>
+        ) : null}
+        {profile.credentialRef ? (
+          <span className="text-[11px] font-normal text-muted-foreground">
+            {t("auth.passphraseSaved")}
+          </span>
+        ) : null}
+      </span>
+    )
+  }
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span>{t("auth.password")}</span>
+      <span className="text-[11px] font-normal text-muted-foreground">
+        {profile.credentialRef ? t("auth.passwordSaved") : t("auth.passwordMissing")}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * The chain, outermost bastion first, drawn as the route it is.
+ *
+ * `ssh_config(5)` supports several comma-separated `ProxyJump` hops, and each
+ * one authenticates and is TOFU-verified separately, so a chain is a list of
+ * machines you are trusting rather than a transparent pipe. Flattening it to
+ * "via a bastion" would hide how many.
+ */
+function SshRouteFact({
+  chain,
+  broken,
+}: {
+  chain: readonly SshHostProfile[] | null
+  broken: boolean
+}) {
+  const t = useTranslations("devices.ssh")
+  if (broken) return <span className="text-destructive">{t("route.broken")}</span>
+  if (!chain || chain.length <= 1) return <>{t("route.direct")}</>
+  return (
+    <span className="flex flex-wrap items-center gap-1" data-testid="ssh-jump-chain">
+      <span className="text-muted-foreground">{t("route.thisMachine")}</span>
+      {chain.map((hop) => (
+        <span key={hop.id} className="flex items-center gap-1">
+          <ArrowRightIcon className="size-3 text-muted-foreground" aria-hidden />
+          <span className="font-mono text-[11px] font-normal break-all">
+            {`${hop.username}@${hop.host}:${hop.port}`}
+          </span>
+        </span>
+      ))}
+    </span>
   )
 }

@@ -154,7 +154,32 @@
     "credentialRequiredTitle": "Password not saved",
     "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting.",
     "unknownHostTitle": "Saved profile not found",
-    "unknownHostBody": "Nothing in Settings → Terminal matches {ref}. The profile was renamed or removed after this row was listed; reopen Settings to add it back."
+    "unknownHostBody": "Nothing in Settings → Terminal matches {ref}. The profile was renamed or removed after this row was listed; reopen Settings to add it back.",
+    "facts": {
+      "address": "Address",
+      "auth": "Authentication",
+      "route": "Route",
+      "forwards": "Port forwarding"
+    },
+    "auth": {
+      "password": "Password",
+      "passwordSaved": "A password is stored in this machine's keyring.",
+      "passwordMissing": "No password stored, so connecting will fail.",
+      "privateKey": "Private key",
+      "passphraseSaved": "A passphrase is stored in this machine's keyring.",
+      "agent": "ssh-agent"
+    },
+    "route": {
+      "direct": "Direct",
+      "thisMachine": "This machine",
+      "broken": "Cannot be resolved"
+    },
+    "chainBrokenTitle": "Jump chain cannot be resolved",
+    "chainBrokenBody": "A host on the way to this one is missing, points back at itself, or the chain is longer than five hops. Connecting is refused rather than falling back to a direct connection, which would reach a different machine. Fix the jump host in Settings → Terminal.",
+    "forwardsNone": "No forwarding rules.",
+    "forwardEnabled": "On",
+    "forwardDisabled": "Off",
+    "forwardsLoopback": "Both ends always bind 127.0.0.1. A forward reachable from the network would turn one machine into an open relay for the other."
   },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",

@@ -9086,13 +9086,38 @@
       "pairedTitle": "Paired devices"
     },
     "ssh": {
+      "auth": {
+        "agent": "ssh-agent",
+        "passphraseSaved": "A passphrase is stored in this machine's keyring.",
+        "password": "Password",
+        "passwordMissing": "No password stored, so connecting will fail.",
+        "passwordSaved": "A password is stored in this machine's keyring.",
+        "privateKey": "Private key"
+      },
+      "chainBrokenBody": "A host on the way to this one is missing, points back at itself, or the chain is longer than five hops. Connecting is refused rather than falling back to a direct connection, which would reach a different machine. Fix the jump host in Settings → Terminal.",
+      "chainBrokenTitle": "Jump chain cannot be resolved",
       "connect": "Open a shell",
       "connecting": "Connecting…",
       "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting.",
       "credentialRequiredTitle": "Password not saved",
       "edit": "Edit in Settings",
+      "facts": {
+        "address": "Address",
+        "auth": "Authentication",
+        "forwards": "Port forwarding",
+        "route": "Route"
+      },
+      "forwardDisabled": "Off",
+      "forwardEnabled": "On",
+      "forwardsLoopback": "Both ends always bind 127.0.0.1. A forward reachable from the network would turn one machine into an open relay for the other.",
+      "forwardsNone": "No forwarding rules.",
       "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
       "localOnlyTitle": "This machine only",
+      "route": {
+        "broken": "Cannot be resolved",
+        "direct": "Direct",
+        "thisMachine": "This machine"
+      },
       "shellOnly": "A shell and nothing else. No agent, workspace or sandbox runs over SSH.",
       "title": "SSH",
       "unknownHostBody": "Nothing in Settings → Terminal matches {ref}. The profile was renamed or removed after this row was listed; reopen Settings to add it back.",

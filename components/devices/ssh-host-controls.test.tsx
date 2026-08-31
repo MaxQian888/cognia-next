@@ -151,3 +151,97 @@ it("renders nothing for a row that is not an SSH host", () => {
   )
   expect(container).toBeEmptyDOMElement()
 })
+
+/**
+ * Where it is, how it authenticates and what it goes through were all already
+ * in `SshHostProfile`, and none of them reached the screen. A directory that
+ * lists a machine and can say nothing about it is a link, not a console.
+ */
+it("states the address, the auth method and whether the secret is present", () => {
+  sshHosts = [{ ...PROFILE, authMethod: "password", credentialRef: "s1" }]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByText("deploy@10.0.4.21:22")).toBeInTheDocument()
+  expect(screen.getByText("devices.ssh.auth.password")).toBeInTheDocument()
+  expect(screen.getByText("devices.ssh.auth.passwordSaved")).toBeInTheDocument()
+})
+
+it("separates a stored password from a missing one, because only one of them connects", () => {
+  sshHosts = [{ ...PROFILE, authMethod: "password" }]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByText("devices.ssh.auth.passwordMissing")).toBeInTheDocument()
+})
+
+/** `agent` holds its own key material, so "no secret stored" is not a defect there. */
+it("does not claim a missing secret for an agent host", () => {
+  sshHosts = [{ ...PROFILE, authMethod: "agent" }]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByText("devices.ssh.auth.agent")).toBeInTheDocument()
+  expect(screen.queryByText("devices.ssh.auth.passwordMissing")).not.toBeInTheDocument()
+  expect(screen.getByTestId("ssh-connect")).toBeEnabled()
+})
+
+it("calls a host with no jump host direct", () => {
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByText("devices.ssh.route.direct")).toBeInTheDocument()
+  expect(screen.queryByTestId("ssh-jump-chain")).not.toBeInTheDocument()
+})
+
+/**
+ * Every hop authenticates and is TOFU-verified in its own right, so the chain
+ * is a list of machines being trusted. Collapsing it to "via a bastion" would
+ * hide how many.
+ */
+it("draws every hop of a jump chain, outermost first", () => {
+  const bastion = { ...PROFILE, id: "s0", name: "bastion", host: "edge.example", username: "jump" }
+  sshHosts = [bastion, { ...PROFILE, jumpHostId: "s0" }]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  const chain = screen.getByTestId("ssh-jump-chain")
+  expect(chain).toHaveTextContent("jump@edge.example:22")
+  expect(chain).toHaveTextContent("deploy@10.0.4.21:22")
+})
+
+/**
+ * A chain that cannot be walked is not a direct connection. `resolveJumpChain`
+ * returns null for a missing hop or a cycle and `buildForwardedConnectRequest`
+ * refuses, so connecting direct would reach a machine the user did not name.
+ */
+it("refuses a broken jump chain rather than quietly connecting direct", () => {
+  sshHosts = [{ ...PROFILE, jumpHostId: "gone" }]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByTestId("ssh-chain-broken")).toBeInTheDocument()
+  expect(screen.getByText("devices.ssh.route.broken")).toBeInTheDocument()
+  expect(screen.getByTestId("ssh-connect")).toBeDisabled()
+})
+
+it("lists forwarding rules in both directions and marks the ones that are off", () => {
+  sshHosts = [
+    {
+      ...PROFILE,
+      localForwards: [
+        { id: "l1", localPort: 8080, remoteHost: "db.internal", remotePort: 5432, enabled: true },
+      ],
+      remoteForwards: [
+        { id: "r1", remotePort: 9000, localHost: "localhost", localPort: 3000, enabled: false },
+      ],
+    },
+  ]
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  const forwards = screen.getByTestId("ssh-forwards")
+  expect(forwards).toHaveTextContent("127.0.0.1:8080 → db.internal:5432")
+  expect(forwards).toHaveTextContent("remote 127.0.0.1:9000 → localhost:3000")
+  expect(forwards).toHaveTextContent("devices.ssh.forwardEnabled")
+  expect(forwards).toHaveTextContent("devices.ssh.forwardDisabled")
+})
+
+it("says a host has no forwarding rules rather than showing an empty list", () => {
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByTestId("ssh-forwards")).toHaveTextContent("devices.ssh.forwardsNone")
+})
+
+/** No profile, no facts: the fact block must not render placeholders for a row it cannot resolve. */
+it("shows no facts for a row whose profile is gone", () => {
+  sshHosts = []
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.queryByTestId("ssh-forwards")).not.toBeInTheDocument()
+  expect(screen.queryByText("devices.ssh.route.direct")).not.toBeInTheDocument()
+})

@@ -154,7 +154,32 @@
     "credentialRequiredTitle": "未保存密码",
     "credentialRequiredBody": "{name} 使用密码认证但没有保存密码。请先在 设置 → 终端 中添加。",
     "unknownHostTitle": "未找到已保存的配置",
-    "unknownHostBody": "设置 → 终端中没有与 {ref} 匹配的配置。它可能在该行列出后被重命名或删除；请打开设置重新添加。"
+    "unknownHostBody": "设置 → 终端中没有与 {ref} 匹配的配置。它可能在该行列出后被重命名或删除；请打开设置重新添加。",
+    "facts": {
+      "address": "地址",
+      "auth": "认证方式",
+      "route": "连接路径",
+      "forwards": "端口转发"
+    },
+    "auth": {
+      "password": "密码",
+      "passwordSaved": "密码已保存在这台机器的钥匙串中。",
+      "passwordMissing": "未保存密码，连接会失败。",
+      "privateKey": "私钥",
+      "passphraseSaved": "私钥口令已保存在这台机器的钥匙串中。",
+      "agent": "ssh-agent"
+    },
+    "route": {
+      "direct": "直连",
+      "thisMachine": "本机",
+      "broken": "无法解析"
+    },
+    "chainBrokenTitle": "跳板链无法解析",
+    "chainBrokenBody": "通往这台主机的某一跳缺失、指回了自己，或整条链超过五跳。此时会拒绝连接，而不是退回直连——直连到达的是另一台机器。请在 设置 → 终端 中修正跳板主机。",
+    "forwardsNone": "没有转发规则。",
+    "forwardEnabled": "已启用",
+    "forwardDisabled": "已停用",
+    "forwardsLoopback": "两端始终绑定 127.0.0.1。可从网络访问的转发会把一台机器变成另一台机器的开放中继。"
   },
   "title": "设备",
   "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
