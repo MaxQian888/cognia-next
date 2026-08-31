@@ -613,6 +613,46 @@ describe("TerminalDock", () => {
       expect(mockSpawnFromDock).not.toHaveBeenCalled()
     })
 
+    /**
+     * A changed key is the one connection failure a toast cannot resolve: the
+     * user has to see both fingerprints and decide. The dock used to put the
+     * raw `ssh_host_key_changed:{…}` payload in the toast body instead, with
+     * the only remedy in a Settings screen nothing pointed at.
+     */
+    it("adjudicates a changed host key instead of toasting the native payload", async () => {
+      seedSshHost()
+      seedProjectAndSession()
+      mockConnectSsh.mockResolvedValueOnce({
+        kind: "error",
+        message: `ssh_host_key_changed:${JSON.stringify({
+          host: "prod.example.com",
+          port: 22,
+          knownFingerprint: "SHA256:old",
+          presentedFingerprint: "SHA256:new",
+        })}`,
+      })
+      render(<TerminalDock />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
+      })
+
+      expect(screen.getByTestId("ssh-host-key-presented")).toHaveTextContent("SHA256:new")
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it("keeps the ordinary failure toast for everything else", async () => {
+      seedSshHost()
+      seedProjectAndSession()
+      mockConnectSsh.mockResolvedValueOnce({ kind: "error", message: "connection refused" })
+      render(<TerminalDock />)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("dock-ssh-ssh-1"))
+      })
+
+      expect(toastError).toHaveBeenCalled()
+      expect(screen.queryByTestId("ssh-host-key-dialog")).not.toBeInTheDocument()
+    })
+
     it("sends a password host with no stored credential back to settings", async () => {
       seedSshHost({ authMethod: "password", credentialRef: undefined })
       seedProjectAndSession()

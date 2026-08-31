@@ -340,3 +340,33 @@ describe("Test connection", () => {
     expect(screen.getByTestId("ssh-probe")).toBeDisabled()
   })
 })
+
+/**
+ * The failure that had no way out from here. A changed key arrives as the raw
+ * `ssh_host_key_changed:{…}` JSON, and the card used to print it into the error
+ * paragraph, where it told the user nothing and offered nothing.
+ */
+it("adjudicates a changed host key instead of printing the native payload", async () => {
+  const change = JSON.stringify({
+    host: "10.0.4.21",
+    port: 22,
+    knownFingerprint: "SHA256:old",
+    presentedFingerprint: "SHA256:new",
+  })
+  const connect = jest
+    .fn()
+    .mockResolvedValue({ kind: "error", message: `ssh_host_key_changed:${change}` })
+  render(<SshHostControls row={row()} connect={connect} />)
+  await userEvent.click(screen.getByTestId("ssh-connect"))
+  expect(await screen.findByTestId("ssh-host-key-dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("ssh-host-key-presented")).toHaveTextContent("SHA256:new")
+  expect(screen.queryByTestId("ssh-connect-error")).not.toBeInTheDocument()
+})
+
+it("keeps its own error line for every other failure", async () => {
+  const connect = jest.fn().mockResolvedValue({ kind: "error", message: "connection refused" })
+  render(<SshHostControls row={row()} connect={connect} />)
+  await userEvent.click(screen.getByTestId("ssh-connect"))
+  expect(await screen.findByTestId("ssh-connect-error")).toHaveTextContent("connection refused")
+  expect(screen.queryByTestId("ssh-host-key-dialog")).not.toBeInTheDocument()
+})

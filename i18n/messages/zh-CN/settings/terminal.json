@@ -363,7 +363,8 @@
       "title": "该服务器的主机密钥已变更",
       "trust": "忘记旧密钥并信任这一个",
       "trusting": "正在忘记…",
-      "unknownFingerprint": "无法从 known_hosts 中读取"
+      "unknownFingerprint": "无法从 known_hosts 中读取",
+      "desktopOnly": "忘记旧密钥需要写入这台机器的 known_hosts，只有桌面应用能做到。两个指纹都在上面：请通过其他渠道核实新指纹，然后在桌面端重新信任。"
     },
     "newName": "新 SSH 主机",
     "remove": "移除 SSH 主机",

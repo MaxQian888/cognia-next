@@ -16,14 +16,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { connectSshFromDock } from "@/lib/terminal/ssh-connect"
-import {
-  forgetSshHostKey,
-  parseHostKeyChange,
-  type SshHostKeyChange,
-} from "@/lib/terminal/ssh-host-key"
+import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
 import { SshConfigImportDialog } from "./ssh-config-import-dialog"
 import { SshForwardingEditor } from "./ssh-forwarding-editor"
-import { SshHostKeyDialog } from "./ssh-host-key-dialog"
 import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 import { clearSshCredential, saveSshCredential } from "@/lib/terminal/ssh-credentials"
 import { nextSshHostId, type SshAuthMethod, type SshHostProfile } from "@/lib/terminal/ssh-profiles"
@@ -46,7 +41,12 @@ export function SshHosts() {
   const hosts = (terminal.sshHosts ?? []) as SshHostProfile[]
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [hostKeyChange, setHostKeyChange] = useState<SshHostKeyChange | null>(null)
+  /**
+   * The changed-host-key flow, which used to live only here. It is a hook now
+   * so the device console and the terminal dock get the same adjudication
+   * instead of printing the raw native string.
+   */
+  const hostKeyGuard = useSshHostKeyChange()
   const hostSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(
@@ -149,11 +149,7 @@ export function SshHosts() {
       if (result.kind === "error") {
         // A changed server key is refused before anything else can happen, and
         // it is the one failure the user must adjudicate rather than retry.
-        const hostKeyChange = parseHostKeyChange(result.message)
-        if (hostKeyChange) {
-          setHostKeyChange(hostKeyChange)
-          return
-        }
+        if (hostKeyGuard.capture(result.message)) return
         // A missing or empty agent is the common first-run stumble, and the
         // generic failure title buries it. The native side reports both cases
         // as "SSH agent …", and the exact reason still rides in the body.
@@ -362,21 +358,7 @@ export function SshHosts() {
         />
       </div>
 
-      <SshHostKeyDialog
-        change={hostKeyChange}
-        onDismiss={() => setHostKeyChange(null)}
-        onTrust={async (change) => {
-          try {
-            await forgetSshHostKey(change.host, change.port)
-            setHostKeyChange(null)
-            toast.success(t("toasts.hostKeyForgotten"))
-          } catch (error) {
-            toast.error(t("toasts.hostKeyForgetFailed"), {
-              description: error instanceof Error ? error.message : String(error),
-            })
-          }
-        }}
-      />
+      {hostKeyGuard.dialog}
     </section>
   )
 }

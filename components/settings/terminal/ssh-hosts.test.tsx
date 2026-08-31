@@ -67,6 +67,18 @@ jest.mock("@/lib/terminal/host-profiles", () => ({
   syncTerminalHostProfiles: (...args: unknown[]) => mockSyncHostProfiles(...args),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
+/**
+ * The same switch, through the canonical detector.
+ *
+ * `ssh-hosts.tsx` reads `@/lib/tauri`, while the shared host-key guard reads
+ * `@/lib/platform/detect`, which is where `isTauri` actually lives. Driving
+ * only the barrel would leave the guard believing it was on a companion and
+ * withholding the re-trust button in every test.
+ */
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: () => mockTauri,
+}))
 const mockForgetHostKey = jest.fn(async (..._args: unknown[]) => 1)
 jest.mock("@/lib/terminal/ssh-host-key", () => ({
   ...jest.requireActual("@/lib/terminal/ssh-host-key"),

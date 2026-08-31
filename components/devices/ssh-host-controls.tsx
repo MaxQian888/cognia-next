@@ -38,6 +38,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useSshProbe, type SshProbeState } from "@/hooks/devices/use-ssh-probe"
+import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
 import type { DeviceRow } from "@/lib/devices/types"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
 import {
@@ -105,6 +106,12 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
   const chainBroken = Boolean(profile?.jumpHostId) && chain === null
 
   const { state: probeState, probe } = useSshProbe(profile, hosts)
+  /**
+   * A changed host key was the one failure this card could not resolve. It
+   * arrived as the raw `ssh_host_key_changed:{…}` string in the error line,
+   * with the only remedy in a Settings screen nothing pointed at.
+   */
+  const hostKeyGuard = useSshHostKeyChange()
 
   const forwards = useMemo(() => {
     if (!profile) return []
@@ -136,11 +143,15 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         // here would re-render this card on every keystroke in any terminal.
         store: useTerminalStore.getState(),
       })
-      if (outcome.kind === "error") setError(outcome.message)
+      if (outcome.kind === "error") {
+        // Adjudicated rather than printed. The raw payload is JSON and tells
+        // the user nothing they can act on.
+        if (!hostKeyGuard.capture(outcome.message)) setError(outcome.message)
+      }
     } finally {
       setBusy(false)
     }
-  }, [connect, hosts, launch])
+  }, [connect, hostKeyGuard, hosts, launch])
 
   if (row.kind !== "ssh-host") return null
 
@@ -286,6 +297,8 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
       </div>
 
       <SshProbeResult state={probeState} />
+
+      {hostKeyGuard.dialog}
 
       {error ? (
         <p role="alert" className="text-xs text-destructive" data-testid="ssh-connect-error">

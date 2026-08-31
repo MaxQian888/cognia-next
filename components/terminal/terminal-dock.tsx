@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { type TerminalProfile } from "@/lib/terminal/profiles"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
+import { useSshHostKeyChange } from "@/hooks/terminal/use-ssh-host-key-change"
 import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
 import { nextDockPosition } from "@/lib/terminal/dock-position"
 import { spawnDefaultTerminal } from "@/lib/terminal/spawn-default"
@@ -136,6 +137,12 @@ export function TerminalDock() {
   // sites once spelled this `settings.terminalSettings`, a key `AppSettings`
   // has never declared, so every saved host silently resolved to `undefined`.
   const settingsSshHosts = useSettingsStore(selectSavedSshHosts)
+  /**
+   * The changed-host-key adjudication, shared with Settings and the device
+   * console. The dock previously toasted the raw native payload, which is JSON
+   * and offers the user nothing to act on.
+   */
+  const hostKeyGuard = useSshHostKeyChange()
 
   const projectKey = activeProjectId ?? ""
 
@@ -269,6 +276,10 @@ export function TerminalDock() {
         store: useTerminalStore.getState(),
       })
       if (result.kind === "error") {
+        // A changed host key is the one connection failure a toast cannot
+        // resolve: the user has to see both fingerprints and decide. The dock
+        // used to print the raw `ssh_host_key_changed:{…}` payload instead.
+        if (hostKeyGuard.capture(result.message)) return
         toast.error(t("spawnError", { message: result.message }))
         return
       }
@@ -276,7 +287,7 @@ export function TerminalDock() {
         description: result.hostKeyFingerprint,
       })
     },
-    [activeProjectId, settingsSshHosts, t]
+    [activeProjectId, hostKeyGuard, settingsSshHosts, t]
   )
 
   /** Plain "+ New": the configured default profile, else the resolved shell. */
@@ -837,6 +848,8 @@ export function TerminalDock() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {hostKeyGuard.dialog}
     </div>
   )
 }

@@ -36189,6 +36189,7 @@
         "hostKeyChanged": {
           "body": "{host}:{port} presented a different key than the one saved on the first connection. This happens when a server is rebuilt or reinstalled — but it is also what a machine-in-the-middle looks like. The connection was refused.",
           "cancel": "Keep the connection blocked",
+          "desktopOnly": "Forgetting the old key writes to this machine's known_hosts, which only the desktop app can do. Both fingerprints are above: verify the new one out of band, then re-trust it from the desktop.",
           "expected": "Fingerprint you trusted",
           "guidance": "Only continue if you can confirm the new fingerprint out of band — from the server console, your provider's dashboard, or whoever rebuilt it.",
           "presented": "Fingerprint presented now",

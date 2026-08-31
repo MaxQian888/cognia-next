@@ -33,9 +33,27 @@ export interface SshHostKeyDialogProps {
   onDismiss: () => void
   /** Forget the stored key so the next connection re-learns this one. */
   onTrust: (change: SshHostKeyChange) => Promise<void> | void
+  /**
+   * Whether re-trusting can happen from this shell.
+   *
+   * `ssh_forget_host_key` is a desktop-only command, but the mismatch itself is
+   * worth showing wherever a connection was attempted: both fingerprints are
+   * exactly what the user needs in order to go and verify one out of band.
+   * Defaults to `true` so the Settings editor, which only ever runs on the
+   * desktop, is unchanged.
+   */
+  canTrust?: boolean
+  /** Shown in place of the re-trust button when {@link canTrust} is false. */
+  unavailableReason?: string
 }
 
-export function SshHostKeyDialog({ change, onDismiss, onTrust }: SshHostKeyDialogProps) {
+export function SshHostKeyDialog({
+  change,
+  onDismiss,
+  onTrust,
+  canTrust = true,
+  unavailableReason,
+}: SshHostKeyDialogProps) {
   const t = useTranslations("settings.terminal.ssh.hostKeyChanged")
   const [busy, setBusy] = useState(false)
 
@@ -92,23 +110,37 @@ export function SshHostKeyDialog({ change, onDismiss, onTrust }: SshHostKeyDialo
 
         <p className="text-[11px] text-muted-foreground">{t("guidance")}</p>
 
+        {/*
+          Said in place of the button rather than instead of the dialog. A
+          companion that hides the whole warning leaves the user with a bare
+          connection failure and no fingerprints, which is strictly less than
+          it can give them.
+        */}
+        {!canTrust && unavailableReason ? (
+          <p className="text-[11px] text-muted-foreground" data-testid="ssh-host-key-desktop-only">
+            {unavailableReason}
+          </p>
+        ) : null}
+
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy} data-testid="ssh-host-key-cancel">
             {t("cancel")}
           </AlertDialogCancel>
-          <AlertDialogAction
-            disabled={busy}
-            onClick={(event) => {
-              // Keep the dialog mounted through the await so the button can
-              // stay disabled; the caller closes it once the key is forgotten.
-              event.preventDefault()
-              void trust()
-            }}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            data-testid="ssh-host-key-trust"
-          >
-            {busy ? t("trusting") : t("trust")}
-          </AlertDialogAction>
+          {canTrust ? (
+            <AlertDialogAction
+              disabled={busy}
+              onClick={(event) => {
+                // Keep the dialog mounted through the await so the button can
+                // stay disabled; the caller closes it once the key is forgotten.
+                event.preventDefault()
+                void trust()
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="ssh-host-key-trust"
+            >
+              {busy ? t("trusting") : t("trust")}
+            </AlertDialogAction>
+          ) : null}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
