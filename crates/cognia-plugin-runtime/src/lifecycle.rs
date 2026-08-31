@@ -4,7 +4,7 @@
 //! installed directory, runtime state JSON, and last known status. The TS
 //! `PluginManager` calls them via `invoke('plugin_*')` from
 //! `lib/plugin/core/manager.ts`, `lifecycle/rollback.ts`, `core/transport.ts`,
-//! and `devtools/hot-reload.ts`. Each handler is intentionally small — it
+//! and `devtools/file-watch.ts`. Each handler is intentionally small — it
 //! doesn't try to re-implement manifest validation (TS owns that) but it
 //! does enforce the install directory boundary so callers can't escape it.
 

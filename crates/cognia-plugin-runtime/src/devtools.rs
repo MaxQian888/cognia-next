@@ -8,7 +8,7 @@
 //! ADR 0016 P1-7 (2026-05-17) — `plugin_watch_start` / `plugin_dev_server_watch`
 //! now hold a real `notify::RecommendedWatcher` instead of a stub
 //! `Vec<PathBuf>`. Filesystem events emit `plugin:file-change` with the same
-//! payload shape `lib/plugin/devtools/hot-reload.ts:33-38` expects.
+//! payload shape `lib/plugin/devtools/file-watch.ts` expects.
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +33,7 @@ static DEV_SERVER_STATUS: once_cell::sync::Lazy<RwLock<DevServerStatus>> =
     once_cell::sync::Lazy::new(|| RwLock::new(DevServerStatus::default()));
 
 /// Active filesystem watchers. We keep a small handful — one for the
-/// top-level `plugin_watch_start` (driven by `hot-reload.ts`) and a per-id
+/// top-level `plugin_watch_start` (driven by `file-watch.ts`) and a per-id
 /// map for `plugin_dev_server_watch` (driven by `dev-server.ts`).
 struct WatcherState {
     /// Holds the single watcher created by `plugin_watch_start`. Dropping it
@@ -72,7 +72,7 @@ fn watched_path_count() -> usize {
 #[serde(rename_all = "camelCase")]
 pub struct FileChangePayload {
     /// "create" | "modify" | "delete" | "rename". Matches the type union in
-    /// `lib/plugin/devtools/hot-reload.ts:34`.
+    /// `lib/plugin/devtools/file-watch.ts`.
     #[serde(rename = "type")]
     pub kind: String,
     pub path: String,

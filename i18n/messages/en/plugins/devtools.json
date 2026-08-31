@@ -34,5 +34,21 @@
     "valid": "Manifest is valid.",
     "validating": "Validating…",
     "warningsHeading": "Warnings"
+  },
+  "watch": {
+    "title": "Watch plugin folders",
+    "description": "Reload a plugin in place when its files change on disk, without running the CLI.",
+    "toggleLabel": "Watch for file changes",
+    "watching": "Watching {count, plural, =0 {no plugins} one {# plugin} other {# plugins}}",
+    "idle": "Not watching",
+    "desktopOnly": "Watching plugin folders needs the Cognia desktop app.",
+    "empty": "No plugin is eligible to watch. Install one from a local folder, or run `cognia plugin dev`.",
+    "skippedHeading": "Not watched",
+    "reason": {
+      "needs-build": "Needs a build first. The app has no compiler, so editing the source produces no new artifact. Use `cognia plugin dev`, which builds and installs before reloading.",
+      "not-local-source": "Installed from a package, so there is no source folder on disk to watch.",
+      "desktop-required": "Only the desktop app can watch the filesystem."
+    },
+    "startFailed": "Could not start watching: {message}"
   }
 }

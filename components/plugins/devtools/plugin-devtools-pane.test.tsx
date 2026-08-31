@@ -12,6 +12,10 @@ jest.mock("./hot-reload-diagnostics", () => ({
   HotReloadDiagnostics: () => <div data-testid="hot-reload-diagnostics-stub" />,
 }))
 
+jest.mock("./plugin-watch-card", () => ({
+  PluginWatchCard: () => <div data-testid="plugin-watch-card-stub" />,
+}))
+
 import { PluginDevtoolsPane } from "./plugin-devtools-pane"
 
 describe("PluginDevtoolsPane", () => {
@@ -21,11 +25,16 @@ describe("PluginDevtoolsPane", () => {
     expect(screen.getByTestId("plugin-dev-session-workbench-stub")).toBeInTheDocument()
   })
 
-  // `CliBridgeEventsBridge` has been filling `hot-reload-history-store` on
-  // every install / uninstall / hot-reload, while the panel that reads it had
-  // no production importer. The events were recorded and never shown.
-  it("renders the hot-reload history the CLI bridge has been recording", () => {
+  it("renders the hot-reload history", () => {
     render(<PluginDevtoolsPane />)
     expect(screen.getByTestId("hot-reload-diagnostics-stub")).toBeInTheDocument()
+  })
+
+  // The watcher is a Tauri command holding a native `notify` handle. Nothing
+  // else in the app mounts this control, so an unmounted card means the
+  // in-app reload loop simply does not exist for the user.
+  it("mounts the file-watch control", () => {
+    render(<PluginDevtoolsPane />)
+    expect(screen.getByTestId("plugin-watch-card-stub")).toBeInTheDocument()
   })
 })

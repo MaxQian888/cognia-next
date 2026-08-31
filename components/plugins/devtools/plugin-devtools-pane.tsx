@@ -10,6 +10,7 @@
 // anything, so any change that drops one of them puts it back to blank.
 
 import { HotReloadDiagnostics } from "./hot-reload-diagnostics"
+import { PluginWatchCard } from "./plugin-watch-card"
 import { PluginDevSessionWorkbench } from "./plugin-dev-session-workbench"
 
 export function PluginDevtoolsPane() {
@@ -17,7 +18,10 @@ export function PluginDevtoolsPane() {
     <div className="h-full min-h-0 overflow-y-auto" data-testid="plugin-devtools-pane">
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 p-4 lg:p-5">
         <PluginDevSessionWorkbench />
-        <HotReloadDiagnostics />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <PluginWatchCard />
+          <HotReloadDiagnostics />
+        </div>
       </div>
     </div>
   )

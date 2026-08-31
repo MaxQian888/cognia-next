@@ -34,5 +34,21 @@
     "valid": "清单校验通过。",
     "validating": "校验中…",
     "warningsHeading": "警告"
+  },
+  "watch": {
+    "title": "监听插件目录",
+    "description": "插件文件在磁盘上变化时就地重载，不必开着 CLI。",
+    "toggleLabel": "监听文件变化",
+    "watching": "正在监听 {count, plural, =0 {0 个插件} other {# 个插件}}",
+    "idle": "未监听",
+    "desktopOnly": "监听插件目录需要 Cognia 桌面端。",
+    "empty": "没有可监听的插件。从本地目录安装一个，或运行 `cognia plugin dev`。",
+    "skippedHeading": "未监听",
+    "reason": {
+      "needs-build": "需要先构建。应用内没有编译器，改源码不会产生新产物。请用 `cognia plugin dev`，它会先构建安装再请求重载。",
+      "not-local-source": "从安装包装的，磁盘上没有可监听的源码目录。",
+      "desktop-required": "只有桌面端能监听文件系统。"
+    },
+    "startFailed": "无法开始监听：{message}"
   }
 }
