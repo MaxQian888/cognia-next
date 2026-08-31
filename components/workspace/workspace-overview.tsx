@@ -222,7 +222,12 @@ export function WorkspaceOverview() {
           // column, and the ancestor clipped the excess rather than scrolling
           // it, so "Source Control" could not be reached on a phone. Same
           // idiom the other narrow tab strips use.
-          className="w-fit max-w-full justify-start overflow-x-auto"
+          //
+          // `shrink-0` because this sits in a `flex-col` with `min-h-0`: the
+          // list's own `h-9` is a base size a flex child is free to shrink
+          // below, and once the tab body had enough content the strip
+          // compressed to its 3px padding and the labels vanished.
+          className="w-fit max-w-full shrink-0 justify-start overflow-x-auto"
           aria-label={t("workspace.viewsLabel")}
         >
           <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
@@ -236,146 +241,153 @@ export function WorkspaceOverview() {
           className="mt-0 flex flex-col gap-3.5"
           data-testid="workspace-overview"
         >
-          <StatStrip
-            stats={stats}
-            pane="workspace-pane"
-            testId="workspace-stat-strip"
-            cellTestIdPrefix="workspace-stat"
-          />
-
           {/*
             The pane is the container, not the viewport. This page renders
             inside `FeaturePageShell`'s centre column, which on a wide window is
             still much narrower than the screen. Same reasoning the device
             detail and the settings panes write down.
-          */}
-          <div className="@container/workspace-pane grid items-start gap-3.5 @3xl/workspace-pane:grid-cols-2">
-            <ConsoleSection
-              id="issues"
-              pane="workspace-pane"
-              idPrefix="workspace-section"
-              title={t("workspace.issueSummary")}
-              meta={counts.open}
-              wide
-            >
-              <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
-                {ISSUE_STATUSES.map((status) => (
-                  <li
-                    key={status}
-                    className="flex items-center gap-1.5 rounded-control border px-2.5 py-1.5 text-xs"
-                    data-testid={`workspace-status-${status}`}
-                  >
-                    <IssueStatusIcon status={status} />
-                    <span>{t(`status.${status}`)}</span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {counts.byStatus[status]}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </ConsoleSection>
 
-            <ConsoleSection
-              id="projects"
+            The strip lives INSIDE this element rather than above it: its column
+            steps are `@xl/workspace-pane`, and a container query with no
+            matching ancestor never fires, so the four tiles sat in two rows at
+            every width.
+          */}
+          <div className="@container/workspace-pane flex flex-col gap-3.5">
+            <StatStrip
+              stats={stats}
               pane="workspace-pane"
-              idPrefix="workspace-section"
-              title={t("projects.title")}
-              meta={(projects ?? []).length}
-            >
-              {(projects ?? []).length === 0 ? (
-                <p className="text-xs text-muted-foreground" data-testid="workspace-no-projects">
-                  {t("workspace.noProjects")}
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {(projects ?? []).map((project) => (
-                    <li key={project.id}>
-                      <Link
-                        href={`/projects?id=${encodeURIComponent(project.id)}`}
-                        className="flex items-center gap-2 rounded-control border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
-                        data-testid={`workspace-project-${project.id}`}
-                      >
-                        <span aria-hidden>{project.icon ?? "📁"}</span>
-                        <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                        <Badge variant="outline" className="font-mono text-[10px]">
-                          {project.key}
-                        </Badge>
-                        <Badge variant="secondary" className="font-normal">
-                          {t(`projects.status.${project.status}`)}
-                        </Badge>
-                      </Link>
+              testId="workspace-stat-strip"
+              cellTestIdPrefix="workspace-stat"
+            />
+
+            <div className="grid items-start gap-3.5 @3xl/workspace-pane:grid-cols-2">
+              <ConsoleSection
+                id="issues"
+                pane="workspace-pane"
+                idPrefix="workspace-section"
+                title={t("workspace.issueSummary")}
+                meta={counts.open}
+                wide
+              >
+                <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
+                  {ISSUE_STATUSES.map((status) => (
+                    <li
+                      key={status}
+                      className="flex items-center gap-1.5 rounded-control border px-2.5 py-1.5 text-xs"
+                      data-testid={`workspace-status-${status}`}
+                    >
+                      <IssueStatusIcon status={status} />
+                      <span>{t(`status.${status}`)}</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {counts.byStatus[status]}
+                      </span>
                     </li>
                   ))}
                 </ul>
-              )}
-            </ConsoleSection>
+              </ConsoleSection>
 
-            <ConsoleSection
-              id="roots"
-              pane="workspace-pane"
-              idPrefix="workspace-section"
-              title={t("workspace.resources")}
-              meta={
-                /*
+              <ConsoleSection
+                id="projects"
+                pane="workspace-pane"
+                idPrefix="workspace-section"
+                title={t("projects.title")}
+                meta={(projects ?? []).length}
+              >
+                {(projects ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="workspace-no-projects">
+                    {t("workspace.noProjects")}
+                  </p>
+                ) : (
+                  <ul className="flex flex-col gap-1">
+                    {(projects ?? []).map((project) => (
+                      <li key={project.id}>
+                        <Link
+                          href={`/projects?id=${encodeURIComponent(project.id)}`}
+                          className="flex items-center gap-2 rounded-control border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+                          data-testid={`workspace-project-${project.id}`}
+                        >
+                          <span aria-hidden>{project.icon ?? "📁"}</span>
+                          <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                          <Badge variant="outline" className="font-mono text-[10px]">
+                            {project.key}
+                          </Badge>
+                          <Badge variant="secondary" className="font-normal">
+                            {t(`projects.status.${project.status}`)}
+                          </Badge>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </ConsoleSection>
+
+              <ConsoleSection
+                id="roots"
+                pane="workspace-pane"
+                idPrefix="workspace-section"
+                title={t("workspace.resources")}
+                meta={
+                  /*
                   Deliberately the existing manager dialog rather than inline
                   root editing. Workspace roots have exactly one editor, and the
                   trust gate lives on that path.
                 */
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="-my-1 h-7"
-                  onClick={() => setManageOpen(true)}
-                  title={t("workspace.manageHint")}
-                  data-testid="workspace-manage-link"
-                >
-                  <SettingsIcon className="size-3.5" />
-                  {t("workspace.manage")}
-                </Button>
-              }
-            >
-              {workspace?.roots?.length ? (
-                <ul className="flex flex-col gap-1" data-testid="workspace-roots">
-                  {workspace.roots.map((root) => {
-                    const isTrusted = trustedPaths.has(normalizePath(root.path))
-                    return (
-                      <li
-                        key={root.id}
-                        className="flex items-center gap-2 rounded-control border px-3 py-2 text-xs"
-                      >
-                        <FolderIcon aria-hidden className="size-3.5 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate font-mono">{root.path}</span>
-                        {root.isPrimary ? (
-                          <Badge variant="secondary" className="text-[10px] font-normal">
-                            1
-                          </Badge>
-                        ) : null}
-                        <Badge
-                          variant={isTrusted ? "secondary" : "outline"}
-                          className="gap-1 text-[10px] font-normal"
-                          data-testid={`workspace-root-trust-${isTrusted ? "trusted" : "untrusted"}`}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="-my-1 h-7"
+                    onClick={() => setManageOpen(true)}
+                    title={t("workspace.manageHint")}
+                    data-testid="workspace-manage-link"
+                  >
+                    <SettingsIcon className="size-3.5" />
+                    {t("workspace.manage")}
+                  </Button>
+                }
+              >
+                {workspace?.roots?.length ? (
+                  <ul className="flex flex-col gap-1" data-testid="workspace-roots">
+                    {workspace.roots.map((root) => {
+                      const isTrusted = trustedPaths.has(normalizePath(root.path))
+                      return (
+                        <li
+                          key={root.id}
+                          className="flex items-center gap-2 rounded-control border px-3 py-2 text-xs"
                         >
-                          {isTrusted ? (
-                            <ShieldCheckIcon aria-hidden className="size-3" />
-                          ) : (
-                            <ShieldOffIcon aria-hidden className="size-3" />
-                          )}
-                          {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
-                        </Badge>
-                      </li>
-                    )
-                  })}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
-              )}
-            </ConsoleSection>
+                          <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate font-mono">{root.path}</span>
+                          {root.isPrimary ? (
+                            <Badge variant="secondary" className="text-[10px] font-normal">
+                              1
+                            </Badge>
+                          ) : null}
+                          <Badge
+                            variant={isTrusted ? "secondary" : "outline"}
+                            className="gap-1 text-[10px] font-normal"
+                            data-testid={`workspace-root-trust-${isTrusted ? "trusted" : "untrusted"}`}
+                          >
+                            {isTrusted ? (
+                              <ShieldCheckIcon aria-hidden className="size-3" />
+                            ) : (
+                              <ShieldOffIcon aria-hidden className="size-3" />
+                            )}
+                            {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
+                          </Badge>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
+                )}
+              </ConsoleSection>
 
-            {/* ADR-0149 section 4: the roster, and the only place a guest is
+              {/* ADR-0149 section 4: the roster, and the only place a guest is
                 visible to anybody but themselves. Reads the projection, so it
                 never blocks on the network. */}
-            <WorkspaceMembers workspaceId={workspaceId} />
-            <WorkspaceActivity workspaceId={workspaceId} />
+              <WorkspaceMembers workspaceId={workspaceId} />
+              <WorkspaceActivity workspaceId={workspaceId} />
+            </div>
           </div>
         </TabsContent>
 
