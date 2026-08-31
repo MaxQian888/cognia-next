@@ -1,0 +1,13 @@
+{
+  "block": {
+    "no-host": "Nothing here can run this yet: this browser is not paired with a Cognia host, and a browser tab cannot do it on its own.",
+    "needs-desktop-shell": "This one needs the desktop app itself, not just a host that can run the work.",
+    "host-lacks-capability": "The host you are paired with does not offer this.",
+    "local-lacks-capability": "This build cannot do it on this machine."
+  },
+  "nextStep": {
+    "no-host": "Pair this browser with a host, or open Cognia on your desktop.",
+    "needs-desktop-shell": "Open Cognia on your desktop to use it.",
+    "host-lacks-capability": "Open Cognia on a host that supports it, or switch hosts."
+  }
+}

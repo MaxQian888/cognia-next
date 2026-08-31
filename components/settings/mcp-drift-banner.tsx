@@ -41,6 +41,11 @@ export function McpDriftBanner() {
   const [busy, setBusy] = useState<Set<AgentId>>(new Set())
   const [expanded, setExpanded] = useState<Set<AgentId>>(new Set())
 
+  // Deliberately hidden rather than explained, unlike the status bar above it.
+  // This is a conditional WARNING: even on the desktop it renders nothing
+  // until a projection actually drifts. A permanent "agent sync needs the
+  // desktop app" paragraph on a browser settings page would be noise where
+  // there is, by construction, nothing to act on.
   if (!isTauri()) return null
 
   const drifters = statuses.filter((s) => {

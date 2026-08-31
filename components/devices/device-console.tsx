@@ -28,8 +28,7 @@ import { Button } from "@/components/ui/button"
 import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useDeviceRows } from "@/hooks/devices/use-device-rows"
-import { isCapacitor, isTauri } from "@/lib/platform/detect"
-import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { hasHostRuntime } from "@/lib/platform/capabilities"
 
 import { DeviceDetail } from "./device-detail"
 import { DeviceListPane } from "./device-list-pane"
@@ -53,12 +52,15 @@ export function DeviceConsole() {
   /**
    * Standalone: no host of our own and none paired.
    *
-   * The same trichotomy `useFleetSnapshot` picks its source by. This is the
-   * surface contract's `standalone: "explain"` state — the console keeps
+   * The same trichotomy `useFleetSnapshot` picks its source by, asked through
+   * `hasHostRuntime` rather than the open-coded
+   * `!isTauri() && !isCapacitor() && !hasWebCompanionTarget()`, which also
+   * called the headless brain standalone. This is the surface contract's
+   * `standalone: "explain"` state — the console keeps
    * working for this machine, and says which half is missing rather than
    * rendering a one-row "fleet".
    */
-  const standalone = !isTauri() && !isCapacitor() && !hasWebCompanionTarget()
+  const standalone = !hasHostRuntime()
 
   // A `?device=<ref>` deep link wins over whatever was last selected — it is
   // what ⌘K and the Settings entry points hand us, and landing on the previous

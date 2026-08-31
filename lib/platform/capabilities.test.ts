@@ -9,6 +9,7 @@ import {
   hasCapability,
   isCapabilityId,
   serverBackedCapabilities,
+  hasHostRuntime,
 } from "./capabilities"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
@@ -62,6 +63,7 @@ describe("detectLocalCapabilities", () => {
       "connector-runtime",
       "mcp-runtime",
       "headless",
+      "thread-handoff-v1",
     ])
     expect(caps).toBe(serverBackedCapabilities("cloud-companion"))
   })
@@ -190,6 +192,30 @@ describe("detectHostProfile", () => {
     expect(detectHostProfile()).toBe("web-standalone")
     process.env[ENV_KEY] = "https://cloud.example.com"
     expect(detectHostProfile()).toBe("cloud-companion")
+  })
+})
+
+describe("hasHostRuntime", () => {
+  it("is false only for a standalone browser", () => {
+    for (const profile of ["desktop", "mobile-companion", "cloud-companion", "headless"] as const) {
+      expect(hasHostRuntime(profile)).toBe(true)
+    }
+    expect(hasHostRuntime("web-standalone")).toBe(false)
+  })
+
+  it("counts the headless brain as a host, which the open-coded version did not", () => {
+    // Six copies of `isTauri() || isCapacitor() || hasWebCompanionTarget()`
+    // answered false here, because the brain has no Tauri marker, no Capacitor
+    // and no pairing of its own. It IS the execution plane.
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    expect(hasHostRuntime()).toBe(true)
+  })
+
+  it("reads the live profile when none is passed", () => {
+    setTauri(true)
+    expect(hasHostRuntime()).toBe(true)
+    setTauri(false)
+    expect(hasHostRuntime()).toBe(false)
   })
 })
 

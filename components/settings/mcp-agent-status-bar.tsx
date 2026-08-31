@@ -19,8 +19,9 @@ import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
+import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
 import { syncToAgent, type SyncResult } from "@/lib/claude/sync"
 import { useAgentStatuses, type AgentStatus } from "@/hooks/agent"
 import type { AgentId } from "@cognia/agent-config-types"
@@ -30,8 +31,19 @@ export function McpAgentStatusBar() {
   const { statuses, projectedCount, refresh, loading } = useAgentStatuses()
   const [syncingAll, setSyncingAll] = useState(false)
   const [busy, setBusy] = useState<Set<AgentId>>(new Set())
+  // Writes `~/.claude/…`, `~/.codex/…` and friends on the machine the user is
+  // sitting at, so this needs the desktop process itself rather than any host
+  // that happens to have a shell. `requirement: "desktop-shell"` is what says
+  // so, and it is why a paired companion gets an explanation rather than a
+  // control that would write to the wrong machine.
+  const reach = useSurfaceReach({ capability: "shell", requirement: "desktop-shell" })
 
-  if (!isTauri()) return null
+  if (!reach.available) {
+    // This bar IS the Agents tab. Returning null left the tab with nothing but
+    // a related-links strip and no hint that agent sync exists at all, which
+    // is the shape of "hiding collapses three answers into one silence".
+    return <SurfaceUnavailableNotice reach={reach} data-testid="mcp-agents-unavailable" />
+  }
 
   const writable = statuses.filter((s) => s.agent.writable)
   const readonly = statuses.filter((s) => !s.agent.writable)
@@ -78,7 +90,7 @@ export function McpAgentStatusBar() {
   }
 
   return (
-    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+    <div data-testid="mcp-agent-status-bar" className="space-y-2 rounded-md border bg-muted/20 p-3">
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">
           <p className="text-xs font-medium">{t("title")}</p>

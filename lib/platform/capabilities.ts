@@ -187,6 +187,26 @@ export function detectHostProfile(): HostProfile {
 }
 
 /**
+ * Is there a host to run host-owned work on: this shell itself, or one it is
+ * paired to?
+ *
+ * The single predicate behind six hand-rolled copies of
+ * `isTauri() || isCapacitor() || hasWebCompanionTarget()` that used to live in
+ * `lib/git/commands.ts`, `lib/subscription/core/migration.ts`,
+ * `lib/logging/bootstrap.ts` (three of them) and
+ * `components/devices/device-console.tsx`. All six shared one bug: the
+ * headless brain has no `window.__TAURI_INTERNALS__`, no Capacitor and no
+ * pairing of its own, so every copy classified the process that IS the
+ * execution plane as a standalone browser.
+ *
+ * Phrased against the profile so the answer stays right as profiles are added:
+ * exactly one of them, `web-standalone`, means "no host anywhere".
+ */
+export function hasHostRuntime(profile: HostProfile = detectHostProfile()): boolean {
+  return profile !== "web-standalone"
+}
+
+/**
  * Capabilities the PAIRED SERVER executes on this profile's behalf (reached
  * over the companion RPC, not locally). Empty for hosts that are themselves
  * the execution plane (desktop) or have no server (web-standalone). UI

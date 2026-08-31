@@ -51,8 +51,8 @@ import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
 import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
-import { isCapacitor, isTauri } from "@/lib/platform/detect"
-import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { isTauri } from "@/lib/platform/detect"
+import { hasHostRuntime } from "@/lib/platform/capabilities"
 import { ingestLangfuseTraceBatch, setLangfuseCredentials } from "@/lib/logging/langfuse-host"
 import {
   configureTauriSidecarTelemetry,
@@ -288,7 +288,10 @@ function readTransportSettings(): LoggingTransportSettings {
       }
     }
     const legacyLangfuse = migration.settings.langfuseConfig as Record<string, unknown> | undefined
-    const hasHost = isTauri() || isCapacitor() || hasWebCompanionTarget()
+    // Every profile but a standalone browser has a host to hold these
+    // secrets. The old three-term spelling answered false on the headless
+    // brain, which is the one process that keeps them.
+    const hasHost = hasHostRuntime()
     const publicKey =
       typeof legacyLangfuse?.publicKey === "string" ? legacyLangfuse.publicKey.trim() : ""
     const shouldEnableLangfuse =
@@ -390,7 +393,7 @@ function readTransportSettings(): LoggingTransportSettings {
     legacyLangfuseRequested &&
     langfusePublicKey.trim().length > 0 &&
     langfuseSecretConfigured &&
-    (isTauri() || isCapacitor() || hasWebCompanionTarget())
+    hasHostRuntime()
   ) {
     void setLangfuseCredentials({
       enabled: true,
@@ -944,7 +947,7 @@ function applyTransportSettings(
     transports.langfuse &&
     transports.langfuseConfig.enabled &&
     process.env.NEXT_PUBLIC_LANGFUSE_TRACING_DISABLED !== "1"
-  const hasAiExecutionHost = isTauri() || isCapacitor() || hasWebCompanionTarget()
+  const hasAiExecutionHost = hasHostRuntime()
   if (langfuseRuntimeEnabled && hasAiExecutionHost) {
     addTransport(
       createLangfuseTransport({

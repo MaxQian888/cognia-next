@@ -16,8 +16,13 @@ jest.mock("sonner", () => ({
 // Host detection: jsdom is plain web, so default the suite to "a host exists"
 // and let the skip tests flip these off explicitly.
 jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
   isTauri: () => mockIsTauri(),
   isCapacitor: () => mockIsCapacitor(),
+  // `hasHostRuntime()` resolves the host PROFILE, which reads the platform, so
+  // this mock has to answer consistently with the flags above. A partial mock
+  // left `detectPlatform` undefined and the profile resolver threw.
+  detectPlatform: () => (mockIsTauri() ? "tauri" : mockIsCapacitor() ? "mobile" : "web"),
 }))
 
 jest.mock("@/lib/platform/web-companion", () => ({

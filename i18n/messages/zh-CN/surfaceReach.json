@@ -1,0 +1,13 @@
+{
+  "block": {
+    "no-host": "这里还没有能运行它的地方：此浏览器尚未与任何 Cognia 主机配对，而浏览器标签页本身做不了这件事。",
+    "needs-desktop-shell": "这一项需要桌面应用本身，而不只是一台能跑起来的主机。",
+    "host-lacks-capability": "你配对的这台主机不提供该能力。",
+    "local-lacks-capability": "当前版本在这台机器上无法做到。"
+  },
+  "nextStep": {
+    "no-host": "把此浏览器与一台主机配对，或在桌面上打开 Cognia。",
+    "needs-desktop-shell": "在桌面上打开 Cognia 即可使用。",
+    "host-lacks-capability": "在支持该能力的主机上打开 Cognia，或切换主机。"
+  }
+}

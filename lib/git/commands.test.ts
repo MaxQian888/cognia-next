@@ -13,8 +13,13 @@ jest.mock("@/lib/ai/agent/external/agent-hooks", () => ({
 }))
 
 jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
   isTauri: () => isTauriMock(),
   isCapacitor: () => isCapacitorMock(),
+  // `hasHostRuntime()` resolves the host PROFILE, which reads the platform, so
+  // this mock has to answer consistently with the flags above. A partial mock
+  // left `detectPlatform` undefined and the profile resolver threw.
+  detectPlatform: () => (isTauriMock() ? "tauri" : isCapacitorMock() ? "mobile" : "web"),
 }))
 
 jest.mock("@/lib/platform/web-companion", () => ({

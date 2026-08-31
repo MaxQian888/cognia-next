@@ -22,8 +22,7 @@
 
 import { toast } from "sonner"
 
-import { isCapacitor, isTauri } from "@/lib/platform/detect"
-import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { hasHostRuntime } from "@/lib/platform/capabilities"
 import type { MigrationOutcome } from "@/types/subscription"
 import { subscriptionInit } from "./transport"
 
@@ -43,13 +42,15 @@ export interface SubscriptionInitResult {
 }
 
 /**
- * Whether a host capable of serving `subscription_*` commands exists: the Tauri
- * desktop shell, the Capacitor mobile shell, or a browser wired to a
- * cognia-server (build-time URL or an existing pairing). Same predicate the
- * transport picker uses to choose a real transport over `WebStubTransport`.
+ * Whether a host capable of serving `subscription_*` commands exists. Every
+ * profile except a standalone browser has one, including the headless brain,
+ * which the previous `isTauri() || isCapacitor() || hasWebCompanionTarget()`
+ * spelling excluded even though it serves those commands itself. Same
+ * predicate the transport picker uses to choose a real transport over
+ * `WebStubTransport`.
  */
 function hasSubscriptionHost(): boolean {
-  return isTauri() || isCapacitor() || hasWebCompanionTarget()
+  return hasHostRuntime()
 }
 
 /**

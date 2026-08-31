@@ -13,8 +13,8 @@
  * get the forwarded `git://status-changed` WS event instead (see events.ts).
  */
 
-import { isCapacitor, isTauri } from "@/lib/platform/detect"
-import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { isTauri } from "@/lib/platform/detect"
+import { hasHostRuntime } from "@/lib/platform/capabilities"
 import { transport as baseTransport } from "@/lib/tauri"
 import { issueHostAdminLease } from "@/lib/tauri/admin-lease"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
@@ -193,14 +193,17 @@ export async function runGitUserAction<T>(
 
 /**
  * Whether a transport that can actually reach the native git backend is
- * active: Tauri desktop, the Capacitor mobile shell, or a web client paired
- * with a cognia server. This is the *seam capability* gate — every command
+ * active: any shell with a host runtime, which is every profile except a
+ * standalone browser. Asked through `hasHostRuntime` rather than
+ * `isTauri() || isCapacitor() || hasWebCompanionTarget()`, which answered
+ * false on the headless brain, the one process that IS the git backend. This
+ * is the *seam capability* gate — every command
  * wrapper below short-circuits on it. It is NOT the UI-availability gate:
  * whether the Source Control *panel* is offered is a separate, narrower
  * decision (see {@link isSourceControlUiAvailable}).
  */
 export function hasGitBridge(): boolean {
-  return isTauri() || isCapacitor() || hasWebCompanionTarget()
+  return hasHostRuntime()
 }
 
 /**

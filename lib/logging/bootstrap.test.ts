@@ -31,6 +31,10 @@ const mockCreateTauriOtlpFetch = jest.fn(
 jest.mock("@/lib/platform/detect", () => ({
   ...jest.requireActual("@/lib/platform/detect"),
   isTauri: () => mockIsTauri(),
+  // `hasHostRuntime()` resolves the host PROFILE, which reads the platform, so
+  // this mock has to answer consistently with the flags above. A partial mock
+  // left `detectPlatform` undefined and the profile resolver threw.
+  detectPlatform: () => (mockIsTauri() ? "tauri" : "web"),
 }))
 jest.mock("./transports/tauri-fetch-shim", () => ({
   configureTauriSidecarTelemetry: (...args: unknown[]) =>

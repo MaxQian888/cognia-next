@@ -8,6 +8,10 @@ import { CapabilityGate } from "./capability-gate"
 import type { HostProfile } from "@/lib/platform/capabilities"
 
 let profileMock: HostProfile = "desktop"
+jest.mock("next-intl", () => ({
+  useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
+}))
+
 jest.mock("@/hooks/use-host-profile", () => ({
   useHostProfile: () => profileMock,
   useCapability: (cap: string) => {
@@ -85,5 +89,56 @@ describe("<CapabilityGate />", () => {
       </CapabilityGate>
     )
     expect(screen.getByTestId("open")).toBeInTheDocument()
+  })
+
+  it("explains the refusal instead of vanishing when asked to", () => {
+    // The point of the mode: an empty space cannot tell a user whether the
+    // control never existed here, is one pairing away, or is broken.
+    profileMock = "web-standalone"
+    render(
+      <CapabilityGate capability="sidecar" explain>
+        <div data-testid="gated" />
+      </CapabilityGate>
+    )
+    expect(screen.queryByTestId("gated")).not.toBeInTheDocument()
+    const notice = screen.getByTestId("surface-unavailable-notice")
+    expect(notice).toHaveAttribute("data-cause", "no-host")
+  })
+
+  it("reads a failed profile check as needing the desktop shell", () => {
+    // The capability is available on this companion; what is missing is the
+    // shell the surface is bound to. "The host lacks it" would send the user
+    // somewhere that cannot help.
+    profileMock = "cloud-companion"
+    render(
+      <CapabilityGate capability="sidecar" profiles={["desktop"]} explain>
+        <div data-testid="gated" />
+      </CapabilityGate>
+    )
+    expect(screen.getByTestId("surface-unavailable-notice")).toHaveAttribute(
+      "data-cause",
+      "needs-desktop-shell"
+    )
+  })
+
+  it("lets an explicit fallback win over explain", () => {
+    profileMock = "web-standalone"
+    render(
+      <CapabilityGate capability="sidecar" explain fallback={<div data-testid="fallback" />}>
+        <div data-testid="gated" />
+      </CapabilityGate>
+    )
+    expect(screen.getByTestId("fallback")).toBeInTheDocument()
+    expect(screen.queryByTestId("surface-unavailable-notice")).not.toBeInTheDocument()
+  })
+
+  it("still renders nothing without explain, which stays the default", () => {
+    profileMock = "cloud-companion"
+    const { container } = render(
+      <CapabilityGate capability="ocr">
+        <div data-testid="gated" />
+      </CapabilityGate>
+    )
+    expect(container).toBeEmptyDOMElement()
   })
 })
