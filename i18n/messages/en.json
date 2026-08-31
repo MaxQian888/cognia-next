@@ -17480,11 +17480,7 @@
     },
     "plugins": {
       "backAria": "Back to Me",
-      "disabled": "Disabled",
       "empty": "No plugins installed.",
-      "enabled": "Enabled",
-      "intro": "Enable or disable installed plugins. Changes sync to your paired desktop when it next comes online.",
-      "queueLabel": "Queued — desktop will apply when online.",
       "title": "Plugins",
       "toggleAria": "Toggle plugin",
       "toggleFailed": "Toggle failed: {message}"
@@ -21683,6 +21679,11 @@
       "syncing": "Syncing…",
       "title": "GitHub marketplace sources",
       "unreviewed": "cognia doesn't review these plugins. They run with the permissions they request — check the repository before you install anything from it."
+    },
+    "mobile": {
+      "mirroredHint": "This device mirrors your paired desktop. Changes are queued and applied there when it next comes online.",
+      "refresh": "Refresh catalog",
+      "sectionsAria": "Plugin sections"
     },
     "modalRoot": {
       "errorFallback": "Plugin modal failed to render. Check the console for details."

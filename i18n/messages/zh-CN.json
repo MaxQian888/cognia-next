@@ -17480,11 +17480,7 @@
     },
     "plugins": {
       "backAria": "返回我的",
-      "disabled": "已禁用",
       "empty": "尚未安装任何插件。",
-      "enabled": "已启用",
-      "intro": "启用或禁用已安装的插件。更改会在配对的桌面端下次上线时同步。",
-      "queueLabel": "已排队——桌面上线后会同步。",
       "title": "插件",
       "toggleAria": "切换插件状态",
       "toggleFailed": "切换失败：{message}"
@@ -21683,6 +21679,11 @@
       "syncing": "同步中…",
       "title": "GitHub 市场源",
       "unreviewed": "cognia 不审核这些插件。它们会以自己申请的权限运行——安装前请先查看该仓库。"
+    },
+    "mobile": {
+      "mirroredHint": "本设备镜像已配对的桌面端。改动会先入队，等桌面端上线后在那里生效。",
+      "refresh": "刷新目录",
+      "sectionsAria": "插件分区"
     },
     "modalRoot": {
       "errorFallback": "插件弹窗渲染失败，详细信息请查看控制台。"
