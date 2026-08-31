@@ -129,7 +129,7 @@ jobs:
             context: .
             file: Dockerfile.ops-controller
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The runner image lands with the Phase 3 artifacts; until its Dockerfile
       # exists this matrix entry no-ops instead of failing the whole workflow.
@@ -182,7 +182,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
@@ -205,7 +205,7 @@ jobs:
       matrix:
         variant: [slim, full]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 

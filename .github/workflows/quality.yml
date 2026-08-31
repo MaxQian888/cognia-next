@@ -47,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # No pnpm install here on purpose: check-all.mjs imports nothing outside
       # node: builtins, so the manifest is available in seconds rather than
@@ -83,7 +83,7 @@ jobs:
       # Full history: several gates diff against git (lint-i18n --staged
       # semantics, the static-export scanner's file listing, command parity).
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

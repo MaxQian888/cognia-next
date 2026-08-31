@@ -47,7 +47,7 @@ jobs:
     name: Tier 1 (services)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
@@ -93,7 +93,7 @@ jobs:
     # migrate, then seed, then serve — is what used to be broken: the tenant
     # fixture ran as a Postgres init hook, before the tables existed.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
@@ -192,7 +192,7 @@ jobs:
       NEXT_PUBLIC_ACCOUNT_GATE: "1"
       COMPOSE_FILE: "docker-compose.yml:docker-compose.web-headless-e2e.yml"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v3
 
