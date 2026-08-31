@@ -152,7 +152,6 @@ const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
 )
-
 export function DesktopOnlyInitializers() {
   const isClient = useIsClient()
   useSyncExternalStore(

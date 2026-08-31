@@ -63,7 +63,7 @@ describe("DesktopOnlyInitializers", () => {
     // silently dropping one when the list changes. (WindowShowInitializer,
     // WebviewHeartbeatInitializer and ExitConfirmationDialog moved up to
     // WindowLivenessInitializers.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(20)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(21)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 

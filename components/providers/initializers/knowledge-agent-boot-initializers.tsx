@@ -10,6 +10,7 @@ import { ExternalAgentInitializer } from "./external-agent-initializer"
 import { MemoryJobWorkerInitializer } from "./memory-job-worker-initializer"
 import { OcrRuntimeInitializer } from "./ocr-runtime-initializer"
 import { TemplatePlatformInitializer } from "./template-platform-initializer"
+import { VectorCredentialMigrationInitializer } from "./vector-credential-migration-initializer"
 
 export function KnowledgeAgentBootInitializers() {
   useEffect(() => markBootCapabilityReady("knowledge-agents"), [])
@@ -21,6 +22,7 @@ export function KnowledgeAgentBootInitializers() {
       <OcrRuntimeInitializer />
       <TwinWorkerInitializer />
       <ProjectKnowledgeWorkerInitializer />
+      <VectorCredentialMigrationInitializer />
       <TemplatePlatformInitializer />
     </>
   )

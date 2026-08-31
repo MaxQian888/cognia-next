@@ -11,6 +11,8 @@ import {
   inflateFlatKeys,
   subscribeToPluginI18n,
 } from "@/lib/i18n/plugin-i18n-registry"
+import { setPref } from "@/lib/tauri/store"
+import { LIGHTWEIGHT_LOCALE_PREF } from "./lightweight-locale-gate"
 
 /**
  * Wraps children in a NextIntlClientProvider whose locale is sourced from
@@ -38,6 +40,10 @@ export function LocaleGate({ children }: { children: React.ReactNode }) {
   const language = useSettingsStore((s) => s.settings?.language)
   const loaded = useSettingsStore((s) => s.loaded)
   const locale: Locale = loaded && language ? language : defaultLocale
+
+  useEffect(() => {
+    if (loaded && language) void setPref(LIGHTWEIGHT_LOCALE_PREF, language)
+  }, [language, loaded])
 
   // Subscribe to plugin i18n changes — version bumps on every register /
   // unregister so React knows to re-render with the merged messages.

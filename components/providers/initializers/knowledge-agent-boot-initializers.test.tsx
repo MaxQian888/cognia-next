@@ -21,6 +21,9 @@ jest.mock("./memory-job-worker-initializer", () => ({
 jest.mock("./template-platform-initializer", () => ({
   TemplatePlatformInitializer: () => <span data-boot="templates" />,
 }))
+jest.mock("./vector-credential-migration-initializer", () => ({
+  VectorCredentialMigrationInitializer: () => <span data-boot="vector-credentials" />,
+}))
 const mockMarkReady = jest.fn()
 jest.mock("@/lib/boot/capabilities", () => ({
   markBootCapabilityReady: (...args: unknown[]) => mockMarkReady(...args),
@@ -34,6 +37,15 @@ it("mounts knowledge and agent workers and reports readiness", () => {
     Array.from(container.querySelectorAll("[data-boot]")).map((node) =>
       node.getAttribute("data-boot")
     )
-  ).toEqual(["external-agent", "agent-team", "memory", "ocr", "twin", "project-kb", "templates"])
+  ).toEqual([
+    "external-agent",
+    "agent-team",
+    "memory",
+    "ocr",
+    "twin",
+    "project-kb",
+    "vector-credentials",
+    "templates",
+  ])
   expect(mockMarkReady).toHaveBeenCalledWith("knowledge-agents")
 })

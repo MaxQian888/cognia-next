@@ -6,6 +6,7 @@ import { detectPlatform } from "@/lib/platform/detect"
 import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
+import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
 import {
   markBootCapabilityFailed,
   markBootCapabilityReady,
@@ -62,25 +63,30 @@ export function PluginRuntimeInitializer({
     getBootCapabilitySnapshot
   )
   const requested = isBootCapabilityRequested("plugin-runtime")
-  const isAllowedRoute =
-    !onlyForPluginSurfaceE2E ||
-    (typeof window !== "undefined" &&
-      window.location.pathname.startsWith("/e2e/plugin-ui-surfaces"))
+  const isPluginSurfaceE2E =
+    onlyForPluginSurfaceE2E &&
+    process.env.NEXT_PUBLIC_E2E === "1" &&
+    typeof window !== "undefined" &&
+    window.location.pathname.startsWith("/e2e/plugin-ui-surfaces")
+  const shouldRun = onlyForPluginSurfaceE2E ? isPluginSurfaceE2E : requested
+  const runtimeOwnerKey = isPluginSurfaceE2E
+    ? "e2e:plugin-ui-surfaces"
+    : unlockedAccountId
+      ? `${unlockedAccountId}:${accountRevision}`
+      : null
 
   // Dependency warnings involving theme packs must stay current in every
   // runtime profile. Theme packs are contributed by regular plugins, while
   // local character-pack scanning only runs in the desktop shell.
   useEffect(() => {
-    if (!requested || !isAllowedRoute) return
+    if (!shouldRun) return
     return installPackWarningRefreshWiring()
-  }, [isAllowedRoute, requested])
+  }, [shouldRun])
 
   useEffect(() => {
-    if (!requested || !isAllowedRoute) return
-    if (!unlockedAccountId) return
-    const accountKey = `${unlockedAccountId}:${accountRevision}`
-    if (initializedForAccount.current === accountKey) return
-    initializedForAccount.current = accountKey
+    if (!shouldRun || !runtimeOwnerKey) return
+    if (initializedForAccount.current === runtimeOwnerKey) return
+    initializedForAccount.current = runtimeOwnerKey
     window.__cogniaPluginRuntimeReady = false
 
     const initialize = async () => {
@@ -171,18 +177,21 @@ export function PluginRuntimeInitializer({
     }
 
     void initialize()
-  }, [accountRevision, isAllowedRoute, requested, unlockedAccountId])
+  }, [runtimeOwnerKey, shouldRun])
 
   // Emit `APP_CLOSING` on page unload so plugins can flush state / cancel
   // in-flight work. The handler must be synchronous (a dynamic import wouldn't
   // resolve before the page is gone), hence the static `emitSystemBusEvent`
   // import above. Best-effort: a no-op when no plugin subscribed.
   useEffect(() => {
-    if (!requested || !isAllowedRoute) return
-    const handleBeforeUnload = () => emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
+    if (!shouldRun) return
+    const handleBeforeUnload = () => {
+      emitSystemBusEvent(SystemEvents.APP_CLOSING, {})
+      void disposeMicrovmAdapters()
+    }
     window.addEventListener("beforeunload", handleBeforeUnload)
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [isAllowedRoute, requested])
+  }, [shouldRun])
 
   return null
 }
