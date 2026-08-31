@@ -2702,31 +2702,7 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "codex_oauth_refresh",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
       "name": "codex_oauth_request_device_code",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
-      "risk": "low",
-      "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
-      "name": "codex_oauth_revoke",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",

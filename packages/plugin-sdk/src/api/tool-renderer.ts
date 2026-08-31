@@ -1,68 +1,115 @@
-/**
- * Plugin SDK — `tool-renderer` capability surface.
- *
- * Re-exports the manifest authoring helper and the runtime registry for
- * plugins that render a custom card for a tool's result in the chat
- * transcript. Distinct from `./message-renderer`, which renders whole AI SDK
- * message *parts*; this one keys off a tool name.
- *
- * A plugin registers from `activate(ctx)` and the plugin manager clears
- * everything it contributed on disable via
- * `clearToolResultRenderersForPlugin(pluginId)` — the same call a plugin's own
- * tests should use for cleanup.
- */
+/** Portable contracts and protocol helpers for plugin tool-result renderers. */
+
+import type React from "react"
+import type { DynamicToolUIPart, ToolUIPart } from "ai"
 
 export { defineToolRenderer } from "../define/define-tool-renderer"
 
-export {
-  clearAllToolResultRenderers,
-  clearToolResultRenderersForPlugin,
-  getToolResultRenderer,
-  getToolResultRenderersRevision,
-  listToolResultRenderers,
-  registerToolResultRenderer,
-  subscribeToolResultRenderers,
-  toolResultRendererKey,
-} from "@/lib/plugin/api/tool-result-renderers"
+export interface ToolResultRendererProps {
+  /** The tool part exactly as it sits in `UIMessage.parts`. */
+  part: ToolUIPart | DynamicToolUIPart
+  /** Chat session this tool call belongs to, when the host knows it. */
+  sessionId?: string
+}
 
-export type {
-  ToolResultRendererEntry,
-  ToolResultRendererProps,
-} from "@/lib/plugin/api/tool-result-renderers"
+export interface ToolResultRendererEntry {
+  pluginId: string
+  toolName: string
+  component: React.ComponentType<ToolResultRendererProps>
+}
 
-/**
- * The card chrome the host's own tool cards are built from. A renderer that
- * hand-rolls its own frame drifts from the transcript around it — different
- * padding, different header affordances, a different empty state — so the
- * shell, the output parser and the media-src resolver are all shared rather
- * than re-implemented per plugin.
- *
- * `useParsedOutput` / `parseOutputJson` handle the awkward part: a tool result
- * arrives as `unknown` and may be a JSON string, an already-parsed object, or
- * neither. `blockMediaSrc` turns an MCP content block into something an `<img>`
- * or `<video>` can load, including base64 payloads.
- */
-export {
-  blockMediaSrc,
-  hostOf,
-  languageFromPath,
-  McpCardShell,
-  parseOutputJson,
-  useParsedOutput,
-} from "@/components/chat/message-parts/mcp-renderers/common"
+/** One content block returned by an MCP-compatible tool. */
+export type McpResultBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image"
+      data?: string
+      mimeType?: string
+      source?: { type?: string; media_type?: string; data?: string }
+    }
+  | { type: "audio"; data?: string; mimeType?: string }
+  | {
+      type: "resource"
+      resource?: { uri?: string; mimeType?: string; text?: string; blob?: string }
+      [key: string]: unknown
+    }
+  | { type: string; [key: string]: unknown }
 
-/** The host's image renderer — zoom, download, and error states included. */
-export { ImageBlock } from "@/components/chat/renderers/image-block"
+/** Parse the two output shapes accepted by the renderer boundary. */
+export function parseOutputJson(output: unknown): unknown | null {
+  if (output === null || output === undefined) return null
+  if (typeof output === "string") {
+    const trimmed = output.trim()
+    if (!trimmed) return null
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      return null
+    }
+  }
+  return typeof output === "object" ? output : null
+}
 
-/** One content block of an MCP tool result. */
-export type { McpResultBlock } from "@/lib/claude/parts-extensions"
+/** Extract the hostname used by compact URL badges. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
 
-/**
- * Copy-to-clipboard with the host's own feedback timing, and the icon that
- * animates the confirmation. A card that copies text should feel like every
- * other copy button in the app.
- */
-export { useCopy } from "@/hooks/ui/use-copy"
-export type { UseCopyOptions, UseCopyResult } from "@/hooks/ui/use-copy"
-export { CopyFeedbackIcon } from "@/components/shared/animated-action-icon"
-export type { CopyFeedbackIconProps } from "@/components/shared/animated-action-icon"
+const LANGUAGE_BY_EXT: Record<string, string> = {
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  mjs: "javascript",
+  py: "python",
+  rs: "rust",
+  go: "go",
+  java: "java",
+  rb: "ruby",
+  cs: "csharp",
+  c: "c",
+  cpp: "cpp",
+  h: "c",
+  hpp: "cpp",
+  md: "markdown",
+  json: "json",
+  yml: "yaml",
+  yaml: "yaml",
+  toml: "toml",
+  css: "css",
+  html: "html",
+  sh: "bash",
+  sql: "sql",
+}
+
+/** Map a file extension to the host's syntax-highlighting language id. */
+export function languageFromPath(path: string | undefined): string {
+  if (!path) return "text"
+  const ext = path.toLowerCase().split(".").pop() ?? ""
+  return LANGUAGE_BY_EXT[ext] ?? "text"
+}
+
+/** Build a loadable media URL from either supported MCP image/audio shape. */
+export function blockMediaSrc(block: McpResultBlock, fallbackMime: string): string | null {
+  const candidate = block as {
+    data?: unknown
+    mimeType?: unknown
+    source?: { data?: unknown; media_type?: unknown }
+  }
+  if (typeof candidate.data === "string" && candidate.data.length > 0) {
+    const mime = typeof candidate.mimeType === "string" ? candidate.mimeType : fallbackMime
+    return candidate.data.startsWith("data:")
+      ? candidate.data
+      : `data:${mime};base64,${candidate.data}`
+  }
+  const source = candidate.source
+  if (source && typeof source.data === "string" && source.data.length > 0) {
+    const mime = typeof source.media_type === "string" ? source.media_type : fallbackMime
+    return source.data.startsWith("data:") ? source.data : `data:${mime};base64,${source.data}`
+  }
+  return null
+}

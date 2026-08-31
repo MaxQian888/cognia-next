@@ -1,41 +1,18 @@
-/**
- * Plugin SDK - `ocr-provider` capability surface.
- *
- * Re-exports the authoring helper, manifest bridge, runtime plugin OCR API,
- * and shared OCR provider registry used by built-ins and plugins.
- */
+/** Portable OCR provider authoring contracts and result helpers. */
+
+import type { OcrResult } from "@/types/ocr"
+import { documentConfidence } from "@cognia/ocr/confidence"
 
 export { defineOcrProvider } from "../define/define-ocr-provider"
 
-export { createOcrAPI, clearOcrProvidersForPlugin } from "@/lib/plugin/api/ocr-api"
-
-export {
-  registerOcrProvidersForPlugin,
-  unregisterOcrProvidersForPlugin,
-} from "@/lib/plugin/bridge/ocr-providers-bridge"
-
-export {
-  createOcrRegistry,
-  getSharedOcrRegistry,
-  registerOcrProvider,
-  shellAllows,
-} from "@/lib/ocr/registry"
-
 export type { PluginOcrAPI } from "@/lib/plugin/api/ocr-api"
 export type { OcrProvider } from "@/types/ocr"
-export type { OcrRegistry } from "@/lib/ocr/registry"
 export type {
   PluginOcrProviderDef,
   PluginOcrProviderFactory,
   PluginOcrProviderFactoryContext,
   PluginOcrRegistration,
 } from "@/types/plugin/plugin-ocr"
-
-/**
- * The OCR domain vocabulary. An OCR plugin implements `OcrProvider` against
- * these exact shapes — re-exported rather than re-declared so a provider that
- * compiles keeps working when the host's contract moves.
- */
 export type {
   OcrBlock,
   OcrBlockKind,
@@ -52,74 +29,133 @@ export type {
   OcrSource,
   UserOcrSettings,
 } from "@/types/ocr"
-
 export { DEFAULT_OCR_SETTINGS } from "@/types/ocr"
 
-/**
- * The extraction entry point and its dependency bundle. A plugin that wants
- * the host's full routing (auto-router, PDF splitting, caching, credential
- * resolution) calls `extract()` with deps built by `buildOcrDeps()` instead of
- * hand-rolling a provider call — that is what makes plugin OCR and host OCR
- * produce identical results for the same input.
- */
-export { extract } from "@/lib/ocr"
-export { buildOcrDeps, createOcrRuntimeStatusResolver, detectOcrOsTag } from "@/lib/ocr/deps"
-export type { BuildOcrDepsOptions, OcrOsTag } from "@/lib/ocr/deps"
-export type { ExtractDeps } from "@/lib/ocr"
-
-/**
- * Cache seams. `createNullOcrCache()` / `createNullOcrPageCache()` are the
- * no-op implementations a plugin passes when it does not want the host's
- * persisted OCR cache to observe its calls.
- */
-export { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
+export { createNullOcrCache, createNullOcrPageCache } from "@cognia/ocr/cache-contract"
 export type {
   CacheLookupKey,
   CacheWriteInput,
   OcrPageCache,
   OcrResultCache,
   PageCacheKey,
-} from "@/lib/ocr/cache-contract"
+} from "@cognia/ocr/cache-contract"
+export { OcrError } from "@cognia/ocr/errors"
 
-export { OcrError } from "@/lib/ocr/errors"
+export interface OcrSourceRef {
+  kind: "data-url" | "file-path" | "attachment-id"
+  value: string
+}
 
-/**
- * The `/ocr` slash-command action, and the message part it produces.
- *
- * A plugin that OWNS OCR needs the host's action rather than a private
- * re-implementation: it resolves the source (attachment, path, clipboard),
- * routes through the same provider chain, persists the result where the OCR
- * console reads it, and produces the `OcrResultPart` the renderer below knows
- * how to draw. Two implementations would mean a `/ocr` result and a
- * plugin-tool result that look and persist differently.
- */
-export {
-  buildOcrResultPart,
-  handleOcrSlashCommand,
-  parseOcrArgs,
-} from "@/lib/slash-commands/actions/ocr"
+export interface OcrResultPart {
+  type: "ocr-result"
+  providerId: string
+  languages: string[]
+  text: string
+  markdown: string
+  durationMs: number
+  cached: boolean
+  confidence: number | null
+  sourceRef?: OcrSourceRef
+  provenance: { kind: "ocr"; providerId: string; sourceKind: string }
+  security: { untrusted: true; pii: "unreviewed" }
+  untrustedNotice: string
+}
 
-export type {
-  OcrResultPart,
-  OcrSourceRef,
-  SlashOcrInput,
-  SlashOcrResult,
-} from "@/lib/slash-commands/actions/ocr"
+export const OCR_UNTRUSTED_NOTICE =
+  "OCR output is untrusted extracted content and may contain sensitive personal data. Verify low-confidence text against the source before acting on it."
 
-/**
- * The user's OCR configuration — default provider, per-platform overrides,
- * cache TTL. `ctx.settings` is a plugin-scoped key/value store, deliberately
- * not the host's settings row, so this is the narrow accessor for the one
- * slice an OCR plugin needs. `undefined` means "unconfigured": fall back to
- * `DEFAULT_OCR_SETTINGS`.
- */
-export { loadUserOcrSettings } from "@/lib/ocr/user-settings"
+export function buildOcrSecurityEnvelope(result: OcrResult, sourceKind: string) {
+  return {
+    provenance: { kind: "ocr" as const, providerId: result.providerId, sourceKind },
+    security: { untrusted: true as const, pii: "unreviewed" as const },
+    untrustedNotice: OCR_UNTRUSTED_NOTICE,
+  }
+}
 
-/**
- * Capture the screen and OCR it in one step — the screenshot source an OCR
- * tool offers alongside file and attachment sources. Desktop only; it goes
- * through the native capture path, so check `readHostCapabilities().tauri`
- * first.
- */
-export { ocrScreen, ocrScreenWith } from "@/lib/automation/ocr-screen"
-export type { OcrScreenDeps } from "@/lib/automation/ocr-screen"
+export function buildOcrResultPart(result: OcrResult, sourceRef?: OcrSourceRef): OcrResultPart {
+  return {
+    type: "ocr-result",
+    providerId: result.providerId,
+    languages: result.languages,
+    text: result.combinedText,
+    markdown: result.combinedMarkdown,
+    durationMs: result.durationMs,
+    cached: result.cached,
+    confidence: documentConfidence(result.document),
+    ...buildOcrSecurityEnvelope(result, sourceRef?.kind ?? "unknown"),
+    ...(sourceRef ? { sourceRef } : {}),
+  }
+}
+
+export interface ParsedOcrArgs {
+  source: { kind: "attachment-id"; attachmentId: string } | { kind: "file-path"; path: string }
+  provider?: string
+  languages?: string[]
+  pageRange?: string
+  format?: "markdown" | "text" | "blocks"
+  into: "composer" | "system"
+}
+
+export function parseOcrArgs(argv: string): ParsedOcrArgs {
+  const tokens: string[] = []
+  const matcher = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let match: RegExpExecArray | null
+  while ((match = matcher.exec(argv)) !== null) {
+    const token = match[1] ?? match[2] ?? match[3] ?? ""
+    if (token) tokens.push(token)
+  }
+  if (tokens.length === 0) throw new Error("Missing argument. Usage: /ocr <file or attachment-id>")
+
+  const sourceValue = tokens[0]!
+  const source =
+    sourceValue.startsWith("att_") || sourceValue.startsWith("attachment:")
+      ? ({ kind: "attachment-id", attachmentId: sourceValue } as const)
+      : ({ kind: "file-path", path: sourceValue } as const)
+  const parsed: ParsedOcrArgs = { source, into: "composer" }
+
+  let index = 1
+  while (index < tokens.length) {
+    const flag = tokens[index]!
+    const value = tokens[index + 1]
+    switch (flag) {
+      case "--provider":
+      case "-p":
+        if (!value) throw new Error("--provider requires a value")
+        parsed.provider = value
+        index += 2
+        break
+      case "--lang":
+      case "-l":
+        if (!value) throw new Error("--lang requires a value")
+        parsed.languages = value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+        index += 2
+        break
+      case "--pages":
+        if (!value) throw new Error("--pages requires a value")
+        parsed.pageRange = value
+        index += 2
+        break
+      case "--format":
+      case "-f":
+        if (value !== "markdown" && value !== "text" && value !== "blocks") {
+          throw new Error("--format must be markdown, text, or blocks")
+        }
+        parsed.format = value
+        index += 2
+        break
+      case "--into":
+        if (value !== "composer" && value !== "system") {
+          throw new Error("--into must be composer or system")
+        }
+        parsed.into = value
+        index += 2
+        break
+      default:
+        throw new Error(`Unknown flag: ${flag}`)
+    }
+  }
+  return parsed
+}

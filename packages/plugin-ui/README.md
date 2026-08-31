@@ -2,6 +2,12 @@
 
 The component surface third-party Cognia plugins render with.
 
+Install the version that matches the host SDK contract:
+
+```bash
+pnpm add @cognia/plugin-ui@^0.2.0
+```
+
 ```tsx
 import { Button, Card, CardContent } from "@cognia/plugin-ui"
 
@@ -56,3 +62,7 @@ mounted into and cannot escape it. Components in this package that need layering
 mounts and controls. Dialogs must include `DialogTitle`; pass localized
 `closeLabel` text because this standalone package cannot read the host's
 `next-intl` catalog.
+
+Import author-facing components and motion helpers only from the package root.
+Deep component imports are intentionally outside the runtime shared-module
+contract.

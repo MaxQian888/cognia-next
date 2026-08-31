@@ -1,7 +1,6 @@
 import * as sdk from "./ocr-provider"
 import type {
   OcrProvider,
-  OcrRegistry,
   PluginOcrAPI,
   PluginOcrProviderDef,
   PluginOcrProviderFactory,
@@ -10,16 +9,16 @@ import type {
 } from "./ocr-provider"
 
 describe("plugin-sdk api/ocr-provider", () => {
-  it("exposes the authoring helper, manifest bridge, plugin API, and shared OCR registry", () => {
+  it("exposes portable authoring and result helpers", () => {
     expect(typeof sdk.defineOcrProvider).toBe("function")
-    expect(typeof sdk.registerOcrProvidersForPlugin).toBe("function")
-    expect(typeof sdk.unregisterOcrProvidersForPlugin).toBe("function")
-    expect(typeof sdk.createOcrAPI).toBe("function")
-    expect(typeof sdk.clearOcrProvidersForPlugin).toBe("function")
-    expect(typeof sdk.registerOcrProvider).toBe("function")
-    expect(typeof sdk.getSharedOcrRegistry).toBe("function")
-    expect(typeof sdk.createOcrRegistry).toBe("function")
-    expect(typeof sdk.shellAllows).toBe("function")
+    expect(typeof sdk.buildOcrResultPart).toBe("function")
+    expect(typeof sdk.parseOcrArgs).toBe("function")
+    expect(typeof sdk.createNullOcrCache).toBe("function")
+    expect(typeof sdk.OcrError).toBe("function")
+    expect(sdk.buildOcrSecurityEnvelope({ providerId: "mock" } as never, "screen")).toMatchObject({
+      provenance: { kind: "ocr", providerId: "mock", sourceKind: "screen" },
+      security: { untrusted: true, pii: "unreviewed" },
+    })
   })
 
   it("re-exports OCR provider contribution, plugin API, and registry types", () => {
@@ -30,8 +29,7 @@ describe("plugin-sdk api/ocr-provider", () => {
         | PluginOcrProviderFactoryContext
         | PluginOcrRegistration
         | PluginOcrAPI
-        | OcrProvider
-        | OcrRegistry,
+        | OcrProvider,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

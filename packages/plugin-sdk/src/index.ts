@@ -95,7 +95,7 @@ export {
 } from "./errors/adapter-error"
 export type { PluginAdapterErrorCode, PluginAdapterErrorPayload } from "./errors/adapter-error"
 
-export { definePlugin } from "./manifest"
+export { definePlugin } from "./define/define-plugin"
 export { defineMcpServerPreset } from "./define/define-mcp-server-preset"
 export { defineNativeAnthropicTool } from "./define/define-native-anthropic-tool"
 export { defineSkill } from "./define/define-skill"
@@ -118,6 +118,7 @@ export {
 } from "./templates"
 export { defineAgentTool } from "./define/define-agent-tool"
 export { defineTool } from "./define/define-tool"
+export { definePluginTool } from "./define/define-plugin-tool"
 export { defineGuardrail } from "./define/define-guardrail"
 export { defineContextProvider } from "./define/define-context-provider"
 export { defineContextPanel } from "./define/define-context-panel"
@@ -242,9 +243,6 @@ export {
 } from "./api/external-agent-adapter"
 export type {
   AcpPermissionResponse,
-  ExternalAgentAdaptersBridgeError,
-  ExternalAgentAdaptersBridgeOptions,
-  ExternalAgentAdaptersBridgeResult,
   ExternalAgentConfig,
   ExternalAgentEvent,
   ExternalAgentExecutionBlockAssessment,
@@ -350,31 +348,25 @@ export type {
 } from "./api/cli-tool"
 
 /**
- * OCR. The extraction pipeline is a pure function over an injected dependency
- * bundle, so it belongs here; the provider REGISTRY lives on
- * `@cognia/plugin-sdk/api/ocr-provider`.
+ * OCR provider contracts and pure result/cache helpers. Host extraction is
+ * governed through `ctx.ocr`.
  */
 export {
-  buildOcrDeps,
+  buildOcrResultPart,
   createNullOcrCache,
   createNullOcrPageCache,
-  createOcrRuntimeStatusResolver,
   DEFAULT_OCR_SETTINGS,
-  detectOcrOsTag,
-  extract,
   OcrError,
+  parseOcrArgs,
 } from "./api/ocr-provider"
 export type {
-  BuildOcrDepsOptions,
   CacheLookupKey,
   CacheWriteInput,
-  ExtractDeps,
   OcrBlock,
   OcrBlockKind,
   OcrCostEstimate,
   OcrCredentials,
   OcrInput,
-  OcrOsTag,
   OcrOutputFormat,
   OcrPage,
   OcrPageCache,
@@ -383,10 +375,11 @@ export type {
   OcrProviderConfig,
   OcrProviderContext,
   OcrProviderShellSupport,
-  OcrRegistry,
+  OcrResultPart,
   OcrResult,
   OcrResultCache,
   OcrSource,
+  OcrSourceRef,
   PageCacheKey,
   UserOcrSettings,
 } from "./api/ocr-provider"
@@ -394,36 +387,22 @@ export type {
 /** Desktop automation — the locator/action vocabulary; the client is on the subpath. */
 export type {
   ActionRequest,
+  ActionResult,
   AppLocator,
   AutomationSurface,
   CallContext,
   ElementHandle,
+  ExpandedElements,
   GetAppStateOptions,
   Locator,
+  PluginComputerUseOrigin,
+  ResolvedApplication,
+  UiStateRevision,
+  UiTreeNode,
   UiaEventPayload,
 } from "./api/automation"
 
-/**
- * Manifest validation — the SAME validator the plugin manager runs at install
- * time. A plugin test asserting `validatePluginManifest(manifest).valid` is
- * the cheapest way to catch a contribution that would be rejected on load.
- */
-export {
-  assertPluginManifestParity,
-  findPluginManifestParityIssues,
-  parseManifest,
-  PluginManifestParityError,
-  validatePluginConfig,
-  validatePluginManifest,
-} from "./manifest"
-export type {
-  ConfigValidationResult,
-  ManifestDiagnostic,
-  ManifestValidationOptions,
-  PluginManifestParityIssue,
-  ValidationError,
-  ValidationResult,
-} from "./manifest"
+/** Install-time validation is intentionally isolated on `@cognia/plugin-sdk/manifest`. */
 
 /**
  * Cooperative cancellation. A plugin tool typically holds two signals — the
@@ -433,11 +412,11 @@ export type {
  * plus the `cleanup()` that detaches them, and answers `undefined` when there
  * is nothing to combine.
  */
-export { combineAbortSignals } from "@/lib/execution/admit"
+export { combineAbortSignals } from "./runtime/abort"
 
 /**
  * Hand the user a file. A plugin that exports a report, a transcript or a
  * SARIF log needs the same object-URL dance every host export does — including
  * the revoke, which is the part hand-rolled copies forget.
  */
-export { downloadBlob } from "@/lib/connectors/audit-export"
+export { downloadBlob } from "./runtime/download"

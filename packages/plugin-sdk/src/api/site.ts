@@ -9,15 +9,7 @@
  * Backed by `database:read`; no new canonical permission is minted here.
  */
 
-export {
-  getSiteProductionUrl,
-  listSiteDeploymentsForPlugin as listSiteDeployments,
-  listSiteOperationsForPlugin as listSiteOperations,
-  listSiteVersionsForPlugin as listSiteVersions,
-  listSites,
-} from "@/lib/plugin/api/sites"
-
-export type { PluginSiteSummary } from "@/lib/plugin/api/sites"
+export type { PluginSiteSummary, PluginSitesAPI } from "@/lib/plugin/api/sites"
 
 export type {
   SiteDeploymentRow,

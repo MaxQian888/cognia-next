@@ -6,10 +6,6 @@ import type {
   PluginTaskHandler,
   PluginTaskResult,
   PluginTaskTrigger,
-  RegisteredScheduledTask,
-  ScheduledTaskBridgeOptions,
-  ScheduledTaskBridgeResult,
-  ScheduledTaskSchedulerPort,
 } from "./scheduled-task"
 
 describe("plugin-sdk api/scheduled-task", () => {
@@ -19,27 +15,11 @@ describe("plugin-sdk api/scheduled-task", () => {
     consoleInfoSpy = jest.spyOn(console, "info").mockImplementation(() => undefined)
   })
 
-  afterEach(() => {
-    sdk.unregisterScheduledTaskDefsByPlugin("plugin-sdk-test")
-    sdk.clearPluginTaskHandlers()
-    consoleInfoSpy.mockRestore()
-  })
+  afterEach(() => consoleInfoSpy.mockRestore())
 
-  it("exposes the scheduled-task authoring helper, bridge, definition registry, and handler registry", () => {
+  it("exposes portable scheduled-task authoring helpers", () => {
     expect(typeof sdk.defineScheduledTask).toBe("function")
     expect(typeof sdk.toTaskTrigger).toBe("function")
-    expect(typeof sdk.registerScheduledTasksForPlugin).toBe("function")
-    expect(typeof sdk.unregisterScheduledTasksForPlugin).toBe("function")
-    expect(typeof sdk.registerScheduledTaskDefsForPlugin).toBe("function")
-    expect(typeof sdk.unregisterScheduledTaskDefsByPlugin).toBe("function")
-    expect(typeof sdk.listScheduledTaskDefs).toBe("function")
-    expect(typeof sdk.subscribeScheduledTaskDefs).toBe("function")
-    expect(typeof sdk.registerPluginTaskHandler).toBe("function")
-    expect(typeof sdk.unregisterPluginTaskHandler).toBe("function")
-    expect(typeof sdk.getPluginTaskHandler).toBe("function")
-    expect(typeof sdk.hasPluginTaskHandler).toBe("function")
-    expect(typeof sdk.getPluginTaskHandlerNames).toBe("function")
-    expect(typeof sdk.clearPluginTaskHandlers).toBe("function")
   })
 
   it("defineScheduledTask is a typesafe identity function and maps triggers", () => {
@@ -54,23 +34,7 @@ describe("plugin-sdk api/scheduled-task", () => {
     expect(sdk.toTaskTrigger(def)).toEqual({ type: "interval", intervalMs: 30_000 })
   })
 
-  it("exposes the in-memory scheduled-task definition and handler registries", () => {
-    const def = sdk.defineScheduledTask({
-      name: "refresh-index",
-      handler: "refreshIndex",
-      trigger: { type: "interval", seconds: 30 },
-    })
-    expect(sdk.registerScheduledTaskDefsForPlugin("plugin-sdk-test", [def])).toBe(1)
-    expect(sdk.listScheduledTaskDefs()).toEqual([{ pluginId: "plugin-sdk-test", def }])
-
-    const handler: PluginTaskHandler = async () => ({ success: true })
-    sdk.registerPluginTaskHandler("plugin-sdk-test:refreshIndex", handler)
-    expect(sdk.hasPluginTaskHandler("plugin-sdk-test:refreshIndex")).toBe(true)
-    expect(sdk.getPluginTaskHandler("plugin-sdk-test:refreshIndex")).toBe(handler)
-    expect(sdk.getPluginTaskHandlerNames()).toContain("plugin-sdk-test:refreshIndex")
-  })
-
-  it("re-exports scheduled-task bridge, registry, and runtime API types", () => {
+  it("re-exports scheduled-task authoring and runtime context types", () => {
     const assertTypes = <
       _T extends
         | PluginScheduledTaskDef
@@ -78,11 +42,7 @@ describe("plugin-sdk api/scheduled-task", () => {
         | PluginTaskHandler
         | PluginTaskContext
         | PluginTaskResult
-        | PluginSchedulerAPI
-        | RegisteredScheduledTask
-        | ScheduledTaskSchedulerPort
-        | ScheduledTaskBridgeOptions
-        | ScheduledTaskBridgeResult,
+        | PluginSchedulerAPI,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

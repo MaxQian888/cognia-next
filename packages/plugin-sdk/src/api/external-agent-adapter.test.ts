@@ -1,7 +1,5 @@
 import * as sdk from "./external-agent-adapter"
 import type {
-  ExternalAgentAdaptersBridgeOptions,
-  ExternalAgentAdaptersBridgeResult,
   PluginExternalAgentAdapterDef,
   ProtocolAdapter,
   ProtocolAdapterFactory,
@@ -10,16 +8,12 @@ import type {
 } from "./external-agent-adapter"
 
 describe("plugin-sdk api/external-agent-adapter", () => {
-  it("exposes the authoring helper, manifest bridge, and protocol adapter registry", () => {
+  it("exposes portable authoring and adapter runtime helpers", () => {
     expect(typeof sdk.defineExternalAgentAdapter).toBe("function")
-    expect(typeof sdk.registerExternalAgentAdaptersForPlugin).toBe("function")
-    expect(typeof sdk.unregisterExternalAgentAdaptersForPlugin).toBe("function")
-    expect(typeof sdk.registerPluginProtocolAdapter).toBe("function")
-    expect(typeof sdk.unregisterPluginProtocolAdaptersByPlugin).toBe("function")
-    expect(typeof sdk.getPluginProtocolAdapterOwner).toBe("function")
-    expect(typeof sdk.getPluginProtocolAdapterProtocols).toBe("function")
-    expect(typeof sdk.listPluginProtocolAdapters).toBe("function")
-    expect(typeof sdk.onProtocolAdapterRegistryChange).toBe("function")
+    expect(typeof sdk.BaseProtocolAdapter).toBe("function")
+    expect(typeof sdk.foldUsageUpdate).toBe("function")
+    expect(typeof sdk.mergeTurnUsage).toBe("function")
+    expect(typeof sdk.getExternalAgentExecutionBlock).toBe("function")
   })
 
   it("defineExternalAgentAdapter is a typesafe identity function", () => {
@@ -34,12 +28,10 @@ describe("plugin-sdk api/external-agent-adapter", () => {
     expect(def.export).toBe("createDemoAdapter")
   })
 
-  it("re-exports external agent adapter bridge and protocol types", () => {
+  it("re-exports external-agent adapter protocol types", () => {
     const assertTypes = <
       _T extends
         | PluginExternalAgentAdapterDef
-        | ExternalAgentAdaptersBridgeOptions
-        | ExternalAgentAdaptersBridgeResult
         | ProtocolAdapter
         | ProtocolAdapterFactory
         | ProtocolAdapterRegistryChange

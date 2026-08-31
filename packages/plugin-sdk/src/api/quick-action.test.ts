@@ -1,5 +1,12 @@
 import * as sdk from "./quick-action"
-import type { PluginQuickActionDef, PluginQuickActionInput, QuickActionEntry } from "./quick-action"
+import type {
+  PluginQuickActionDef,
+  PluginQuickActionInput,
+  PluginQuickActionInvocation,
+  PluginQuickActionResult,
+  PluginSelectionActionSpec,
+  QuickActionEntry,
+} from "./quick-action"
 
 describe("plugin-sdk api/quick-action", () => {
   it("exposes the authoring helper and quick-action registry functions", () => {
@@ -19,5 +26,21 @@ describe("plugin-sdk api/quick-action", () => {
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()
+    const selection: PluginSelectionActionSpec = { input: "text", output: "preview" }
+    const invocation: PluginQuickActionInvocation = {
+      surface: "selection",
+      selection: {
+        candidateId: "c1",
+        sourceApp: "TextEdit",
+        origin: "accessibility",
+        capturedAt: 1,
+        truncated: false,
+        contentTypes: [],
+        editable: true,
+        replaceCapability: "paste",
+      },
+    }
+    const result: PluginQuickActionResult = { kind: "status" }
+    expect({ selection, invocation, result }).toBeDefined()
   })
 })

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict"
 import { describe, test } from "node:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   checkPerformanceBudget,
+  measureEsmChunkClosure,
   percentile,
   resolvePerformanceFiles,
   summarizeLifecycleSamples,
@@ -70,5 +74,21 @@ describe("plugin performance budget", () => {
       () => resolvePerformanceFiles([], "/repo", "/default.json"),
       /\[baseline\.json\] <candidate\.json>/
     )
+  })
+
+  test("measures each imported ESM chunk once", () => {
+    const dir = mkdtempSync(join(tmpdir(), "plugin-sdk-performance-"))
+    try {
+      writeFileSync(join(dir, "index.js"), 'import "./shared.js"; export const x = 1\n')
+      writeFileSync(join(dir, "context.js"), 'export { x } from "./shared.js"\n')
+      writeFileSync(join(dir, "browser.js"), "export const browser = true\n")
+      writeFileSync(join(dir, "shared.js"), "export const x = 1\n")
+      const measured = measureEsmChunkClosure(dir)
+      assert.deepEqual(measured.files, ["browser.js", "context.js", "index.js", "shared.js"])
+      assert.equal(measured.rawBytes, 120)
+      assert.ok(measured.gzipBytes > 0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

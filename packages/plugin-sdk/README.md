@@ -58,7 +58,7 @@ export default definePlugin({
   `eval`, `external-agent-adapter`, `external-agent-preset`, `host-environment`, `i18n`,
   `integration`, `message-renderer`, `ocr-provider`, `sandbox`, `scheduled-task`,
   `security-findings`, `shared-memory-adapter`, `skill`, `skill-recorder`,
-  `resources`, `slash-command`, `subagent`, `testing`, `tool-renderer`, `webview`,
+  `resources`, `slash-command`, `subagent`, `tool-renderer`, `webview`,
   `workflow-editor`, `workflow-run`, and `workflow-template`.
 
   Registries are deliberately absent from the root barrel (pinned by
@@ -117,3 +117,7 @@ packaging. Additive SDK changes use pre-1.0 minor releases.
 Host code inside the Cognia repository may temporarily use the unexported source-only
 `@cognia/plugin-sdk/host` compatibility module. It is absent from `package.json#exports` and the
 npm tarball and must never be imported by third-party plugins.
+
+Host-backed database and runtime fixtures are intentionally not published as an author API.
+First-party integration tests import those fixtures from the host test modules directly; an
+external plugin test suite should mock only the documented `PluginContext` boundary.

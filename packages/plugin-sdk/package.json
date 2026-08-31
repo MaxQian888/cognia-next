@@ -1,6 +1,6 @@
 {
   "name": "@cognia/plugin-sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "description": "Standalone TypeScript SDK for authoring Cognia plugins.",
   "license": "AGPL-3.0-only",
@@ -20,6 +20,12 @@
       "import": "./dist/agent-team-template.js",
       "require": "./dist/agent-team-template.cjs",
       "default": "./dist/agent-team-template.js"
+    },
+    "./api/abort": {
+      "types": "./dist/abort.d.ts",
+      "import": "./dist/abort.js",
+      "require": "./dist/abort.cjs",
+      "default": "./dist/abort.js"
     },
     "./api/agent-turn": {
       "types": "./dist/agent-turn.d.ts",
@@ -74,6 +80,12 @@
       "import": "./dist/context-provider.js",
       "require": "./dist/context-provider.cjs",
       "default": "./dist/context-provider.js"
+    },
+    "./api/download": {
+      "types": "./dist/download.d.ts",
+      "import": "./dist/download.js",
+      "require": "./dist/download.cjs",
+      "default": "./dist/download.js"
     },
     "./api/editor": {
       "types": "./dist/editor.d.ts",
@@ -195,12 +207,6 @@
       "require": "./dist/subagent.cjs",
       "default": "./dist/subagent.js"
     },
-    "./api/testing": {
-      "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.js",
-      "require": "./dist/testing.cjs",
-      "default": "./dist/testing.js"
-    },
     "./api/tool": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
@@ -303,7 +309,12 @@
   "dependencies": {
     "@cognia/provider-core": "workspace:*",
     "@cognia/provider-routing": "workspace:*",
-    "@cognia/provider-types": "workspace:*"
+    "@cognia/provider-types": "workspace:*",
+    "ajv": "^8.20.0",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@cognia/security-findings": "workspace:*"
   },
   "peerDependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",

@@ -1,42 +1,9 @@
-/**
- * Plugin SDK - `scheduled-task` capability surface.
- *
- * Re-exports the declarative authoring helper, manifest bridge, task
- * definition registry, and plugin task handler registry.
- */
+/** Portable scheduled-task authoring contracts. Runtime operations live on context APIs. */
+
+import type { PluginScheduledTaskDef } from "@/types/plugin"
+import type { TaskTrigger } from "@/types/scheduler"
 
 export { defineScheduledTask } from "../define/define-scheduled-task"
-
-export {
-  registerScheduledTasksForPlugin,
-  toTaskTrigger,
-  unregisterScheduledTasksForPlugin,
-} from "@/lib/plugin/bridge/scheduled-task-bridge"
-
-export type {
-  ScheduledTaskBridgeOptions,
-  ScheduledTaskBridgeResult,
-  ScheduledTaskSchedulerPort,
-} from "@/lib/plugin/bridge/scheduled-task-bridge"
-
-export {
-  listScheduledTaskDefs,
-  registerScheduledTaskDefsForPlugin,
-  subscribeScheduledTaskDefs,
-  unregisterScheduledTaskDefsByPlugin,
-} from "@/lib/plugin/scheduler/scheduled-task-registry"
-
-export type { RegisteredScheduledTask } from "@/lib/plugin/scheduler/scheduled-task-registry"
-
-export {
-  clearPluginTaskHandlers,
-  getPluginTaskHandler,
-  getPluginTaskHandlerNames,
-  hasPluginTaskHandler,
-  registerPluginTaskHandler,
-  unregisterPluginTaskHandler,
-} from "@/lib/plugin/scheduler/scheduler-plugin-executor"
-
 export type { PluginScheduledTaskDef } from "@/types/plugin"
 export type {
   PluginSchedulerAPI,
@@ -45,11 +12,6 @@ export type {
   PluginTaskResult,
   PluginTaskTrigger,
 } from "@/types/plugin/plugin-scheduler"
-
-/**
- * The scheduler domain vocabulary. A plugin that creates or inspects tasks
- * types them against the host's own row shapes rather than a private copy.
- */
 export type {
   CreateScheduledTaskInput,
   ScheduledTask,
@@ -62,21 +24,27 @@ export type {
   TaskTrigger,
   TaskTriggerType,
 } from "@/types/scheduler"
-
 export { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
 
-/**
- * The USER's scheduled tasks — the `/scheduler` list — as opposed to the
- * plugin-owned tasks `ctx.scheduler` manages. An agent tool that schedules
- * work on the user's behalf lives here, and MUST consult
- * `getSchedulerPermissionPolicy()` before creating anything: the policy is the
- * user's standing answer to "may something other than me put work on my
- * schedule?", and the store does not enforce it on write.
- */
-export {
-  createUserScheduledTask,
-  deleteUserScheduledTask,
-  getSchedulerPermissionPolicy,
-  listUserScheduledTasks,
-  runUserScheduledTaskNow,
-} from "@/lib/plugin/api/scheduler-tasks"
+/** Project a declarative plugin trigger into the host scheduler vocabulary. */
+export function toTaskTrigger(def: PluginScheduledTaskDef): TaskTrigger {
+  const trigger = def.trigger
+  switch (trigger.type) {
+    case "cron":
+      return {
+        type: "cron",
+        cronExpression: trigger.expression,
+        timezone: trigger.timezone,
+      }
+    case "interval":
+      return { type: "interval", intervalMs: Math.max(0, trigger.seconds) * 1000 }
+    case "once":
+      return { type: "once", runAt: new Date(trigger.runAt) }
+    case "event":
+      return {
+        type: "event",
+        eventType: trigger.eventType,
+        eventSource: trigger.eventSource,
+      }
+  }
+}

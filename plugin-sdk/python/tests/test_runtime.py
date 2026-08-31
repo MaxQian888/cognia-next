@@ -8,9 +8,9 @@ from cognia.runtime import Runtime
 
 
 def assert_current_handshake(info):
-    assert info["sdk_version"] == "0.1.0"
+    assert info["sdk_version"] == "0.3.0"
     assert info["protocol_version"] == "2.0.0"
-    assert info["contract_version"] == "1.0.0"
+    assert info["contract_version"] == "1.2.0"
     assert info["runtime_id"] == "python"
     assert info["legacy_adapter"] is False
     assert set(info["capabilities"]) >= {"tools", "hooks", "contributions"}

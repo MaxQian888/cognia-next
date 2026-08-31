@@ -25,6 +25,10 @@
  */
 
 export { cn } from "./cn"
+export { CopyFeedbackIcon, type CopyFeedbackIconProps } from "./copy-feedback-icon"
+export { PluginImage, type PluginImageProps } from "./plugin-image"
+export { parseToolOutput, ToolCard, type ToolCardProps, useParsedToolOutput } from "./tool-card"
+export { useCopy, type UseCopyOptions, type UseCopyResult } from "./use-copy"
 
 export { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "./accordion"
 export { Alert, AlertDescription, AlertTitle, alertVariants } from "./alert"

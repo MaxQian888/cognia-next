@@ -585,6 +585,7 @@ class QuickAction:
 
     id: str
     title: str
+    label_key: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     category: Optional[str] = None
@@ -593,9 +594,12 @@ class QuickAction:
     command: Optional[str] = None
     slash: Optional[str] = None
     surfaces: List[str] = field(default_factory=list)
+    selection: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"id": self.id, "title": self.title}
+        if self.label_key is not None:
+            out["labelKey"] = self.label_key
         if self.description is not None:
             out["description"] = self.description
         if self.icon is not None:
@@ -612,6 +616,8 @@ class QuickAction:
             out["slash"] = self.slash
         if self.surfaces:
             out["surfaces"] = list(self.surfaces)
+        if self.selection is not None:
+            out["selection"] = dict(self.selection)
         return out
 
 
@@ -620,6 +626,7 @@ def define_quick_action(
     title: str,
     *,
     description: Optional[str] = None,
+    label_key: Optional[str] = None,
     icon: Optional[str] = None,
     category: Optional[str] = None,
     when: Optional[str] = None,
@@ -627,6 +634,7 @@ def define_quick_action(
     command: Optional[str] = None,
     slash: Optional[str] = None,
     surfaces: Optional[List[str]] = None,
+    selection: Optional[Dict[str, Any]] = None,
 ) -> QuickAction:
     """Construct a validated ``QuickAction``. A quick action must name a
     dispatch target — exactly one of ``command`` or ``slash`` is required."""
@@ -636,9 +644,34 @@ def define_quick_action(
         raise ValueError(
             "quick action must name a dispatch target (command or slash)"
         )
+    resolved_surfaces = list(surfaces or [])
+    allowed_surfaces = {"palette", "composer", "tray", "selection"}
+    if any(surface not in allowed_surfaces for surface in resolved_surfaces):
+        raise ValueError("quick action contains an unsupported surface")
+    if "selection" in resolved_surfaces and selection is None:
+        raise ValueError("selection surface requires a selection contract")
+    if selection is not None and "selection" not in resolved_surfaces:
+        raise ValueError("selection contract requires the selection surface")
+    if selection is not None:
+        if selection.get("input") not in {"metadata", "text"}:
+            raise ValueError("selection contract input must be metadata or text")
+        if selection.get("output") not in {
+            "none",
+            "preview",
+            "copy",
+            "replace",
+            "status",
+        }:
+            raise ValueError("selection contract output is invalid")
+        max_chars = selection.get("maxChars")
+        if max_chars is not None and (
+            not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars <= 0
+        ):
+            raise ValueError("selection contract maxChars must be a positive integer")
     return QuickAction(
         id=id,
         title=title,
+        label_key=label_key,
         description=description,
         icon=icon,
         category=category,
@@ -646,5 +679,6 @@ def define_quick_action(
         accelerator=accelerator,
         command=command,
         slash=slash,
-        surfaces=list(surfaces or []),
+        surfaces=resolved_surfaces,
+        selection=dict(selection) if selection is not None else None,
     )

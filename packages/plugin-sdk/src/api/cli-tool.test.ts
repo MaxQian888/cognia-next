@@ -1,8 +1,5 @@
 import * as sdk from "./cli-tool"
 import type {
-  CliToolDeps,
-  CliToolExecutionResult,
-  ExecuteCliToolContext,
   PluginCliArgvToken,
   PluginCliBinaryRef,
   PluginCliCwdPolicy,
@@ -11,10 +8,12 @@ import type {
 } from "./cli-tool"
 
 describe("plugin-sdk api/cli-tool", () => {
-  it("exposes the CLI tool authoring helper and executor", () => {
+  it("exposes portable CLI-tool authoring and preview helpers", () => {
     expect(typeof sdk.defineCliTool).toBe("function")
-    expect(typeof sdk.executeCliTool).toBe("function")
-    expect(typeof sdk.CliToolExecutionError).toBe("function")
+    expect(typeof sdk.buildArgv).toBe("function")
+    expect(typeof sdk.resolveCwd).toBe("function")
+    expect(typeof sdk.parseOutput).toBe("function")
+    expect(typeof sdk.CliTemplateError).toBe("function")
   })
 
   it("defineCliTool is a typesafe identity function", () => {
@@ -38,10 +37,7 @@ describe("plugin-sdk api/cli-tool", () => {
         | PluginCliBinaryRef
         | PluginCliArgvToken
         | PluginCliOutputParse
-        | PluginCliCwdPolicy
-        | CliToolExecutionResult
-        | ExecuteCliToolContext
-        | CliToolDeps,
+        | PluginCliCwdPolicy,
     >(): void => undefined
 
     expect(assertTypes).toBeDefined()

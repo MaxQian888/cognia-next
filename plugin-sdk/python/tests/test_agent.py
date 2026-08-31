@@ -286,3 +286,31 @@ def test_quick_action_command_and_slash():
 def test_quick_action_requires_dispatch_target():
     with pytest.raises(ValueError, match="dispatch target"):
         define_quick_action("qa", "Quick")
+
+
+def test_quick_action_selection_surface_requires_a_valid_selection_contract():
+    action = define_quick_action(
+        "rewrite",
+        "Rewrite",
+        command="rewrite.command",
+        surfaces=["selection"],
+        selection={
+            "input": "text",
+            "output": "preview",
+            "origins": ["accessibility"],
+            "contentTypes": ["code"],
+            "maxChars": 4000,
+        },
+    )
+    assert action.to_dict()["selection"]["input"] == "text"
+    with pytest.raises(ValueError, match="selection contract"):
+        define_quick_action(
+            "broken", "Broken", command="broken", surfaces=["selection"]
+        )
+    with pytest.raises(ValueError, match="selection surface"):
+        define_quick_action(
+            "hidden",
+            "Hidden",
+            command="hidden",
+            selection={"input": "metadata", "output": "status"},
+        )

@@ -696,6 +696,7 @@
               "conversationSidebar",
               "conversationTimeline",
               "conversationTitle",
+              "costBudget",
               "customCss",
               "customCssEnabled",
               "customThemes",
@@ -717,10 +718,12 @@
               "language",
               "lastInboxViewedAt",
               "lmntVoice",
+              "messageDisplay",
               "mistralVoiceId",
               "mobileComputerUseEnabled",
               "motion",
               "notificationPreferences",
+              "onboardingProfile",
               "openaiVoice",
               "permissionMode",
               "pinnedWorkflowIds",
@@ -733,6 +736,7 @@
               "sidebarLayout",
               "streamPartialMessages",
               "sttLanguage",
+              "stylePack",
               "surfaceSkillsEnabled",
               "systemVoice",
               "telemetryEnabled",
@@ -744,7 +748,6 @@
               "ttsRate",
               "ttsVolume",
               "typographyExt",
-              "wallpapers",
               "xiaomiVoice"
             ]
           }
@@ -1846,7 +1849,8 @@
           "type": "string"
         },
         "content": {
-          "type": "string"
+          "type": "string",
+          "description": "The proposed revision, inline. A file large enough to exceed the host's rpcJsonBodyBytes ceiling is refused before dispatch; the caller falls back to the on-disk diff rather than sending a truncated one."
         },
         "title": {
           "type": "string"

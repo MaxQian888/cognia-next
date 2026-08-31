@@ -17,8 +17,6 @@
  *  - Runtime API types live in `@cognia/plugin-sdk/context`.
  */
 
-import type { PluginDefinition } from "@/types/plugin/plugin"
-
 export type {
   PluginManifest,
   PluginManifestDexieBlock,
@@ -67,6 +65,13 @@ export type {
   PluginManifestCommandDef,
   PluginQuickActionDef,
   PluginQuickActionSurface,
+  PluginQuickActionInvocation,
+  PluginQuickActionResult,
+  PluginSelectionActionSpec,
+  PluginSelectionContentType,
+  PluginSelectionOrigin,
+  PluginSelectionQuickActionContext,
+  PluginSelectionReplaceCapability,
   PluginManifestTrayItemDef,
   PluginA2UIAction,
   PluginA2UIDataChange,
@@ -90,9 +95,7 @@ export type {
 } from "@/types/plugin/plugin"
 export type * from "@/types/plugin/plugin-ide"
 
-export function definePlugin(definition: PluginDefinition): PluginDefinition {
-  return definition
-}
+export { definePlugin } from "../define/define-plugin"
 
 export type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 export type { PluginAiProviderDef } from "@/types/plugin/plugin-ai-provider"

@@ -37,6 +37,7 @@ export type {
   PluginConfirmDialog,
   PluginA2UIAPI,
   PluginAgentAPI,
+  PluginToolRegistration,
   PluginSettingsAPI,
   PluginPythonAPI,
   PluginPythonModule,
@@ -207,6 +208,33 @@ export type {
   PluginBackupRestoreOptions,
 } from "@/lib/plugin/api/backup-api"
 export type { PluginAutomationAPI } from "@/lib/plugin/api/automation-api"
+export type {
+  EmitPluginWorkflowWaitEventInput,
+  PluginWorkflowAuthorAPI,
+  PluginWorkflowEditorCommand,
+  PluginWorkflowEditorMutationResult,
+  PluginWorkflowEditorResolution,
+  PluginWorkflowEditorSnapshot,
+  RecordPluginWorkflowCallbackInput,
+  StageWorkflowProposalInput,
+} from "@/lib/plugin/api/workflow-author-api"
+export type { PluginBrowserAPI, PluginBrowserRoute } from "@/lib/plugin/api/browser-api"
+export type {
+  PluginCharacterPackRegistration,
+  PluginCharacterPacksAPI,
+} from "@/lib/plugin/api/character-packs-api"
+export type { PluginResourcesAPI } from "@/lib/plugin/api/resources-api"
+export type { PluginSitesAPI, PluginSiteSummary } from "@/lib/plugin/api/sites"
+export type { PluginSandboxAPI } from "@/lib/plugin/api/sandbox-api"
+export type { PluginRecorderAPI } from "@/lib/plugin/api/recorder-api"
+export type { PluginSecurityScansAPI } from "@/lib/plugin/api/security-scans-api"
+export type {
+  PluginEvalAPI,
+  PluginEvalProjectArgs,
+  PluginRunCalibrationArgs,
+  PluginRunDatasetArgs,
+} from "@/lib/plugin/api/eval-api"
+export type { PluginUserSchedulerAPI } from "@/lib/plugin/api/scheduler-tasks"
 export type { PluginCompanionAPI, CompanionServerStatus } from "@/lib/plugin/api/companion-api"
 export type {
   PluginMemoryAPI,

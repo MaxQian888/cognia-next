@@ -22,4 +22,11 @@ export type {
   PluginQuickActionDef,
   PluginQuickActionInput,
   PluginQuickActionSurface,
+  PluginQuickActionInvocation,
+  PluginQuickActionResult,
+  PluginSelectionActionSpec,
+  PluginSelectionContentType,
+  PluginSelectionOrigin,
+  PluginSelectionQuickActionContext,
+  PluginSelectionReplaceCapability,
 } from "@/types/plugin"

@@ -14,6 +14,12 @@
       "@cognia/provider-embedding/*": ["../../packages/provider-embedding/src/*"],
       "@cognia/provider-routing": ["../../packages/provider-routing/src/index.ts"],
       "@cognia/provider-routing/*": ["../../packages/provider-routing/src/*"],
+      // `tsup --clean` removes dist before declaration generation, while a few
+      // shared host types legitimately refer back to the public SDK contract.
+      // Resolve that self-reference to source so author types never depend on
+      // a stale prebuilt package.
+      "@cognia/plugin-sdk": ["../../packages/plugin-sdk/src/index.ts"],
+      "@cognia/plugin-sdk/*": ["../../packages/plugin-sdk/src/*"],
       "@cognia/rag": ["../../packages/rag/src/index.ts"],
       "@cognia/rag/*": ["../../packages/rag/src/*"],
       "@cognia/error-parsers": ["../../packages/error-parsers/src/index.ts"],

@@ -30,6 +30,26 @@ describe("standalone resolution", () => {
     expect(sources.length).toBeGreaterThan(5)
   })
 
+  it("publishes only the host-resolvable author entry as a stable package surface", () => {
+    const manifest = JSON.parse(readFileSync(join(SRC_DIR, "..", "package.json"), "utf8")) as {
+      version: string
+      private?: boolean
+      main: string
+      module: string
+      types: string
+      exports: Record<string, unknown>
+      publishConfig?: { access?: string }
+    }
+    expect(manifest.version).toBe("0.2.0")
+    expect(manifest.private).toBe(false)
+    expect(manifest.main).toBe("./dist/index.cjs")
+    expect(manifest.module).toBe("./dist/index.js")
+    expect(manifest.types).toBe("./dist/index.d.ts")
+    expect(Object.hasOwn(manifest.exports, ".")).toBe(true)
+    expect(Object.hasOwn(manifest.exports, "./*")).toBe(false)
+    expect(manifest.publishConfig?.access).toBe("public")
+  })
+
   it.each(sources)("%s imports no app-aliased path", (file) => {
     const code = readFileSync(join(SRC_DIR, file), "utf8")
     const appImports = [...code.matchAll(/from\s+"(@\/[^"]+)"/g)].map((m) => m[1])
@@ -58,6 +78,7 @@ describe("barrel", () => {
       "CardHeader",
       "CardTitle",
       "Checkbox",
+      "CopyFeedbackIcon",
       "Dialog",
       "DialogContent",
       "DialogTitle",
@@ -65,6 +86,7 @@ describe("barrel", () => {
       "FormField",
       "Input",
       "Label",
+      "PluginImage",
       "Select",
       "SelectContent",
       "SelectItem",
@@ -74,6 +96,7 @@ describe("barrel", () => {
       "TabsContent",
       "TabsList",
       "TabsTrigger",
+      "ToolCard",
       "Tooltip",
       "TooltipContent",
       "TooltipProvider",
@@ -81,6 +104,9 @@ describe("barrel", () => {
       "Toaster",
       "toast",
       "cn",
+      "parseToolOutput",
+      "useCopy",
+      "useParsedToolOutput",
     ]) {
       expect(kit).toHaveProperty(name)
     }

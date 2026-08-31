@@ -1,59 +1,92 @@
-/**
- * Plugin SDK — `sandbox` capability surface.
- *
- * Two halves of the same story:
- *
- *  - `setMicrovmExec()` is the seam a sandbox PROVIDER plugin fills. The host
- *    routes confined command execution through whatever adapter is installed;
- *    a plugin that can run commands in a microVM (E2B, Firecracker, a remote
- *    runner) registers itself here and every sandboxed tool call in the app
- *    goes through it. Exactly one adapter is live at a time — `null` clears it,
- *    which is what a plugin must do on deactivate.
- *
- *  - `sandboxSessionRuntime` is the seam a sandbox CONSUMER plugin reads. It
- *    answers "is this session confined, and to what runtime?" so a tool can
- *    refuse, or downgrade, rather than quietly executing on the host. A tool
- *    that skips this check is a tool that escapes the sandbox the user asked
- *    for, which is why the runtime is exposed rather than left implicit.
- *
- * `HOST_FALLBACK_RUNTIME_REF` is the sentinel for "no sandbox installed —
- * running on the host": distinguishable from an unknown runtime, so a caller
- * can tell "unconfined by configuration" from "confined to something I cannot
- * reach".
- */
+/** Portable sandbox contracts shared by providers, consumers, and the host. */
 
-export { getMicrovmExec, MicrovmAdapterError, setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
+export interface MicrovmResult {
+  exit_code: number
+  stdout: string
+  stderr: string
+  duration: number
+  timed_out: boolean
+  /** True when stdout exceeded the per-stream transport cap. */
+  stdout_truncated?: boolean
+  /** True when stderr exceeded the per-stream transport cap. */
+  stderr_truncated?: boolean
+}
 
-export type {
-  MicrovmAdapterErrorCode,
-  MicrovmCeiling,
-  MicrovmCommand,
-  MicrovmExecAdapter,
-  MicrovmExecPayload,
-  MicrovmRequest,
-  MicrovmResult,
-} from "@/lib/sandbox/microvm-bridge"
+export interface MicrovmCommand {
+  argv: string[]
+  cwd: string
+  env: Record<string, string>
+  stdin: string | null
+  timeout: number
+}
 
-export {
-  HOST_FALLBACK_RUNTIME_REF,
-  SandboxRuntimeError,
-  sandboxSessionRuntime,
-  SandboxSessionRuntime,
-} from "@/lib/sandbox/session-runtime"
+export interface MicrovmRequest {
+  writable: string[]
+  readable: string[]
+  targetFiles: string[]
+  maxCpuSeconds: number
+  maxMemoryMb: number
+  network: "off" | "on" | "allowlist"
+  networkHosts: string[]
+}
 
-export type {
-  BindSandboxSessionInput,
-  SandboxConfine,
-  SandboxRuntimeErrorCode,
-  SandboxRuntimeRef,
-} from "@/lib/sandbox/session-runtime"
+export interface MicrovmCeiling {
+  network?: "off" | "on" | "allowlist"
+  maxCpuSeconds?: number
+  maxMemoryMb?: number
+}
 
-/** The checkout contract a workspace backend hands back. */
+export interface MicrovmExecPayload {
+  tool: string
+  command: MicrovmCommand
+  request: MicrovmRequest
+  ceiling?: MicrovmCeiling
+}
+
+export type MicrovmAdapterErrorCode =
+  "workspace-unavailable" | "runtime-unbound" | "policy-not-attested" | "workspace-boundary"
+
+export class MicrovmAdapterError extends Error {
+  readonly code: MicrovmAdapterErrorCode
+
+  constructor(code: MicrovmAdapterErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = "MicrovmAdapterError"
+    this.code = code
+  }
+}
+
+export interface MicrovmExecAdapter {
+  preflight?(ownerRef: string, workspaceRoot?: string, ownerGroup?: string): Promise<void> | void
+  execute(ownerRef: string, payload: MicrovmExecPayload): Promise<MicrovmResult>
+  release?(ownerRef: string): Promise<void> | void
+  dispose?(): Promise<void> | void
+}
+
+export type SandboxRuntimeRef = string
+
+export type SandboxRuntimeErrorCode =
+  | "invalid-binding"
+  | "target-not-found"
+  | "surface-disabled"
+  | "runtime-released"
+  | "microvm-unavailable"
+  | "placement-unavailable"
+
+export class SandboxRuntimeError extends Error {
+  readonly code: SandboxRuntimeErrorCode
+
+  constructor(code: SandboxRuntimeErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = "SandboxRuntimeError"
+    this.code = code
+  }
+}
+
+export const HOST_FALLBACK_RUNTIME_REF: SandboxRuntimeRef = "sandbox-runtime:host-default"
+
+export type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 export type { E2BBackend, WorkspaceHandle } from "@/lib/github/workspace"
 
-/**
- * The CPU / memory / wall-clock ceiling an agent run declares. A microVM
- * adapter must honour it — the host applies no ceiling of its own once
- * execution is delegated.
- */
-export type { SandboxResourcePolicy } from "@cognia/agent-config-types"
+/** Runtime operations are mounted on `ctx.sandbox` for ownership and permission governance. */
+export type { PluginSandboxAPI } from "@/lib/plugin/api/sandbox-api"

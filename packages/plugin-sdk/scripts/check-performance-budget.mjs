@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { basename, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { gzipSync } from "node:zlib"
 
 export const DEFAULT_LATENCY_REGRESSION_RATIO = 0.05
 export const DEFAULT_CHUNK_REGRESSION_RATIO = 0.02
@@ -67,12 +68,55 @@ export function resolvePerformanceFiles(args, cwd, defaultBaselinePath) {
   throw new Error("usage: check-performance-budget.mjs [baseline.json] <candidate.json>")
 }
 
+/** Measure the unique ESM closure shared by the public SDK's hot entrypoints. */
+export function measureEsmChunkClosure(
+  distDir,
+  entries = ["index.js", "context.js", "browser.js"]
+) {
+  const pending = [...entries]
+  const seen = new Set()
+  const chunks = []
+  while (pending.length > 0) {
+    const file = basename(pending.pop())
+    if (seen.has(file)) continue
+    seen.add(file)
+    const source = readFileSync(resolve(distDir, file))
+    chunks.push(source)
+    const text = source.toString("utf8")
+    for (const match of text.matchAll(/(?:from\s*|import\s*\()\s*["']\.\/([^"']+\.js)["']/g)) {
+      if (!seen.has(match[1])) pending.push(match[1])
+    }
+  }
+  const combined = Buffer.concat(chunks.flatMap((chunk) => [chunk, Buffer.from("\n")]))
+  return {
+    files: [...seen].sort(),
+    rawBytes: chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
+    gzipBytes: gzipSync(combined).byteLength,
+  }
+}
+
 function main() {
-  const scriptDir = resolve(fileURLToPath(new URL(".", import.meta.url)))
+  const scriptDir = dirname(fileURLToPath(import.meta.url))
+  const args = process.argv.slice(2)
+  const defaultBaselinePath = resolve(scriptDir, "../contract/performance-baseline.json")
+  if (args.length === 0) {
+    const baseline = JSON.parse(readFileSync(defaultBaselinePath, "utf8"))
+    const chunk = measureEsmChunkClosure(resolve(scriptDir, "../dist"))
+    const errors = checkPerformanceBudget(baseline, { lifecycle: {}, chunk })
+    if (errors.length > 0) {
+      throw new Error(
+        `Plugin performance budget failed:\n${errors.map((error) => `- ${error}`).join("\n")}`
+      )
+    }
+    process.stdout.write(
+      `Plugin performance budget passed (${chunk.rawBytes} raw / ${chunk.gzipBytes} gzip bytes across ${chunk.files.length} chunks).\n`
+    )
+    return
+  }
   const { baselinePath, candidatePath } = resolvePerformanceFiles(
-    process.argv.slice(2),
+    args,
     process.cwd(),
-    resolve(scriptDir, "../contract/performance-baseline.json")
+    defaultBaselinePath
   )
   const baseline = JSON.parse(readFileSync(baselinePath, "utf8"))
   const candidate = JSON.parse(readFileSync(candidatePath, "utf8"))

@@ -1,23 +1,13 @@
 import * as sdk from "./character-pack"
 
 describe("plugin-sdk: api/character-pack", () => {
-  it("re-exports the helper + registry functions plugin authors call", () => {
+  it("exports only portable character-pack authoring and file helpers", () => {
     expect(typeof sdk.defineCharacterPack).toBe("function")
     expect(typeof sdk.PLUGIN_CHARACTER_PACK_SOFT_LIMIT).toBe("number")
-    expect(typeof sdk.registerCharacterPack).toBe("function")
-    expect(typeof sdk.unregisterCharacterPackById).toBe("function")
-    expect(typeof sdk.unregisterCharacterPacksByPlugin).toBe("function")
-    expect(typeof sdk.getCharacterPack).toBe("function")
-    expect(typeof sdk.getCharacterPackEntry).toBe("function")
-    expect(typeof sdk.listCharacterPackIds).toBe("function")
-    expect(typeof sdk.listCharacterPackEntries).toBe("function")
-    expect(typeof sdk.listAllPackCharacters).toBe("function")
-    expect(typeof sdk.getPackCharacterByRuntimeId).toBe("function")
+    expect(typeof sdk.parseLocalPackFile).toBe("function")
+    expect(typeof sdk.serializeLocalPackFile).toBe("function")
     expect(typeof sdk.buildOverlayCharacterId).toBe("function")
     expect(typeof sdk.isOverlayCharacterId).toBe("function")
-    expect(typeof sdk.getPackWarnings).toBe("function")
-    expect(typeof sdk.getPackCharacterWarnings).toBe("function")
-    expect(typeof sdk.refreshAllPackWarnings).toBe("function")
   })
 
   it("defineCharacterPack is a typesafe identity function", () => {
