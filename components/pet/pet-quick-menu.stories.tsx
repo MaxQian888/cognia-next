@@ -3,21 +3,20 @@ import { fn } from "storybook/test"
 
 import { PetQuickMenu } from "./pet-quick-menu"
 
-// Shared right-click quick menu for the widget + the desktop overlay. Dumb
-// `ContextMenu` wrapper — every action is injected. Right-click the target box
-// to open the menu.
+// Shared right-click quick menu for the widget. Every action is injected.
+// Right-click the target box to open the menu.
 const actions = {
   onFeed: fn(),
   onPlay: fn(),
   onPet: fn(),
   onTalk: fn(),
+  onSleep: fn(),
+  onClean: fn(),
+  onTreat: fn(),
   onOpenConsole: fn(),
   onToggleDesktopPet: fn(),
   onMinimize: fn(),
   onOpenSettings: fn(),
-  onClickThrough: fn(),
-  onHideDesktopPet: fn(),
-  onShowMainWindow: fn(),
 }
 
 const Target = () => (
@@ -31,7 +30,6 @@ const meta = {
   component: PetQuickMenu,
   parameters: { layout: "centered" },
   args: {
-    context: "widget",
     actions,
     children: <Target />,
     onOpenChange: fn(),
@@ -49,8 +47,4 @@ export const WidgetWithDesktopPet: Story = {
 
 export const WidgetDesktopPetOpen: Story = {
   args: { showDesktopPetItems: true, desktopPetOpen: true },
-}
-
-export const Overlay: Story = {
-  args: { context: "overlay" },
 }

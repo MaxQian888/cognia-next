@@ -138,7 +138,12 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
   const selection = skinResolution.selection
   const runtime = getPetSkinRuntime()
   useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
-  const assetKey = modelId ? `live2d:${modelId}` : undefined
+  const assetKey =
+    pet.skinId === "live2d" && modelId
+      ? `live2d:${modelId}`
+      : pet.skinId === "sprite-v2" && activeSpritePack?.id
+        ? `sprite-v2:${activeSpritePack.id}`
+        : undefined
   const diagnostics: PetAssetDiagnostic[] = [
     ...skinResolution.diagnostics,
     ...(activeModel?.compatibility
@@ -307,6 +312,7 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
                 view={view}
                 skinId={effectiveSkin}
                 selection={selection}
+                lowPower={pet.lowPower}
                 onFeed={feed}
                 onPlay={play}
                 onPet={petStroke}

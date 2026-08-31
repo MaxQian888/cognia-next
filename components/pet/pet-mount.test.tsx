@@ -16,6 +16,7 @@ const windowCommandDispose = jest.fn()
 const interactionCommandsDispose = jest.fn()
 const openPetWindow = jest.fn().mockResolvedValue(true)
 const isPetWindowOpen = jest.fn().mockResolvedValue(false)
+const setPetClickThrough = jest.fn().mockResolvedValue(true)
 
 jest.mock("@/hooks/pet/use-pet-event-bus", () => ({
   usePetEventBus: (e: boolean, twinAwareness: unknown) => usePetEventBus(e, twinAwareness),
@@ -43,6 +44,7 @@ jest.mock("@/lib/tauri/pet-window", () => ({
   onPetNativeStateChanged: (handler: unknown) => onPetNativeStateChanged(handler),
   openPetWindow: (opts: unknown) => openPetWindow(opts),
   isPetWindowOpen: () => isPetWindowOpen(),
+  setPetClickThrough: (ignore: boolean) => setPetClickThrough(ignore),
 }))
 jest.mock("@/lib/pet/events/cross-window-bridge", () => ({
   startMainPetBridge: (deps: unknown) => startMainPetBridge(deps),
@@ -85,6 +87,7 @@ beforeEach(() => {
   windowCommandDispose.mockReset()
   interactionCommandsDispose.mockReset()
   openPetWindow.mockClear()
+  setPetClickThrough.mockClear()
   isPetWindowOpen.mockReset()
   isPetWindowOpen.mockResolvedValue(false)
   registerPetWindowCommand.mockReturnValue(windowCommandDispose)
@@ -215,7 +218,7 @@ describe("PetMount", () => {
     render(<PetMount />)
 
     await waitFor(() => {
-      expect(isPetWindowOpen).toHaveBeenCalledTimes(1)
+      expect(isPetWindowOpen).toHaveBeenCalled()
       expect(openPetWindow).toHaveBeenCalledWith({
         width: 256,
         height: 320,
@@ -226,7 +229,10 @@ describe("PetMount", () => {
     })
   })
 
-  it("does not duplicate an already-visible desktop-pet window", async () => {
+  it("never re-opens an already-visible desktop-pet window", async () => {
+    // The native existing-window branch reveals + raises the panel, so
+    // re-opening on a settings write would order the overlay to the front and
+    // restart its animation loops for no reason.
     settingsValue = {
       petSettings: {
         ...ENABLED_SETTINGS.petSettings,
@@ -239,7 +245,24 @@ describe("PetMount", () => {
 
     render(<PetMount />)
 
-    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalled())
+    expect(openPetWindow).not.toHaveBeenCalled()
+  })
+
+  it("reconciles click-through on an already-visible window without raising it", async () => {
+    settingsValue = {
+      petSettings: {
+        ...ENABLED_SETTINGS.petSettings,
+        desktopPet: { enabled: true, clickThrough: true, size: 128, position: null },
+      },
+    }
+    getPetWindowRole.mockReturnValue("main")
+    isTauri.mockReturnValue(true)
+    isPetWindowOpen.mockResolvedValue(true)
+
+    render(<PetMount />)
+
+    await waitFor(() => expect(setPetClickThrough).toHaveBeenCalledWith(true))
     expect(openPetWindow).not.toHaveBeenCalled()
   })
 
@@ -260,7 +283,7 @@ describe("PetMount", () => {
     )
 
     const { unmount } = render(<PetMount />)
-    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(isPetWindowOpen).toHaveBeenCalled())
     unmount()
     resolveProbe(false)
     await Promise.resolve()

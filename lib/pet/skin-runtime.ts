@@ -168,18 +168,22 @@ export class PetSkinRuntime {
     return pending
   }
 
-  invalidateAsset(assetKey: string): void {
+  private clearCachedAsset(assetKey: string): void {
     const url = this.objectUrls.get(assetKey)
     if (url) this.revokeObjectURL(url)
     this.objectUrls.delete(assetKey)
     this.snapshots.delete(assetKey)
     this.loadedAssets.delete(assetKey)
     this.assetPromises.delete(assetKey)
+    this.counters.objectUrls = this.objectUrls.size
+  }
+
+  invalidateAsset(assetKey: string): void {
+    this.clearCachedAsset(assetKey)
     this.contextLossCount.delete(assetKey)
     this.degradedAssets.delete(assetKey)
     this.failureDiagnostics.delete(assetKey)
     this.retryGenerations.delete(assetKey)
-    this.counters.objectUrls = this.objectUrls.size
     this.emit()
   }
 
@@ -207,6 +211,10 @@ export class PetSkinRuntime {
   }
 
   retryAsset(assetKey: string): void {
+    // A retry must perform a real reload. Keeping a fulfilled promise or an
+    // object URL here makes the retry control appear to work while serving the
+    // exact same failed resource.
+    this.clearCachedAsset(assetKey)
     this.contextLossCount.delete(assetKey)
     this.degradedAssets.delete(assetKey)
     this.failureDiagnostics.delete(assetKey)

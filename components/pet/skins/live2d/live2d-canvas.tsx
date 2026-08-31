@@ -453,7 +453,8 @@ export default function Live2dCanvas({
     model as unknown as Live2dLipSyncModel | null,
     state,
     oneShot,
-    reducedMotion || Boolean(paused)
+    reducedMotion || Boolean(paused),
+    parameterMapping
   )
 
   // Mouth flap while a bubble is up. Skip when paused (ticker stopped → no frames)

@@ -12,8 +12,12 @@ const useActiveLive2dModel = jest.fn(() => ({
   row: undefined,
   coreReady: false as boolean | undefined,
 }))
+const useActiveSpritePack = jest.fn(() => ({
+  packId: undefined as string | undefined,
+  row: undefined as { id: string } | undefined,
+}))
 jest.mock("@/hooks/pet/use-active-sprite-pack", () => ({
-  useActiveSpritePack: () => ({ packId: undefined, row: undefined }),
+  useActiveSpritePack: () => useActiveSpritePack(),
 }))
 jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
   useActiveLive2dModel: () => useActiveLive2dModel(),
@@ -98,6 +102,8 @@ beforeEach(() => {
   settingsValue = {}
   useActiveLive2dModel.mockReset()
   useActiveLive2dModel.mockReturnValue({ modelId: undefined, row: undefined, coreReady: false })
+  useActiveSpritePack.mockReset()
+  useActiveSpritePack.mockReturnValue({ packId: undefined, row: undefined })
 })
 
 describe("PetConsole", () => {
@@ -203,6 +209,18 @@ describe("PetConsole", () => {
     render(<PetConsole />)
     fireEvent.click(screen.getByRole("button", { name: /retry/i }))
     expect(runtime.assetDiagnostic("live2d:m1")).toBeUndefined()
+  })
+
+  it("offers the same runtime recovery for an active Sprite v2 pack", () => {
+    mockUsePet.mockReturnValue(petResult({ name: "Boba", personality: "x", hatchDate: "" }))
+    useActiveSpritePack.mockReturnValue({ packId: "s1", row: { id: "s1" } })
+    settingsValue = { petSettings: { skinId: "sprite-v2" } }
+    const runtime = getPetSkinRuntime()
+    runtime.recordAssetFailure("sprite-v2:s1", "renderFailed")
+
+    render(<PetConsole />)
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    expect(runtime.assetDiagnostic("sprite-v2:s1")).toBeUndefined()
   })
 
   it("hides the plugins tab until a pet.console.tab extension registers", () => {

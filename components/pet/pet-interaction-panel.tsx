@@ -74,7 +74,13 @@ export function PetInteractionPanel({
   const [talkOpen, setTalkOpen] = useState(false)
 
   return (
-    <div data-testid="pet-interaction-panel" className={cn("flex w-72 flex-col gap-3", className)}>
+    <div
+      data-testid="pet-interaction-panel"
+      className={cn(
+        "flex max-h-[calc(100dvh-2rem)] w-[min(18rem,calc(100vw-3rem))] max-w-full flex-col gap-3 overflow-y-auto overscroll-contain",
+        className
+      )}
+    >
       <PetStatCard
         bones={view.effectiveBones}
         soul={profile.soul}

@@ -18,7 +18,12 @@ import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
-import { isPetWindowOpen, onPetNativeStateChanged, openPetWindow } from "@/lib/tauri/pet-window"
+import {
+  isPetWindowOpen,
+  onPetNativeStateChanged,
+  openPetWindow,
+  setPetClickThrough,
+} from "@/lib/tauri/pet-window"
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
@@ -97,8 +102,14 @@ export function PetMount() {
 
   // Reconcile persisted intent after a cold start. The native window is
   // process-local, so `desktopPet.enabled` can survive a restart while no
-  // `pet` webview exists. Probe first so React remounts never duplicate or
-  // unnecessarily raise an already-visible panel.
+  // `pet` webview exists. Probe first and open ONLY when nothing is there:
+  // `open_pet_window_claimed`'s existing-window branch reveals the panel and
+  // emits `pet://resume`, so calling it unconditionally would re-raise the
+  // overlay and restart its animation loops on every settings write. It also
+  // ignores `opts.x`/`opts.y` (it re-derives placement from the window's own
+  // position), so re-opening on a position change raises the pet without even
+  // applying the change that triggered it — hence `position` is an input to
+  // the FIRST open only and is deliberately not a dependency here.
   useEffect(() => {
     if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
     let cancelled = false
@@ -114,15 +125,31 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
+    // `desktopPet.position` seeds the first open and must not re-trigger it —
+    // see the note above this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     desktopPet.clickThrough,
     desktopPet.enabled,
-    desktopPet.position?.x,
-    desktopPet.position?.y,
     desktopPet.size,
     isMainDesktopWindow,
     widgetEnabled,
   ])
+
+  // Click-through has a dedicated native command that does not reveal or raise
+  // the window, so it is the one overlay setting that can be reconciled live.
+  // Size has no such command; it applies on the next open, as it did before.
+  useEffect(() => {
+    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    let cancelled = false
+    void isPetWindowOpen().then((open) => {
+      if (cancelled || !open) return
+      void setPetClickThrough(desktopPet.clickThrough)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [desktopPet.clickThrough, desktopPet.enabled, isMainDesktopWindow, widgetEnabled])
 
   // Keep PetSettings in sync with NATIVE window mutations the renderer didn't
   // initiate (tray toggle, tray click-through recovery): the Rust side

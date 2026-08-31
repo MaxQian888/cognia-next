@@ -217,26 +217,26 @@ export function PetInteractionControls({ pet, patch }: PetControlsProps) {
               ))}
             </>
           ) : null}
-
-          <Field orientation="responsive">
-            <FieldContent>
-              <FieldLabel htmlFor="pet-memory-enabled">{t("memory.label")}</FieldLabel>
-              <FieldDescription>{t("memory.description")}</FieldDescription>
-            </FieldContent>
-            <Switch
-              id="pet-memory-enabled"
-              checked={pet.petMemory?.enabled !== false}
-              onCheckedChange={(enabled) => patch({ petMemory: { enabled } })}
-            />
-          </Field>
-          <Field orientation="responsive">
-            <FieldDescription>{t("memory.clearDescription")}</FieldDescription>
-            <Button variant="outline" size="sm" onClick={() => void clearPetConversation()}>
-              {t("memory.clearAction")}
-            </Button>
-          </Field>
         </>
       ) : null}
+
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="pet-memory-enabled">{t("memory.label")}</FieldLabel>
+          <FieldDescription>{t("memory.description")}</FieldDescription>
+        </FieldContent>
+        <Switch
+          id="pet-memory-enabled"
+          checked={pet.petMemory?.enabled !== false}
+          onCheckedChange={(enabled) => patch({ petMemory: { enabled } })}
+        />
+      </Field>
+      <Field orientation="responsive">
+        <FieldDescription>{t("memory.clearDescription")}</FieldDescription>
+        <Button variant="outline" size="sm" onClick={() => void clearPetConversation()}>
+          {t("memory.clearAction")}
+        </Button>
+      </Field>
     </FieldGroup>
   )
 }

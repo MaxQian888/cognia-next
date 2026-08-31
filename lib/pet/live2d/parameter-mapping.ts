@@ -11,6 +11,23 @@ const STANDARD_PARAMETERS: Record<Live2dParameterRole, readonly string[]> = {
   mouthOpen: ["ParamMouthOpenY", "PARAM_MOUTH_OPEN_Y"],
 }
 
+/**
+ * Canonical parameter id → role, derived from {@link STANDARD_PARAMETERS} so it
+ * covers every spelling (`ParamAngleX` and `PARAM_ANGLE_X`) and cannot fall
+ * behind when a role is added. Hand-maintaining the reverse direction is how a
+ * parameter write ends up silently dropped for want of a role.
+ */
+const ROLE_BY_PARAMETER_ID: Readonly<Record<string, Live2dParameterRole>> = Object.fromEntries(
+  (Object.keys(STANDARD_PARAMETERS) as Live2dParameterRole[]).flatMap((role) =>
+    STANDARD_PARAMETERS[role].map((id) => [id, role] as const)
+  )
+)
+
+/** Role a canonical Live2D parameter id belongs to, or undefined if unknown. */
+export function live2dParameterRoleOf(parameterId: string): Live2dParameterRole | undefined {
+  return ROLE_BY_PARAMETER_ID[parameterId]
+}
+
 export function resolveLive2dParameterMapping(
   availableIds: readonly string[],
   overrides: Live2dParameterMapping = {}

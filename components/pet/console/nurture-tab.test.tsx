@@ -3,7 +3,25 @@ import userEvent from "@testing-library/user-event"
 
 // Stub the renderer so we don't mount the SVG/live2d skin in this unit test.
 jest.mock("../pet-renderer", () => ({
-  PetRenderer: ({ size }: { size?: number }) => <div data-testid="pet-preview" data-size={size} />,
+  PetRenderer: ({
+    size,
+    flavor,
+    mood,
+    lowPower,
+  }: {
+    size?: number
+    flavor?: string
+    mood?: string
+    lowPower?: boolean
+  }) => (
+    <div
+      data-testid="pet-preview"
+      data-size={size}
+      data-flavor={flavor}
+      data-mood={mood}
+      data-low-power={lowPower || undefined}
+    />
+  ),
 }))
 
 // Inventory strip's reactive read — empty so the strip stays hidden here.
@@ -35,7 +53,7 @@ function setup() {
     onClean: jest.fn(),
     onTreat: jest.fn(),
   }
-  render(<NurtureTab profile={profile} view={view} {...handlers} />)
+  render(<NurtureTab profile={profile} view={view} lowPower {...handlers} />)
   return handlers
 }
 
@@ -50,7 +68,10 @@ describe("NurtureTab", () => {
     expect(document.querySelector('[data-need="mood"]')).not.toBeNull()
     expect(document.querySelector('[data-need="bond"]')).not.toBeNull()
     // A large hero preview alongside the stat-card preview.
-    expect(screen.getAllByTestId("pet-preview").some((n) => n.dataset.size === "160")).toBe(true)
+    const hero = screen.getAllByTestId("pet-preview").find((node) => node.dataset.size === "160")
+    expect(hero).toBeDefined()
+    expect(hero).toHaveAttribute("data-mood", "lonely")
+    expect(hero).toHaveAttribute("data-low-power", "true")
   })
 
   it("wires feed/play/pet directly and toggles the talk composer", () => {

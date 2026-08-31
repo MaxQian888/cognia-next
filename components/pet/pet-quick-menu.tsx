@@ -1,7 +1,7 @@
-// Shared right-click quick menu for the pet, used by both the in-app floating
-// widget (`context="widget"`) and the transparent desktop-pet overlay window
-// (`context="overlay"`). It is a dumb shadcn `ContextMenu` wrapper: every action
-// is supplied by the caller, so this component owns no pet state. Labels come
+// Shared right-click quick menu for the in-app floating pet widget. The desktop
+// overlay owns a dedicated popup window, so keeping a second, unreachable menu
+// branch here only lets the two interaction surfaces drift. This is a dumb
+// shadcn `ContextMenu` wrapper: every action is supplied by the caller. Labels come
 // from `pet.quickMenu.*` (next-intl); the trigger is whatever `children` the
 // caller passes (the pet body / overlay root) wrapped with `asChild` so the
 // right-click target stays the existing element (left-click + drag are
@@ -24,19 +24,16 @@ export interface PetQuickMenuActions {
   onPlay(): void
   onPet(): void
   onTalk(): void
-  // widget-only
+  onSleep(): void
+  onClean(): void
+  onTreat(): void
   onOpenConsole?(): void
   onToggleDesktopPet?(): void
   onMinimize?(): void
   onOpenSettings?(): void
-  // overlay-only
-  onClickThrough?(): void
-  onHideDesktopPet?(): void
-  onShowMainWindow?(): void
 }
 
 export interface PetQuickMenuProps {
-  context: "widget" | "overlay"
   /** The right-click target (pet body / overlay root). */
   children: ReactNode
   actions: PetQuickMenuActions
@@ -48,7 +45,6 @@ export interface PetQuickMenuProps {
 }
 
 export function PetQuickMenu({
-  context,
   children,
   actions,
   desktopPetOpen = false,
@@ -60,47 +56,30 @@ export function PetQuickMenu({
   return (
     <ContextMenu onOpenChange={onOpenChange}>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      {/* Radix ContextMenu anchors at the pointer and has no `side` prop (unlike
-          DropdownMenu); it auto-flips to stay in the viewport. The overlay
-          window grows on open (see PetOverlayView.handleMenuOpenChange) to give
-          the menu room rather than relying on a fixed side. */}
+      {/* Radix ContextMenu anchors at the pointer and auto-flips to remain in
+          the viewport. */}
       <ContextMenuContent>
         <ContextMenuItem onSelect={() => actions.onFeed()}>{t("feed")}</ContextMenuItem>
         <ContextMenuItem onSelect={() => actions.onPlay()}>{t("play")}</ContextMenuItem>
         <ContextMenuItem onSelect={() => actions.onPet()}>{t("pet")}</ContextMenuItem>
         <ContextMenuItem onSelect={() => actions.onTalk()}>{t("talk")}</ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.onSleep()}>{t("sleep")}</ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.onClean()}>{t("clean")}</ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.onTreat()}>{t("treat")}</ContextMenuItem>
         <ContextMenuSeparator />
 
-        {context === "widget" ? (
-          <>
-            <ContextMenuItem onSelect={() => actions.onOpenConsole?.()}>
-              {t("openConsole")}
-            </ContextMenuItem>
-            {showDesktopPetItems && (
-              <ContextMenuItem onSelect={() => actions.onToggleDesktopPet?.()}>
-                {desktopPetOpen ? t("hideDesktopPet") : t("showDesktopPet")}
-              </ContextMenuItem>
-            )}
-            <ContextMenuItem onSelect={() => actions.onMinimize?.()}>
-              {t("minimize")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => actions.onOpenSettings?.()}>
-              {t("openSettings")}
-            </ContextMenuItem>
-          </>
-        ) : (
-          <>
-            <ContextMenuItem onSelect={() => actions.onClickThrough?.()}>
-              {t("clickThrough")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => actions.onHideDesktopPet?.()}>
-              {t("hideDesktopPet")}
-            </ContextMenuItem>
-            <ContextMenuItem onSelect={() => actions.onShowMainWindow?.()}>
-              {t("showMainWindow")}
-            </ContextMenuItem>
-          </>
+        <ContextMenuItem onSelect={() => actions.onOpenConsole?.()}>
+          {t("openConsole")}
+        </ContextMenuItem>
+        {showDesktopPetItems && (
+          <ContextMenuItem onSelect={() => actions.onToggleDesktopPet?.()}>
+            {desktopPetOpen ? t("hideDesktopPet") : t("showDesktopPet")}
+          </ContextMenuItem>
         )}
+        <ContextMenuItem onSelect={() => actions.onMinimize?.()}>{t("minimize")}</ContextMenuItem>
+        <ContextMenuItem onSelect={() => actions.onOpenSettings?.()}>
+          {t("openSettings")}
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )

@@ -239,7 +239,7 @@ export function PetCustomizationWorkspace() {
                 size={176}
                 skinId={skinResolution.selection.skinId}
                 selection={skinResolution.selection}
-                renderPriority="console"
+                renderPriority="configuration"
                 lowPower={pet.lowPower}
                 flavor={profile.evolutionFlavor}
               />

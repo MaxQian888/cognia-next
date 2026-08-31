@@ -242,7 +242,7 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
     >
       {bubble && <PetBubbleView bubble={bubble} />}
       {open && (
-        <div className="rounded-xl border bg-popover p-3 shadow-lg">
+        <div className="max-w-[calc(100vw-2rem)] rounded-xl border bg-popover p-3 shadow-lg">
           <PetInteractionPanel
             profile={profile}
             view={view}
@@ -261,12 +261,14 @@ export function PetWidget({ settings, activeCharacterId }: PetWidgetProps) {
       )}
       <div className="flex items-end gap-1">
         <PetQuickMenu
-          context="widget"
           actions={{
             onFeed: feed,
             onPlay: play,
             onPet: petStroke,
             onTalk: talk,
+            onSleep: sleep,
+            onClean: clean,
+            onTreat: treat,
             onOpenConsole: () => router.push("/pet"),
             onToggleDesktopPet: handleToggleDesktopPet,
             onMinimize: () => setMinimized(true),

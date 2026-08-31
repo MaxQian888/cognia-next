@@ -34,6 +34,7 @@ export interface NurtureTabProps {
   /** Effective skin so the previews match the live pet. */
   skinId?: string
   selection?: PetSkinSelection
+  lowPower?: boolean
   /** Jump to the console's shop tab (wallet strip click). */
   onOpenShop?: () => void
 }
@@ -50,6 +51,7 @@ export function NurtureTab({
   onTreat,
   skinId,
   selection,
+  lowPower,
   onOpenShop,
 }: NurtureTabProps) {
   const grewStats = usePetStore((s) => s.lastGrewStats)
@@ -120,6 +122,9 @@ export function NurtureTab({
           size={160}
           skinId={skinId}
           selection={selection}
+          flavor={profile.evolutionFlavor}
+          mood={view.mood}
+          lowPower={lowPower}
           renderPriority="console"
         />
       </aside>

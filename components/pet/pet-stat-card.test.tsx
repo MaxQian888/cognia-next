@@ -4,8 +4,8 @@ import type { PetBones, PetSoul } from "@/types/pet"
 // Stub the renderer so the preview avatar's skin choice is observable without
 // pulling the live2d skin's stores/canvas into a stat-card unit test.
 jest.mock("./pet-renderer", () => ({
-  PetRenderer: ({ skinId }: { skinId?: string }) => (
-    <div data-testid="pet-preview" data-skin={skinId ?? "default"} />
+  PetRenderer: ({ skinId, flavor }: { skinId?: string; flavor?: string }) => (
+    <div data-testid="pet-preview" data-skin={skinId ?? "default"} data-flavor={flavor} />
   ),
 }))
 
@@ -95,6 +95,7 @@ describe("PetStatCard", () => {
     const badge = container.querySelector('[data-testid="pet-flavor-badge"]')
     expect(badge).not.toBeNull()
     expect(badge).toHaveAttribute("data-flavor", "radiant")
+    expect(screen.getByTestId("pet-preview")).toHaveAttribute("data-flavor", "radiant")
 
     rerender(<PetStatCard bones={makeBones()} soul={soul} stage="adult" flavor="plain" />)
     expect(container.querySelector('[data-flavor="plain"]')).not.toBeNull()

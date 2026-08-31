@@ -32,7 +32,9 @@ describe("useLive2dParamEmotion", () => {
   it("writes envelope parameters each frame while thinking", () => {
     const { model, writes, fire } = makeModel()
     let t = 0
-    renderHook(() => useLive2dParamEmotion(model, "thinking", null, false, () => (t += 250)))
+    renderHook(() =>
+      useLive2dParamEmotion(model, "thinking", null, false, undefined, () => (t += 250))
+    )
     fire()
     fire()
     expect(writes.length).toBeGreaterThanOrEqual(4)
@@ -52,6 +54,17 @@ describe("useLive2dParamEmotion", () => {
     const reduced = makeModel()
     renderHook(() => useLive2dParamEmotion(reduced.model, "thinking", null, true))
     expect(reduced.handlerCount()).toBe(0)
+  })
+
+  it("uses resolved custom parameter ids and respects disabled roles", () => {
+    const { model, writes, fire } = makeModel()
+    renderHook(() =>
+      useLive2dParamEmotion(model, "thinking", null, false, { headZ: "CustomHeadZ" }, () => 250)
+    )
+
+    fire()
+    expect(writes).toEqual([{ id: "CustomHeadZ", value: expect.any(Number) }])
+    expect(writes.some((write) => write.id === "ParamEyeBallX")).toBe(false)
   })
 
   it("unregisters the frame handler on unmount and state exit", () => {

@@ -36,6 +36,16 @@ describe("PetInteractionControls", () => {
     expect(clearPetConversation).toHaveBeenCalled()
   })
 
+  it("keeps conversation memory controls available when LLM bubbles are disabled", () => {
+    const patch = jest.fn()
+    render(<PetInteractionControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
+
+    fireEvent.click(document.getElementById("pet-memory-enabled") as HTMLButtonElement)
+    expect(patch).toHaveBeenCalledWith({ petMemory: { enabled: false } })
+    fireEvent.click(screen.getByRole("button", { name: /clear pet memory/i }))
+    expect(clearPetConversation).toHaveBeenCalled()
+  })
+
   it("drives the llm-speak, proactive, and memory controls", () => {
     const patch = jest.fn()
     const full: PetSettings = {

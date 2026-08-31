@@ -94,6 +94,7 @@ export function PetStatCard({
             size={72}
             skinId={skinId}
             selection={selection}
+            flavor={flavor}
             renderPriority="thumbnail"
           />
         </div>

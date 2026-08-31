@@ -1,6 +1,12 @@
 "use client"
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from "react"
 import type { PetSkin, PetSkinRenderProps } from "@/types/pet"
 import { PET_SKIN_CAPABILITIES, quantizeSpriteLookDirection } from "@/lib/pet/skin-governance"
 import { loadSpriteSkinAsset } from "@/lib/pet/skin-assets"
@@ -141,7 +147,15 @@ function AnimatedAtlas({
 
 function SpriteV2Boundary(props: PetSkinRenderProps) {
   const packId = props.selection?.skinId === "sprite-v2" ? props.selection.packId : undefined
-  const [asset, setAsset] = useState<{ packId: string; url: string } | null>(null)
+  const runtime = getPetSkinRuntime()
+  useSyncExternalStore(runtime.subscribe, runtime.snapshotRevision, runtime.snapshotRevision)
+  const assetKey = packId ? `sprite-v2:${packId}` : undefined
+  const retryGeneration = assetKey ? runtime.retryGeneration(assetKey) : 0
+  const [asset, setAsset] = useState<{
+    packId: string
+    retryGeneration: number
+    url: string
+  } | null>(null)
   const gazeActive =
     props.state === "idle" && Boolean(props.lookTarget) && !props.reducedMotion && !props.paused
   const lookSample = gazeActive
@@ -161,19 +175,36 @@ function SpriteV2Boundary(props: PetSkinRenderProps) {
   }
   useEffect(() => {
     let active = true
-    if (!packId) return
-    void loadSpriteSkinAsset(packId).then((pack) => {
-      if (!active || !pack) return
-      const runtime = getPetSkinRuntime()
-      setAsset({ packId, url: runtime.objectUrl(`sprite-v2:${packId}`, pack.spritesheet) })
-    })
+    if (!packId || !assetKey) return
+    void loadSpriteSkinAsset(packId)
+      .then((pack) => {
+        if (!active) return
+        if (!pack) {
+          runtime.recordAssetFailure(assetKey, "modelMissing")
+          return
+        }
+        setAsset({
+          packId,
+          retryGeneration,
+          url: runtime.objectUrl(assetKey, pack.spritesheet),
+        })
+      })
+      .catch(() => {
+        if (active) runtime.recordAssetFailure(assetKey, "renderFailed")
+      })
     return () => {
       active = false
     }
-  }, [packId])
+  }, [assetKey, packId, retryGeneration, runtime])
 
   useEffect(() => {
-    if (!packId || asset?.packId !== packId || typeof Image === "undefined") return
+    if (
+      !packId ||
+      asset?.packId !== packId ||
+      asset.retryGeneration !== retryGeneration ||
+      typeof Image === "undefined"
+    )
+      return
     let active = true
     const image = new Image()
     image.onload = () => {
@@ -195,9 +226,10 @@ function SpriteV2Boundary(props: PetSkinRenderProps) {
       active = false
       image.onload = null
     }
-  }, [asset, packId])
+  }, [asset, packId, retryGeneration])
 
-  if (!packId || asset?.packId !== packId) return <>{fallback(props)}</>
+  if (!packId || asset?.packId !== packId || asset.retryGeneration !== retryGeneration)
+    return <>{fallback(props)}</>
   let animation = resolveSpriteAnimation({ ...props, lookTarget: null })
   const look = lookState.sample === lookSample ? lookState.cell : undefined
   if (look) animation = { row: look.row, durations: [1], fixedFrame: look.frame }

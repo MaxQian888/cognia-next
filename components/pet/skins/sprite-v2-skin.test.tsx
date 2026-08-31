@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 import type { PetSkinRenderProps } from "@/types/pet"
 
 const loadSpriteSkinAsset = jest.fn()
@@ -10,6 +10,7 @@ jest.mock("./svg-skin", () => ({
 }))
 
 import { resolveSpriteAnimation, spriteV2Skin } from "./sprite-v2-skin"
+import { getPetSkinRuntime, resetPetSkinRuntimeForTests } from "@/lib/pet/skin-runtime"
 
 const props: PetSkinRenderProps = {
   bones: {} as never,
@@ -23,6 +24,7 @@ const props: PetSkinRenderProps = {
 
 describe("spriteV2Skin", () => {
   beforeEach(() => {
+    resetPetSkinRuntimeForTests()
     jest.useFakeTimers()
     loadSpriteSkinAsset.mockResolvedValue({
       id: "momo",
@@ -39,8 +41,10 @@ describe("spriteV2Skin", () => {
   })
 
   afterEach(() => {
+    cleanup()
     jest.clearAllTimers()
     jest.useRealTimers()
+    resetPetSkinRuntimeForTests()
   })
 
   it("maps Cognia states and locomotion to the standard v2 rows", () => {
@@ -137,13 +141,30 @@ describe("spriteV2Skin", () => {
     expect(sprite.parentElement).toHaveAttribute("data-pet-mood", "lonely")
   })
 
-  it("uses the SVG fallback when the configured pack is missing", () => {
+  it("uses the SVG fallback when the configured pack is missing", async () => {
     loadSpriteSkinAsset.mockResolvedValue(undefined)
     render(
       <>
         {spriteV2Skin.render({ ...props, selection: { skinId: "sprite-v2", packId: "missing" } })}
       </>
     )
+    await act(async () => Promise.resolve())
     expect(screen.getByTestId("sprite-fallback")).toBeInTheDocument()
+  })
+
+  it("reloads a missing pack after the runtime retry action", async () => {
+    loadSpriteSkinAsset.mockResolvedValueOnce(undefined).mockResolvedValueOnce({
+      id: "momo",
+      spritesheet: new Blob(["atlas"], { type: "image/webp" }),
+    })
+    render(<>{spriteV2Skin.render(props)}</>)
+    await act(async () => Promise.resolve())
+    expect(screen.getByTestId("sprite-fallback")).toBeInTheDocument()
+
+    act(() => getPetSkinRuntime().retryAsset("sprite-v2:momo"))
+    await act(async () => Promise.resolve())
+
+    expect(loadSpriteSkinAsset).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("pet-sprite-v2")).toBeInTheDocument()
   })
 })

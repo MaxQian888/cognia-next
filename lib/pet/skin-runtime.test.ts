@@ -96,6 +96,23 @@ describe("PetSkinRuntime", () => {
     expect(runtime.assetDiagnostic("live2d:m1")?.code).toBe("runtimeUnavailable")
   })
 
+  it("drops cached load state and object URLs before retrying an asset", async () => {
+    const revokeObjectURL = jest.fn()
+    const runtime = new PetSkinRuntime({
+      createObjectURL: () => "blob:atlas",
+      revokeObjectURL,
+    })
+    const loader = jest.fn().mockResolvedValue({ id: "momo" })
+
+    await runtime.loadAsset("sprite-v2:momo", loader)
+    runtime.objectUrl("sprite-v2:momo", new Blob(["atlas"]))
+    runtime.retryAsset("sprite-v2:momo")
+    await runtime.loadAsset("sprite-v2:momo", loader)
+
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:atlas")
+  })
+
   it("returns every active resource counter to baseline after repeated cycles", () => {
     const runtime = new PetSkinRuntime({
       createObjectURL: (_blob) => `blob:${Math.random()}`,

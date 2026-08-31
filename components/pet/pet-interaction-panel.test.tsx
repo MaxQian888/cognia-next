@@ -64,6 +64,7 @@ describe("PetInteractionPanel", () => {
 
   it("renders the stat card and the three need bars", () => {
     setup()
+    expect(screen.getByTestId("pet-interaction-panel")).toHaveClass("max-h-[calc(100dvh-2rem)]")
     expect(screen.getByTestId("pet-stat-card")).toBeInTheDocument()
     expect(document.querySelector('[data-need="energy"]')).not.toBeNull()
     expect(document.querySelector('[data-need="mood"]')).not.toBeNull()

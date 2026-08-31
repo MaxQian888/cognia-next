@@ -9,6 +9,7 @@ let mockLive2dValue: Record<string, unknown> = {
 }
 let mockSpriteValue: Record<string, unknown> = { packId: undefined, row: undefined }
 let mockPetValue: Record<string, unknown> = { profile: null, view: null }
+const rendererProps = jest.fn()
 let settingsValue: unknown = {
   petSettings: {
     enabled: true,
@@ -65,6 +66,12 @@ jest.mock("./pet-twin-awareness-controls", () => ({
 jest.mock("./pet-desktop-controls", () => ({
   PetDesktopControls: () => <div data-testid="desktop-controls" />,
 }))
+jest.mock("../pet-renderer", () => ({
+  PetRenderer: (props: unknown) => {
+    rendererProps(props)
+    return <div data-testid="pet-preview" />
+  },
+}))
 jest.mock("@/components/platform/capability-gate", () => ({
   CapabilityGate: ({ children }: { children: React.ReactNode }) => children,
 }))
@@ -76,6 +83,7 @@ describe("PetCustomizationWorkspace", () => {
   beforeEach(() => {
     save.mockClear()
     resetPet.mockClear()
+    rendererProps.mockClear()
     settingsValue = {
       petSettings: {
         enabled: true,
@@ -140,5 +148,17 @@ describe("PetCustomizationWorkspace", () => {
     render(<PetCustomizationWorkspace />)
     fireEvent.click(screen.getByRole("button", { name: /retry/i }))
     expect(runtime.assetDiagnostic("live2d:m1")).toBeUndefined()
+  })
+
+  it("gives the customization preview the configuration renderer lease priority", () => {
+    mockPetValue = {
+      profile: { stage: "adult" },
+      view: { effectiveBones: {}, mood: "content" },
+    }
+    render(<PetCustomizationWorkspace />)
+
+    expect(rendererProps).toHaveBeenCalledWith(
+      expect.objectContaining({ renderPriority: "configuration" })
+    )
   })
 })
