@@ -20931,7 +20931,8 @@
         "skills": "Skills",
         "themes": "Themes",
         "tools": "Tools"
-      }
+      },
+      "otherHeading": "Other"
     },
     "cliInstall": {
       "copied": "Command copied.",
@@ -21201,6 +21202,8 @@
         "switchAria": "Trust this plugin's frontend code",
         "title": "Trust frontend code"
       },
+      "keywordFilterAria": "Filter by keyword {keyword}",
+      "keywords": "Keywords",
       "lifecycle": {
         "activating": "Activating",
         "dirty": "Cleanup required",
@@ -21304,6 +21307,8 @@
       "rollback": "Rollback…",
       "rollbackAria": "Rollback {name}",
       "runtimeContributions": "Runtime contributions",
+      "screenshotAlt": "Screenshot {index}",
+      "screenshots": "Screenshots",
       "sectionAnalytics": "Analytics",
       "sectionBackup": "Backup",
       "sectionDependencies": "Dependency graph",
@@ -21726,6 +21731,7 @@
       "installing": "Installing…",
       "license": "License",
       "optional": "Optional permissions",
+      "publishedAt": "Published {date}",
       "rawManifest": "View raw manifest",
       "rawManifestTitle": "Raw manifest",
       "readme": "README",

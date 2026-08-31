@@ -20931,7 +20931,8 @@
         "skills": "技能",
         "themes": "主题",
         "tools": "工具"
-      }
+      },
+      "otherHeading": "其它"
     },
     "cliInstall": {
       "copied": "命令已复制。",
@@ -21201,6 +21202,8 @@
         "switchAria": "信任此插件的前端代码",
         "title": "信任前端代码"
       },
+      "keywordFilterAria": "按关键词 {keyword} 筛选",
+      "keywords": "关键词",
       "lifecycle": {
         "activating": "正在激活",
         "dirty": "需要清理",
@@ -21304,6 +21307,8 @@
       "rollback": "回滚…",
       "rollbackAria": "回滚 {name}",
       "runtimeContributions": "运行时贡献",
+      "screenshotAlt": "截图 {index}",
+      "screenshots": "截图",
       "sectionAnalytics": "使用统计",
       "sectionBackup": "备份",
       "sectionDependencies": "依赖图",
@@ -21726,6 +21731,7 @@
       "installing": "安装中…",
       "license": "许可",
       "optional": "可选权限",
+      "publishedAt": "发布于 {date}",
       "rawManifest": "查看原始 manifest",
       "rawManifestTitle": "原始 manifest",
       "readme": "README",
