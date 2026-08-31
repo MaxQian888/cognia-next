@@ -8811,6 +8811,7 @@
       "revoke": "吊销",
       "revokedBody": "它不持有任何能力，且必须重新配对才能连接。",
       "revokedTitle": "该设备已被吊销",
+      "terminalReachesSsh": "该授权同时允许该设备打开本机保存的任意 SSH 主机。连接由宿主用它保存的密钥或密码发起，且这份已保存列表在所有获授权设备之间共享，无法按设备单独指定。",
       "title": "访问授权"
     },
     "actions": {
@@ -8883,6 +8884,12 @@
       "noVocabularyTitle": "该设备没有可展示的能力词表",
       "reportedAt": "上报于{when}",
       "reportedCount": "已上报 {reported}/{total}",
+      "source": {
+        "device-report": "设备自述",
+        "host-manifest": "宿主清单",
+        "local-probe": "本机探测",
+        "platform-baseline": "平台基线"
+      },
       "title": "能力"
     },
     "capabilityState": {

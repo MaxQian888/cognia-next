@@ -190,3 +190,40 @@ it("closes the pairing loop instead of pointing at a page that refuses to render
   // …and the page that link leads to actually renders.
   expect(resolveSurfaceAvailability(getSurfaceContract("pair")!, unpaired).state).toBe("available")
 })
+
+/**
+ * `/me/terminal` had no row and therefore inherited `/me`'s, which classifies
+ * the profile hub. A terminal is a process on a machine, so `standalone:
+ * "full"` was the one answer that could not be true of it, and the boundary
+ * never classified the route at all.
+ */
+describe("/me/terminal", () => {
+  it("is matched by its own contract rather than the /me hub's", () => {
+    const contract = getSurfaceContractForRoute("/me/terminal")
+    expect(contract?.id).toBe("me-terminal")
+    expect(getSurfaceContractForRoute("/me")?.id).toBe("me")
+  })
+
+  /**
+   * The shell is never the machine running the shell. Pairing one is what
+   * changes that, and `unsupported` is the state whose recovery is `/pair`.
+   */
+  it("sends a standalone browser to pairing instead of a dead screen", () => {
+    const contract = getSurfaceContract("me-terminal")
+    expect(contract).not.toBeNull()
+    expect(resolveSurfaceAvailability(contract!, snapshot())).toEqual({
+      state: "unsupported",
+      reason: "requires-companion",
+    })
+  })
+
+  /** A pty is a live process. There is no cached reading of one. */
+  it("is blocked offline rather than served from a cache", () => {
+    expect(getSurfaceContract("me-terminal")?.offline).toBe("blocked")
+  })
+
+  /** It is reached from the `/me` list, not the sidebar, so it claims no nav slot. */
+  it("claims no navigation slot of its own", () => {
+    expect(getSurfaceContract("me-terminal")).not.toHaveProperty("navigation")
+  })
+})

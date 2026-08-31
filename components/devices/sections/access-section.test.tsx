@@ -7,7 +7,26 @@ import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-action
 
 import { AccessSection } from "./access-section"
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+/**
+ * The terminal grant now asks `useSurfaceReach` rather than `isTauri()`,
+ * because a switch that writes only the Dexie mirror off the desktop reports a
+ * grant the host never made. The suite drives that resolver directly, so the
+ * desktop and companion cases are both reachable here.
+ */
+// eslint-disable-next-line no-var -- jest.mock factories hoist above this body.
+var hostProfile: string
+// eslint-disable-next-line no-var -- same hoisting rule.
+var capabilityHeld: boolean
+jest.mock("@/hooks/use-host-profile", () => ({
+  ...jest.requireActual("@/hooks/use-host-profile"),
+  useHostProfile: () => hostProfile,
+  useCapability: () => capabilityHeld,
+}))
+
+beforeEach(() => {
+  hostProfile = "desktop"
+  capabilityHeld = true
+})
 
 function actions(): DeviceGrantActions {
   return {
@@ -190,5 +209,42 @@ describe("AccessSection — a device that belongs to somebody else", () => {
   it("does not show the banner for an ordinary device", () => {
     render(<AccessSection row={row()} actions={actions()} />)
     expect(screen.queryByTestId("device-access-owner-suspended")).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The terminal grant is written from a machine, not from an account:
+ * `useDeviceGrantActions.hostCall` is a no-op off the desktop, so flipping it
+ * anywhere else writes the mirror and leaves the host's answer untouched. It
+ * used to be a dead switch with no sentence beside it, which collapses "never
+ * existed here", "one pairing away" and "broken right now" into one silence.
+ */
+describe("AccessSection — the terminal grant off the desktop", () => {
+  it("disables the switch and says which block it is", () => {
+    hostProfile = "mobile-companion"
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.getByTestId("paired-device-remote-terminal-d1")).toBeDisabled()
+    expect(screen.getByTestId("grant-terminal-unavailable")).toBeInTheDocument()
+  })
+
+  it("leaves the other grants alone", () => {
+    hostProfile = "mobile-companion"
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.getByTestId("paired-device-remote-control-d1")).toBeEnabled()
+  })
+
+  it("says nothing when the desktop can write it", () => {
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.queryByTestId("grant-terminal-unavailable")).not.toBeInTheDocument()
+  })
+
+  /**
+   * A grant whose blast radius grew has to say so where it is toggled, not
+   * only where it is used. `terminal.open` now also opens this machine's saved
+   * SSH hosts, and `ssh_profiles` is a shared map rather than a per-device one.
+   */
+  it("states that the grant now reaches this machine's saved SSH hosts", () => {
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.getByTestId("grant-terminal-ssh-note")).toBeInTheDocument()
   })
 })

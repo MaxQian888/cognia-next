@@ -141,7 +141,13 @@
       "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
       "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。"
     },
-    "title": "能力"
+    "title": "能力",
+    "source": {
+      "device-report": "设备自述",
+      "platform-baseline": "平台基线",
+      "host-manifest": "宿主清单",
+      "local-probe": "本机探测"
+    }
   },
   "ssh": {
     "title": "SSH",
@@ -233,7 +239,8 @@
     },
     "title": "访问授权",
     "heldCount": "已授权 {held}/{total}",
-    "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。"
+    "ownerSuspendedHint": "授权已挂起：这台设备属于其他人。",
+    "terminalReachesSsh": "该授权同时允许该设备打开本机保存的任意 SSH 主机。连接由宿主用它保存的密钥或密码发起，且这份已保存列表在所有获授权设备之间共享，无法按设备单独指定。"
   },
   "runtime": {
     "probeEmpty": "该主机报告没有工作树。",

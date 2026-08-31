@@ -317,6 +317,30 @@ export const SURFACE_CONTRACTS = [
     companion: "remote",
     offline: "local",
   },
+  /**
+   * Listed after `/me` and matched before it, because
+   * `getSurfaceContractForRoute` sorts by route length.
+   *
+   * Without a row of its own this route inherited `/me`'s `standalone: "full"`,
+   * which is the one classification that cannot be true of it. A terminal is a
+   * process on a machine: `selectTerminalTransport()` already returns
+   * `unsupported` in a standalone browser, so the surface knew, the contract
+   * did not, and the boundary never classified the route at all. The screen's
+   * own empty state said "unavailable" and stopped there, with no route to the
+   * thing that fixes it.
+   *
+   * `remote` in both columns, because the answer is the same either way: the
+   * shell is never the machine running the shell, and pairing one is what
+   * changes that. `blocked` offline, because a pty is a live process and there
+   * is no cached reading of one.
+   */
+  {
+    id: "me-terminal",
+    route: "/me/terminal",
+    standalone: "remote",
+    companion: "remote",
+    offline: "blocked",
+  },
 ] as const satisfies readonly SurfaceContract[]
 
 /**

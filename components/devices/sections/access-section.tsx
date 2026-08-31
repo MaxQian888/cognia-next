@@ -23,7 +23,8 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { isGrantEnabled } from "@/lib/devices/grant-capabilities"
 import type { DeviceGrantRow, DeviceRow } from "@/lib/devices/types"
-import { isTauri } from "@/lib/tauri"
+import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { cn } from "@/lib/utils"
 
@@ -66,6 +67,22 @@ function GrantSection({
   const revoked = row.adminState === "revoked"
 
   /**
+   * The terminal grant is the one row that is written from a machine rather
+   * than from an account.
+   *
+   * `useDeviceGrantActions.hostCall` is a no-op off Tauri, so flipping this
+   * anywhere else would write the Dexie mirror and leave the host's own answer
+   * untouched, which is a switch that reports a grant nobody made. It used to
+   * be `!isTauri()` and a dead switch with no sentence beside it, which is the
+   * shape that collapses "never existed here", "one pairing away" and "broken
+   * right now" into one silence. `requirement: "desktop-shell"` is the honest
+   * question: a headless host runs plenty of capabilities and cannot write
+   * this one.
+   */
+  const terminalReach = useSurfaceReach({ capability: "pty", requirement: "desktop-shell" })
+  const terminalBlocked = grant.id === "terminal" && !terminalReach.available
+
+  /**
    * Locked Use is meaningful only together with remote control — the native
    * lease validator requires both — so it cannot be armed on its own.
    */
@@ -76,7 +93,7 @@ function GrantSection({
   const disabled =
     revoked ||
     !grant.available ||
-    (grant.id === "terminal" && !isTauri()) ||
+    terminalBlocked ||
     (grant.id === "lockedComputerUse" && !controlHeld)
 
   const onChange = (next: boolean) => {
@@ -104,6 +121,19 @@ function GrantSection({
             ) : null}
           </div>
           <p className="text-xs text-muted-foreground">{namespace("description")}</p>
+          {/*
+            A grant whose blast radius grew has to say so where it is toggled,
+            not only where it is used. `terminal.open` now also lets the device
+            open any SSH host this machine has saved, because
+            `spawn_synchronized_profile` resolves them out of the host's own
+            keyring, and the `ssh_profiles` map is shared rather than scoped per
+            device the way local PTY profiles are.
+          */}
+          {grant.id === "terminal" ? (
+            <p className="text-[11px] text-muted-foreground" data-testid="grant-terminal-ssh-note">
+              {t("access.terminalReachesSsh")}
+            </p>
+          ) : null}
         </div>
         <Switch
           checked={grant.available && isGrantEnabled(grant)}
@@ -135,6 +165,14 @@ function GrantSection({
             )
           })}
         </ul>
+      ) : null}
+
+      {terminalBlocked ? (
+        <SurfaceUnavailableNotice
+          reach={terminalReach}
+          className="mt-2"
+          data-testid="grant-terminal-unavailable"
+        />
       ) : null}
 
       {grant.state === "partial" ? (

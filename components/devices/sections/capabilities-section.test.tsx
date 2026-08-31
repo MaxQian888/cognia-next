@@ -181,3 +181,47 @@ describe("CapabilitiesSection", () => {
     expect(screen.getByText(/different vocabulary/)).toBeInTheDocument()
   })
 })
+
+/**
+ * `source` was computed for every cell from the start and rendered nowhere,
+ * which is what made ADR-0143's central distinction unreadable: `expected`
+ * from a platform baseline and `reported` from the device are different kinds
+ * of claim, and the cell said only which one it was, never who said it.
+ */
+describe("CapabilitiesSection — where each answer came from", () => {
+  it("names the source beside every cell", () => {
+    const { container } = render(
+      <CapabilitiesSection
+        row={row({
+          capabilities: [
+            cell({ id: "camera", state: "reported", source: "device-report" }),
+            cell({ id: "shell", state: "expected", source: "platform-baseline" }),
+          ],
+        })}
+      />
+    )
+    const sources = container.querySelectorAll('[data-testid^="capability-source-"]')
+    expect(sources.length).toBe(2)
+    expect([...sources].map((node) => node.textContent)).toEqual([
+      "platform baseline",
+      "device said so",
+    ])
+  })
+
+  /**
+   * The visible token needs room the narrowest pane does not have, and a fact
+   * this load-bearing must not be reachable only on a wide monitor.
+   */
+  it("carries the source in the row title at every width", () => {
+    const { container } = render(
+      <CapabilitiesSection
+        row={row({
+          capabilities: [cell({ id: "camera", state: "reported", source: "device-report" })],
+        })}
+      />
+    )
+    const rows = container.querySelectorAll('li[data-testid^="capability-"]')
+    expect(rows.length).toBeGreaterThan(0)
+    for (const cell of rows) expect(cell.getAttribute("title")).toBeTruthy()
+  })
+})

@@ -8811,6 +8811,7 @@
       "revoke": "Revoke",
       "revokedBody": "It holds no capabilities and cannot reconnect without pairing again.",
       "revokedTitle": "This device is revoked",
+      "terminalReachesSsh": "This grant also lets the device open any SSH host saved on this machine. The host connects with the key or password it keeps, and the saved list is shared across granted devices rather than chosen per device.",
       "title": "Access"
     },
     "actions": {
@@ -8883,6 +8884,12 @@
       "noVocabularyTitle": "No capability vocabulary for this device",
       "reportedAt": "Reported {when}",
       "reportedCount": "{reported}/{total} reported",
+      "source": {
+        "device-report": "device said so",
+        "host-manifest": "host manifest",
+        "local-probe": "probed here",
+        "platform-baseline": "platform baseline"
+      },
       "title": "Capabilities"
     },
     "capabilityState": {

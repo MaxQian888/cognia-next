@@ -141,7 +141,13 @@
       "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
       "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab."
     },
-    "title": "Capabilities"
+    "title": "Capabilities",
+    "source": {
+      "device-report": "device said so",
+      "platform-baseline": "platform baseline",
+      "host-manifest": "host manifest",
+      "local-probe": "probed here"
+    }
   },
   "ssh": {
     "title": "SSH",
@@ -233,7 +239,8 @@
     },
     "title": "Access",
     "heldCount": "{held}/{total} granted",
-    "ownerSuspendedHint": "Grants suspended: this device belongs to someone else."
+    "ownerSuspendedHint": "Grants suspended: this device belongs to someone else.",
+    "terminalReachesSsh": "This grant also lets the device open any SSH host saved on this machine. The host connects with the key or password it keeps, and the saved list is shared across granted devices rather than chosen per device."
   },
   "runtime": {
     "probeEmpty": "This host reports no worktrees.",

@@ -87,6 +87,10 @@ function CapabilityGroup({
             key={cell.id}
             className="flex items-baseline gap-2 border-b border-border/50 py-1"
             data-testid={`capability-${cell.id}`}
+            /* Where the answer came from, at every width. The visible token
+               below needs room the narrowest pane does not have, and a fact
+               this load-bearing must not be reachable only on a wide monitor. */
+            title={t(`capabilities.source.${cell.source}`)}
           >
             <CapabilityDot state={cell.state} className="translate-y-[-1px]" />
             <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{cell.id}</span>
@@ -97,6 +101,19 @@ function CapabilityGroup({
                 {cell.detail}
               </span>
             ) : null}
+            {/*
+              The distinction the whole matrix rests on is unreadable without
+              this. `expected` from a platform baseline and `reported` from the
+              device are different kinds of claim, and until now the cell said
+              only which one it was, never who said it. `source` was computed
+              for every cell from the start and rendered nowhere.
+            */}
+            <span
+              className="hidden shrink-0 text-[11px] text-muted-foreground @2xl/device-card:inline"
+              data-testid={`capability-source-${cell.id}`}
+            >
+              {t(`capabilities.source.${cell.source}`)}
+            </span>
             <span className={cn("shrink-0 text-[11px]", capabilityToneClass(cell.state))}>
               {t(`capabilityState.${cell.state}`)}
             </span>
