@@ -12,9 +12,8 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { InboxChip } from "./inbox-chip"
 import { MoonIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
@@ -42,28 +41,19 @@ export function QuietHoursChip({ adapterId, conversationKey }: QuietHoursChipPro
   const active = isInQuietHours(now, quiet.from, quiet.to, quiet.tz)
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge
-          variant={active ? "warning" : "outline"}
-          className="hidden md:inline-flex items-center gap-1 text-xs"
-          aria-label={
-            active
-              ? t("ariaActive", { time: quiet.to })
-              : t("ariaInactive", { from: quiet.from, to: quiet.to, tz: quiet.tz })
-          }
-          data-active={active}
-          data-testid="quiet-hours-chip"
-        >
-          <MoonIcon className="size-3" />
-          {active
-            ? t("active", { time: quiet.to })
-            : t("inactive", { from: quiet.from, to: quiet.to })}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent className="text-xs">
-        {t("tooltip", { from: quiet.from, to: quiet.to, tz: quiet.tz })}
-      </TooltipContent>
-    </Tooltip>
+    <InboxChip
+      variant={active ? "warning" : "outline"}
+      icon={<MoonIcon className="size-3" />}
+      aria-label={
+        active
+          ? t("ariaActive", { time: quiet.to })
+          : t("ariaInactive", { from: quiet.from, to: quiet.to, tz: quiet.tz })
+      }
+      data-testid="quiet-hours-chip"
+      dataAttributes={{ "data-active": active }}
+      tooltip={t("tooltip", { from: quiet.from, to: quiet.to, tz: quiet.tz })}
+    >
+      {active ? t("active", { time: quiet.to }) : t("inactive", { from: quiet.from, to: quiet.to })}
+    </InboxChip>
   )
 }

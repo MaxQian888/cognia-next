@@ -3,8 +3,7 @@
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { GitBranchIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { InboxChip } from "./inbox-chip"
 import { getDb } from "@/lib/db/schema"
 import {
   resolveDeliveryReadiness,
@@ -65,37 +64,33 @@ export function TopicRuntimeChip({ adapterId, conversationKey }: TopicRuntimeChi
   ].filter(Boolean).length
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge
-          variant="outline"
-          className="hidden md:inline-flex items-center gap-1 text-xs"
-          data-testid="topic-runtime-chip"
-          aria-label={t("aria", {
-            policy: diagnostic.effective,
-            dispatch: diagnostic.dispatch,
-          })}
-        >
-          <GitBranchIcon className="size-3" />
-          {t("badge", { policy: diagnostic.effective, dispatch: diagnostic.dispatch })}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-sm space-y-1 text-xs">
-        <p>{t("requested", { value: diagnostic.requested })}</p>
-        <p>{t("effective", { value: diagnostic.effective })}</p>
-        <p>{t("readiness", { value: diagnostic.readiness })}</p>
-        <p>{t("activation", { value: diagnostic.active ? t("active") : t("inactive") })}</p>
-        <p>{t("queue", { count: diagnostic.queueDepth })}</p>
-        <p>{t("activeRun", { value: diagnostic.activeRunId ?? t("none") })}</p>
-        <p>{t("recovery", { count: diagnostic.recoveryCount })}</p>
-        <p>
-          {t("capabilities", {
-            topic: diagnostic.capabilities.topicIsolation,
-            count: capabilityCount,
-          })}
-        </p>
-        {diagnostic.fallback && <p>{t("fallback.delivery_unverified")}</p>}
-      </TooltipContent>
-    </Tooltip>
+    <InboxChip
+      icon={<GitBranchIcon className="size-3" />}
+      data-testid="topic-runtime-chip"
+      aria-label={t("aria", {
+        policy: diagnostic.effective,
+        dispatch: diagnostic.dispatch,
+      })}
+      tooltip={
+        <div className="max-w-sm space-y-1">
+          <p>{t("requested", { value: diagnostic.requested })}</p>
+          <p>{t("effective", { value: diagnostic.effective })}</p>
+          <p>{t("readiness", { value: diagnostic.readiness })}</p>
+          <p>{t("activation", { value: diagnostic.active ? t("active") : t("inactive") })}</p>
+          <p>{t("queue", { count: diagnostic.queueDepth })}</p>
+          <p>{t("activeRun", { value: diagnostic.activeRunId ?? t("none") })}</p>
+          <p>{t("recovery", { count: diagnostic.recoveryCount })}</p>
+          <p>
+            {t("capabilities", {
+              topic: diagnostic.capabilities.topicIsolation,
+              count: capabilityCount,
+            })}
+          </p>
+          {diagnostic.fallback && <p>{t("fallback.delivery_unverified")}</p>}
+        </div>
+      }
+    >
+      {t("badge", { policy: diagnostic.effective, dispatch: diagnostic.dispatch })}
+    </InboxChip>
   )
 }

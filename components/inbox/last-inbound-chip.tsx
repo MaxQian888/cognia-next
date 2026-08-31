@@ -14,8 +14,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { InboxChip } from "./inbox-chip"
 import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
 
 export function LastInboundChip({ conversationKey }: { conversationKey: string }) {
@@ -44,17 +43,11 @@ export function LastInboundChip({ conversationKey }: { conversationKey: string }
   })()
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* No `hidden md:inline-flex` any more — the overflow popover it now
-            lives in is not width-constrained by the header strip. */}
-        <Badge variant="outline" className="text-xs" data-testid="conversation-header-last-inbound">
-          {label}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent className="text-xs">
-        {t("lastInboundTooltip", { time: new Date(lastAt).toLocaleString() })}
-      </TooltipContent>
-    </Tooltip>
+    <InboxChip
+      data-testid="conversation-header-last-inbound"
+      tooltip={t("lastInboundTooltip", { time: new Date(lastAt).toLocaleString() })}
+    >
+      {label}
+    </InboxChip>
   )
 }

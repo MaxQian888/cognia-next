@@ -16,9 +16,8 @@
  */
 
 import { useTranslations } from "next-intl"
+import { InboxChip } from "./inbox-chip"
 import { AtSignIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
 import { resolveInboundActivationPolicy } from "@/lib/connectors/conversation-admission"
@@ -43,22 +42,14 @@ export function AtStrategyChip({ adapterId, conversationKey }: AtStrategyChipPro
   const scope = override?.inboundActivationPolicy ? "conversation" : "adapter"
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge
-          variant="outline"
-          className="hidden md:inline-flex items-center gap-1 text-xs"
-          aria-label={t("aria", { strategy: label })}
-          data-testid="at-strategy-chip"
-          data-policy={policy}
-        >
-          <AtSignIcon className="size-3" />
-          {label}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent className="text-xs">
-        {t(`tooltip.${scope}`, { strategy: label })}
-      </TooltipContent>
-    </Tooltip>
+    <InboxChip
+      icon={<AtSignIcon className="size-3" />}
+      aria-label={t("aria", { strategy: label })}
+      data-testid="at-strategy-chip"
+      dataAttributes={{ "data-policy": policy }}
+      tooltip={t(`tooltip.${scope}`, { strategy: label })}
+    >
+      {label}
+    </InboxChip>
   )
 }

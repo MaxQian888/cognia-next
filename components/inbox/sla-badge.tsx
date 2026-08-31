@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Badge } from "@/components/ui/badge"
+import { InboxChip } from "./inbox-chip"
 import { isOverdue } from "@/lib/connectors/sla"
 import type { ConversationStatus } from "@/lib/db/conversation-overrides"
 
@@ -59,9 +59,8 @@ export function SlaBadge({ nextResponseDueAt, status, escalatedStep }: SlaBadgeP
   const aria = overdue ? t("overdueAria") : t("dueAria", { time: humanizeRemaining(remaining) })
 
   return (
-    <Badge
+    <InboxChip
       variant={overdue ? "destructive" : "outline"}
-      className="hidden md:inline-flex text-xs"
       data-testid="sla-badge"
       aria-label={level !== undefined ? `${aria} · ${t("escalatedAria", { level })}` : aria}
     >
@@ -69,6 +68,6 @@ export function SlaBadge({ nextResponseDueAt, status, escalatedStep }: SlaBadgeP
       {level !== undefined ? (
         <span data-testid="sla-badge-escalation">{t("escalated", { level })}</span>
       ) : null}
-    </Badge>
+    </InboxChip>
   )
 }

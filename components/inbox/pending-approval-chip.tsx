@@ -14,8 +14,8 @@
  */
 
 import { useTranslations } from "next-intl"
+import { InboxChip } from "./inbox-chip"
 import { ShieldAlertIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { usePendingApprovalCount } from "@/hooks/connectors/use-pending-approval-count"
 
@@ -31,18 +31,14 @@ export function PendingApprovalChip({ sessionId, className }: PendingApprovalChi
   if (count <= 0) return null
 
   return (
-    <Badge
-      variant="outline"
+    <InboxChip
       role="status"
-      className={cn(
-        "gap-1 border-amber-500/40 text-xs text-amber-700 dark:text-amber-300",
-        className
-      )}
+      icon={<ShieldAlertIcon className="size-3" aria-hidden />}
+      className={cn("border-amber-500/40 text-amber-700 dark:text-amber-300", className)}
       data-testid="pending-approval-chip"
-      data-count={count}
+      dataAttributes={{ "data-count": count }}
     >
-      <ShieldAlertIcon className="size-3" aria-hidden />
       {t("count", { count })}
-    </Badge>
+    </InboxChip>
   )
 }
