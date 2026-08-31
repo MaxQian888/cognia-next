@@ -25,4 +25,26 @@ describe("dispatchCollabOutbound", () => {
     expect(refresh).toHaveBeenCalledWith("account-1")
     expect(result).toEqual({ id: "iss-1", revision: 2 })
   })
+
+  it("refuses a collab command it has no route for instead of reporting it written", async () => {
+    const refresh = jest.fn().mockResolvedValue(undefined)
+
+    // `liveDispatcher` picks this dispatcher by the `collab_` prefix and calls
+    // it through `as never`, so a name that never got a case still arrives.
+    // Returning undefined for one made the drain mark the row sent with
+    // nothing written to the collaboration server, which loses the edit
+    // silently; the throw puts it on the retry-then-deadletter path instead.
+    await expect(
+      dispatchCollabOutbound(
+        "collab_issue_unlisted" as never,
+        { orgId: "org-1" },
+        {
+          localAccountId: "account-1",
+          client: {} as never,
+          refresh,
+        }
+      )
+    ).rejects.toThrow(/has no dispatch route/i)
+    expect(refresh).not.toHaveBeenCalled()
+  })
 })

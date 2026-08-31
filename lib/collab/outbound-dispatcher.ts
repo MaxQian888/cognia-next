@@ -103,6 +103,14 @@ export async function dispatchCollabOutbound(
         body as PatchCollabRunInput
       )
       break
+    default:
+      // `liveDispatcher` selects this dispatcher by name prefix and calls it
+      // through `as never`, so exhaustiveness here is not enforced at the call
+      // site. Without this arm an unlisted `collab_` command left `result`
+      // undefined, the drain read that as success and marked the row sent, and
+      // the edit was lost with nothing to show for it. Throwing puts the row
+      // on the normal retry-then-deadletter path, where it is visible.
+      throw new Error(`collab queue command ${String(command)} has no dispatch route`)
   }
 
   // Fire-and-forget through the scheduler's coalescing entry point. Awaiting a
