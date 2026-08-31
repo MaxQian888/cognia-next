@@ -26,9 +26,10 @@ import { getPluginManager } from "@/lib/plugin/core/manager"
 import { usePluginDiagnostics } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
+import { PluginCompatibilityBadge } from "../_shared/plugin-compatibility-badge"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginActivationProgress } from "../plugin-activation-progress"
-import { PluginStatusPill } from "../plugin-status-badge"
+import { PluginRuntimeWarnings, PluginStatusPill } from "../plugin-status-badge"
 import { PluginAvatar } from "../plugin-avatar"
 
 interface Props {
@@ -109,6 +110,11 @@ export function PluginDetailHeader({ plugin }: Props) {
             <Badge variant="outline" className="text-xs">
               {plugin.source}
             </Badge>
+            {/* Both of these were being produced and shown nowhere: the
+                compatibility diagnostic had no reader at all, and the loader's
+                degraded-runtime markers were rendered only by the card grid. */}
+            <PluginCompatibilityBadge manifest={plugin.manifest} />
+            <PluginRuntimeWarnings plugin={plugin} />
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">

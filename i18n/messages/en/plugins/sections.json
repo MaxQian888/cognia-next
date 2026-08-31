@@ -1,5 +1,7 @@
 {
   "agent-packages": "Agent packages",
+  "desktopOnly": "Desktop only",
+  "desktopOnlyHint": "This section needs the Cognia desktop app.",
   "detailSheetLabel": "Plugin detail",
   "devtools": "Devtools",
   "discover": "Discover",

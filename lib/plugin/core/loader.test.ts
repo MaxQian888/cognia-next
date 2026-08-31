@@ -612,7 +612,14 @@ describe("PluginLoader", () => {
       jest.useFakeTimers()
     })
 
-    it("stamps a python-runtime-unavailable warning on the row via persistPythonStubWarning", async () => {
+    /**
+     * The stub's marker write moved to `runtime-stub-warning.ts` so the WASM
+     * and VS Code loaders could stop degrading silently. Its edge cases
+     * (idempotence, a missing row, a failed write) live in that module's own
+     * suite. What has to be pinned HERE is the call site: the Python stub must
+     * still record that it handed back an inert runtime.
+     */
+    it("stamps the python-runtime-unavailable marker when it hands back a stub", async () => {
       jest.useRealTimers()
       jest.resetModules()
       const updatePlugin = jest.fn().mockResolvedValue(undefined)
@@ -620,14 +627,22 @@ describe("PluginLoader", () => {
         id: "python-warn",
         manifest: { id: "python-warn" },
       })
+      jest.doMock("@/lib/platform/detect", () => ({
+        ...jest.requireActual("@/lib/platform/detect"),
+        isTauri: () => false,
+        isHeadlessHost: () => false,
+      }))
       jest.doMock("@/lib/db/plugins", () => ({ getPlugin, updatePlugin }))
 
       const { PluginLoader: FreshLoader } = await import("./loader")
-      const fresh = new FreshLoader() as unknown as {
-        persistPythonStubWarning: (id: string) => Promise<void>
-      }
+      const fresh = new FreshLoader()
+      const definition = await fresh.load(createMockPlugin("python-warn", "python"))
+      const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() }
+      await definition.activate({ logger } as never)
 
-      await fresh.persistPythonStubWarning("python-warn")
+      // The write is detached from activate on purpose, so a Dexie hiccup can
+      // never block plugin load. Flush the microtask queue before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 0))
 
       expect(getPlugin).toHaveBeenCalledWith("python-warn")
       expect(updatePlugin).toHaveBeenCalledWith(
@@ -638,45 +653,7 @@ describe("PluginLoader", () => {
           }),
         })
       )
-      jest.useFakeTimers()
-    })
-
-    it("does not duplicate the warning when persistPythonStubWarning runs twice", async () => {
-      jest.useRealTimers()
-      jest.resetModules()
-      const updatePlugin = jest.fn().mockResolvedValue(undefined)
-      const getPlugin = jest.fn().mockResolvedValue({
-        id: "python-twice",
-        manifest: { id: "python-twice", _cogniaWarnings: ["python-runtime-unavailable"] },
-      })
-      jest.doMock("@/lib/db/plugins", () => ({ getPlugin, updatePlugin }))
-
-      const { PluginLoader: FreshLoader } = await import("./loader")
-      const fresh = new FreshLoader() as unknown as {
-        persistPythonStubWarning: (id: string) => Promise<void>
-      }
-
-      await fresh.persistPythonStubWarning("python-twice")
-
-      expect(updatePlugin).not.toHaveBeenCalled()
-      jest.useFakeTimers()
-    })
-
-    it("swallows db errors during warning persistence", async () => {
-      jest.useRealTimers()
-      jest.resetModules()
-      const getPlugin = jest.fn().mockRejectedValue(new Error("db down"))
-      const updatePlugin = jest.fn()
-      jest.doMock("@/lib/db/plugins", () => ({ getPlugin, updatePlugin }))
-
-      const { PluginLoader: FreshLoader } = await import("./loader")
-      const fresh = new FreshLoader() as unknown as {
-        persistPythonStubWarning: (id: string) => Promise<void>
-      }
-
-      // Should not throw.
-      await expect(fresh.persistPythonStubWarning("python-broken")).resolves.toBeUndefined()
-      expect(updatePlugin).not.toHaveBeenCalled()
+      jest.dontMock("@/lib/platform/detect")
       jest.useFakeTimers()
     })
   })

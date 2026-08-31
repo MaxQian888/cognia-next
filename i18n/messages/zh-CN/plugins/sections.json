@@ -1,5 +1,7 @@
 {
   "agent-packages": "Agent 扩展包",
+  "desktopOnly": "仅桌面端",
+  "desktopOnlyHint": "该分区需要 Cognia 桌面应用。",
   "detailSheetLabel": "插件详情",
   "devtools": "开发工具",
   "discover": "发现",

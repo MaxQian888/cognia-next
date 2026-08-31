@@ -11,7 +11,9 @@
   "reviewPermissions": "Review permissions",
   "rollback": "Rollback…",
   "runtimeWarnings": {
-    "python-runtime-unavailable": "Python runtime unavailable — desktop only"
+    "python-runtime-unavailable": "Python runtime unavailable — desktop only",
+    "vscode-runtime-unavailable": "VS Code host unavailable, desktop only",
+    "wasm-runtime-unavailable": "WASM runtime unavailable, desktop only"
   },
   "selectAria": "Select {name}",
   "status": {

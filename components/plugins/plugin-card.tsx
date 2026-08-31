@@ -20,6 +20,7 @@ import { getAllContributions } from "@/lib/plugin/contracts/capability-contribut
 import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import { PluginActivationProgress } from "./plugin-activation-progress"
+import { PluginCompatibilityBadge } from "./_shared/plugin-compatibility-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 import { PluginVersionBadge } from "./_shared/plugin-version-badge"
 import { PluginAvatar } from "./plugin-avatar"
@@ -181,6 +182,7 @@ export const PluginCard = memo(function PluginCard({
         <PluginActivationProgress pluginId={plugin.id} pluginName={plugin.name} variant="card" />
       </div>
 
+      <PluginCompatibilityBadge manifest={plugin.manifest} />
       <PluginRuntimeWarnings plugin={plugin} />
 
       {errored && plugin.error && (

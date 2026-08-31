@@ -8,7 +8,14 @@
 //
 // Two install lanes are exposed via grouped dropdown items:
 //   • Manifest (web + desktop) — JSON manifest file / URL, staged for review
-//   • WASM bundle (Tauri only) — local .wasm/.zip or signed URL with grant sheet
+//   • Git / local / WASM (desktop only) — these read a disk path or a git
+//     checkout and run in the Rust backend
+//
+// The desktop-only lanes are RENDERED EVERYWHERE and disabled off the desktop
+// shell, not hidden. Hiding them collapsed three different answers into one
+// blank menu: "this does not exist", "this exists and needs the desktop app",
+// and "this is broken". A user on the web build had no way to tell which, and
+// no reason to look for the desktop app.
 
 import { useState } from "react"
 import dynamic from "next/dynamic"
@@ -60,6 +67,14 @@ interface Props {
   onSyncRegistry?: () => Promise<void> | void
   /** Set by the parent while a sync is in flight to drive the spinner. */
   syncing?: boolean
+}
+
+function DesktopOnlyChip({ label }: { label: string }) {
+  return (
+    <span className="rounded-pill border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+      {label}
+    </span>
+  )
 }
 
 export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = false }: Props) {
@@ -148,45 +163,70 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
               <GlobeIcon className="size-3.5 mr-2" />
               {t("fromUrl")}
             </DropdownMenuItem>
-            {wasmAvailable && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t("groupGit")}</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => setGithubDialogOpen(true)}>
-                  <GitBranchIcon className="size-3.5 mr-2" />
-                  {t("fromGithub")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t("groupLocal")}</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={() => void loadUnpacked.trigger()}
-                  disabled={loadUnpacked.busy}
-                >
-                  <FolderOpenIcon className="size-3.5 mr-2" />
-                  {t("loadUnpacked")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setVsixDialogOpen(true)}>
-                  <FileArchiveIcon className="size-3.5 mr-2" />
-                  {t("fromVsix")}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>{t("groupWasm")}</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={() => void wasmLocal.trigger()}
-                  disabled={wasmLocal.busy}
-                >
-                  <FilePlus2Icon className="size-3.5 mr-2" />
-                  {t("fromLocalWasm")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSignedUrlDialogOpen(true)}>
-                  <ShieldCheckIcon className="size-3.5 mr-2" />
-                  {t("fromUrlSigned")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setWasmGitDialogOpen(true)}>
-                  <GitMergeIcon className="size-3.5 mr-2" />
-                  {t("fromWasmGit")}
-                </DropdownMenuItem>
-              </>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="flex items-center justify-between gap-2">
+              {t("groupGit")}
+              {!wasmAvailable && <DesktopOnlyChip label={t("desktopOnlyHint")} />}
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => setGithubDialogOpen(true)}
+              disabled={!wasmAvailable}
+              data-testid="plugin-install-from-github"
+            >
+              <GitBranchIcon className="size-3.5 mr-2" />
+              {t("fromGithub")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("groupLocal")}</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => void loadUnpacked.trigger()}
+              disabled={!wasmAvailable || loadUnpacked.busy}
+              data-testid="plugin-install-load-unpacked"
+            >
+              <FolderOpenIcon className="size-3.5 mr-2" />
+              {t("loadUnpacked")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setVsixDialogOpen(true)}
+              disabled={!wasmAvailable}
+              data-testid="plugin-install-from-vsix"
+            >
+              <FileArchiveIcon className="size-3.5 mr-2" />
+              {t("fromVsix")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t("groupWasm")}</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => void wasmLocal.trigger()}
+              disabled={!wasmAvailable || wasmLocal.busy}
+              data-testid="plugin-install-from-local-wasm"
+            >
+              <FilePlus2Icon className="size-3.5 mr-2" />
+              {t("fromLocalWasm")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setSignedUrlDialogOpen(true)}
+              disabled={!wasmAvailable}
+              data-testid="plugin-install-from-signed-url"
+            >
+              <ShieldCheckIcon className="size-3.5 mr-2" />
+              {t("fromUrlSigned")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setWasmGitDialogOpen(true)}
+              disabled={!wasmAvailable}
+              data-testid="plugin-install-from-wasm-git"
+            >
+              <GitMergeIcon className="size-3.5 mr-2" />
+              {t("fromWasmGit")}
+            </DropdownMenuItem>
+            {!wasmAvailable && (
+              <p
+                className="px-2 py-1.5 text-xs text-muted-foreground"
+                data-testid="plugin-install-desktop-only-hint"
+              >
+                {t("desktopOnlyGroupHint")}
+              </p>
             )}
           </DropdownMenuContent>
         </DropdownMenu>

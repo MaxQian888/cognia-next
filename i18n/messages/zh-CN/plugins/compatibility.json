@@ -1,0 +1,14 @@
+{
+  "blockedLabel": "本端不可用",
+  "blockedTooltip": "该插件未声明对 {host} 运行时的支持，Cognia 不会在本设备上启动它。请改在桌面端打开。",
+  "degradedLabel": "本端受限",
+  "degradedTooltip": "该插件在 {host} 运行时下的能力会被削减。",
+  "host": {
+    "browser": "浏览器",
+    "headless": "无头",
+    "mobile": "移动端",
+    "tauri": "桌面端"
+  },
+  "installBlocked": "插件安装在桌面端后台执行，需要 Cognia 桌面应用。",
+  "runtimeUnavailable": "该插件的运行时在本设备上不可用。"
+}

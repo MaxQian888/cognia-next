@@ -13,6 +13,7 @@ import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
 import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest, PluginTool } from "@/types/plugin"
 import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
+import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
 
 const wasmLoaderLogger = loggers.plugin.child("wasm-loader")
 
@@ -88,6 +89,11 @@ export async function loadWasmDefinition(
         context.logger.warn(
           `WASM plugin ${manifest.id} requires a native Cognia host. Running in stub mode.`
         )
+        // A `logger.warn` was the ONLY trace this left. The row went on saying
+        // "Enabled" over a runtime that never started, which the Python path
+        // had already learned to record. Detached on purpose: a Dexie hiccup
+        // must not block plugin load.
+        void persistRuntimeStubWarning(manifest.id, RUNTIME_STUB_WARNINGS.wasm)
         return {}
       },
       deactivate: async () => {},

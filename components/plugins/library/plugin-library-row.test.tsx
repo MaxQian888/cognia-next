@@ -13,6 +13,10 @@ jest.mock("next-intl", () => ({
   },
 }))
 
+jest.mock("../_shared/plugin-compatibility-badge", () => ({
+  PluginCompatibilityBadge: () => <div data-testid="compatibility-badge-stub" />,
+}))
+
 import { PluginLibraryRow } from "./plugin-library-row"
 
 const baseRow: PluginRow = {
@@ -203,6 +207,34 @@ describe("PluginLibraryRow", () => {
       />
     )
     expect(screen.getByText("hooks")).toBeInTheDocument()
+  })
+
+  // Both of these were being produced and shown nowhere in the DEFAULT view:
+  // the compatibility diagnostic had no reader at all, and the loader's
+  // degraded-runtime markers were rendered only by the card grid. A row could
+  // read "Enabled" over a runtime that never started.
+  it("carries the compatibility badge", () => {
+    const h = handlers()
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+    expect(screen.getByTestId("compatibility-badge-stub")).toBeInTheDocument()
+  })
+
+  it("renders the loader's degraded-runtime markers", () => {
+    const h = handlers()
+    render(
+      <PluginLibraryRow
+        plugin={{
+          ...baseRow,
+          manifest: { ...baseRow.manifest, _cogniaWarnings: ["wasm-runtime-unavailable"] },
+        }}
+        selected={false}
+        active={false}
+        {...h}
+      />
+    )
+    expect(
+      screen.getByTestId("plugin-runtime-warning-wasm-runtime-unavailable")
+    ).toBeInTheDocument()
   })
 
   it("shows the +N overflow badge when there are more than 3 capabilities", () => {

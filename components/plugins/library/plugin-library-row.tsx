@@ -34,10 +34,11 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
 import { getAllContributions } from "@/lib/plugin/contracts/capability-contributions"
+import { PluginCompatibilityBadge } from "../_shared/plugin-compatibility-badge"
 import { PluginRowActionsMenu } from "../plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginActivationProgress } from "../plugin-activation-progress"
-import { PluginStatusPill } from "../plugin-status-badge"
+import { PluginRuntimeWarnings, PluginStatusPill } from "../plugin-status-badge"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
 import { PluginAvatar } from "../plugin-avatar"
 
@@ -153,6 +154,7 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
                 {permissionCount}
               </span>
             )}
+            <PluginCompatibilityBadge manifest={plugin.manifest} />
             <PluginSignatureBadge state={signatureState} compact />
             {errored && (
               <TriangleAlertIcon
@@ -196,6 +198,10 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
               </Badge>
             )}
           </div>
+          {/* The loader stamps these when it hands back a stub instead of a
+              runtime. Only the card grid rendered them, so in the default list
+              view a plugin could read "Enabled" while doing nothing at all. */}
+          <PluginRuntimeWarnings plugin={plugin} className="relative z-10 shrink-0" />
           {errored && plugin.error && (
             <span className="flex min-w-0 items-center gap-0.5 text-destructive">
               <CircleAlertIcon className="size-3 shrink-0" />

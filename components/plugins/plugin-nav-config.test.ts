@@ -64,19 +64,24 @@ describe("plugin-nav-config", () => {
 describe("visiblePluginSections", () => {
   // Shared by the desktop rail and the phone body. If the two ever filtered
   // separately, one shell would offer a section the other refused to.
-  it("hides the desktop-only and devtools sections off a Tauri shell", () => {
-    const ids = visiblePluginSections({ devtoolsEnabled: false, isDesktop: false }).map(
-      (s) => s.section
-    )
-    expect(ids).toEqual(["library", "discover", "governance"])
+  it("keeps the desktop-only section visible but disabled off a Tauri shell", () => {
+    const entries = visiblePluginSections({ devtoolsEnabled: false, isDesktop: false })
+    expect(entries.map((s) => s.section)).toEqual([
+      "library",
+      "discover",
+      "agent-packages",
+      "governance",
+    ])
+    const agentPackages = entries.find((s) => s.section === "agent-packages")
+    expect(agentPackages?.disabled).toBe(true)
   })
 
-  it("offers agent packages on a desktop shell", () => {
-    const ids = visiblePluginSections({ devtoolsEnabled: false, isDesktop: true }).map(
-      (s) => s.section
-    )
-    expect(ids).toContain("agent-packages")
-    expect(ids).not.toContain("devtools")
+  it("enables agent packages on a desktop shell", () => {
+    const entries = visiblePluginSections({ devtoolsEnabled: false, isDesktop: true })
+    expect(entries.find((s) => s.section === "agent-packages")?.disabled).toBe(false)
+    // Devtools is an opt-in developer switch, not a capability gap, so it is
+    // absent rather than disabled.
+    expect(entries.some((s) => s.section === "devtools")).toBe(false)
   })
 
   it("adds devtools only behind its opt-in flag, and keeps nav order", () => {
@@ -84,5 +89,12 @@ describe("visiblePluginSections", () => {
       (s) => s.section
     )
     expect(ids).toEqual(["library", "discover", "agent-packages", "governance", "devtools"])
+  })
+
+  it("never marks a section that carries no feature flag as disabled", () => {
+    const entries = visiblePluginSections({ devtoolsEnabled: true, isDesktop: false })
+    for (const entry of entries.filter((e) => !e.featureFlag)) {
+      expect(entry.disabled).toBe(false)
+    }
   })
 })

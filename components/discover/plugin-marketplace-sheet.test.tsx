@@ -7,6 +7,15 @@ import userEvent from "@testing-library/user-event"
 
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
 
+jest.mock("@/lib/native/utils", () => ({
+  ...jest.requireActual("@/lib/native/utils"),
+  // `InstallButton` gates install on the desktop host, because the download
+  // and checksum verification run in the Rust backend. These suites are about
+  // what the surface renders and what it calls, not about the gate, which has
+  // its own tests in `_shared/install-button.test.tsx`.
+  canUseTauriInvoke: () => true,
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     if (vars && Object.keys(vars).length > 0) return key + ":" + JSON.stringify(vars)

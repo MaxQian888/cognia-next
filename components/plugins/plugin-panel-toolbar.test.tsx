@@ -64,17 +64,22 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="dropdown-content">{children}</div>
   ),
+  // `data-testid` and `aria-disabled` are forwarded because the desktop-only
+  // items are now rendered-and-disabled rather than hidden, and that is what
+  // the web-mode tests assert on.
   DropdownMenuItem: ({
     children,
     onClick,
     disabled,
+    ...rest
   }: {
     children: React.ReactNode
     onClick?: () => void
     disabled?: boolean
     className?: string
+    "data-testid"?: string
   }) => (
-    <button onClick={onClick} disabled={disabled}>
+    <button onClick={onClick} disabled={disabled} aria-disabled={disabled} {...rest}>
       {children}
     </button>
   ),
@@ -247,12 +252,23 @@ describe("PluginPanelToolbar", () => {
       expect(screen.getByText("fromUrlSigned")).toBeInTheDocument()
     })
 
-    it("hides the WASM group in web mode", () => {
+    // These used to be hidden in web mode, which collapsed three answers into
+    // one blank menu: "this does not exist", "this exists and needs the
+    // desktop app", and "this is broken". They are rendered and disabled now,
+    // with the reason attached.
+    it("disables the WASM group in web mode instead of hiding it", () => {
       canUseTauriInvokeMock.mockReturnValue(false)
       render(<PluginPanelToolbar />)
-      expect(screen.queryByText("groupWasm")).not.toBeInTheDocument()
-      expect(screen.queryByText("fromLocalWasm")).not.toBeInTheDocument()
-      expect(screen.queryByText("fromUrlSigned")).not.toBeInTheDocument()
+      expect(screen.getByText("groupWasm")).toBeInTheDocument()
+      expect(screen.getByTestId("plugin-install-from-local-wasm")).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+      expect(screen.getByTestId("plugin-install-from-signed-url")).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+      expect(screen.getByTestId("plugin-install-desktop-only-hint")).toBeInTheDocument()
     })
 
     it("From local .wasm/.zip menu item triggers the install flow", () => {
@@ -289,11 +305,37 @@ describe("PluginPanelToolbar", () => {
       expect(await screen.findByTestId("wasm-git-dialog")).toBeInTheDocument()
     })
 
-    it("hides the VSIX and Git (WASM) items in web mode", () => {
+    it("disables the VSIX and Git items in web mode instead of hiding them", () => {
       canUseTauriInvokeMock.mockReturnValue(false)
       render(<PluginPanelToolbar />)
-      expect(screen.queryByText("fromVsix")).not.toBeInTheDocument()
-      expect(screen.queryByText("fromWasmGit")).not.toBeInTheDocument()
+      expect(screen.getByTestId("plugin-install-from-vsix")).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+      expect(screen.getByTestId("plugin-install-from-wasm-git")).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+      expect(screen.getByTestId("plugin-install-from-github")).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+    })
+
+    it("leaves the desktop-only items enabled in the desktop shell", () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      for (const id of [
+        "plugin-install-from-github",
+        "plugin-install-load-unpacked",
+        "plugin-install-from-vsix",
+        "plugin-install-from-local-wasm",
+        "plugin-install-from-signed-url",
+        "plugin-install-from-wasm-git",
+      ]) {
+        expect(screen.getByTestId(id)).not.toHaveAttribute("aria-disabled", "true")
+      }
+      expect(screen.queryByTestId("plugin-install-desktop-only-hint")).toBeNull()
     })
   })
 

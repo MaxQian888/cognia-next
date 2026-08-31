@@ -1,5 +1,7 @@
 {
   "checkUpdates": "检查更新",
+  "desktopOnlyGroupHint": "这些安装方式要读取磁盘或 git 检出，只能在桌面端后台执行。",
+  "desktopOnlyHint": "需要 Cognia 桌面应用",
   "fromFile": "从文件…",
   "fromFileSourceLabel": "本地文件 ({count})",
   "fromGithub": "从 GitHub…",

@@ -10,8 +10,10 @@ jest.mock("next-intl", () => ({
 }))
 
 let devtoolsEnabled = false
+let pluginTotals = { total: 0, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 }
 jest.mock("@/hooks/plugins", () => ({
   useDevtoolsGate: () => devtoolsEnabled,
+  usePlugins: () => ({ totals: pluginTotals }),
 }))
 
 let inDesktopShell = false
@@ -23,6 +25,7 @@ import { usePluginsStore } from "@/stores/plugins"
 beforeEach(() => {
   devtoolsEnabled = false
   inDesktopShell = false
+  pluginTotals = { total: 0, enabled: 0, errored: 0, loading: 0, updateAvailable: 0 }
   usePluginsStore.setState({
     activeSection: "library",
     librarySubFilter: "all",
@@ -51,35 +54,59 @@ describe("PluginNavSidebar", () => {
   })
 
   /**
-   * Pi's package manager needs a config file and a CLI, so on the web and on
-   * mobile the entry is not rendered at all rather than rendered and broken.
+   * Pi's package manager needs a config file and a CLI, so it cannot run on
+   * the web or on mobile. It used to be dropped from the rail entirely, which
+   * collapsed "does not exist", "needs the desktop app" and "is broken" into
+   * one blank space. It is now rendered, disabled, and says which.
    */
-  it("hides agent packages outside the desktop shell", () => {
+  it("disables agent packages outside the desktop shell and says why", () => {
     inDesktopShell = false
     render(<PluginNavSidebar />)
-    expect(screen.queryByTestId("plugin-nav-agent-packages")).not.toBeInTheDocument()
+    const entry = screen.getByTestId("plugin-nav-agent-packages")
+    expect(entry).toBeDisabled()
+    expect(entry).toHaveAttribute("data-disabled-reason", "desktop")
+    expect(entry).toHaveAttribute("title", "desktopOnlyHint")
   })
 
   it("renders agent packages in the desktop shell", () => {
     inDesktopShell = true
     render(<PluginNavSidebar />)
-    expect(screen.getByTestId("plugin-nav-agent-packages")).toBeInTheDocument()
+    const entry = screen.getByTestId("plugin-nav-agent-packages")
+    expect(entry).toBeInTheDocument()
+    expect(entry).not.toBeDisabled()
+  })
+
+  // "3 updates waiting" and "1 plugin failed" used to require entering the
+  // Library section to discover.
+  it("badges Library with the update and error counts", () => {
+    pluginTotals = { total: 5, enabled: 4, errored: 1, loading: 0, updateAvailable: 3 }
+    render(<PluginNavSidebar />)
+    const library = screen.getByTestId("plugin-nav-library")
+    expect(library).toHaveTextContent("3")
+    expect(library).toHaveTextContent("1")
+  })
+
+  it("drops the badges when both counts are zero", () => {
+    render(<PluginNavSidebar />)
+    const library = screen.getByTestId("plugin-nav-library")
+    expect(library.textContent).toBe("library")
   })
 
   /**
-   * The gate must resolve in an effect, not during render. This app is a static
-   * export: the server render happens at build time, where `isTauri()` is
-   * always false. A render-time read would emit the entry into the desktop
-   * shell's server HTML and then disagree with it on hydration.
+   * The shell must be read through `useSyncExternalStore`'s server snapshot,
+   * not during render. This app is a static export: the server render happens
+   * at build time, where `isTauri()` is always false. So the desktop entry is
+   * emitted DISABLED into the server HTML and enables itself on the client.
    *
-   * Asserting on the server render is the only way to pin that — after mount
-   * the effect has already run, so a client-side query cannot tell the two
-   * implementations apart.
+   * Asserting on the server render is the only way to pin that: after mount
+   * the snapshot has already resolved, so a client-side query cannot tell the
+   * two implementations apart.
    */
-  it("omits the desktop entry from the server render even inside Tauri", () => {
+  it("emits the desktop entry as disabled in the server render even inside Tauri", () => {
     inDesktopShell = true
     const html = renderToString(<PluginNavSidebar />)
-    expect(html).not.toContain("plugin-nav-agent-packages")
+    expect(html).toContain("plugin-nav-agent-packages")
+    expect(html).toContain('data-disabled-reason="desktop"')
     expect(html).toContain("plugin-nav-library")
   })
 

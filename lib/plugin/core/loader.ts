@@ -31,6 +31,7 @@ import {
 import { resolvePluginPath } from "./plugin-path"
 import { createPluginRequire, primeSharedModules } from "./shared-modules"
 import { assertNoHostPrivateImports } from "../security/import-boundary"
+import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -533,38 +534,10 @@ export class PluginLoader {
         // Persist a runtime warning on the plugin row so the UI can render
         // a degraded badge. Fire-and-forget so activate doesn't block on
         // a Dexie write (the runtime is happy regardless).
-        void this.persistPythonStubWarning(manifest.id)
+        void persistRuntimeStubWarning(manifest.id, RUNTIME_STUB_WARNINGS.python)
         return {}
       },
       deactivate: async () => {},
-    }
-  }
-
-  /**
-   * Best-effort: append "python-runtime-unavailable" to the row's
-   * `manifest._cogniaWarnings` so the UI can render a degraded badge. Runs
-   * detached from the activate flow so a Dexie hiccup never blocks plugin
-   * load.
-   */
-  private async persistPythonStubWarning(pluginId: string): Promise<void> {
-    try {
-      const { getPlugin, updatePlugin } = await import("@/lib/db/plugins")
-      const row = await getPlugin(pluginId)
-      if (!row) return
-      const existing = (
-        (row.manifest as { _cogniaWarnings?: string[] })._cogniaWarnings ?? []
-      ).slice()
-      const warning = "python-runtime-unavailable"
-      if (existing.includes(warning)) return
-      existing.push(warning)
-      await updatePlugin(pluginId, {
-        manifest: { ...row.manifest, _cogniaWarnings: existing },
-      })
-    } catch (writeError) {
-      pluginLoaderLogger.debug("Skipped runtime warning write for Python stub", {
-        pluginId,
-        error: writeError instanceof Error ? writeError.message : String(writeError),
-      })
     }
   }
 

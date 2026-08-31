@@ -4,6 +4,15 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
+jest.mock("@/lib/native/utils", () => ({
+  ...jest.requireActual("@/lib/native/utils"),
+  // `InstallButton` gates install on the desktop host, because the download
+  // and checksum verification run in the Rust backend. These suites are about
+  // what the surface renders and what it calls, not about the gate, which has
+  // its own tests in `_shared/install-button.test.tsx`.
+  canUseTauriInvoke: () => true,
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))

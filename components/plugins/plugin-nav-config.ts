@@ -89,19 +89,34 @@ export interface PluginSectionVisibility {
   isDesktop: boolean
 }
 
+export interface PluginNavEntry extends PluginNavItem {
+  /**
+   * True when the section exists but this host cannot run it. The entry is
+   * still rendered, with a reason, rather than dropped.
+   */
+  disabled: boolean
+}
+
 /**
  * The sections a given host should offer, in nav order.
  *
  * Shared by the desktop rail and the phone body so the two can never disagree
  * about which sections exist. Pure, so the rule is testable without a shell.
+ *
+ * The two gates are deliberately NOT treated the same way:
+ *
+ *   - `devtools` is an opt-in developer switch in Settings. A user who has not
+ *     turned it on is not missing a capability, so the entry is absent.
+ *   - `desktop` is a capability gap. Dropping the entry collapsed three
+ *     answers into one blank rail: "this does not exist", "this exists and
+ *     needs the desktop app", and "this is broken". It stays visible and
+ *     disabled so the third answer is the only one it cannot be.
  */
 export function visiblePluginSections({
   devtoolsEnabled,
   isDesktop,
-}: PluginSectionVisibility): ReadonlyArray<PluginNavItem> {
-  return PLUGIN_NAV_SECTIONS.filter((item) => {
-    if (item.featureFlag === "devtools") return devtoolsEnabled
-    if (item.featureFlag === "desktop") return isDesktop
-    return true
-  })
+}: PluginSectionVisibility): ReadonlyArray<PluginNavEntry> {
+  return PLUGIN_NAV_SECTIONS.filter(
+    (item) => item.featureFlag !== "devtools" || devtoolsEnabled
+  ).map((item) => ({ ...item, disabled: item.featureFlag === "desktop" && !isDesktop }))
 }

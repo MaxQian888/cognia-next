@@ -171,12 +171,15 @@ function PluginsMobileBodyInner({ showHeader }: { showHeader: boolean }) {
             aria-label={tMobile("sectionsAria")}
             className="w-max"
           >
-            {sections.map(({ section, labelKey, icon: Icon }) => (
+            {sections.map(({ section, labelKey, icon: Icon, disabled }) => (
               <ToggleGroupItem
                 key={section}
                 value={section}
+                disabled={disabled}
+                title={disabled ? tSections("desktopOnlyHint") : undefined}
                 className="h-8 gap-1.5 px-2.5 text-xs"
                 data-testid={`plugins-mobile-section-${section}`}
+                data-disabled-reason={disabled ? "desktop" : undefined}
               >
                 <Icon className="size-3.5 shrink-0" />
                 {tSections(labelKey)}

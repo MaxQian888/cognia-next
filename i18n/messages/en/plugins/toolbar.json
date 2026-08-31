@@ -1,5 +1,7 @@
 {
   "checkUpdates": "Check for updates",
+  "desktopOnlyGroupHint": "These install from disk or a git checkout, which runs in the desktop backend.",
+  "desktopOnlyHint": "Needs the Cognia desktop app",
   "fromFile": "From file…",
   "fromFileSourceLabel": "Local files ({count})",
   "fromGithub": "From GitHub…",

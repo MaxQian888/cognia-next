@@ -27,6 +27,7 @@ import {
 import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
 import { configureLmHandler } from "@/lib/plugin/vscode-shim/lm-handler"
 import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
+import { persistRuntimeStubWarning, RUNTIME_STUB_WARNINGS } from "./runtime-stub-warning"
 
 const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
 
@@ -249,6 +250,10 @@ export async function loadVscodeDefinition(
         context.logger.warn(
           `VS Code extension ${manifest.id} requires the Tauri desktop runtime. Running in stub mode.`
         )
+        // Same reason as the WASM stub: without this marker the row reads
+        // "Enabled" over an extension that never started, and the only trace
+        // is a console warning.
+        void persistRuntimeStubWarning(manifest.id, RUNTIME_STUB_WARNINGS.vscode)
         return {}
       },
       deactivate: async () => {},

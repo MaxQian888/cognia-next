@@ -1,6 +1,27 @@
 import { WINDOW_LABELS } from "@/lib/native/utils"
+import type { PluginRuntimeProfile } from "@/types/plugin"
 
 import type { PluginManagerConfig } from "./manager"
+
+/**
+ * Which runtime profile a shell boots the plugin manager as.
+ *
+ * Exported on its own because the UI has to answer the same question: a
+ * compatibility badge that disagreed with the profile the manager is actually
+ * running would be worse than no badge. `resolvePluginRuntimeBootstrap` below
+ * is the only other caller, so the rule exists once.
+ *
+ * Capacitor mobile is a browser-class WebView without the Tauri bridge. It
+ * boots the `mobile` profile so desktop-native built-ins stay
+ * discovered-but-inert; plain web (and the Node CLI) stays `browser`.
+ */
+export function pluginRuntimeProfileFor(shell: {
+  isTauri: boolean
+  isMobile?: boolean
+}): PluginRuntimeProfile {
+  if (shell.isTauri) return "tauri"
+  return shell.isMobile ? "mobile" : "browser"
+}
 
 export interface ResolvePluginRuntimeBootstrapOptions {
   isTauri: boolean
@@ -32,10 +53,7 @@ export function resolvePluginRuntimeBootstrap(
     return {
       shouldInitialize: true,
       config: {
-        // Capacitor mobile is a browser-class WebView without the Tauri bridge.
-        // It boots the `mobile` profile so desktop-native built-ins stay
-        // discovered-but-inert; plain web (and the Node CLI) stays `browser`.
-        runtimeProfile: options.isMobile ? "mobile" : "browser",
+        runtimeProfile: pluginRuntimeProfileFor(options),
         pluginDirectory: "",
         enablePython: false,
         lifecycleFeatures: {

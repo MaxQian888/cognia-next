@@ -100,8 +100,12 @@ describe("PluginsMobileBody", () => {
     expect(screen.getByTestId("plugins-mobile-section-library")).toBeInTheDocument()
     expect(screen.getByTestId("plugins-mobile-section-discover")).toBeInTheDocument()
     expect(screen.getByTestId("plugins-mobile-section-governance")).toBeInTheDocument()
-    // Desktop-only and devtools-gated sections are absent on a browser phone.
-    expect(screen.queryByTestId("plugins-mobile-section-agent-packages")).toBeNull()
+    // A capability gap says so; an opt-in developer switch simply is not there.
+    expect(screen.getByTestId("plugins-mobile-section-agent-packages")).toHaveAttribute(
+      "data-disabled-reason",
+      "desktop"
+    )
+    expect(screen.getByTestId("plugins-mobile-section-agent-packages")).toBeDisabled()
     expect(screen.queryByTestId("plugins-mobile-section-devtools")).toBeNull()
   })
 
