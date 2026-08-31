@@ -41,6 +41,7 @@ import { useSiteHostingManifest } from "@/hooks/sites/use-site-hosting-manifest"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
 import { useSitePreviewSession } from "@/hooks/sites/use-site-preview-session"
 import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import {
   deleteSiteProjectMetadata,
   updateSiteAuthoringPolicy,
@@ -76,7 +77,11 @@ type Confirmation = "purge" | "delete-metadata" | null
 
 export function SitesConsole() {
   const t = useTranslations("sites")
+  // Two different questions, two different signals. `platform` answers "can
+  // this shell drive wrangler / reach a deploy host", which stays a runtime
+  // fact. `compact` answers "is there room for the console", which is width.
   const platform = usePlatform()
+  const compact = useCompactLayout()
   const projects = useProjectStore((state) => state.projects)
   const activeProjectId = useProjectStore((state) => state.activeProjectId)
   const loadProjects = useProjectStore((state) => state.load)
@@ -174,7 +179,7 @@ export function SitesConsole() {
     }
   }, [deployGate, publish.wrangler, t])
 
-  if (platform === "mobile") {
+  if (compact) {
     // ADR-0084 defers the mobile projection, and that stands — nothing here
     // reaches another host. But the same ADR says the console renders in every
     // shell over whichever local database that shell owns, and a bare

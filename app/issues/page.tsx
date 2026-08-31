@@ -14,14 +14,16 @@ import { useSearchParams } from "next/navigation"
 
 import { IssueConsole } from "@/components/issues/issue-console"
 import { IssuesMobileBody } from "@/components/mobile/issues/issues-mobile-body"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 function IssuesPageInner() {
-  const platform = usePlatform()
+  // Width, not runtime: the desktop board is a multi-column grid that a
+  // 375px browser cannot render any better than a phone can.
+  const compact = useCompactLayout()
   const params = useSearchParams()
   const initialSelectedId = params.get("id") ?? undefined
 
-  if (platform === "mobile") {
+  if (compact) {
     return <IssuesMobileBody initialSelectedId={initialSelectedId} />
   }
 

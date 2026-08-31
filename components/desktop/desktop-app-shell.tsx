@@ -15,8 +15,12 @@
  *   It is the outermost column on whichever side it takes, so the transient
  *   extension host bar appearing beside it never shifts it.
  *
- * - On mobile (`platform === "mobile"`) this component is a no-op so
- *   `MobileShellWrapper` keeps full ownership of the layout.
+ * - Whenever the compact shell owns the layout (`lib/shell/compact-shell.ts`:
+ *   a native mobile runtime at any width, or a narrow non-Tauri viewport)
+ *   this component is a no-op so `MobileShellWrapper` keeps full ownership.
+ *   Tauri is deliberately excluded from the narrow branch: its window is
+ *   `decorations: false`, so the `TitleBar` below carries the window
+ *   controls and handing the frame away would take them with it.
  * - On bypass routes (deep-link / overlay screens like `/share-target`,
  *   `/pair`, `/oauth`, `/canvas/join`) the chrome is suppressed so the
  *   target screen renders full-bleed. `/onboarding` joins them for its own
@@ -48,6 +52,7 @@ import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { toggleSidebarAction } from "@/lib/desktop/menu-actions"
 import { PanelQuickSwitch } from "@/components/context-workbench/panel-quick-switch"
 import { useMenuEventRouter } from "@/hooks/desktop/use-menu-event-router"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { usePlatform } from "@/hooks/use-platform"
 import { PageLoading } from "@/components/ui/loading-states"
 import { loadSystemFonts } from "@/lib/appearance/load-system-fonts"
@@ -59,6 +64,7 @@ import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
 import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { isShellBypassRoute } from "@/lib/shell/bypass-routes"
+import { usesCompactShell } from "@/lib/shell/compact-shell"
 import { isOnboardingRoute } from "@/lib/onboarding/route"
 
 const log = loggers.shell
@@ -81,7 +87,10 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // would have put "the flow the gate redirects into" in a file whose contract
   // is "screens that keep the document scroll".
   const bypass = isShellBypassRoute(pathname) || isOnboardingRoute(pathname)
-  const isMobile = platform === "mobile"
+  // The question is not "is this a phone" but "is the phone-shaped shell
+  // drawing the frame". The same helper answers it in `MobileShellWrapper`,
+  // so the two cannot drift into both owning or neither owning the layout.
+  const compactShell = usesCompactShell(platform, useCompactLayout())
 
   // View menu collapse toggles. Both default to `false` (visible). Persisted
   // by the ui-store so the choice sticks across reloads.
@@ -125,7 +134,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   // real in the web shell too. Fires while the composer has focus, like VS
   // Code's, so a writer can hide the list without leaving the editor.
   useAppShortcut("shell.sidebar.toggle", toggleSidebarAction, {
-    enabled: !isMobile && !bypass,
+    enabled: !compactShell && !bypass,
     allowInEditable: true,
     preventDefault: true,
   })
@@ -142,14 +151,14 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
 
   // The `data-app-shell` body attribute switches on the global
   // `overflow:hidden` rule in globals.css. Only set it while the desktop
-  // chrome is the viewport owner — bypass / mobile keep the document scroll
-  // they expect.
+  // chrome is the viewport owner. Bypass routes and the compact shell keep
+  // the document scroll they expect.
   useEffect(() => {
     if (typeof document === "undefined") return
-    if (isMobile || bypass) return
+    if (compactShell || bypass) return
     document.body.setAttribute("data-app-shell", "true")
     return () => document.body.removeAttribute("data-app-shell")
-  }, [isMobile, bypass])
+  }, [compactShell, bypass])
 
   // Defense-in-depth against the SSR/hydration paint: until effects run,
   // `usePlatform()` returns the server snapshot ("web") and `usePathname()`
@@ -167,7 +176,7 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
     ) : (
       <PageLoading variant="workspace" milestone="interface" allowReload />
     )
-  if (isMobile || bypass) return <>{children}</>
+  if (compactShell || bypass) return <>{children}</>
 
   const handleCreateTeam = () => {
     log.info("guild create-team via shell")

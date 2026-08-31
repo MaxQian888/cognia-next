@@ -7,7 +7,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
 import { useMessagePermalink } from "@/hooks/chat/use-message-permalink"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 // Platform shells are mutually exclusive at runtime but static imports made
 // Turbopack compile both multi-thousand-module graphs for `/`. Keep the
@@ -49,7 +49,10 @@ function MessagePermalinkConsumer() {
 }
 
 export default function Home() {
-  const platform = usePlatform()
+  // Layout, not runtime: a 375px browser window needs the phone shell too,
+  // and it used to get the three-pane desktop workspace with no navigation
+  // (`GuildRail` is `hidden md:flex`).
+  const compact = useCompactLayout()
   return (
     <>
       {/* Static-export idiom (mirrors `/memory?id=`): `useSearchParams` throws
@@ -57,7 +60,7 @@ export default function Home() {
       <Suspense fallback={null}>
         <MessagePermalinkConsumer />
       </Suspense>
-      {platform === "mobile" ? <AppShellMobile /> : <DesktopChatWorkspace />}
+      {compact ? <AppShellMobile /> : <DesktopChatWorkspace />}
     </>
   )
 }

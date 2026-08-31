@@ -8,8 +8,15 @@
  *     hidden under the fixed `<MobileTabBar />`.
  *   - Hides the tab bar on routes where it would conflict with the page's
  *     own chrome (pair flow, fullscreen workflow viewer).
- *   - Mounts the `<MobileTabBar />` only when the active platform is
- *     `mobile` — desktop / web pass children through unchanged.
+ *   - Mounts the `<MobileTabBar />` whenever the compact shell owns the
+ *     layout (`lib/shell/compact-shell.ts`), which is a native mobile shell
+ *     at any width OR a narrow non-Tauri viewport. A wide desktop/web tab
+ *     passes children through unchanged.
+ *   - Keeps the genuinely native pieces (the automation consent sheet, the
+ *     launch landing redirect) on `usePlatform() === "mobile"`. A narrow
+ *     browser window has no OS consent surface and did not just launch an
+ *     app, so giving it those alongside the layout would be a behaviour
+ *     change wearing a layout change's clothes.
  *   - Computes an "Inbox unread" badge over the Chat tab from the
  *     `inboundLedger` count newer than `settings.lastInboxViewedAt`.
  *
@@ -25,8 +32,10 @@ import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consen
 import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
 import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
+import { usesCompactShell } from "@/lib/shell/compact-shell"
 import { getDb } from "@/lib/db/schema"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
@@ -46,6 +55,11 @@ export interface MobileShellWrapperProps {
 
 export function MobileShellWrapper({ children, badges, className }: MobileShellWrapperProps) {
   const platform = usePlatform()
+  // Layout ownership vs native runtime. `compactShell` decides whether this
+  // component draws the frame at all; `nativeMobile` decides which of the
+  // pieces inside it are real on this device.
+  const compactShell = usesCompactShell(platform, useCompactLayout())
+  const nativeMobile = platform === "mobile"
   const pathname = usePathname() ?? "/"
   const router = useRouter()
   const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
@@ -67,7 +81,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
   // decision must wait for it (the pre-hydration default is "chat").
   const settingsHydrated = useSettingsStore((s) => s.loaded)
   useEffect(() => {
-    if (platform !== "mobile" || landingDoneRef.current) return
+    if (!nativeMobile || landingDoneRef.current) return
     if (launchPathRef.current !== "/") {
       landingDoneRef.current = true
       return
@@ -81,7 +95,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     if (resolvedTabs.defaultLanding !== "chat") {
       router.replace(tabHref(resolvedTabs.defaultLanding))
     }
-  }, [platform, settingsHydrated, resolvedTabs.defaultLanding, router])
+  }, [nativeMobile, settingsHydrated, resolvedTabs.defaultLanding, router])
 
   const inboundUnread =
     useLiveQuery<number>(
@@ -90,7 +104,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     ) ?? 0
 
   const showTabBar = useMemo(() => {
-    if (platform !== "mobile") return false
+    if (!compactShell) return false
     // Workflow detail sub-routes (the full-screen touch editor + run detail)
     // own the whole viewport — hide the tab bar so it doesn't fight the
     // canvas FAB / inspector drawer. The `/workflows` list itself keeps it.
@@ -102,18 +116,19 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     return !TAB_BAR_HIDDEN_PREFIXES.some(
       (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
     )
-  }, [platform, pathname])
+  }, [compactShell, pathname])
 
-  // Desktop pass-through: skip mobile-only providers (OfflineBanner,
-  // outbound runner, tab bar) and the `min-h-[100dvh]` viewport reservation
-  // so `DesktopAppShell` owns the entire layout. The thin wrapper div is
-  // kept so existing tests / dev tools can still locate the shell.
-  if (platform !== "mobile") {
+  // Desktop pass-through: skip the compact-only providers (OfflineBanner,
+  // tab bar) and the `min-h-[100dvh]` viewport reservation so
+  // `DesktopAppShell` owns the entire layout. The thin wrapper div is kept so
+  // existing tests / dev tools can still locate the shell.
+  if (!compactShell) {
     return (
       <div
         data-testid="mobile-shell-wrapper"
         className={cn("contents", className)}
         data-platform={platform}
+        data-compact-shell="false"
         data-tab-bar-visible="false"
       >
         {children}
@@ -167,6 +182,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
       data-testid="mobile-shell-wrapper"
       className={cn("contents", className)}
       data-platform={platform}
+      data-compact-shell="true"
       data-tab-bar-visible={showTabBar ? "true" : "false"}
       data-full-viewport={fullViewport ? "true" : "false"}
       data-keyboard-visible={keyboard.isVisible ? "true" : "false"}
@@ -195,7 +211,9 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         <FinishSetupBar />
         {children}
       </div>
-      <MobileConsentSheet />
+      {/* Native only. The automation HITL prompt answers an OS-level consent
+          request; a narrow browser window has no such request to answer. */}
+      {nativeMobile ? <MobileConsentSheet /> : null}
       {/* The mobile counterpart of the mount in `DesktopAppShell`, which this
           platform never reaches — that shell returns bare children here. It
           belongs at this level rather than in `AppShellMobile`: that component

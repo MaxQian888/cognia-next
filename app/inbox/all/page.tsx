@@ -10,17 +10,13 @@ import { Suspense } from "react"
 import { InboxShell } from "@/components/inbox/inbox-shell"
 import { MobileInboxBody } from "@/components/mobile/inbox/mobile-inbox-body"
 import { PageLoading } from "@/components/ui/loading-states"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 export default function InboxAllPage() {
-  const platform = usePlatform()
+  const compact = useCompactLayout()
   return (
     <Suspense fallback={<PageLoading />}>
-      {platform === "mobile" ? (
-        <MobileInboxBody initialTab="messages" />
-      ) : (
-        <InboxShell view="all" />
-      )}
+      {compact ? <MobileInboxBody initialTab="messages" /> : <InboxShell view="all" />}
     </Suspense>
   )
 }

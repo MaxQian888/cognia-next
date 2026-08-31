@@ -12,6 +12,14 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: () => platformMock(),
 }))
 
+// The second signal. `platformMock` says which runtime this is; this one says
+// whether the viewport is narrow. They disagree exactly where the bug was: a
+// 375px browser is `web` + compact.
+const compactMock = jest.fn(() => false)
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => compactMock(),
+}))
+
 const pathnameMock = jest.fn(() => "/")
 const replaceMock = jest.fn()
 jest.mock("next/navigation", () => ({
@@ -45,6 +53,12 @@ jest.mock("@/components/file-viewer/file-viewer-dialog", () => ({
 
 jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => <div data-testid="offline-banner-stub" />,
+}))
+
+// Native-only chrome. Stubbed so the suite can assert it is ABSENT on a narrow
+// browser, which is the half of the split that is easy to get wrong.
+jest.mock("@/components/mobile/automation/mobile-consent-sheet", () => ({
+  MobileConsentSheet: () => <div data-testid="mobile-consent-sheet-stub" />,
 }))
 
 // Stubbed for the same reason as the banner above: what this suite pins is
@@ -102,6 +116,7 @@ jest.mock("next-intl", () => ({
 describe("<MobileShellWrapper />", () => {
   beforeEach(() => {
     platformMock.mockReset().mockReturnValue("mobile")
+    compactMock.mockReset().mockReturnValue(false)
     pathnameMock.mockReset().mockReturnValue("/")
     inboundUnreadRef.value = 0
     keyboardRef.value = { keyboardHeight: 0, isVisible: false }
@@ -180,9 +195,10 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.getByTestId("mobile-global-search-host")).toBeInTheDocument()
   })
 
-  it("leaves the file viewer dialog to the desktop shell off mobile", () => {
-    // Both shells mount one; the platform gate is what keeps exactly one of
-    // them rendering rather than two dialogs fighting over the same store.
+  it("leaves the file viewer dialog to the desktop shell when it owns the frame", () => {
+    // Both shells mount one. The shared `usesCompactShell` predicate is what
+    // keeps exactly one of them rendering rather than two dialogs fighting
+    // over the same store.
     platformMock.mockReturnValue("desktop")
     render(
       <MobileShellWrapper>
@@ -570,4 +586,80 @@ describe("<MobileShellWrapper />", () => {
       "false"
     )
   })
+
+  it("takes the frame on a narrow BROWSER, which used to get the desktop shell", () => {
+    // The regression this split exists for: `web` + 375px. The old gate asked
+    // `platform === "mobile"`, answered false, and handed the page to
+    // `DesktopAppShell`, whose `GuildRail` is `hidden md:flex`. Net result was
+    // a phone-width viewport with no navigation at all.
+    platformMock.mockReturnValue("web")
+    compactMock.mockReturnValue(true)
+    render(
+      <MobileShellWrapper>
+        <div data-testid="child">narrow web</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
+    expect(screen.getByTestId("child")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-shell-wrapper")).toHaveAttribute(
+      "data-compact-shell",
+      "true"
+    )
+  })
+
+  it("does not mount the native consent sheet on a narrow browser", () => {
+    // Layout came across; native side effects did not. A browser window has no
+    // OS automation-consent request to answer.
+    platformMock.mockReturnValue("web")
+    compactMock.mockReturnValue(true)
+    render(
+      <MobileShellWrapper>
+        <div>narrow web</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.queryByTestId("mobile-consent-sheet-stub")).not.toBeInTheDocument()
+  })
+
+  it("still mounts the native consent sheet on a real mobile shell", () => {
+    platformMock.mockReturnValue("mobile")
+    render(
+      <MobileShellWrapper>
+        <div>phone</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.getByTestId("mobile-consent-sheet-stub")).toBeInTheDocument()
+  })
+
+  it("does not fire the launch landing redirect on a narrow browser", () => {
+    // The redirect models an app launch. Resizing a browser window is not one.
+    platformMock.mockReturnValue("web")
+    compactMock.mockReturnValue(true)
+    setTabLayout({
+      order: ["chat", "workflows", "discover", "me"],
+      hidden: [],
+      defaultLanding: "workflows",
+    })
+    render(
+      <MobileShellWrapper>
+        <div>narrow web</div>
+      </MobileShellWrapper>
+    )
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it("never takes the frame from Tauri, however narrow the window gets", () => {
+    // The desktop window is `decorations: false`, so `TitleBar` carries the
+    // close / minimise / maximise controls. Handing the frame to this shell
+    // would take them away.
+    platformMock.mockReturnValue("tauri")
+    compactMock.mockReturnValue(true)
+    render(
+      <MobileShellWrapper>
+        <div data-testid="child">narrow tauri</div>
+      </MobileShellWrapper>
+    )
+    expect(screen.queryByTestId("mobile-tab-bar")).not.toBeInTheDocument()
+    expect(screen.getByTestId("child")).toBeInTheDocument()
+  })
+
 })

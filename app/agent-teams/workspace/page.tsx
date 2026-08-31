@@ -68,7 +68,7 @@ import {
 } from "@/lib/agent-team/runtime-targets"
 import { dispatchTeamMention } from "@/lib/agent-team/team-runtime-dispatcher"
 import { createCompositeStreamer } from "@/lib/agent-team/runtime-streamers"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { TeamWorkspaceMobile } from "@/components/mobile/agent-teams/team-workspace-mobile"
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
@@ -562,14 +562,15 @@ function resolveExternalAgentIdByPreset(runtime: TeammateRuntime): string | null
 }
 
 /**
- * Platform router. The mobile companion renders a read-mostly workspace body
- * (the desktop tab shell has no usable mobile layout); desktop keeps the full
- * inner workspace. Dispatching here — not inside the inner component — keeps
- * the rules-of-hooks intact (each branch is its own component).
+ * Layout router. A narrow viewport renders a read-mostly workspace body,
+ * because the desktop tab shell has no usable layout below `md`. Wide keeps
+ * the full inner workspace. Dispatching here rather than inside the inner
+ * component keeps the rules-of-hooks intact, since each branch is its own
+ * component. Keyed on width, so a 375px browser is covered too.
  */
 function AgentTeamWorkspaceRouter() {
-  const platform = usePlatform()
-  if (platform === "mobile") return <TeamWorkspaceMobile />
+  const compact = useCompactLayout()
+  if (compact) return <TeamWorkspaceMobile />
   return <AgentTeamWorkspaceInner />
 }
 

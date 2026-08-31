@@ -57,13 +57,17 @@ import {
 } from "@/components/mobile/me/me-entries"
 import { usePinnedMeRows } from "@/components/mobile/me/use-pinned-me-rows"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { formatRelative } from "@cognia/time"
 
 export default function MePage() {
   const t = useTranslations("mobile.me")
-  const platform = usePlatform()
+  // `/me` is the phone-shaped settings hub. It used to be gated on the
+  // Capacitor runtime, which meant a 375px browser was redirected away from
+  // the only settings surface that fits it, into the desktop shell it cannot
+  // render. Width is the right question here.
+  const compact = useCompactLayout()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [scrolled, setScrolled] = useState(false)
@@ -80,17 +84,17 @@ export default function MePage() {
 
   useEffect(() => {
     if (!mounted) return
-    if (platform === "mobile") return
+    if (compact) return
     router.replace("/settings?section=account")
-  }, [mounted, platform, router])
+  }, [compact, mounted, router])
 
   useEffect(() => {
-    if (!mounted || platform !== "mobile") return
+    if (!mounted || !compact) return
     const states = snapshotSyncStates()
     const max = Object.values(states).reduce((acc, s) => Math.max(acc, s.lastSyncAt ?? 0), 0)
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLastSyncedLabel(max > 0 ? formatRelative(max) : undefined)
-  }, [mounted, platform])
+  }, [compact, mounted])
 
   const filtered = useMemo(
     () => (query.trim() ? ME_ENTRIES.filter((e) => matchMeEntry(e, query, t)) : []),
@@ -101,7 +105,7 @@ export default function MePage() {
     [pinnedIds]
   )
 
-  if (!mounted || platform !== "mobile") return null
+  if (!mounted || !compact) return null
 
   /** Right-aligned dynamic value for certain rows. */
   const rowValue = (entry: MeEntry): string | undefined => {

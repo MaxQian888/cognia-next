@@ -7,9 +7,10 @@
  * Deep links use `?id=` inside `<Suspense>`: this app is a static export, so
  * `[id]` segments do not exist at runtime.
  *
- * Mobile gets its own read-only body, mirroring `/issues`. Without the branch
- * the phone rendered the desktop table inside `FeaturePageShellMobile` — a
- * seven-column grid in a 375px viewport.
+ * A narrow viewport gets its own read-only body, mirroring `/issues`. Without
+ * the branch the desktop table renders inside `FeaturePageShellMobile`, which
+ * is a seven-column grid in a 375px viewport. Keyed on width rather than on
+ * the Capacitor runtime, so a narrow browser is covered as well.
  */
 
 import { Suspense } from "react"
@@ -17,16 +18,16 @@ import { useSearchParams } from "next/navigation"
 
 import { ProjectsMobileBody } from "@/components/mobile/issues/projects-mobile-body"
 import { ProjectConsole } from "@/components/issues/projects/project-console"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 function ProjectsPageInner() {
   const params = useSearchParams()
-  const platform = usePlatform()
+  const compact = useCompactLayout()
   const initialSelectedId = params.get("id") ?? undefined
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
-      {platform === "mobile" ? (
+      {compact ? (
         <ProjectsMobileBody initialSelectedId={initialSelectedId} />
       ) : (
         <ProjectConsole initialSelectedId={initialSelectedId} />

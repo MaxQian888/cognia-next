@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 
 import { MemoryConsole } from "@/components/memory/memory-console"
 import { MemoryMobileBody } from "@/components/mobile/memory/memory-mobile-body"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 /**
  * Dedicated full-page long-term memory management panel. Reached from the
@@ -14,15 +14,15 @@ import { usePlatform } from "@/hooks/use-platform"
  * inside a `<Suspense>` boundary, NOT a dynamic `[id]` route). The console
  * owns its own chrome; this page just hosts it full-height (mirrors `/goals`).
  *
- * On the mobile companion the desktop console has no usable layout, so the
- * phone renders a read-mostly `MemoryMobileBody` instead (reached via /me).
+ * On a narrow viewport the desktop console has no usable layout, so the
+ * phone-shaped `MemoryMobileBody` renders instead (reached via /me). Keyed on
+ * width rather than on the Capacitor runtime, so a 375px browser gets it too.
  */
 function MemoryPageInner() {
-  const platform = usePlatform()
+  const compact = useCompactLayout()
   const params = useSearchParams()
   const initialSelectedId = params.get("id")
-  if (platform === "mobile")
-    return <MemoryMobileBody initialSelectedId={initialSelectedId ?? undefined} />
+  if (compact) return <MemoryMobileBody initialSelectedId={initialSelectedId ?? undefined} />
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
       <MemoryConsole initialSelectedId={initialSelectedId ?? undefined} />

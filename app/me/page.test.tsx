@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  *
- * Covers the platform gate / desktop-redirect plus the data-driven section
+ * Covers the width gate / wide-viewport redirect plus the data-driven section
  * composition, search filtering, and pinned-favorites behavior in
  * `app/me/page.tsx`. The heavyweight card/row dependencies are stubbed so the
  * unit under test is the page's own composition logic. `MeRow` / `MeSection`
@@ -19,9 +19,12 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: routerReplace, push: jest.fn(), back: jest.fn() }),
 }))
 
-let platformValue: "tauri" | "mobile" | "web" = "web"
-jest.mock("@/hooks/use-platform", () => ({
-  usePlatform: () => platformValue,
+// `/me` is the phone-shaped settings hub, so the gate is viewport width, not
+// the Capacitor runtime. A 375px browser used to be redirected away from the
+// only settings surface that fits it.
+let compactValue = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => compactValue,
 }))
 
 const companionConfigState = {
@@ -109,7 +112,7 @@ import MePage from "./page"
 beforeEach(() => {
   routerReplace.mockReset()
   togglePinMock.mockReset()
-  platformValue = "web"
+  compactValue = false
   companionConfigState.current = { paired: false, shortDeviceId: null }
   pinnedState.current = []
   syncStates.current = {}
@@ -121,9 +124,9 @@ function hrefOf(testid: string): string | null | undefined {
   return link?.getAttribute("href")
 }
 
-describe("MePage platform gate", () => {
-  it("renders the mobile body when platform === 'mobile'", () => {
-    platformValue = "mobile"
+describe("MePage width gate", () => {
+  it("renders the compact body on a narrow viewport", () => {
+    compactValue = true
     render(<MePage />)
     expect(screen.getByTestId("me-page")).toBeInTheDocument()
     expect(screen.getByTestId("stub-account-card")).toBeInTheDocument()
@@ -138,7 +141,7 @@ describe("MePage platform gate", () => {
   })
 
   it("emphasizes the sticky header once the body is scrolled", () => {
-    platformValue = "mobile"
+    compactValue = true
     const { container } = render(<MePage />)
     const main = screen.getByTestId("me-page")
     const header = container.querySelector("header")
@@ -149,7 +152,7 @@ describe("MePage platform gate", () => {
   })
 
   it("renders all six MeSection groups", () => {
-    platformValue = "mobile"
+    compactValue = true
     render(<MePage />)
     expect(screen.getByTestId("me-section-account")).toBeInTheDocument()
     expect(screen.getByTestId("me-section-appearance")).toBeInTheDocument()
@@ -160,7 +163,7 @@ describe("MePage platform gate", () => {
   })
 
   it("reflows the section grid responsively (2-col tablet, 3-col landscape)", () => {
-    platformValue = "mobile"
+    compactValue = true
     const { container } = render(<MePage />)
     const grid = container.querySelector(".grid")
     expect(grid?.className).toMatch(/sm:grid-cols-2/)
@@ -170,14 +173,14 @@ describe("MePage platform gate", () => {
   })
 
   it("renders the scheduler row in the automation section pointing at /me/scheduler", () => {
-    platformValue = "mobile"
+    compactValue = true
     render(<MePage />)
     expect(screen.getByTestId("me-row-scheduler")).toBeInTheDocument()
     expect(hrefOf("me-row-scheduler")).toBe("/me/scheduler")
   })
 
   it("renders companion illustrations on the selected core feature entries", () => {
-    platformValue = "mobile"
+    compactValue = true
     render(<MePage />)
 
     expect(screen.getByTestId("mobile-spot-icon-profile")).toBeInTheDocument()
@@ -186,14 +189,14 @@ describe("MePage platform gate", () => {
   })
 
   it("surfaces the new terminal and remote-sessions entries", () => {
-    platformValue = "mobile"
+    compactValue = true
     render(<MePage />)
     expect(hrefOf("me-row-terminal")).toBe("/me/terminal")
     expect(hrefOf("me-row-remote-sessions")).toBe("/remote-sessions")
   })
 
   it("shows the 'Pair now' row only when unpaired", () => {
-    platformValue = "mobile"
+    compactValue = true
     companionConfigState.current = { paired: false, shortDeviceId: null }
     const { rerender } = render(<MePage />)
     expect(screen.getByTestId("me-row-pair")).toBeInTheDocument()
@@ -204,28 +207,28 @@ describe("MePage platform gate", () => {
   })
 
   it("shows the short deviceId on the devices row when paired", () => {
-    platformValue = "mobile"
+    compactValue = true
     companionConfigState.current = { paired: true, shortDeviceId: "ABCDEFGH" }
     render(<MePage />)
     expect(screen.getByTestId("me-row-devices")).toHaveTextContent("ABCDEFGH")
   })
 
   it("shows the last-synced stamp on the sync row when sync state exists", () => {
-    platformValue = "mobile"
+    compactValue = true
     syncStates.current = { sessions: { lastSyncAt: Date.now() - 120_000 } }
     render(<MePage />)
     expect(screen.getByTestId("me-row-sync")).toHaveTextContent(/ago/)
   })
 
-  it("renders null and redirects to the account overview on web", () => {
-    platformValue = "web"
+  it("renders null and redirects to the account overview on a wide viewport", () => {
+    compactValue = false
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
     expect(routerReplace).toHaveBeenCalledWith("/settings?section=account")
   })
 
-  it("renders null and redirects to the account overview on Tauri", () => {
-    platformValue = "tauri"
+  it("stays redirected on a second wide render", () => {
+    compactValue = false
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
     expect(routerReplace).toHaveBeenCalledWith("/settings?section=account")
@@ -234,7 +237,7 @@ describe("MePage platform gate", () => {
 
 describe("MePage search", () => {
   it("filters to matching rows and hides the grouped sections", () => {
-    platformValue = "mobile"
+    compactValue = true
     render(<MePage />)
     fireEvent.change(screen.getByTestId("me-search-input"), { target: { value: "backup" } })
     expect(screen.getByTestId("me-search-results")).toBeInTheDocument()
@@ -245,7 +248,7 @@ describe("MePage search", () => {
   })
 
   it("shows an empty state when nothing matches", () => {
-    platformValue = "mobile"
+    compactValue = true
     render(<MePage />)
     fireEvent.change(screen.getByTestId("me-search-input"), { target: { value: "zzzzzzz" } })
     expect(screen.getByTestId("me-search-empty")).toBeInTheDocument()
@@ -255,14 +258,14 @@ describe("MePage search", () => {
 
 describe("MePage favorites", () => {
   it("hides the favorites section when nothing is pinned", () => {
-    platformValue = "mobile"
+    compactValue = true
     pinnedState.current = []
     render(<MePage />)
     expect(screen.queryByTestId("me-section-favorites")).toBeNull()
   })
 
   it("renders pinned rows in a favorites section above the groups", () => {
-    platformValue = "mobile"
+    compactValue = true
     pinnedState.current = ["sync", "backup"]
     render(<MePage />)
     expect(screen.getByTestId("me-section-favorites")).toBeInTheDocument()

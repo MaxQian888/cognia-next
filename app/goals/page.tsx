@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 
 import { GoalConsole } from "@/components/goal/console/goal-console"
 import { GoalsMobileBody } from "@/components/mobile/goals/goals-mobile-body"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { isGoalConsoleTab } from "@/lib/goal/console-prefs"
 
 /**
@@ -13,8 +13,9 @@ import { isGoalConsoleTab } from "@/lib/goal/console-prefs"
  * guild-rail "Goals" entry. The console owns its own chrome; this page just
  * hosts it full-height (mirrors `/performance`).
  *
- * On the mobile companion the desktop console has no usable layout, so the
- * phone renders a read-mostly `GoalsMobileBody` instead (reached via /me).
+ * On a narrow viewport the desktop console has no usable layout, so the
+ * phone-shaped `GoalsMobileBody` renders instead (reached via /me). Keyed on
+ * width rather than on the Capacitor runtime, so a 375px browser gets it too.
  *
  * Static-export-safe deep link: the initial bottom tab rides in `?tab=` (read
  * via `useSearchParams` inside a `<Suspense>` boundary), used by the Settings
@@ -27,8 +28,8 @@ function GoalsRoute() {
 }
 
 export default function GoalsPage() {
-  const platform = usePlatform()
-  if (platform === "mobile") return <GoalsMobileBody />
+  const compact = useCompactLayout()
+  if (compact) return <GoalsMobileBody />
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-bg-target="chat">
       <Suspense fallback={null}>

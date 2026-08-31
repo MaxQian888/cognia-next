@@ -13,13 +13,13 @@ import { InboxShell } from "@/components/inbox/inbox-shell"
 import { DraftCenter } from "@/components/inbox/draft-center"
 import { MobileInboxBody } from "@/components/mobile/inbox/mobile-inbox-body"
 import { PageLoading } from "@/components/ui/loading-states"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 
 export default function InboxDraftsPage() {
-  const platform = usePlatform()
+  const compact = useCompactLayout()
   return (
     <Suspense fallback={<PageLoading />}>
-      {platform === "mobile" ? (
+      {compact ? (
         <MobileInboxBody initialTab="drafts" />
       ) : (
         <InboxShell view="all">

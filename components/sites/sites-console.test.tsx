@@ -42,6 +42,9 @@ jest.mock("next-intl", () => ({
   useNow: () => new Date(1_700_000_000_000),
 }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "tauri") }))
+// Two signals: `usePlatform` answers "can this shell drive wrangler", while
+// `useCompactLayout` answers "is there room for the console".
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: jest.fn(() => false) }))
 jest.mock("@/hooks/sites/use-site-live-data", () => {
   const actual = jest.requireActual("@/hooks/sites/use-site-live-data")
   return { ...actual, useSiteLiveData: jest.fn() }
@@ -119,12 +122,14 @@ jest.mock("./new-site-dialog", () => ({
 }))
 
 import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useSiteLiveData } from "@/hooks/sites/use-site-live-data"
 import type { SiteProjectRow } from "@/types/sites"
 import { useSiteConsoleStore } from "@/stores/sites/site-console-store"
 import { SitesConsole } from "./sites-console"
 
 const usePlatformMock = usePlatform as jest.Mock
+const useCompactLayoutMock = useCompactLayout as jest.Mock
 const useSiteLiveDataMock = useSiteLiveData as unknown as jest.Mock
 
 function site(overrides: Partial<SiteProjectRow> = {}): SiteProjectRow {
@@ -166,6 +171,7 @@ function liveData(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks()
   usePlatformMock.mockReturnValue("tauri")
+  useCompactLayoutMock.mockReturnValue(false)
   useSiteLiveDataMock.mockReturnValue(liveData())
 })
 
@@ -190,8 +196,11 @@ it("disables host-privileged actions in the browser rather than hiding them", ()
   expect(screen.getByTestId("site-save-token")).toBeDisabled()
 })
 
-it("keeps the desktop-only card on the phone, where ADR-0084 defers the projection", () => {
+it("shows the compact overview on a narrow viewport, where ADR-0084 defers the projection", () => {
+  // Width, not runtime: the console is a rail plus a detail pane, and a 375px
+  // browser has no more room for it than a phone does.
   usePlatformMock.mockReturnValue("mobile")
+  useCompactLayoutMock.mockReturnValue(true)
   render(<SitesConsole />)
 
   expect(screen.getByTestId("sites-mobile-notice")).toBeInTheDocument()

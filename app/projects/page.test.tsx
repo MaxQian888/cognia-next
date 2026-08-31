@@ -17,8 +17,9 @@ jest.mock("@/components/mobile/issues/projects-mobile-body", () => ({
   },
 }))
 
-let platform = "desktop"
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => platform }))
+// Width, not runtime: the desktop table is a seven-column grid.
+let compact = false
+jest.mock("@/hooks/ui/use-compact-layout", () => ({ useCompactLayout: () => compact }))
 
 let search = new URLSearchParams()
 jest.mock("next/navigation", () => ({ useSearchParams: () => search }))
@@ -29,15 +30,19 @@ import ProjectsPage from "./page"
 beforeEach(() => {
   consoleProps = null
   mobileProps = null
-  platform = "desktop"
+  compact = false
   search = new URLSearchParams()
 })
 
 describe("ProjectsPage", () => {
-  it("renders the project console inside the chat-background wrapper", () => {
+  it("renders the project console inside a definite-height wrapper", () => {
+    // Same correction as `/issues`: `data-bg-target` belongs to
+    // `FeaturePageShell` now, and the console is stubbed here, so asserting it
+    // at this layer could never pass. The wrapper's height chain is what this
+    // page actually owns.
     const { container } = render(<ProjectsPage />)
     expect(screen.getByTestId("project-console-stub")).toBeInTheDocument()
-    expect(container.querySelector("[data-bg-target='chat']")).not.toBeNull()
+    expect(container.firstElementChild?.className).toContain("h-full")
   })
 
   it("forwards the ?id= deep link", () => {
@@ -51,16 +56,16 @@ describe("ProjectsPage", () => {
     expect(consoleProps).toMatchObject({ initialSelectedId: undefined })
   })
 
-  describe("mobile", () => {
+  describe("narrow viewport", () => {
     it("renders the read-only body instead of the desktop table", () => {
-      platform = "mobile"
+      compact = true
       render(<ProjectsPage />)
       expect(screen.getByTestId("projects-mobile-stub")).toBeInTheDocument()
       expect(screen.queryByTestId("project-console-stub")).not.toBeInTheDocument()
     })
 
     it("forwards the deep link there too", () => {
-      platform = "mobile"
+      compact = true
       search = new URLSearchParams("id=iprj_9")
       render(<ProjectsPage />)
       expect(mobileProps).toMatchObject({ initialSelectedId: "iprj_9" })
