@@ -88,7 +88,13 @@ describe("segmentsToMessageParts", () => {
         { type: "text", text: "hello" },
         { type: "markdown", md: "**bold**" },
         { type: "image", url: "https://x/i.png" },
-        { type: "file", name: "report.pdf", url: "https://x/f", mimeType: "application/pdf", sizeBytes: 12 },
+        {
+          type: "file",
+          name: "report.pdf",
+          url: "https://x/f",
+          mimeType: "application/pdf",
+          sizeBytes: 12,
+        },
       ])
     ).toEqual([
       { type: "text", text: "hello" },
@@ -247,6 +253,23 @@ describe("approveDraftLocally", () => {
       { type: "text", text: "edited on phone" },
     ])
     expect((await getDb().connectorDrafts.get(draft.id))?.status).toBe("approved")
+  })
+
+  it("re-applies Twin disclosure when an approved draft was edited", async () => {
+    const draft = await seedDraft({
+      outboundPreview: {
+        conversationRef: REF,
+        segments: [{ type: "text", text: "original" }],
+        metadata: {
+          idempotencyKey: "twin-draft",
+          provenance: [{ source: "digital-twin", sourceId: "twin-1", disclosure: "ai-generated" }],
+        },
+      },
+    })
+    await approveDraftLocally(draft.id, { segments: [{ type: "text", text: "edited" }] })
+    expect(enqueueMock.mock.calls[0][0].request.segments).toEqual([
+      { type: "text", text: expect.stringContaining("AI-generated · Digital Twin") },
+    ])
   })
 
   it("uses an explicit binding when the draft has no outbound preview and no session row", async () => {

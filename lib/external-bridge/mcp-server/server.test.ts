@@ -608,6 +608,51 @@ describe("buildMcpServer — runtime_query gate", () => {
   })
 })
 
+describe("computer_use — frame presentation", () => {
+  const frame = {
+    bytes: "BASE64PIXELS",
+    width: 1600,
+    height: 1000,
+    capturedAt: 1_700_000_000,
+    format: "png" as const,
+  }
+
+  it("returns the screenshot as an image block instead of stringified base64", () => {
+    const envelope = __TESTING__.presentComputerUse({
+      ok: true,
+      result: { revision: 2, screenshot: frame },
+    })
+    expect(envelope?.content?.[0]).toEqual({
+      type: "image",
+      data: "BASE64PIXELS",
+      mimeType: "image/png",
+    })
+  })
+
+  it("keeps the bytes out of both the text block and the structured content", () => {
+    const envelope = __TESTING__.presentComputerUse({
+      ok: true,
+      result: { revision: 2, screenshot: frame },
+    })
+    const textBlocks = (envelope?.content ?? []).filter((block) => block.type === "text")
+    expect(textBlocks).toHaveLength(1)
+    expect(JSON.stringify(textBlocks)).not.toContain("BASE64PIXELS")
+    expect(JSON.stringify(envelope?.structuredContent)).not.toContain("BASE64PIXELS")
+    expect(envelope?.structuredContent).toMatchObject({
+      ok: true,
+      result: { revision: 2, screenshot: { width: 1600, height: 1000 } },
+    })
+  })
+
+  it("leaves operations that carry no frame on the default envelope", () => {
+    expect(__TESTING__.presentComputerUse({ ok: true, result: { apps: [] } })).toBeNull()
+  })
+
+  it("leaves a failed call on the default envelope", () => {
+    expect(__TESTING__.presentComputerUse({ ok: false, error: "denied" })).toBeNull()
+  })
+})
+
 describe("audit log integration", () => {
   it("writes a row for every dispatched tool call", async () => {
     const { client } = await makeWiredPair(settings())

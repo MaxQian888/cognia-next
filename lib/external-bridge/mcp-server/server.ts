@@ -35,7 +35,8 @@ import {
   checkToolCall,
 } from "../permission-gate"
 import { wrapUntrusted } from "../untrusted"
-import { computerUse } from "../handlers/computer-use"
+import { carriesFrame, frameToModelContent } from "@/lib/automation/model-frame"
+import { computerUse, type ComputerUseOutput } from "../handlers/computer-use"
 import {
   agentDispatch,
   teamRun,
@@ -690,8 +691,11 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
       title: "Drive the host computer",
       description:
         "Read and act on a revision-bound native application session. Call getAppState " +
-        "before each performAction; the state always includes a matching screenshot. " +
-        "Routes through Cognia's automation permission gate (`Surface::Mcp`).",
+        "before each performAction; the state always includes a matching screenshot, " +
+        "returned as an image. When a target is too small to locate confidently, call " +
+        "`zoom` with a region of that same frame and ground against the crop, then map a " +
+        "point back with `x = region.x + zoomX / scale` (both fields come back in the " +
+        "zoom result). Routes through Cognia's automation permission gate (`Surface::Mcp`).",
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -705,6 +709,7 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
           "queryElements",
           "expandElement",
           "performAction",
+          "zoom",
         ]),
         turnKey: z.string().min(1).optional(),
         sessionId: z.string().min(1).optional(),
@@ -716,6 +721,15 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         handle: z.object({}).passthrough().optional(),
         continuationToken: z.string().nullable().optional(),
         request: z.object({}).passthrough().optional(),
+        region: z
+          .object({
+            x: z.number().int(),
+            y: z.number().int(),
+            width: z.number().int().min(1),
+            height: z.number().int().min(1),
+          })
+          .optional()
+          .describe("zoom only. The crop, in the pixel space of the frame this revision returned."),
       },
     },
     async (args, extra) =>
@@ -724,8 +738,27 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         scope: "mcp:computer-use",
         check: checkToolCall(await scopedSettings(settingsGetter, extra), "computer_use"),
         body: () => computerUse(args as Parameters<typeof computerUse>[0]),
+        present: presentComputerUse,
       })
   )
+}
+
+/**
+ * `getAppState` answers with an inline base64 frame. Left to the default
+ * envelope it would reach the external client as one enormous text block, so
+ * the model could not see the screen it is supposed to be driving and paid a
+ * full image's worth of tokens for the privilege. Hand it over as an MCP image
+ * block instead, using the same projection the in-app plugin tools use.
+ *
+ * Only capture-bearing operations are rewritten. `listApps`, `queryElements`
+ * and the rest keep the plain JSON envelope they have always had.
+ */
+function presentComputerUse(
+  output: ComputerUseOutput
+): Pick<ToolEnvelope, "content" | "structuredContent"> | null {
+  if (!output.ok || !carriesFrame(output.result)) return null
+  const { content, json } = frameToModelContent(output.result)
+  return { content, structuredContent: { ok: true, result: json } }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2021,10 +2054,17 @@ interface RunWithGateInput<T> {
   scope: (typeof ALL_BRIDGE_SCOPES)[number] | "n/a"
   check: { allowed: true } | { allowed: false; reason: string }
   body: () => Promise<T>
+  /**
+   * Optional replacement for the default `JSON.stringify` envelope, for a
+   * result that has to reach the model as something other than text. Returning
+   * `null` keeps the default. Only `computer_use` uses this so far, because a
+   * screenshot serialised as text is a screenshot the model cannot look at.
+   */
+  present?: (result: T) => Pick<ToolEnvelope, "content" | "structuredContent"> | null
 }
 
 interface ToolEnvelope {
-  content: Array<{ type: "text"; text: string }>
+  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>
   isError?: boolean
   structuredContent?: Record<string, unknown>
   // Index signature satisfies the SDK's `Result extends Record<string,
@@ -2063,6 +2103,10 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
     // MCP requires `structuredContent` to be a JSON object (Record). Arrays
     // and primitives are wrapped under `{ value: ... }` so they survive
     // round-trip without violating the schema.
+    const presented = input.present?.(result)
+    if (presented) {
+      return presented
+    }
     const structured: Record<string, unknown> =
       result !== null && typeof result === "object" && !Array.isArray(result)
         ? (result as Record<string, unknown>)
@@ -2087,4 +2131,4 @@ async function runWithGate<T>(input: RunWithGateInput<T>): Promise<ToolEnvelope>
   }
 }
 
-export const __TESTING__ = { mapEntityToScope, runWithGate }
+export const __TESTING__ = { mapEntityToScope, runWithGate, presentComputerUse }

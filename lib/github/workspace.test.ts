@@ -7,6 +7,7 @@ const { transport } = require("@/lib/tauri") as { transport: { call: jest.Mock }
 const call = transport.call
 
 import {
+  __resetWorkspaceHandleBackendsForTesting,
   cloneToWorkspace,
   commitAndPush,
   removeWorkspace,
@@ -17,6 +18,7 @@ import {
 import {
   __resetWorkspaceBackendRegistryForTesting,
   registerWorkspaceBackend,
+  unregisterWorkspaceBackend,
 } from "./workspace-backend-registry"
 
 /**
@@ -35,6 +37,7 @@ function registerPluginE2B(backend: E2BBackend, pluginId = "cognia-e2b-sandbox")
 beforeEach(() => {
   call.mockReset()
   __resetWorkspaceBackendRegistryForTesting()
+  __resetWorkspaceHandleBackendsForTesting()
 })
 
 describe("cloneToWorkspace — local backend", () => {
@@ -284,6 +287,61 @@ describe("removeWorkspace + statWorkspace", () => {
     })
     expect(ok).toBe(true)
     expect(backend.remove).toHaveBeenCalled()
+  })
+
+  it("keeps existing E2B handles bound to their draining backend after unregister", async () => {
+    const backend: E2BBackend = {
+      clone: jest.fn(async () => ({
+        backend: "e2b" as const,
+        path: "sb-draining",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })),
+      commitAndPush: jest.fn(async () => "sha"),
+      remove: jest.fn(async () => true),
+    }
+    registerPluginE2B(backend)
+    const handle = await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "tok",
+      backend: "e2b",
+    })
+    unregisterWorkspaceBackend("cognia-e2b-sandbox:e2b")
+
+    await expect(commitAndPush({ workspace: handle, message: "done" })).resolves.toBe("sha")
+    await expect(removeWorkspace(handle)).resolves.toBe(true)
+    expect(backend.remove).toHaveBeenCalledWith(handle)
+    await expect(
+      cloneToWorkspace({ repoFullName: "o/r", branch: "main", token: "tok", backend: "e2b" })
+    ).rejects.toThrow(/not registered/)
+  })
+
+  it("retains failed E2B handle cleanup for retry after unregister", async () => {
+    const backend: E2BBackend = {
+      clone: jest.fn(async () => ({
+        backend: "e2b" as const,
+        path: "sb-retry",
+        repoFullName: "o/r",
+        branch: "main",
+        createdAt: 0,
+      })),
+      commitAndPush: jest.fn(),
+      remove: jest.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true),
+    }
+    registerPluginE2B(backend)
+    const handle = await cloneToWorkspace({
+      repoFullName: "o/r",
+      branch: "main",
+      token: "tok",
+      backend: "e2b",
+    })
+    unregisterWorkspaceBackend("cognia-e2b-sandbox:e2b")
+
+    await expect(removeWorkspace(handle)).resolves.toBe(false)
+    await expect(removeWorkspace(handle)).resolves.toBe(true)
+    expect(backend.remove).toHaveBeenCalledTimes(2)
   })
 
   it("logs and returns false when the E2B backend rejects", async () => {

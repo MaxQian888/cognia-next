@@ -40,6 +40,12 @@ export interface OutboundRequest {
      * was rerouted once (either mechanism) is never rerouted again.
      */
     balancedFromAdapterId?: string
+    /** Host-enforced provenance for externally delivered generated content. */
+    provenance?: Array<{
+      source: "digital-twin"
+      sourceId: string
+      disclosure: "ai-generated"
+    }>
   }
 }
 

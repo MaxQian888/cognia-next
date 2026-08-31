@@ -982,6 +982,38 @@ describe("installRuntime — ai-run (twin injection)", () => {
     expect(tryBuildTwinDepsImpl).toHaveBeenCalledTimes(1)
   })
 
+  it("marks twin-generated outbound content visibly and structurally", async () => {
+    await getDb().characters.put({ id: "char_abc", name: "Twinned", twinId: "twin_1" } as never)
+    tryBuildTwinDepsImpl = jest.fn(async () => ({ embedding: {}, store: {} }))
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_twin_disclosure" })
+    await callHandler(event, "ai-run")
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.request.segments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ md: expect.stringContaining("AI-generated · Digital Twin") }),
+      ])
+    )
+    expect(job.request.metadata.provenance).toEqual([
+      { source: "digital-twin", sourceId: "twin_1", disclosure: "ai-generated" },
+    ])
+  })
+
+  it("persists Twin provenance in draft outbound previews", async () => {
+    await getDb().characters.put({ id: "char_abc", name: "Twinned", twinId: "twin_1" } as never)
+    tryBuildTwinDepsImpl = jest.fn(async () => ({ embedding: {}, store: {} }))
+    const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_twin_draft" })
+    await callHandler(event, "draft-prepare")
+    const [draft] = await getDb().connectorDrafts.toArray()
+    expect(draft.outboundPreview?.metadata.provenance).toEqual([
+      { source: "digital-twin", sourceId: "twin_1", disclosure: "ai-generated" },
+    ])
+    expect(draft.outboundPreview?.segments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ md: expect.stringContaining("AI-generated · Digital Twin") }),
+      ])
+    )
+  })
+
   it("skips the twin lookup when the bound character has no twinId", async () => {
     await getDb().characters.put({ id: "char_abc", name: "Plain" } as never)
     const event = makeEvent({ conversationKey: "telegram:adapter_1:chat_notwin" })

@@ -30,6 +30,7 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 import { invalidatePersistSnapshot } from "@/lib/db/messages"
+import { enforceTwinDisclosureFromProvenance } from "@/lib/twin/outbound-disclosure"
 
 export interface ManualReplyInput {
   adapterId: string
@@ -198,9 +199,14 @@ async function resolveApprovalRequest(
 ): Promise<{ adapterId: string; request: OutboundRequest } | undefined> {
   const segments = options.segments ?? draft.segments
   if (draft.outboundPreview) {
+    const request = { ...draft.outboundPreview, segments }
+    request.segments = enforceTwinDisclosureFromProvenance(
+      request.segments,
+      request.metadata.provenance
+    )
     return {
       adapterId: draft.outboundPreview.conversationRef.adapterId,
-      request: { ...draft.outboundPreview, segments },
+      request,
     }
   }
   const binding =

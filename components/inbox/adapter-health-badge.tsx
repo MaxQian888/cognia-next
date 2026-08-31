@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { requeueAdapter } from "@/lib/connectors/lifecycle"
+import { connectionsHref } from "@/lib/settings/deep-link"
 import { isTauri } from "@/lib/tauri"
 import { cn } from "@/lib/utils"
 import { decideBadge, STATE_ICON, STATE_TINT, type BadgeState } from "./adapter-health-decision"
@@ -125,7 +126,7 @@ export function AdapterHealthBadge({ adapterId }: AdapterHealthBadgeProps) {
             className="h-7 px-2 text-xs"
             data-testid="adapter-health-open-full"
           >
-            <Link href={`/settings/connections?adapterId=${encodeURIComponent(adapterId)}`}>
+            <Link href={connectionsHref({ adapter: adapterId, tab: "adapters" })}>
               {t("openHealth")}
               <ArrowRightIcon className="ml-1 h-3 w-3" aria-hidden />
             </Link>

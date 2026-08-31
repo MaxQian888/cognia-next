@@ -199,6 +199,36 @@ describe("outbound-runner — plugin onConnectorOutbound", () => {
     expect(audits.some((a) => a.kind === "plugin.outbound_transformed")).toBe(true)
   })
 
+  it("re-applies Twin disclosure after a plugin transform strips it", async () => {
+    mockConnectorDecision.mockResolvedValue({
+      action: "transform",
+      segments: [{ type: "text", text: "rewritten without marker" }],
+    })
+    const adapterId = "a_twin_transform"
+    const adapter = makeAdapter(adapterId, async () => ({ ok: true, platformMessageId: "pm" }))
+    await enqueueOutbound({
+      adapterId,
+      conversationKey: `telegram:${adapterId}:chat`,
+      request: {
+        conversationRef: { platform: "telegram", adapterId },
+        segments: [{ type: "text", text: "original" }],
+        metadata: {
+          idempotencyKey: crypto.randomUUID(),
+          provenance: [{ source: "digital-twin", sourceId: "twin-1", disclosure: "ai-generated" }],
+        },
+      },
+      source: "ai-run",
+    })
+    await runOnce(new Map([[adapterId, adapter]]))
+    expect(adapter.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        segments: [
+          expect.objectContaining({ text: expect.stringContaining("AI-generated · Digital Twin") }),
+        ],
+      })
+    )
+  })
+
   it("rejects a PII-leaking transform and sends the original", async () => {
     mockConnectorDecision.mockResolvedValue({
       action: "transform",
@@ -217,6 +247,46 @@ describe("outbound-runner — plugin onConnectorOutbound", () => {
     expect(sentSegments).toEqual([{ type: "text", text: "hello" }])
     const audits = await listRecent(adapterId)
     expect(audits.some((a) => a.kind === "plugin.transform_pii_blocked")).toBe(true)
+  })
+})
+
+describe("outbound-runner — identity boundary", () => {
+  it("turns a send-as-user authorization failure into a pending draft", async () => {
+    const adapterId = "a_identity"
+    const conversationKey = `lark:${adapterId}:chat`
+    await upsertByConversationKey({ conversationKey, sessionId: "session-identity" })
+    const adapter = makeAdapter(adapterId, async () => ({
+      ok: false,
+      error: {
+        code: "identity_reauthorization_required",
+        message: "Reconnect the user identity",
+        retryable: false,
+      },
+    }))
+    await enqueue(adapterId, conversationKey, "identity-key")
+
+    await runOnce(new Map([[adapterId, adapter]]))
+
+    const [job] = await getDb().outboundQueue.toArray()
+    expect(job.status).toBe("deadlettered")
+    const [draft] = await getDb().connectorDrafts.toArray()
+    expect(draft).toMatchObject({
+      conversationKey,
+      sessionId: "session-identity",
+      status: "pending",
+      outboundPreview: expect.objectContaining({
+        metadata: expect.objectContaining({ idempotencyKey: "identity-key" }),
+      }),
+    })
+    const audits = await listRecent(adapterId)
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "draft.prepared",
+          reason: "identity_reauthorization_required",
+        }),
+      ])
+    )
   })
 })
 

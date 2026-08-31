@@ -68,6 +68,7 @@ import {
   wakeSnoozedConversations,
 } from "@/lib/db/conversation-overrides"
 import { appendAudit } from "./audit"
+import { enforceTwinDisclosureFromProvenance } from "@/lib/twin/outbound-disclosure"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -81,6 +82,7 @@ import {
 } from "./circuit-breaker"
 import { createTokenBucket, type TokenBucket, type TokenBucketSnapshot } from "./rate-limit"
 import { recordDeliveredMessage } from "./delivered-messages"
+import { createDraft } from "@/lib/db/connector-drafts"
 
 // ── Quiet hours helpers ────────────────────────────────────────────────────────
 
@@ -931,7 +933,10 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         if (decision.action === "transform") {
           const segments = decision.segments as MessageSegment[]
           if (hasNoLeakingPiiDeep(segments)) {
-            request.segments = segments
+            request.segments = enforceTwinDisclosureFromProvenance(
+              segments,
+              request.metadata.provenance
+            )
             await getDb().outboundQueue.update(job.id, { request })
             await appendAudit({
               adapterId,
@@ -1072,6 +1077,13 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
       return
     }
 
+    // Host-owned Twin provenance survives draft edits and plugin transforms.
+    // Re-assert the visible disclosure at the final external sink.
+    request.segments = enforceTwinDisclosureFromProvenance(
+      request.segments,
+      request.metadata.provenance
+    )
+
     // Edit-vs-send dispatch. When the request carries an
     // `editTargetMessageId`, route to `adapter.edit()` so the platform
     // updates the existing message in place. Adapters that don't
@@ -1190,6 +1202,39 @@ export async function startOutboundRunner(opts: OutboundRunnerOptions): Promise<
         outcome: "failed",
         errorCode: err.code,
       })
+      if (err.code === "identity_reauthorization_required") {
+        const resolution = await readForResolution(conversationKey).catch(() => null)
+        if (resolution?.sessionId) {
+          const draft = await createDraft({
+            conversationKey,
+            sessionId: resolution.sessionId,
+            segments: request.segments,
+            sourceMessageId: request.metadata.sourceMessageId,
+            outboundPreview: request,
+          })
+          await appendAudit({
+            adapterId,
+            kind: "draft.prepared",
+            at: now,
+            conversationKey,
+            idempotencyKey,
+            reason: err.code,
+            message: "Reply saved as a draft; reconnect the user identity before approval",
+            fields: { draftId: draft.id },
+          })
+        }
+        await markDeadlettered(job.id, err.code, err.message)
+        await appendAudit({
+          adapterId,
+          kind: "delivery.deadlettered",
+          at: now,
+          conversationKey,
+          idempotencyKey,
+          reason: err.code,
+          message: err.message,
+        })
+        return
+      }
       const ambiguousRemoteFailure =
         adapter.runtimeCapabilities?.ambiguousDelivery === "reconciliation_required" &&
         (err.code === "network" || err.code === "platform_5xx")

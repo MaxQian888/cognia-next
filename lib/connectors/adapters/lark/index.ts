@@ -59,7 +59,7 @@ import {
   serializeUrgent,
   sniffReceiveId,
 } from "./serialize"
-import { getTenantAccessToken, getUserAccessToken } from "./auth"
+import { fetchLarkUserInfo, getTenantAccessToken, getUserAccessToken } from "./auth"
 import { LarkApiError, withTatRefresh, withUserTokenRefresh } from "./auth-retry"
 import { createLarkChatManagement } from "./chat-management"
 import { resolveLarkMediaKeys } from "./upload"
@@ -96,8 +96,8 @@ export interface LarkAdapterOptions {
    * When true and a user access token is connected (via the OAuth flow in
    * `oauth-handler.ts`), outbound `send()` acts on behalf of the authorised
    * user (user_access_token) instead of the bot (tenant_access_token). Opt-in
-   * per adapter via `settings.sendAsUser`. Falls back to the bot identity when
-   * no user token is connected or it cannot be refreshed.
+   * per adapter via `settings.sendAsUser`. If that identity cannot be used,
+   * delivery stops so the host can preserve the reply as a draft.
    */
   sendAsUser?: boolean
   transport: "webhook" | "long-connection"
@@ -127,7 +127,21 @@ const LARK_API_BASE = "https://open.feishu.cn/open-apis"
  *   - 5xx                    → platform_5xx, retryable
  *   - non-LarkApiError (Rust bridge / fetch failures) → network, retryable
  */
+class LarkUserIdentityUnavailableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "LarkUserIdentityUnavailableError"
+  }
+}
+
 function larkOutboundError(err: unknown): OutboundError {
+  if (err instanceof LarkUserIdentityUnavailableError) {
+    return {
+      code: "identity_reauthorization_required",
+      message: err.message,
+      retryable: false,
+    }
+  }
   if (err instanceof LarkApiError) {
     const message = err.message
     // 99991400 is Lark's app frequency-limit business code (shipped inside
@@ -246,6 +260,29 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     return { appId, appSecret }
   }
 
+  async function requireUserSendIdentity(creds: {
+    appId: string
+    appSecret: string
+  }): Promise<void> {
+    if (opts.sendAsUser !== true) return
+    const token = await getUserAccessToken(opts.id).catch(() => null)
+    if (!token) {
+      throw new LarkUserIdentityUnavailableError(
+        "Lark send-as-user requires reconnecting the user identity"
+      )
+    }
+    try {
+      await withUserTokenRefresh({ adapterId: opts.id, ...creds }, async () => {
+        const current = (await getUserAccessToken(opts.id)) ?? token
+        await fetchLarkUserInfo(current)
+      })
+    } catch {
+      throw new LarkUserIdentityUnavailableError(
+        "Lark send-as-user authorization expired; reconnect before sending"
+      )
+    }
+  }
+
   /** Issue one authenticated Lark API call with an explicit bearer token. */
   async function sendHttp(
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
@@ -293,24 +330,29 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     const creds = await resolveCredentials()
 
     // Opt-in send-as-user path: act on behalf of the connected user when a user
-    // token is present, refreshing it once on invalidation. Any failure of the
-    // user path degrades to the bot (tenant) identity so the message still
-    // goes out — the user just needs to re-authorise to restore their identity.
+    // token is present, refreshing it once on invalidation. Identity is an
+    // authorization boundary: never silently downgrade to the bot.
     if (reqOpts?.asUser) {
       const userToken = await getUserAccessToken(opts.id).catch(() => null)
-      if (userToken) {
-        try {
-          return await withUserTokenRefresh({ adapterId: opts.id, ...creds }, async () => {
-            const tok = (await getUserAccessToken(opts.id)) ?? userToken
-            return sendHttp(method, urlPath, body, tok)
-          })
-        } catch (err) {
-          loggers.network.warn("[lark] user-token send failed; falling back to bot identity", {
-            id: opts.id,
-            reason: err instanceof Error ? err.message : String(err),
-          })
-          // fall through to the tenant path below
-        }
+      if (!userToken) {
+        throw new LarkUserIdentityUnavailableError(
+          "Lark send-as-user requires reconnecting the user identity"
+        )
+      }
+      try {
+        return await withUserTokenRefresh({ adapterId: opts.id, ...creds }, async () => {
+          const tok = (await getUserAccessToken(opts.id)) ?? userToken
+          return sendHttp(method, urlPath, body, tok)
+        })
+      } catch (err) {
+        loggers.network.warn("[lark] user-token send failed; delivery stopped", {
+          id: opts.id,
+          reason: err instanceof Error ? err.message : String(err),
+        })
+        throw new LarkUserIdentityUnavailableError(
+          "Lark send-as-user authorization expired; reconnect before sending",
+          { cause: err }
+        )
       }
     }
 
@@ -617,7 +659,11 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     try {
+      // Identity is a precondition for the whole outbound transaction. Check
+      // before media upload so an expired user binding cannot upload bytes
+      // under the bot and only then fail the user-authored message send.
       const creds = await resolveCredentials()
+      await requireUserSendIdentity(creds)
       // Upload pre-pass — Rust `connectors_lark_upload_*` commands surface
       // TAT invalidation as Error.message text; `withTatRefresh` detects
       // those by substring and retries with a fresh token.

@@ -72,6 +72,8 @@ describe("OutboundSaturationNotice", () => {
   it("CTA link points at the outbound settings tab", () => {
     wrap([saturated("tg-1")])
     const link = screen.getByTestId("outbound-saturation-view").closest("a")
-    expect(link?.getAttribute("href")).toBe("/settings/connections?tab=outbound")
+    // Was `/settings/connections?tab=outbound`: a route that does not exist
+    // under `output: "export"`, carrying a param name nothing reads.
+    expect(link?.getAttribute("href")).toBe("/settings?section=connections&connectionsTab=outbound")
   })
 })

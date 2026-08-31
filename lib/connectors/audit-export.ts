@@ -26,6 +26,9 @@
  */
 
 import type { ConnectorAuditRow } from "@/lib/db/connector-types"
+import { downloadBlob } from "@cognia/plugin-sdk/api/download"
+
+export { downloadBlob }
 
 const CSV_COLUMNS = [
   "at",
@@ -123,23 +126,6 @@ export function buildExportFilename(options: ExportFilenameOptions): string {
  * the temporary anchor is removed and the object URL revoked
  * synchronously after the click.
  */
-export function downloadBlob(filename: string, blob: Blob): void {
-  if (typeof window === "undefined" || typeof document === "undefined") return
-  const url = URL.createObjectURL(blob)
-  try {
-    const anchor = document.createElement("a")
-    anchor.href = url
-    anchor.download = filename
-    anchor.rel = "noopener"
-    anchor.style.display = "none"
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
 export interface ExportAuditViewOptions {
   rows: ConnectorAuditRow[]
   format: "csv" | "json"

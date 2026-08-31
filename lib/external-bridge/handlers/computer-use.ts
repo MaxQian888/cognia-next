@@ -13,6 +13,7 @@ import type {
   ElementHandle,
   GetAppStateOptions,
   Locator,
+  Rect,
 } from "@/lib/automation/types"
 import { isTauri } from "@/lib/tauri"
 
@@ -43,6 +44,13 @@ export type ComputerUseInput =
       operation: "performAction"
       turnKey: string
       request: ActionRequest
+    }
+  | {
+      operation: "zoom"
+      sessionId: string
+      lineageId: string
+      revision: number
+      region: Rect
     }
 
 export interface ComputerUseOutput {
@@ -87,6 +95,8 @@ async function rendererPath(input: ComputerUseInput): Promise<unknown> {
         input.request,
         context(requireNonEmpty(input.turnKey, "turnKey"))
       )
+    case "zoom":
+      return desktop.zoom(input, input.region, context())
   }
 }
 
@@ -163,6 +173,17 @@ function toEnvelope(input: ComputerUseInput, token: string): ProxyEnvelope {
         args: {
           turnKey: requireNonEmpty(input.turnKey, "turnKey"),
           request: input.request,
+        },
+      }
+    case "zoom":
+      return {
+        ...base,
+        command: "desktop_zoom",
+        args: {
+          sessionId: input.sessionId,
+          lineageId: input.lineageId,
+          revision: input.revision,
+          region: input.region,
         },
       }
   }

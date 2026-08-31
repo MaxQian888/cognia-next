@@ -9,6 +9,7 @@ jest.mock("@/lib/automation/client", () => ({
     queryElements: jest.fn(),
     expandElement: jest.fn(),
     performAction: jest.fn(),
+    zoom: jest.fn(),
   },
 }))
 
@@ -78,6 +79,27 @@ describe("computerUse canonical renderer adapter", () => {
       surface: "mcp",
       turnKey: "message-1",
     })
+  })
+
+  it("crops a region of the revision the caller already read", async () => {
+    mockedDesktop.zoom.mockResolvedValueOnce({ revision: 3 } as never)
+    const region = { x: 100, y: 200, width: 320, height: 240 }
+    const result = await computerUse({
+      operation: "zoom",
+      sessionId: "app-session",
+      lineageId: "lineage",
+      revision: 3,
+      region,
+    })
+
+    expect(result).toEqual({ ok: true, result: { revision: 3 } })
+    // A zoom re-reads pixels the caller was already shown, so it carries no
+    // turn key: there is no mutation to bind and no token to burn.
+    expect(mockedDesktop.zoom).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "app-session", lineageId: "lineage", revision: 3 }),
+      region,
+      { surface: "mcp", turnKey: undefined }
+    )
   })
 
   it("fails closed when a mutation has no authenticated turn key", async () => {
@@ -159,6 +181,23 @@ describe("computerUse canonical sidecar adapter", () => {
         locator,
         options: {},
       },
+    })
+  })
+
+  it("uses the canonical zoom wire command", async () => {
+    const region = { x: 4, y: 8, width: 64, height: 48 }
+    await computerUse({
+      operation: "zoom",
+      sessionId: "app-session",
+      lineageId: "lineage",
+      revision: 4,
+      region,
+    })
+
+    expect(seen[0]).toMatchObject({
+      token: "secret",
+      command: "desktop_zoom",
+      args: { sessionId: "app-session", lineageId: "lineage", revision: 4, region },
     })
   })
 

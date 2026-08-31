@@ -745,7 +745,7 @@ describe("createLarkAdapter", () => {
     expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer u-access-tok")
   })
 
-  it("send() falls back to the bot token when sendAsUser is on but no user token is connected", async () => {
+  it("send() refuses instead of changing identity when sendAsUser has no user token", async () => {
     const adapter = createLarkAdapter({
       id: "lark-nouser",
       displayName: "No-User Bot",
@@ -772,8 +772,16 @@ describe("createLarkAdapter", () => {
       metadata: { idempotencyKey: "kb" },
     })
 
-    expect(result.ok).toBe(true)
-    expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer t-bot")
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "identity_reauthorization_required", retryable: false },
+    })
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "connectors_http_request",
+      expect.objectContaining({
+        req: expect.objectContaining({ url: expect.stringContaining("tenant_access_token") }),
+      })
+    )
   })
 
   it("refreshes the user token on invalidation and retries the send once", async () => {
@@ -815,6 +823,20 @@ describe("createLarkAdapter", () => {
             }),
           }
         }
+        if (req.url.includes("/authen/v1/user_info")) {
+          if (req.headers["Authorization"] === "Bearer u-old") {
+            return {
+              status: 401,
+              headers: {},
+              body: JSON.stringify({ code: 99991677, msg: "invalid user access token" }),
+            }
+          }
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({ code: 0, data: { open_id: "ou_user" } }),
+          }
+        }
         if (req.url.includes("/im/v1/messages")) {
           sendAttempts++
           if (req.headers["Authorization"] === "Bearer u-old") {
@@ -837,7 +859,7 @@ describe("createLarkAdapter", () => {
     })
 
     expect(result.ok).toBe(true)
-    expect(sendAttempts).toBe(2) // failed once (old token), succeeded on the refreshed token
+    expect(sendAttempts).toBe(1) // identity was refreshed before the first message-side effect
     expect(sendHeaders(findSend())["Authorization"]).toBe("Bearer u-new")
   })
 

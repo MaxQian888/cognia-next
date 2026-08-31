@@ -55,6 +55,8 @@ import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { endSpan } from "@cognia/agent-trace/emitter"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
+import { discloseTwinOutboundSegments } from "@/lib/twin/outbound-disclosure"
+import { inferBuiltInSkillIntents } from "@/lib/skills/intent-resolver"
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { readResolvedPrincipal } from "./principal/resolve"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
@@ -745,7 +747,7 @@ async function resolveInboundSendOptions(params: {
   override: ConversationOverrideRow | null
   adapterRow: AdapterInstanceRow
   emitTrace: boolean
-  executionIdentity?: { runId: string; attemptId?: string }
+  executionIdentity?: { runId: string; turnId: string; attemptId: string }
   permissionCeiling?: AgentPermissionCeiling
   resolvedCharacter?: Awaited<ReturnType<typeof resolveCharacterById>>
   /**
@@ -760,6 +762,7 @@ async function resolveInboundSendOptions(params: {
   appSettings: AppSettings | undefined
   runTitle: string
   workspaceRoot?: string
+  twinId?: string
   /**
    * Which layer muted the turn, when one did. `suppressedReason` collapses to
    * `"muted"` either way, and "this bot is off" vs "this chat is off" sends a
@@ -875,7 +878,10 @@ async function resolveInboundSendOptions(params: {
     // (guarded in the resolver).
     emitTrace,
     traceSurface: "connector",
+    turnId: executionIdentity?.turnId,
     executionIdentity,
+    skillIntents: inferBuiltInSkillIntents(event.plainText),
+    skillRenderMode: "hybrid",
     permissionCeiling,
     compositionSelection,
   })
@@ -891,6 +897,7 @@ async function resolveInboundSendOptions(params: {
     sendOptions,
     appSettings,
     runTitle: character?.name?.trim() || "Agent run",
+    ...(character?.twinId && twinHandshake ? { twinId: character.twinId } : {}),
     ...(workspaceRoot ? { workspaceRoot } : {}),
     ...(suppression.mutedScope ? { mutedScope: suppression.mutedScope } : {}),
   }
@@ -1352,14 +1359,15 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           : baseExecutionRunId
         const executionIdentity = {
           runId: previousRecoveryAnchor?.executionIdentityRunId ?? baseExecutionRunId,
-          ...(previousRecoveryAnchor ? { attemptId: previousRecoveryAnchor.attemptId } : {}),
+          turnId: storedMsg.id,
+          attemptId: previousRecoveryAnchor?.attemptId ?? "a1",
         }
 
         // Resolve the send options (character + twin + memory context) through
         // the shared helper so an ai-run and a draft prepare from identical
         // grounding. `emitTrace: true` mints the connector root span, ended on
         // the capture-error / success branches below.
-        const { sendOptions, appSettings, runTitle, workspaceRoot, mutedScope } =
+        const { sendOptions, appSettings, runTitle, workspaceRoot, mutedScope, twinId } =
           await resolveInboundSendOptions({
             event,
             session,
@@ -1573,7 +1581,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           attemptId: recoveryAnchor.attemptId,
           hostRef: recoveryExecution.hostRef,
           runtime: recoveryExecution.runtimeAdapter,
-          turnId: crypto.randomUUID(),
+          turnId: executionIdentity.turnId,
         })
         let canonicalTail: Promise<unknown> = Promise.resolve()
         let canonicalFailure: unknown
@@ -1661,9 +1669,25 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           ...(streamsThroughReceiver && typeof targetAdapter?.streamReply === "function"
             ? {
                 onPartial: (text: string) => {
+                  const safeText = twinId
+                    ? (
+                        discloseTwinOutboundSegments([{ type: "text", text }], twinId)
+                          .segments[0] as { type: "text"; text: string }
+                      ).text
+                    : text
+                  if (!hasNoLeakingPii(safeText)) {
+                    void appendAudit({
+                      adapterId: event.adapterId,
+                      kind: "adapter.error",
+                      at: Date.now(),
+                      conversationKey: event.conversationKey,
+                      reason: "partial_pii_blocked",
+                    }).catch(() => undefined)
+                    return
+                  }
                   void targetAdapter.streamReply!({
                     conversationRef: event.conversationRef,
-                    text,
+                    text: safeText,
                   }).catch(() => undefined)
                 },
               }
@@ -1805,7 +1829,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
           recoveredPrefix && !captured.text.startsWith(recoveredPrefix)
             ? `${recoveredPrefix}${captured.text}`
             : captured.text
-        const outboundSegments: MessageSegment[] = assistantReplyToSegments({
+        let outboundSegments: MessageSegment[] = assistantReplyToSegments({
           text: recoveredText,
           a2uiSurfaces: captured.a2uiSurfaces,
           a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
@@ -1814,6 +1838,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             platform: outboundTarget.deliveryTarget.address.platform,
           },
         })
+        const twinDisclosure = twinId
+          ? discloseTwinOutboundSegments(outboundSegments, twinId)
+          : undefined
+        if (twinDisclosure) outboundSegments = twinDisclosure.segments
         const idempotencyKey = `airun:${captured.messageId}`
         // ── Reply quoting (ADR-0009 §3A.3) ──
         // In group / thread scopes, quote the triggering message so a busy
@@ -1831,6 +1859,17 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             "send.reply"
           ) &&
           (override?.replyQuoting ?? adapterRow.replyQuoting ?? true)
+        const outboundRequest = {
+          conversationRef: outboundTarget.conversationRef,
+          deliveryTarget: outboundTarget.deliveryTarget,
+          segments: outboundSegments,
+          ...(quoteReply ? { replyTo: { messageId: event.messageId } } : {}),
+          metadata: {
+            idempotencyKey,
+            sourceMessageId: storedMsg.id,
+            ...(twinDisclosure ? { provenance: twinDisclosure.provenance } : {}),
+          },
+        }
         // ── The one place acceptance changes anything ──
         //
         // The turn is finished and identical either way; what differs is
@@ -1846,6 +1885,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             sessionId: session.id,
             segments: draftSegments,
             sourceMessageId: storedMsg.id,
+            outboundPreview: { ...outboundRequest, segments: draftSegments },
           })
           await appendAudit({
             adapterId: event.adapterId,
@@ -1872,16 +1912,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         await enqueueOutbound({
           adapterId: outboundTarget.adapterId,
           conversationKey: outboundTarget.conversationKey,
-          request: {
-            conversationRef: outboundTarget.conversationRef,
-            deliveryTarget: outboundTarget.deliveryTarget,
-            segments: outboundSegments,
-            ...(quoteReply ? { replyTo: { messageId: event.messageId } } : {}),
-            metadata: {
-              idempotencyKey,
-              sourceMessageId: storedMsg.id,
-            },
-          },
+          request: outboundRequest,
           source: "ai-run",
         })
 

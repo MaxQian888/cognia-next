@@ -56,6 +56,10 @@ export interface E2BBackend {
 import { resolveWorkspaceBackendByKind } from "./workspace-backend-registry"
 
 const E2B_BACKEND_KIND: WorkspaceBackend = "e2b"
+// An issued workspace handle keeps its provider ownership even after the
+// plugin unregisters to drain. New clones resolve only the accepting registry;
+// commit/remove for existing handles use this cleanup-only ownership ledger.
+const e2bBackendByWorkspacePath = new Map<string, E2BBackend>()
 
 const E2B_NOT_REGISTERED_MESSAGE =
   "e2b workspace backend not registered. Install the e2b-sandbox plugin and enable it."
@@ -85,11 +89,13 @@ export async function cloneToWorkspace(opts: CloneOptions): Promise<WorkspaceHan
   if (opts.backend === E2B_BACKEND_KIND) {
     const backend = resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
     if (!backend) throw new Error(E2B_NOT_REGISTERED_MESSAGE)
-    return backend.clone({
+    const handle = await backend.clone({
       repoFullName: opts.repoFullName,
       branch: opts.branch,
       token: opts.token,
     })
+    e2bBackendByWorkspacePath.set(handle.path, backend)
+    return handle
   }
 
   const result = await transport.call<{ path: string; createdAt: number }>(
@@ -137,7 +143,9 @@ export interface CommitAndPushOptions {
  */
 export async function commitAndPush(opts: CommitAndPushOptions): Promise<string> {
   if (opts.workspace.backend === E2B_BACKEND_KIND) {
-    const backend = resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
+    const backend =
+      e2bBackendByWorkspacePath.get(opts.workspace.path) ??
+      resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
     if (!backend) throw new Error(E2B_NOT_REGISTERED_MESSAGE)
     return backend.commitAndPush({
       workspace: opts.workspace,
@@ -167,10 +175,13 @@ export async function commitAndPush(opts: CommitAndPushOptions): Promise<string>
  */
 export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean> {
   if (handle.backend === E2B_BACKEND_KIND) {
-    const backend = resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
+    const backend =
+      e2bBackendByWorkspacePath.get(handle.path) ?? resolveWorkspaceBackendByKind(E2B_BACKEND_KIND)
     if (!backend) return false
     try {
-      return await backend.remove(handle)
+      const removed = await backend.remove(handle)
+      if (removed) e2bBackendByWorkspacePath.delete(handle.path)
+      return removed
     } catch (err) {
       console.error(`e2b removeWorkspace failed for ${handle.path}`, err)
       return false
@@ -182,6 +193,11 @@ export async function removeWorkspace(handle: WorkspaceHandle): Promise<boolean>
     console.error(`removeWorkspace failed for ${handle.path}`, err)
     return false
   }
+}
+
+/** Test-only: clear handle-bound provider ownership between cases. */
+export function __resetWorkspaceHandleBackendsForTesting(): void {
+  e2bBackendByWorkspacePath.clear()
 }
 
 /**

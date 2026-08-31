@@ -14,6 +14,7 @@ import { useTranslations } from "next-intl"
 import { ArrowRightIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { SaturatedAdapter } from "@/hooks/connectors/use-outbound-saturation"
+import { connectionsHref } from "@/lib/settings/deep-link"
 import { NoticeItem } from "./notices/notice-item"
 
 export interface OutboundSaturationNoticeProps {
@@ -47,7 +48,7 @@ export function OutboundSaturationNotice({ adapters, onDismiss }: OutboundSatura
           className="h-6 px-2 text-[11px]"
           data-testid="outbound-saturation-view"
         >
-          <Link href="/settings/connections?tab=outbound">
+          <Link href={connectionsHref({ tab: "outbound" })}>
             {t("viewOutbound")}
             <ArrowRightIcon className="ml-1 size-3" aria-hidden />
           </Link>
