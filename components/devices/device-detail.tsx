@@ -44,6 +44,7 @@ import { ActivitySection } from "./sections/activity-section"
 import { CapabilitiesSection } from "./sections/capabilities-section"
 import { OverviewSection } from "./sections/overview-section"
 import { RuntimeSection } from "./sections/runtime-section"
+import { WanSection } from "./sections/wan-section"
 
 export interface DeviceDetailProps {
   row: DeviceRow | null
@@ -117,6 +118,10 @@ export function DeviceDetail({ row, actions, onRepairHost }: DeviceDetailProps) 
             </DeviceSection>
           ) : null}
           <CapabilitiesSection row={row} />
+          {/* Sits next to Access because both answer "what can this device do
+              from where it is", and because a dormant WAN connection explains a
+              grant that looks live but cannot be exercised off the LAN. */}
+          <WanSection row={row} />
           <AccessSection row={row} actions={actions} />
           <RuntimeSection row={row} />
           <ActivitySection row={row} />

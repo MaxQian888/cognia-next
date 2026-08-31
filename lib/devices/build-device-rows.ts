@@ -17,6 +17,7 @@
 
 import { RECENTLY_ACTIVE_WINDOW_MS } from "@/lib/companion/device-presence-registry"
 import { isPlaceable, type PlacementLiveness } from "@/lib/placement/liveness"
+import { isWanBlocked, isWanDormant, lastWanEvidenceAt } from "@/lib/signaling/wan-dormancy"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 
 import {
@@ -32,6 +33,7 @@ import type {
   DeviceAdminState,
   DeviceReachability,
   DeviceRow,
+  DeviceWanSummary,
   RemoteHostInput,
   SshHostInput,
   WorkerInput,
@@ -124,6 +126,56 @@ function mirrorAdminState(row: PairedDeviceRow): DeviceAdminState {
   return "active"
 }
 
+/**
+ * Whether the desktop holds a WAN signaling connection for this device, and
+ * why not when it does not.
+ *
+ * Mirrors `selectSignalingDevices` in `lib/signaling/desktop-controller.ts`
+ * exactly, reading the same `isWanDormant` and `isWanBlocked` leaves, because a
+ * console that described a different rule from the one the hub applies would be
+ * worse than one that said nothing. The order is fixed: structural facts first
+ * (there is no room to join), then the deny-list, then this shell's ability to
+ * answer at all, then the master switch, then dormancy. Each answer supersedes
+ * the ones below it, so the reader gets the reason that actually decides the
+ * outcome rather than the last one checked.
+ *
+ * The deny-list step reads BOTH the mirror row (via `isWanBlocked`, the exact
+ * predicate the hub push applies) and the host-preferred `adminState`, because
+ * the two can disagree: that disagreement is what `adminStateConflict` records.
+ * Trusting `adminState` alone let a row whose mirror carries `pausedAt` but
+ * whose host reports `active` render as "Held open" for a device the hub had
+ * already dropped, with a "Connect now" button that re-pushed a list the same
+ * `pausedAt` filtered straight back out.
+ */
+export function buildDeviceWan(
+  row: PairedDeviceRow,
+  input: Pick<
+    BuildDeviceRowsInput,
+    "holdsWanConnections" | "wanEnabled" | "wokenWanDeviceIds" | "now"
+  >,
+  adminState: DeviceAdminState
+): DeviceWanSummary {
+  const evidenceAt = lastWanEvidenceAt(row)
+  const base = {
+    ...(evidenceAt > 0 ? { lastEvidenceAt: evidenceAt } : {}),
+    canWake: false,
+  }
+
+  const provisioned =
+    typeof row.rendezvousId === "string" &&
+    row.signalingRoomDescriptor?.v === 2 &&
+    typeof row.signalingKeyRef === "string"
+  if (!provisioned) return { ...base, state: "unprovisioned" }
+  if (isWanBlocked(row) || adminState === "revoked" || adminState === "paused") {
+    return { ...base, state: "blocked" }
+  }
+  if (!input.holdsWanConnections) return { ...base, state: "unmanaged" }
+  if (input.wanEnabled === false) return { ...base, state: "disabled" }
+  if (!isWanDormant(row, input.now)) return { ...base, state: "automatic" }
+  if (input.wokenWanDeviceIds?.has(row.deviceId) === true) return { ...base, state: "woken" }
+  return { ...base, state: "dormant", canWake: true }
+}
+
 function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput): DeviceRow {
   const hostDevice = input.hostDevices?.get(row.deviceId)
   const mirror = mirrorAdminState(row)
@@ -188,6 +240,7 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
     capabilitiesReportedAt: row.capabilitiesReportedAt,
     capabilityReportMissing: row.capabilitiesReportedAt === undefined,
     grants: buildGrantRows(evidence),
+    wan: buildDeviceWan(row, input, adminState),
     presence,
     placement: buildDevicePlacement({
       kind: "paired-device",

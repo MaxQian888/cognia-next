@@ -24,9 +24,15 @@ jest.mock("@/lib/platform/detect", () => ({
 
 // eslint-disable-next-line no-var -- same hoisting rule as `tauri`.
 var sshHosts: unknown[] | undefined
+/**
+ * The shape has to be the real one: `settings.terminal`, the key `AppSettings`
+ * actually declares. A mock that invents a wrapper (this one said
+ * `terminalSettings` for a while) keeps passing while the component reads
+ * `undefined` in production.
+ */
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
-    selector({ settings: { terminalSettings: { sshHosts: sshHosts ?? [] } } }),
+    selector({ settings: { terminal: { sshHosts: sshHosts ?? [] } } }),
 }))
 jest.mock("@/stores/terminal/terminal-store", () => ({
   useTerminalStore: { getState: () => ({}) },
@@ -104,6 +110,25 @@ it("blocks a password host with no saved password, and names it", () => {
   render(<SshHostControls row={row()} connect={jest.fn()} />)
   expect(screen.getByTestId("ssh-credential-required")).toHaveTextContent("prod-web-01")
   expect(screen.getByTestId("ssh-connect")).toBeDisabled()
+})
+
+/**
+ * The third reason Connect can be dead. While every read of the SSH list
+ * resolved to `undefined` this was the state of every row on screen, and the
+ * component said nothing: a disabled button with no sentence beside it reads as
+ * a working host you simply cannot click.
+ */
+it("says so when the row names a profile that is no longer saved", () => {
+  sshHosts = []
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.getByTestId("ssh-unknown-host")).toHaveTextContent("ssh:s1")
+  expect(screen.getByTestId("ssh-connect")).toBeDisabled()
+})
+
+it("shows no such warning for a host it can actually launch", () => {
+  render(<SshHostControls row={row()} connect={jest.fn()} />)
+  expect(screen.queryByTestId("ssh-unknown-host")).not.toBeInTheDocument()
+  expect(screen.getByTestId("ssh-connect")).toBeEnabled()
 })
 
 it("surfaces a connection failure instead of failing silently", async () => {

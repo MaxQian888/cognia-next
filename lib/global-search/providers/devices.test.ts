@@ -1,4 +1,19 @@
-import { createDevicesProvider, loadDeviceSearchRows, type DevicesProviderDeps } from "./devices"
+let settingsState: unknown = { settings: null }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: { getState: () => settingsState },
+}))
+
+let remoteHostState: unknown = { hosts: [] }
+jest.mock("@/stores/remote-host/remote-host-store", () => ({
+  useRemoteHostStore: { getState: () => remoteHostState },
+}))
+
+import {
+  createDevicesProvider,
+  loadDeviceSearchRows,
+  DEFAULT_DEVICES_PROVIDER_DEPS,
+  type DevicesProviderDeps,
+} from "./devices"
 import type { GlobalSearchContext } from "../types"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { RemoteHostInput, SshHostInput } from "@/lib/devices/types"
@@ -142,5 +157,64 @@ describe("devicesProvider", () => {
       signal: new AbortController().signal,
     })
     expect(result.items).toEqual([])
+  })
+})
+
+/**
+ * Every case above injects `deps`, so the wiring the app actually runs is only
+ * covered here. A wrong read in the defaults returns `[]` forever and leaves
+ * the whole suite green, which is exactly how the SSH list shipped broken: it
+ * named `settings.terminalSettings`, a key `AppSettings` has never declared.
+ * The settings path now lives in `lib/terminal/saved-ssh-hosts` with its own
+ * cases; both other defaults are asserted here.
+ */
+describe("DEFAULT_DEVICES_PROVIDER_DEPS", () => {
+  it("reads remote hosts off the store the app really keeps them in", () => {
+    remoteHostState = { hosts: [host()] }
+    expect(DEFAULT_DEVICES_PROVIDER_DEPS.listRemoteHosts()).toEqual([host()])
+  })
+
+  it("reads saved SSH hosts off the settings the app really writes", () => {
+    settingsState = { settings: { terminal: { sshHosts: [sshHost()] } } }
+    expect(DEFAULT_DEVICES_PROVIDER_DEPS.listSshHosts()).toEqual([sshHost()])
+  })
+
+  it("is empty before either store loads, rather than throwing", () => {
+    settingsState = { settings: null }
+    remoteHostState = { hosts: [] }
+    expect(DEFAULT_DEVICES_PROVIDER_DEPS.listSshHosts()).toEqual([])
+    expect(DEFAULT_DEVICES_PROVIDER_DEPS.listRemoteHosts()).toEqual([])
+  })
+})
+
+/**
+ * The provider's `load` is cached, so a rejection does not just cost this
+ * keystroke: devices stay missing from the palette until the TTL expires. Every
+ * source therefore fails alone.
+ */
+describe("loadDeviceSearchRows source isolation", () => {
+  const boom = () => {
+    throw new Error("store not hydrated")
+  }
+
+  it("keeps the other two sources when the paired-device read rejects", async () => {
+    const rows = await loadDeviceSearchRows(
+      deps({
+        listPairedDevices: (async () => {
+          throw new Error("dexie closed")
+        }) as DevicesProviderDeps["listPairedDevices"],
+      })
+    )
+    expect(rows.map((row) => row.kind)).toEqual(["remote-host", "ssh-host"])
+  })
+
+  it("keeps the other two sources when the remote-host store throws", async () => {
+    const rows = await loadDeviceSearchRows(deps({ listRemoteHosts: boom }))
+    expect(rows.map((row) => row.kind)).toEqual(["paired-device", "ssh-host"])
+  })
+
+  it("keeps the other two sources when the SSH read throws", async () => {
+    const rows = await loadDeviceSearchRows(deps({ listSshHosts: boom }))
+    expect(rows.map((row) => row.kind)).toEqual(["paired-device", "remote-host"])
   })
 })

@@ -2,9 +2,11 @@
  * Every device grant state and reason must have a label, in both locales.
  *
  * `device-visuals.tsx` renders `t(\`grantState.${state}\`)`,
- * `access-section.tsx` renders `t(\`access.reason.${reasonKey}\`)`, and
- * `host-controls.tsx` renders `t(\`host.state.${connectionState}\`)` — all
- * **dynamic** keys, which `pnpm lint:i18n` does not see. ADR-0149 §5 step two
+ * `access-section.tsx` renders `t(\`access.reason.${reasonKey}\`)`,
+ * `host-controls.tsx` renders `t(\`host.state.${connectionState}\`)`, and
+ * `wan-section.tsx` renders both `t(\`wan.state.${state}\`)` and
+ * `t(\`wan.reason.${state}\`)` — all **dynamic** keys, which `pnpm lint:i18n`
+ * does not see. ADR-0149 §5 step two
  * added `suspended` / `ownerMismatch`, and a fifth state added without a label
  * would ship a badge reading `grantState.whatever` and pass every gate.
  *
@@ -32,10 +34,25 @@ const CONNECTION_STATES = [
   "versionMismatch",
 ] as const
 
+/**
+ * Mirrors `DeviceWanState`. Seven states exist precisely so that "no socket is
+ * held" never collapses into "this device can never hold one".
+ */
+const WAN_STATES = [
+  "automatic",
+  "woken",
+  "dormant",
+  "blocked",
+  "unprovisioned",
+  "disabled",
+  "unmanaged",
+] as const
+
 type Catalogue = {
   grantState: Record<string, string>
   access: { reason: Record<string, string> }
   host: { state: Record<string, string> }
+  wan: { state: Record<string, string>; reason: Record<string, string> }
 }
 
 const catalogues: Record<string, Catalogue> = {
@@ -100,6 +117,32 @@ describe("devices grant-state catalogue", () => {
     const labels = catalogues[locale]!.host.state
     const missing = CONNECTION_STATES.filter((state) => typeof labels[state] !== "string")
     expect(missing).toEqual([])
+  })
+
+  it("keeps the WAN-state union in step with the type", () => {
+    const types = readFileSync(join(process.cwd(), "lib", "devices", "types.ts"), "utf8")
+    const declared = types
+      .match(/export type DeviceWanState =([\s\S]*?)\n\n/)![1]!
+      .split("|")
+      .map((part) => part.trim().replaceAll('"', ""))
+      .filter(Boolean)
+    expect(declared.sort()).toEqual([...WAN_STATES].sort())
+  })
+
+  it.each(Object.keys(catalogues))("%s labels and explains every WAN state", (locale) => {
+    // The reason text is the load-bearing half. A badge alone cannot tell an
+    // owner whether the missing connection is one click away or impossible.
+    const wan = catalogues[locale]!.wan
+    expect(WAN_STATES.filter((state) => typeof wan.state[state] !== "string")).toEqual([])
+    expect(WAN_STATES.filter((state) => typeof wan.reason[state] !== "string")).toEqual([])
+  })
+
+  it.each(Object.keys(catalogues))("%s gives each WAN state its own words", (locale) => {
+    const wan = catalogues[locale]!.wan
+    const labels = WAN_STATES.map((state) => wan.state[state])
+    expect(new Set(labels).size).toBe(labels.length)
+    const reasons = WAN_STATES.map((state) => wan.reason[state])
+    expect(new Set(reasons).size).toBe(reasons.length)
   })
 
   it("gives each state a distinct label", () => {

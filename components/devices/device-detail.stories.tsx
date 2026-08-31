@@ -43,6 +43,7 @@ function fleet(overrides: Partial<Parameters<typeof buildDeviceRows>[0]> = {}): 
     workers: [],
     sandboxConnections: [],
     activeHostId: null,
+    holdsWanConnections: true,
     now: NOW,
     ...overrides,
   })

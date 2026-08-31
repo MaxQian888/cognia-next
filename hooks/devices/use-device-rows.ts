@@ -21,7 +21,7 @@
  * renders the mirror and admits what it is.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useShallow } from "zustand/react/shallow"
 
@@ -44,6 +44,12 @@ import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
 import { getFriendlyDeviceLabel } from "@/lib/device/device-identity"
 import { isTauri, transport } from "@/lib/tauri"
+import {
+  getWanWakeOverrides,
+  getWanWakeOverridesServerSnapshot,
+  subscribeWanWakeOverrides,
+} from "@/lib/signaling/wan-wake-overrides"
+import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useSandboxConnections } from "@/hooks/automation/use-sandbox-connections"
@@ -169,7 +175,23 @@ export function useDeviceRows(): UseDeviceRowsResult {
    * one place every remote machine appears, and their rows say plainly that a
    * shell is all they offer.
    */
-  const sshHosts = useSettingsStore((state) => state.settings.terminalSettings?.sshHosts)
+  const sshHosts = useSettingsStore(selectSavedSshHosts)
+  /**
+   * The WebRTC master switch. Absent means on, matching
+   * `buildSignalingConfigPatch`, so the console and the hub agree about a
+   * settings row that predates the toggle.
+   */
+  const wanEnabled = useSettingsStore((state) => state.settings?.webrtcEnabled ?? true)
+  /**
+   * Devices the owner woke this session. A plain module-level set rather than a
+   * Dexie row on purpose (see `lib/signaling/wan-wake-overrides.ts`), so this is
+   * how the console subscribes to it.
+   */
+  const wokenWanDeviceIds = useSyncExternalStore(
+    subscribeWanWakeOverrides,
+    getWanWakeOverrides,
+    getWanWakeOverridesServerSnapshot
+  )
 
   const [hostDevices, setHostDevices] = useState<Map<string, HostDeviceSummaryInput> | null>(null)
   const [workers, setWorkers] = useState<WorkerInput[]>([])
@@ -241,6 +263,11 @@ export function useDeviceRows(): UseDeviceRowsResult {
         capabilities: projectSandboxConnectionCapabilities(connection, isTauri()),
       })),
       activeHostId,
+      // Only the Tauri desktop runs the signaling hub, so only it can say
+      // whether a WAN connection is held, or start one.
+      holdsWanConnections: isTauri(),
+      wanEnabled,
+      wokenWanDeviceIds,
       ownerNames,
       ...(hostPersonUserId ? { hostPersonUserId } : {}),
       now,
@@ -253,6 +280,8 @@ export function useDeviceRows(): UseDeviceRowsResult {
     workers,
     connections,
     activeHostId,
+    wanEnabled,
+    wokenWanDeviceIds,
     ownerNames,
     hostPersonUserId,
     runtimeAvailability.microvm.available,

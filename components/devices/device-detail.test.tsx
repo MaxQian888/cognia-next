@@ -23,6 +23,9 @@ jest.mock("./sections/runtime-section", () => ({
 jest.mock("./sections/activity-section", () => ({
   ActivitySection: () => <div data-testid="section-activity" />,
 }))
+jest.mock("./sections/wan-section", () => ({
+  WanSection: () => <div data-testid="section-wan" />,
+}))
 jest.mock("./host-controls", () => ({
   HostControls: () => <div data-testid="section-host-controls" />,
 }))
@@ -72,7 +75,7 @@ describe("DeviceDetail", () => {
    */
   it("renders every section at once, with no tab bar", () => {
     render(<DeviceDetail row={row()} actions={actions} />)
-    for (const id of ["overview", "capabilities", "access", "runtime", "activity"]) {
+    for (const id of ["overview", "capabilities", "wan", "access", "runtime", "activity"]) {
       expect(screen.getByTestId(`section-${id}`)).toBeInTheDocument()
     }
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument()

@@ -32,7 +32,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import type { DeviceRow } from "@/lib/devices/types"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
-import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
+import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
 import { isTauri } from "@/lib/platform/detect"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
@@ -49,7 +49,7 @@ export interface SshHostControlsProps {
 
 export function SshHostControls({ row, connect = connectSshFromDock }: SshHostControlsProps) {
   const t = useTranslations("devices.ssh")
-  const terminal = useSettingsStore((s) => s.settings.terminalSettings)
+  const savedHosts = useSettingsStore(selectSavedSshHosts)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -57,7 +57,7 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
   // Memoised so `onConnect`'s identity is stable: a jump host is stored as a
   // profile id, so the whole set has to travel with the one being launched or
   // a bastion-backed host connects direct.
-  const hosts = useMemo(() => (terminal?.sshHosts ?? []) as SshHostProfile[], [terminal?.sshHosts])
+  const hosts = useMemo(() => savedHosts ?? [], [savedHosts])
   const launch = useMemo(
     () => (profileId ? resolveSshHostLaunch(profileId, hosts) : { kind: "unknownHost" as const }),
     [profileId, hosts]
@@ -104,6 +104,20 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         <Alert data-testid="ssh-credential-required">
           <AlertTitle>{t("credentialRequiredTitle")}</AlertTitle>
           <AlertDescription>{t("credentialRequiredBody", { name: launch.name })}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/*
+        The third reason Connect can be dead, and the one that hid a real bug:
+        the row exists but no saved profile carries its id. While every read of
+        the SSH list resolved to `undefined`, this was the state of every row on
+        screen, and nothing said so. A disabled button with no sentence next to
+        it is indistinguishable from a working host you simply cannot click.
+      */}
+      {launch.kind === "unknownHost" ? (
+        <Alert variant="destructive" data-testid="ssh-unknown-host">
+          <AlertTitle>{t("unknownHostTitle")}</AlertTitle>
+          <AlertDescription>{t("unknownHostBody", { ref: row.ref })}</AlertDescription>
         </Alert>
       ) : null}
 

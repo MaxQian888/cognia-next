@@ -152,7 +152,9 @@
     "localOnlyTitle": "This machine only",
     "localOnlyBody": "SSH connects with this computer's own identity, so a paired phone or a browser cannot open one. The host is listed here so the fleet is complete.",
     "credentialRequiredTitle": "Password not saved",
-    "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting."
+    "credentialRequiredBody": "{name} uses password authentication and no password is stored. Add one in Settings → Terminal before connecting.",
+    "unknownHostTitle": "Saved profile not found",
+    "unknownHostBody": "Nothing in Settings → Terminal matches {ref}. The profile was renamed or removed after this row was listed; reopen Settings to add it back."
   },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
@@ -319,5 +321,32 @@
   "addHost": {
     "description": "Pair with a machine running cognia-server so this app can drive its terminal, files, and git.",
     "title": "Add a remote host"
+  },
+  "wan": {
+    "title": "WAN connection",
+    "description": "Whether this desktop keeps a relay connection open so the device can reach it from anywhere.",
+    "lastActivity": "Last activity",
+    "state": {
+      "automatic": "Held open",
+      "woken": "Held open on request",
+      "dormant": "Not held open",
+      "blocked": "Blocked",
+      "unprovisioned": "Not available",
+      "disabled": "Turned off",
+      "unmanaged": "Not managed here"
+    },
+    "reason": {
+      "automatic": "This device has been active recently, so a relay connection is kept open for it and it can be reached from any network.",
+      "woken": "A relay connection is being held open because you asked for one. It lasts until the device checks in or the app restarts, after which the usual rule applies again.",
+      "dormant": "This device has not checked in for over 30 days, so no relay connection is kept open for it. Each open connection costs a permanent socket, and they cannot be shared. The pairing, its keys and its permissions are untouched: connect it below, or the device reconnects by itself the next time it checks in.",
+      "blocked": "This device is paused or revoked, so the host refuses its requests and a relay connection could not serve one. Resume it under Access first.",
+      "unprovisioned": "This device was paired before relay connections existed, so it has no room to join. Pair it again to give it one.",
+      "disabled": "Relay connections are switched off for every device in Settings, so nothing is kept open and connecting here would not help.",
+      "unmanaged": "Only the desktop app keeps relay connections open. This shell cannot tell whether one is held for this device, or start one."
+    },
+    "wake": "Connect now",
+    "sleep": "Stop holding it open",
+    "settings": "Relay settings",
+    "liveHint": "This says whether a connection is kept open, not whether the device is answering right now. Relay settings shows the live status of each one."
   }
 }

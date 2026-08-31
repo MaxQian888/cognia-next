@@ -76,6 +76,12 @@ export function useDeviceOptions(input: UseDeviceOptionsInput): DeviceOption[] {
       workers: [],
       sandboxConnections: [],
       activeHostId,
+      // A picker asks where work could run, never how a device is reached, so
+      // it does not render the WAN facet at all. Saying "not managed here" is
+      // the truthful answer for this surface, and it keeps a Select from
+      // subscribing to the WebRTC master switch to answer a question it never
+      // asks.
+      holdsWanConnections: false,
       now,
     })
     const scoped = kinds ? rows.filter((row) => kinds.includes(row.kind)) : rows

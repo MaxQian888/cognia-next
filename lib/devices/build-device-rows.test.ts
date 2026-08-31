@@ -1,5 +1,6 @@
 import {
   buildDeviceRows,
+  buildDeviceWan,
   deriveReachability,
   dispatchTargetRef,
   pairedDeviceRef,
@@ -11,6 +12,7 @@ import {
 import { RECENTLY_ACTIVE_WINDOW_MS } from "@/lib/companion/device-presence-registry"
 import { DEFAULT_LIVENESS_TTL_MS } from "@/lib/placement/liveness"
 import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
+import { selectSignalingDevices } from "@/lib/signaling/desktop-controller"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type {
   BuildDeviceRowsInput,
@@ -104,9 +106,31 @@ function input(overrides: Partial<BuildDeviceRowsInput> = {}): BuildDeviceRowsIn
     workers: [],
     sandboxConnections: [],
     activeHostId: null,
+    holdsWanConnections: true,
+    wanEnabled: true,
     now: NOW,
     ...overrides,
   }
+}
+
+/**
+ * A phone provisioned for WebRTC. The bare {@link phone} fixture deliberately
+ * is not, because most rows in this repo's history predate ADR-0021.
+ */
+function wanPhone(overrides: Partial<PairedDeviceRow> = {}): PairedDeviceRow {
+  return phone({
+    rendezvousId: "r1",
+    signalingKeyRef: "kr:d1",
+    signalingRoomDescriptor: {
+      v: 2,
+      roomId: "r1",
+      roomNonce: "nonce",
+      desktopSigningKey: "desktop-key",
+      mobileSigningKey: "mobile-key",
+      notAfter: NOW + 1_000_000,
+    },
+    ...overrides,
+  })
 }
 
 function find(rows: DeviceRow[], ref: string): DeviceRow {
@@ -549,5 +573,208 @@ describe("device ownership (ADR-0149 §5, step one)", () => {
   it("does not suspend anything when nobody is signed in on this host", () => {
     const row = pairedRow(rowsWith({ hostDevices: hostDevice({ userId: BOB }) }))
     expect(row?.grants.some((grant) => grant.state === "suspended")).toBe(false)
+  })
+})
+
+describe("buildDeviceWan", () => {
+  const DAY = 24 * 60 * 60 * 1000
+  /**
+   * A realistic wall clock. The module-wide `NOW` is 10,000 seconds past the
+   * epoch, which is fine for a 90 s liveness TTL and useless against a 30-day
+   * window: every "40 days ago" would land before 1970.
+   */
+  const WAN_NOW = 1_800_000_000_000
+
+  const at = (overrides: Partial<BuildDeviceRowsInput> = {}) =>
+    input({ now: WAN_NOW, ...overrides })
+
+  /** Provisioned for WebRTC, seen a second ago, on the realistic clock. */
+  const live = (overrides: Partial<PairedDeviceRow> = {}) =>
+    wanPhone({ pairedAt: WAN_NOW - 400 * DAY, lastSeenAt: WAN_NOW - 1_000, ...overrides })
+
+  it("reports an automatic connection for a provisioned, active, recently-seen device", () => {
+    const wan = buildDeviceWan(live(), at(), "active")
+    expect(wan.state).toBe("automatic")
+    expect(wan.canWake).toBe(false)
+    expect(wan.lastEvidenceAt).toBe(WAN_NOW - 1_000)
+  })
+
+  it("reports dormant, and only dormant offers the button", () => {
+    const wan = buildDeviceWan(live({ lastSeenAt: WAN_NOW - 40 * DAY }), at(), "active")
+    expect(wan.state).toBe("dormant")
+    expect(wan.canWake).toBe(true)
+    expect(wan.lastEvidenceAt).toBe(WAN_NOW - 40 * DAY)
+  })
+
+  it("keeps a device just inside the window connected", () => {
+    expect(buildDeviceWan(live({ lastSeenAt: WAN_NOW - 29 * DAY }), at(), "active").state).toBe(
+      "automatic"
+    )
+  })
+
+  it("reports woken once the owner has asked for a connection", () => {
+    const wan = buildDeviceWan(
+      live({ lastSeenAt: WAN_NOW - 40 * DAY }),
+      at({ wokenWanDeviceIds: new Set(["d1"]) }),
+      "active"
+    )
+    expect(wan.state).toBe("woken")
+    // Already connected, so there is nothing left to click.
+    expect(wan.canWake).toBe(false)
+  })
+
+  it("ignores a wake for a device that was never dormant", () => {
+    expect(buildDeviceWan(live(), at({ wokenWanDeviceIds: new Set(["d1"]) }), "active").state).toBe(
+      "automatic"
+    )
+  })
+
+  it("says unprovisioned for a row paired before WebRTC existed", () => {
+    // Not "dormant": no button would help, because there is no room to join.
+    const wan = buildDeviceWan(
+      phone({ pairedAt: WAN_NOW - 400 * DAY, lastSeenAt: WAN_NOW - 40 * DAY }),
+      at(),
+      "active"
+    )
+    expect(wan.state).toBe("unprovisioned")
+    expect(wan.canWake).toBe(false)
+  })
+
+  it("says unprovisioned for a v1 room descriptor", () => {
+    const legacy = live()
+    const row = {
+      ...legacy,
+      signalingRoomDescriptor: { ...legacy.signalingRoomDescriptor!, v: 1 as unknown as 2 },
+    }
+    expect(buildDeviceWan(row, at(), "active").state).toBe("unprovisioned")
+  })
+
+  it("says blocked for a paused or revoked device rather than dormant", () => {
+    // The deny-list is the reason, and resuming is a different control. Calling
+    // it dormant would send the owner to a wake button that cannot help.
+    const stale = live({ lastSeenAt: WAN_NOW - 40 * DAY })
+    expect(buildDeviceWan(stale, at(), "paused").state).toBe("blocked")
+    expect(buildDeviceWan(stale, at(), "revoked").state).toBe("blocked")
+    expect(buildDeviceWan(stale, at(), "paused").canWake).toBe(false)
+  })
+
+  /**
+   * `adminState` prefers what the HOST reported. The hub push filters on the
+   * mirror row's own `pausedAt` / `revokedAt`. When the two disagree (the
+   * condition the row records as `adminStateConflict`) the console has to
+   * answer from the fields the hub actually reads, or it describes a rule
+   * nobody is applying.
+   */
+  it("says blocked from the mirror row even when the host still calls it active", () => {
+    const paused = live({ pausedAt: WAN_NOW - 2 * DAY })
+    expect(buildDeviceWan(paused, at(), "active").state).toBe("blocked")
+    expect(buildDeviceWan(paused, at(), "active").canWake).toBe(false)
+
+    const revoked = live({ revokedAt: WAN_NOW - 2 * DAY })
+    expect(buildDeviceWan(revoked, at(), "active").state).toBe("blocked")
+  })
+
+  it("never offers a wake the hub push would filter straight back out", () => {
+    // The dead-button case: idle past the window AND paused in the mirror. The
+    // old ordering read `adminState` alone, returned `dormant` with
+    // `canWake: true`, and every press re-pushed a list `isWanBlocked` dropped.
+    const wan = buildDeviceWan(
+      live({ lastSeenAt: WAN_NOW - 40 * DAY, pausedAt: WAN_NOW - 2 * DAY }),
+      at(),
+      "active"
+    )
+    expect(wan.state).toBe("blocked")
+    expect(wan.canWake).toBe(false)
+  })
+
+  it("says unmanaged before it consults the master switch", () => {
+    // A picker that never renders this facet passes `holdsWanConnections:
+    // false` and no switch at all. It must not come out as "turned off", which
+    // is a claim about the user's settings rather than about this surface.
+    const { wanEnabled: _omitted, ...noSwitch } = at({ holdsWanConnections: false })
+    expect(buildDeviceWan(live(), noSwitch, "active").state).toBe("unmanaged")
+  })
+
+  it("says unmanaged on a shell that does not run the hub", () => {
+    // A phone or a browser reading this console genuinely does not know whether
+    // the desktop is holding a socket, and cannot start one.
+    const wan = buildDeviceWan(live(), at({ holdsWanConnections: false }), "active")
+    expect(wan.state).toBe("unmanaged")
+    expect(wan.canWake).toBe(false)
+  })
+
+  it("treats an absent master switch as on, exactly as the hub does", () => {
+    // `buildSignalingConfigPatch` reads `webrtcEnabled ?? true`, so a settings
+    // row written before the toggle existed must not read as switched off.
+    const { wanEnabled: _omitted, ...withoutSwitch } = at()
+    expect(buildDeviceWan(live(), withoutSwitch, "active").state).toBe("automatic")
+  })
+
+  it("says disabled when the WebRTC master switch is off", () => {
+    // Distinct from dormant: waking would do nothing until the switch is back.
+    const wan = buildDeviceWan(
+      live({ lastSeenAt: WAN_NOW - 40 * DAY }),
+      at({ wanEnabled: false }),
+      "active"
+    )
+    expect(wan.state).toBe("disabled")
+    expect(wan.canWake).toBe(false)
+  })
+
+  it("prefers the structural reason over every later one", () => {
+    // An unprovisioned, paused device on a non-desktop shell with the switch
+    // off still reads "unprovisioned", because that is the fact that decides.
+    expect(
+      buildDeviceWan(
+        phone({ pairedAt: WAN_NOW - 400 * DAY, lastSeenAt: WAN_NOW - 40 * DAY }),
+        at({ holdsWanConnections: false, wanEnabled: false }),
+        "paused"
+      ).state
+    ).toBe("unprovisioned")
+  })
+
+  it("omits the timestamp entirely when the row carries no evidence", () => {
+    // "Never" rather than "1970", which is what a raw 0 would render as.
+    const wan = buildDeviceWan(live({ lastSeenAt: 0, pairedAt: 0 }), at(), "active")
+    expect(wan.lastEvidenceAt).toBeUndefined()
+    expect(wan.state).toBe("dormant")
+  })
+
+  it("is attached to paired-device rows and to nothing else", () => {
+    const rows = buildDeviceRows(
+      input({
+        pairedDevices: [wanPhone()],
+        remoteHosts: [host()],
+        workers: [worker()],
+        sshHosts: [
+          { id: "s1", name: "box", host: "h", port: 22, username: "u", authMethod: "agent" },
+        ],
+      })
+    )
+    expect(find(rows, pairedDeviceRef("d1")).wan?.state).toBe("automatic")
+    for (const row of rows.filter((candidate) => candidate.kind !== "paired-device")) {
+      expect(row.wan).toBeUndefined()
+    }
+  })
+
+  it("matches the hub filter: exactly the rows selectSignalingDevices keeps read as connected", () => {
+    // The console and the controller must not describe two different rules, so
+    // both read the same `isWanDormant` leaf and this pins the agreement.
+    const rows = [
+      live({ deviceId: "fresh", rendezvousId: "r-fresh" }),
+      live({ deviceId: "stale", rendezvousId: "r-stale", lastSeenAt: WAN_NOW - 40 * DAY }),
+      live({ deviceId: "paused", rendezvousId: "r-paused", pausedAt: WAN_NOW }),
+      phone({ deviceId: "legacy", pairedAt: WAN_NOW - DAY, lastSeenAt: WAN_NOW - DAY }),
+    ]
+    const connectedHere = rows
+      .filter((row) =>
+        ["automatic", "woken"].includes(
+          buildDeviceWan(row, at(), row.pausedAt ? "paused" : "active").state
+        )
+      )
+      .map((row) => row.deviceId)
+    const connectedInHub = selectSignalingDevices(rows, { now: WAN_NOW }).map((d) => d.deviceId)
+    expect(connectedHere).toEqual(["fresh"])
+    expect(connectedInHub).toEqual(connectedHere)
   })
 })

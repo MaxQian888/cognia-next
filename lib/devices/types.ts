@@ -87,6 +87,54 @@ export interface DeviceCapabilityCell {
   detail?: string
 }
 
+/**
+ * Whether the desktop is holding a WAN signaling connection for this device.
+ *
+ * ADR-0021 costs one permanent WSS socket per connected device (the hosted
+ * deployment routes each one to a per-room Durable Object, so they cannot be
+ * multiplexed), and the paired-device list only ever grows. A device silent for
+ * 30 days therefore gets no automatic connection. That is a real reduction in
+ * what the console can promise, so it is stated rather than left for the reader
+ * to infer from a device that never answers.
+ *
+ * The states are not interchangeable, which is the whole point of having seven:
+ *
+ *  * `automatic` The desktop keeps a connection for this device. Whether the
+ *    socket is up *this second* is the WebRTC card's question, not this one.
+ *  * `woken` Dormant, but a connection is being held because the owner asked
+ *    for one. Lasts until the app restarts or the device answers.
+ *  * `dormant` Idle past the window. No connection, and the only state with a
+ *    button.
+ *  * `blocked` Paused or revoked. The device is on the host deny-list, so a
+ *    socket could not serve a request even if one existed. Resuming it is a
+ *    different control, in Access.
+ *  * `unprovisioned` Paired before WebRTC existed, so there is no room to join
+ *    and never was.
+ *  * `disabled` The WebRTC master switch is off for every device.
+ *  * `unmanaged` This shell does not hold WAN connections at all. Only the
+ *    Tauri desktop runs the hub, so a phone or a browser reading this console
+ *    genuinely does not know and cannot act.
+ */
+export type DeviceWanState =
+  "automatic" | "woken" | "dormant" | "blocked" | "unprovisioned" | "disabled" | "unmanaged"
+
+export interface DeviceWanSummary {
+  state: DeviceWanState
+  /**
+   * The timestamp the dormancy decision was measured from, i.e. the later of
+   * `lastSeenAt` and `pairedAt`. `undefined` when the row carries neither,
+   * which reads as "never" rather than as "the epoch".
+   */
+  lastEvidenceAt?: number
+  /**
+   * Whether the owner can start a connection from here. True only in
+   * `dormant`, and only on a shell that runs the hub. Every other state stays
+   * rendered with the button disabled and a reason, because hiding it would
+   * merge "not supported" with "one click away".
+   */
+  canWake: boolean
+}
+
 /** The four grants the owner can hand a paired device. */
 export type DeviceGrantId = "control" | "agentControl" | "terminal" | "lockedComputerUse"
 
@@ -251,6 +299,12 @@ export interface DeviceRow {
   capabilityReportMissing: boolean
 
   grants: readonly DeviceGrantRow[]
+  /**
+   * WAN signaling, for a paired device. Absent on every other kind: a Host, a
+   * worker and an SSH box are reached over their own transports and never cost
+   * a rendezvous socket.
+   */
+  wan?: DeviceWanSummary
   presence?: DevicePresenceSummary
   placement: DevicePlacementSummary
   runtime: DeviceRuntimeSummary
@@ -365,7 +419,7 @@ export interface BuildDeviceRowsInput {
   hostDevices?: ReadonlyMap<string, HostDeviceSummaryInput>
   remoteHosts: readonly RemoteHostInput[]
   /**
-   * Saved SSH hosts, from `AppSettings.terminalSettings.sshHosts`.
+   * Saved SSH hosts, from `AppSettings.terminal.sshHosts`.
    *
    * Local-identity only: `ssh_terminal_*` is `target: "client"` with
    * `capability: client.local`, and the Rust arm refuses a profile that did not
@@ -380,6 +434,29 @@ export interface BuildDeviceRowsInput {
   sandboxConnections: readonly SandboxConnectionRow[]
   /** `activeHostId` from the remote-host store; `null` routes locally. */
   activeHostId: string | null
+  /**
+   * Whether this shell runs the signaling hub, i.e. whether it is the Tauri
+   * desktop. Only that shell holds WAN connections, so anywhere else the WAN
+   * facet reports `unmanaged` rather than guessing.
+   */
+  holdsWanConnections: boolean
+  /**
+   * `AppSettings.webrtcEnabled`. When the master switch is off no device gets a
+   * connection, and a wake button that silently did nothing would be worse than
+   * one that says why.
+   *
+   * Optional, and absent means on, which is the same default
+   * `buildSignalingConfigPatch` applies to a settings row written before the
+   * toggle existed. A surface that does not manage WAN connections says so
+   * through {@link BuildDeviceRowsInput.holdsWanConnections} and never reaches
+   * this.
+   */
+  wanEnabled?: boolean
+  /**
+   * Device ids the owner woke this session, from
+   * `lib/signaling/wan-wake-overrides.ts`.
+   */
+  wokenWanDeviceIds?: ReadonlySet<string>
   /**
    * `usr_…` → display name, from the ADR-0149 identity projection.
    *

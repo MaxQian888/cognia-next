@@ -1,7 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
+
+import { resetWanWakeOverridesForTests, wakeDeviceForWan } from "@/lib/signaling/wan-wake-overrides"
 
 import { useDeviceRows } from "./use-device-rows"
 
@@ -9,6 +11,11 @@ const pairedRows: unknown[] = []
 let listWorkersImpl: () => Promise<unknown[]> = async () => []
 let transportCallImpl: (name: string) => Promise<unknown> = async () => []
 let tauri = true
+let sshHostSettings: unknown[] | undefined = []
+/** `AppSettings.webrtcEnabled`. Absent means on, as the hub reads it. */
+let webrtcEnabled: boolean | undefined
+/** `AppSettings | null`: the store is null until `load()` resolves. */
+let settingsLoaded = true
 let runtimeAvailability = {
   os: { available: true, backend: "seatbelt", reason: "available", detail: "" },
   microvm: { available: false, reason: "adapter-missing", requiresWorkspace: true },
@@ -48,7 +55,11 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
  */
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
-    selector({ settings: { terminalSettings: { sshHosts: [] } } }),
+    selector(
+      settingsLoaded
+        ? { settings: { terminal: { sshHosts: sshHostSettings }, webrtcEnabled } }
+        : { settings: null }
+    ),
 }))
 
 jest.mock("@/lib/device/device-identity", () => ({
@@ -63,6 +74,10 @@ jest.mock("@/lib/companion/device-presence-registry", () => ({
 beforeEach(() => {
   pairedRows.length = 0
   tauri = true
+  sshHostSettings = []
+  webrtcEnabled = undefined
+  settingsLoaded = true
+  resetWanWakeOverridesForTests()
   listWorkersImpl = async () => []
   transportCallImpl = async () => []
   runtimeAvailability = {
@@ -172,6 +187,52 @@ describe("useDeviceRows", () => {
     expect(result.current.rows.every((row) => row.kind !== "worker")).toBe(true)
   })
 
+  /**
+   * The SSH list is the one input that comes from settings rather than a
+   * device registry, and it reached the hook through a key `AppSettings` does
+   * not have (`terminalSettings`) — which reads as `undefined`, so every saved
+   * host silently vanished from the console. This pins the real path.
+   */
+  it("lists saved SSH hosts from settings", async () => {
+    sshHostSettings = [
+      {
+        id: "s1",
+        name: "prod-web-01",
+        host: "10.0.4.21",
+        port: 22,
+        username: "deploy",
+        authMethod: "privateKey",
+      },
+    ]
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows.find((row) => row.ref === "ssh:s1")).toMatchObject({
+      kind: "ssh-host",
+      label: "prod-web-01",
+    })
+  })
+
+  /**
+   * Settings are `AppSettings | null` and stay null until `load()` resolves, so
+   * the selector runs against a null store on the first paint of `/devices`.
+   * Reading through it without a guard threw inside the selector and took the
+   * page down before any device could be listed.
+   */
+  it("renders the rest of the fleet before settings have loaded", async () => {
+    settingsLoaded = false
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows.some((row) => row.ref === "local")).toBe(true)
+    expect(result.current.rows.every((row) => row.kind !== "ssh-host")).toBe(true)
+  })
+
+  it("lists no SSH row when the user has saved none", async () => {
+    sshHostSettings = undefined
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.rows.every((row) => row.kind !== "ssh-host")).toBe(true)
+  })
+
   it("includes enrolled workers when the host has them", async () => {
     listWorkersImpl = async () => [
       {
@@ -189,5 +250,79 @@ describe("useDeviceRows", () => {
     await waitFor(() =>
       expect(result.current.rows.some((row) => row.ref === "worker-1")).toBe(true)
     )
+  })
+})
+
+describe("useDeviceRows — WAN dormancy", () => {
+  const DAY = 24 * 60 * 60 * 1000
+
+  /** A phone provisioned for WebRTC, silent for the given number of days. */
+  function pushPhone(idleDays: number) {
+    pairedRows.push({
+      deviceId: "d1",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      appVersion: "1.0.0",
+      pairedAt: Date.now() - 400 * DAY,
+      lastSeenAt: Date.now() - idleDays * DAY,
+      allowRemoteTerminal: false,
+      rendezvousId: "r1",
+      signalingKeyRef: "kr:d1",
+      signalingRoomDescriptor: {
+        v: 2,
+        roomId: "r1",
+        roomNonce: "n",
+        desktopSigningKey: "dk",
+        mobileSigningKey: "mk",
+        notAfter: Date.now() + DAY,
+      },
+    })
+  }
+
+  async function wanState() {
+    const { result } = renderHook(() => useDeviceRows())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    return result
+  }
+
+  it("marks a phone silent past the window as dormant", async () => {
+    pushPhone(40)
+    const result = await wanState()
+    expect(result.current.rows.find((row) => row.deviceId === "d1")?.wan).toMatchObject({
+      state: "dormant",
+      canWake: true,
+    })
+  })
+
+  it("leaves a recently-active phone connected", async () => {
+    pushPhone(1)
+    const result = await wanState()
+    expect(result.current.rows.find((row) => row.deviceId === "d1")?.wan?.state).toBe("automatic")
+  })
+
+  it("re-renders as woken when the owner asks for a connection", async () => {
+    // The override set is a plain module singleton, so this is also the pin
+    // that the console is actually subscribed to it.
+    pushPhone(40)
+    const result = await wanState()
+    act(() => wakeDeviceForWan("d1"))
+    await waitFor(() =>
+      expect(result.current.rows.find((row) => row.deviceId === "d1")?.wan?.state).toBe("woken")
+    )
+  })
+
+  it("says unmanaged off the desktop rather than guessing", async () => {
+    tauri = false
+    pushPhone(1)
+    const result = await wanState()
+    expect(result.current.rows.find((row) => row.deviceId === "d1")?.wan?.state).toBe("unmanaged")
+  })
+
+  it("says disabled when the WebRTC master switch is off", async () => {
+    webrtcEnabled = false
+    pushPhone(40)
+    const result = await wanState()
+    expect(result.current.rows.find((row) => row.deviceId === "d1")?.wan?.state).toBe("disabled")
   })
 })

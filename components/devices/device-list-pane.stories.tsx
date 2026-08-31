@@ -110,6 +110,7 @@ const FLEET: DeviceRow[] = buildDeviceRows({
   ],
   sandboxConnections: [],
   activeHostId: null,
+  holdsWanConnections: true,
   now: NOW,
 })
 

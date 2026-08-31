@@ -17,8 +17,8 @@ import { SmartphoneIcon } from "lucide-react"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { pairedDeviceRef, remoteHostRef, sshHostRef } from "@/lib/devices/build-device-rows"
 import type { DeviceKind, RemoteHostInput, SshHostInput } from "@/lib/devices/types"
+import { readSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
-import { useSettingsStore } from "@/stores/settings"
 
 import { createListProvider } from "./list-provider"
 
@@ -44,22 +44,54 @@ export interface DevicesProviderDeps {
   listSshHosts: () => readonly SshHostInput[]
 }
 
-const defaultDeps: DevicesProviderDeps = {
+/**
+ * The real wiring, kept as a named export so a test can reach it.
+ *
+ * Every case in this module's suite injects its own `deps`, so nothing here is
+ * exercised by them: a wrong read would return `[]` forever and the suite would
+ * stay green. That is exactly how the SSH list shipped broken once, which is
+ * why the settings path now lives in `lib/terminal/saved-ssh-hosts` with its
+ * own tests, and why `listRemoteHosts` is asserted directly below.
+ */
+export const DEFAULT_DEVICES_PROVIDER_DEPS: DevicesProviderDeps = {
   listPairedDevices,
   listRemoteHosts: () =>
     useRemoteHostStore.getState().hosts as unknown as readonly RemoteHostInput[],
-  listSshHosts: () =>
-    (useSettingsStore.getState().settings.terminalSettings?.sshHosts ??
-      []) as unknown as readonly SshHostInput[],
+  listSshHosts: readSavedSshHosts,
+}
+
+/**
+ * One source's failure must not blank the other two.
+ *
+ * A provider's `load` is cached (`list-provider.ts`), so a rejection does not
+ * just drop this keystroke: devices vanish from the palette until the TTL
+ * expires. Each source is therefore isolated, including the two synchronous
+ * store reads, which can throw before their store has hydrated.
+ *
+ * The failure is logged rather than swallowed. An empty list is a legitimate
+ * answer here, so a silent `[]` makes "you have no SSH hosts" and "the settings
+ * store threw" the same result on screen and leaves nothing anywhere to tell
+ * them apart. That is exactly how the wrong settings path went unnoticed.
+ */
+async function readSource<T>(
+  name: string,
+  read: () => readonly T[] | PromiseLike<readonly T[]>
+): Promise<readonly T[]> {
+  try {
+    return await read()
+  } catch (error) {
+    console.warn(`global-search/devices: ${name} failed; listing none from it`, error)
+    return []
+  }
 }
 
 export async function loadDeviceSearchRows(
-  deps: DevicesProviderDeps = defaultDeps
+  deps: DevicesProviderDeps = DEFAULT_DEVICES_PROVIDER_DEPS
 ): Promise<DeviceSearchRow[]> {
   const [devices, hosts, sshHosts] = await Promise.all([
-    deps.listPairedDevices().catch(() => []),
-    Promise.resolve(deps.listRemoteHosts()),
-    Promise.resolve(deps.listSshHosts()),
+    readSource("listPairedDevices", () => deps.listPairedDevices()),
+    readSource("listRemoteHosts", () => deps.listRemoteHosts()),
+    readSource("listSshHosts", () => deps.listSshHosts()),
   ])
 
   return [
@@ -87,7 +119,7 @@ export async function loadDeviceSearchRows(
   ]
 }
 
-export function createDevicesProvider(deps: DevicesProviderDeps = defaultDeps) {
+export function createDevicesProvider(deps: DevicesProviderDeps = DEFAULT_DEVICES_PROVIDER_DEPS) {
   return createListProvider<DeviceSearchRow>({
     id: DEVICES_PROVIDER_ID,
     kind: "device",
