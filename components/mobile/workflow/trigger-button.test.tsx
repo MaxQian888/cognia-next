@@ -7,6 +7,10 @@ import userEvent from "@testing-library/user-event"
 
 import { TriggerButton } from "./trigger-button"
 import { listAll, listByStatus } from "@/lib/db/mobile-outbound-queue"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { getDb } from "@/lib/db/schema"
 
 const toastSuccess = jest.fn()
@@ -31,11 +35,22 @@ jest.mock("next-intl", () => ({
   },
 }))
 
+// Every outbound job is addressed to one account and one runtime target, and
+// `enqueue` refuses to write a row it cannot address. `TriggerButton` passes
+// neither and reads the active scope instead, so without one the click lands in
+// the catch arm, toasts the failure, and leaves the queue empty. A phone that
+// can run a workflow on the desktop is paired by definition, so stand a scope
+// up here rather than mocking the queue.
 beforeEach(async () => {
   toastSuccess.mockReset()
   toastError.mockReset()
+  setActiveRuntimeTargetContext("local_acct_a", "host-1")
   const all = await listAll()
   await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
+})
+
+afterEach(() => {
+  clearActiveRuntimeTargetContext()
 })
 
 describe("<TriggerButton />", () => {

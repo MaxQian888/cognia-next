@@ -8,6 +8,10 @@ import userEvent from "@testing-library/user-event"
 
 import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store"
 import { listByStatus, listAll } from "@/lib/db/mobile-outbound-queue"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 import { getDb } from "@/lib/db/schema"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
@@ -94,14 +98,24 @@ function renderTopbar(mode: "read" | "edit" = "read") {
   return { store, onToggleMode, onOpenCopilot, onOpenWorkbench }
 }
 
+// Run hands the workflow to the paired desktop through the outbound queue, and
+// every job there is addressed to one account and one runtime target. `enqueue`
+// refuses to write a row it cannot address, so with no active scope the click
+// toasts a failure instead of queueing. A phone whose Run reaches a desktop is
+// paired by definition, so stand a scope up rather than mocking the queue.
 beforeEach(async () => {
   toastSuccess.mockReset()
   toastError.mockReset()
   toastWarning.mockReset()
   persistEditorWorkflow.mockClear()
   downloadWorkflowJson.mockClear()
+  setActiveRuntimeTargetContext("local_acct_a", "host-1")
   const all = await listAll()
   await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
+})
+
+afterEach(() => {
+  clearActiveRuntimeTargetContext()
 })
 
 describe("<MobileEditorTopbar />", () => {
