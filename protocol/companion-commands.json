@@ -4100,7 +4100,7 @@
       "capability": "client.local",
       "risk": "high",
       "approval": "none",
-      "idempotency": "structural",
+      "idempotency": "required",
       "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
