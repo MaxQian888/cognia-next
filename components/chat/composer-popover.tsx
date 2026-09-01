@@ -58,6 +58,7 @@ import {
   TableIcon,
   TargetIcon,
   TerminalIcon,
+  UserRoundIcon,
   WandSparklesIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -992,6 +993,9 @@ const ENTITY_ROW_ICONS: Record<EntitySelectionKind, typeof BrainIcon> = {
   // back" from the artifact row sitting next to it in the same list.
   result: SquareChevronRightIcon,
   artifact: ShapesIcon,
+  // Singular on purpose: ⌘K gives a whole Squad the plural `UsersIcon`, and a
+  // list can carry both a Squad row and one of its members.
+  teammate: UserRoundIcon,
 }
 
 function triggerTitle(

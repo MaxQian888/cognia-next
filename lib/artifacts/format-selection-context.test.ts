@@ -4,7 +4,7 @@ import {
   wholeArtifactSelection,
   wholeFileSelection,
 } from "./format-selection-context"
-import type { ArtifactSelectionRef } from "@/types/artifact/artifact"
+import type { ArtifactSelectionRef, EntitySelectionKind } from "@/types/artifact/artifact"
 import type { ContextCommentAnchor } from "@/types/context-comment"
 
 const sel = (over: Partial<ArtifactSelectionRef> = {}): ArtifactSelectionRef => ({
@@ -320,13 +320,35 @@ describe("entity selections", () => {
   })
 
   it("uses a distinct noun per kind", () => {
-    const headings = (["memory", "issue", "plan", "session", "artifact"] as const).map(
+    // Every member of `EntitySelectionKind`. The map that answers this is typed
+    // `Record<EntitySelectionKind, string>`, so a new kind cannot compile
+    // without a noun — but `next.config.ts` builds with `ignoreBuildErrors`,
+    // which is how `teammate` shipped with the map still holding seven rows.
+    const ALL_KINDS = [
+      "memory",
+      "issue",
+      "plan",
+      "session",
+      "message",
+      "result",
+      "artifact",
+      "teammate",
+    ] as const satisfies readonly EntitySelectionKind[]
+    const headings = ALL_KINDS.map(
       (entityKind) =>
         formatContextSelectionsForLLM([{ ...base, entityKind, entityId: "x", title: "T" }]).split(
           "\n"
         )[2]
     )
-    expect(new Set(headings).size).toBe(5)
+    expect(new Set(headings).size).toBe(ALL_KINDS.length)
+  })
+
+  it("tells the model a teammate block is a role, not something the member said", () => {
+    expect(
+      formatContextSelectionsForLLM([
+        { ...base, entityKind: "teammate", entityId: "tm1", title: "Reviewer" },
+      ])
+    ).toContain('A Squad teammate\'s role definition "Reviewer":')
   })
 
   it("appends the subtitle when the record has one", () => {
