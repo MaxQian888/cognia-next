@@ -960,6 +960,7 @@ commands.allow = [
   "terminal_reattach",
   "terminal_release_control",
   "terminal_resize",
+  "terminal_serial_attach",
   "terminal_serial_status",
   "terminal_serial_write",
   "terminal_set_flow_control",

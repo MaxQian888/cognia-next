@@ -109,6 +109,20 @@ pub struct TmuxWindow {
 /// `TERM=screen-256color` is deliberately NOT consulted: tmux sets it too, and
 /// so do plenty of emulators that are neither, so it identifies a terminfo
 /// entry rather than a multiplexer.
+///
+/// ## What this cannot tell you
+///
+/// Nesting. A shell inside zellij-inside-tmux inherits `TMUX` and `ZELLIJ`
+/// both, and so does a shell inside tmux-inside-zellij: the variables record
+/// which multiplexers are in the ancestry, never their order. This returns the
+/// outer one by the fixed precedence above, which is right for the first case
+/// and wrong for the second, and no reading of the environment alone can
+/// separate them. Answering it properly means walking the process tree.
+///
+/// That is tolerable only because the answer is descriptive today. Nothing
+/// dispatches a detach or an attach from it, and `list_tmux_sessions` asks tmux
+/// directly rather than trusting this. Before anything acts on the result, the
+/// ambiguity has to be resolved rather than documented.
 pub fn classify_env(env: &HashMap<String, String>) -> MultiplexerInfo {
     let non_empty = |key: &str| env.get(key).filter(|value| !value.is_empty()).cloned();
 

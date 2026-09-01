@@ -26,12 +26,15 @@
  * is what `crates/cognia-terminal/src/serial.rs` publishes. Base64 rather than
  * a JSON number array because the latter is roughly a 4x expansion and a
  * 115200-baud device saturates it.
+ *
+ * Opening is two host calls, not one. See [`SerialTerminalSession.open`].
  */
 
 import { transport } from "@/lib/tauri"
 
 import { BaseTerminalSession } from "./base-session"
 import {
+  attachSerialPort,
   closeSerialPort,
   formatSerialConfig,
   openSerialPort,
@@ -94,18 +97,33 @@ export class SerialTerminalSession extends BaseTerminalSession {
   }
 
   /**
-   * Open `config.port` and start streaming.
+   * Open `config.port`, subscribe, and only then let the bytes flow.
    *
-   * Listeners are attached BEFORE the first byte can arrive, because the base
-   * class's early-data buffer only covers the window between the first byte
-   * and the first subscriber. A device that greets on open (most bootloaders
-   * do) would otherwise lose its banner.
+   * Three calls rather than one, and the order is the whole point. A Tauri
+   * event is not buffered, and the id needed to name the two topics only
+   * exists once the open has returned, so a host that started reading inside
+   * `terminal_open_serial` emitted its first bytes with nobody listening. A
+   * bootloader that greets on open lost its banner that way, and a port that
+   * died in the same window left a session this class still believed was
+   * connected. `terminal_serial_attach` is what starts the read loop, and it
+   * is called last on purpose.
+   *
+   * The port is open but idle between the open and the attach, so a failure to
+   * attach leaves a closeable session rather than a leaked handle.
    */
   static async open(config: SerialConfig, projectId: string | null = null) {
     const result = await openSerialPort(config)
     if ("error" in result) throw new Error(result.error)
     const session = new SerialTerminalSession(result.sessionId, config, projectId)
     session.subscribe()
+    if (!(await attachSerialPort(result.sessionId))) {
+      // The host does not know this id, which means the open raced a close or
+      // the session died between the two calls. Tearing down here beats
+      // handing back a session that will never produce a byte.
+      session.teardown()
+      await closeSerialPort(result.sessionId)
+      throw new Error(`the serial session ${result.sessionId} was gone before it could stream`)
+    }
     return session
   }
 
@@ -136,6 +154,7 @@ export class SerialTerminalSession extends BaseTerminalSession {
     this.unlisten = [data, status]
   }
 
+  /** Stop listening. Safe to call more than once. */
   private teardown(): void {
     for (const off of this.unlisten) off()
     this.unlisten = []

@@ -20,6 +20,7 @@ export { BAUD_RATES, DEFAULT_SERIAL_CONFIG } from "./types"
 export {
   listSerialPorts,
   openSerialPort,
+  attachSerialPort,
   closeSerialPort,
   writeSerialPort,
   getSerialStatus,

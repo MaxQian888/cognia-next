@@ -11,6 +11,7 @@ describe("lib/terminal/serial barrel", () => {
     for (const name of [
       "listSerialPorts",
       "openSerialPort",
+      "attachSerialPort",
       "closeSerialPort",
       "writeSerialPort",
       "getSerialStatus",
@@ -32,6 +33,7 @@ describe("lib/terminal/serial barrel", () => {
     expect(Object.keys(serial).sort()).toEqual([
       "BAUD_RATES",
       "DEFAULT_SERIAL_CONFIG",
+      "attachSerialPort",
       "closeSerialPort",
       "formatHexDump",
       "formatSerialConfig",

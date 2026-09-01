@@ -5,6 +5,7 @@
 import {
   listSerialPorts,
   openSerialPort,
+  attachSerialPort,
   closeSerialPort,
   writeSerialPort,
   lineEndingStr,
@@ -49,6 +50,28 @@ describe("serial/serial-connection", () => {
       }
       const result = await openSerialPort(config)
       expect("error" in result).toBe(true)
+    })
+  })
+
+  describe("attachSerialPort", () => {
+    it("returns false when not in Tauri", async () => {
+      expect(await attachSerialPort("s1")).toBe(false)
+    })
+
+    /**
+     * The attach is what starts the read loop, so it is the one call that must
+     * carry the id the open returned. A silent `true` on a mismatched id would
+     * leave a session that never streams and never says why.
+     */
+    it("passes the session id through and reports what the host answered", async () => {
+      mockIsTauri.mockReturnValue(true)
+      const { invoke } = jest.requireMock("@tauri-apps/api/core")
+      invoke.mockResolvedValueOnce(true)
+      expect(await attachSerialPort("sess-9")).toBe(true)
+      expect(invoke).toHaveBeenCalledWith("terminal_serial_attach", { sessionId: "sess-9" })
+
+      invoke.mockResolvedValueOnce(false)
+      expect(await attachSerialPort("gone")).toBe(false)
     })
   })
 

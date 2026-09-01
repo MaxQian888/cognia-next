@@ -15,13 +15,17 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 const openSerialPortMock = jest.fn()
+const attachSerialPortMock = jest.fn()
 const writeSerialPortMock = jest.fn()
 const closeSerialPortMock = jest.fn()
+/** Every host call, in the order the session made it. */
+const calls: string[] = []
 jest.mock("./serial/serial-connection", () => {
   const actual = jest.requireActual("./serial/serial-connection")
   return {
     ...actual,
     openSerialPort: (...args: unknown[]) => openSerialPortMock(...args),
+    attachSerialPort: (...args: unknown[]) => attachSerialPortMock(...args),
     writeSerialPort: (...args: unknown[]) => writeSerialPortMock(...args),
     closeSerialPort: (...args: unknown[]) => closeSerialPortMock(...args),
   }
@@ -41,11 +45,20 @@ const handlers = new Map<string, (payload: never) => void>()
 
 beforeEach(() => {
   handlers.clear()
+  calls.length = 0
   subscribeMock.mockReset().mockImplementation((topic: string, handler) => {
+    calls.push("subscribe")
     handlers.set(topic, handler)
     return () => handlers.delete(topic)
   })
-  openSerialPortMock.mockReset().mockResolvedValue({ sessionId: "sess-1" })
+  openSerialPortMock.mockReset().mockImplementation(async () => {
+    calls.push("open")
+    return { sessionId: "sess-1" }
+  })
+  attachSerialPortMock.mockReset().mockImplementation(async () => {
+    calls.push("attach")
+    return true
+  })
   writeSerialPortMock.mockReset().mockResolvedValue(true)
   closeSerialPortMock.mockReset().mockResolvedValue(true)
 })
@@ -60,13 +73,32 @@ it("labels the tab with the port and its line settings", async () => {
 
 /**
  * A device that greets on open (most bootloaders do) sends its banner before
- * any consumer mounts. Subscribing after the open call would drop it, and the
- * base class's early-data buffer only covers the window after the first byte.
+ * any consumer mounts, and a Tauri event is not buffered. The host therefore
+ * reads nothing until the attach, and the attach must come after both
+ * subscriptions or the banner is emitted with nobody listening.
  */
-it("subscribes to both topics before returning", async () => {
+it("opens, subscribes, and only then attaches", async () => {
   await SerialTerminalSession.open(config)
   expect(handlers.has(serialDataTopic("sess-1"))).toBe(true)
   expect(handlers.has(serialStatusTopic("sess-1"))).toBe(true)
+  expect(calls).toEqual(["open", "subscribe", "subscribe", "attach"])
+  expect(attachSerialPortMock).toHaveBeenCalledWith("sess-1")
+})
+
+/**
+ * The host not knowing the id means the session died between the two calls.
+ * Returning it anyway would hand back a tab that can never produce a byte.
+ */
+it("refuses the session when the attach finds nothing to attach to", async () => {
+  attachSerialPortMock.mockImplementation(async () => {
+    calls.push("attach")
+    return false
+  })
+  await expect(SerialTerminalSession.open(config)).rejects.toThrow(
+    /was gone before it could stream/
+  )
+  expect(closeSerialPortMock).toHaveBeenCalledWith("sess-1")
+  expect(handlers.size).toBe(0)
 })
 
 it("decodes inbound base64 into the data stream", async () => {

@@ -99,6 +99,29 @@ export async function writeSerialPort(
 }
 
 /**
+ * Start streaming a session that `openSerialPort` opened.
+ *
+ * Opening and reading are two calls because a Tauri event is not buffered: the
+ * renderer cannot subscribe to `terminal://serial/<id>/...` until it holds the
+ * id, so a host that began reading inside the open would emit the first bytes
+ * into a void. A bootloader that greets on open loses its banner that way, and
+ * a port that dies in the same window leaves a session the UI still shows as
+ * connected. The port is open but idle between the two calls.
+ *
+ * Idempotent, and `false` only when the id names no session.
+ */
+export async function attachSerialPort(sessionId: string): Promise<boolean> {
+  if (!isTauri()) return false
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    return await invoke<boolean>("terminal_serial_attach", { sessionId })
+  } catch {
+    return false
+  }
+}
+
+/**
  * Get the current connection status of a serial session.
  */
 export async function getSerialStatus(sessionId: string): Promise<SerialConnectionStatus> {

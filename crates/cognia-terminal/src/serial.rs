@@ -102,11 +102,23 @@ pub struct SerialOpenResult {
     pub session_id: String,
 }
 
+/// Outbound bytes plus the channel the loop answers on.
+///
+/// The ack is what makes [`write_serial`] mean "the device took these bytes"
+/// rather than "these bytes are in a queue". Without it a write that was still
+/// sitting in the channel when the cable was pulled reported success, and
+/// `writeSerialPort` turns that into a `true` the composer shows as sent.
+type WriteRequest = (Vec<u8>, tokio::sync::oneshot::Sender<Result<(), String>>);
+
 struct SerialSession {
     /// Outbound bytes. A channel rather than a shared writer so a slow device
     /// cannot hold a lock the status read also wants.
-    writer: mpsc::Sender<Vec<u8>>,
+    writer: mpsc::Sender<WriteRequest>,
     status: Arc<Mutex<&'static str>>,
+    /// Released by [`attach_serial`], which is what lets the read loop start.
+    /// `None` once a caller has attached, so a second attach is a no-op rather
+    /// than a panic.
+    attach: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// Dropping this aborts the read loop, which closes the port.
     _guard: Arc<ReadGuard>,
 }
@@ -282,34 +294,52 @@ pub async fn open_serial(
 
     let session_id = Uuid::new_v4().to_string();
     let status = Arc::new(Mutex::new("connected"));
-    let (writer_tx, mut writer_rx) = mpsc::channel::<Vec<u8>>(64);
+    let (writer_tx, mut writer_rx) = mpsc::channel::<WriteRequest>(64);
+    let (attach_tx, attach_rx) = tokio::sync::oneshot::channel::<()>();
 
     let task_id = session_id.clone();
     let task_status = Arc::clone(&status);
     let task_sink = Arc::clone(&sink);
     let handle = tokio::spawn(async move {
+        // Nothing is read until a caller attaches. The renderer cannot
+        // subscribe to the two topics until `open_serial` has returned it a
+        // session id, so a loop that started here would emit into a void: a
+        // bootloader that greets on open lost its banner, and a port that died
+        // in that window left a session the UI still believed was connected.
+        // `Err` means the session was closed before anyone attached.
+        if attach_rx.await.is_err() {
+            return;
+        }
         let mut stream = stream;
         let mut buffer = vec![0u8; READ_CHUNK];
         loop {
+            // Deliberately NOT `biased`. Polling the write branch first meant a
+            // caller that kept the 64-slot queue full could starve the read
+            // branch indefinitely, and because the selected branch runs its
+            // `write_all` to completion, inbound bytes piled up in the kernel
+            // buffer and a hot-unplug went unnoticed until the writes drained.
+            // Random selection lets both sides make progress.
             tokio::select! {
-                // Writes are biased first so a burst of inbound data cannot
-                // starve the command the user just typed.
-                biased;
                 outbound = writer_rx.recv() => {
-                    let Some(bytes) = outbound else { break };
+                    let Some((bytes, ack)) = outbound else { break };
                     match tokio::time::timeout(WRITE_TIMEOUT, stream.write_all(&bytes)).await {
-                        Ok(Ok(())) => {}
+                        Ok(Ok(())) => {
+                            // A serial write is only durable once it has been
+                            // handed to the driver, which `write_all` returning
+                            // Ok is. `flush` on a `SerialStream` is a no-op.
+                            let _ = ack.send(Ok(()));
+                        }
                         Ok(Err(error)) => {
-                            fail(&task_sink, &task_id, &task_status, &error.to_string());
+                            let reason = error.to_string();
+                            let _ = ack.send(Err(reason.clone()));
+                            fail(&task_sink, &task_id, &task_status, &reason);
                             break
                         }
                         Err(_) => {
-                            fail(
-                                &task_sink,
-                                &task_id,
-                                &task_status,
-                                "the device did not accept the write within 5s (flow control?)",
-                            );
+                            let reason =
+                                "the device did not accept the write within 5s (flow control?)";
+                            let _ = ack.send(Err(reason.to_string()));
+                            fail(&task_sink, &task_id, &task_status, reason);
                             break
                         }
                     }
@@ -338,6 +368,14 @@ pub async fn open_serial(
                 }
             }
         }
+        // The loop only ends when the port is gone, so the entry describes a
+        // session that can no longer read or write. Leaving it behind held the
+        // sender, the sink and an `AbortHandle` for the life of the process,
+        // one set per hot-unplug. The renderer already has the `error` status
+        // event; `serial_status` answering `disconnected` afterwards is the
+        // truthful reading of an id that names nothing.
+        let removed = registry().sessions.lock().remove(&task_id);
+        drop(removed);
     });
 
     registry().sessions.lock().insert(
@@ -345,14 +383,44 @@ pub async fn open_serial(
         SerialSession {
             writer: writer_tx,
             status,
+            attach: Mutex::new(Some(attach_tx)),
             _guard: Arc::new(ReadGuard(handle.abort_handle())),
         },
     );
-    sink.emit(
-        &status_topic(&session_id),
-        serde_json::json!({ "status": "connected" }),
-    );
     Ok(SerialOpenResult { session_id })
+}
+
+/// Start streaming, now that the caller is listening.
+///
+/// Split from [`open_serial`] because the renderer can only subscribe to
+/// `terminal://serial/<id>/...` once it holds the id, and Tauri events are not
+/// buffered: anything emitted in that window is simply gone. Opening and
+/// reading are therefore two steps, and the port sits idle but open between
+/// them. `false` when the id names nothing.
+///
+/// Idempotent. A second attach finds the gate already spent and does nothing,
+/// so a reconnecting renderer cannot restart a loop that is already running.
+///
+/// A write issued before the attach queues rather than failing, and its ack
+/// arrives once the loop starts. In practice `SerialTerminalSession.open`
+/// attaches before it hands the session to anyone, so nothing can write first.
+pub fn attach_serial(session_id: &str) -> bool {
+    let gate = {
+        let sessions = registry().sessions.lock();
+        let Some(session) = sessions.get(session_id) else {
+            return false;
+        };
+        let gate = session.attach.lock().take();
+        gate
+    };
+    match gate {
+        Some(gate) => {
+            let _ = gate.send(());
+            true
+        }
+        // Already attached. Still `true`: the session exists and is streaming.
+        None => true,
+    }
 }
 
 fn fail(
@@ -389,10 +457,17 @@ pub async fn write_serial(session_id: &str, data: &str) -> Result<(), String> {
             .ok_or_else(|| format!("no serial session {session_id}"))?;
         session.writer.clone()
     };
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
     writer
-        .send(data.as_bytes().to_vec())
+        .send((data.as_bytes().to_vec(), ack_tx))
         .await
-        .map_err(|_| format!("serial session {session_id} is no longer reading"))
+        .map_err(|_| format!("serial session {session_id} is no longer reading"))?;
+    // Waiting for the ack is the point: returning at the queue boundary made a
+    // write that the cable never carried indistinguishable from one it did.
+    // The wait is bounded by WRITE_TIMEOUT inside the loop.
+    ack_rx
+        .await
+        .map_err(|_| format!("serial session {session_id} stopped before the write landed"))?
 }
 
 /// `disconnected` | `connected` | `error`.
@@ -450,6 +525,11 @@ pub async fn terminal_close_serial(session_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn terminal_serial_write(session_id: String, data: String) -> Result<(), String> {
     write_serial(&session_id, &data).await
+}
+
+#[tauri::command]
+pub async fn terminal_serial_attach(session_id: String) -> Result<bool, String> {
+    Ok(attach_serial(&session_id))
 }
 
 #[tauri::command]
@@ -594,5 +674,85 @@ mod tests {
     fn topics_are_namespaced_per_session() {
         assert_eq!(data_topic("abc"), "terminal://serial/abc/data");
         assert_eq!(status_topic("abc"), "terminal://serial/abc/status");
+    }
+
+    /// Registers a session shaped like a real one, without a port: an attach
+    /// gate, a write channel, and a parked task holding the abort handle. Every
+    /// registry-lifecycle rule below is about those three and not about the
+    /// hardware, so this exercises them on a machine with no serial devices.
+    fn register_fake_session(id: &str) -> (mpsc::Receiver<WriteRequest>, Arc<Mutex<&'static str>>) {
+        let (writer_tx, writer_rx) = mpsc::channel::<WriteRequest>(4);
+        let (attach_tx, attach_rx) = tokio::sync::oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new("connected"));
+        let handle = tokio::spawn(async move {
+            let _ = attach_rx.await;
+            std::future::pending::<()>().await;
+        });
+        registry().sessions.lock().insert(
+            id.to_string(),
+            SerialSession {
+                writer: writer_tx,
+                status: Arc::clone(&status),
+                attach: Mutex::new(Some(attach_tx)),
+                _guard: Arc::new(ReadGuard(handle.abort_handle())),
+            },
+        );
+        (writer_rx, status)
+    }
+
+    /// The renderer cannot subscribe before it holds the id, so the read loop
+    /// must not start until it says so. Attaching twice is what a reconnecting
+    /// renderer does, and it must not restart or panic.
+    #[tokio::test]
+    async fn attaching_releases_the_gate_once_and_tolerates_a_second_call() {
+        assert!(!attach_serial("no-such-session"));
+
+        let id = "attach-test";
+        let (_rx, _status) = register_fake_session(id);
+        assert!(attach_serial(id));
+        // The gate is spent. Still `true`: the session exists and is streaming.
+        assert!(attach_serial(id));
+        assert!(close_serial(id));
+    }
+
+    /// A write is acknowledged by the loop, not by the queue. When the loop is
+    /// gone the ack sender is dropped, and that must surface as an error rather
+    /// than as a resolved write the composer renders as sent.
+    #[tokio::test]
+    async fn a_write_whose_reader_vanished_reports_the_loss() {
+        let id = "write-ack-test";
+        let (rx, _status) = register_fake_session(id);
+        // Dropping the receiver is what a stopped loop looks like from here.
+        drop(rx);
+        let error = write_serial(id, "AT\r\n")
+            .await
+            .expect_err("a write nobody can take must not resolve");
+        assert!(error.contains("no longer reading"), "{error}");
+        assert!(close_serial(id));
+    }
+
+    /// The loop answers the ack, and only then does the caller return.
+    #[tokio::test]
+    async fn a_write_resolves_on_the_acknowledgement_the_loop_sends() {
+        let id = "write-ok-test";
+        let (mut rx, _status) = register_fake_session(id);
+        let write = tokio::spawn(async move { write_serial("write-ok-test", "AT\r\n").await });
+        let (bytes, ack) = rx.recv().await.expect("the write must reach the loop");
+        assert_eq!(bytes, b"AT\r\n".to_vec());
+        ack.send(Ok(())).expect("the caller must still be waiting");
+        write.await.expect("join").expect("the write must resolve");
+        assert!(close_serial(id));
+    }
+
+    /// Closing drops the session, which drops the `ReadGuard` and aborts the
+    /// task that owns the `SerialStream`. A second close names nothing.
+    #[tokio::test]
+    async fn closing_removes_the_entry_and_is_idempotent() {
+        let id = "close-test";
+        let (_rx, _status) = register_fake_session(id);
+        assert_eq!(serial_status(id), "connected");
+        assert!(close_serial(id));
+        assert_eq!(serial_status(id), "disconnected");
+        assert!(!close_serial(id));
     }
 }

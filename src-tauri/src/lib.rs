@@ -1038,6 +1038,7 @@ pub fn run() {
             terminal::serial::terminal_open_serial,
             terminal::serial::terminal_close_serial,
             terminal::serial::terminal_serial_write,
+            terminal::serial::terminal_serial_attach,
             terminal::serial::terminal_serial_status,
             tts::keyring::tts_keyring_get,
             tts::keyring::tts_keyring_set,
