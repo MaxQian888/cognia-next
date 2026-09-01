@@ -39,6 +39,7 @@ import type { InspectedTemplatePackage } from "@/lib/templates/package"
 import type {
   TemplatePackageVerification,
   TemplatePreflightPlan,
+  TemplateConflictResolution,
   TemplateUpdatePlan,
 } from "@/lib/templates/service"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
@@ -297,8 +298,11 @@ export function TemplateStudio() {
     setUpdatePlan(await runtime.service.planUpdate(instanceId, version))
   }
 
-  const applyUpdate = async (target: TemplateUpdatePlan) => {
-    await runtime.service.applyUpdate(target, { confirmed: true })
+  const applyUpdate = async (
+    target: TemplateUpdatePlan,
+    resolutions: Record<string, TemplateConflictResolution>
+  ) => {
+    await runtime.service.applyUpdate(target, { confirmed: true, resolutions })
     setUpdatePlan(undefined)
     setMessage(t("messages.updated", { version: target.next.version ?? "" }))
     setInstances(await runtime.repository.listInstances())
@@ -809,7 +813,7 @@ export function TemplateStudio() {
       <TemplateUpdateDialog
         plan={updatePlan}
         onOpenChange={(open) => (open ? undefined : setUpdatePlan(undefined))}
-        onConfirm={(target) => guard(() => applyUpdate(target))()}
+        onConfirm={(target, resolutions) => guard(() => applyUpdate(target, resolutions))()}
       />
       <TemplateExportDialog
         origin={exportOrigin}

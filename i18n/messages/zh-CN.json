@@ -39974,12 +39974,16 @@
       "confirm": "应用更新",
       "conflicts": "与你的本地修改有 {count} 处冲突",
       "description": "从 {from} 更新到 {to}。",
+      "keepLocal": "保留我的",
+      "resolutionLabel": "裁决 {path}",
       "status": {
         "blocked": "已阻断",
         "needs-confirmation": "需要确认",
         "ready": "就绪"
       },
-      "title": "更新该实例"
+      "takeUpstream": "采用上游",
+      "title": "更新该实例",
+      "unresolved": "还有 {count} 处冲突未裁决"
     }
   },
   "terminal": {

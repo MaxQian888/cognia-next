@@ -1,6 +1,7 @@
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import { isCredentialKey } from "./contracts"
 import { interpolateTemplatePayload, resolveTemplateInputs } from "./interpolate"
+import { diffPayload } from "./payload-diff"
 import type {
   TemplateDefinitionEnvelope,
   TemplateDomain,
@@ -8,7 +9,6 @@ import type {
   TemplateValidationIssue,
 } from "./contracts"
 import type {
-  TemplateDiffResult,
   TemplateDomainAdapter,
   TemplateInstantiationResult,
   TemplatePreflightPlan,
@@ -189,24 +189,16 @@ function asObject(value: unknown): Record<string, TemplateJson> {
   return json && typeof json === "object" && !Array.isArray(json) ? json : {}
 }
 
-function genericDiff(
-  baseline: TemplateJson,
-  local: TemplateJson,
-  next: TemplateJson
-): TemplateDiffResult {
-  const baselineText = JSON.stringify(baseline)
-  const localText = JSON.stringify(local)
-  const nextText = JSON.stringify(next)
-  if (baselineText === nextText) return { changes: [], conflicts: [] }
-  if (baselineText === localText) {
-    return { changes: [{ path: "$", before: baseline, after: next }], conflicts: [] }
-  }
-  if (localText === nextText) return { changes: [], conflicts: [] }
-  return {
-    changes: [],
-    conflicts: [{ path: "$", baseline, local, next }],
-  }
-}
+/**
+ * The default diff for every domain: a per-path three-way comparison.
+ *
+ * This used to compare whole documents, so baseline/local/next all differing
+ * produced a single `$` conflict and `planUpdate` refused the update outright.
+ * Two disjoint edits are not a conflict, and `lib/templates/payload-diff` is
+ * where that judgement now lives. A domain with stable element ids inside its
+ * arrays can still override `diff` to do better than atomic array handling.
+ */
+const genericDiff = diffPayload
 
 function definitionPayload<T extends TemplateJson>(definition: TemplateDefinitionEnvelope): T {
   return definition.payload as T
@@ -543,9 +535,13 @@ export function createAgentTeamTemplateAdapter(port: AgentTeamTemplatePort): Tem
 
     diff: genericDiff,
 
-    async update({ instance, next }) {
+    async update({ instance, next, resolvedPayload }) {
       if (!port.update) throw new Error("AgentTeam in-place template update is unavailable")
-      return port.update(instance.resources, resolvedUpdatePayload(next, instance))
+      return port.update(
+        instance.resources,
+        (resolvedPayload as AgentTeamTemplatePayload | undefined) ??
+          resolvedUpdatePayload(next, instance)
+      )
     },
 
     async rollback(token) {
@@ -646,11 +642,11 @@ function createCrudTemplateAdapter(
       return Promise.resolve(port.snapshot(resourceIds))
     },
     diff: genericDiff,
-    async update({ instance, next }) {
+    async update({ instance, next, resolvedPayload }) {
       if (!port.update) throw new Error(`${domain} in-place template update is unavailable`)
       const updated = await port.update(
         instance.resources,
-        resolvedUpdatePayload(next, instance),
+        resolvedPayload ?? resolvedUpdatePayload(next, instance),
         {}
       )
       return { resources: [{ domain, id: updated.id }] }

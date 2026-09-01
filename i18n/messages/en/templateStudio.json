@@ -330,11 +330,15 @@
     "confirm": "Apply update",
     "conflicts": "{count, plural, =1 {1 conflict} other {# conflicts}} with your local edits",
     "description": "From {from} to {to}.",
+    "keepLocal": "Keep mine",
+    "resolutionLabel": "Resolve {path}",
     "status": {
       "blocked": "Blocked",
       "needs-confirmation": "Needs confirmation",
       "ready": "Ready"
     },
-    "title": "Update this instance"
+    "takeUpstream": "Take theirs",
+    "title": "Update this instance",
+    "unresolved": "{count, plural, =1 {1 conflict still needs an answer} other {# conflicts still need an answer}}"
   }
 }

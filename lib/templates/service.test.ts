@@ -316,7 +316,7 @@ describe("TemplateService lifecycle", () => {
     )
   })
 
-  it("plans a three-way update, blocks conflicts, and preserves detached instances", async () => {
+  it("plans a three-way update, resolves conflicts, and preserves detached instances", async () => {
     const repository = new InMemoryTemplateRepository()
     const catalog = new TemplateCatalog()
     const adapter: TemplateDomainAdapter = {
@@ -371,9 +371,20 @@ describe("TemplateService lifecycle", () => {
 
     const update = await service.planUpdate(instance.id, second.version!)
 
-    expect(update.status).toBe("blocked")
+    // A conflict is answerable, not fatal: the plan proceeds, but every
+    // conflicting path has to be resolved before the write is allowed.
+    expect(update.status).toBe("needs-confirmation")
     expect(update.diff.conflicts).toHaveLength(1)
-    await expect(service.applyUpdate(update, { confirmed: true })).rejects.toThrow(/blocked/i)
+    const conflictPath = update.diff.conflicts[0]!.path
+    await expect(service.applyUpdate(update, { confirmed: true })).rejects.toThrow(
+      /unresolved conflicts/i
+    )
+    await expect(
+      service.applyUpdate(update, {
+        confirmed: true,
+        resolutions: { [conflictPath]: "upstream" },
+      })
+    ).resolves.toBeDefined()
 
     const detached = await service.detachInstance(instance.id)
     expect(detached.detachedAt).toBe(1_000)

@@ -1,6 +1,7 @@
 import { sha256Hex } from "@/lib/share/hash"
 import { TemplateCatalog } from "./catalog"
 import { interpolatableBindings, resolvedUpdatePayload } from "./adapters"
+import { mergePayload } from "./payload-diff"
 import {
   canonicalTemplateStringify,
   createTemplateDefinition,
@@ -96,6 +97,9 @@ export interface TemplateDiffResult {
   }>
 }
 
+/** Which side of a conflicting path wins when an update is applied. */
+export type TemplateConflictResolution = "local" | "upstream"
+
 export interface TemplateUpdatePlan {
   id: string
   instanceId: string
@@ -126,6 +130,17 @@ export interface TemplateDomainAdapter {
     instance: TemplateInstanceRecord
     next: TemplateDefinitionEnvelope
     diff: TemplateDiffResult
+    /**
+     * What to actually write: the local resource with the upstream changes
+     * folded in, and with the conflicts the user chose to adopt taken from
+     * `next`. Absent when there was nothing to reconcile, in which case an
+     * adapter falls back to `resolvedUpdatePayload(next, instance)`.
+     *
+     * Without this the adopt-set could not reach the adapter at all: both
+     * implementations ignored `diff` and wrote the whole of `next`, so a
+     * partial resolution would have been silently discarded.
+     */
+    resolvedPayload?: TemplateJson
     idempotencyKey: string
   }): Promise<TemplateInstantiationResult>
   rollback?(token: TemplateJson): Promise<void>
@@ -857,10 +872,15 @@ export class TemplateService {
         message: "Active or running resources cannot be updated",
       })
     }
+    // A conflict is a question, not a wall. It used to be a blocker, which,
+    // combined with a whole-document diff, meant a customised instance could
+    // never take an upstream release again. Per-path conflicts are answerable,
+    // so they downgrade to a warning and `applyUpdate` requires the caller to
+    // have answered every one of them.
     if (diff.conflicts.length > 0) {
       issues.push({
         code: "update.conflict",
-        severity: "blocker",
+        severity: "warning",
         message: "The instance and source both changed in conflicting ways",
       })
     }
@@ -870,17 +890,37 @@ export class TemplateService {
       source: instance.source.snapshot,
       next,
       diff,
-      status: issues.length > 0 ? "blocked" : "needs-confirmation",
+      status: issues.some((issue) => issue.severity === "blocker")
+        ? "blocked"
+        : "needs-confirmation",
       issues,
     }
   }
 
+  /**
+   * Apply a planned update.
+   *
+   * `resolutions` answers every conflict the plan reported, by path. Silence
+   * is refused rather than defaulted: "keep local" and "take upstream" each
+   * discard someone's work, so a caller that never rendered the conflicts must
+   * not be able to pick one of them by omission.
+   */
   async applyUpdate(
     plan: TemplateUpdatePlan,
-    input: { confirmed: boolean }
+    input: { confirmed: boolean; resolutions?: Record<string, TemplateConflictResolution> }
   ): Promise<TemplateInstantiationResult> {
     if (plan.status === "blocked") throw new Error("Blocked template update cannot be applied")
     if (!input.confirmed) throw new Error("Template update requires explicit confirmation")
+    const resolutions = input.resolutions ?? {}
+    const unanswered = plan.diff.conflicts
+      .map((conflict) => conflict.path)
+      .filter((path) => resolutions[path] === undefined)
+    if (unanswered.length > 0) {
+      throw new Error(`Template update has unresolved conflicts: ${unanswered.join(", ")}`)
+    }
+    const adopt = Object.entries(resolutions)
+      .filter(([, choice]) => choice === "upstream")
+      .map(([path]) => path)
     const instance = await this.repository.getInstance(plan.instanceId)
     if (!instance || instance.detachedAt) {
       throw new Error(`Template instance ${plan.instanceId} is unavailable`)
@@ -897,6 +937,12 @@ export class TemplateService {
       instance,
       next: plan.next,
       diff: plan.diff,
+      resolvedPayload: mergePayload(
+        instance.baseline,
+        await adapter.snapshot(instance.resources),
+        resolvedUpdatePayload(plan.next, instance),
+        adopt
+      ),
       idempotencyKey: plan.id,
     })
     const updated: TemplateInstanceRecord = {
