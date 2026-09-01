@@ -2754,7 +2754,7 @@ function renderSpec(spec) {
   return stringify(spec, { indent: 2, lineWidth: 120, sortMapEntries: false })
 }
 
-function buildHeadlessAsyncApi(contract, catalog) {
+export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
   const routePaths = new Set(
     contract.routes.filter((route) => route.document === "headless").map((route) => route.path),
   )
@@ -2770,7 +2770,7 @@ function buildHeadlessAsyncApi(contract, catalog) {
     },
   }
   const message = (name, payload) => ({ name, payload })
-  return {
+  const spec = {
     asyncapi: "3.0.0",
     info: {
       title: "Cognia Headless Service Event and Bridge API",
@@ -2811,6 +2811,9 @@ function buildHeadlessAsyncApi(contract, catalog) {
           ping: { $ref: "#/components/messages/BridgePingFrame" },
           pong: { $ref: "#/components/messages/BridgePongFrame" },
           tokenRefresh: { $ref: "#/components/messages/BridgeTokenRefreshFrame" },
+          workerAttach: { $ref: "#/components/messages/BridgeWorkerAttachFrame" },
+          workerFrame: { $ref: "#/components/messages/BridgeWorkerFrame" },
+          workerDetach: { $ref: "#/components/messages/BridgeWorkerDetachFrame" },
         },
       },
     },
@@ -2839,6 +2842,9 @@ function buildHeadlessAsyncApi(contract, catalog) {
           { $ref: "#/channels/headlessBridge/messages/hello" },
           { $ref: "#/channels/headlessBridge/messages/respond" },
           { $ref: "#/channels/headlessBridge/messages/pong" },
+          // Bidirectional: the server forwards a device's frames to the brain
+          // and the brain answers on the same connection id.
+          { $ref: "#/channels/headlessBridge/messages/workerFrame" },
         ],
       },
       receiveBridgeFrames: {
@@ -2850,6 +2856,9 @@ function buildHeadlessAsyncApi(contract, catalog) {
           { $ref: "#/channels/headlessBridge/messages/ping" },
           { $ref: "#/channels/headlessBridge/messages/pong" },
           { $ref: "#/channels/headlessBridge/messages/tokenRefresh" },
+          { $ref: "#/channels/headlessBridge/messages/workerAttach" },
+          { $ref: "#/channels/headlessBridge/messages/workerFrame" },
+          { $ref: "#/channels/headlessBridge/messages/workerDetach" },
         ],
       },
     },
@@ -3009,8 +3018,108 @@ function buildHeadlessAsyncApi(contract, catalog) {
           additionalProperties: false,
           properties: { ...frameBase.properties, type: { type: "string", const: "token_refresh" }, token: { type: "string", writeOnly: true } },
         }),
+        // The remote-worker multiplex. These three were live in `protocol.ts`,
+        // in `ws_bridge.rs` and in the golden fixture, and absent from this
+        // document, because the message map below is hand-written and nothing
+        // compared it to the fixture. `assertBridgeMessagesCoverFixture` does.
+        BridgeWorkerAttachFrame: message("BridgeWorkerAttachFrame", {
+          ...frameBase,
+          required: [...frameBase.required, "connectionId", "hostRef", "manifest"],
+          additionalProperties: false,
+          properties: {
+            ...frameBase.properties,
+            type: { type: "string", const: "worker_attach" },
+            connectionId: { type: "string" },
+            hostRef: {
+              type: "string",
+              description: "Derived from the authenticated device identity by the front door.",
+            },
+            manifest: { type: "object", additionalProperties: true },
+          },
+        }),
+        BridgeWorkerFrame: message("BridgeWorkerFrame", {
+          ...frameBase,
+          required: [...frameBase.required, "connectionId", "frame"],
+          additionalProperties: false,
+          properties: {
+            ...frameBase.properties,
+            type: { type: "string", const: "worker_frame" },
+            connectionId: { type: "string" },
+            frame: {
+              type: "string",
+              description:
+                "An opaque, newline-free Agent RPC v2 JSON frame. Carried as a string on purpose: the bridge multiplexes it and never parses it.",
+            },
+          },
+        }),
+        BridgeWorkerDetachFrame: message("BridgeWorkerDetachFrame", {
+          ...frameBase,
+          required: [...frameBase.required, "connectionId", "hostRef", "reason"],
+          additionalProperties: false,
+          properties: {
+            ...frameBase.properties,
+            type: { type: "string", const: "worker_detach" },
+            connectionId: { type: "string" },
+            hostRef: { type: "string" },
+            reason: { type: "string" },
+          },
+        }),
       },
     },
+  }
+  assertBridgeMessagesCoverFixture(spec, bridgeFixture)
+  return spec
+}
+
+/**
+ * Every frame type in the cross-language golden fixture must be a declared
+ * bridge message, and every declared message must appear in an operation.
+ *
+ * The document used to list seven of ten frames. Nothing noticed, because the
+ * message map is hand-written here and the only test read two entries out of it
+ * to check a hash. The fixture is the list both languages already agree on, so
+ * it is the right thing to compare against, and this throws where the document
+ * is built rather than in a test that could be scoped away.
+ */
+function assertBridgeMessagesCoverFixture(spec, bridgeFixture) {
+  if (!bridgeFixture?.frames) {
+    throw new Error("AsyncAPI: bridge fixture is required to verify frame coverage")
+  }
+  const declared = new Map()
+  const channelMessages = spec.channels.headlessBridge.messages
+  for (const [key, ref] of Object.entries(channelMessages)) {
+    const name = ref.$ref.split("/").pop()
+    const payload = spec.components.messages[name]?.payload
+    const constant = payload?.properties?.type?.const
+    if (!constant) throw new Error(`AsyncAPI: bridge message ${name} pins no frame type`)
+    declared.set(constant, key)
+  }
+
+  const fixtureTypes = new Set(
+    Object.values(bridgeFixture.frames).map((frame) => frame.type),
+  )
+  const undocumented = [...fixtureTypes].filter((type) => !declared.has(type)).sort()
+  if (undocumented.length > 0) {
+    throw new Error(
+      `AsyncAPI: bridge frames present in the golden fixture but undocumented: ${undocumented.join(", ")}`,
+    )
+  }
+  const phantom = [...declared.keys()].filter((type) => !fixtureTypes.has(type)).sort()
+  if (phantom.length > 0) {
+    throw new Error(
+      `AsyncAPI: bridge messages with no golden fixture frame: ${phantom.join(", ")}`,
+    )
+  }
+
+  // A message nobody sends or receives is documentation of nothing.
+  const used = new Set()
+  for (const operation of Object.values(spec.operations)) {
+    if (operation.channel.$ref !== "#/channels/headlessBridge") continue
+    for (const ref of operation.messages) used.add(ref.$ref.split("/").pop())
+  }
+  const orphaned = [...declared.values()].filter((key) => !used.has(key)).sort()
+  if (orphaned.length > 0) {
+    throw new Error(`AsyncAPI: bridge messages in no operation: ${orphaned.join(", ")}`)
   }
 }
 
@@ -3214,7 +3323,7 @@ export function inspectCommittedContract() {
     buildDevicePlaneOverrides(desiredPublicSpec, desiredHeadlessSpec),
   )
   const desiredHeadlessAsyncApiSource = renderSpec(
-    buildHeadlessAsyncApi(contract, desiredHostCommandCatalog),
+    buildHeadlessAsyncApi(contract, desiredHostCommandCatalog, JSON.parse(bridgeFixtureSource)),
   )
   const desiredHeadlessContractIdentitySource = renderHeadlessContractIdentity(
     desiredHostCommandCatalog,

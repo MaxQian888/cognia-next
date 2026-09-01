@@ -4,6 +4,7 @@ import Ajv2020 from "ajv/dist/2020.js"
 import { parse as parseYaml } from "yaml"
 
 import {
+  buildHeadlessAsyncApi,
   buildHostCommandCatalog,
   classifyHostCommand,
   extractKnownCommands,
@@ -175,6 +176,33 @@ test("builds a deterministic host catalog from the generated Headless command se
   )
 })
 
+test("refuses to emit an AsyncAPI that does not cover every bridge frame", () => {
+  const inspected = inspectCommittedContract()
+  const fixture = JSON.parse(inspected.desiredBridgeFixtureSource)
+
+  // A frame type nobody documented is exactly the shape the worker frames had.
+  fixture.frames.somethingNew = { v: 3, type: "worker_reset" }
+  assert.throws(
+    () =>
+      buildHeadlessAsyncApi(inspected.contract, inspected.desiredHostCommandCatalog, fixture),
+    /undocumented: worker_reset/,
+  )
+
+  // And the reverse: a documented message the fixture never carries is a claim
+  // about a wire nobody speaks.
+  const withoutWorkers = JSON.parse(inspected.desiredBridgeFixtureSource)
+  delete withoutWorkers.frames.workerAttach
+  assert.throws(
+    () =>
+      buildHeadlessAsyncApi(
+        inspected.contract,
+        inspected.desiredHostCommandCatalog,
+        withoutWorkers,
+      ),
+    /no golden fixture frame: worker_attach/,
+  )
+})
+
 test("generates one drift-free identity for HTTP, WebSocket, CLI, and bridge consumers", () => {
   const inspected = inspectCommittedContract()
   const catalog = inspected.desiredHostCommandCatalog
@@ -191,6 +219,26 @@ test("generates one drift-free identity for HTTP, WebSocket, CLI, and bridge con
     new RegExp(`HEADLESS_CONTRACT_VERSION = ${catalog.schemaVersion}`),
   )
   const bridgeFixture = JSON.parse(inspected.desiredBridgeFixtureSource)
+
+  // Every frame the two languages already agree on must be documented. The
+  // spec listed seven of ten for a long time: `worker_attach`, `worker_frame`
+  // and `worker_detach` were live in protocol.ts, in ws_bridge.rs and in this
+  // very fixture, and the only assertion here read two entries to check a hash.
+  const documentedFrameTypes = new Set(
+    Object.values(asyncApi.channels.headlessBridge.messages).map(
+      (ref) => asyncApi.components.messages[ref.$ref.split("/").pop()].payload.properties.type.const,
+    ),
+  )
+  const fixtureFrameTypes = new Set(
+    Object.values(bridgeFixture.frames).map((frame) => frame.type),
+  )
+  assert.deepEqual(
+    [...fixtureFrameTypes].sort(),
+    [...documentedFrameTypes].sort(),
+    "the AsyncAPI bridge channel must document exactly the fixture's frame types",
+  )
+  assert.ok(fixtureFrameTypes.size >= 10, `expected all ten frame types, saw ${fixtureFrameTypes.size}`)
+
   for (const name of ["hello", "helloAck"]) {
     assert.equal(bridgeFixture.frames[name].catalogHash, catalog.catalogHash)
     assert.equal(bridgeFixture.frames[name].contractVersion, catalog.schemaVersion)

@@ -3,7 +3,7 @@ info:
   title: Cognia Headless Service Event and Bridge API
   version: "1"
   description: Generated WebSocket contract for the existing Headless event stream and Brain data-plane bridge.
-  x-cognia-catalog-hash: 9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67
+  x-cognia-catalog-hash: e94e518fbb840a82f2bc60b67db2700fe8ac744bfc85c5982754e80a16217273
 servers:
   loopback:
     host: 127.0.0.1:{port}
@@ -49,6 +49,12 @@ channels:
         $ref: "#/components/messages/BridgePongFrame"
       tokenRefresh:
         $ref: "#/components/messages/BridgeTokenRefreshFrame"
+      workerAttach:
+        $ref: "#/components/messages/BridgeWorkerAttachFrame"
+      workerFrame:
+        $ref: "#/components/messages/BridgeWorkerFrame"
+      workerDetach:
+        $ref: "#/components/messages/BridgeWorkerDetachFrame"
 operations:
   receiveHeadlessEvents:
     action: receive
@@ -75,6 +81,7 @@ operations:
       - $ref: "#/channels/headlessBridge/messages/hello"
       - $ref: "#/channels/headlessBridge/messages/respond"
       - $ref: "#/channels/headlessBridge/messages/pong"
+      - $ref: "#/channels/headlessBridge/messages/workerFrame"
   receiveBridgeFrames:
     action: receive
     channel:
@@ -85,6 +92,9 @@ operations:
       - $ref: "#/channels/headlessBridge/messages/ping"
       - $ref: "#/channels/headlessBridge/messages/pong"
       - $ref: "#/channels/headlessBridge/messages/tokenRefresh"
+      - $ref: "#/channels/headlessBridge/messages/workerAttach"
+      - $ref: "#/channels/headlessBridge/messages/workerFrame"
+      - $ref: "#/channels/headlessBridge/messages/workerDetach"
 components:
   securitySchemes:
     serviceQueryToken:
@@ -272,7 +282,7 @@ components:
               type: string
           catalogHash:
             type: string
-            const: 9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67
+            const: e94e518fbb840a82f2bc60b67db2700fe8ac744bfc85c5982754e80a16217273
           contractVersion:
             type: integer
             const: 1
@@ -303,7 +313,7 @@ components:
             type: string
           catalogHash:
             type: string
-            const: 9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67
+            const: e94e518fbb840a82f2bc60b67db2700fe8ac744bfc85c5982754e80a16217273
           contractVersion:
             type: integer
             const: 1
@@ -403,4 +413,72 @@ components:
           token:
             type: string
             writeOnly: true
+        additionalProperties: false
+    BridgeWorkerAttachFrame:
+      name: BridgeWorkerAttachFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - connectionId
+          - hostRef
+          - manifest
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: worker_attach
+          connectionId:
+            type: string
+          hostRef:
+            type: string
+            description: Derived from the authenticated device identity by the front door.
+          manifest:
+            type: object
+            additionalProperties: true
+        additionalProperties: false
+    BridgeWorkerFrame:
+      name: BridgeWorkerFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - connectionId
+          - frame
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: worker_frame
+          connectionId:
+            type: string
+          frame:
+            type: string
+            description:
+              "An opaque, newline-free Agent RPC v2 JSON frame. Carried as a string on purpose: the bridge multiplexes it
+              and never parses it."
+        additionalProperties: false
+    BridgeWorkerDetachFrame:
+      name: BridgeWorkerDetachFrame
+      payload:
+        type: object
+        required:
+          - v
+          - type
+          - connectionId
+          - hostRef
+          - reason
+        properties:
+          v: *a1
+          type:
+            type: string
+            const: worker_detach
+          connectionId:
+            type: string
+          hostRef:
+            type: string
+          reason:
+            type: string
         additionalProperties: false
