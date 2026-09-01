@@ -293,7 +293,7 @@ describe("ProjectFileTree", () => {
     await waitFor(() => expect(deps.createDir).toHaveBeenCalledWith("/repo", "src/sub"))
   })
 
-  it("swallows a delete error without crashing", async () => {
+  it("closes the confirm dialog after a delete fails", async () => {
     const deps = makeDeps()
     ;(deps.deleteEntry as jest.Mock).mockRejectedValue(new Error("EPERM"))
     render(
@@ -390,7 +390,13 @@ describe("ProjectFileTree", () => {
     expect(screen.getByTestId("project-file-tree")).toBeInTheDocument()
   })
 
-  it("swallows a rename error without leaving the row in edit mode", async () => {
+  /**
+   * Retitled. This used to assert the swallow itself, which is the behaviour
+   * that made a remote backend unusable. What it should pin is the part that
+   * was always right: a failed rename must not strand the row in edit mode.
+   * That the failure is now reported is pinned in "failures reach the user".
+   */
+  it("leaves no row in edit mode after a rename fails", async () => {
     const deps = makeDeps()
     ;(deps.renameEntry as jest.Mock).mockRejectedValue(new Error("EPERM"))
     render(
@@ -403,5 +409,133 @@ describe("ProjectFileTree", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     await waitFor(() => expect(screen.queryByLabelText("rename")).toBeNull())
     expect(screen.getByTestId("project-file-tree")).toBeInTheDocument()
+  })
+})
+
+/**
+ * Every one of these failed silently before. The listing path was the worst:
+ * it wrote an empty array, so a directory the caller may not read rendered
+ * identically to one that genuinely has nothing in it.
+ */
+describe("failures reach the user", () => {
+  function renderTree(deps: ProjectFileTreeDeps, onFailure = jest.fn()) {
+    render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={deps}
+        onFailure={onFailure}
+      />
+    )
+    return onFailure
+  }
+
+  it("shows why a directory could not be read, instead of calling it empty", async () => {
+    const deps = makeDeps()
+    deps.listDir = jest.fn(async () => {
+      throw new Error("EACCES: permission denied")
+    })
+    const onFailure = renderTree(deps)
+
+    const row = await screen.findByTestId("file-tree-failure-root")
+    expect(row).toHaveAttribute("data-failure", "denied")
+    expect(row.textContent).toContain("treeFailure.denied")
+    expect(screen.queryByText("treeEmpty")).toBeNull()
+    expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ kind: "denied" }), "list", "")
+  })
+
+  /**
+   * Retry is offered only for the one kind that could succeed unchanged.
+   * A permission denial with a retry button trains people to click it.
+   */
+  it("offers a retry for an unreachable host and not for a denial", async () => {
+    const unreachable = makeDeps()
+    unreachable.listDir = jest.fn(async () => {
+      throw new Error("host is offline")
+    })
+    const { unmount } = render(
+      <ProjectFileTree
+        rootPath="/repo"
+        activePath={null}
+        onOpenFile={jest.fn()}
+        deps={unreachable}
+      />
+    )
+    const first = await screen.findByTestId("file-tree-failure-root")
+    expect(within(first).queryByLabelText("refresh")).not.toBeNull()
+    unmount()
+
+    const denied = makeDeps()
+    denied.listDir = jest.fn(async () => {
+      throw new Error("EACCES: permission denied")
+    })
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={denied} />
+    )
+    const second = await screen.findByTestId("file-tree-failure-root")
+    expect(within(second).queryByLabelText("refresh")).toBeNull()
+  })
+
+  it("clears the failure once the directory reads", async () => {
+    const deps = makeDeps()
+    let fail = true
+    const listDir = jest.fn(async (_root: string, rel?: string) => {
+      if (fail) throw new Error("host is offline")
+      return deps.fs[rel ?? ""] ?? []
+    })
+    deps.listDir = listDir as unknown as ProjectFileTreeDeps["listDir"]
+    render(
+      <ProjectFileTree rootPath="/repo" activePath={null} onOpenFile={jest.fn()} deps={deps} />
+    )
+    const row = await screen.findByTestId("file-tree-failure-root")
+    fail = false
+    fireEvent.click(within(row).getByLabelText("refresh"))
+
+    await waitFor(() => expect(screen.queryByTestId("file-tree-failure-root")).toBeNull())
+    expect(await screen.findByTestId("tree-row-readme.md")).toBeInTheDocument()
+  })
+
+  it("reports a failed delete rather than closing the dialog as if it worked", async () => {
+    const deps = makeDeps()
+    deps.deleteEntry = jest.fn(async () => {
+      throw new Error("EROFS: read-only file system")
+    })
+    const onFailure = renderTree(deps)
+
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.click(screen.getAllByText("delete")[1])
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "delete" }))
+
+    await waitFor(() =>
+      expect(onFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "denied" }),
+        "delete",
+        "readme.md"
+      )
+    )
+  })
+
+  it("reports a failed rename", async () => {
+    const deps = makeDeps()
+    deps.renameEntry = jest.fn(async () => {
+      throw new Error("EEXIST: file already exists")
+    })
+    const onFailure = renderTree(deps)
+
+    await screen.findByTestId("tree-row-readme.md")
+    fireEvent.click(screen.getAllByText("rename")[1])
+    const input = await screen.findByLabelText("rename")
+    fireEvent.change(input, { target: { value: "taken.md" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+
+    await waitFor(() =>
+      expect(onFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "conflict" }),
+        "rename",
+        "readme.md"
+      )
+    )
   })
 })

@@ -3,6 +3,15 @@
 // Lazy, CRUD-capable project file tree over `lib/files/workspace-fs`. Each
 // directory is listed on first expand (`.gitignore`-respecting). Right-click a
 // row for New File / New Folder / Rename / Delete. Files open on click.
+//
+// Every operation reports its failure. It did not used to: a failed listing
+// wrote an empty array, so "you may not read this directory" rendered as "this
+// directory is empty", and rename and delete failures were dropped outright
+// with the dialog closing as if they had worked. That was survivable while the
+// only backend was a local workspace the app had registered. It is not
+// survivable over SFTP (ADR-0162), where denials, read-only mounts and dropped
+// connections are ordinary. `lib/files/file-tree-failure.ts` owns the
+// vocabulary so both backends explain themselves the same way.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -13,6 +22,7 @@ import {
   RefreshCwIcon,
   FilePlusIcon,
   FolderPlusIcon,
+  TriangleAlertIcon,
 } from "lucide-react"
 import { FileTypeIcon } from "@/components/shared/file-type-icon"
 import { cn } from "@/lib/utils"
@@ -37,6 +47,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { EditorTabMode } from "@/lib/editor-workbench/editor-tab-model"
+import {
+  classifyFileTreeFailure,
+  isFileTreeFailureRetryable,
+  type FileTreeFailure,
+  type FileTreeOperation,
+} from "@/lib/files/file-tree-failure"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type {
   listWorkspaceDir,
@@ -64,6 +80,12 @@ interface Props {
   deps: ProjectFileTreeDeps
   density?: "compact" | "touch"
   onRenamed?: (from: string, to: string) => void | Promise<void>
+  /**
+   * Told about every failed operation, so the surface that owns this tree can
+   * put it somewhere the user will see. A listing failure is ALSO rendered in
+   * place, because a toast that scrolls away leaves a directory looking empty.
+   */
+  onFailure?: (failure: FileTreeFailure, operation: FileTreeOperation, relPath: string) => void
 }
 
 const parentOf = (rel: string) => rel.split("/").slice(0, -1).join("/")
@@ -77,6 +99,7 @@ export function ProjectFileTree({
   deps,
   density = "compact",
   onRenamed,
+  onFailure,
 }: Props) {
   const t = useTranslations("projectEditor")
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]))
@@ -89,17 +112,48 @@ export function ProjectFileTree({
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceEntry | null>(null)
+  /**
+   * Kept per directory, not globally. Expanding a folder you may not read must
+   * not blank out the siblings you can, and the reason belongs on the row that
+   * produced it.
+   */
+  const [failureByDir, setFailureByDir] = useState<Record<string, FileTreeFailure>>({})
+
+  /** One place where a thrown error becomes a typed failure and reaches the caller. */
+  const report = useCallback(
+    (error: unknown, operation: FileTreeOperation, relPath: string): FileTreeFailure => {
+      const failure = classifyFileTreeFailure(error)
+      onFailure?.(failure, operation, relPath)
+      return failure
+    },
+    [onFailure]
+  )
 
   const loadDir = useCallback(
     async (dirRel: string) => {
       try {
         const entries = await deps.listDir(rootPath, dirRel || undefined)
         setChildrenByDir((prev) => ({ ...prev, [dirRel]: entries }))
-      } catch {
-        setChildrenByDir((prev) => ({ ...prev, [dirRel]: [] }))
+        setFailureByDir((prev) => {
+          if (!(dirRel in prev)) return prev
+          const next = { ...prev }
+          delete next[dirRel]
+          return next
+        })
+      } catch (error) {
+        // Deliberately NOT an empty array. That was the old behaviour and it
+        // made a directory the caller may not read indistinguishable from one
+        // that genuinely has nothing in it.
+        const failure = report(error, "list", dirRel)
+        setFailureByDir((prev) => ({ ...prev, [dirRel]: failure }))
+        setChildrenByDir((prev) => {
+          const next = { ...prev }
+          delete next[dirRel]
+          return next
+        })
       }
     },
-    [deps, rootPath]
+    [deps, rootPath, report]
   )
 
   // Reset the tree and load the root on mount / root change. The synchronous
@@ -148,12 +202,12 @@ export function ProjectFileTree({
       else await deps.writeFile(rootPath, rel, "")
       await loadDir(pendingCreate.parent)
       if (pendingCreate.kind === "file") onOpenFile(rel)
-    } catch {
-      /* surfaced by the caller's error toast path */
+    } catch (error) {
+      report(error, "create", rel)
     }
     setPendingCreate(null)
     setCreateName("")
-  }, [pendingCreate, createName, deps, rootPath, loadDir, onOpenFile])
+  }, [pendingCreate, createName, deps, rootPath, loadDir, onOpenFile, report])
 
   const submitRename = useCallback(async () => {
     if (!renameTarget || !renameValue.trim()) {
@@ -166,24 +220,38 @@ export function ProjectFileTree({
       await deps.renameEntry(rootPath, renameTarget, to)
       await onRenamed?.(renameTarget, to)
       await loadDir(parent)
-    } catch {
-      /* ignore */
+    } catch (error) {
+      report(error, "rename", renameTarget)
     }
     setRenameTarget(null)
-  }, [renameTarget, renameValue, deps, rootPath, loadDir, onRenamed])
+  }, [renameTarget, renameValue, deps, rootPath, loadDir, onRenamed, report])
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return
     try {
       await deps.deleteEntry(rootPath, deleteTarget.relPath, deleteTarget.isDir)
       await loadDir(parentOf(deleteTarget.relPath))
-    } catch {
-      /* ignore */
+    } catch (error) {
+      report(error, "delete", deleteTarget.relPath)
     }
     setDeleteTarget(null)
-  }, [deleteTarget, deps, rootPath, loadDir])
+  }, [deleteTarget, deps, rootPath, loadDir, report])
 
   const renderChildren = (dirRel: string, depth: number) => {
+    const failure = failureByDir[dirRel]
+    if (failure) {
+      return (
+        <FailureRow
+          key={`failure:${dirRel}`}
+          depth={depth}
+          failure={failure}
+          label={t(`treeFailure.${failure.kind}`)}
+          retryLabel={t("refresh")}
+          onRetry={isFileTreeFailureRetryable(failure) ? () => void loadDir(dirRel) : undefined}
+          testId={`file-tree-failure-${dirRel || "root"}`}
+        />
+      )
+    }
     const entries = childrenByDir[dirRel]
     if (!entries) return null
     return entries.map((entry) => (
@@ -240,7 +308,12 @@ export function ProjectFileTree({
     ))
   }
 
-  const rootIsEmpty = useMemo(() => (childrenByDir[""] ?? []).length === 0, [childrenByDir])
+  // "Empty" is a claim about what is there, so it may only be made when the
+  // listing actually succeeded. A failed root renders its reason instead.
+  const rootIsEmpty = useMemo(
+    () => !failureByDir[""] && (childrenByDir[""] ?? []).length === 0,
+    [childrenByDir, failureByDir]
+  )
 
   return (
     <div className="flex h-full flex-col" data-testid="project-file-tree">
@@ -313,6 +386,54 @@ export function ProjectFileTree({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+/**
+ * A directory that could not be read, in the place its contents would have been.
+ *
+ * In place rather than only in a toast: a toast scrolls away and leaves the
+ * folder looking empty, which is the exact confusion this whole change exists
+ * to remove. The far side's own words go in `title` rather than the row, so a
+ * long `errno` string cannot break the tree's layout.
+ */
+function FailureRow({
+  depth,
+  failure,
+  label,
+  retryLabel,
+  onRetry,
+  testId,
+}: {
+  depth: number
+  failure: FileTreeFailure
+  label: string
+  retryLabel: string
+  onRetry?: () => void
+  testId: string
+}) {
+  return (
+    <div
+      className="flex items-center gap-1.5 py-1 pr-2 text-xs text-muted-foreground"
+      style={{ paddingLeft: `${depth * 12 + 12}px` }}
+      data-testid={testId}
+      data-failure={failure.kind}
+      title={failure.detail ?? undefined}
+    >
+      <TriangleAlertIcon className="size-3 shrink-0 text-amber-600 dark:text-amber-500" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {onRetry ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-5"
+          aria-label={retryLabel}
+          onClick={onRetry}
+        >
+          <RefreshCwIcon className="size-3" />
+        </Button>
+      ) : null}
     </div>
   )
 }

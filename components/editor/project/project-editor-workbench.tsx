@@ -24,6 +24,7 @@ import { readMonacoActiveEditor, type ReadableMonacoEditor } from "./monaco-acti
 import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
 import { ProjectEditorTabs } from "./project-editor-tabs"
+import type { FileTreeFailure, FileTreeOperation } from "@/lib/files/file-tree-failure"
 import { ProjectFileTree } from "./project-file-tree"
 import { ProjectMonaco } from "./project-monaco"
 import { ProjectSearchPanel } from "./project-search-panel"
@@ -350,6 +351,28 @@ export function ProjectEditorFileWorkbench({
     return () => setMonacoReadHandles(null)
   }, [diagnostics, setMonacoReadHandles])
 
+  /**
+   * Put a file-tree failure where the user will see it.
+   *
+   * The tree renders a listing failure in place as well, because a toast
+   * scrolls away and leaves a folder looking empty. This is the channel for the
+   * three that have no row of their own: a create, a rename and a delete each
+   * close their dialog, and before this they closed it as if they had worked.
+   */
+  const reportTreeFailure = useCallback(
+    (failure: FileTreeFailure, operation: FileTreeOperation, relPath: string) => {
+      toast.error(
+        t("treeFailureToast", {
+          operation: t(`treeOperation.${operation}`),
+          path: relPath || rootPath,
+          reason: t(`treeFailure.${failure.kind}`),
+        }),
+        { description: failure.detail ?? undefined }
+      )
+    },
+    [t, rootPath]
+  )
+
   const fileTree = (
     <ProjectFileTree
       rootPath={rootPath}
@@ -359,6 +382,7 @@ export function ProjectEditorFileWorkbench({
       onRenamed={editor.renameOpenFile}
       deps={deps}
       density={layout === "mobile" ? "touch" : "compact"}
+      onFailure={reportTreeFailure}
     />
   )
   const searchPanel = (

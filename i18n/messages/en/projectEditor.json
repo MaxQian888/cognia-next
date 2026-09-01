@@ -79,6 +79,23 @@
   "searchTab": "Search",
   "treeAria": "Project files",
   "treeEmpty": "No files",
+  "treeFailure": {
+    "capacity": "The machine is out of space, so this folder could not be read.",
+    "conflict": "This folder is in use and could not be read.",
+    "denied": "You do not have permission to read this folder.",
+    "missing": "This folder is no longer there.",
+    "refused": "The Host refused to read this folder.",
+    "unreachable": "Could not reach this folder."
+  },
+  "treeFailureToast": "Could not {operation} {path}: {reason}",
+  "treeOperation": {
+    "create": "create",
+    "delete": "delete",
+    "list": "read",
+    "read": "read",
+    "rename": "rename",
+    "write": "write"
+  },
   "unavailableDesc": "The project editor needs a desktop app or a paired device to reach the project files.",
   "unavailableTitle": "Editor unavailable",
   "workbench": {

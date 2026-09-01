@@ -79,6 +79,23 @@
   "searchTab": "搜索",
   "treeAria": "项目文件",
   "treeEmpty": "暂无文件",
+  "treeFailure": {
+    "capacity": "机器空间不足，读不出这个目录。",
+    "conflict": "这个目录正被占用，读不出来。",
+    "denied": "你没有读取这个目录的权限。",
+    "missing": "这个目录已经不在了。",
+    "refused": "宿主拒绝读取这个目录。",
+    "unreachable": "无法到达这个目录。"
+  },
+  "treeFailureToast": "{operation} {path} 失败：{reason}",
+  "treeOperation": {
+    "create": "新建",
+    "delete": "删除",
+    "list": "读取",
+    "read": "读取",
+    "rename": "重命名",
+    "write": "写入"
+  },
   "unavailableDesc": "项目编辑器需要桌面应用或已配对的设备才能访问项目文件。",
   "unavailableTitle": "编辑器不可用",
   "workbench": {
