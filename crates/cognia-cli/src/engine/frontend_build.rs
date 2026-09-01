@@ -125,6 +125,11 @@ const ESBUILD_EXTERNALS: &[&str] = &[
     "react/jsx-dev-runtime",
     "react-dom",
     "@cognia/plugin-sdk",
+    // esbuild matches import paths literally, so the bare package above does
+    // not cover its subpaths. This one reads the host's settings and
+    // agent-runtime stores, and a bundled copy of those answers from state the
+    // host never writes.
+    "@cognia/plugin-sdk/api/effort-surface",
     "@cognia/plugin-ui",
     "lucide-react",
 ];
@@ -267,6 +272,7 @@ mod tests {
             "react/jsx-runtime",
             "react/jsx-dev-runtime",
             "@cognia/plugin-sdk",
+            "@cognia/plugin-sdk/api/effort-surface",
             "@cognia/plugin-ui",
             "lucide-react",
         ] {

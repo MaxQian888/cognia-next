@@ -33,6 +33,16 @@ export const PLUGIN_SHARED_MODULES = [
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
   "@cognia/plugin-sdk",
+  // A subpath, and it has to be listed separately: this check is an exact
+  // match, so the bare `@cognia/plugin-sdk` above does not cover it. Unlike the
+  // SDK's other `api/*` subpaths, which are types and pure functions, this one
+  // READS the host's settings and agent-runtime stores. Inlined into a plugin
+  // bundle it would carry a second copy of both, so `effortSurfaceForSession`
+  // would answer from a store the host never writes: no hidden-tier
+  // preference, no session model, and a `subscribeEffortSurface` that never
+  // fires. A dial disagreeing with the composer's own chip is the exact failure
+  // the module exists to prevent.
+  "@cognia/plugin-sdk/api/effort-surface",
   "@cognia/plugin-ui",
   "lucide-react",
 ] as const
@@ -52,6 +62,7 @@ const sharedModuleLoaders: Record<PluginSharedModule, () => Promise<unknown>> = 
   "react/jsx-runtime": () => import("react/jsx-runtime"),
   "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
   "@cognia/plugin-sdk": () => import("@cognia/plugin-sdk"),
+  "@cognia/plugin-sdk/api/effort-surface": () => import("@cognia/plugin-sdk/api/effort-surface"),
   "@cognia/plugin-ui": () => import("@cognia/plugin-ui"),
   "lucide-react": () =>
     import("@/lib/icons/lucide-require-compat").then((module) => module.lucideRequireCompat),

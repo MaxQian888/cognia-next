@@ -25,6 +25,20 @@ describe("PLUGIN_SHARED_MODULES", () => {
     )
   })
 
+  /**
+   * The match is exact, so the bare package does not cover its subpaths. This
+   * one is listed because it READS the host's settings and agent-runtime
+   * stores: a bundled copy answers from state the host never writes, so the
+   * offered tier ladder ignores the user's hidden tiers and the subscription
+   * never fires. The SDK's other `api/*` subpaths are types and pure helpers
+   * and stay off this list deliberately.
+   */
+  it("shares the one SDK subpath that reads host stores", () => {
+    expect(PLUGIN_SHARED_MODULES).toContain("@cognia/plugin-sdk/api/effort-surface")
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/effort-surface")).toBe(true)
+    expect(isSharedModuleSpecifier("@cognia/plugin-sdk/api/skill")).toBe(false)
+  })
+
   it("does NOT share react-dom", () => {
     // Sharing react-dom hands plugins createPortal, which lets a slot
     // contribution render outside the slot it was mounted into — escaping both
