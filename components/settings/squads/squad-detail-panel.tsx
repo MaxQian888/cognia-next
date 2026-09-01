@@ -32,6 +32,7 @@ import { useTranslations } from "next-intl"
 import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { SquadDeriveActions } from "./squad-derive-actions"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -171,6 +172,8 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
           completedTaskCount: taskStats.completed,
         }}
       />
+
+      <SquadDeriveActions squadId={squadId} className="rounded-md border p-3" />
 
       <div className="rounded-md border border-destructive/40 p-3">
         <p className="text-xs font-medium">{t("dangerTitle")}</p>

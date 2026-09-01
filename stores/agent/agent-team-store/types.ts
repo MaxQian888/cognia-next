@@ -149,6 +149,8 @@ export interface AgentTeamState {
   // Templates
   addTemplate: (template: AgentTeamTemplate) => void
   deleteTemplate: (templateId: string) => void
+  /** Copy a squad into a workspace. See the note on the implementation. */
+  duplicateSquad: (teamId: string, input: { name: string; projectId?: string }) => AgentTeam | null
   saveAsTemplate: (
     teamId: string,
     name: string,

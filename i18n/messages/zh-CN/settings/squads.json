@@ -1,4 +1,20 @@
 {
+  "derive": {
+    "cancel": "取消",
+    "copyDefaultName": "{name} 副本",
+    "description": "复制到某个工作区，或把它的编制存为模板。",
+    "duplicate": "复制",
+    "duplicateBody": "成员名单、各成员配置与任务列表都会带过去。副本从空闲开始，不带运行历史。",
+    "duplicateTitle": "复制这个小队",
+    "duplicated": "已创建 {name}。",
+    "nameLabel": "名称",
+    "saveAsTemplate": "存为模板",
+    "templateBody": "模板保留成员编制与小队设置，不保留队长自身的配置、任务列表，以及运行产生的任何内容。",
+    "templateSaved": "已把 {name} 存入模板。",
+    "templateTitle": "存为模板",
+    "title": "复用这个小队",
+    "workspaceLabel": "工作区"
+  },
   "detail": {
     "advanced": "高级治理",
     "dangerDescription": "绑定到它的会话会回退为单个 Agent。已产生的运行记录会保留。",

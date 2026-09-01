@@ -1,4 +1,20 @@
 {
+  "derive": {
+    "cancel": "Cancel",
+    "copyDefaultName": "{name} copy",
+    "description": "Copy it into a workspace, or save its shape as a template.",
+    "duplicate": "Duplicate",
+    "duplicateBody": "The roster, per-teammate settings and task list come across. The copy starts idle with no run history.",
+    "duplicateTitle": "Duplicate this squad",
+    "duplicated": "Created {name}.",
+    "nameLabel": "Name",
+    "saveAsTemplate": "Save as template",
+    "templateBody": "A template keeps the roster shape and squad settings. It does not keep the lead's own configuration, the task list, or anything a run produced.",
+    "templateSaved": "Saved {name} to your templates.",
+    "templateTitle": "Save as a template",
+    "title": "Reuse this squad",
+    "workspaceLabel": "Workspace"
+  },
   "detail": {
     "advanced": "Advanced governance",
     "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",

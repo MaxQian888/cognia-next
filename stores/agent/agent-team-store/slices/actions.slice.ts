@@ -193,6 +193,100 @@ export const createAgentTeamActionsSlice = (
     return team
   },
 
+  /**
+   * Copy a squad, roster and tasks included, into a workspace.
+   *
+   * There was no squad-to-squad copy at all. `saveAsTemplate` went one way and
+   * `instantiateAgentTeamTemplate` came back, so the only route from "this
+   * squad, but for the other repo" was to publish a template and re-instantiate
+   * it, which loses everything a template deliberately drops: the lead's own
+   * configuration, per-teammate models, task ordering.
+   *
+   * `projectId` is a parameter rather than always the active workspace, which
+   * is what makes this "copy into that workspace" as well as "copy here". Now
+   * that the column is a real Dexie boundary rather than a filter, that is a
+   * move between two places rather than a relabel.
+   */
+  duplicateSquad: (teamId, input) => {
+    const state = get()
+    const source = state.teams[teamId]
+    if (!source) return null
+
+    const nextTeamId = nanoid()
+    const now = new Date()
+    // Old id to new, so `leadId`, `teammateIds` and each task's `assignedTo`
+    // point at the copies rather than back at the original's roster.
+    const teammateIdMap = new Map<string, string>()
+    const teammates: AgentTeammate[] = source.teammateIds
+      .map((id) => state.teammates[id])
+      .filter((member): member is AgentTeammate => member !== undefined)
+      .map((member) => {
+        const id = nanoid()
+        teammateIdMap.set(member.id, id)
+        return {
+          ...member,
+          id,
+          teamId: nextTeamId,
+          // A copy has done no work yet. Carrying progress across would show a
+          // brand new squad as part-finished.
+          status: "idle",
+          completedTaskIds: [],
+          tokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          progress: 0,
+          createdAt: now,
+        } as AgentTeammate
+      })
+
+    const tasks: AgentTeamTask[] = source.taskIds
+      .map((id) => state.tasks[id])
+      .filter((task): task is AgentTeamTask => task !== undefined)
+      .map((task) => {
+        const assignedTo = task.assignedTo ? teammateIdMap.get(task.assignedTo) : undefined
+        const { completedAt: _completedAt, startedAt: _startedAt, ...rest } = task
+        return {
+          ...rest,
+          id: nanoid(),
+          teamId: nextTeamId,
+          status: "pending",
+          ...(assignedTo ? { assignedTo } : { assignedTo: undefined }),
+          createdAt: now,
+        } as AgentTeamTask
+      })
+
+    const team: AgentTeam = {
+      ...source,
+      id: nextTeamId,
+      name: input.name,
+      projectId: input.projectId ?? source.projectId,
+      // A copy starts idle with no history: statuses, run linkage and the
+      // session it was bound to all belong to the original.
+      status: "idle",
+      progress: 0,
+      totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      leadId: teammateIdMap.get(source.leadId) ?? source.leadId,
+      teammateIds: teammates.map((member) => member.id),
+      taskIds: tasks.map((task) => task.id),
+      messageIds: [],
+      createdAt: now,
+      sessionId: undefined,
+      completedAt: undefined,
+      routingAssessment: undefined,
+      dispatchDecision: undefined,
+      externalPickup: undefined,
+    }
+
+    set((current) => ({
+      teams: { ...current.teams, [nextTeamId]: team },
+      teammates: {
+        ...current.teammates,
+        ...Object.fromEntries(teammates.map((member) => [member.id, member])),
+      },
+      tasks: { ...current.tasks, ...Object.fromEntries(tasks.map((task) => [task.id, task])) },
+    }))
+
+    return team
+  },
+
   upsertTeam: (team) => {
     set((state) => ({
       teams: { ...state.teams, [team.id]: team },

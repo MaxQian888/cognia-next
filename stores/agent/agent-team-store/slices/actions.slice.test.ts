@@ -2089,3 +2089,85 @@ describe("account storage isolation", () => {
     expect(localStorage.getItem("cognia-agent-teams:acct_b")).toContain("team_b")
   })
 })
+
+describe("duplicateSquad", () => {
+  beforeEach(() => {
+    useAgentTeamStore.setState({ teams: {}, teammates: {}, tasks: {} })
+  })
+
+  function seeded() {
+    const store = useAgentTeamStore.getState()
+    const team = store.createTeam({ name: "Alpha", task: "ship", description: "the first" })
+    const mate = useAgentTeamStore
+      .getState()
+      .addTeammate({ teamId: team.id, name: "Reviewer", description: "reviews" })
+    const task = useAgentTeamStore.getState().createTask({
+      teamId: team.id,
+      title: "Review it",
+      assignedTo: mate.id,
+    })
+    return { team, mate, task }
+  }
+
+  it("copies the roster and tasks rather than sharing them", () => {
+    const { team } = seeded()
+    const copy = useAgentTeamStore.getState().duplicateSquad(team.id, { name: "Alpha copy" })
+
+    expect(copy).not.toBeNull()
+    expect(copy!.id).not.toBe(team.id)
+    expect(copy!.name).toBe("Alpha copy")
+    // The live row, not the pre-`addTeammate` snapshot `createTeam` returned.
+    const source = useAgentTeamStore.getState().teams[team.id]!
+    expect(copy!.teammateIds).toHaveLength(source.teammateIds.length)
+    expect(copy!.teammateIds).not.toEqual(expect.arrayContaining(source.teammateIds))
+    expect(copy!.taskIds).toHaveLength(1)
+  })
+
+  /**
+   * The lead and every `assignedTo` are ids. Copying them verbatim would leave
+   * the new squad pointing at the original's roster, so editing one would
+   * silently change the other.
+   */
+  it("repoints the lead and each assignment at the copies", () => {
+    const { team } = seeded()
+    const copy = useAgentTeamStore.getState().duplicateSquad(team.id, { name: "Copy" })!
+    const state = useAgentTeamStore.getState()
+
+    expect(copy.teammateIds).toContain(copy.leadId)
+    expect(state.teammates[copy.leadId]?.teamId).toBe(copy.id)
+    const copiedTask = state.tasks[copy.taskIds[0]!]!
+    expect(copy.teammateIds).toContain(copiedTask.assignedTo)
+    expect(copiedTask.teamId).toBe(copy.id)
+  })
+
+  /** A copy has done no work. Carrying history over would show it part-done. */
+  it("starts the copy idle with no history", () => {
+    const { team } = seeded()
+    useAgentTeamStore.getState().updateTeam(team.id, { status: "executing", progress: 60 })
+    const copy = useAgentTeamStore.getState().duplicateSquad(team.id, { name: "Copy" })!
+
+    expect(copy.status).toBe("idle")
+    expect(copy.progress).toBe(0)
+    expect(copy.sessionId).toBeUndefined()
+    expect(copy.messageIds).toEqual([])
+    expect(useAgentTeamStore.getState().tasks[copy.taskIds[0]!]?.status).toBe("pending")
+  })
+
+  /**
+   * The point of taking a workspace: now that `projectId` is a real Dexie
+   * boundary rather than a filter, this is a move between two places.
+   */
+  it("copies into another workspace when asked", () => {
+    const { team } = seeded()
+    const copy = useAgentTeamStore
+      .getState()
+      .duplicateSquad(team.id, { name: "Copy", projectId: "ws_other" })!
+
+    expect(copy.projectId).toBe("ws_other")
+    expect(useAgentTeamStore.getState().teams[team.id]?.projectId).not.toBe("ws_other")
+  })
+
+  it("returns null for a squad that is not there", () => {
+    expect(useAgentTeamStore.getState().duplicateSquad("missing", { name: "x" })).toBeNull()
+  })
+})

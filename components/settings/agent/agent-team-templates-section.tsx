@@ -58,6 +58,7 @@ import {
 } from "@/lib/plugin/registries/agent-team-template-registry"
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
 import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-template"
+import { publishSquadTemplateToPlatform } from "@/lib/agent-team/publish-template-to-platform"
 
 const log = createLogger("settings.agent-teams")
 
@@ -156,6 +157,7 @@ export function AgentTeamTemplatesSection() {
         isBuiltIn: false,
       }
       addTemplate(copy)
+      void publishSquadTemplateToPlatform(copy)
       log.info("template_duplicated", { sourceId: source.id, newId: copy.id })
       toast.success(t("duplicatedToast", { name: copy.name }))
       // Drop straight into the editor so the user can rename / tweak.
@@ -212,6 +214,11 @@ export function AgentTeamTemplatesSection() {
               onSave={(patch) => {
                 updateTemplate(tpl.id, patch)
                 setEditing(null)
+                // Keep the unified platform's copy in step. The projection that
+                // puts squad templates there otherwise only runs at boot, so an
+                // edit made here stayed invisible to Discover, global search and
+                // fork until the next restart.
+                void publishSquadTemplateToPlatform({ ...tpl, ...patch })
                 toast.success(t("updatedToast", { name: patch.name ?? tpl.name }))
               }}
               onUse={() => handleUse(tpl)}
@@ -243,6 +250,7 @@ export function AgentTeamTemplatesSection() {
               isBuiltIn: false,
             }
             addTemplate(newTemplate)
+            void publishSquadTemplateToPlatform(newTemplate)
             setCreating(false)
             toast.success(t("addedToast", { name: newTemplate.name }))
           }}

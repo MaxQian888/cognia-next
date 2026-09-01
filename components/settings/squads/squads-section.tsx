@@ -27,6 +27,7 @@ import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { AgentTeamTemplatesSection } from "@/components/settings/agent/agent-team-templates-section"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { createSquad } from "@/lib/agent-team/create-squad"
 import { useUIStore } from "@/stores/ui/ui-store"
 import {
   SQUAD_TAB_PARAM,
@@ -91,14 +92,18 @@ function SquadsSectionInner() {
   // where a Squad comes into existence, so it belongs beside "New Squad".
   const [autoComposeOpen, setAutoComposeOpen] = useState(false)
 
+  // Through `createSquad` rather than straight into the store, so a new Squad
+  // starts on durable-v2 where the workspace supports it. The resolver that
+  // decides is async, which is why it cannot live in `createTeam` itself.
+  const activeProject = useProjectStore((state) =>
+    state.projects.find((candidate) => candidate.id === state.activeProjectId)
+  )
   const handleCreate = useCallback(() => {
-    const squad = createTeam({
-      name: t("nav.newSquadName"),
-      task: "",
-      leadName: t("nav.defaultLeadName"),
-    })
-    navigate(squadPanelId(squad.id))
-  }, [createTeam, navigate, t])
+    void createSquad(
+      { name: t("nav.newSquadName"), task: "", leadName: t("nav.defaultLeadName") },
+      { createTeam, project: activeProject }
+    ).then((squad) => navigate(squadPanelId(squad.id)))
+  }, [activeProject, createTeam, navigate, t])
 
   // `File > New Squad` fires a create request and routes here. Without a
   // consumer the menu item would land on the library and do nothing.
