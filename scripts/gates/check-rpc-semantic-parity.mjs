@@ -226,6 +226,15 @@ export const GATED_KINDS = new Set([
   "unsubstantiated-coverage-claim",
   "stale-stream-exemption",
   "stale-headless-owned-exemption",
+  // Gated now that it is at zero. The audit found 17 of these: arms the
+  // manifest advertises to every paired device over http/websocket/webrtc,
+  // which then answer 503 `headless_unsupported` on a desktop host, whose
+  // message tells the operator to use the desktop app they are already using.
+  // Every one has since been routed through `DispatchHost`, and
+  // `HEADLESS_OWNED_ARMS` is empty. Report-only was the right setting while
+  // there was a backlog to burn down; leaving it report-only after the burndown
+  // is how the class comes back, one arm at a time, with nothing failing.
+  "desktop-dead",
 ])
 
 // ---------------------------------------------------------------------------

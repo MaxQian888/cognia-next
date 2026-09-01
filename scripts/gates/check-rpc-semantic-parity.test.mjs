@@ -21,6 +21,7 @@ import {
   isInjectedParam,
   isOpaqueSchema,
   ceilingRegressions,
+  GATED_KINDS,
   countRatchetedKinds,
   responseSchemaPrecision,
   normalizeField,
@@ -816,6 +817,30 @@ test("a headless-owned arm is not reported as desktop-dead, but a bare one is", 
     findings.filter((f) => f.kind === "desktop-dead").map((f) => f.command),
     ["something_else"]
   )
+})
+
+test("desktop-dead fails the build rather than merely being reported", () => {
+  // The class is at zero and every arm has been routed through `DispatchHost`.
+  // Report-only was right while there was a backlog; keeping it report-only
+  // afterwards is how 17 findings come back one arm at a time with a green
+  // gate. This assertion is the thing that stops that.
+  assert.ok(GATED_KINDS.has("desktop-dead"))
+
+  const findings = analyze(
+    baseInput({
+      arms: new Map([
+        [
+          "codeserver_ensure",
+          {
+            body: "let services = host.headless().ok_or_else(|| RpcError::headless_host_required(name))?;",
+            file: "rpc/plugins.rs",
+          },
+        ],
+      ]),
+    })
+  )
+  const gated = findings.filter((f) => GATED_KINDS.has(f.kind)).map((f) => f.kind)
+  assert.ok(gated.includes("desktop-dead"))
 })
 
 test("a headless-owned exemption goes stale when the arm stops needing headless", () => {

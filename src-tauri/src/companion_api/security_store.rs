@@ -2414,6 +2414,19 @@ fn default_capabilities_for_role(role: &str) -> &'static [&'static str] {
             "process.spawn",
             "secret.manage",
             "host.admin",
+            // Dormant, deliberately, and pinned by
+            // `every_grantable_capability_has_an_enforcement_point`. Neither
+            // name is the required capability of any command in
+            // `protocol/companion-commands.json`, so holding one grants
+            // nothing today. They stay in the defaults rather than being
+            // retired because `replace_capabilities` rejects the WHOLE
+            // incoming list when any name is not assignable: an owner device
+            // paired before this build already carries both, and the device
+            // console reads the current grants and writes them back, so
+            // dropping them from `is_assignable_device_capability` would turn
+            // every capability edit on an existing owner into
+            // `InvalidCapabilities`. Retiring them needs a store migration
+            // that clears the rows first.
             "device.admin",
             "server.admin",
             "scheduler.manage",
@@ -2423,7 +2436,7 @@ fn default_capabilities_for_role(role: &str) -> &'static [&'static str] {
             // `message_send`, `app_settings_update`, …) and nothing granted
             // them, so every paired device answered 403 to the entire mirror
             // it exists to serve. Pinned by
-            // `default_grants_cover_every_device_reachable_capability`.
+            // `owner_default_grants_cover_every_device_reachable_command`.
             "client.read",
             "client.write",
             // The performance plane. Unlike the client plane these commands
@@ -2506,8 +2519,14 @@ pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
             | "scheduler.manage"
             | "secret.manage"
             | "host.admin"
+            // Dormant: no command requires either (see the note in
+            // `default_capabilities_for_role`). Accepted so an existing owner's
+            // grant list still round-trips through `replace_capabilities`.
             | "device.admin"
             | "server.admin"
+            // Assignable and command-less on purpose: `agent.worker` is
+            // enforced by `ws_worker::worker_authorized` at the socket, not by
+            // any RPC descriptor.
             | "agent.worker"
             | "client.read"
             | "client.write"
@@ -5252,6 +5271,98 @@ CREATE TABLE devices (
         assert!(
             unreachable.is_empty(),
             "capabilities no device can hold: {unreachable:?}"
+        );
+    }
+
+    /// The inverse of the test above: every capability the store will accept
+    /// as a grant must have something that actually enforces it.
+    ///
+    /// The forward test catches a command whose capability nobody can hold.
+    /// This one catches the other half, a switch that grants nothing, which is
+    /// worse than useless because it reads as a security control. All three
+    /// exemptions are named, and a name that stops being exempt has to be
+    /// deleted from this list before the test goes green again.
+    #[test]
+    fn every_grantable_capability_has_an_enforcement_point() {
+        /// Capabilities enforced somewhere other than a command descriptor, or
+        /// not enforced at all and recorded as such (CLAUDE.md working rule 7:
+        /// dormancy is documented at the type, labelled in the UI, and pinned
+        /// by a test; any two of the three is a latent bug).
+        const NO_COMMAND_REQUIRES_IT: &[(&str, &str)] = &[
+            (
+                "agent.worker",
+                "enforced at the socket by ws_worker::worker_authorized, which has no RPC descriptor",
+            ),
+            (
+                "device.admin",
+                "dormant: nothing requires it, kept assignable so existing owner grant lists round-trip",
+            ),
+            (
+                "server.admin",
+                "dormant: nothing requires it, kept assignable so existing owner grant lists round-trip",
+            ),
+        ];
+
+        let required: std::collections::HashSet<&str> = super::super::command_manifest::commands()
+            .iter()
+            .map(|descriptor| descriptor.capability.as_str())
+            .collect();
+        let exempt: std::collections::HashSet<&str> =
+            NO_COMMAND_REQUIRES_IT.iter().map(|(name, _)| *name).collect();
+
+        // Every name the store accepts. Kept next to the matches! arm it
+        // mirrors, because a new arm with no entry here is exactly the drift
+        // this test exists to catch.
+        const ASSIGNABLE: &[&str] = &[
+            "host.observe",
+            "agent.run",
+            "workspace.read",
+            "workspace.write",
+            "git.write",
+            "terminal.open",
+            "workflow.run",
+            "process.spawn",
+            "scheduler.manage",
+            "secret.manage",
+            "host.admin",
+            "device.admin",
+            "server.admin",
+            "agent.worker",
+            "client.read",
+            "client.write",
+            "performance.observe",
+            "performance.traces",
+            "performance.capture",
+        ];
+        for capability in ASSIGNABLE {
+            assert!(
+                is_assignable_device_capability(capability),
+                "{capability} is listed here but the store rejects it"
+            );
+        }
+
+        let unenforced: Vec<&str> = ASSIGNABLE
+            .iter()
+            .copied()
+            .filter(|capability| !required.contains(capability))
+            .filter(|capability| !exempt.contains(capability))
+            .collect();
+        assert!(
+            unenforced.is_empty(),
+            "grantable capabilities that enforce nothing: {unenforced:?}. \
+             Bind a command to it, or add it to NO_COMMAND_REQUIRES_IT with a reason."
+        );
+
+        // And the exemptions must stay honest: one that acquires a command is
+        // no longer an exemption, and leaving it here hides the next real one.
+        let stale: Vec<&str> = NO_COMMAND_REQUIRES_IT
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|capability| required.contains(capability))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "exempted as enforcing nothing, but a command now requires it: {stale:?}"
         );
     }
 

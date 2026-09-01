@@ -20,6 +20,15 @@ import type { DeviceGrantId, DeviceGrantRow, DeviceGrantState } from "./types"
 /**
  * Mirrors `GrantKind::capabilities()`. Order matches the Rust arrays so the
  * two read as the same table side by side.
+ *
+ * `device.admin` and `server.admin` are absent on purpose, and their absence
+ * is the UI half of a documented dormancy (CLAUDE.md working rule 7). The
+ * store will accept either as a grant, but neither is the required capability
+ * of any command in `protocol/companion-commands.json`, so a switch here would
+ * be a security control that controls nothing. The type-level note lives in
+ * `security_store.rs::default_capabilities_for_role`, and
+ * `every_grantable_capability_has_an_enforcement_point` fails if a command
+ * ever starts requiring one, which is when a row belongs here.
  */
 export const GRANT_CAPABILITIES: Readonly<Record<DeviceGrantId, readonly string[]>> = Object.freeze(
   {
