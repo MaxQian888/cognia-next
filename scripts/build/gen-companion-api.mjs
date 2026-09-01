@@ -3081,8 +3081,10 @@ export function buildHeadlessAsyncApi(contract, catalog, bridgeFixture) {
             connectionId: { type: "string" },
             frame: {
               type: "string",
-              description:
-                "An opaque, newline-free Agent RPC v2 JSON frame. Carried as a string on purpose: the bridge multiplexes it and never parses it.",
+              // Kept short enough to serialize on one line: prettier and the
+              // YAML writer wrap long strings differently, and the disagreement
+              // shows up as permanent drift in `companion-api:check`.
+              description: "Opaque, newline-free Agent RPC v2 frame. The bridge multiplexes it, never parses it.",
             },
           },
         }),

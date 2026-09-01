@@ -456,9 +456,7 @@ components:
             type: string
           frame:
             type: string
-            description:
-              "An opaque, newline-free Agent RPC v2 JSON frame. Carried as a string on purpose: the bridge multiplexes it
-              and never parses it."
+            description: Opaque, newline-free Agent RPC v2 frame. The bridge multiplexes it, never parses it.
         additionalProperties: false
     BridgeWorkerDetachFrame:
       name: BridgeWorkerDetachFrame
