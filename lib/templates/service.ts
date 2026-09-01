@@ -1,7 +1,7 @@
 import { sha256Hex } from "@/lib/share/hash"
 import { TemplateCatalog } from "./catalog"
 import { interpolatableBindings, resolvedUpdatePayload } from "./adapters"
-import { mergePayload } from "./payload-diff"
+import { diffPayload, mergePayload } from "./payload-diff"
 import {
   canonicalTemplateStringify,
   createTemplateDefinition,
@@ -29,7 +29,9 @@ import {
 } from "./package"
 import type {
   StoredTemplatePackage,
+  TemplateDerivation,
   TemplateInstanceRecord,
+  TemplateLocalRecord,
   TemplateRepository,
   TemplateResourceRef,
 } from "./repository"
@@ -95,6 +97,15 @@ export interface TemplateDiffResult {
     local?: TemplateJson
     next?: TemplateJson
   }>
+}
+
+/** A fork measured against a newer release of the definition it came from. */
+export interface TemplateDerivedUpdatePlan {
+  id: string
+  definitionId: string
+  derivation: TemplateDerivation
+  next: TemplateDefinitionEnvelope
+  diff: TemplateDiffResult
 }
 
 /** Which side of a conflicting path wins when an update is applied. */
@@ -250,15 +261,29 @@ export class TemplateService {
     return definition
   }
 
+  /**
+   * Derive an editable draft from another definition, and remember where it
+   * came from.
+   *
+   * A fork used to be a copy: the new draft carried none of its origin, so
+   * nothing could tell the user an upstream release had appeared, and there was
+   * no common ancestor to merge against. The lineage goes in the repository's
+   * local record rather than in the envelope, with an immutable snapshot of the
+   * upstream as it stood, because upstream may be a draft that gets overwritten
+   * or a release that gets removed with its package.
+   *
+   * `workspaceId` confines the fork to one workspace. Absent keeps it shared,
+   * which is the right default for forking a built-in you want everywhere.
+   */
   async fork(
     definitionId: string,
-    input: { version?: string; newId: string }
+    input: { version?: string; newId: string; workspaceId?: string }
   ): Promise<TemplateDefinitionEnvelope> {
     const source = input.version
       ? await this.repository.getRelease(definitionId, input.version)
       : await this.repository.getDraft(definitionId)
     if (!source) throw new Error(`Template definition ${definitionId} not found`)
-    return this.createDraft({
+    const draft = await this.createDraft({
       id: input.newId,
       domain: source.domain,
       metadata: { ...source.metadata, name: `${source.metadata.name} Copy` },
@@ -267,6 +292,133 @@ export class TemplateService {
       dependencies: structuredClone(source.dependencies),
       capabilities: [...source.capabilities],
       compatibility: structuredClone(source.compatibility),
+    })
+    const local: TemplateLocalRecord = {
+      derivedFrom: {
+        definitionId: source.id,
+        version: source.version,
+        revision: source.revision,
+        contentHash: source.contentHash,
+        forkedAt: this.now(),
+        baseSnapshot: structuredClone(source),
+      },
+    }
+    if (input.workspaceId !== undefined) local.workspaceId = input.workspaceId
+    await this.repository.putLocal(draft.id, local)
+    return draft
+  }
+
+  /** Where this definition was forked from, if anywhere. */
+  async getDerivation(definitionId: string): Promise<TemplateDerivation | undefined> {
+    return (await this.repository.getLocal(definitionId))?.derivedFrom
+  }
+
+  /**
+   * The newest upstream release worth offering, or nothing.
+   *
+   * Yanked releases are skipped: `planUpdate` refuses them for instances, and
+   * offering one here would only produce a failure one click later. A release
+   * at or below the version already adopted is not an update.
+   */
+  async findUpstreamUpdate(definitionId: string): Promise<TemplateDefinitionEnvelope | undefined> {
+    const derivation = await this.getDerivation(definitionId)
+    if (!derivation) return undefined
+    const releases = (await this.repository.listReleases(derivation.definitionId)).filter(
+      (release) => release.status !== "yanked" && release.version !== null
+    )
+    let best: TemplateDefinitionEnvelope | undefined
+    for (const release of releases) {
+      if (derivation.version && compareSemver(release.version!, derivation.version) <= 0) continue
+      if (!best || compareSemver(release.version!, best.version!) > 0) best = release
+    }
+    return best
+  }
+
+  /**
+   * A three-way diff of this fork against a newer upstream release.
+   *
+   * Same shape as the instance update plan, and the same reason: the fork and
+   * upstream have both moved since they parted, and only the paths where they
+   * disagree need an answer.
+   */
+  async planDerivedUpdate(
+    definitionId: string,
+    version?: string
+  ): Promise<TemplateDerivedUpdatePlan> {
+    const derivation = await this.getDerivation(definitionId)
+    if (!derivation) throw new Error(`Template definition ${definitionId} is not derived`)
+    const local = await this.repository.getDraft(definitionId)
+    if (!local) throw new Error(`Template draft ${definitionId} not found`)
+    const next = version
+      ? await this.repository.getRelease(derivation.definitionId, version)
+      : await this.findUpstreamUpdate(definitionId)
+    if (!next) throw new Error(`No upstream release available for ${definitionId}`)
+    return {
+      id: this.id(),
+      definitionId,
+      derivation,
+      next,
+      diff: diffPayload(derivation.baseSnapshot.payload, local.payload, next.payload),
+    }
+  }
+
+  /**
+   * Fold an upstream release into the fork, keeping the local edits that did
+   * not clash and applying the answer given for each one that did.
+   *
+   * The lineage moves to the release just adopted, so the next check compares
+   * against what was actually taken rather than against the original fork.
+   */
+  async applyDerivedUpdate(
+    plan: TemplateDerivedUpdatePlan,
+    input: { confirmed: boolean; resolutions?: Record<string, TemplateConflictResolution> }
+  ): Promise<TemplateDefinitionEnvelope> {
+    if (!input.confirmed) throw new Error("Template derived update requires explicit confirmation")
+    const resolutions = input.resolutions ?? {}
+    const unanswered = plan.diff.conflicts
+      .map((conflict) => conflict.path)
+      .filter((path) => resolutions[path] === undefined)
+    if (unanswered.length > 0) {
+      throw new Error(`Template derived update has unresolved conflicts: ${unanswered.join(", ")}`)
+    }
+    const current = await this.repository.getDraft(plan.definitionId)
+    if (!current) throw new Error(`Template draft ${plan.definitionId} not found`)
+    const merged = mergePayload(
+      plan.derivation.baseSnapshot.payload,
+      current.payload,
+      plan.next.payload,
+      Object.entries(resolutions)
+        .filter(([, choice]) => choice === "upstream")
+        .map(([path]) => path)
+    )
+    const saved = await this.saveDraft({ ...current, payload: merged }, current.revision)
+    await this.repository.putLocal(plan.definitionId, {
+      derivedFrom: {
+        definitionId: plan.next.id,
+        version: plan.next.version,
+        revision: plan.next.revision,
+        contentHash: plan.next.contentHash,
+        forkedAt: this.now(),
+        baseSnapshot: structuredClone(plan.next),
+      },
+    })
+    return saved
+  }
+
+  /**
+   * Forget where this definition came from.
+   *
+   * The draft is untouched. Detaching is how a user says the fork has become
+   * its own thing, so the library stops offering upstream releases for it.
+   */
+  async detachDerivation(definitionId: string): Promise<void> {
+    await this.repository.putLocal(definitionId, { derivedFrom: undefined })
+  }
+
+  /** Confine a definition to one workspace, or share it again with `null`. */
+  async setDefinitionWorkspace(definitionId: string, workspaceId: string | null): Promise<void> {
+    await this.repository.putLocal(definitionId, {
+      workspaceId: workspaceId ?? undefined,
     })
   }
 

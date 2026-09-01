@@ -4,14 +4,27 @@ import type {
   SaveDraftResult,
   StoredTemplatePackage,
   TemplateDeviceBindingRecord,
+  TemplateDerivation,
   TemplateInstanceRecord,
+  TemplateLocalRecord,
   TemplateMigrationJournalRecord,
   TemplateRepository,
 } from "@/lib/templates/repository"
 import { getDb } from "./schema"
 
+/**
+ * A stored definition: the portable envelope plus what only this library knows.
+ *
+ * `workspaceId` and `derivedFrom` are local facts (see `TemplateLocalRecord`).
+ * They live on the row rather than in the envelope so that `toDefinition`
+ * removes them on every read, which means no export, package or content hash
+ * can ever carry them. Every row sharing a definition id carries the same
+ * values, so any one of them can answer a read.
+ */
 export interface TemplateDefinitionRow extends TemplateDefinitionEnvelope {
   storageKey: string
+  workspaceId?: string
+  derivedFrom?: TemplateDerivation
 }
 
 export interface TemplatePackageRow extends StoredTemplatePackage {
@@ -19,7 +32,13 @@ export interface TemplatePackageRow extends StoredTemplatePackage {
   version: string
 }
 
-export type { TemplateDeviceBindingRecord, TemplateInstanceRecord, TemplateMigrationJournalRecord }
+export type {
+  TemplateDerivation,
+  TemplateDeviceBindingRecord,
+  TemplateInstanceRecord,
+  TemplateLocalRecord,
+  TemplateMigrationJournalRecord,
+}
 
 function draftKey(id: string): string {
   return `draft:${id}`
@@ -30,17 +49,41 @@ function releaseKey(id: string, version: string): string {
 }
 
 function toDefinition(row: TemplateDefinitionRow): TemplateDefinitionEnvelope {
-  const { storageKey: _storageKey, ...definition } = row
+  const {
+    storageKey: _storageKey,
+    workspaceId: _workspaceId,
+    derivedFrom: _derivedFrom,
+    ...definition
+  } = row
   return definition
 }
 
-function draftRow(definition: TemplateDefinitionEnvelope): TemplateDefinitionRow {
-  return { ...definition, storageKey: draftKey(definition.id) }
+/** The local half of a row, for callers that want it. */
+function toLocal(row: TemplateDefinitionRow): TemplateLocalRecord {
+  const local: TemplateLocalRecord = {}
+  if (row.workspaceId !== undefined) local.workspaceId = row.workspaceId
+  if (row.derivedFrom !== undefined) local.derivedFrom = row.derivedFrom
+  return local
 }
 
-function releaseRow(definition: TemplateDefinitionEnvelope): TemplateDefinitionRow {
+/**
+ * `local` is threaded through both row builders because a save spreads a bare
+ * envelope, which has no local fields. Without it every `saveDraft` would
+ * quietly erase the workspace and the fork lineage of the row it overwrites.
+ */
+function draftRow(
+  definition: TemplateDefinitionEnvelope,
+  local?: TemplateLocalRecord
+): TemplateDefinitionRow {
+  return { ...definition, ...local, storageKey: draftKey(definition.id) }
+}
+
+function releaseRow(
+  definition: TemplateDefinitionEnvelope,
+  local?: TemplateLocalRecord
+): TemplateDefinitionRow {
   if (!definition.version) throw new Error("Template release version is required")
-  return { ...definition, storageKey: releaseKey(definition.id, definition.version) }
+  return { ...definition, ...local, storageKey: releaseKey(definition.id, definition.version) }
 }
 
 function packageRow(value: StoredTemplatePackage): TemplatePackageRow {
@@ -91,7 +134,7 @@ export class DexieTemplateRepository implements TemplateRepository {
           current: current ? toDefinition(current) : undefined,
         } satisfies SaveDraftResult
       }
-      await db.templateDefinitions.put(draftRow(definition))
+      await db.templateDefinitions.put(draftRow(definition, current ? toLocal(current) : undefined))
       return { saved: true, definition } satisfies SaveDraftResult
     })
   }
@@ -106,7 +149,10 @@ export class DexieTemplateRepository implements TemplateRepository {
       if (await db.templateDefinitions.get(key)) {
         throw new Error(`Template release ${definition.id}@${definition.version} is immutable`)
       }
-      await db.templateDefinitions.add(releaseRow(definition))
+      const sibling = await db.templateDefinitions.where("id").equals(definition.id).first()
+      await db.templateDefinitions.add(
+        releaseRow(definition, sibling ? toLocal(sibling) : undefined)
+      )
     })
   }
 
@@ -211,6 +257,42 @@ export class DexieTemplateRepository implements TemplateRepository {
 
   async listInstances(): Promise<TemplateInstanceRecord[]> {
     return getDb().templateInstances.toArray()
+  }
+
+  async getLocal(id: string): Promise<TemplateLocalRecord | undefined> {
+    const row = await getDb().templateDefinitions.where("id").equals(id).first()
+    if (!row) return undefined
+    const local = toLocal(row)
+    return Object.keys(local).length > 0 ? local : undefined
+  }
+
+  async putLocal(id: string, patch: TemplateLocalRecord): Promise<void> {
+    const db = getDb()
+    await db.transaction("rw", db.templateDefinitions, async () => {
+      // Every row of this id, so a read can take the first one it finds and a
+      // later release does not disagree with the draft it came from.
+      await db.templateDefinitions
+        .where("id")
+        .equals(id)
+        .modify((row) => {
+          for (const key of ["workspaceId", "derivedFrom"] as const) {
+            if (!(key in patch)) continue
+            // An explicit `undefined` is a clear: `detachDerivation` sends one.
+            if (patch[key] === undefined) delete row[key]
+            else Object.assign(row, { [key]: patch[key] })
+          }
+        })
+    })
+  }
+
+  async listLocal(): Promise<Record<string, TemplateLocalRecord>> {
+    const out: Record<string, TemplateLocalRecord> = {}
+    for (const row of await getDb().templateDefinitions.toArray()) {
+      if (out[row.id]) continue
+      const local = toLocal(row)
+      if (Object.keys(local).length > 0) out[row.id] = local
+    }
+    return out
   }
 }
 

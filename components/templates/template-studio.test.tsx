@@ -18,6 +18,8 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
+let mockDerivation: Record<string, unknown> | undefined
+let mockUpstream: Record<string, unknown> | undefined
 jest.mock("@/hooks/use-template-catalog", () => ({
   useTemplateCatalog: () => ({ definitions: catalogDefinitions, revision: 0 }),
 }))
@@ -31,6 +33,10 @@ jest.mock("@/lib/templates/runtime", () => ({
       saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
       deleteDraft: (...args: unknown[]) => mockDeleteDraft(...args),
       deprecate: (...args: unknown[]) => mockDeprecate(...args),
+      // The inspector reads fork lineage from the repository on every
+      // selection. Unforked is the default in this suite.
+      getDerivation: async () => mockDerivation,
+      findUpstreamUpdate: async () => mockUpstream,
     },
   }),
 }))

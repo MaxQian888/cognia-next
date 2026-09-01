@@ -39904,6 +39904,21 @@
       "permission": "请求权限",
       "update": "更新资源"
     },
+    "origin": {
+      "apply": "合并",
+      "cancel": "取消",
+      "changes": "{count} 处变更",
+      "detach": "脱钩",
+      "detached": "已与上游脱钩。",
+      "dialogDescription": "从 {from} 更新到 {to}。",
+      "dialogTitle": "采用上游更新",
+      "localOnly": "由本地模板库记录，并非模板自身的声明。",
+      "merged": "已合并上游更新。",
+      "review": "查看更新",
+      "title": "派生自",
+      "upToDate": "已是上游最新",
+      "updateAvailable": "上游已更新至 {version}"
+    },
     "packages": {
       "maintenance": "维护",
       "none": "尚未导入任何包。",

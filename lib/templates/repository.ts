@@ -47,6 +47,47 @@ export interface TemplateInstanceRecord {
   sourceUnavailableAt?: number
 }
 
+/**
+ * Where a definition came from, recorded when it was forked.
+ *
+ * This is LOCAL relationship data, deliberately not part of the portable
+ * envelope. Two reasons. Provenance is excluded from `contentHash`, so lineage
+ * carried there would be freely forgeable by anyone shipping a package, and it
+ * drives update prompts. And a fork's origin is a fact about this machine's
+ * library, not a claim the template makes about itself, so exporting it would
+ * turn one user's local history into another user's publisher metadata.
+ *
+ * `baseSnapshot` is the upstream definition AS IT WAS at fork time, stored
+ * rather than re-read. `fork()` may derive from a draft, which is mutable and
+ * gets overwritten, and a release can be removed with its package. Either way
+ * the common ancestor would be unrecoverable and a three-way merge would
+ * silently degrade to "take everything". `TemplateInstanceRecord.source`
+ * already keeps a snapshot for the same reason.
+ */
+export interface TemplateDerivation {
+  definitionId: string
+  version: string | null
+  revision: number
+  contentHash: string
+  forkedAt: number
+  baseSnapshot: TemplateDefinitionEnvelope
+}
+
+/**
+ * Facts the local library knows about a definition that the definition itself
+ * must not carry. Stripped on the way out of storage, so nothing here can
+ * reach an export, a package or a content hash.
+ */
+export interface TemplateLocalRecord {
+  /**
+   * The workspace that owns this definition. Absent means shared: built-ins,
+   * plugin and marketplace templates, and anything the user chose not to
+   * confine. Matches `byProjectId`, where an unowned row belongs to everyone.
+   */
+  workspaceId?: string
+  derivedFrom?: TemplateDerivation
+}
+
 export interface TemplateDeviceBindingRecord {
   id: string
   definitionId: string
@@ -108,6 +149,11 @@ export interface TemplateRepository {
   putInstance(value: TemplateInstanceRecord): Promise<void>
   getInstance(id: string): Promise<TemplateInstanceRecord | undefined>
   listInstances(): Promise<TemplateInstanceRecord[]>
+  /** Local-only facts for one definition id, across every one of its rows. */
+  getLocal(id: string): Promise<TemplateLocalRecord | undefined>
+  /** Merge a patch into those facts. An explicit `undefined` clears a field. */
+  putLocal(id: string, patch: TemplateLocalRecord): Promise<void>
+  listLocal(): Promise<Record<string, TemplateLocalRecord>>
 }
 
 function releaseKey(id: string, version: string): string {
@@ -119,6 +165,7 @@ export class InMemoryTemplateRepository implements TemplateRepository {
   private readonly releases = new Map<string, TemplateDefinitionEnvelope>()
   private readonly packages = new Map<string, StoredTemplatePackage>()
   private readonly instances = new Map<string, TemplateInstanceRecord>()
+  private readonly local = new Map<string, TemplateLocalRecord>()
 
   async listDefinitions(): Promise<TemplateDefinitionEnvelope[]> {
     return [...this.drafts.values(), ...this.releases.values()].map((value) =>
@@ -259,5 +306,27 @@ export class InMemoryTemplateRepository implements TemplateRepository {
 
   async listInstances(): Promise<TemplateInstanceRecord[]> {
     return [...this.instances.values()].map((value) => structuredClone(value))
+  }
+
+  async getLocal(id: string): Promise<TemplateLocalRecord | undefined> {
+    const value = this.local.get(id)
+    return value ? structuredClone(value) : undefined
+  }
+
+  async putLocal(id: string, patch: TemplateLocalRecord): Promise<void> {
+    const merged = { ...this.local.get(id), ...patch }
+    // An explicit `undefined` is a clear, not a no-op: `detachDerivation`
+    // passes one and has to actually forget the origin.
+    for (const key of Object.keys(patch) as (keyof TemplateLocalRecord)[]) {
+      if (patch[key] === undefined) delete merged[key]
+    }
+    if (Object.keys(merged).length === 0) this.local.delete(id)
+    else this.local.set(id, structuredClone(merged))
+  }
+
+  async listLocal(): Promise<Record<string, TemplateLocalRecord>> {
+    return Object.fromEntries(
+      [...this.local.entries()].map(([id, value]) => [id, structuredClone(value)])
+    )
   }
 }

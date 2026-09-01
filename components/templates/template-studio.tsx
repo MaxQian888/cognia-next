@@ -37,11 +37,13 @@ import {
 } from "@/lib/templates/contracts"
 import type { InspectedTemplatePackage } from "@/lib/templates/package"
 import type {
+  TemplateConflictResolution,
+  TemplateDerivedUpdatePlan,
   TemplatePackageVerification,
   TemplatePreflightPlan,
-  TemplateConflictResolution,
   TemplateUpdatePlan,
 } from "@/lib/templates/service"
+import type { TemplateDerivation } from "@/lib/templates/repository"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -79,6 +81,8 @@ import { TemplateMetadataEditor, type TemplateMetadataDraft } from "./template-m
 import { PublishConfirmDialog, type PublishSuggestion } from "./publish-confirm-dialog"
 import { InstantiateConfirmDialog } from "./instantiate-confirm-dialog"
 import { TemplateInstanceCard } from "./template-instance-card"
+import { TemplateDerivedUpdateDialog } from "./template-derived-update-dialog"
+import { TemplateOriginCard } from "./template-origin-card"
 import { TemplateUpdateDialog } from "./template-update-dialog"
 
 /** Domains with a real adapter: these can be authored, published, instantiated. */
@@ -236,6 +240,13 @@ export function TemplateStudio() {
   const [publishSuggestion, setPublishSuggestion] = useState<PublishSuggestion | null>(null)
   const [pendingInstantiate, setPendingInstantiate] = useState<TemplatePreflightPlan>()
   const [updatePlan, setUpdatePlan] = useState<TemplateUpdatePlan>()
+  const [derivedPlan, setDerivedPlan] = useState<TemplateDerivedUpdatePlan>()
+  const [derivation, setDerivation] = useState<TemplateDerivation>()
+  const [upstream, setUpstream] = useState<TemplateDefinitionEnvelope>()
+  // Bumped after a merge or a detach so the origin card re-reads. The lineage
+  // lives in the repository, not in the catalog the selection comes from, so
+  // nothing else would tell this view it changed.
+  const [originNonce, setOriginNonce] = useState(0)
   const [pendingImport, setPendingImport] = useState<{
     bytes: Uint8Array
     inspected: InspectedTemplatePackage
@@ -259,6 +270,41 @@ export function TemplateStudio() {
       active = false
     }
   }, [revision, runtime])
+
+  /**
+   * The selected definition's fork lineage, and whether upstream has moved.
+   *
+   * Read here rather than in the inspector because the lineage is repository
+   * state, not catalog state: the selection carries the envelope, and the
+   * envelope deliberately does not know where it came from.
+   */
+  const selectedId = selected?.id
+  useEffect(() => {
+    let active = true
+    // The empty case resolves through the same promise rather than clearing
+    // synchronously: a bare setState in an effect body cascades renders, and
+    // the lint rule that catches it is there for exactly this shape.
+    const load = selectedId
+      ? Promise.all([
+          runtime.service.getDerivation(selectedId),
+          runtime.service.findUpstreamUpdate(selectedId),
+        ])
+      : Promise.resolve([undefined, undefined] as const)
+    void load
+      .then(([nextDerivation, nextUpstream]) => {
+        if (!active) return
+        setDerivation(nextDerivation)
+        setUpstream(nextUpstream)
+      })
+      .catch(() => {
+        if (!active) return
+        setDerivation(undefined)
+        setUpstream(undefined)
+      })
+    return () => {
+      active = false
+    }
+  }, [selectedId, originNonce, revision, runtime])
 
   /**
    * Run an async handler and report what happened.
@@ -327,6 +373,34 @@ export function TemplateStudio() {
     })
     setSelectionKey(`id:${forked.id}`)
     setMessage(t("messages.forked", { id: forked.id }))
+  }
+
+  /**
+   * Reconcile a fork with a newer release of what it came from.
+   *
+   * The lineage and the upstream lookup both come from the service, so the
+   * inspector never has to guess which release a fork is measured against.
+   */
+  const reviewDerivedUpdate = async () => {
+    if (!selected) return
+    setDerivedPlan(await runtime.service.planDerivedUpdate(selected.id))
+  }
+
+  const applyDerivedUpdate = async (
+    target: TemplateDerivedUpdatePlan,
+    resolutions: Record<string, TemplateConflictResolution>
+  ) => {
+    await runtime.service.applyDerivedUpdate(target, { confirmed: true, resolutions })
+    setDerivedPlan(undefined)
+    setOriginNonce((value) => value + 1)
+    setMessage(t("origin.merged"))
+  }
+
+  const detachDerivation = async () => {
+    if (!selected) return
+    await runtime.service.detachDerivation(selected.id)
+    setOriginNonce((value) => value + 1)
+    setMessage(t("origin.detached"))
   }
 
   /** Withdraw a release. `deprecate` also had no caller. */
@@ -620,6 +694,10 @@ export function TemplateStudio() {
         onSaveDraft={saveDraft}
         onExport={() => setExportOrigin(selected)}
         onFork={guard(forkSelected)}
+        derivation={derivation}
+        upstream={upstream}
+        onReviewUpdate={guard(reviewDerivedUpdate)}
+        onDetach={guard(detachDerivation)}
         onDeprecate={guard(() => deprecateSelected("deprecated"))}
         onYank={guard(() => deprecateSelected("yanked"))}
         onDeleteDraft={guard(deleteSelectedDraft)}
@@ -810,6 +888,11 @@ export function TemplateStudio() {
         onOpenChange={(open) => (open ? undefined : setPublishSuggestion(null))}
         onConfirm={(bump) => guard(() => publish(bump))()}
       />
+      <TemplateDerivedUpdateDialog
+        plan={derivedPlan}
+        onOpenChange={(open) => !open && setDerivedPlan(undefined)}
+        onConfirm={(target, resolutions) => guard(() => applyDerivedUpdate(target, resolutions))()}
+      />
       <TemplateUpdateDialog
         plan={updatePlan}
         onOpenChange={(open) => (open ? undefined : setUpdatePlan(undefined))}
@@ -944,6 +1027,10 @@ function TemplateInspector({
   onSaveDraft,
   onExport,
   onFork,
+  derivation,
+  upstream,
+  onReviewUpdate,
+  onDetach,
   onDeprecate,
   onYank,
   onDeleteDraft,
@@ -966,6 +1053,10 @@ function TemplateInspector({
   }): Promise<void>
   onExport(): void
   onFork(): void
+  derivation?: TemplateDerivation
+  upstream?: TemplateDefinitionEnvelope
+  onReviewUpdate(): void
+  onDetach(): void
   onDeprecate(): void
   onYank(): void
   onDeleteDraft(): void
@@ -1013,6 +1104,13 @@ function TemplateInspector({
           <p>{t("inspector.source", { source: definition.provenance.source })}</p>
           <p>{t("inspector.hash", { hash: definition.contentHash })}</p>
         </div>
+        <TemplateOriginCard
+          derivation={derivation}
+          upstream={upstream}
+          onReviewUpdate={onReviewUpdate}
+          onDetach={onDetach}
+          readOnly={mobile || readOnly}
+        />
         {definition.inputs.map((input) => (
           <TemplateBindingField
             key={input.id}

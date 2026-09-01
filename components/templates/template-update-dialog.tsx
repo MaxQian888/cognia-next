@@ -29,8 +29,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { TemplateConflictResolution, TemplateUpdatePlan } from "@/lib/templates/service"
+import { TemplateConflictList, unresolvedPaths } from "./template-conflict-list"
 
 export interface TemplateUpdateDialogProps {
   plan: TemplateUpdatePlan | undefined
@@ -64,7 +64,7 @@ export function TemplateUpdateDialog({
   }
 
   const unresolved = useMemo(
-    () => (plan?.diff.conflicts ?? []).filter((c) => resolutions[c.path] === undefined).length,
+    () => unresolvedPaths(plan?.diff.conflicts ?? [], resolutions).length,
     [plan, resolutions]
   )
 
@@ -96,62 +96,11 @@ export function TemplateUpdateDialog({
                 </AlertDescription>
               </Alert>
             ) : null}
-            {plan.diff.conflicts.length > 0 ? (
-              <section className="space-y-2" data-testid="template-update-conflicts">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t("conflicts", { count: plan.diff.conflicts.length })}
-                </h3>
-                <ul className="max-h-52 space-y-1.5 overflow-y-auto">
-                  {plan.diff.conflicts.map((conflict) => (
-                    <li
-                      key={conflict.path}
-                      className="flex items-center gap-3 rounded-lg border px-3 py-2"
-                    >
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                        {conflict.path}
-                      </span>
-                      <ToggleGroup
-                        type="single"
-                        size="sm"
-                        value={resolutions[conflict.path] ?? ""}
-                        aria-label={t("resolutionLabel", { path: conflict.path })}
-                        onValueChange={(value) => {
-                          // Radix clears the value when the active item is
-                          // clicked again. An answered conflict stays answered.
-                          if (!value) return
-                          setResolutions((prev) => ({
-                            ...prev,
-                            [conflict.path]: value as TemplateConflictResolution,
-                          }))
-                        }}
-                        className="text-xs"
-                      >
-                        <ToggleGroupItem
-                          value="local"
-                          data-testid={`template-update-keep-${conflict.path}`}
-                        >
-                          {t("keepLocal")}
-                        </ToggleGroupItem>
-                        <ToggleGroupItem
-                          value="upstream"
-                          data-testid={`template-update-take-${conflict.path}`}
-                        >
-                          {t("takeUpstream")}
-                        </ToggleGroupItem>
-                      </ToggleGroup>
-                    </li>
-                  ))}
-                </ul>
-                {unresolved > 0 ? (
-                  <p
-                    className="text-xs text-muted-foreground"
-                    data-testid="template-update-pending"
-                  >
-                    {t("unresolved", { count: unresolved })}
-                  </p>
-                ) : null}
-              </section>
-            ) : null}
+            <TemplateConflictList
+              conflicts={plan.diff.conflicts}
+              resolutions={resolutions}
+              onResolve={(path, choice) => setResolutions((prev) => ({ ...prev, [path]: choice }))}
+            />
             <p className="text-muted-foreground">
               {t("changes", { count: plan.diff.changes.length })}
             </p>

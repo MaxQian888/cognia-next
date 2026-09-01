@@ -39904,6 +39904,21 @@
       "permission": "Request permission",
       "update": "Update a resource"
     },
+    "origin": {
+      "apply": "Merge",
+      "cancel": "Cancel",
+      "changes": "{count, plural, =1 {1 change} other {# changes}}",
+      "detach": "Detach",
+      "detached": "Detached from upstream.",
+      "dialogDescription": "From {from} to {to}.",
+      "dialogTitle": "Take the upstream update",
+      "localOnly": "Recorded by this library, not claimed by the template.",
+      "merged": "Merged the upstream update.",
+      "review": "Review update",
+      "title": "Forked from",
+      "upToDate": "Up to date with upstream",
+      "updateAvailable": "Upstream updated to {version}"
+    },
     "packages": {
       "maintenance": "Maintenance",
       "none": "No packages imported yet.",

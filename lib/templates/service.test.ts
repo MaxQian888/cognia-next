@@ -558,3 +558,182 @@ describe("TemplateService package maintenance", () => {
     await expect(service.deleteDraft("user.skill.scratch")).rejects.toThrow(/not found/)
   })
 })
+
+describe("TemplateService derivation", () => {
+  async function upstream(payload: Record<string, unknown> = { content: "v1", tone: "plain" }) {
+    const { repository, service, catalog } = makeService()
+    const draft = await service.createDraft({
+      id: "skill.origin",
+      domain: "skill",
+      metadata: { name: "Origin" },
+      payload: payload as never,
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const release = await service.publish(draft.id, {
+      expectedRevision: 1,
+      confirmedBump: "minor",
+    })
+    return { repository, service, catalog, draft, release }
+  }
+
+  it("records where a fork came from, which a copy never did", async () => {
+    const { service, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+
+    const derivation = await service.getDerivation(fork.id)
+    expect(derivation).toMatchObject({
+      definitionId: release.id,
+      version: release.version,
+      contentHash: release.contentHash,
+    })
+  })
+
+  /**
+   * Lineage is local, never portable. Carrying it in the envelope would put a
+   * forgeable origin claim (provenance is outside `contentHash`) into every
+   * export, and turn one machine's history into another's publisher metadata.
+   */
+  it("keeps the lineage out of the definition the catalog and exports see", async () => {
+    const { service, repository, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+
+    const stored = await repository.getDraft(fork.id)
+    expect(stored).toBeDefined()
+    expect(stored).not.toHaveProperty("derivedFrom")
+    expect(stored).not.toHaveProperty("workspaceId")
+  })
+
+  it("offers a newer upstream release and ignores anything at or below the fork", async () => {
+    const { service, draft, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+    expect(await service.findUpstreamUpdate(fork.id)).toBeUndefined()
+
+    const edited = await service.saveDraft(
+      { ...draft, payload: { content: "v2", tone: "plain" } },
+      draft.revision
+    )
+    const second = await service.publish(edited.id, {
+      expectedRevision: edited.revision,
+      confirmedBump: "patch",
+    })
+    expect((await service.findUpstreamUpdate(fork.id))?.version).toBe(second.version)
+  })
+
+  it("does not offer a yanked release, which the update path would refuse anyway", async () => {
+    const { service, draft, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+    const edited = await service.saveDraft(
+      { ...draft, payload: { content: "v2", tone: "plain" } },
+      draft.revision
+    )
+    const second = await service.publish(edited.id, {
+      expectedRevision: edited.revision,
+      confirmedBump: "patch",
+    })
+    await service.deprecate(second.id, second.version!, "yanked")
+    expect(await service.findUpstreamUpdate(fork.id)).toBeUndefined()
+  })
+
+  it("keeps the local edit and takes the disjoint upstream one", async () => {
+    const { service, draft, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+    await service.saveDraft({ ...fork, payload: { content: "v1", tone: "mine" } }, fork.revision)
+    const edited = await service.saveDraft(
+      { ...draft, payload: { content: "v2", tone: "plain" } },
+      draft.revision
+    )
+    const second = await service.publish(edited.id, {
+      expectedRevision: edited.revision,
+      confirmedBump: "patch",
+    })
+
+    const plan = await service.planDerivedUpdate(fork.id)
+    expect(plan.diff.conflicts).toEqual([])
+    const merged = await service.applyDerivedUpdate(plan, { confirmed: true })
+    expect(merged.payload).toEqual({ content: "v2", tone: "mine" })
+    // Lineage advances to what was taken, so the next check is against it.
+    expect((await service.getDerivation(fork.id))?.version).toBe(second.version)
+  })
+
+  it("refuses a conflicting merge until each clashing path is answered", async () => {
+    const { service, draft, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+    await service.saveDraft({ ...fork, payload: { content: "mine", tone: "plain" } }, fork.revision)
+    const edited = await service.saveDraft(
+      { ...draft, payload: { content: "theirs", tone: "plain" } },
+      draft.revision
+    )
+    await service.publish(edited.id, { expectedRevision: edited.revision, confirmedBump: "patch" })
+
+    const plan = await service.planDerivedUpdate(fork.id)
+    expect(plan.diff.conflicts.map((c) => c.path)).toEqual(["$/content"])
+    await expect(service.applyDerivedUpdate(plan, { confirmed: true })).rejects.toThrow(
+      /unresolved conflicts/i
+    )
+    const merged = await service.applyDerivedUpdate(plan, {
+      confirmed: true,
+      resolutions: { "$/content": "local" },
+    })
+    expect(merged.payload).toEqual({ content: "mine", tone: "plain" })
+  })
+
+  /**
+   * `fork()` may derive from a DRAFT, which is mutable. Re-reading the origin
+   * at merge time would use the overwritten draft as the common ancestor and
+   * report every field as agreed, silently taking upstream wholesale. The
+   * snapshot taken at fork time is what makes the three-way merge honest.
+   */
+  it("merges against the snapshot taken at fork time, not the overwritten origin", async () => {
+    const { service } = makeService()
+    const origin = await service.createDraft({
+      id: "skill.origin",
+      domain: "skill",
+      metadata: { name: "Origin" },
+      payload: { content: "v1", tone: "plain" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const fork = await service.fork(origin.id, { newId: "skill.mine" })
+    await service.saveDraft({ ...fork, payload: { content: "v1", tone: "mine" } }, fork.revision)
+
+    // The origin draft moves on and is then published.
+    const moved = await service.saveDraft(
+      { ...origin, payload: { content: "v2", tone: "plain" } },
+      origin.revision
+    )
+    const released = await service.publish(moved.id, {
+      expectedRevision: moved.revision,
+      confirmedBump: "minor",
+    })
+
+    const plan = await service.planDerivedUpdate(fork.id, released.version!)
+    expect(plan.diff.conflicts).toEqual([])
+    const merged = await service.applyDerivedUpdate(plan, { confirmed: true })
+    expect(merged.payload).toEqual({ content: "v2", tone: "mine" })
+  })
+
+  it("stops offering upstream once the fork is detached", async () => {
+    const { service, release } = await upstream()
+    const fork = await service.fork(release.id, { version: release.version!, newId: "skill.mine" })
+    await service.detachDerivation(fork.id)
+    expect(await service.getDerivation(fork.id)).toBeUndefined()
+    await expect(service.planDerivedUpdate(fork.id)).rejects.toThrow(/not derived/i)
+  })
+
+  it("confines a fork to one workspace and shares it again", async () => {
+    const { service, repository, release } = await upstream()
+    const fork = await service.fork(release.id, {
+      version: release.version!,
+      newId: "skill.mine",
+      workspaceId: "ws_1",
+    })
+    expect((await repository.getLocal(fork.id))?.workspaceId).toBe("ws_1")
+    await service.setDefinitionWorkspace(fork.id, null)
+    expect((await repository.getLocal(fork.id))?.workspaceId).toBeUndefined()
+  })
+})
