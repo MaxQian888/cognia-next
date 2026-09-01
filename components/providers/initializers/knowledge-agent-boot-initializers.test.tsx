@@ -24,6 +24,12 @@ jest.mock("./template-platform-initializer", () => ({
 jest.mock("./vector-credential-migration-initializer", () => ({
   VectorCredentialMigrationInitializer: () => <span data-boot="vector-credentials" />,
 }))
+// ADR-0162. Stubbed like its siblings, and asserted below, because the real one
+// renders null: a transfer pump that was dropped from this group would leave
+// every queued transfer sitting at "queued" with nothing to show for it.
+jest.mock("./sftp-transfer-initializer", () => ({
+  SftpTransferInitializer: () => <span data-boot="sftp-transfers" />,
+}))
 const mockMarkReady = jest.fn()
 jest.mock("@/lib/boot/capabilities", () => ({
   markBootCapabilityReady: (...args: unknown[]) => mockMarkReady(...args),
@@ -46,6 +52,7 @@ it("mounts knowledge and agent workers and reports readiness", () => {
     "project-kb",
     "vector-credentials",
     "templates",
+    "sftp-transfers",
   ])
   expect(mockMarkReady).toHaveBeenCalledWith("knowledge-agents")
 })

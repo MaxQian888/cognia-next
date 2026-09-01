@@ -85,6 +85,7 @@ export const CORE_TABLE_NAMES = [
   "browserDomainGrants",
   "browserProfiles",
   "browserRecordings",
+  "sftpTransfers",
   "browserSubmissions",
   "calibrationItems",
   "calibrationRuns",
@@ -1228,6 +1229,12 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   evalOnlinePolicies: "metadata-only",
   // Three numbers and a day key.
   evalOnlineBudget: "metadata-only",
+  // ADR-0162. The heuristic would call this metadata by its name, and the row
+  // carries the actual bytes of a file on somebody's production machine: an
+  // upload waiting to be sent, or a download waiting to be saved. That is user
+  // content by any reading, and it is here rather than in the name pattern
+  // because no spelling of "transfer" says "this holds a file".
+  sftpTransfers: "encrypted-content",
 }
 
 /**

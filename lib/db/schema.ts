@@ -159,6 +159,7 @@ import type {
   CollabChatSyncStateRow,
 } from "./collab-chat-mirror-types"
 import type { BrowserSubmissionRow } from "./browser-submissions-types"
+import type { SftpTransferRow } from "@/lib/sftp/transfer-types"
 import type { ThreadHandoffTicket } from "@cognia/agent-config-types/thread-handoff"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
@@ -393,7 +394,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 215
+export const CURRENT_SCHEMA_VERSION = 216
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -877,6 +878,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   collabChatSyncStates: "&sessionId, orgId, updatedAt",
   accountContentMigrations: "&id, accountId, status, updatedAt",
   collabChatAttachments: "&id, sessionId, orgId, status, updatedAt, fetchedAt",
+  sftpTransfers:
+    "&id, profileId, status, direction, createdAt, [profileId+status], [status+createdAt]",
   evalObservations:
     "&id, origin, evaluatorVersionId, scope.runId, scope.experimentId, scope.caseId, scope.traceId, createdAt, [origin+createdAt], [scope.traceId+origin]",
   evalOnlinePolicies: "&id, workspaceId, enabledFlag, updatedAt, [workspaceId+enabledFlag]",
@@ -1475,6 +1478,11 @@ export class CogniaDB extends Dexie {
   // v199 — Browser Companion submission side-notes. See
   // `lib/db/browser-submissions.ts`.
   browserSubmissions!: Table<BrowserSubmissionRow, string>
+  // v216 — ADR-0162 SFTP transfer queue. LOCAL ONLY, and deliberately so: a
+  // row carries the bytes still to be uploaded, and the machine on the other
+  // end is reachable from this host and not from a phone that synced the row.
+  // See `lib/sftp/transfer-queue.ts`.
+  sftpTransfers!: Table<SftpTransferRow, string>
   // v200 — ADR-0103 two-role cross-host handoff journal. See
   // `lib/db/thread-handoff-tickets.ts`.
   threadHandoffTickets!: Table<ThreadHandoffTicket, [string, string]>
