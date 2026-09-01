@@ -31,7 +31,7 @@ export const ACTION_REVIEW_CONTRACT_VERSION = 1 as const
 export type ActionReviewChannel =
   /** Sidecar `canUseTool` → the chat approval dialog. The largest producer. */
   | "chat-tool"
-  /** Agent Team plan approval (`lib/ai/agent/plan-approval-bus.ts`). */
+  /** Squad plan approval (`lib/runtime/approval-bus.ts`, scope `agent-team`). */
   | "agent-team-plan"
   /** Agent Team capability/risk gate (`lib/ai/agent/agent-team-runtime.ts`). */
   | "agent-team-gate"

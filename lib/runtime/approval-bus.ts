@@ -2,10 +2,11 @@
  * Generic approval bus — scope+id-keyed pub/sub for "wait until human (or
  * another async actor) decides approve/reject" workflows.
  *
- * Extracted from `lib/ai/agent/plan-approval-bus.ts` so the same primitive
- * powers Agent-Team plan approvals AND GitHub Delivery's HITL guard. Pure
- * in-memory; the durable side of any approval (draft row, Dexie state)
- * lives in the caller's domain.
+ * Extracted from a Squad-only plan-approval bus so the same primitive powers
+ * Squad plan approvals AND GitHub Delivery's HITL guard. The `teamId`-keyed
+ * wrapper it was extracted from is gone: it existed to keep legacy call sites
+ * unchanged, and outlived the last of them. Pure in-memory. The durable side of
+ * any approval (draft row, Dexie state) lives in the caller's domain.
  */
 
 export interface ApprovalKey {
