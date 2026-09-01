@@ -2,28 +2,23 @@
 
 // Default-model picker for the Built-in Agent Runtime settings page.
 //
-// Reads the same provider whitelist as `composer/model-picker.tsx` but
-// persists the selection to `AppSettings.defaultModel` + `defaultProvider`
-// instead of a session row. Used as the body of the "Default model" card
-// in the Defaults tab.
+// Persists to `AppSettings.defaultModel` + `defaultProvider` rather than to a
+// session row. Used as the body of the "Default model" card in the Defaults
+// tab.
+//
+// The list itself is `ProviderModelList`, shared with the goal judge picker and
+// the routing alias combobox, which were three copies of the same forty lines.
+// The frame is `ResponsivePicker`, so this becomes a bottom sheet on a phone
+// and carries the overlay surface tier like every other picker.
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, ChevronsUpDownIcon, CpuIcon } from "lucide-react"
+import { ChevronsUpDownIcon, CpuIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ResponsivePicker } from "@/components/shared/responsive-picker"
+import { ProviderModelList } from "@/components/settings/provider/provider-model-list"
 import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
 
 export function DefaultModelPicker() {
@@ -44,21 +39,17 @@ export function DefaultModelPicker() {
 
   const activeModel = defaultModel ?? ""
   const activeProvider = defaultProvider ?? ""
-  const buttonLabel = activeModel ? activeModel : t("modelUnset")
-
-  const handleSelect = (providerId: string, modelId: string) => {
-    setOpen(false)
-    void save({ defaultModel: modelId, defaultProvider: providerId })
-  }
-
-  const handleClear = () => {
-    setOpen(false)
-    void save({ defaultModel: undefined, defaultProvider: undefined })
-  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <ResponsivePicker
+      open={open}
+      onOpenChange={setOpen}
+      title={t("modelLabel")}
+      align="start"
+      side="bottom"
+      contentClassName="w-[340px]"
+      testId="default-model-panel"
+      trigger={
         <Button
           variant="outline"
           className="w-full justify-between gap-2 font-mono text-xs"
@@ -66,54 +57,33 @@ export function DefaultModelPicker() {
         >
           <span className="flex items-center gap-2 truncate">
             <CpuIcon className="size-3.5 shrink-0" />
-            <span className="truncate">{buttonLabel}</span>
+            <span className="truncate">{activeModel ? activeModel : t("modelUnset")}</span>
           </span>
           <ChevronsUpDownIcon className="size-3 shrink-0 opacity-50" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[340px] p-0">
-        <Command>
-          <CommandInput placeholder={t("modelSearch")} />
-          <CommandList>
-            {groups.length === 0 ? (
-              <CommandEmpty>{t("modelEmpty")}</CommandEmpty>
-            ) : (
-              <>
-                {groups.map((group, idx) => (
-                  <div key={group.providerId}>
-                    {idx > 0 ? <CommandSeparator /> : null}
-                    <CommandGroup heading={group.providerName}>
-                      {group.models.map((modelId) => {
-                        const isActive =
-                          modelId === activeModel && group.providerId === activeProvider
-                        return (
-                          <CommandItem
-                            key={`${group.providerId}:${modelId}`}
-                            value={`${group.providerId} ${modelId}`}
-                            onSelect={() => handleSelect(group.providerId, modelId)}
-                          >
-                            <CheckIcon
-                              className={cn("mr-2 size-4", isActive ? "opacity-100" : "opacity-0")}
-                            />
-                            <span className="font-mono text-xs">{modelId}</span>
-                          </CommandItem>
-                        )
-                      })}
-                    </CommandGroup>
-                  </div>
-                ))}
-                <CommandSeparator />
-                <CommandGroup>
-                  <CommandItem value="__clear__" onSelect={handleClear} disabled={!activeModel}>
-                    <span className="text-xs text-muted-foreground">{t("modelClear")}</span>
-                  </CommandItem>
-                </CommandGroup>
-              </>
-            )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+      }
+    >
+      <ProviderModelList
+        groups={groups}
+        activeProviderId={activeProvider}
+        activeModelId={activeModel}
+        searchPlaceholder={t("modelSearch")}
+        emptyLabel={t("modelEmpty")}
+        onSelect={(providerId, modelId) => {
+          setOpen(false)
+          void save({ defaultModel: modelId, defaultProvider: providerId })
+        }}
+        footer={{
+          label: t("modelClear"),
+          value: "__clear__",
+          disabled: !activeModel,
+          onSelect: () => {
+            setOpen(false)
+            void save({ defaultModel: undefined, defaultProvider: undefined })
+          },
+        }}
+      />
+    </ResponsivePicker>
   )
 }
 

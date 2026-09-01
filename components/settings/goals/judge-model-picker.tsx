@@ -1,31 +1,27 @@
 "use client"
 
-// Controlled provider+model picker for the goal judge (Settings → Goals →
-// Defaults). Reuses the shared option universe (`collectOptions` /
-// `groupByProvider`) that backs the default-model picker, but is a CONTROLLED
-// input: it reads/writes the caller's draft (`judgeModel` + `judgeProvider`)
-// rather than persisting to settings itself. An empty selection inherits the
-// chat model (the historical default). Replaces the two free-text <Input>s so
-// a typo can no longer silently downgrade the judge to the default provider —
-// a stored value no configured provider offers is flagged inline instead.
+// Controlled provider+model picker for the goal judge (Settings, Goals,
+// Defaults).
+//
+// A CONTROLLED input: it reads and writes the caller's draft (`judgeModel` +
+// `judgeProvider`) rather than persisting to settings itself. An empty
+// selection inherits the chat model (the historical default). It replaced two
+// free-text inputs so a typo can no longer silently downgrade the judge to the
+// default provider. A stored value no configured provider offers is flagged
+// inline instead.
+//
+// The list body is `ProviderModelList`, shared with the default-model picker
+// and the routing alias combobox. Same option universe, same rows, one copy.
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, ChevronsUpDownIcon, ScaleIcon } from "lucide-react"
+import { ChevronsUpDownIcon, ScaleIcon } from "lucide-react"
 
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ResponsivePicker } from "@/components/shared/responsive-picker"
+import { ProviderModelList } from "@/components/settings/provider/provider-model-list"
 import { collectOptions, groupByProvider } from "@cognia/provider-routing/model-option-source"
 
 export interface JudgeModelSelection {
@@ -58,21 +54,17 @@ export function JudgeModelPicker({ model, provider, onChange }: Props) {
     model && !options.some((o) => o.modelId === model && (!provider || o.providerId === provider))
   )
 
-  const buttonLabel = model ? model : t("judge.useChatModel")
-
-  const select = (providerId: string, modelId: string) => {
-    setOpen(false)
-    onChange({ model: modelId, provider: providerId })
-  }
-  const clear = () => {
-    setOpen(false)
-    onChange({ model: undefined, provider: undefined })
-  }
-
   return (
     <div className="space-y-1">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
+      <ResponsivePicker
+        open={open}
+        onOpenChange={setOpen}
+        title={t("judge.model")}
+        align="start"
+        side="bottom"
+        contentClassName="w-[340px]"
+        testId="goal-judge-model-panel"
+        trigger={
           <Button
             variant="outline"
             className={cn(
@@ -84,58 +76,33 @@ export function JudgeModelPicker({ model, provider, onChange }: Props) {
           >
             <span className="flex items-center gap-2 truncate">
               <ScaleIcon className="size-3.5 shrink-0" />
-              <span className="truncate">{buttonLabel}</span>
+              <span className="truncate">{model ? model : t("judge.useChatModel")}</span>
             </span>
             <ChevronsUpDownIcon className="size-3 shrink-0 opacity-50" />
           </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-[340px] p-0">
-          <Command>
-            <CommandInput placeholder={t("judge.searchPlaceholder")} />
-            <CommandList>
-              {groups.length === 0 ? (
-                <CommandEmpty>{t("judge.noModels")}</CommandEmpty>
-              ) : (
-                <>
-                  {groups.map((group, idx) => (
-                    <div key={group.providerId}>
-                      {idx > 0 ? <CommandSeparator /> : null}
-                      <CommandGroup heading={group.providerName}>
-                        {group.models.map((modelId) => {
-                          const isActive = modelId === model && group.providerId === provider
-                          return (
-                            <CommandItem
-                              key={`${group.providerId}:${modelId}`}
-                              value={`${group.providerId} ${modelId}`}
-                              onSelect={() => select(group.providerId, modelId)}
-                            >
-                              <CheckIcon
-                                className={cn(
-                                  "mr-2 size-4",
-                                  isActive ? "opacity-100" : "opacity-0"
-                                )}
-                              />
-                              <span className="font-mono text-xs">{modelId}</span>
-                            </CommandItem>
-                          )
-                        })}
-                      </CommandGroup>
-                    </div>
-                  ))}
-                  <CommandSeparator />
-                  <CommandGroup>
-                    <CommandItem value="__inherit__" onSelect={clear} disabled={!model}>
-                      <span className="text-xs text-muted-foreground">
-                        {t("judge.useChatModel")}
-                      </span>
-                    </CommandItem>
-                  </CommandGroup>
-                </>
-              )}
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+        }
+      >
+        <ProviderModelList
+          groups={groups}
+          {...(provider === undefined ? {} : { activeProviderId: provider })}
+          {...(model === undefined ? {} : { activeModelId: model })}
+          searchPlaceholder={t("judge.searchPlaceholder")}
+          emptyLabel={t("judge.noModels")}
+          onSelect={(providerId, modelId) => {
+            setOpen(false)
+            onChange({ model: modelId, provider: providerId })
+          }}
+          footer={{
+            label: t("judge.useChatModel"),
+            value: "__inherit__",
+            disabled: !model,
+            onSelect: () => {
+              setOpen(false)
+              onChange({ model: undefined, provider: undefined })
+            },
+          }}
+        />
+      </ResponsivePicker>
       {invalid && (
         <p className="text-[10px] text-destructive" data-testid="goal-judge-model-invalid">
           {t("judge.invalidModel")}
