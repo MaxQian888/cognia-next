@@ -31,10 +31,9 @@ export class UnsupportedForKindError extends Error {
  * The action is real for this KIND, but not on the runtime this particular run
  * uses.
  *
- * A Squad on `durable-v2` can be resumed and steered from the cockpit. The same
- * Squad on `legacy` cannot: it keeps no durable receipt queue to steer into,
- * and resuming it means starting a fresh lifecycle over the remaining tasks,
- * which is a different run with its own row. Reporting either as
+ * A Squad on `durable-v2` can be steered from the cockpit, because the durable
+ * coordinator holds a receipt queue to steer into. The same Squad on `legacy`
+ * has no queue, so there is nowhere to put the message. Reporting that as
  * {@link UnsupportedForKindError} told the user "this kind of run cannot take
  * that action", which is false about Squads and leaves nowhere to go.
  */
@@ -207,15 +206,20 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
    * discards: Stop reported success and stopped nothing. `legacy` is the
    * default runtime version, so that was the common case.
    *
-   * The live-run context registry already maps a run id to its team, and for
-   * exactly as long as the run can be controlled at all: a legacy run keeps
-   * its abort controller in memory and does not outlive the process. Control
-   * goes through `agentTeamManager`, the same entry the Squad console uses,
-   * so there is no second control implementation here.
+   * Three answers, in the order a run can give them:
    *
-   * When neither registry knows the run, the workflow cancel's own `noop` is
-   * reported instead of swallowed, so the cockpit says the engine refused
-   * rather than showing a stop that never happened.
+   *   - LIVE. The run-context registry maps a run id to its team for exactly
+   *     as long as the run is controllable at all, since a legacy run keeps
+   *     its abort controller in memory and does not outlive the process. Pause
+   *     and Stop go through `agentTeamManager`, the same entry the Squad
+   *     console uses, so there is no second control implementation here.
+   *   - PAUSED. The lifecycle has exited, so there is no context entry, and
+   *     resume is addressed to the TEAM. The team is on the run's opening
+   *     journal event, and the run id is handed back so the remaining work
+   *     continues under the same row.
+   *   - NEITHER. The workflow cancel runs, and its own `noop` is reported
+   *     instead of swallowed, so the cockpit says the engine refused rather
+   *     than showing a stop that never happened.
    */
   const legacyOrWorkflow = async (command: RunControlCommand, sourceId: string): Promise<void> => {
     const { getTeamRunContext } = await import("@/lib/ai/agent/team/team-run-context")
@@ -224,23 +228,34 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
       if (command.action === "pause") return agentTeamManager.pause(live.teamId)
       if (command.action === "stop") return agentTeamManager.shutdown(live.teamId)
-      // `resume` is absent on purpose, and unreachable rather than merely
-      // unwanted: the context registry holds an entry only while the
-      // lifecycle is live, and pausing a legacy run exits the lifecycle. So a
-      // paused legacy run never has a `live` context to resume through.
-      // Resuming one starts a FRESH lifecycle over the remaining tasks, which
-      // is a new run with a new row, so the Squad console owns that verb.
-      //
-      // Steering is refused for the same shape of reason: it needs the
-      // durable coordinator's receipt queue, and a legacy run has nowhere to
-      // put the message.
-      //
-      // Reported against the RUNTIME rather than the kind, because a
-      // durable-v2 Squad takes both verbs. "This kind of run cannot take that
-      // action" is a false statement about Squads.
+      // Steering is the one verb with nowhere to go: it needs the durable
+      // coordinator's receipt queue, and a legacy run has no queue to put the
+      // message in. Reported against the RUNTIME rather than the kind, because
+      // a durable-v2 Squad steers from this very pane, so "this kind of run
+      // cannot take that action" would be false about Squads.
       throw new UnsupportedForRuntimeError(command.action, "team")
     }
-    if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "team")
+
+    // Not live, and a paused legacy run is the case that matters: its
+    // lifecycle has exited, so it holds no context entry, and resuming it is
+    // addressed to the TEAM rather than to a run id. The team is recorded on
+    // the run's own opening event, which is what lets the row answer for
+    // itself here.
+    //
+    // The run id goes back to `resume`, so the work that is left continues
+    // under THIS row rather than minting a second one and stranding the row
+    // the button was pressed on at `paused` for good.
+    if (command.action === "resume") {
+      const { teamIdForExecutionRun } = await import("@/lib/execution/agent-team-bridge")
+      const teamId = await teamIdForExecutionRun(command.runId)
+      // Rows written before the team was seeded cannot answer, and are refused
+      // rather than guessed at.
+      if (!teamId) throw new UnsupportedForRuntimeError(command.action, "team")
+      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+      return agentTeamManager.resume(teamId, undefined, sourceId)
+    }
+
+    if (command.action !== "stop") throw new UnsupportedForRuntimeError(command.action, "team")
     const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
     const result = await cancelWorkflowRun(sourceId, "im_control")
     if (result.mode === "noop") throw new Error("No live run behind this team row")

@@ -5,8 +5,11 @@ import type { AgentTeamRunRecord } from "@/types/agent/agent-team-runtime"
 import {
   agentTeamExecutionRunId,
   ensureAgentTeamExecutionRun,
+  ensureTeamExecutionRun,
   projectRemoteAgentTeamEvent,
+  reopenTeamExecutionRun,
   settleAgentTeamExecutionRun,
+  teamIdForExecutionRun,
 } from "./agent-team-bridge"
 
 const sourceRun: AgentTeamRunRecord = {
@@ -90,5 +93,42 @@ describe("AgentTeam ExecutionRun bridge", () => {
       sourceId: "team-run-1",
       status: "completed",
     })
+  })
+
+  // `ExecutionRun` has no column for the Squad, and a legacy run writes no
+  // durable record, so the opening event is the only place a row carries it.
+  // Without it the cockpit can stop a paused run but never resume it.
+  it("records the Squad on the opening event and reads it back", async () => {
+    await ensureAgentTeamExecutionRun(sourceRun)
+    await expect(teamIdForExecutionRun("execution:team:team-run-1")).resolves.toBe("team-1")
+  })
+
+  it("answers undefined for a row whose opening event named no Squad", async () => {
+    await ensureTeamExecutionRun({
+      sourceRunId: "team-run-2",
+      objective: "Older row",
+      startedAt: 1,
+      updatedAt: 1,
+    })
+    await expect(teamIdForExecutionRun("execution:team:team-run-2")).resolves.toBeUndefined()
+  })
+
+  it("re-opens only a paused row, so a late event cannot resurrect one", async () => {
+    await ensureAgentTeamExecutionRun(sourceRun)
+    // Running, not paused: nothing to re-open.
+    await reopenTeamExecutionRun("team-run-1", 300)
+    let types = (
+      await getDb().executionRunEvents.where("runId").equals("execution:team:team-run-1").toArray()
+    ).map((event) => event.type)
+    expect(types).toEqual(["run.started"])
+
+    await getDb().executionRuns.update("execution:team:team-run-1", { status: "paused" })
+    await reopenTeamExecutionRun("team-run-1", 400)
+    types = (
+      await getDb().executionRunEvents.where("runId").equals("execution:team:team-run-1").toArray()
+    ).map((event) => event.type)
+    expect(types).toContain("run.resumed")
+    const run = await getDb().executionRuns.get("execution:team:team-run-1")
+    expect(run?.status).toBe("running")
   })
 })

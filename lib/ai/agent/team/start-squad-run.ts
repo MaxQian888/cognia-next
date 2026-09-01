@@ -275,6 +275,10 @@ export async function startSquadRun(
     const seed = {
       sourceRunId: runId,
       objective: input.goal.trim() || squadName || squadId,
+      // Names the Squad on the run's own opening event. `ExecutionRun` has no
+      // column for it, and a legacy Squad writes no durable record, so this is
+      // the only thing that lets a surface holding one row resume it.
+      teamId: squadId,
       // Attributes the run to the Squad's workspace. `inProject` treats an
       // absent value as global, so omitting it did not hide the row — it made
       // it permanently unattributable, showing up in every workspace.

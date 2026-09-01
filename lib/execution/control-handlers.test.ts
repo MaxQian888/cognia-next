@@ -7,7 +7,12 @@ import {
   registerSecurityScanRunController,
 } from "./control-handlers"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { createExecutionRun, listExecutionRunEvents } from "@/lib/db/execution-runs"
+import {
+  createExecutionRun,
+  getExecutionRun,
+  listExecutionRunEvents,
+  runEventJournal,
+} from "@/lib/db/execution-runs"
 import { executeRunControlCommand } from "./run-control"
 
 const mockCancelRendererBackgroundRun = jest.fn((_runId: string) => true)
@@ -35,10 +40,15 @@ jest.mock("@/lib/ai/agent/team/team-run-context", () => ({
 
 const mockTeamPause = jest.fn(async (_teamId: string) => undefined)
 const mockTeamShutdown = jest.fn(async (_teamId: string) => undefined)
+const mockTeamResume = jest.fn(
+  async (_teamId: string, _opts?: unknown, _runId?: string) => undefined
+)
 jest.mock("@/lib/ai/agent/agent-team", () => ({
   agentTeamManager: {
     pause: (...args: unknown[]) => mockTeamPause(...(args as [string])),
     shutdown: (...args: unknown[]) => mockTeamShutdown(...(args as [string])),
+    resume: (...args: unknown[]) =>
+      mockTeamResume(...(args as [string, unknown | undefined, string | undefined])),
   },
 }))
 
@@ -315,13 +325,24 @@ describe("team run control", () => {
     mockCancelWorkflowRun.mockResolvedValue({ cancelled: true, live: true, mode: "aborted" })
   })
 
-  async function seedTeamRun(sourceId: string) {
+  /**
+   * Seed a team row, and optionally the opening journal event that names its
+   * Squad — the only thing a legacy row carries the team on.
+   *
+   * Returns the resulting revision, because appending events moves it and a
+   * command carries `expectedRevision`.
+   */
+  async function seedTeamRun(
+    sourceId: string,
+    opts: { teamId?: string; status?: "running" | "paused" } = {}
+  ): Promise<number> {
+    const runId = `execution:team:${sourceId}`
     await createExecutionRun({
-      id: `execution:team:${sourceId}`,
+      id: runId,
       kind: "team",
       sourceId,
       title: "Ship it",
-      status: "running",
+      status: opts.status ?? "running",
       currentRevision: 0,
       // Control is authorized against the run's initiator (or an operator
       // allowlist), so a run with no initiator rejects every command.
@@ -329,6 +350,16 @@ describe("team run control", () => {
       startedAt: 1,
       updatedAt: 1,
     })
+    if (!opts.teamId && !opts.status) return 0
+    await runEventJournal.append(runId, {
+      id: `seed:${sourceId}:started`,
+      ts: 1,
+      type: "run.started",
+      visibility: "summary",
+      payload: opts.teamId ? { teamId: opts.teamId } : {},
+    })
+    const seeded = await getExecutionRun(runId)
+    return seeded?.currentRevision ?? 0
   }
 
   it("stops a durable AgentTeam run through controlDurableRun", async () => {
@@ -430,6 +461,50 @@ describe("team run control", () => {
   // "This kind of run cannot take that action" is false about Squads: a
   // durable-v2 one resumes and steers from here. What cannot is the RUNTIME,
   // and the copy for that reason names where the verb does live.
+  // Resume addresses a TEAM, the cockpit addresses a RUN, and nothing on the
+  // row bridged the two until the Squad was written onto the run's opening
+  // event. The run id goes back with it so the work that is left continues
+  // under this row rather than stranding it at `paused` under a second one.
+  it("resumes a paused legacy run into the row the button was pressed on", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue(undefined)
+    const revision = await seedTeamRun("run_legacy_4", { teamId: "team-11", status: "paused" })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:team:run_legacy_4",
+      action: "resume",
+      idempotencyKey: "legacy-resume",
+      expectedRevision: revision,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(true)
+    expect(mockTeamResume).toHaveBeenCalledWith("team-11", undefined, "run_legacy_4")
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+
+  it("refuses a resume on a row whose opening event never named a Squad", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue(undefined)
+    const revision = await seedTeamRun("run_legacy_5", { status: "paused" })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:team:run_legacy_5",
+      action: "resume",
+      idempotencyKey: "legacy-resume-2",
+      expectedRevision: revision,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(false)
+    expect(result.reason).toBe("unsupported_for_runtime")
+    expect(mockTeamResume).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+
   it("blames the runtime, not the kind, when a legacy run cannot take a verb", async () => {
     const handlers = installExecutionRunControlHandlers()
     mockGetAgentTeamRun.mockResolvedValue(undefined)

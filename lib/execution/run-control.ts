@@ -65,9 +65,9 @@ export interface RunControlResult {
      * The action is real for this kind, but not on the runtime THIS run uses.
      *
      * Separate from `unsupported_for_kind` because the two need different copy:
-     * a legacy Squad cannot be resumed or steered from the cockpit, while a
-     * durable-v2 Squad can, so saying "this kind of run cannot" would be false
-     * about the kind and would send the user nowhere.
+     * a legacy Squad cannot be steered from the cockpit, while a durable-v2
+     * Squad can, so saying "this kind of run cannot" would be false about the
+     * kind and would send the user nowhere.
      */
     | "unsupported_for_runtime"
     /**

@@ -127,7 +127,7 @@
     "steer_degraded": "The message was not delivered and is still yours to send.",
     "unsupported": "Nothing is registered to control this kind of run.",
     "unsupported_for_kind": "This kind of run cannot take that action.",
-    "unsupported_for_runtime": "This Squad runs on the legacy runtime, which cannot resume or steer a single run. The Squad console can resume it, as a fresh run over the work that is left."
+    "unsupported_for_runtime": "This Squad uses the legacy runtime, which has no way to apply that to one run. The Squad console acts on the Squad instead."
   },
   "report": {
     "latestForSquad": "The Squad's latest execution report. Reports are kept per Squad, not per run.",

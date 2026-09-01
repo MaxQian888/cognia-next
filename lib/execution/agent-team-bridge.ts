@@ -3,6 +3,7 @@ import type { AgentEventEnvelope } from "@cognia/agent"
 import {
   createExecutionRun,
   getExecutionRun,
+  listExecutionRunEvents,
   runEventJournal,
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
@@ -39,6 +40,20 @@ export interface TeamExecutionRunSeed {
    * the thread that is waiting on it.
    */
   sessionId?: string
+  /**
+   * The Squad this run belongs to.
+   *
+   * `ExecutionRun` has no column for it, and `sourceId` is the LIFECYCLE run
+   * id, so a row on its own could not answer "which Squad is this?". A durable
+   * run could be asked via its `agentTeamRuns` record; a legacy run writes no
+   * record, which is why the cockpit could stop a paused legacy run but never
+   * resume it — resume needs a team id, not a run id.
+   *
+   * Recorded in the `run.started` payload rather than as a column: the payload
+   * is the run's own opening statement, it needs no schema change, and an id is
+   * exactly the kind of semantic value the journal is allowed to carry.
+   */
+  teamId?: string
   startedAt: number
   updatedAt: number
 }
@@ -64,20 +79,59 @@ export async function ensureTeamExecutionRun(seed: TeamExecutionRunSeed): Promis
     }
     await runEventJournal.append(
       runId,
-      semanticRunEvent(
-        "run.started",
-        {},
-        { ts: seed.startedAt, sourceEventId: `agent-team:${seed.sourceRunId}:started` }
-      )
+      semanticRunEvent("run.started", seed.teamId ? { teamId: seed.teamId } : {}, {
+        ts: seed.startedAt,
+        sourceEventId: `agent-team:${seed.sourceRunId}:started`,
+      })
     )
   }
   return runId
+}
+
+/**
+ * Which Squad an execution run belongs to, read back from its opening event.
+ *
+ * The cockpit addresses a RUN. Resuming a legacy Squad addresses a TEAM, and
+ * nothing on the row bridged the two, so Resume could only be refused. Rows
+ * written before `teamId` was seeded return `undefined` and are still refused,
+ * which is the honest answer for them rather than a guess.
+ */
+export async function teamIdForExecutionRun(executionRunId: string): Promise<string | undefined> {
+  const events = await listExecutionRunEvents(executionRunId).catch(() => [])
+  const started = events.find((event) => event.type === "run.started")
+  const teamId = started?.payload?.teamId
+  return typeof teamId === "string" && teamId.length > 0 ? teamId : undefined
+}
+
+/**
+ * Re-open a paused run's row so it reads as running again.
+ *
+ * Only a resume calls this, and only a `paused` row is touched. It is NOT
+ * folded into `ensureTeamExecutionRun`, which every projected remote event and
+ * every settle also passes through: an unconditional re-open there would
+ * resurrect a paused run on a stray late event.
+ */
+export async function reopenTeamExecutionRun(sourceRunId: string, ts = Date.now()): Promise<void> {
+  const runId = agentTeamExecutionRunId(sourceRunId)
+  const run = await getExecutionRun(runId).catch(() => undefined)
+  if (run?.status !== "paused") return
+  await runEventJournal
+    .append(
+      runId,
+      semanticRunEvent(
+        "run.resumed",
+        {},
+        { ts, sourceEventId: `agent-team:${sourceRunId}:resumed:${ts}` }
+      )
+    )
+    .catch(() => undefined)
 }
 
 export async function ensureAgentTeamExecutionRun(sourceRun: AgentTeamRunRecord): Promise<string> {
   return ensureTeamExecutionRun({
     sourceRunId: sourceRun.id,
     objective: sourceRun.objective,
+    teamId: sourceRun.teamId,
     ...(sourceRun.projectId ? { projectId: sourceRun.projectId } : {}),
     startedAt: sourceRun.startedAt ?? sourceRun.createdAt,
     updatedAt: sourceRun.updatedAt,

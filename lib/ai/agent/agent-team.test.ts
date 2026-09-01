@@ -274,4 +274,32 @@ describe("agentTeamManager.resume", () => {
     // Terminal status mirrored from the run result.
     expect(state.teams["t1"]?.status).toBe("completed")
   })
+
+  // The Squad console addresses a TEAM and has no run in mind, so it mints a
+  // fresh id. The run cockpit addresses one row: without handing that id back,
+  // resuming from there left the row the button was pressed on paused for good
+  // while a second row carried the work.
+  it("continues the addressed run when the caller names one", async () => {
+    agentTeamManager.create(makeTeam({ status: "paused" }))
+    useAgentTeamStore.getState().upsertTeammate(makeTeammate("w1"))
+    useAgentTeamStore.getState().upsertTask(makeTask("pending-1", { status: "pending" }))
+
+    runTeamLifecycleMock.mockResolvedValueOnce({ runId: "run_prior", status: "completed" })
+    await agentTeamManager.resume("t1", undefined, "run_prior")
+
+    expect(runTeamLifecycleMock.mock.calls[0][1].runId).toBe("run_prior")
+  })
+
+  it("mints a fresh run when no run is named", async () => {
+    agentTeamManager.create(makeTeam({ status: "paused" }))
+    useAgentTeamStore.getState().upsertTeammate(makeTeammate("w1"))
+    useAgentTeamStore.getState().upsertTask(makeTask("pending-1", { status: "pending" }))
+
+    runTeamLifecycleMock.mockResolvedValueOnce({ runId: "run_new", status: "completed" })
+    await agentTeamManager.resume("t1")
+
+    const mintedRunId = runTeamLifecycleMock.mock.calls[0][1].runId
+    expect(typeof mintedRunId).toBe("string")
+    expect(mintedRunId).not.toBe("run_prior")
+  })
 })

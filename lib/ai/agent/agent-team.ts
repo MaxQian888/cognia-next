@@ -57,7 +57,20 @@ export interface AgentTeamManager {
    * shared memory), then re-enter the lifecycle over the not-yet-done tasks
    * only. No-op unless the team is `paused`.
    */
-  resume(id: string, opts?: Parameters<AgentTeamManager["start"]>[1]): Promise<void>
+  resume(
+    id: string,
+    opts?: Parameters<AgentTeamManager["start"]>[1],
+    /**
+     * The run being resumed, when the caller is addressing one.
+     *
+     * Omitted, a resume mints a fresh run id, which is right for the Squad
+     * console: it addresses a TEAM and has no particular run in mind. The run
+     * cockpit addresses one row, so it passes that row's id and the remaining
+     * work continues under the same run instead of stranding the row it was
+     * pressed on at `paused` for good.
+     */
+    existingRunId?: string
+  ): Promise<void>
   retryChild(childRunId: string, optionalHostRef?: string): Promise<void>
   shutdown(id: string): Promise<void>
 }
@@ -178,6 +191,7 @@ async function runManaged(
     await ensureTeamExecutionRun({
       sourceRunId: runId,
       objective: startingTeam?.task || startingTeam?.name || id,
+      teamId: id,
       ...(startingTeam?.projectId ? { projectId: startingTeam.projectId } : {}),
       ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
       startedAt: at,
@@ -347,7 +361,7 @@ export const agentTeamManager: AgentTeamManager = {
     )
     if (active) await updateAgentTeamRun(active.id, { status: "paused", updatedAt: Date.now() })
   },
-  resume: async (id, opts) => {
+  resume: async (id, opts, existingRunId) => {
     const store = useAgentTeamStore.getState()
     const team = store.teams[id]
     if (!team || team.status !== "paused") return
@@ -415,7 +429,14 @@ export const agentTeamManager: AgentTeamManager = {
       return
     }
 
-    await runManaged(id, opts, (t) => !RESUME_SKIP_STATUSES.has(t.status))
+    if (existingRunId) {
+      // The row this resume was pressed on is `paused`. Say it is running
+      // again before the lifecycle starts, or the cockpit shows a paused run
+      // doing work until the terminal event lands.
+      const { reopenTeamExecutionRun } = await import("@/lib/execution/agent-team-bridge")
+      await reopenTeamExecutionRun(existingRunId).catch(() => undefined)
+    }
+    await runManaged(id, opts, (t) => !RESUME_SKIP_STATUSES.has(t.status), existingRunId)
   },
   retryChild: async (childRunId, optionalHostRef) => {
     const [{ getDurableTeamCoordinator }, { getAgentTeamChildRun }] = await Promise.all([
