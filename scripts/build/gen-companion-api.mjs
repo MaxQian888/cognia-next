@@ -36,7 +36,7 @@ const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/companion_api/rpc/source_control.rs",
   "src-tauri/src/companion_api/rpc/filesystem.rs",
   "src-tauri/src/companion_api/rpc/terminal.rs",
-  "src-tauri/src/companion_api/rpc/sftp.rs",
+  "src-tauri/src/sftp_service.rs",
   "src-tauri/src/companion_api/rpc/plugins.rs",
   "src-tauri/src/companion_api/rpc/diagnostics.rs",
 ]
@@ -930,8 +930,17 @@ function schemaFromArm(arm) {
  * still win; this only replaces the otherwise-empty RpcArgs fallback.
  */
 export function extractCommandArgumentSchemas(source) {
-  const dispatchStart = source.indexOf("pub(super) async fn dispatch(")
-  if (dispatchStart < 0) throw new Error("Could not locate companion RPC dispatch function")
+  // Most families put the arms behind `pub(super) async fn dispatch(`. SFTP is
+  // the exception: its arms live in `sftp_service.rs`, which the desktop's own
+  // `#[tauri::command]` wrappers share, so the function is `pub` and named for
+  // what it does rather than for the RPC table it happens to serve. The arms
+  // themselves are the same shape, which is all this scan reads.
+  const dispatchStart = ["pub(super) async fn dispatch(", "pub async fn dispatch_sftp("]
+    .map((marker) => source.indexOf(marker))
+    .find((index) => index >= 0)
+  if (dispatchStart === undefined) {
+    throw new Error("Could not locate companion RPC dispatch function")
+  }
   const matchStart = source.indexOf("match name {", dispatchStart)
   if (matchStart < 0) throw new Error("Could not locate companion RPC dispatch match")
   const lines = source.slice(matchStart).split(/\r?\n/)

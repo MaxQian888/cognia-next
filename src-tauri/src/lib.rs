@@ -191,6 +191,7 @@ pub use cognia_observability::telemetry;
 // generate_handler! + .manage()) resolves unchanged.
 pub use cognia_scheduling::timing;
 pub use cognia_terminal as terminal;
+pub mod sftp_service;
 pub mod terminal_host_bridge;
 // ADR-0067 Tier C — extracted to `crates/cognia-terminal` (zero `crate::`
 // deps, already built on that crate's host/session); re-aliased so every
@@ -1220,6 +1221,20 @@ pub fn run() {
             companion_api::commands::companion_set_agent_control,
             companion_api::commands::companion_set_remote_terminal,
             companion_api::commands::companion_set_ssh_files,
+            sftp_service::sftp_list_dir,
+            sftp_service::sftp_stat,
+            sftp_service::sftp_realpath,
+            sftp_service::sftp_create_dir,
+            sftp_service::sftp_rename_entry,
+            sftp_service::sftp_delete_entry,
+            sftp_service::sftp_download_open,
+            sftp_service::sftp_download_read_chunk,
+            sftp_service::sftp_download_close,
+            sftp_service::sftp_upload_open,
+            sftp_service::sftp_upload_write_chunk,
+            sftp_service::sftp_upload_commit,
+            sftp_service::sftp_upload_abort,
+            sftp_service::sftp_session_close,
             companion_api::commands::companion_migrate_legacy_device_grants,
             companion_api::commands::companion_set_locked_computer_use,
             companion_api::commands::companion_seed_locked_computer_use,

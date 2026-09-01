@@ -3260,7 +3260,10 @@ fn every_known_command_has_a_dispatch_arm() {
         include_str!("source_control.rs"),
         include_str!("filesystem.rs"),
         include_str!("terminal.rs"),
+        // The SFTP arm is a thin mapping; the command names live with the
+        // implementation the desktop face shares.
         include_str!("sftp.rs"),
+        include_str!("../../sftp_service.rs"),
         include_str!("plugins.rs"),
         include_str!("diagnostics.rs"),
     ]
