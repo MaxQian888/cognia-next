@@ -8976,6 +8976,11 @@
         "versionMismatch": "需要升级"
       }
     },
+    "files": {
+      "title": "文件",
+      "transfers": "传输",
+      "unknownProfile": "这一行没有指向已保存的 SSH 主机，因此没有可浏览的内容。"
+    },
     "grantState": {
       "denied": "未授权",
       "granted": "已授权",
@@ -36580,6 +36585,46 @@
       "title": "工作区信任",
       "trustedAt": "信任于 {date}",
       "trustedFoldersLabel": "已信任的文件夹"
+    }
+  },
+  "sftp": {
+    "browser": {
+      "failure": {
+        "capacity": "那台机器上已经没有空间了：{path}",
+        "conflict": "那里已经有东西了，或者目录非空：{path}",
+        "denied": "该账号无权读写那台机器上的 {path}。",
+        "missing": "{path} 已经不存在了。",
+        "refused": "宿主拒绝了这次操作：{path}",
+        "unreachable": "无法连接到那台机器来处理 {path}。"
+      },
+      "home": "回到主目录",
+      "noBoundary": "这里浏览的是整台机器。没有可以限制的目录范围：路径是那台机器自己的，符号链接也由它自己解析。",
+      "pathLabel": "远端机器上的路径",
+      "queuedDownload": "已把 {name} 加入下载队列。",
+      "queuedUpload": "已把 {name} 加入上传队列。",
+      "refresh": "重新加载该目录",
+      "tooLarge": "{name} 太大，队列无法在等待期间保存它。",
+      "up": "回到上一级目录",
+      "upload": "上传"
+    },
+    "queue": {
+      "approvalNeeded": "这些传输正在等待你在宿主上的批准。",
+      "approve": "批准",
+      "cancel": "取消",
+      "clearFinished": "清除 {count, plural, other {# 项已完成的传输}}",
+      "empty": "还没有任何传输。",
+      "pause": "暂停",
+      "resume": "继续",
+      "retry": "重试",
+      "save": "保存",
+      "status": {
+        "cancelled": "已取消",
+        "done": "已完成",
+        "failed": "失败",
+        "paused": "已暂停",
+        "queued": "排队中",
+        "running": "传输中"
+      }
     }
   },
   "share": {
