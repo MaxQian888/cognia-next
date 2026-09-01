@@ -9,13 +9,12 @@ import { cn } from "@/lib/utils"
  * visually and only narrows the room the text has: at `h-7` the old `py-1`
  * left an 18px content box for a 20px line box, so descenders were shaved.
  *
- * The one layout that DID read the base padding is `InputGroup`'s block-start
- * / block-end alignment, where the group goes `h-auto` and stacks the addon
- * above or below the control: its own variant supplies the outer edge
- * (`pb-3` / `pt-3`) and the inner edge came from `py-1` here. That edge now
- * lives on the variant beside the one it was always paired with, so this base
- * stays padding-free. Any other call site that wants padding sets `py-*`
- * itself and tailwind-merge lets it win.
+ * The layout that would have read the base padding is `InputGroup`'s
+ * block-start / block-end alignment, where the group goes `h-auto` and stacks
+ * the addon above or below the control. No call site reaches it with an
+ * `input`: every such addon in the repo stacks around a textarea, which brings
+ * its own padding. Any call site that wants padding sets `py-*` itself and
+ * tailwind-merge lets it win.
  */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (

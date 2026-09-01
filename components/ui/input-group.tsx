@@ -20,12 +20,14 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
         // Variants based on alignment.
         "has-[>[data-align=inline-start]]:[&>input]:pl-2",
         "has-[>[data-align=inline-end]]:[&>input]:pr-2",
-        // Both edges, explicitly. These variants only ever named the OUTER one.
-        // The inner edge, between the stacked addon and the control, came from
-        // the `py-1` the `Input` base used to carry, and dropping that left the
-        // control flush against the addon.
-        "has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>[data-align=block-start]]:[&>input]:pt-1 has-[>[data-align=block-start]]:[&>input]:pb-3",
-        "has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-end]]:[&>input]:pt-3 has-[>[data-align=block-end]]:[&>input]:pb-1",
+        // The `[&>input]` half of these two matches nothing today: every
+        // `block-start` / `block-end` addon in the repo stacks around a
+        // TEXTAREA (`components/ai-elements/prompt-input.tsx`), which brings
+        // its own padding. Left as-is rather than extended, because the inner
+        // edge these looked like they were missing is one no call site can
+        // currently show.
+        "has-[>[data-align=block-start]]:h-auto has-[>[data-align=block-start]]:flex-col has-[>[data-align=block-start]]:[&>input]:pb-3",
+        "has-[>[data-align=block-end]]:h-auto has-[>[data-align=block-end]]:flex-col has-[>[data-align=block-end]]:[&>input]:pt-3",
 
         // Focus state.
         "has-[[data-slot=input-group-control]:focus-visible]:border-ring has-[[data-slot=input-group-control]:focus-visible]:ring-[3px] has-[[data-slot=input-group-control]:focus-visible]:ring-ring/50",
