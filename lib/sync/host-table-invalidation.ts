@@ -84,6 +84,12 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   templateDefinitions: "templateDefinitions",
   templatePackages: "templatePackages",
   templateInstances: "templateInstances",
+  // Squad definitions (v215). These reached the protocol list without
+  // reaching this map, so a squad edited on the Host announced nothing and
+  // a paired phone only caught up on its next mount. Identity names.
+  agentTeams: "agentTeams",
+  agentTeammates: "agentTeammates",
+  agentTeamTasks: "agentTeamTasks",
   connectorDrafts: "connectorDrafts",
   outboundQueue: "outboundQueue",
 })
