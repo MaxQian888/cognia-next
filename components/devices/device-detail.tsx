@@ -40,6 +40,7 @@ import { DeviceSection } from "./device-section"
 import { HostControls } from "./host-controls"
 import { SshHostControls } from "./ssh-host-controls"
 import { AccessSection } from "./sections/access-section"
+import { FilesSection } from "./sections/files-section"
 import { ActivitySection } from "./sections/activity-section"
 import { CapabilitiesSection } from "./sections/capabilities-section"
 import { OverviewSection } from "./sections/overview-section"
@@ -135,6 +136,11 @@ export function DeviceDetail({ row, actions, onRepairHost }: DeviceDetailProps) 
               <DeviceSection id="ssh" title={t("ssh.title")} icon={TerminalIcon} wide>
                 <SshHostControls row={row} />
               </DeviceSection>
+              {/* Below the identity record and above the "what this cannot do"
+                  summary, because it is the one thing a saved SSH host CAN do
+                  from every shell, and burying it under five refusals would
+                  read as another of them. */}
+              <FilesSection row={row} />
               <ShellOnlySection />
             </>
           ) : (

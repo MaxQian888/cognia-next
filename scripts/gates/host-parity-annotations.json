@@ -398,6 +398,10 @@
     "lib/sites": {
       "classification": "unmigrated"
     },
+    "lib/sftp": {
+      "classification": "physically-impossible",
+      "note": "The one `isTauri()` here decides whether an interactive approval is needed at all, and that is not a capability question. ADR-0162 puts the approval on the two transfer opens so a REMOTE device asks a human at the host; the desktop is that host, so there is nobody else to ask and a lease would be a permission with no grantor. Every other call in this module is transport-neutral and reaches the same implementation through `invoke` or `_rpc`."
+    },
     "lib/skills": {
       "classification": "unmigrated"
     },

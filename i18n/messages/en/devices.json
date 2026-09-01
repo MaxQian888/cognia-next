@@ -416,5 +416,10 @@
     "sleep": "Stop holding it open",
     "settings": "Relay settings",
     "liveHint": "This says whether a connection is kept open, not whether the device is answering right now. Relay settings shows the live status of each one."
+  },
+  "files": {
+    "title": "Files",
+    "transfers": "Transfers",
+    "unknownProfile": "This row does not name a saved SSH host, so there is nothing to browse."
   }
 }
