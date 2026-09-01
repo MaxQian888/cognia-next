@@ -3,6 +3,15 @@ import { ChevronDownIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * A `select` is not a Radix trigger: the UA centres the selected option inside
+ * the *content* box and clips whatever does not fit, so vertical padding here
+ * buys nothing visually and only shrinks the room the text has. That is why
+ * this control carries no `py-*`. Call sites routinely tighten it to `h-8` or
+ * `h-7`, and with `py-2` in the base those heights cut the descenders off
+ * every label. Height alone now decides the box, and the text stays centred in
+ * it at any size.
+ */
 function NativeSelect({
   className,
   wrapperClassName,
@@ -24,7 +33,7 @@ function NativeSelect({
         data-slot="native-select"
         data-size={size}
         className={cn(
-          "h-9 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent px-3 py-2 pr-9 text-sm shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed data-[size=sm]:h-8 data-[size=sm]:py-1 dark:bg-input/30 dark:hover:bg-input/50",
+          "h-9 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent px-3 py-0 pr-9 text-sm shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed data-[size=sm]:h-8 dark:bg-input/30 dark:hover:bg-input/50",
           "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
           "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
           className

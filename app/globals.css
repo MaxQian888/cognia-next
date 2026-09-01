@@ -3611,26 +3611,69 @@ html[data-reduce-motion="true"] .boot-preview__block {
   }
 }
 
-/* iOS auto-zoom prevention: any text input that's <16px on focus triggers
- * an unwanted zoom-in. Apply to every native form control globally so we
- * don't have to remember per-component. The visual size at the desktop's
- * higher density still feels small — balance by setting the input's
- * design-token size in component-level utilities. */
-input[type="text"],
-input[type="email"],
-input[type="number"],
-input[type="password"],
-input[type="search"],
-input[type="tel"],
-input[type="url"],
-input[type="date"],
-input[type="datetime-local"],
-input[type="time"],
-input[type="month"],
-input[type="week"],
-textarea,
-select {
-  font-size: max(16px, 1rem);
+/* iOS auto-zoom prevention: a native control whose text renders below 16px
+ * zooms the page in when it takes focus. Only a touch shell does that, so the
+ * enforcement is gated behind a coarse pointer. It has to be: the rule is
+ * unlayered, and Tailwind v4 emits its utilities inside `@layer utilities`, so
+ * this outranks every `text-*` class regardless of specificity. Ungated it
+ * repainted the entire app at 16px, the desktop shell included, and defeated
+ * shadcn's own `text-base md:text-sm` split, which already solves the zoom for
+ * `Input` and `Textarea` the responsive way.
+ *
+ * Where it does apply, the enforced size needs somewhere to live. A `select`
+ * clips its selected option at the content box whatever `overflow` says, and
+ * an `h-8` control with `py-2` leaves 14px of content box for a line box that
+ * 16px text makes ~21px tall, so every label lost its descenders. The same
+ * block therefore pins the line box and adds a floor, turning the `h-*`
+ * utilities into a minimum rather than a clipping ceiling. `textarea` takes
+ * the font size but not the floor: it carries its own `min-h-*` alongside
+ * `field-sizing-content`, and an unlayered `min-height` here would shrink it
+ * instead of protecting it.
+ *
+ * The floor reads a variable so a call site can still opt out. Being unlayered
+ * is what lets the font size beat `text-*`, but it would also make the floor
+ * unbeatable: `min-height` wins over `height` whenever it is larger, and no
+ * `min-h-*` utility (layered) can override an unlayered `min-height`, so a
+ * genuinely compact control would have had no escape at all. Nothing declares
+ * `--touch-control-min-h` here, only the `var()` fallback, so a utility that
+ * declares it (`[--touch-control-min-h:2rem]`, or `0px` to opt out entirely)
+ * is the only declaration in the cascade and wins from inside
+ * `@layer utilities`. The zoom fix itself stays non-negotiable, which is the
+ * whole point of it. */
+@media (pointer: coarse), (hover: none) {
+  input[type="text"],
+  input[type="email"],
+  input[type="number"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="time"],
+  input[type="month"],
+  input[type="week"],
+  textarea,
+  select {
+    font-size: max(16px, 1rem);
+  }
+
+  input[type="text"],
+  input[type="email"],
+  input[type="number"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="time"],
+  input[type="month"],
+  input[type="week"],
+  select {
+    line-height: 1.25;
+    min-height: var(--touch-control-min-h, 2.5rem);
+  }
 }
 
 /* Fleet island: a soft amber inset ring that breathes while a monitored agent
