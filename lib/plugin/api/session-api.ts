@@ -82,7 +82,20 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
 
     updateSession: async (id: string, updates) => {
       const store = useSessionStore.getState()
-      store.updateSession(id, updates)
+      try {
+        // Awaited, so a rejected Dexie write reaches the plugin instead of being
+        // swallowed behind a resolved promise. A plugin that shows a "saved"
+        // toast has nothing else to key it on.
+        await store.updateSession(id, updates)
+      } catch (error) {
+        // Logged before it leaves, like every other write on this API. The
+        // store used to `console.warn` its own failure; now that the rejection
+        // is the plugin's answer, this is the only host-side record of it, and
+        // without it a plugin that forgets to catch produces an unattributable
+        // unhandled rejection.
+        logger.error(`Failed to update session ${id}:`, error)
+        throw error
+      }
       logger.info(`Updated session: ${id}`)
     },
 
@@ -341,22 +354,41 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
     },
   }
 
-  return createGuardedAPI(pluginId, api, {
-    getCurrentSession: "session:read",
-    getCurrentSessionId: "session:read",
-    getSession: "session:read",
-    listSessions: "session:read",
-    getMessages: "session:read",
-    onSessionChange: "session:read",
-    onMessagesChange: "session:read",
-    getSessionStats: "session:read",
-    createSession: "session:write",
-    startSeededSession: "session:write",
-    updateSession: "session:write",
-    switchSession: "session:write",
-    deleteSession: "session:delete",
-    addMessage: "session:write",
-    updateMessage: "session:write",
-    deleteMessage: "session:delete",
-  })
+  return createGuardedAPI(
+    pluginId,
+    api,
+    {
+      getCurrentSession: "session:read",
+      getCurrentSessionId: "session:read",
+      getSession: "session:read",
+      listSessions: "session:read",
+      getMessages: "session:read",
+      onSessionChange: "session:read",
+      onMessagesChange: "session:read",
+      getSessionStats: "session:read",
+      createSession: "session:write",
+      startSeededSession: "session:write",
+      updateSession: "session:write",
+      switchSession: "session:write",
+      deleteSession: "session:delete",
+      addMessage: "session:write",
+      updateMessage: "session:write",
+      deleteMessage: "session:delete",
+    },
+    {
+      // Synchronous by contract, and read by React through `useSyncExternalStore`
+      // in at least one first-party plugin. Without this, raising `session:read`
+      // to the "confirm" tier swaps them for the async consent path: the snapshot
+      // getter starts handing React a fresh Promise per call (infinite render
+      // loop) and the subscribe call returns a Promise where an unsubscribe
+      // function is expected. Exempt methods still REQUIRE the granted
+      // permission; they only skip the per-call prompt.
+      consentExempt: [
+        "getCurrentSession",
+        "getCurrentSessionId",
+        "onSessionChange",
+        "onMessagesChange",
+      ],
+    }
+  )
 }

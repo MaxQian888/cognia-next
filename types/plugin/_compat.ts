@@ -57,6 +57,13 @@ export type Session = Omit<ChatSession, "createdAt" | "updatedAt"> & {
   projectId?: string
   branches?: SessionBranch[]
   /**
+   * Free-form plugin annotations. Held on the cached row only: `ChatSession`
+   * has no column for it, so `updateSession` applies it in memory and it is
+   * gone on reload. Anything that has to survive belongs in the plugin's own
+   * Dexie table (`ctx.dexie`) rather than here.
+   */
+  metadata?: Record<string, unknown>
+  /**
    * Provider id the session is currently routed to (e.g. "openai",
    * "anthropic"). Optional because cognia-next defaults to
    * Anthropic-via-sidecar, but plugins may surface multi-provider
@@ -79,8 +86,28 @@ export interface CreateSessionInput {
 export interface UpdateSessionInput {
   title?: string
   mode?: ChatMode
+  /**
+   * Move the conversation to another Workspace, or `undefined` to unlink it.
+   *
+   * Not a plain column write: attribution also lives on the destination's
+   * roster and on the session's own `executionContext`, so this rejects for a
+   * running or handed-off conversation and for an unknown destination, the
+   * same refusals the in-app move offers.
+   */
   projectId?: string
+  /** Free-form annotations. In-memory only, see {@link Session.metadata}. */
   metadata?: Record<string, unknown>
+  /**
+   * Per-turn reasoning effort forwarded to the active runtime.
+   *
+   * One setting in two halves with {@link UpdateSessionInput.thinkingLevel}.
+   * Naming either one writes both: the store completes the missing half rather
+   * than persisting a row that renders as one tier and sends another. Compose
+   * `thinkingLevelPatch` and you never have to think about it.
+   */
+  effort?: ChatSession["effort"]
+  /** Cognia's full thinking-tier identity, including off and ultracode. */
+  thinkingLevel?: ChatSession["thinkingLevel"]
   /**
    * The Squad this conversation is handed to (ADR-0140), or `undefined` to
    * hand it back to the direct path. Readable all along, because `getSession`

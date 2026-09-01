@@ -4,6 +4,7 @@
 
 import { createSessionAPI } from "./session-api"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
+import { resetPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import type { Session, UIMessage } from "@/types"
 
 // Mock session store
@@ -13,6 +14,18 @@ const mockSubscribers: Array<(state: unknown) => void> = []
 
 // Mock messages storage
 const mockMessages: Record<string, UIMessage[]> = {}
+
+/**
+ * The store's write, swappable so a test can make the Dexie half reject. The
+ * default applies the patch the way the real store does.
+ */
+const defaultStoreUpdateSession = (id: string, updates: Record<string, unknown>) => {
+  const idx = mockSessions.findIndex((s) => s.id === id)
+  if (idx >= 0) Object.assign(mockSessions[idx], updates, { updatedAt: new Date() })
+  return Promise.resolve()
+}
+let storeUpdateSessionImpl: (id: string, updates: Record<string, unknown>) => Promise<void> =
+  defaultStoreUpdateSession
 
 const messageHooks = {
   creating: new Set<(primaryKey: string, obj: { sessionId?: string }) => void>(),
@@ -48,12 +61,7 @@ jest.mock("@/stores/chat/session-store", () => ({
         mockMessages[session.id] = []
         return session
       }),
-      updateSession: jest.fn((id, updates) => {
-        const idx = mockSessions.findIndex((s) => s.id === id)
-        if (idx >= 0) {
-          Object.assign(mockSessions[idx], updates, { updatedAt: new Date() })
-        }
-      }),
+      updateSession: jest.fn((id, updates) => storeUpdateSessionImpl(id, updates)),
       setActiveSession: jest.fn((id) => {
         mockActiveSessionId = id
       }),
@@ -144,6 +152,7 @@ describe("Session API", () => {
     mockActiveSessionId = null
     mockSubscribers.length = 0
     Object.keys(mockMessages).forEach((key) => delete mockMessages[key])
+    storeUpdateSessionImpl = defaultStoreUpdateSession
     messageHooks.creating.clear()
     messageHooks.updating.clear()
     messageHooks.deleting.clear()
@@ -599,6 +608,117 @@ describe("Session API", () => {
       expect(stats.assistantMessageCount).toBe(0)
       expect(stats.totalTokens).toBe(0)
     })
+  })
+
+  /**
+   * The four synchronous members of this API are read by React through
+   * `useSyncExternalStore` in at least one first-party plugin. If raising
+   * `session:read` to the "confirm" tier swapped them for the async consent
+   * path, the snapshot getter would hand React a fresh Promise per call (an
+   * infinite render loop) and `subscribe` would return a Promise where an
+   * unsubscribe function belongs. `consentExempt` is what stops that, and
+   * without a test the list is free to lose a name.
+   */
+  describe("the consent overlay and the synchronous members", () => {
+    const syncMembers = [
+      "getCurrentSession",
+      "getCurrentSessionId",
+      "onSessionChange",
+      "onMessagesChange",
+    ] as const
+
+    beforeEach(() => {
+      guard.setTier(testPluginId, "session:read", "confirm")
+      guard.setTier(testPluginId, "session:write", "confirm")
+    })
+
+    // The parked consent request below holds the broker's prompt timer. Drop it
+    // rather than leaving a timer to outlive the suite.
+    afterEach(() => {
+      resetPluginConsentBroker()
+    })
+
+    it("keeps the snapshot readers synchronous at the confirm tier", () => {
+      const api = createSessionAPI(testPluginId)
+      mockActiveSessionId = null
+
+      expect(api.getCurrentSession()).toBeNull()
+      expect(api.getCurrentSessionId()).toBeNull()
+      // Not a Promise: React would otherwise see a new object every call.
+      expect(api.getCurrentSession()).not.toBeInstanceOf(Promise)
+      expect(api.getCurrentSessionId()).not.toBeInstanceOf(Promise)
+    })
+
+    it("returns a callable unsubscribe from the subscribe members", () => {
+      const api = createSessionAPI(testPluginId)
+
+      for (const member of ["onSessionChange", "onMessagesChange"] as const) {
+        const unsubscribe =
+          member === "onSessionChange"
+            ? api.onSessionChange(() => undefined)
+            : api.onMessagesChange("sess-x", () => undefined)
+        expect(unsubscribe).not.toBeInstanceOf(Promise)
+        expect(typeof unsubscribe).toBe("function")
+        expect(() => unsubscribe()).not.toThrow()
+      }
+    })
+
+    /**
+     * The exemption has to be selective. If it were blanket, this test would
+     * pass while the consent gate had been switched off for the whole API.
+     */
+    it("still routes an async action method through the consent path", async () => {
+      const api = createSessionAPI(testPluginId)
+      let wrote = false
+      storeUpdateSessionImpl = () => {
+        wrote = true
+        return Promise.resolve()
+      }
+
+      // Nothing answers the consent prompt in this suite, so the call parks on
+      // the broker. Never awaited, precisely because that is the proof.
+      const returned = api.updateSession("sess-x", { title: "Renamed" })
+      returned.catch(() => undefined)
+      expect(returned).toBeInstanceOf(Promise)
+
+      await Promise.resolve()
+      expect(wrote).toBe(false)
+    })
+
+    /**
+     * Exempt means "skip the prompt", never "skip the grant". A plugin without
+     * `session:read` must still be refused.
+     */
+    it("still requires the granted permission from an exempt member", () => {
+      const ungrantedId = "ungranted-plugin"
+      guard.registerPlugin(ungrantedId, ["session:write"])
+      guard.setTier(ungrantedId, "session:read", "confirm")
+      const api = createSessionAPI(ungrantedId)
+
+      for (const member of syncMembers) {
+        expect(() => {
+          if (member === "onMessagesChange") api.onMessagesChange("sess-x", () => undefined)
+          else if (member === "onSessionChange") api.onSessionChange(() => undefined)
+          else if (member === "getCurrentSession") api.getCurrentSession()
+          else api.getCurrentSessionId()
+        }).toThrow()
+      }
+    })
+  })
+
+  /**
+   * The store's write is awaited now, so a rejected Dexie write is the plugin's
+   * answer rather than a resolved promise. A control that shows a success toast
+   * on resolution has nothing else to key it on.
+   */
+  it("hands a failed persistence back to the plugin instead of swallowing it", async () => {
+    const api = createSessionAPI(testPluginId)
+    const session = await api.createSession({ title: "Doomed write" })
+    storeUpdateSessionImpl = () => Promise.reject(new Error("content cipher locked"))
+
+    await expect(api.updateSession(session.id, { title: "Renamed" })).rejects.toThrow(
+      "content cipher locked"
+    )
   })
 
   it("keeps delete working for a legacy manifest that only declared session:write", async () => {
