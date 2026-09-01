@@ -1,59 +1,18 @@
 /**
  * agent-team-compat
  *
- * Bridges the agent-team store to the runtime engine + lightly normalizes
- * config/task inputs so they don't carry obviously-invalid values into the
- * store.
+ * Lightly normalizes Squad config and task inputs so they do not carry
+ * obviously-invalid values into the store. The store calls both of these on
+ * every create and update.
  *
- * Was a no-op stub before the runtime landed; now `dispatchAgentTeam`
- * actually starts a team via `agentTeamManager.start()`.
+ * It used to carry a `dispatchAgentTeam` bridge as well, which awaited a
+ * Squad's whole lifecycle and translated a terminal `failed` status into an
+ * `{ ok: false }`. Nothing called it, and by the time ADR-0140 named
+ * `startSquadRun` as the one dispatch funnel it was also the wrong shape: every
+ * live caller starts fire-and-forget and reads progress off the run row. Two
+ * ways in, one of them unreachable and neither of them the documented one, is
+ * worse than one.
  */
-
-import { agentTeamManager } from "./agent-team"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-
-export interface AgentTeamCompatDispatchOptions {
-  teamId: string
-  task?: string
-  metadata?: Record<string, unknown>
-}
-
-export interface AgentTeamCompatDispatchResult {
-  ok: boolean
-  reason?: string
-}
-
-/**
- * Start a team's lifecycle. Returns `{ ok: true }` on a successful run,
- * `{ ok: false, reason }` on validation / runtime errors. The promise
- * resolves once the runtime returns — for long-running teams the caller
- * may prefer to start them via `agentTeamManager.start()` directly.
- */
-export async function dispatchAgentTeam(
-  options: AgentTeamCompatDispatchOptions
-): Promise<AgentTeamCompatDispatchResult> {
-  if (!options || typeof options.teamId !== "string" || options.teamId.length === 0) {
-    return { ok: false, reason: "teamId is required" }
-  }
-  try {
-    await agentTeamManager.start(options.teamId)
-    // F-path runtime mirrors terminal result onto team.status. Translate
-    // failed/cancelled into ok=false so legacy callers see the failure
-    // even though start() itself didn't throw.
-    const team = useAgentTeamStore.getState().getTeam(options.teamId)
-    if (!team) return { ok: false, reason: `team ${options.teamId} not found` }
-    if (team.status === "failed" || team.status === "cancelled") {
-      return { ok: false, reason: `run ended ${team.status}` }
-    }
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) }
-  }
-}
-
-export const agentTeamCompat = {
-  dispatch: dispatchAgentTeam,
-}
 
 /**
  * Light-weight normalizer for AgentTeamConfig-shaped objects. Trims string

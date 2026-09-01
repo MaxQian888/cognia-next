@@ -144,7 +144,6 @@
     "lib/a2ui/templates/utility.ts",
     "lib/accounts/account-types.ts",
     "lib/agent-team/project-plugin-template.ts",
-    "lib/ai/agent/sample-team.ts",
     "lib/ai/agent/team/auto/types.ts",
     "lib/ai/eval/ci/golden-fixture.ts",
     "lib/ai/eval/import/foreign/_shared.ts",

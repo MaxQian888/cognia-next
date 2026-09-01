@@ -117,11 +117,22 @@ export const TEAM_EXECUTION_PATTERNS = [
 export type TeamExecutionPattern = (typeof TEAM_EXECUTION_PATTERNS)[number]
 
 /**
- * Main workspace tabs for the dedicated Agent Team page. Must stay in sync
- * with `WORKSPACE_TABS` in `components/agent/workspace/workspace-tab-nav.tsx`
- * — the nav renders exactly these, in this order. Stale persisted values
- * (e.g. the removed "graph"/"analytics") are guarded at the workspace page,
- * which falls back to "overview" for unknown tabs.
+ * Tabs of the dedicated Agent Team page, a page ADR-0140 dissolved.
+ *
+ * DORMANT ON PURPOSE, and this comment is the type-level half of that label.
+ * There is no live reader: the nav it named,
+ * `components/agent/workspace/workspace-tab-nav.tsx`, is gone, and the live
+ * Squads addressing is `SQUAD_TAB_PARAM` in
+ * `components/settings/squads/nav-config.ts` plus the `?tab=` union in
+ * `components/squads/squad-fleet-console.tsx`.
+ *
+ * The union survives because the VALUE does: `workspaceTab` is inside
+ * `partializeAgentTeamState` (`stores/agent/agent-team-store/store.ts`) and
+ * inside the `cognia-agent-teams` backup snapshot, so a stored preference from
+ * before the dissolution still round-trips through both. Deleting the type
+ * would force a persist-version decision on the busiest store in the repo to
+ * remove a field nothing reads. Its behaviour is pinned by
+ * `stores/agent/agent-team-store/selectors.test.ts`.
  */
 export type AgentTeamWorkspaceTab =
   | "overview"

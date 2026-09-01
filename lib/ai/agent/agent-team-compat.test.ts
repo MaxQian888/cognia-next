@@ -1,9 +1,4 @@
-import {
-  agentTeamCompat,
-  dispatchAgentTeam,
-  normalizeAgentTeamConfig,
-  normalizeAgentTeamTask,
-} from "./agent-team-compat"
+import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "./agent-team-compat"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { configureAgentTeamRuntime, __resetAgentTeamRuntimeForTesting } from "./agent-team"
 import { __resetInflightForTesting } from "./agent-team-runtime"
@@ -53,57 +48,6 @@ beforeEach(() => {
   useAgentTeamStore.getState().reset()
   __resetAgentTeamRuntimeForTesting()
   __resetInflightForTesting()
-})
-
-describe("dispatchAgentTeam", () => {
-  it("rejects when teamId is missing or non-string", async () => {
-    const r1 = await dispatchAgentTeam({ teamId: "" })
-    expect(r1.ok).toBe(false)
-    expect(r1.reason).toMatch(/teamId is required/i)
-  })
-
-  it("self-heals with default deps when the runtime hasn't been configured", async () => {
-    // `ensureConfiguredDeps` deliberately auto-configures via
-    // `buildAgentTeamRuntimeDeps()` instead of throwing "not configured"
-    // (headless / scheduler / CLI dispatch paths have no React initializer).
-    // The run still fails here — the team has no materialized teammates or
-    // tasks — but through the normal lifecycle, with the auto-config warning.
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
-    try {
-      useAgentTeamStore.getState().upsertTeam(makeTeam())
-      const result = await dispatchAgentTeam({ teamId: "t1" })
-      expect(result.ok).toBe(false)
-      expect(result.reason).toMatch(/run ended failed/i)
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("auto-configured"))
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it("returns ok=false when the team doesn't exist", async () => {
-    configureAgentTeamRuntime({})
-    const result = await dispatchAgentTeam({ teamId: "missing" })
-    expect(result.ok).toBe(false)
-    expect(result.reason).toMatch(/not found/i)
-  })
-
-  it("returns ok=true when the runtime completes the lifecycle", async () => {
-    useAgentTeamStore.getState().upsertTeam(makeTeam())
-    useAgentTeamStore.getState().upsertTeammate(makeTeammate("lead-1", "lead"))
-    useAgentTeamStore.getState().upsertTeammate(makeTeammate("tm-1"))
-    configureAgentTeamRuntime({})
-    const result = await dispatchAgentTeam({ teamId: "t1" })
-    // The new F-path runtime requires at least one task in the team — without
-    // tasks, the synthesizer fails fast with "No tasks to dispatch". For the
-    // compat shim that's still ok=false; the legacy contract treated "no
-    // tasks" as success. We accept the changed semantics here.
-    expect(typeof result.ok).toBe("boolean")
-  })
-
-  it("agentTeamCompat.dispatch forwards to dispatchAgentTeam", async () => {
-    const result = await agentTeamCompat.dispatch({ teamId: "" })
-    expect(result.ok).toBe(false)
-  })
 })
 
 describe("normalizeAgentTeamConfig", () => {
