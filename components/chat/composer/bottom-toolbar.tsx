@@ -138,7 +138,7 @@ function GenericBottomToolbar({
   const toolbarWidth = useElementWidth(rootRef)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
-  const runtime = useAgentRuntimeStore((s) => s.runtime)
+  const runtimeRef = useAgentRuntimeStore((s) => s.runtimeRef)
   // Live, not derived from the `session` prop: binding a Squad has to change
   // this row in the same tick the chip changes, and the prop's freshness is
   // the caller's business.
@@ -173,13 +173,22 @@ function GenericBottomToolbar({
   /** Any arrangement that sits INSIDE the composer box rather than below it. */
   const inBox = layout !== "detached"
   const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
-  const tierActive = runtime !== "claude-sdk"
+  const onBuiltinRuntime = runtimeRef.kind === "builtin"
+  const tierActive = !onBuiltinRuntime
 
   // Runtime AND the external agent it dispatches to are one choice in one
   // dropdown (see `runtime-selector.tsx`) — there is no second "which agent"
   // control to place, and no way to sit on an external lane with nothing
   // selected.
-  const runtimeControl = <AgentRuntimeSelector disabled={isStreaming} className={TOOLBAR_CHIP} />
+  const runtimeControl = (
+    <AgentRuntimeSelector
+      disabled={isStreaming}
+      className={TOOLBAR_CHIP}
+      // The chip names the sidecar runtime that will really serve the turn, and
+      // that is derived from the provider, so it has to be told which one.
+      providerId={providerId}
+    />
+  )
 
   // Agent Mode composes the preset the Claude SDK runtime runs under; it is
   // meaningless for an external CLI agent, which brings its own.
@@ -193,14 +202,13 @@ function GenericBottomToolbar({
   // On the wide row the preset sits directly on the toolbar and the axes get
   // their own button; inside the "⋯" overflow there is no row to spread over,
   // so both packings collapse into the single chip.
-  const modeControl =
-    runtime === "claude-sdk" ? (
-      <CompositionChip
-        sessionId={session?.id}
-        disabled={isStreaming}
-        layout={compact || inBox ? "combined" : "split"}
-      />
-    ) : null
+  const modeControl = onBuiltinRuntime ? (
+    <CompositionChip
+      sessionId={session?.id}
+      disabled={isStreaming}
+      layout={compact || inBox ? "combined" : "split"}
+    />
+  ) : null
 
   // Passive indicator, not a control — it belongs beside the context ring
   // rather than inside a menu the user has to open to learn whether this turn

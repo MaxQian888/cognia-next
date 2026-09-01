@@ -4,6 +4,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react"
 import { AgentRuntimeSelector } from "./runtime-selector"
+import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 // Passthrough i18n — assertions use raw translation keys.
 jest.mock("next-intl", () => ({
@@ -140,22 +141,10 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   isFromPreset: () => null,
 }))
 
-const mockSetRuntime = jest.fn()
-const mockSetExternalAgentId = jest.fn()
-const mockSetExternalHostConfig = jest.fn()
-interface HostSelection {
-  configId: string
-  revision: string
-  lifecycleGeneration: number
-  name: string
-}
+const mockSetRuntimeRef = jest.fn()
 const runtimeState = {
-  runtime: "claude-sdk" as "claude-sdk" | "external",
-  setRuntime: mockSetRuntime,
-  externalAgentId: null as string | null,
-  setExternalAgentId: mockSetExternalAgentId,
-  externalHostConfig: null as HostSelection | null,
-  setExternalHostConfig: mockSetExternalHostConfig,
+  runtimeRef: { kind: "builtin" } as AgentRuntimeRef,
+  setRuntimeRef: mockSetRuntimeRef,
 }
 
 // Configurations the paired host owns. The hook itself is covered by its own
@@ -214,21 +203,22 @@ function agent(id: string, name: string, enabled = true) {
 }
 
 beforeEach(() => {
-  runtimeState.runtime = "claude-sdk"
-  runtimeState.externalAgentId = null
-  runtimeState.externalHostConfig = null
+  runtimeState.runtimeRef = { kind: "builtin" }
   hostConfigsState.configs = []
   hostConfigsState.unavailable = null
-  mockSetExternalHostConfig.mockClear()
   externalAgentState.enabled = true
   externalAgentState.agents = {}
   externalAgentState.connectionStatus = {}
   externalAgentState.agentValidity = {}
-  mockSetRuntime.mockClear()
-  mockSetExternalAgentId.mockClear()
+  mockSetRuntimeRef.mockClear()
   mockSelectExternalAgent.mockClear()
   mockSetExternalEnabled.mockClear()
 })
+
+/** The chip's own fallback effect landing on the default lane. */
+function fellBackToBuiltin(): boolean {
+  return mockSetRuntimeRef.mock.calls.some(([ref]) => (ref as AgentRuntimeRef).kind === "builtin")
+}
 
 describe("AgentRuntimeSelector — chip label", () => {
   // The label is earned by being a choice. On the built-in runtime the trigger
@@ -240,12 +230,11 @@ describe("AgentRuntimeSelector — chip label", () => {
     const trigger = screen.getByTestId("agent-runtime-trigger")
     expect(trigger).not.toHaveAttribute("data-labelled")
     expect(trigger).toHaveTextContent("")
-    expect(trigger.getAttribute("aria-label")).toContain("claudeSdk")
+    expect(trigger.getAttribute("aria-label")).toContain("cogniaAgent")
   })
 
   it("names the selected external agent instead of a generic 'external' label", () => {
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
     const trigger = screen.getByTestId("agent-runtime-trigger")
@@ -265,7 +254,7 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
   it("lists each configured agent as a peer of the built-in runtime", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex"), a2: agent("a2", "Gemini") }
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-item-claude-sdk")).toBeInTheDocument()
+    expect(screen.getByTestId("radio-item-builtin")).toBeInTheDocument()
     expect(screen.getByTestId("radio-item-external:a1")).toBeInTheDocument()
     expect(screen.getByTestId("radio-item-external:a2")).toBeInTheDocument()
     // The old two-control split is gone: there is no bare "external" lane to
@@ -273,11 +262,23 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     expect(screen.queryByTestId("radio-item-external")).toBeNull()
   })
 
+  // The defect this catalog exists for: the builtin row claimed the Anthropic
+  // SDK sidecar under every provider, including in the accessible name, where
+  // the glyph-only chip means it is the ONLY wording a screen reader gets.
+  it("names the engine that will really serve the turn", () => {
+    const { rerender } = render(<AgentRuntimeSelector providerId="anthropic" />)
+    expect(screen.getByTestId("radio-item-builtin")).toHaveTextContent("engineClaudeAgentSdk")
+
+    rerender(<AgentRuntimeSelector providerId="deepseek" />)
+    expect(screen.getByTestId("radio-item-builtin")).toHaveTextContent("engineAiSdk")
+    expect(screen.getByTestId("radio-item-builtin")).not.toHaveTextContent("engineClaudeAgentSdk")
+  })
+
   it("sorts agent rows by name", () => {
     externalAgentState.agents = { a1: agent("a1", "Zed"), a2: agent("a2", "Codex") }
     render(<AgentRuntimeSelector />)
     const items = screen.getAllByRole("menuitemradio").map((el) => el.dataset.value)
-    expect(items).toEqual(["claude-sdk", "external:a2", "external:a1"])
+    expect(items).toEqual(["builtin", "external:a2", "external:a1"])
   })
 
   it("selects the runtime AND the agent record in a single click", () => {
@@ -285,16 +286,15 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     render(<AgentRuntimeSelector />)
     fireEvent.click(screen.getByTestId("radio-item-external:a1"))
     expect(mockSelectExternalAgent).toHaveBeenCalledWith("a1")
-    expect(mockSetRuntime).toHaveBeenCalledWith("external")
+    expect(mockSetRuntimeRef).toHaveBeenCalledWith({ kind: "external", agentId: "a1" })
   })
 
   it("switches back to the built-in runtime without touching the agent record", () => {
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    fireEvent.click(screen.getByTestId("radio-item-claude-sdk"))
-    expect(mockSetRuntime).toHaveBeenCalledWith("claude-sdk")
+    fireEvent.click(screen.getByTestId("radio-item-builtin"))
+    expect(mockSetRuntimeRef).toHaveBeenCalledWith({ kind: "builtin" })
     expect(mockSelectExternalAgent).not.toHaveBeenCalled()
   })
 
@@ -309,7 +309,7 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex", false) }
     render(<AgentRuntimeSelector />)
     fireEvent.click(screen.getByTestId("radio-item-external:a1"))
-    expect(mockSetRuntime).not.toHaveBeenCalled()
+    expect(mockSetRuntimeRef).not.toHaveBeenCalled()
     expect(mockSelectExternalAgent).not.toHaveBeenCalled()
   })
 
@@ -415,26 +415,23 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
 
 describe("AgentRuntimeSelector — invalid selection repair", () => {
   it("falls back to the built-in runtime when the selected agent is gone", () => {
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "deleted"
+    runtimeState.runtimeRef = { kind: "external", agentId: "deleted" }
     render(<AgentRuntimeSelector />)
-    expect(mockSetRuntime).toHaveBeenCalledWith("claude-sdk")
+    expect(fellBackToBuiltin()).toBe(true)
   })
 
   it("falls back when the selected agent can no longer execute", () => {
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex", false) }
     render(<AgentRuntimeSelector />)
-    expect(mockSetRuntime).toHaveBeenCalledWith("claude-sdk")
+    expect(fellBackToBuiltin()).toBe(true)
   })
 
   it("leaves a valid external selection alone", () => {
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    expect(mockSetRuntime).not.toHaveBeenCalled()
+    expect(fellBackToBuiltin()).toBe(false)
   })
 
   it("keeps the selection while a plugin adapter has not registered yet", () => {
@@ -442,18 +439,16 @@ describe("AgentRuntimeSelector — invalid selection repair", () => {
     // adapters, so a plugin-contributed agent reads as blocked at first render.
     // Persisting the fallback there silently moved the user off their chosen
     // agent on every restart, and the later registry tick never undid it.
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: { ...agent("a1", "My Plugin Agent"), protocol: "acme:rpc" } }
     render(<AgentRuntimeSelector />)
-    expect(mockSetRuntime).not.toHaveBeenCalled()
+    expect(fellBackToBuiltin()).toBe(false)
   })
 
   it("still renders a transiently blocked agent as unselectable", () => {
     // Not persisting the fallback must not mean pretending it works: the row
     // stays disabled and carries its reason until the adapter registers.
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: { ...agent("a1", "My Plugin Agent"), protocol: "acme:rpc" } }
     render(<AgentRuntimeSelector />)
     expect(screen.getByTestId("radio-item-external:a1")).toHaveAttribute("aria-disabled", "true")
@@ -477,8 +472,7 @@ describe("AgentRuntimeSelector — props", () => {
   })
 
   it("lets the runtime label use the available toolbar width before truncating", () => {
-    runtimeState.runtime = "external"
-    runtimeState.externalAgentId = "a1"
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
     const trigger = screen.getByTestId("agent-runtime-trigger")
@@ -521,19 +515,19 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
     ]
     render(<AgentRuntimeSelector />)
     fireEvent.click(screen.getByTestId("radio-item-host:eac_1"))
-    expect(mockSetExternalHostConfig).toHaveBeenCalledWith({
+    expect(mockSetRuntimeRef).toHaveBeenCalledWith({
+      kind: "host",
       configId: "eac_1",
       revision: "eacr_7",
       lifecycleGeneration: 4,
       name: "Pi",
     })
-    expect(mockSetRuntime).toHaveBeenCalledWith("external")
   })
 
   it("names the host agent on the chip", () => {
     hostConfigsState.configs = [hostConfig("eac_1", "Pi on the box")]
-    runtimeState.runtime = "external"
-    runtimeState.externalHostConfig = {
+    runtimeState.runtimeRef = {
+      kind: "host",
       configId: "eac_1",
       revision: "eac_1-rev",
       lifecycleGeneration: 1,
@@ -545,8 +539,8 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
 
   it("marks the host row as the checked value", () => {
     hostConfigsState.configs = [hostConfig("eac_1", "Pi")]
-    runtimeState.runtime = "external"
-    runtimeState.externalHostConfig = {
+    runtimeState.runtimeRef = {
+      kind: "host",
       configId: "eac_1",
       revision: "eac_1-rev",
       lifecycleGeneration: 1,
@@ -560,23 +554,23 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
   // bounce every host selection straight back to the built-in runtime.
   it("does not fall back to the built-in runtime while a host agent is selected", () => {
     hostConfigsState.configs = [hostConfig("eac_1", "Pi")]
-    runtimeState.runtime = "external"
-    runtimeState.externalHostConfig = {
+    runtimeState.runtimeRef = {
+      kind: "host",
       configId: "eac_1",
       revision: "eac_1-rev",
       lifecycleGeneration: 1,
       name: "Pi",
     }
     render(<AgentRuntimeSelector />)
-    expect(mockSetRuntime).not.toHaveBeenCalledWith("claude-sdk")
+    expect(fellBackToBuiltin()).toBe(false)
   })
 
   // The host swapped, or the configuration was deleted over there. Naming a
   // different agent for the user is a worse surprise than the default.
   it("drops a selection whose configuration the host no longer has", () => {
     hostConfigsState.configs = [hostConfig("eac_other", "Other")]
-    runtimeState.runtime = "external"
-    runtimeState.externalHostConfig = {
+    runtimeState.runtimeRef = {
+      kind: "host",
       configId: "eac_gone",
       revision: "r",
       lifecycleGeneration: 1,

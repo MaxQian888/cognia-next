@@ -404,13 +404,25 @@ describe("useExternalAgent core actions", () => {
   // Chat dispatch reads the runtime store, not this one. Before the selection
   // module, picking an agent here left the composer sending to whatever it had
   // selected — the manager and the chat disagreed silently.
-  it("setActiveAgent also moves the runtime store's selection", async () => {
+  it("setActiveAgent retargets an already-external lane", async () => {
     seedAgent("a1")
-    useAgentRuntimeStore.getState().setExternalAgentId(null)
+    useAgentRuntimeStore.getState().setRuntimeRef({ kind: "external", agentId: "a0" })
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     act(() => result.current.setActiveAgent("a1"))
     expect(useAgentRuntimeStore.getState().externalAgentId).toBe("a1")
+  })
+
+  // ...and never switches the lane on its own. Picking an agent in the manager
+  // must not reroute a chat that is running on Cognia's own runtime.
+  it("setActiveAgent leaves the builtin lane alone", async () => {
+    seedAgent("a1")
+    useAgentRuntimeStore.getState().setRuntimeRef({ kind: "builtin" })
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    act(() => result.current.setActiveAgent("a1"))
+    expect(useAgentRuntimeStore.getState().runtimeRef).toEqual({ kind: "builtin" })
+    expect(storeSetActiveAgent).toHaveBeenCalledWith("a1")
   })
 
   it("addAgent: success path forwards to manager", async () => {
@@ -556,7 +568,7 @@ describe("useExternalAgent core actions", () => {
   it("removeAgent drops the runtime store's dangling selection", async () => {
     seedAgent("a1")
     fakeManager.getAgent.mockReturnValue({ config: { id: "a1", name: "A1", protocol: "acp" } })
-    useAgentRuntimeStore.getState().setExternalAgentId("a1")
+    useAgentRuntimeStore.getState().setRuntimeRef({ kind: "external", agentId: "a1" })
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     await act(async () => {
@@ -568,7 +580,7 @@ describe("useExternalAgent core actions", () => {
   it("removeAgent leaves a selection that names a different agent", async () => {
     seedAgent("a1")
     fakeManager.getAgent.mockReturnValue({ config: { id: "a1", name: "A1", protocol: "acp" } })
-    useAgentRuntimeStore.getState().setExternalAgentId("a2")
+    useAgentRuntimeStore.getState().setRuntimeRef({ kind: "external", agentId: "a2" })
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     await act(async () => {

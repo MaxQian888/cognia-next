@@ -95,13 +95,11 @@ jest.mock("@/components/ai-elements/context", () => ({
   ContextCacheUsage: () => null,
 }))
 
-// Agent store state — mutated by tests that need different runtime/mode.
+// Agent store state — mutated by tests that need a different lane or mode.
 let agentRuntimeState = {
-  runtime: "claude-sdk" as string,
+  runtimeRef: { kind: "builtin" } as { kind: string; agentId?: string },
   modeId: "general" as string,
   setModeId: jest.fn(),
-  externalAgentId: null as string | null,
-  setExternalAgentId: jest.fn(),
 }
 
 jest.mock("@/stores/agent", () => ({
@@ -149,11 +147,9 @@ beforeEach(() => {
     setPermissionMode: jest.fn(),
   }
   agentRuntimeState = {
-    runtime: "claude-sdk",
+    runtimeRef: { kind: "builtin" },
     modeId: "general",
     setModeId: jest.fn(),
-    externalAgentId: null,
-    setExternalAgentId: jest.fn(),
   }
   for (const key of Object.keys(lastSelectorProps)) delete lastSelectorProps[key]
   mockToolbarWidth = 0
@@ -262,7 +258,7 @@ describe("BottomToolbar — session-kind branching", () => {
   // Agent Modes compose the Claude SDK runtime's preset; an external CLI agent
   // brings its own, so the chip has nothing to say there.
   it("drops the Agent-mode chip while an external agent is selected", () => {
-    agentRuntimeState.runtime = "external"
+    agentRuntimeState.runtimeRef = { kind: "external", agentId: "a1" }
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.queryByTestId("composition-chip")).toBeNull()
@@ -449,7 +445,7 @@ describe("BottomToolbar — agent-mode wiring", () => {
   // The runtime chip owns the external-agent record now (one dropdown, one
   // choice), so the toolbar no longer brokers a second selector's callback.
   it("mounts no separate external-agent selector", () => {
-    agentRuntimeState.runtime = "external"
+    agentRuntimeState.runtimeRef = { kind: "external", agentId: "a1" }
     renderWide(<BottomToolbar session={session} />)
     expect(screen.queryByTestId("external-agent-selector")).toBeNull()
     expect(lastSelectorProps.onAgentChange).toBeUndefined()

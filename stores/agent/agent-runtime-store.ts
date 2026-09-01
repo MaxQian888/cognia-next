@@ -1,11 +1,14 @@
 "use client"
 
 /**
- * Agent runtime selector — picks which engine drives the next chat turn.
+ * Agent runtime selector, which picks the engine that drives the next chat turn.
  *
- * cognia-next ships with a Claude SDK sidecar as the default agent runtime.
- * The migrated External Agent layer adds a peer runtime that spawns a CLI
- * process (Codex, Claude Code CLI, Gemini CLI, Cursor, custom) over stdio.
+ * The choice is one `AgentRuntimeRef` (see `lib/ai/agent/runtime-catalog`):
+ * Cognia's own runtime in the bundled sidecar, a locally configured external
+ * agent process (Codex, Claude Code CLI, Gemini CLI, Cursor, custom), or a
+ * configuration the paired host owns. It used to be three separate persisted
+ * fields that could disagree, and the flat fields survive here only as
+ * deprecated mirrors for readers that have not migrated.
  *
  * Since ADR-0117 a "mode" is no longer one flat id. It is a composition of
  * five axes (preset, permission, tool presentation, orchestration, runtime),
@@ -33,7 +36,14 @@ import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/age
 import { STANDARD_PRESET_ID } from "@/lib/agent/composition/preset-catalog"
 import { appPresetIds } from "@/lib/agent/composition/app-preset-catalog"
 import { selectionFromLegacyModeId } from "@/lib/agent/composition/legacy-mode-mapping"
+import { BUILTIN_RUNTIME_REF, type AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
+/**
+ * @deprecated Compatibility mirror of {@link AgentRuntimeState.runtimeRef}.
+ * The lane is now an `AgentRuntimeRef`, which also names the target, so a
+ * "which agent" answer can no longer go missing from a "which lane" answer.
+ * Readers still on this field are being migrated.
+ */
 export type AgentRuntime = "claude-sdk" | "external"
 
 /** What the composer remembers about a host-owned agent it has selected. */
@@ -46,6 +56,18 @@ export interface ExternalHostConfigSelection {
 }
 
 interface AgentRuntimeState {
+  /**
+   * What runs the next turn: Cognia's own runtime, a locally configured
+   * external agent, or a configuration the paired host owns.
+   *
+   * This replaced three separately persisted fields (`runtime`,
+   * `externalAgentId`, `externalHostConfig`) that could describe a lane with no
+   * target, which is a state no turn can be sent from. One value makes that
+   * unrepresentable, and it is why the composer chip no longer needs repair
+   * effects to reconcile a disagreement.
+   */
+  runtimeRef: AgentRuntimeRef
+  /** @deprecated Mirror of `runtimeRef.kind`. Written only by `setRuntimeRef`. */
   runtime: AgentRuntime
   /**
    * Legacy flat mode id.
@@ -57,8 +79,11 @@ interface AgentRuntimeState {
   modeId: string
   defaultComposition: AgentCompositionSelectionV1
   sessionCompositions: Record<string, AgentCompositionSelectionV1>
+  /** @deprecated Mirror of a `kind: "external"` ref. Written only by `setRuntimeRef`. */
   externalAgentId: string | null
   /**
+   * @deprecated Mirror of a `kind: "host"` ref. Written only by `setRuntimeRef`.
+   *
    * A configuration owned by the paired HOST, when the external lane points at
    * one instead of at a locally configured agent.
    *
@@ -74,13 +99,12 @@ interface AgentRuntimeState {
    */
   externalHostConfig: ExternalHostConfigSelection | null
 
-  setRuntime: (runtime: AgentRuntime) => void
+  /** The single writer for the lane. Every mirror above is derived from it. */
+  setRuntimeRef: (ref: AgentRuntimeRef) => void
   setModeId: (modeId: string) => void
   setDefaultComposition: (selection: AgentCompositionSelectionV1) => void
   setSessionComposition: (sessionId: string, selection: AgentCompositionSelectionV1) => void
   clearSessionComposition: (sessionId: string) => void
-  setExternalAgentId: (id: string | null) => void
-  setExternalHostConfig: (selection: ExternalHostConfigSelection | null) => void
 }
 
 /**
@@ -119,9 +143,69 @@ function migratedSelectionFromModeId(
   return selectionFromLegacyModeId(modeId, new Set(trimmed ? [trimmed] : [])).selection
 }
 
+/**
+ * The deprecated flat fields, recomputed from the ref.
+ *
+ * They are written on every ref change rather than left to drift, so a reader
+ * that has not migrated yet still sees the truth, and a downgrade to a build
+ * that only knows the flat fields still opens on the right lane.
+ */
+function legacyMirrors(ref: AgentRuntimeRef): {
+  runtime: AgentRuntime
+  externalAgentId: string | null
+  externalHostConfig: ExternalHostConfigSelection | null
+} {
+  switch (ref.kind) {
+    case "builtin":
+      return { runtime: "claude-sdk", externalAgentId: null, externalHostConfig: null }
+    case "external":
+      return { runtime: "external", externalAgentId: ref.agentId, externalHostConfig: null }
+    case "host":
+      return {
+        runtime: "external",
+        externalAgentId: null,
+        externalHostConfig: {
+          configId: ref.configId,
+          revision: ref.revision,
+          lifecycleGeneration: ref.lifecycleGeneration,
+          name: ref.name ?? ref.configId,
+        },
+      }
+  }
+}
+
+/**
+ * Read a v2 state's three fields as one ref.
+ *
+ * A host selection wins over a local one because v2's setters cleared the other
+ * key on write, so both being set can only mean a partially applied write, and
+ * the host stamp is the more specific of the two.
+ *
+ * `runtime: "external"` with neither target set was representable in v2 and
+ * could not send a turn. It migrates to the default lane rather than being
+ * preserved: carrying a dead state forward would only reproduce the chip's
+ * "External (none selected)" dead end on the other side of the migration.
+ */
+function refFromLegacyFields(state: Partial<AgentRuntimeState>): AgentRuntimeRef {
+  if (state.runtime !== "external") return BUILTIN_RUNTIME_REF
+  const host = state.externalHostConfig
+  if (host?.configId) {
+    return {
+      kind: "host",
+      configId: host.configId,
+      revision: host.revision,
+      lifecycleGeneration: host.lifecycleGeneration,
+      ...(host.name ? { name: host.name } : {}),
+    }
+  }
+  if (state.externalAgentId) return { kind: "external", agentId: state.externalAgentId }
+  return BUILTIN_RUNTIME_REF
+}
+
 export const useAgentRuntimeStore = create<AgentRuntimeState>()(
   persist(
     (set) => ({
+      runtimeRef: BUILTIN_RUNTIME_REF,
       runtime: "claude-sdk",
       modeId: "general",
       defaultComposition: { presetId: STANDARD_PRESET_ID },
@@ -129,7 +213,7 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
       externalAgentId: null,
       externalHostConfig: null,
 
-      setRuntime: (runtime) => set({ runtime }),
+      setRuntimeRef: (runtimeRef) => set({ runtimeRef, ...legacyMirrors(runtimeRef) }),
       setModeId: (modeId) => set({ modeId, defaultComposition: selectionFromModeId(modeId) }),
       setDefaultComposition: (selection) =>
         // Mirror back onto `modeId` so unmigrated readers stay consistent
@@ -158,37 +242,32 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
           delete next[sessionId]
           return { sessionCompositions: next }
         }),
-      // Each setter clears the other lane when it selects something. Leaving
-      // both set would make "which agent is this turn on" answerable two ways
-      // and the send path would have to guess. Clearing one leaves the other
-      // alone: `setExternalAgentId(null)` means "no local agent", not "no agent
-      // anywhere", and a partial with an explicit `undefined` would overwrite
-      // the other key rather than skip it.
-      setExternalAgentId: (externalAgentId) =>
-        set(externalAgentId ? { externalAgentId, externalHostConfig: null } : { externalAgentId }),
-      setExternalHostConfig: (externalHostConfig) =>
-        set(
-          externalHostConfig
-            ? { externalHostConfig, externalAgentId: null }
-            : { externalHostConfig }
-        ),
     }),
     {
       name: "cognia-next.agent-runtime",
       storage: persistLocalStorage(),
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
-        const state = (persisted ?? {}) as Partial<AgentRuntimeState>
-        if (version >= 2) return state as AgentRuntimeState
+        let state = (persisted ?? {}) as Partial<AgentRuntimeState>
 
-        // v1 → v2: derive the default composition from the single global mode
-        // id. Sessions get nothing, which is correct — v1 never recorded a
-        // per-session choice, so inventing one would be fabricating history.
-        return {
-          ...state,
-          defaultComposition: migratedSelectionFromModeId(state.modeId),
-          sessionCompositions: {},
-        } as AgentRuntimeState
+        // v1 to v2: derive the default composition from the single global mode
+        // id. Sessions get nothing, which is correct, because v1 never recorded
+        // a per-session choice and inventing one would fabricate history.
+        if (version < 2) {
+          state = {
+            ...state,
+            defaultComposition: migratedSelectionFromModeId(state.modeId),
+            sessionCompositions: {},
+          }
+        }
+
+        // v2 to v3: fold the three lane fields into one ref.
+        if (version < 3) {
+          const runtimeRef = refFromLegacyFields(state)
+          state = { ...state, runtimeRef, ...legacyMirrors(runtimeRef) }
+        }
+
+        return state as AgentRuntimeState
       },
     }
   )
