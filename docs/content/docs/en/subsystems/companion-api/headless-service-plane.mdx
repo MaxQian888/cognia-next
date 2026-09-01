@@ -69,7 +69,7 @@ supervised together.
 pnpm dev:web-headless
 ```
 
-Two facts about it are easy to lose an afternoon to.
+Three facts about it are easy to lose an afternoon to.
 
 **The page and the API are different origins.** `http://localhost:3000` talking to
 `https://127.0.0.1:27890` is cross-origin, and the server's origin policy is exact-match with an
@@ -104,6 +104,25 @@ cannot leave the machine — and it refuses to start without an allowlist, becau
 empty one answers `403 web_origin_forbidden` to every request a browser makes while looking, from
 the outside, exactly like a working port. It also turns on Private Network Access for those
 origins, which Chrome preflights before a page on `:3000` may reach loopback at all.
+
+**The Host can only see one directory tree.** `SpawnPolicy` reads `COGNIA_WORKSPACES_DIR` once at
+startup and refuses every path outside it, for browsing and for running alike. Left unset that root
+is `<data dir>/workspaces`, which holds none of the code on this machine, so the server folder
+picker opens on a refusal rather than on your projects. `pnpm dev:web-headless` therefore passes a
+root of its own: this checkout. Not the folder that holds it, which is usually `~/Projects` and
+holds every other repository on the machine with its own `.env` files, so reaching a sibling is
+something you ask for rather than the default. Widen, narrow or move the root with the flag, or
+with `COGNIA_WORKSPACES_DIR`, which it honours:
+
+```bash
+pnpm dev:web-headless --workspaces-dir ~/Projects
+```
+
+A root that does not exist is refused by the launcher before anything starts, because the Host
+would boot cleanly and then refuse every browse with an opaque error. So is a `--workspaces-dir`
+with no path after it, rather than quietly falling back to the wider default. The root is fixed for the
+life of the process and no paired client can widen it; the one in force is readable over
+`fs_workspace_roots` and shown, read-only, under Settings -> Companion -> Pairing.
 
 Then issue the invitation **against that plane**, not the HTTPS one:
 

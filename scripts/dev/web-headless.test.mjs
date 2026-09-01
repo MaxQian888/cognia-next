@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -8,6 +8,14 @@ import { fileURLToPath } from "node:url"
 
 const packageJsonPath = fileURLToPath(new URL("../../package.json", import.meta.url))
 const scriptPath = fileURLToPath(new URL("./web-headless.mjs", import.meta.url))
+const repoRoot = await realpath(fileURLToPath(new URL("../..", import.meta.url)))
+const defaultWorkspacesDir = repoRoot
+
+async function dryRun(args = [], env = {}) {
+  const result = await run(["--dry-run", ...args], env)
+  assert.equal(result.code, 0, result.stderr)
+  return JSON.parse(result.stdout)
+}
 
 function run(args = [], env = {}) {
   return new Promise((resolve, reject) => {
@@ -154,6 +162,7 @@ if (service === "dev:headless") {
 
     assert.equal(result.code, 7, result.stderr)
     assert.equal(result.signal, null)
+    assert.match(result.stdout, /may browse and run in/)
     assert.deepEqual((await readFile(logPath, "utf8")).trim().split("\n").sort(), [
       "dev:headless:started",
       "dev:started",
@@ -175,12 +184,19 @@ test("dev:web-headless starts both services and tears down the peer on exit", as
   assert.equal(result.signal, null)
   assert.deepEqual(JSON.parse(result.stdout), {
     killPeerOnExit: true,
+    workspacesDir: defaultWorkspacesDir,
     services: [
       { name: "web", command: "pnpm", args: ["dev"] },
       {
         name: "headless",
         command: "pnpm",
-        args: ["dev:headless", "--browser-listener-port", "27891"],
+        args: [
+          "dev:headless",
+          "--browser-listener-port",
+          "27891",
+          "--workspaces-dir",
+          defaultWorkspacesDir,
+        ],
       },
       { name: "workspace-runtime", command: "pnpm", args: ["dev:workspace-runtime"] },
     ],
@@ -218,7 +234,7 @@ test("dev:web-headless opens the one port a browser tab can reach the Host on", 
   const result = await run(["--dry-run"])
   assert.equal(result.code, 0, result.stderr)
   const headless = JSON.parse(result.stdout).services.find(({ name }) => name === "headless")
-  assert.deepEqual(headless.args.slice(1), ["--browser-listener-port", "27891"])
+  assert.deepEqual(headless.args.slice(1, 3), ["--browser-listener-port", "27891"])
 
   // The port must agree with the Rust default and the browser-side probe, or
   // discovery looks in a place nothing is listening.
@@ -232,4 +248,76 @@ test("dev:web-headless opens the one port a browser tab can reach the Host on", 
     "utf8"
   )
   assert.match(probe, /export const DEFAULT_BROWSER_ACCESS_PORT = 27891/)
+})
+
+test("the Host is confined to the checkout, not the data dir and not its siblings", async () => {
+  // Unset, the Host confines every paired client to `<data dir>/workspaces`,
+  // which holds none of the code on this machine -- the server folder picker
+  // then opens on a refusal. The point of this script is a browser tab driving
+  // this machine's code, so the default root is the checkout.
+  const { workspacesDir } = await dryRun()
+
+  assert.equal(workspacesDir, defaultWorkspacesDir)
+  // The checkout, not the folder that holds it. That folder is usually
+  // `~/Projects`, and the Host refuses nothing inside the root it is given,
+  // for running as well as for browsing, so every sibling repository would be
+  // reachable by default. Widening to it is `--workspaces-dir ..`.
+  assert.equal(workspacesDir, repoRoot)
+  assert.notEqual(workspacesDir, await realpath(path.resolve(repoRoot, "..")))
+})
+
+test("--workspaces-dir narrows the root, and beats the environment", async (t) => {
+  const flagRoot = await mkdtemp(path.join(os.tmpdir(), "cognia-web-headless-flag-"))
+  const envRoot = await mkdtemp(path.join(os.tmpdir(), "cognia-web-headless-env-"))
+  t.after(() =>
+    Promise.all([flagRoot, envRoot].map((dir) => rm(dir, { recursive: true, force: true })))
+  )
+
+  const flagged = await dryRun(["--workspaces-dir", flagRoot], { COGNIA_WORKSPACES_DIR: envRoot })
+  const headless = flagged.services.find(({ name }) => name === "headless")
+
+  // Resolved through the real path, the way the Host resolves it: on macOS
+  // the temp dir is a symlink, and the root the client is told about has to be
+  // the root `fs_workspace_roots` reports back.
+  assert.equal(flagged.workspacesDir, await realpath(flagRoot))
+  assert.deepEqual(headless.args.slice(3), ["--workspaces-dir", await realpath(flagRoot)])
+})
+
+test("COGNIA_WORKSPACES_DIR is honoured when no flag is passed", async (t) => {
+  const envRoot = await mkdtemp(path.join(os.tmpdir(), "cognia-web-headless-env-only-"))
+  t.after(() => rm(envRoot, { recursive: true, force: true }))
+
+  const { workspacesDir } = await dryRun([], { COGNIA_WORKSPACES_DIR: envRoot })
+
+  assert.equal(workspacesDir, await realpath(envRoot))
+})
+
+test("a root that is not a usable directory is refused before anything starts", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-web-headless-bad-root-"))
+  const filePath = path.join(root, "not-a-dir")
+  await writeFile(filePath, "")
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  // The Host would boot happily and then refuse every browse with an opaque
+  // error, because it reads this once at startup and never again.
+  const missing = await run(["--dry-run", "--workspaces-dir", path.join(root, "nope")])
+  assert.equal(missing.code, 4, missing.stderr)
+  assert.match(missing.stderr, /workspaces dir does not exist/)
+
+  const file = await run(["--dry-run", "--workspaces-dir", filePath])
+  assert.equal(file.code, 4, file.stderr)
+  assert.match(file.stderr, /workspaces dir is not a directory/)
+})
+
+test("a --workspaces-dir with no value is refused, not silently widened", async () => {
+  // `argv[flagIndex + 1]` on its own resolved `<cwd>/--dry-run` as a path, and
+  // a trailing flag fell through to the default root -- the opposite of the
+  // narrowing the user asked for, with nothing said about it.
+  const swallowed = await run(["--workspaces-dir", "--dry-run"])
+  assert.equal(swallowed.code, 4, swallowed.stderr)
+  assert.match(swallowed.stderr, /--workspaces-dir needs a directory path/)
+
+  const trailing = await run(["--dry-run", "--workspaces-dir"])
+  assert.equal(trailing.code, 4, trailing.stderr)
+  assert.match(trailing.stderr, /--workspaces-dir needs a directory path/)
 })

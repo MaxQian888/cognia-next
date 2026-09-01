@@ -64,7 +64,7 @@ curl --insecure \
 pnpm dev:web-headless
 ```
 
-有两件事很容易在上面耗掉一个下午。
+有三件事很容易在上面耗掉一个下午。
 
 **页面和 API 不同源。** `http://localhost:3000` 访问 `https://127.0.0.1:27890` 属于跨源，而服务端的
 origin 策略是精确匹配、默认为空——任何不在清单里的 origin 都会拿到 `403 web_origin_forbidden`，
@@ -95,6 +95,21 @@ cargo run --bin cognia-server -- serve --port 27890 --browser-listener-port 2789
 拒绝启动：空清单的监听器会对浏览器发出的每一个请求回 `403 web_origin_forbidden`，而从外面看它和
 一个正常工作的端口一模一样。它同时为这些 origin 打开 Private Network Access——Chrome 在 `:3000`
 上的页面能访问回环之前，会先发这个预检。
+
+**宿主只能看见一棵目录树。** `SpawnPolicy` 只在启动时读一次 `COGNIA_WORKSPACES_DIR`，此后拒绝这个
+根之外的一切路径——浏览如此，执行也如此。不设置时这个根是 `<data dir>/workspaces`，里面没有你在这台
+机器上写的任何代码，于是"选择服务器目录"弹窗打开时看到的是一句拒绝，而不是你的项目。所以
+`pnpm dev:web-headless` 会自己传一个根：本仓库的检出目录。不是包含它的那个目录——那通常是
+`~/Projects`，装着这台机器上其它所有仓库和它们各自的 `.env`，所以"能看到兄弟仓库"应该是你主动要求
+的，而不是默认值。要放宽、收窄或改到别处，用这个参数，或者用它同样认的 `COGNIA_WORKSPACES_DIR`：
+
+```bash
+pnpm dev:web-headless --workspaces-dir ~/Projects
+```
+
+不存在的根会在任何服务启动之前就被启动器拒绝——否则宿主会正常起来，然后对每一次浏览回一个语焉不详的
+错误。后面没跟路径的 `--workspaces-dir` 同样会被拒绝，而不是悄悄退回到更宽的默认值。这个根在进程的整个生命周期内固定，任何已配对的客户端都无法把它放宽；当前生效的根可以通过
+`fs_workspace_roots` 读到，并在 设置 -> 伴侣 -> 配对 下只读展示。
 
 然后**对着这个平面**签发邀请，而不是 HTTPS 那个：
 
