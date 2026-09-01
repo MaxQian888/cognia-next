@@ -16,6 +16,7 @@ import {
   useWorkspacePickerDialogs,
   WorkspacePickerList,
 } from "@/components/workspace/workspace-picker-list"
+import { WorkspaceContextBar } from "@/components/workspace/workspace-context-bar"
 import { useProjectStore } from "@/stores/project/project-store"
 import { cn } from "@/lib/utils"
 
@@ -33,6 +34,14 @@ import { cn } from "@/lib/utils"
  * `WorkspacePickerList` the desktop popover renders, at touch density, and the
  * dialogs it opens are mounted outside the Drawer because a Drawer unmounts
  * its children when it closes.
+ *
+ * The sheet carries the branch under the list, which is the same pair the
+ * desktop title bar shows. The header row itself stays ONE chip on purpose: it
+ * already holds the character header, the background-runs chip and the
+ * missing-credential warning, and a second permanent control there is how a
+ * 375px header starts truncating the conversation title. Cursor Mobile makes
+ * the same call, asking for the repository and then the branch in one
+ * progressive sheet rather than putting both in the chrome.
  */
 export function MobileWorkspaceChip({ className }: { className?: string }) {
   const t = useTranslations("mobile.workspace")
@@ -74,6 +83,12 @@ export function MobileWorkspaceChip({ className }: { className?: string }) {
               density="comfortable"
               onSwitched={() => setOpen(false)}
             />
+            {/*
+              Self-hides where Source Control cannot run or no repository is
+              bound, so the sheet does not grow a dead row on a phone that has
+              no host to ask.
+            */}
+            <WorkspaceContextBar layout="stacked" className="mt-1 [&:empty]:hidden" />
           </div>
         </DrawerContent>
       </Drawer>

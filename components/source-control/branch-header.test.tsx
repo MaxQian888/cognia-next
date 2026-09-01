@@ -52,3 +52,21 @@ describe("BranchHeader", () => {
     expect(screen.getByTestId("branch-header")).toBeDisabled()
   })
 })
+
+describe("BranchHeader as a bar segment", () => {
+  it("takes a width from its host instead of forcing max-w-[60%] everywhere", () => {
+    render(
+      <BranchHeader
+        branch="main"
+        ahead={0}
+        behind={0}
+        branches={branches}
+        actions={actions}
+        className="max-w-[45%] shrink"
+      />
+    )
+    const trigger = screen.getByTestId("branch-header")
+    expect(trigger.className).toContain("max-w-[45%]")
+    expect(trigger.className).toContain("shrink")
+  })
+})

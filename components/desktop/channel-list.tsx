@@ -89,7 +89,7 @@ import {
   guildSectionRows,
 } from "@/components/shell/sidebar-guild-sections"
 import { SidebarFooter } from "@/components/shell/sidebar-footer"
-import { WorkspaceSwitcher } from "@/components/shell/workspace-switcher"
+import { WorkspaceContextBar } from "@/components/workspace/workspace-context-bar"
 import { requestCommandPalette } from "@/lib/shell/command-palette-request"
 import { densitySurfaceProps } from "@/lib/appearance/density-applier"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -2167,7 +2167,10 @@ function Header({
         data-testid="channel-list-header"
         className="flex h-full min-w-0 flex-1 items-center gap-2 px-2"
       >
-        <WorkspaceSwitcher variant="wide" className="min-w-0" />
+        {/* The bar, not the bare switcher: the branch belongs beside the
+            workspace it is inside, and from a conversation there was no door
+            to it at all. Same switcher inside, so this is not a second one. */}
+        <WorkspaceContextBar />
       </div>,
       outlet
     )
