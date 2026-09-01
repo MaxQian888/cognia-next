@@ -67,8 +67,11 @@
   },
   "filters": {
     "allDomains": "全部类型",
+    "allScopes": "全部范围",
     "allTrust": "全部信任级别",
     "domain": "模板类型",
+    "hiddenHere": "本工作区隐藏了 {count} 个模板",
+    "scope": "范围",
     "search": "搜索模板",
     "trust": "信任级别"
   },
@@ -142,6 +145,10 @@
     "detached": "已分离",
     "rebindTo": "重新绑定到",
     "resources": "{count} 个资源",
+    "scopeAll": "全部工作区共 {count} 个实例",
+    "scopeCurrent": "本工作区 {count} 个实例",
+    "showAll": "全部工作区",
+    "showCurrent": "本工作区",
     "sourceUnavailable": "来源不可用",
     "upToDate": "已是最新版本",
     "updateTo": "更新到…"
@@ -316,6 +323,13 @@
     "noReasons": "没有会改变版本号的差异。",
     "title": "发布该模板",
     "unreleased": "尚未发布"
+  },
+  "scopes": {
+    "builtin": "内置",
+    "marketplace": "市场",
+    "mine": "我的模板库",
+    "plugin": "来自插件",
+    "workspace": "本工作区"
   },
   "status": {
     "conflict": "冲突",

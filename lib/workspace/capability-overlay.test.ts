@@ -224,7 +224,15 @@ describe("WORKSPACE_CAPABILITY_KINDS", () => {
     // `manager.setPluginIntent`), so a per-workspace overlay would rewrite the
     // record of what is actually running on every switch. Pinned here so the
     // exclusion has to be argued with, not just typed over.
-    expect(WORKSPACE_CAPABILITY_KINDS).toEqual(["skill", "mcpServer"])
+    expect(WORKSPACE_CAPABILITY_KINDS).toEqual(["skill", "mcpServer", "template"])
     expect(WORKSPACE_CAPABILITY_KINDS).not.toContain("plugin")
+  })
+
+  it("covers templates for visibility only, never for ownership", () => {
+    // A shared template is defined once and offered everywhere, so "not here"
+    // is a real preference. Ownership is a different claim and lives on
+    // `TemplateDefinitionRow.workspaceId`: an owned template is absent from
+    // other workspaces outright rather than overlaid off in each of them.
+    expect(WORKSPACE_CAPABILITY_KINDS).toContain("template")
   })
 })

@@ -13,6 +13,7 @@ import { refreshBuiltInTemplateOverlays } from "@/lib/templates/builtin-overlays
 import { createLegacyTemplateSources } from "@/lib/templates/legacy-sources"
 import { migrateLegacyTemplates } from "@/lib/templates/migration"
 import { createProductionTemplatePorts, getTemplateRuntime } from "@/lib/templates/runtime"
+import { refreshTemplateOwners } from "@/lib/global-search/providers/library"
 
 const log = loggers.shell
 
@@ -36,6 +37,10 @@ export async function bootTemplatePlatform(): Promise<void> {
   log.info("template-platform: migration completed", { ...report })
   await refreshBuiltInTemplateOverlays({ catalog: runtime.catalog, ports })
   await refreshCatalogOnlyTemplateAdapters(runtime.catalog)
+  // Global search ranks a template by which workspace owns it, and its
+  // `belongs` predicate is synchronous by contract, so it reads a snapshot
+  // rather than Dexie. Take it once the catalog is populated.
+  await refreshTemplateOwners()
 }
 
 export function TemplatePlatformInitializer() {

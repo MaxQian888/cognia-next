@@ -219,25 +219,27 @@
     "adoptEntry": "Folders in use"
   },
   "capabilities": {
-    "tab": "Capabilities",
-    "title": "Capabilities in this workspace",
     "description": "Skills and MCP servers are defined once for the machine. This is where a workspace says which of them it actually uses — anything left on Inherit follows the library, including later changes to it.",
-    "overrideCount": "{count, plural, =0 {no overrides} one {# override} other {# overrides}}",
-    "skills": "Skills",
-    "mcpServers": "MCP servers",
-    "noSkills": "No skills are defined yet. Add them in Settings → Skills.",
-    "noMcpServers": "No MCP servers are configured yet. Add them in Settings → MCP.",
-    "effectiveOn": "Loaded here",
     "effectiveOff": "Not loaded here",
-    "globallyOn": "on for every workspace",
+    "effectiveOn": "Loaded here",
     "globallyOff": "off for every workspace",
-    "stateLabel": "Availability of {name} in this workspace",
+    "globallyOn": "on for every workspace",
+    "mcpServers": "MCP servers",
+    "noMcpServers": "No MCP servers are configured yet. Add them in Settings → MCP.",
+    "noSkills": "No skills are defined yet. Add them in Settings → Skills.",
+    "noTemplates": "No shared templates yet.",
+    "overrideCount": "{count, plural, =0 {no overrides} one {# override} other {# overrides}}",
+    "pluginsAreGlobal": "Plugins stay machine-wide: their enabled flag is the record of what is actually running, not a preference, so it is not something a workspace can hold a second opinion about. Manage them in Settings → Plugins.",
+    "skills": "Skills",
     "state": {
       "inherit": "Inherit",
       "on": "On",
       "off": "Off"
     },
-    "pluginsAreGlobal": "Plugins stay machine-wide: their enabled flag is the record of what is actually running, not a preference, so it is not something a workspace can hold a second opinion about. Manage them in Settings → Plugins.",
+    "stateLabel": "Availability of {name} in this workspace",
+    "tab": "Capabilities",
+    "templates": "Templates",
+    "title": "Capabilities in this workspace",
     "unavailable": "not available — trust it in Settings → MCP first"
   },
   "adopt": {

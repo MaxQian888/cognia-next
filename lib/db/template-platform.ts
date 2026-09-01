@@ -255,8 +255,14 @@ export class DexieTemplateRepository implements TemplateRepository {
     return getDb().templateInstances.get(id)
   }
 
-  async listInstances(): Promise<TemplateInstanceRecord[]> {
-    return getDb().templateInstances.toArray()
+  async listInstances(scope?: { projectId: string }): Promise<TemplateInstanceRecord[]> {
+    if (!scope) return getDb().templateInstances.toArray()
+    // A row with no workspace is legacy, not foreign: it predates the column,
+    // and dropping it here would make instances disappear before the backfill
+    // reaches them. Same rule `byProjectId` uses for unowned rows.
+    return (await getDb().templateInstances.toArray()).filter(
+      (row) => row.projectId === undefined || row.projectId === scope.projectId
+    )
   }
 
   async getLocal(id: string): Promise<TemplateLocalRecord | undefined> {
@@ -294,6 +300,22 @@ export class DexieTemplateRepository implements TemplateRepository {
     }
     return out
   }
+}
+
+/**
+ * Definition id to the workspace that owns it, for the definitions that have
+ * one. A definition absent from this map is shared with every workspace.
+ *
+ * Read directly rather than through the repository because the callers are
+ * Dexie live queries: they want to re-render when the row changes, and the
+ * repository interface is a promise-returning port with no change signal.
+ */
+export async function listTemplateOwners(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  for (const row of await getDb().templateDefinitions.toArray()) {
+    if (row.workspaceId !== undefined) out[row.id] = row.workspaceId
+  }
+  return out
 }
 
 export async function putTemplateDeviceBinding(

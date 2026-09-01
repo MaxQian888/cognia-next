@@ -14,10 +14,12 @@ import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
 import { templateCatalog } from "@/lib/templates/catalog"
 import type { Memory } from "@/types/memory/memory"
 import type { WorkflowRow } from "@/types/workflow/visual"
-import { resolveCapabilityEnabled } from "@/lib/workspace/capability-overlay"
+import { capabilityStateOf, resolveCapabilityEnabled } from "@/lib/workspace/capability-overlay"
+import { listTemplateOwners } from "@/lib/db/template-platform"
 import { byProjectId } from "../workspace-scope"
 import { excerptAround, highlightPositions } from "./helpers"
 import { createListProvider } from "./list-provider"
+import type { GlobalSearchContext } from "../types"
 
 export const WORKFLOWS_PROVIDER_ID = "builtin.workflows"
 export const SKILLS_PROVIDER_ID = "builtin.skills"
@@ -170,6 +172,16 @@ export function createTemplatesProvider(deps: Pick<LibraryProviderDeps, "listTem
     cache: false,
     load: () => deps.listTemplates(),
     include: (d) => d.status !== "deprecated",
+    /**
+     * Templates are the definition layer, like skills and workflows, so they
+     * demote rather than disappear. This provider was the only one of the three
+     * with no workspace relationship at all, which meant a workspace that had
+     * hidden a template still had it ranked here as though nothing was said.
+     *
+     * "Belongs" is both halves of `lib/templates/scope`: a definition confined
+     * to another workspace, and a shared one this workspace switched off.
+     */
+    workspaceScope: { mode: "demote", belongs: templateBelongsToWorkspace },
     getTitle: (d, ctx) => templateName(d, ctx.locale),
     getSecondary: (d, ctx) => templateDescription(d, ctx.locale),
     getKeywords: (d) => [d.id, d.domain, ...(d.metadata.tags ?? []), d.metadata.category ?? ""],
@@ -192,6 +204,43 @@ export function createTemplatesProvider(deps: Pick<LibraryProviderDeps, "listTem
 export const workflowsProvider = createWorkflowsProvider({ listWorkflows: listWorkflowsByUpdated })
 export const skillsProvider = createSkillsProvider({ listSkills })
 export const memoriesProvider = createMemoriesProvider({ listMemories: () => listMemories() })
+/**
+ * Ownership read once and cached in the module.
+ *
+ * `belongs` is synchronous by contract, and it runs per row per keystroke, so
+ * it cannot await Dexie. The snapshot is refreshed by `refreshTemplateOwners`,
+ * which the Studio and the template platform initializer call after any write
+ * that can change ownership. Stale here means a row is ranked as shared for a
+ * moment, never that it is wrongly hidden.
+ */
+let templateOwnersSnapshot: Record<string, string> = {}
+
+/**
+ * Both halves of `lib/templates/scope`: a definition confined to another
+ * workspace, and a shared one this workspace switched off. Named and exported
+ * so the rule can be exercised on its own rather than through a search run.
+ */
+export function templateBelongsToWorkspace(
+  definition: TemplateDefinitionEnvelope,
+  ctx: GlobalSearchContext,
+  scopeId: string
+): boolean {
+  const owner = templateOwnersSnapshot[definition.id]
+  if (owner !== undefined) return owner === scopeId
+  return capabilityStateOf(ctx.capabilityOverlay, "template", definition.id) !== "off"
+}
+
+export async function refreshTemplateOwners(
+  read: () => Promise<Record<string, string>> = listTemplateOwners
+): Promise<void> {
+  templateOwnersSnapshot = await read()
+}
+
+/** Test seam: set the snapshot without touching Dexie. */
+export function __setTemplateOwnersForTests(owners: Record<string, string>): void {
+  templateOwnersSnapshot = owners
+}
+
 export const templatesProvider = createTemplatesProvider({
   listTemplates: () => templateCatalog.getSnapshot().definitions,
 })

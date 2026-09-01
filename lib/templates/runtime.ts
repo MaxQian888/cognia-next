@@ -25,6 +25,7 @@ import {
   putTemplateMigrationJournal,
 } from "@/lib/db/template-platform"
 import { isPublisherTrusted } from "@/lib/db/trusted-publishers"
+import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { createFullDomainAdapters, type FullDomainTemplatePorts } from "./adapters"
 import { templateCatalog, type TemplateCatalog } from "./catalog"
 import type { TemplateJson } from "./contracts"
@@ -43,6 +44,8 @@ interface CreateTemplateRuntimeOptions {
   catalog?: TemplateCatalog
   ports: FullDomainTemplatePorts
   isPublisherTrusted?: (publicKey: string) => Promise<boolean>
+  /** Overridden in tests; production resolves the active workspace. */
+  resolveWorkspaceId?: () => Promise<string | undefined>
 }
 
 function json(value: unknown): TemplateJson {
@@ -72,6 +75,10 @@ export function createTemplateRuntime(options: CreateTemplateRuntimeOptions): Te
         },
       }),
     isPublisherTrusted: options.isPublisherTrusted,
+    // Which workspace an instantiation belongs to. `resolveScopeProjectId`
+    // never returns null (it falls back to the default workspace), so every
+    // new instance is attributable and only pre-v214 rows lack a workspace.
+    resolveWorkspaceId: options.resolveWorkspaceId ?? (() => resolveScopeProjectId()),
   })
   return { catalog, repository, service }
 }

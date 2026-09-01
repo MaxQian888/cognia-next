@@ -46,8 +46,24 @@
  * so rather than leaving the user to infer it.
  */
 
+/**
+ * # Why templates are here, and what the overlay does NOT do for them
+ *
+ * A shared template (a built-in, a plugin's, a marketplace one) is defined once
+ * and offered everywhere, which is the same shape as a skill: right for the
+ * definition, wrong for use. Hiding the ones a workspace has no business seeing
+ * is a visibility preference, and that is all the overlay expresses.
+ *
+ * It is deliberately NOT how a template gets an owner. Ownership lives on
+ * `TemplateDefinitionRow.workspaceId`, because "this template belongs to that
+ * workspace" and "I would rather not see this one here" are different claims,
+ * and answering both with one boolean is how a library starts lying about who
+ * made something. A template WITH an owner is not overlaid at all: it is simply
+ * absent elsewhere.
+ */
+
 /** Capability families a workspace may re-scope. See the note on plugins above. */
-export const WORKSPACE_CAPABILITY_KINDS = ["skill", "mcpServer"] as const
+export const WORKSPACE_CAPABILITY_KINDS = ["skill", "mcpServer", "template"] as const
 
 export type WorkspaceCapabilityKind = (typeof WORKSPACE_CAPABILITY_KINDS)[number]
 

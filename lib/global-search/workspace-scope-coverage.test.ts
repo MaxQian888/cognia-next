@@ -52,7 +52,10 @@ const EXPECTED: Record<string, { scoping: Scoping; why: string }> = {
     why: "Machine-wide definition; the workspace only holds a capability preference.",
   },
   "builtin.workflows": { scoping: "global", why: "Workflows are machine-wide and unscoped." },
-  "builtin.templates": { scoping: "global", why: "The template catalog is machine-wide." },
+  "builtin.templates": {
+    scoping: "demote",
+    why: "The definition layer, like skills and workflows: a template is defined once and a workspace only says whether it wants it here, so one it hid ranks low rather than vanishing. A template CONFINED to another workspace (TemplateDefinitionRow.workspaceId) is also demoted rather than filtered, for the same reason the skills provider gives.",
+  },
   "builtin.workspaces": {
     scoping: "global",
     why: "You search workspaces to switch to ANOTHER one; scoping would hide every result.",

@@ -39711,8 +39711,11 @@
     },
     "filters": {
       "allDomains": "全部类型",
+      "allScopes": "全部范围",
       "allTrust": "全部信任级别",
       "domain": "模板类型",
+      "hiddenHere": "本工作区隐藏了 {count} 个模板",
+      "scope": "范围",
       "search": "搜索模板",
       "trust": "信任级别"
     },
@@ -39786,6 +39789,10 @@
       "detached": "已分离",
       "rebindTo": "重新绑定到",
       "resources": "{count} 个资源",
+      "scopeAll": "全部工作区共 {count} 个实例",
+      "scopeCurrent": "本工作区 {count} 个实例",
+      "showAll": "全部工作区",
+      "showCurrent": "本工作区",
       "sourceUnavailable": "来源不可用",
       "upToDate": "已是最新版本",
       "updateTo": "更新到…"
@@ -39960,6 +39967,13 @@
       "noReasons": "没有会改变版本号的差异。",
       "title": "发布该模板",
       "unreleased": "尚未发布"
+    },
+    "scopes": {
+      "builtin": "内置",
+      "marketplace": "市场",
+      "mine": "我的模板库",
+      "plugin": "来自插件",
+      "workspace": "本工作区"
     },
     "status": {
       "conflict": "冲突",
@@ -47322,6 +47336,7 @@
       "mcpServers": "MCP 服务器",
       "noMcpServers": "尚未配置任何 MCP 服务器。可在「设置 → MCP」中添加。",
       "noSkills": "尚未定义任何技能。可在「设置 → 技能」中添加。",
+      "noTemplates": "暂无共享模板。",
       "overrideCount": "{count, plural, =0 {没有覆盖} other {# 项覆盖}}",
       "pluginsAreGlobal": "插件保持全机范围：它的启用标记记录的是「当前实际在运行什么」，而不是一项偏好，因此工作区无法对它另持一份意见。请在「设置 → 插件」中管理。",
       "skills": "技能",
@@ -47332,6 +47347,7 @@
       },
       "stateLabel": "{name} 在本工作区的可用性",
       "tab": "能力",
+      "templates": "模板",
       "title": "本工作区启用的能力",
       "unavailable": "不可用 — 请先在「设置 → MCP」中信任它"
     },

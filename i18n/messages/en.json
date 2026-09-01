@@ -39711,8 +39711,11 @@
     },
     "filters": {
       "allDomains": "All types",
+      "allScopes": "All scopes",
       "allTrust": "All trust levels",
       "domain": "Template type",
+      "hiddenHere": "{count, plural, =1 {1 template is hidden in this workspace} other {# templates are hidden in this workspace}}",
+      "scope": "Scope",
       "search": "Search templates",
       "trust": "Trust level"
     },
@@ -39786,6 +39789,10 @@
       "detached": "Detached",
       "rebindTo": "Rebind to",
       "resources": "{count, plural, one {# resource} other {# resources}}",
+      "scopeAll": "{count, plural, =1 {1 instance} other {# instances}} across all workspaces",
+      "scopeCurrent": "{count, plural, =1 {1 instance} other {# instances}} in this workspace",
+      "showAll": "All workspaces",
+      "showCurrent": "This workspace",
       "sourceUnavailable": "Source unavailable",
       "upToDate": "On the latest release",
       "updateTo": "Update to…"
@@ -39960,6 +39967,13 @@
       "noReasons": "No differences that change the version.",
       "title": "Publish this template",
       "unreleased": "unreleased"
+    },
+    "scopes": {
+      "builtin": "Built-in",
+      "marketplace": "Marketplace",
+      "mine": "My library",
+      "plugin": "From plugins",
+      "workspace": "This workspace"
     },
     "status": {
       "conflict": "Conflict",
@@ -47322,6 +47336,7 @@
       "mcpServers": "MCP servers",
       "noMcpServers": "No MCP servers are configured yet. Add them in Settings → MCP.",
       "noSkills": "No skills are defined yet. Add them in Settings → Skills.",
+      "noTemplates": "No shared templates yet.",
       "overrideCount": "{count, plural, =0 {no overrides} one {# override} other {# overrides}}",
       "pluginsAreGlobal": "Plugins stay machine-wide: their enabled flag is the record of what is actually running, not a preference, so it is not something a workspace can hold a second opinion about. Manage them in Settings → Plugins.",
       "skills": "Skills",
@@ -47332,6 +47347,7 @@
       },
       "stateLabel": "Availability of {name} in this workspace",
       "tab": "Capabilities",
+      "templates": "Templates",
       "title": "Capabilities in this workspace",
       "unavailable": "not available — trust it in Settings → MCP first"
     },

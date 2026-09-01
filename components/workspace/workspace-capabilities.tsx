@@ -18,13 +18,15 @@
 
 import { useCallback, useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { PlugIcon, SparklesIcon } from "lucide-react"
+import { FileStackIcon, PlugIcon, SparklesIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
+import { listTemplateOwners } from "@/lib/db/template-platform"
+import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import {
   capabilityStateOf,
   countCapabilityOverrides,
@@ -69,6 +71,14 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
 
   const skills = useClientLiveQuery(() => listSkills(), [], [])
   const servers = useClientLiveQuery(() => listMcpServers(), [], [])
+  /**
+   * Only SHARED templates are listed. One confined to a workspace
+   * (`TemplateDefinitionRow.workspaceId`) is simply absent elsewhere, so
+   * offering a visibility toggle for it here would imply the other workspaces
+   * could see it, which they cannot.
+   */
+  const { definitions: templateDefinitions } = useTemplateCatalog({})
+  const templateOwners = useClientLiveQuery(() => listTemplateOwners(), [], {})
 
   const skillRows = useMemo<CapabilityRow[]>(
     () =>
@@ -97,6 +107,21 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
     [servers]
   )
 
+  const templateRows = useMemo<CapabilityRow[]>(
+    () =>
+      templateDefinitions
+        .filter((definition) => templateOwners[definition.id] === undefined)
+        .map((definition) => ({
+          id: definition.id,
+          name: definition.metadata.name,
+          description: definition.domain,
+          // A template has no global on/off flag of its own: being in the
+          // catalog IS being available. So "inherit" means shown.
+          globallyEnabled: true,
+        })),
+    [templateDefinitions, templateOwners]
+  )
+
   const setState = useCallback(
     (kind: WorkspaceCapabilityKind, id: string, state: WorkspaceCapabilityState) => {
       if (!workspaceId) return
@@ -107,12 +132,13 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
       const known: Partial<Record<WorkspaceCapabilityKind, string[]>> = {}
       if (skills) known.skill = skillRows.map((row) => row.id)
       if (servers) known.mcpServer = serverRows.map((row) => row.id)
+      known.template = templateRows.map((row) => row.id)
       const pruned = pruneCapabilityOverlay(overlay, known)
       updateProject(workspaceId, {
         capabilityOverlay: withCapabilityState(pruned, kind, id, state),
       })
     },
-    [overlay, servers, serverRows, skills, skillRows, updateProject, workspaceId]
+    [overlay, servers, serverRows, skills, skillRows, templateRows, updateProject, workspaceId]
   )
 
   const overrideCount = countCapabilityOverrides(overlay)
@@ -154,6 +180,17 @@ export function WorkspaceCapabilities({ workspaceId }: WorkspaceCapabilitiesProp
         title={t("mcpServers")}
         empty={t("noMcpServers")}
         rows={serverRows}
+        overlay={overlay}
+        disabled={!workspaceId}
+        onSet={setState}
+      />
+
+      <CapabilitySection
+        kind="template"
+        icon={<FileStackIcon aria-hidden className="size-3.5" />}
+        title={t("templates")}
+        empty={t("noTemplates")}
+        rows={templateRows}
         overlay={overlay}
         disabled={!workspaceId}
         onSet={setState}

@@ -11,6 +11,8 @@ import {
   createSkillsProvider,
   createTemplatesProvider,
   createWorkflowsProvider,
+  __setTemplateOwnersForTests,
+  templateBelongsToWorkspace,
 } from "./library"
 
 jest.mock("@/lib/db/memories", () => ({ listMemories: jest.fn(async () => []) }))
@@ -215,5 +217,36 @@ describe("library providers", () => {
     )
     expect(zh.items[0]!.title).toBe("发布列车")
     expect(zh.items[0]!.subtitle).toBe("weekly")
+  })
+})
+
+describe("templates provider workspace scope", () => {
+  afterEach(() => __setTemplateOwnersForTests({}))
+
+  /**
+   * This provider was the only one of the three definition providers with no
+   * workspace relationship at all, so a template a workspace had hidden still
+   * ranked here as though nothing had been said. The classification itself is
+   * pinned by `workspace-scope-coverage.test.ts`.
+   */
+  it("treats a template confined to another workspace as not belonging", () => {
+    __setTemplateOwnersForTests({ "shared.one": "ws_1" })
+    expect(templateBelongsToWorkspace({ id: "shared.one" } as never, {} as never, "ws_2")).toBe(
+      false
+    )
+    expect(templateBelongsToWorkspace({ id: "shared.one" } as never, {} as never, "ws_1")).toBe(
+      true
+    )
+  })
+
+  it("treats a shared template the workspace switched off as not belonging", () => {
+    const ctx = { capabilityOverlay: { template: { "shared.one": false } } } as never
+    expect(templateBelongsToWorkspace({ id: "shared.one" } as never, ctx, "ws_1")).toBe(false)
+  })
+
+  it("treats an untouched shared template as belonging everywhere", () => {
+    expect(templateBelongsToWorkspace({ id: "shared.one" } as never, {} as never, "ws_1")).toBe(
+      true
+    )
   })
 })

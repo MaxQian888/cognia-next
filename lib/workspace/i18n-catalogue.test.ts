@@ -132,7 +132,7 @@ describe("the unions the catalogue is checked against", () => {
     // If a third kind is added, its section heading needs a message too — the
     // headings are literal keys, so `lint:i18n` catches those; this asserts the
     // kinds we expect so the addition is a deliberate act.
-    expect([...WORKSPACE_CAPABILITY_KINDS]).toEqual(["skill", "mcpServer"])
+    expect([...WORKSPACE_CAPABILITY_KINDS]).toEqual(["skill", "mcpServer", "template"])
   })
 
   it("keeps every panel classified as pinnable or following", () => {

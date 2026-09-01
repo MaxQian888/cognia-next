@@ -737,3 +737,81 @@ describe("TemplateService derivation", () => {
     expect((await repository.getLocal(fork.id))?.workspaceId).toBeUndefined()
   })
 })
+
+describe("TemplateService workspace isolation", () => {
+  async function instantiated(workspaceId?: string) {
+    const repository = new InMemoryTemplateRepository()
+    const catalog = new TemplateCatalog()
+    let scope = workspaceId
+    const service = new TemplateService({
+      repository,
+      catalog,
+      adapters: [skillAdapter],
+      now: () => 1_000,
+      id: () => `id_${Math.random().toString(36).slice(2)}`,
+      resolveWorkspaceId: async () => scope,
+    })
+    const draft = await service.createDraft({
+      id: "skill.scoped",
+      domain: "skill",
+      metadata: { name: "Scoped" },
+      payload: { content: "v1" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const release = await service.publish(draft.id, {
+      expectedRevision: 1,
+      confirmedBump: "minor",
+    })
+    const plan = await service.preflight({
+      definitionId: release.id,
+      version: release.version!,
+      platform: "desktop",
+      bindings: {},
+    })
+    await service.instantiate({ plan, confirmed: true })
+    return { repository, service, setScope: (next?: string) => (scope = next) }
+  }
+
+  it("stamps the workspace the instance was created in", async () => {
+    const { repository } = await instantiated("ws_1")
+    expect((await repository.listInstances())[0]?.projectId).toBe("ws_1")
+  })
+
+  it("hides another workspace's instances from a scoped list", async () => {
+    const { repository } = await instantiated("ws_1")
+    expect(await repository.listInstances({ projectId: "ws_2" })).toHaveLength(0)
+    expect(await repository.listInstances({ projectId: "ws_1" })).toHaveLength(1)
+  })
+
+  /**
+   * A `projectId` column on its own is not isolation: every one of these
+   * operations takes an id, so a leaked id would still reach across.
+   */
+  it("refuses to touch an instance from another workspace by id", async () => {
+    const { repository, service, setScope } = await instantiated("ws_1")
+    const instance = (await repository.listInstances())[0]!
+    setScope("ws_2")
+    await expect(service.detachInstance(instance.id)).rejects.toThrow(/another workspace/i)
+    await expect(service.planUpdate(instance.id, "0.2.0")).rejects.toThrow(/another workspace/i)
+    await expect(service.rebindSource(instance.id, "skill.scoped", "0.1.0")).rejects.toThrow(
+      /another workspace/i
+    )
+  })
+
+  /**
+   * Rows written before the column existed must not disappear the moment the
+   * filter lands, which would read as data loss rather than as isolation.
+   */
+  it("keeps pre-isolation instances visible and backfills them", async () => {
+    const { repository, service } = await instantiated(undefined)
+    expect((await repository.listInstances())[0]?.projectId).toBeUndefined()
+    expect(await repository.listInstances({ projectId: "ws_1" })).toHaveLength(1)
+
+    expect(await service.backfillInstanceWorkspaces("ws_1")).toBe(1)
+    expect((await repository.listInstances())[0]?.projectId).toBe("ws_1")
+    expect(await service.backfillInstanceWorkspaces("ws_1")).toBe(0)
+  })
+})

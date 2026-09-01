@@ -27,6 +27,16 @@ export interface TemplateInstanceRecord {
     contentHash: string
     snapshot: TemplateDefinitionEnvelope
   }
+  /**
+   * The workspace this instance was created in.
+   *
+   * The definition stays portable (`adapters.ts` strips `projectId` from every
+   * projected payload on purpose), but the instance is the record of "a
+   * template was used HERE", so a workspace key belongs on it. Absent on rows
+   * written before this existed, which `backfillInstanceWorkspaces` repairs to
+   * the default workspace so they do not silently vanish from a scoped list.
+   */
+  projectId?: string
   bindingFingerprint: string
   /**
    * The non-sensitive input values this instance was created with.
@@ -148,7 +158,13 @@ export interface TemplateRepository {
   listPackages(): Promise<StoredTemplatePackage[]>
   putInstance(value: TemplateInstanceRecord): Promise<void>
   getInstance(id: string): Promise<TemplateInstanceRecord | undefined>
-  listInstances(): Promise<TemplateInstanceRecord[]>
+  /**
+   * `scope` confines the read to one workspace, with unowned legacy rows
+   * included so nothing disappears before the backfill runs. Omitting it reads
+   * every workspace, which is what maintenance and the "all workspaces" view
+   * want and what a scoped caller must not do by accident.
+   */
+  listInstances(scope?: { projectId: string }): Promise<TemplateInstanceRecord[]>
   /** Local-only facts for one definition id, across every one of its rows. */
   getLocal(id: string): Promise<TemplateLocalRecord | undefined>
   /** Merge a patch into those facts. An explicit `undefined` clears a field. */
@@ -304,8 +320,12 @@ export class InMemoryTemplateRepository implements TemplateRepository {
     return value ? structuredClone(value) : undefined
   }
 
-  async listInstances(): Promise<TemplateInstanceRecord[]> {
-    return [...this.instances.values()].map((value) => structuredClone(value))
+  async listInstances(scope?: { projectId: string }): Promise<TemplateInstanceRecord[]> {
+    return [...this.instances.values()]
+      .filter(
+        (value) => !scope || value.projectId === undefined || value.projectId === scope.projectId
+      )
+      .map((value) => structuredClone(value))
   }
 
   async getLocal(id: string): Promise<TemplateLocalRecord | undefined> {

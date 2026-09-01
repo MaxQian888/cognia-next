@@ -19,7 +19,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
-import { useTemplateCatalog } from "@/hooks/use-template-catalog"
+import { refreshTemplateOwners } from "@/lib/global-search/providers/library"
+import { useScopedTemplateCatalog } from "@/hooks/templates/use-scoped-template-catalog"
+import { TEMPLATE_SCOPE_TIERS, type TemplateScopeTier } from "@/lib/templates/scope"
+import { useProjectStore } from "@/stores/project/project-store"
 import type {
   TemplateDefinitionEnvelope,
   TemplateDomain,
@@ -193,12 +196,26 @@ export function TemplateStudio() {
   const [query, setQuery] = useState("")
   const [domain, setDomain] = useState<TemplateDomain | "all">("all")
   const [trust, setTrust] = useState<TemplateTrust | "all">("all")
-  const { definitions, revision } = useTemplateCatalog({
-    text: query,
-    platform: templatePlatform,
-    ...(domain === "all" ? {} : { domain }),
-    ...(trust === "all" ? {} : { trust }),
-  })
+  const [tier, setTier] = useState<TemplateScopeTier | "all">("all")
+  // Scoped, not raw: a definition confined to another workspace is not this
+  // workspace's to list, and one this workspace hid should not come back
+  // because the Studio asked a different question than the phone did.
+  const { definitions, revision, tierOf, hiddenCount } = useScopedTemplateCatalog(
+    {
+      text: query,
+      platform: templatePlatform,
+      ...(domain === "all" ? {} : { domain }),
+      ...(trust === "all" ? {} : { trust }),
+    },
+    { tier }
+  )
+  const activeWorkspaceId = useProjectStore((state) => state.activeProjectId)
+  const [allWorkspaceInstances, setAllWorkspaceInstances] = useState(false)
+  const instanceScope = useMemo(
+    () =>
+      allWorkspaceInstances || !activeWorkspaceId ? undefined : { projectId: activeWorkspaceId },
+    [allWorkspaceInstances, activeWorkspaceId]
+  )
   // `?definition=` is how /agent-teams, the workflow settings tab and global
   // search hand a template over. Reading it once inside a state initializer
   // meant a second hand-off from an already-open Studio silently did nothing,
@@ -259,17 +276,18 @@ export function TemplateStudio() {
 
   useEffect(() => {
     let active = true
-    void Promise.all([runtime.repository.listPackages(), runtime.repository.listInstances()]).then(
-      ([nextPackages, nextInstances]) => {
-        if (!active) return
-        setPackages(nextPackages)
-        setInstances(nextInstances)
-      }
-    )
+    void Promise.all([
+      runtime.repository.listPackages(),
+      runtime.repository.listInstances(instanceScope),
+    ]).then(([nextPackages, nextInstances]) => {
+      if (!active) return
+      setPackages(nextPackages)
+      setInstances(nextInstances)
+    })
     return () => {
       active = false
     }
-  }, [revision, runtime])
+  }, [revision, runtime, instanceScope])
 
   /**
    * The selected definition's fork lineage, and whether upstream has moved.
@@ -351,13 +369,13 @@ export function TemplateStudio() {
     await runtime.service.applyUpdate(target, { confirmed: true, resolutions })
     setUpdatePlan(undefined)
     setMessage(t("messages.updated", { version: target.next.version ?? "" }))
-    setInstances(await runtime.repository.listInstances())
+    setInstances(await runtime.repository.listInstances(instanceScope))
   }
 
   const detachInstance = async (instanceId: string) => {
     await runtime.service.detachInstance(instanceId)
     setMessage(t("messages.detached"))
-    setInstances(await runtime.repository.listInstances())
+    setInstances(await runtime.repository.listInstances(instanceScope))
   }
 
   /**
@@ -372,6 +390,8 @@ export function TemplateStudio() {
       newId: makeDraftId(selected.domain, `${selected.metadata.name} copy`),
     })
     setSelectionKey(`id:${forked.id}`)
+    // Ownership can have changed, and global search reads a snapshot of it.
+    await refreshTemplateOwners()
     setMessage(t("messages.forked", { id: forked.id }))
   }
 
@@ -468,7 +488,7 @@ export function TemplateStudio() {
     setPendingInstantiate(undefined)
     setMessage(t("messages.instantiated"))
     setPlan(undefined)
-    setInstances(await runtime.repository.listInstances())
+    setInstances(await runtime.repository.listInstances(instanceScope))
   }
 
   /**
@@ -591,7 +611,7 @@ export function TemplateStudio() {
       return next
     })
     setPackages(await runtime.repository.listPackages())
-    setInstances(await runtime.repository.listInstances())
+    setInstances(await runtime.repository.listInstances(instanceScope))
   }
 
   const reexportPackage = async (key: string) => {
@@ -622,7 +642,7 @@ export function TemplateStudio() {
   const rebindInstance = async (instanceId: string, definitionId: string, version: string) => {
     await runtime.service.rebindSource(instanceId, definitionId, version)
     setMessage(t("messages.rebound"))
-    setInstances(await runtime.repository.listInstances())
+    setInstances(await runtime.repository.listInstances(instanceScope))
   }
 
   const inspectImport = async (file?: File) => {
@@ -784,6 +804,19 @@ export function TemplateStudio() {
                         ))}
                       </SelectContent>
                     </Select>
+                    <Select value={tier} onValueChange={(value) => setTier(value as typeof tier)}>
+                      <SelectTrigger aria-label={t("filters.scope")}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t("filters.allScopes")}</SelectItem>
+                        {TEMPLATE_SCOPE_TIERS.map((item) => (
+                          <SelectItem key={item} value={item}>
+                            {t(`scopes.${item}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <Select
                       value={trust}
                       onValueChange={(value) => setTrust(value as typeof trust)}
@@ -834,6 +867,12 @@ export function TemplateStudio() {
                             {definition.metadata.description || t("empty.noDescription")}
                           </p>
                           <div className="flex flex-wrap gap-1">
+                            {/* Which shelf this came from. Ownership beats
+                                provenance, so a built-in you forked into one
+                                workspace reads as that workspace's. */}
+                            <Badge variant="outline" data-testid="template-card-scope">
+                              {t(`scopes.${tierOf(definition)}`)}
+                            </Badge>
                             <Badge variant="secondary">{t(`status.${definition.status}`)}</Badge>
                             <Badge variant="secondary">
                               {t(`trust.${definition.provenance.trust}`)}
@@ -844,6 +883,16 @@ export function TemplateStudio() {
                     ))}
                     {rows.length === 0 ? (
                       <p className="text-sm text-muted-foreground">{t("empty.noResults")}</p>
+                    ) : null}
+                    {/* Say what the workspace is holding back. A library that
+                        quietly omits rows reads as one that lost them. */}
+                    {hiddenCount > 0 ? (
+                      <p
+                        className="text-xs text-muted-foreground"
+                        data-testid="template-hidden-count"
+                      >
+                        {t("filters.hiddenHere", { count: hiddenCount })}
+                      </p>
                     ) : null}
                   </div>
                 </TabsContent>
@@ -860,7 +909,26 @@ export function TemplateStudio() {
                 onRollbackMigration={(domain) => guard(() => rollbackMigration(domain))()}
               />
             </TabsContent>
-            <TabsContent value="instances">
+            <TabsContent value="instances" className="space-y-3">
+              {/* An instance records that a template was used in a particular
+                  workspace, so the default view is this one. The toggle exists
+                  because "where did I instantiate that" is a real question, and
+                  answering it by silently omitting rows is not. */}
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {allWorkspaceInstances
+                    ? t("instances.scopeAll", { count: instances.length })
+                    : t("instances.scopeCurrent", { count: instances.length })}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setAllWorkspaceInstances((value) => !value)}
+                  data-testid="template-instances-scope"
+                >
+                  {allWorkspaceInstances ? t("instances.showCurrent") : t("instances.showAll")}
+                </Button>
+              </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {instances.map((instance) => (
                   <TemplateInstanceCard

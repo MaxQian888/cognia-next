@@ -393,7 +393,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 213
+export const CURRENT_SCHEMA_VERSION = 214
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -635,9 +635,11 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
     "&id, [pluginId+integrationId], accountId, kind, createdAt, [accountId+createdAt]",
   messageMedia: "&hash, createdAt, lastUsedAt",
   hostSyncCursors: "&[serverKey+table], table, lastSyncAt, since",
-  templateDefinitions: "&storageKey, id, domain, status, version, updatedAt, [id+status]",
+  templateDefinitions:
+    "&storageKey, id, domain, status, version, updatedAt, [id+status], workspaceId, [workspaceId+updatedAt]",
   templatePackages: "&key, id, version, trust, importedAt",
-  templateInstances: "&id, source.definitionId, source.version, updatedAt",
+  templateInstances:
+    "&id, source.definitionId, source.version, updatedAt, projectId, [projectId+updatedAt]",
   templateDeviceBindings: "&id, definitionId, slotId, kind, [definitionId+slotId], updatedAt",
   templateMigrationJournal: "&id, domain, sourceKey, status, updatedAt",
   chatSearchText:

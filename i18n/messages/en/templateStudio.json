@@ -67,8 +67,11 @@
   },
   "filters": {
     "allDomains": "All types",
+    "allScopes": "All scopes",
     "allTrust": "All trust levels",
     "domain": "Template type",
+    "hiddenHere": "{count, plural, =1 {1 template is hidden in this workspace} other {# templates are hidden in this workspace}}",
+    "scope": "Scope",
     "search": "Search templates",
     "trust": "Trust level"
   },
@@ -142,6 +145,10 @@
     "detached": "Detached",
     "rebindTo": "Rebind to",
     "resources": "{count, plural, one {# resource} other {# resources}}",
+    "scopeAll": "{count, plural, =1 {1 instance} other {# instances}} across all workspaces",
+    "scopeCurrent": "{count, plural, =1 {1 instance} other {# instances}} in this workspace",
+    "showAll": "All workspaces",
+    "showCurrent": "This workspace",
     "sourceUnavailable": "Source unavailable",
     "upToDate": "On the latest release",
     "updateTo": "Update to…"
@@ -316,6 +323,13 @@
     "noReasons": "No differences that change the version.",
     "title": "Publish this template",
     "unreleased": "unreleased"
+  },
+  "scopes": {
+    "builtin": "Built-in",
+    "marketplace": "Marketplace",
+    "mine": "My library",
+    "plugin": "From plugins",
+    "workspace": "This workspace"
   },
   "status": {
     "conflict": "Conflict",

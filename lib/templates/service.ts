@@ -178,6 +178,8 @@ export interface TemplateServiceOptions {
   hostVersion?: string
   rollbackMigration?: (domain: TemplateDomain) => Promise<number>
   isPublisherTrusted?: (publicKey: string) => Promise<boolean>
+  /** See `TemplateService.resolveWorkspaceId`. */
+  resolveWorkspaceId?: () => Promise<string | undefined>
 }
 
 function compareSemver(left: string, right: string): number {
@@ -208,7 +210,18 @@ export class TemplateService {
     this.hostVersion = options.hostVersion ?? process.env.NEXT_PUBLIC_COGNIA_VERSION ?? "0.1.0"
     this.rollbackMigrationHandler = options.rollbackMigration
     this.isPublisherTrusted = options.isPublisherTrusted ?? (async () => false)
+    this.resolveWorkspaceId = options.resolveWorkspaceId ?? (async () => undefined)
   }
+
+  /**
+   * The workspace an instantiation belongs to.
+   *
+   * Injected rather than read here so this module stays free of `lib/db`: it
+   * runs in the node test project, and importing the Dexie scope resolver
+   * would drag IndexedDB into every one of those suites. `runtime.ts` supplies
+   * the real `resolveScopeProjectId`.
+   */
+  private readonly resolveWorkspaceId: () => Promise<string | undefined>
 
   async hydrateCatalog(): Promise<void> {
     for (const storedPackage of await this.repository.listPackages()) {
@@ -972,9 +985,11 @@ export class TemplateService {
       canonicalTemplateStringify(input.plan.bindings as unknown as TemplateJson)
     )
     const now = this.now()
+    const projectId = await this.resolveWorkspaceId()
     const instance: TemplateInstanceRecord = {
       id: this.id(),
       idempotencyKey,
+      ...(projectId ? { projectId } : {}),
       source: {
         definitionId: definition.id,
         version: definition.version,
@@ -997,6 +1012,7 @@ export class TemplateService {
   async planUpdate(instanceId: string, nextVersion: string): Promise<TemplateUpdatePlan> {
     const instance = await this.repository.getInstance(instanceId)
     if (!instance) throw new Error(`Template instance ${instanceId} not found`)
+    await this.assertInScope(instance)
     if (instance.detachedAt) throw new Error(`Template instance ${instanceId} is detached`)
     const next = await this.repository.getRelease(instance.source.definitionId, nextVersion)
     if (!next) {
@@ -1077,6 +1093,7 @@ export class TemplateService {
     if (!instance || instance.detachedAt) {
       throw new Error(`Template instance ${plan.instanceId} is unavailable`)
     }
+    await this.assertInScope(instance)
     if (instance.source.contentHash !== plan.source.contentHash) {
       throw new Error("Template instance source changed after update planning")
     }
@@ -1117,9 +1134,43 @@ export class TemplateService {
     return result
   }
 
+  /**
+   * Refuse to touch an instance that belongs to another workspace.
+   *
+   * A `projectId` column alone is not isolation: `getInstance` is a lookup by
+   * id, so an id leaked from one workspace could still be updated, detached or
+   * rebound from another. An unowned row predates the column and is allowed
+   * through, which is what `backfillInstanceWorkspaces` then repairs.
+   */
+  private async assertInScope(instance: TemplateInstanceRecord): Promise<void> {
+    const projectId = await this.resolveWorkspaceId()
+    if (!projectId || instance.projectId === undefined) return
+    if (instance.projectId !== projectId) {
+      throw new Error(`Template instance ${instance.id} belongs to another workspace`)
+    }
+  }
+
+  /**
+   * Give every pre-isolation instance a workspace.
+   *
+   * Without this the scoped Instances view would simply stop showing them the
+   * moment the filter went in, which reads as data loss. Idempotent, and only
+   * ever fills a gap.
+   */
+  async backfillInstanceWorkspaces(projectId: string): Promise<number> {
+    let filled = 0
+    for (const instance of await this.repository.listInstances()) {
+      if (instance.projectId !== undefined) continue
+      await this.repository.putInstance({ ...instance, projectId })
+      filled += 1
+    }
+    return filled
+  }
+
   async detachInstance(instanceId: string): Promise<TemplateInstanceRecord> {
     const instance = await this.repository.getInstance(instanceId)
     if (!instance) throw new Error(`Template instance ${instanceId} not found`)
+    await this.assertInScope(instance)
     const detached = { ...instance, detachedAt: instance.detachedAt ?? this.now() }
     await this.repository.putInstance(detached)
     return detached
@@ -1132,6 +1183,7 @@ export class TemplateService {
   ): Promise<TemplateInstanceRecord> {
     const instance = await this.repository.getInstance(instanceId)
     if (!instance) throw new Error(`Template instance ${instanceId} not found`)
+    await this.assertInScope(instance)
     const source = await this.repository.getRelease(definitionId, version)
     if (!source) throw new Error(`Template release ${definitionId}@${version} not found`)
     if (source.domain !== instance.source.snapshot.domain) {

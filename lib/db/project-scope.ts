@@ -99,6 +99,11 @@ const PROJECT_SCOPED_TABLES = [
   "agentTeamRuns",
   "projectEnvironments",
   "projectEnvironmentVersions",
+  // v214 — a template INSTANCE records that a template was used in this
+  // workspace, so it goes when the workspace does. Definitions stay: they are
+  // portable library entries, confined by `TemplateDefinitionRow.workspaceId`
+  // rather than owned, and deleting a workspace must not delete the library.
+  "templateInstances",
 ] as const
 
 /** Child/event tables dropped by parent id (parent collected via its projectId). */
