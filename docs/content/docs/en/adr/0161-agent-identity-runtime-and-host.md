@@ -107,17 +107,34 @@ rather than carrying it forward. The flat fields survive as deprecated mirrors,
 written only by `setRuntimeRef`, so an unmigrated reader still sees the truth
 and a downgrade still opens on the right lane.
 
-The ref moves onto `AgentCompositionSelectionV1` as the real meaning of
-`runtimeBindingRef`, with the store holding only the default for new sessions.
-That field currently carries an external agent's native session id for imported
-sessions, which is a third unrelated meaning and gets its own name.
+The ref is per session. The store holds the default a new conversation starts
+from plus `sessionRuntimeRefs` for the live ones, which is the same split
+`defaultComposition` / `sessionCompositions` already uses.
 
-### 5. One built-in agent catalog, two tool vocabularies
+Implementation overturned the first draft of this section, which said the ref
+would move onto `AgentCompositionSelectionV1` as the real meaning of
+`runtimeBindingRef`. It should not. `runtimeBindingRef` is part of the SDK's
+published `AgentDefinitionV1` (ADR-0142) and is typed as a string reference, so
+changing what it holds is a breaking change to a versioned contract for no gain
+the store split does not already deliver. `runtimeBindingRef` keeps its
+documented meaning, and the third meaning it had accumulated, an external
+agent's native session id for imported conversations, moves to its own field:
+a `verifiedNativeResume` marker, because the id itself already lives on the
+session row and the verification never changes it.
+
+### 5. One built-in agent catalog
 
 App and CLI read the same `BuiltinAgentEntry` list, tagged by surface. Tool
 policy is declared abstractly (`inherit`, `read-only`, an explicit allowlist)
-and resolved by each shell against its own vocabulary, so one catalog serves two
-tool surfaces without pretending they are the same list.
+and resolved at projection time.
+
+This section was drafted as "one catalog, two tool vocabularies". Implementation
+overturned that too: both shells already derive their read-only surface from the
+same expression over the same shared risk model
+(`lib/settings/builtin-tools`), so there is one vocabulary and the injection
+ceremony the draft called for bought nothing. The `allowlist` variant, which the
+draft dropped as speculative, turned out to be load-bearing: the four workflow
+agents are clamped to the `wf_*` tools and must not reach the run tools.
 
 `general-purpose` joins the catalog for the CLI and team surfaces. It stays out
 of plain chat in this change: the app already surfaces at least six dispatchable

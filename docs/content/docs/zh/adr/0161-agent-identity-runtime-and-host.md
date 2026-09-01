@@ -92,15 +92,27 @@ MCP 预设、钩子、团队、角色，全都是带插件叠加层的目录。�
 只由 `setRuntimeRef` 写入，因此尚未迁移的读者仍然看到真相，
 降级安装也仍然开在正确的通道上。
 
-这个 ref 会挪到 `AgentCompositionSelectionV1` 上，作为 `runtimeBindingRef`
-真正的含义，而 store 只保留新会话的默认值。该字段目前还承载着导入会话的
-外部智能体原生 session id，那是第三个互不相干的含义，会拿到自己的名字。
+这个 ref 按会话持有。store 里保留新会话的默认值，外加 `sessionRuntimeRefs`
+记录每个活跃会话的选择，与 `defaultComposition` / `sessionCompositions`
+已有的拆分方式一致。
 
-### 5. 一份内置智能体目录，两套工具词表
+实现推翻了本节的初稿。初稿写的是把 ref 挪到 `AgentCompositionSelectionV1` 上，
+作为 `runtimeBindingRef` 真正的含义。不应该这么做：`runtimeBindingRef` 属于 SDK
+已发布的 `AgentDefinitionV1`（ADR-0142），类型是字符串引用，改变它承载的东西
+就是对一个有版本契约的破坏性变更，而 store 拆分本来就能拿到同样的收益。
+`runtimeBindingRef` 保留其文档含义；它此前累积的第三个含义——导入会话的外部
+智能体原生 session id——挪到自己的字段：一个 `verifiedNativeResume` 标记，
+因为那个 id 本来就在会话行上，而验证从不改变它。
+
+### 5. 一份内置智能体目录
 
 应用与 CLI 读同一份 `BuiltinAgentEntry` 清单，按 surface 打标签。工具策略以抽象方式
-声明（`inherit`、`read-only`、显式白名单），由每个外壳按自己的词表解析，
-于是一份目录服务两个工具面，而不必假装两者是同一份清单。
+声明（`inherit`、`read-only`、显式白名单），在投影时解析。
+
+本节初稿写的是「一份目录，两套工具词表」。实现同样推翻了它：两个外壳的只读工具面
+本来就由同一份共享风险模型（`lib/settings/builtin-tools`）上的同一个表达式推导，
+因此只有一套词表，初稿要求的注入礼仪什么也没换来。反倒是初稿当作臆测而删掉的
+`allowlist` 变体是必需的：四个工作流智能体被夹在 `wf_*` 工具上，不能碰到运行类工具。
 
 `general-purpose` 以 CLI 与 team 两个 surface 进入目录。本次改动不把它放进普通聊天：
 应用侧本来就有至少六个可派发子智能体，`dispatch_agent` 从不会被扣下，
