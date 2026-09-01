@@ -482,6 +482,15 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // a host-only dedupe ledger, so it was 0 on every paired device. This is the
   // table the desktop's own unread badges read.
   "sessionState",
+  // The Twin registry. There is no `twin_list` command, so the phone had no
+  // way at all to learn which Twins exist, and `/discover` (a primary tab)
+  // rendered its empty state on every device. Drafts ride along because the
+  // review queue is the one Twin surface the phone can act on.
+  // `twinSources` stays off this list on purpose: `twin_source_list` is
+  // remotely reachable, and mirroring parsed source text would enlarge both
+  // the offline footprint and the privacy surface for a live-only panel.
+  "twins",
+  "twinDrafts",
 ])
 
 /**
@@ -518,6 +527,8 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "connectorDrafts",
   "outboundQueue",
   "sessionState",
+  "twins",
+  "twinDrafts",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]

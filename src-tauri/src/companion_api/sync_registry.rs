@@ -109,6 +109,20 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: false,
         },
         SyncTableDescriptor {
+            name: "twins".to_string(),
+            // The switcher above had nothing to switch between: there is no
+            // `twin_list` command, so a paired device could not enumerate the
+            // registry at all and the whole `/discover` Twin section rendered
+            // its empty state.
+            description: "Twin registry (read-only mirror; ingest and review travel back as twin_* RPCs)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "twinDrafts".to_string(),
+            description: "Distilled drafts awaiting review (cursor is max(createdAt, reviewedAt); the review verdict travels back as twin_draft_review)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
             name: "plugins".to_string(),
             description: "Installed plugins (toggle from mobile via plugin_set_enabled)".to_string(),
             has_tombstones: false,

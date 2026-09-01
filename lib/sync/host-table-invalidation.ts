@@ -93,6 +93,8 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   connectorDrafts: "connectorDrafts",
   outboundQueue: "outboundQueue",
   sessionState: "sessionState",
+  twins: "twins",
+  twinDrafts: "twinDrafts",
 })
 
 /** The Dexie surface this module needs — narrowed so tests can hand it a stub. */

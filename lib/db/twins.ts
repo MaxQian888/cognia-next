@@ -16,6 +16,7 @@
 
 import type { Twin } from "@/types/twin"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newId(): string {
   return "twn_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -130,10 +131,16 @@ export async function deleteTwin(
       db.twinDrafts,
       db.twinJobs,
       db.characters,
+      db.syncTombstones,
     ],
     async () => {
       result.chunks = await db.twinChunks.where("twinId").equals(id).delete()
       result.sources = await db.twinSources.where("twinId").equals(id).delete()
+      // Read the draft ids before dropping them: `twins` and `twinDrafts` are
+      // companion-synced, and without a tombstone a paired phone keeps a
+      // deleted Twin in its selector and its drafts in the review queue
+      // forever, because a pull only ever carries rows that still exist.
+      const draftIds = (await db.twinDrafts.where("twinId").equals(id).primaryKeys()) as string[]
       result.drafts = await db.twinDrafts.where("twinId").equals(id).delete()
       result.jobs = await db.twinJobs.where("twinId").equals(id).delete()
       const profile = await db.twinProfile.where("twinId").equals(id).first()
@@ -156,6 +163,9 @@ export async function deleteTwin(
         result.detachedCharacterIds.push(character.id)
       }
       await db.twins.delete(id)
+      const at = Date.now()
+      await recordTombstones("twins", [id], at)
+      await recordTombstones("twinDrafts", draftIds, at)
     }
   )
 

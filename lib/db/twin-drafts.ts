@@ -10,6 +10,7 @@
 
 import type { TwinDraft, TwinDraftKind, TwinDraftPayload, TwinDraftStatus } from "@/types/twin"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newId(): string {
   return "twd_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -157,8 +158,16 @@ export async function markTwinDraftEdited(
 
 export async function deleteTwinDraft(id: string): Promise<void> {
   await getDb().twinDrafts.delete(id)
+  await recordTombstones("twinDrafts", [id])
 }
 
 export async function deleteTwinDraftsByJob(jobId: string): Promise<number> {
-  return getDb().twinDrafts.where("jobId").equals(jobId).delete()
+  const table = getDb().twinDrafts
+  // Ids first: `twinDrafts` is companion-synced, and a pull can only carry
+  // rows that still exist, so a draft dropped here without a tombstone stays
+  // in the phone's review queue until the database is rebuilt.
+  const ids = (await table.where("jobId").equals(jobId).primaryKeys()) as string[]
+  const removed = await table.where("jobId").equals(jobId).delete()
+  await recordTombstones("twinDrafts", ids)
+  return removed
 }

@@ -54,6 +54,7 @@ import { syncSkills } from "./handlers/skills"
 import { syncConnectorDrafts } from "./handlers/connector-drafts"
 import { syncOutboundQueue } from "./handlers/outbound-queue"
 import { syncTerminalHistory } from "./handlers/terminal-history"
+import { syncTwins, syncTwinDrafts } from "./handlers/twins"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
 import { syncWorkflowRuns } from "./handlers/workflow-runs"
@@ -169,6 +170,13 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // server is unreachable, and none of them on the first screen.
   { table: "workflows", stage: "background", run: syncWorkflows },
   { table: "twinProfile", stage: "background", run: syncTwinProfile },
+  // The Twin registry, and the drafts awaiting review. Background because
+  // `/discover` is a tab the user navigates to rather than lands on, and
+  // after `twinProfile` for the same reason the squad rows come after their
+  // runs: a profile keyed by a twin that has not arrived yet is a row with
+  // nothing to attach to.
+  { table: "twins", stage: "background", run: syncTwins },
+  { table: "twinDrafts", stage: "background", run: syncTwinDrafts },
   { table: "plugins", stage: "background", run: syncPlugins },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
   // Long-term memory. Decrypts row by row against the profile DEK, so it is
@@ -244,6 +252,10 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   messages: syncDomain("tombstone"),
   workflows: syncDomain("tombstone"),
   twinProfile: syncDomain("tombstone"),
+  twins: syncDomain("tombstone"),
+  // A draft is created, reviewed once, and then deleted with its twin or its
+  // job. Deletion rides a tombstone so an accepted draft stops being offered.
+  twinDrafts: syncDomain("tombstone"),
   plugins: syncDomain("tombstone"),
   adapterInstances: syncDomain("tombstone"),
   settings: syncDomain("tombstone", "internal"),

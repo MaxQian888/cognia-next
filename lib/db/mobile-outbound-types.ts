@@ -55,6 +55,10 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   // Twin subsystem (twin-sources + twin-drafts panels).
   "twin_ingest_source",
   "twin_source_create",
+  // Retitling a source from the sources panel. It called `updateTwinSource`
+  // straight into local Dexie, so on a paired phone the new title landed in a
+  // mirror the host never reads and was gone on the next list.
+  "twin_source_update",
   "twin_source_delete",
   "twin_draft_review",
   // Wave 2 desktop-write mutating RPCs.

@@ -177,6 +177,10 @@ export async function readDexieDelta(
       return readConversationOverridesDelta(since)
     case "sessionState":
       return readSessionStateDelta(since)
+    case "twins":
+      return readTwinsDelta(since)
+    case "twinDrafts":
+      return readTwinDraftsDelta(since)
     case "goals":
       return readGoalsDelta(since)
     case "plans":
@@ -398,6 +402,39 @@ async function readSessionStateDelta(since: number): Promise<SyncDelta<unknown>>
     .map((row) => ({ ...row, id: row.sessionId, updatedAt: row.updatedAt ?? row.lastReadAt ?? 0 }))
     .filter((row) => row.updatedAt > since)
   return finalizeDelta("sessionState", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * The Twin registry itself. Carries an `updatedAt` index, so this is a plain
+ * range read like `skills`.
+ */
+async function readTwinsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().twins.where("updatedAt").above(since).toArray()
+  return finalizeDelta("twins", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * Distilled drafts awaiting review.
+ *
+ * `TwinDraft` has no `updatedAt` at all — a draft is written once and then
+ * mutated exactly once more, when it is reviewed. So the cursor is
+ * `max(createdAt, reviewedAt)`: without the review half, a phone that pulled a
+ * draft while it was pending would never learn it had been accepted, and the
+ * review queue would keep offering an action the Host has already taken.
+ *
+ * Full scan rather than a range read because the table indexes neither field
+ * (`&id, twinId, jobId, kind, status, ...`). Drafts are bounded by the output
+ * of the distill jobs a user has actually run, which is the same shape
+ * `readSessionStateDelta` and `readTwinProfileDelta` already scan. Adding an
+ * index here would cost every existing install a schema upgrade for a table
+ * measured in tens of rows.
+ */
+async function readTwinDraftsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const all = await getDb().twinDrafts.toArray()
+  const rows = all
+    .map((row) => ({ ...row, updatedAt: Math.max(row.createdAt ?? 0, row.reviewedAt ?? 0) }))
+    .filter((row) => row.updatedAt > since)
+  return finalizeDelta("twinDrafts", rows as UpdatedAtRow[], since)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {

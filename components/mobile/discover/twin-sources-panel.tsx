@@ -12,11 +12,17 @@
  *
  * Each path enqueues a `twin_source_create` outbound job. The desktop owns
  * registration, deduplication, OCR normalization, and ingest scheduling.
+ *
+ * Reads are live, not mirrored. `twinSources` is deliberately NOT a
+ * companion-sync table: `twin_source_list` is remotely reachable, and
+ * mirroring parsed source text would enlarge both the offline footprint and
+ * the privacy surface of every paired device for a panel the user only opens
+ * on purpose. Until this change the panel read a local Dexie table that
+ * nothing ever filled, so it listed nothing on every phone.
  */
 
-import { useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import {
   CameraIcon,
   ClipboardPasteIcon,
@@ -43,7 +49,8 @@ import { RedactReviewSheet } from "@/components/mobile/discover/redact-review-sh
 import { pickPhoto } from "@/lib/capacitor/camera"
 import { prompt as nativePrompt } from "@/lib/capacitor/dialog"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import { listTwinSourcesByTwin, updateTwinSource } from "@/lib/db/twin-sources"
+import { transport } from "@/lib/tauri"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { hasNoLeakingPii } from "@cognia/redact"
 import type { TwinSource } from "@/types/twin"
 import { cn } from "@/lib/utils"
@@ -70,11 +77,33 @@ export function TwinSourcesPanel({ twinId, className }: TwinSourcesPanelProps) {
   /** Source row whose edit action sheet is open (long-press). */
   const [editingSource, setEditingSource] = useState<TwinSource | null>(null)
 
-  const sources =
-    useLiveQuery<TwinSource[]>(
-      () => listTwinSourcesByTwin(twinId) as Promise<TwinSource[]>,
-      [twinId]
-    ) ?? []
+  const [sources, setSources] = useState<TwinSource[]>([])
+  const runtimeSnapshot = useRuntimeSnapshot()
+  // `null` target means this shell IS the host, so the command runs in-process.
+  const canListSources =
+    runtimeSnapshot.target === null ||
+    runtimeSnapshot.host?.operations.includes("twin_source_list") === true
+
+  const reload = useCallback(async () => {
+    if (!canListSources) return
+    try {
+      const result = (await transport.call("twin_source_list", { twinId })) as {
+        sources?: TwinSource[]
+      } | null
+      setSources(Array.isArray(result?.sources) ? result.sources : [])
+    } catch {
+      // Host unreachable. Keep the last list rather than blanking the panel.
+      // The shell's connection badge already carries the connectivity story.
+    }
+  }, [twinId, canListSources])
+
+  useEffect(() => {
+    // Deferred a tick for the same reason `PendingApprovalsCard` defers its
+    // first fetch: react-hooks/set-state-in-effect cannot see that `reload`
+    // only sets state after an await.
+    const kickoff = setTimeout(() => void reload(), 0)
+    return () => clearTimeout(kickoff)
+  }, [reload])
 
   /** Enqueue a markdown text ingest for the desktop to parse + embed. */
   const enqueueText = async (text: string, label: string) => {
@@ -122,8 +151,17 @@ export function TwinSourcesPanel({ twinId, className }: TwinSourcesPanelProps) {
       placeholder: src.title,
     })
     if (r.kind !== "submitted" || r.value.trim() === "") return
-    await updateTwinSource(src.id, { title: r.value.trim() })
+    // Was a bare `updateTwinSource` against local Dexie: on a paired phone
+    // that wrote a title into a mirror the host never reads, so the rename
+    // looked applied and then vanished on the next list. Same queued path as
+    // every other write in this panel.
+    await enqueue({
+      command: "twin_source_update",
+      payload: { id: src.id, patch: { title: r.value.trim() } },
+      label: t("retitleDone"),
+    })
     toast.success(t("retitleDone"))
+    await reload()
   }
 
   const onDelete = async (src: TwinSource) => {
@@ -134,6 +172,7 @@ export function TwinSourcesPanel({ twinId, className }: TwinSourcesPanelProps) {
       label: t("deleteQueueLabel", { title: src.title }),
     })
     toast.success(t("deleteQueued"))
+    await reload()
   }
 
   const onCamera = async () => {

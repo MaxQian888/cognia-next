@@ -179,6 +179,10 @@ function defaultQueryImpl(category: string) {
 const runSyncDownMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
+  // `useDexieFirstQuery` reads this to seed its status snapshot, so the twin
+  // registry read added here brings it into the module surface this suite has
+  // to stub.
+  getSyncStateFor: () => undefined,
 }))
 
 // ─── Skill / outbound-queue mutations ─────────────────────────────────────────
@@ -486,22 +490,35 @@ describe("<DiscoverMobileBody />", () => {
       expect(screen.getByTestId("pull-to-refresh")).toBeInTheDocument()
     })
 
-    it("triggering the refresh affordance calls runSyncDown()", async () => {
+    it("triggering the refresh affordance syncs every table this page renders", async () => {
       const user = userEvent.setup()
       render(<DiscoverMobileBody />)
+      // Mounting already kicks a targeted `twins` pull through
+      // `useDexieFirstQuery`, so assert on the gesture's own call rather than
+      // a total that would silently absorb a dropped table.
       await user.click(screen.getByTestId("pull-to-refresh-trigger"))
-      await waitFor(() => expect(runSyncDownMock).toHaveBeenCalledTimes(1))
+      await waitFor(() =>
+        expect(runSyncDownMock).toHaveBeenCalledWith({
+          only: ["characters", "skills", "twins", "twinDrafts", "twinProfile", "plugins"],
+        })
+      )
     })
 
     it("does not blow up when runSyncDown rejects (transport uninitialised)", async () => {
-      runSyncDownMock.mockRejectedValueOnce(new Error("not connected"))
+      // Rejects for every call, not just the first: the mount kick for the
+      // twin registry now runs before the gesture does, and a `...Once` would
+      // be spent there and never reach the path this test is about.
+      runSyncDownMock.mockRejectedValue(new Error("not connected"))
       const user = userEvent.setup()
       render(<DiscoverMobileBody />)
       // Should not throw.
       await act(async () => {
         await user.click(screen.getByTestId("pull-to-refresh-trigger"))
       })
-      expect(runSyncDownMock).toHaveBeenCalledTimes(1)
+      expect(runSyncDownMock).toHaveBeenCalledWith(
+        expect.objectContaining({ only: expect.arrayContaining(["twins"]) })
+      )
+      runSyncDownMock.mockResolvedValue(undefined)
     })
   })
 
@@ -618,12 +635,24 @@ describe("<DiscoverMobileBody />", () => {
       expect(screen.getByTestId("stub-twin-drafts-panel")).toBeInTheDocument()
     })
 
-    it("shows guidance and disables Twin writes when the registry is empty", () => {
+    it("shows guidance and disables Twin writes when the registry is empty", async () => {
       mockTwins = []
       currentSearch = "?category=twinIngest"
       render(<DiscoverMobileBody />)
-      expect(screen.getByText("twinRegistry.emptyTitle")).toBeInTheDocument()
+      // The registry is skeletonised while the mount pull is in flight, so
+      // this waits for it to settle. That gap is the point: "no Twins" and
+      // "this phone has not pulled the registry yet" are different answers,
+      // and before `twins` synced the second was rendered as the first.
+      expect(await screen.findByText("twinRegistry.emptyTitle")).toBeInTheDocument()
       expect(screen.queryByTestId("stub-twin-sources-panel")).not.toBeInTheDocument()
+    })
+
+    it("skeletonises the registry rather than claiming it is empty mid-sync", () => {
+      mockTwins = []
+      currentSearch = "?category=twinIngest"
+      render(<DiscoverMobileBody />)
+      expect(screen.getByTestId("mobile-twin-registry-skeleton")).toBeInTheDocument()
+      expect(screen.queryByText("twinRegistry.emptyTitle")).not.toBeInTheDocument()
     })
 
     it("mcpTools grid category does not render any legacy panel", () => {

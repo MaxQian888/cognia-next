@@ -10,9 +10,18 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// The panel lists sources over `twin_source_list` rather than from Dexie:
+// `twinSources` is not a companion-sync table, so the local mirror it used to
+// read is empty on every paired device.
 let mockSources: Array<Record<string, unknown>> = []
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockSources,
+const transportCallMock = jest.fn(async (command: string) =>
+  command === "twin_source_list" ? { sources: mockSources } : {}
+)
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: (...a: unknown[]) => transportCallMock(...(a as [string])) },
+}))
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => ({ target: null, host: null }),
 }))
 
 const enqueueMock = jest.fn(async (..._a: unknown[]) => ({}))
@@ -27,11 +36,6 @@ jest.mock("@/lib/capacitor/camera", () => ({ pickPhoto: (...a: unknown[]) => pic
 let mockNoLeak = true
 jest.mock("@cognia/redact", () => ({ hasNoLeakingPii: () => mockNoLeak }))
 
-const updateTwinSourceMock = jest.fn(async (..._a: unknown[]) => undefined)
-jest.mock("@/lib/db/twin-sources", () => ({
-  listTwinSourcesByTwin: jest.fn(async () => []),
-  updateTwinSource: (...a: unknown[]) => updateTwinSourceMock(...a),
-}))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
@@ -56,7 +60,7 @@ beforeEach(() => {
   enqueueMock.mockClear()
   promptMock.mockReset()
   pickPhotoMock.mockReset()
-  updateTwinSourceMock.mockClear()
+  transportCallMock.mockClear()
 })
 
 describe("<TwinSourcesPanel />", () => {
@@ -122,10 +126,19 @@ describe("<TwinSourcesPanel />", () => {
     )
   })
 
-  it("renders the empty state when there are no sources", () => {
+  it("renders the empty state when there are no sources", async () => {
     mockSources = []
     render(<TwinSourcesPanel twinId="twin-1" />)
-    expect(screen.getByText("empty")).toBeInTheDocument()
+    expect(await screen.findByText("empty")).toBeInTheDocument()
+  })
+
+  it("lists the sources the host reports rather than a local mirror", async () => {
+    mockSources = [
+      { id: "s9", title: "Handbook", status: "parsed", format: "pdf", bytes: 10, createdAt: 1 },
+    ]
+    render(<TwinSourcesPanel twinId="twin-7" />)
+    expect(await screen.findByText("Handbook")).toBeInTheDocument()
+    expect(transportCallMock).toHaveBeenCalledWith("twin_source_list", { twinId: "twin-7" })
   })
 
   it("long-pressing a source can retitle it", async () => {
@@ -135,10 +148,18 @@ describe("<TwinSourcesPanel />", () => {
     promptMock.mockResolvedValue({ kind: "submitted", value: "New title" })
     const user = userEvent.setup()
     render(<TwinSourcesPanel twinId="twin-1" />)
-    await user.click(screen.getByTestId("stub-longpress"))
+    await user.click(await screen.findByTestId("stub-longpress"))
     await user.click(await screen.findByTestId("twin-source-retitle"))
+    // Queued for the host, not written into the local mirror. The old path
+    // called `updateTwinSource` directly, so a rename on a paired phone was
+    // gone again the next time the list refreshed.
     await waitFor(() =>
-      expect(updateTwinSourceMock).toHaveBeenCalledWith("s2", { title: "New title" })
+      expect(enqueueMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "twin_source_update",
+          payload: { id: "s2", patch: { title: "New title" } },
+        })
+      )
     )
   })
 
@@ -148,7 +169,7 @@ describe("<TwinSourcesPanel />", () => {
     ]
     const user = userEvent.setup()
     render(<TwinSourcesPanel twinId="twin-1" />)
-    await user.click(screen.getByTestId("stub-longpress"))
+    await user.click(await screen.findByTestId("stub-longpress"))
     expect(await screen.findByTestId("twin-source-edit-sheet")).toBeInTheDocument()
     await user.click(screen.getByTestId("twin-source-delete"))
     await waitFor(() =>

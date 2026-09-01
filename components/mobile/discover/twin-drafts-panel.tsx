@@ -10,7 +10,6 @@
 
 import { CheckIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import { motion, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
@@ -22,6 +21,7 @@ import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import type { TwinDraft } from "@/types/twin"
 import { cn } from "@/lib/utils"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
 
 export interface TwinDraftsPanelProps {
   twinId: string
@@ -35,11 +35,16 @@ export function TwinDraftsPanel({ twinId, className }: TwinDraftsPanelProps) {
   const supportsDraftReview =
     runtimeSnapshot.target === null ||
     runtimeSnapshot.host?.operations.includes("twin_draft_review") === true
-  const drafts =
-    useLiveQuery<TwinDraft[]>(
-      () => listTwinDraftsByTwinAndStatus(twinId, "pending") as Promise<TwinDraft[]>,
-      [twinId]
-    ) ?? []
+  // Dexie-first so mounting the panel kicks a pull. `twinDrafts` only started
+  // syncing with this change, so before it a phone read an empty local table
+  // and the review queue was blank on every paired device.
+  const draftsQuery = useDexieFirstQuery({
+    query: () => listTwinDraftsByTwinAndStatus(twinId, "pending") as Promise<TwinDraft[]>,
+    deps: [twinId],
+    initial: [] as TwinDraft[],
+    table: "twinDrafts",
+  })
+  const drafts = draftsQuery.data ?? []
 
   const onAccept = async (draft: TwinDraft) => {
     await enqueue({

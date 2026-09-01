@@ -14,7 +14,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import { PlusIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 
@@ -56,6 +55,8 @@ import { useSearchHotkey } from "@/hooks/discover/use-search-hotkey"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { setSkillStatus } from "@/lib/db/skills"
 import { observeTwins } from "@/lib/db/twins"
+import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
+import type { Twin } from "@/types/twin"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import type { Character } from "@cognia/agent-config-types"
 import {
@@ -141,9 +142,21 @@ export function DiscoverMobileBody() {
   /** Card whose long-press action sheet (share, …) is open. */
   const [actionItem, setActionItem] = useState<DiscoverItem | null>(null)
   const [preferredTwinId, setPreferredTwinId] = useState<string | null>(null)
-  const twins = useLiveQuery(() => observeTwins(), [], undefined) ?? []
+  // Dexie-first rather than a bare liveQuery: `twins` only started syncing
+  // with this change, so a phone that has never pulled it needs the mount to
+  // kick one. The status is read below to tell "no Twins" apart from "not
+  // synced yet", which is the whole difference between an empty registry and
+  // a device that has not caught up.
+  const twinsQuery = useDexieFirstQuery({
+    query: () => observeTwins(),
+    deps: [],
+    initial: [] as Twin[],
+    table: "twins",
+  })
+  const twins = twinsQuery.data ?? []
   const selectedTwin =
     twins.find((twin) => twin.id === preferredTwinId) ?? twins.find((twin) => !twin.archived)
+  const twinsSyncing = twinsQuery.isSyncing && twins.length === 0
 
   const { favoriteKeys } = useDiscoverFavorites()
   const { layout } = useDiscoverLayout()
@@ -203,7 +216,9 @@ export function DiscoverMobileBody() {
       // Discover only renders the content tables below — scope the pull so it
       // doesn't also sync sessions/messages/workflows/settings the user can't
       // see from here.
-      await runSyncDown({ only: ["characters", "skills", "twinProfile", "plugins"] })
+      await runSyncDown({
+        only: ["characters", "skills", "twins", "twinDrafts", "twinProfile", "plugins"],
+      })
     } catch {
       // Transport may be uninitialised on web/dev — fall through.
     }
@@ -406,6 +421,12 @@ export function DiscoverMobileBody() {
                   <TwinProfilePanel twinId={selectedTwin.id} />
                   <TwinSourcesPanel twinId={selectedTwin.id} />
                 </>
+              ) : twinsSyncing ? (
+                // "No Twins yet" and "this phone has not pulled the registry
+                // yet" are different answers, and until `twins` synced the
+                // second one was rendered as the first on every device. Same
+                // skeleton the character/team/skill lists already use.
+                <ListSkeleton rows={2} testId="mobile-twin-registry-skeleton" />
               ) : (
                 <EmptyState
                   title={t("twinRegistry.emptyTitle")}
@@ -435,6 +456,8 @@ export function DiscoverMobileBody() {
                 </label>
                 <TwinDraftsPanel twinId={selectedTwin.id} />
               </div>
+            ) : twinsSyncing ? (
+              <ListSkeleton rows={2} testId="mobile-twin-registry-skeleton" />
             ) : (
               <EmptyState
                 title={t("twinRegistry.emptyTitle")}
