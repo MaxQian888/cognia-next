@@ -318,6 +318,17 @@ export async function listTemplateOwners(): Promise<Record<string, string>> {
   return out
 }
 
+/**
+ * Device bindings, declared and unused.
+ *
+ * `TemplateInstanceRecord` carries `bindings` and `bindingFingerprint` inline,
+ * and every read and write goes through those, so this table has never held a
+ * row. It exists for the case the inline copy cannot serve: a binding that is
+ * per-DEVICE rather than per-instance, which is why it is local-only and absent
+ * from `lib/sync`. Kept because dropping a declared table is a schema change
+ * with a migration cost and nothing to gain, and pinned by a test so the
+ * emptiness is a decision rather than something nobody noticed.
+ */
 export async function putTemplateDeviceBinding(
   binding: TemplateDeviceBindingRecord
 ): Promise<void> {

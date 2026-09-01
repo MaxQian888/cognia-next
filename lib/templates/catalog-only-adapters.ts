@@ -113,6 +113,16 @@ function defaultReaders(): CatalogOnlyReaders {
           })
         )
       ),
+    /**
+     * Always empty, on purpose.
+     *
+     * `document` is a declared catalog-only domain with no store behind it:
+     * nothing in the app owns a "document template" the catalog could project.
+     * It stays declared because the domain vocabulary is shared with the plugin
+     * SDK and removing a member is a breaking change to a published union,
+     * and the Studio labels the facet inert rather than offering a filter that
+     * silently returns nothing. Pinned by a test so it stays deliberate.
+     */
     document: async () => [],
   }
 }

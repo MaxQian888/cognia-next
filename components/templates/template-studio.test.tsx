@@ -429,8 +429,28 @@ describe("TemplateStudio", () => {
     })
     const trigger = screen.getByLabelText("filters.domain")
     fireEvent.click(trigger)
-    for (const domain of ["a2ui", "goal", "scheduler", "prompt", "subscription", "document"]) {
+    for (const domain of ["a2ui", "goal", "scheduler", "prompt", "subscription"]) {
       expect(screen.getByText(`domains.${domain}`)).toBeInTheDocument()
     }
+    // `document` is offered too, but see below.
+    expect(screen.getByTestId("template-domain-document")).toBeInTheDocument()
+  })
+
+  /**
+   * `document` is a declared catalog-only domain whose reader returns nothing,
+   * because no store in the app owns a document template. Offered as a plain
+   * filter it would empty the list with no explanation, which reads as a broken
+   * filter rather than an absent feature. Working Rule 7: the type says so, the
+   * UI says so, and `lib/templates/dormancy.test.ts` pins the emptiness.
+   */
+  it("labels the domain with nothing behind it inert rather than just empty", async () => {
+    mockPlatform = "tauri"
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+    fireEvent.click(screen.getByLabelText("filters.domain"))
+    const item = screen.getByTestId("template-domain-document")
+    expect(item).toHaveTextContent("filters.domainInert")
+    expect(item).toHaveAttribute("data-disabled")
   })
 })

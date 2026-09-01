@@ -13,11 +13,12 @@
  * Keeping all three on `buildChatMentionTargets()` is what makes the picked
  * handle, the parsed id, and the registered agent map line up — no name drift.
  *
- * NOTE: This is deliberately a SEPARATE type from `lib/agent-team`'s
- * `MentionTarget` (teammate | virtual). That type is coupled to runtime
- * dispatch (`runtime-streamers`, `team-runtime-dispatcher`); a subagent is a
- * model-level identity, not a runtime, so a parallel type avoids polluting the
- * team mention path's ~20 consumers.
+ * NOTE: This is deliberately a SEPARATE type from the team mention path's
+ * `MentionTarget` (teammate | virtual). That type was coupled to the chat-tab
+ * runtime dispatch ADR-0140 retired, whose modules have now been removed. A
+ * subagent is a model-level identity rather than a runtime, so the two stay
+ * separate on their own merits rather than because one of them had a
+ * dependency the other did not.
  */
 
 import { resolveDispatchableSubagents } from "@/lib/claude/agents/subagents"

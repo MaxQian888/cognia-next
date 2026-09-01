@@ -106,6 +106,17 @@ const FILTERABLE_DOMAINS: TemplateDomain[] = [
 ]
 
 /**
+ * Domains that are declared but have nothing behind them.
+ *
+ * `document` is a catalog-only domain whose reader returns an empty array
+ * because no store in the app owns a "document template" to project. Offering
+ * it as a plain filter would mean picking it always empties the list with no
+ * explanation, which reads as a broken filter rather than an absent feature.
+ * Labelled inert instead. See `lib/templates/dormancy.test.ts`.
+ */
+const INERT_DOMAINS = new Set<TemplateDomain>(["document"])
+
+/**
  * Where a domain's real editor lives.
  *
  * Two of these used to carry `?mode=template-authoring`, a parameter nothing
@@ -786,8 +797,15 @@ export function TemplateStudio() {
                       <SelectContent>
                         <SelectItem value="all">{t("filters.allDomains")}</SelectItem>
                         {FILTERABLE_DOMAINS.map((item) => (
-                          <SelectItem key={item} value={item}>
-                            {t(`domains.${item}`)}
+                          <SelectItem
+                            key={item}
+                            value={item}
+                            disabled={INERT_DOMAINS.has(item)}
+                            data-testid={`template-domain-${item}`}
+                          >
+                            {INERT_DOMAINS.has(item)
+                              ? t("filters.domainInert", { domain: t(`domains.${item}`) })
+                              : t(`domains.${item}`)}
                           </SelectItem>
                         ))}
                       </SelectContent>

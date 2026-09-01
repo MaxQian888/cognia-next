@@ -52,6 +52,17 @@ export interface TemplatePreflightIssue {
 
 export interface TemplateOperation {
   id: string
+  /**
+   * What a preflight says it is about to do.
+   *
+   * Only `"create"` is ever emitted today. `update`, `bind`, `permission` and
+   * `enable` are declared, carry translated labels, and no adapter produces
+   * one, so a preflight plan currently never mentions a binding it is about to
+   * write or a permission it is about to need. Kept rather than removed
+   * because the preflight-confirmation contract is the right place for them and
+   * `lib/templates/adapters` is where they would be produced. Pinned by a test
+   * so the gap stays a decision rather than a surprise.
+   */
   kind: "create" | "update" | "bind" | "permission" | "enable"
   domain: string
   summary: string
@@ -981,6 +992,38 @@ export class TemplateService {
         `Template instantiation failed: ${error instanceof Error ? error.message : String(error)}`
       )
     }
+    // Everything from here on can still fail with the resources ALREADY
+    // created: hashing the bindings, snapshotting for the update baseline,
+    // resolving the workspace, and the write itself. `rollbackToken` and
+    // `adapter.rollback` were built for exactly that window and never
+    // connected, so a failure here left resources behind that no instance
+    // record pointed at, invisible to update, detach and rebind alike.
+    //
+    // Only this window. The adapter's own `instantiate` failure is its to
+    // clean up, and the agentTeam adapter already deletes the partial team it
+    // created, so rolling back here as well would be a second delete of
+    // something already gone.
+    try {
+      return await this.recordInstance({ definition, plan: input.plan, idempotencyKey, result })
+    } catch (error) {
+      if (adapter.rollback && result.rollbackToken !== null) {
+        // Best effort. The original failure is the one worth reporting, and a
+        // rollback that also fails must not replace it with its own message.
+        await adapter.rollback(result.rollbackToken).catch(() => undefined)
+      }
+      throw error
+    }
+  }
+
+  private async recordInstance(input: {
+    definition: TemplateDefinitionEnvelope
+    plan: TemplatePreflightPlan
+    idempotencyKey: string
+    result: TemplateInstantiationResult
+  }): Promise<TemplateInstantiationResult> {
+    const { definition, result, idempotencyKey } = input
+    const adapter = this.adapters.get(definition.domain)
+    if (!adapter) throw new Error(`Template domain ${definition.domain} is catalog-only`)
     const bindingFingerprint = await sha256Hex(
       canonicalTemplateStringify(input.plan.bindings as unknown as TemplateJson)
     )

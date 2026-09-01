@@ -71,6 +71,7 @@
     "allTrust": "All trust levels",
     "clear": "Clear filters",
     "domain": "Template type",
+    "domainInert": "{domain} (nothing to list yet)",
     "hiddenHere": "{count, plural, =1 {1 template is hidden in this workspace} other {# templates are hidden in this workspace}}",
     "scope": "Scope",
     "search": "Search templates",

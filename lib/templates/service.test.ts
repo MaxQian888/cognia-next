@@ -815,3 +815,80 @@ describe("TemplateService workspace isolation", () => {
     expect(await service.backfillInstanceWorkspaces("ws_1")).toBe(0)
   })
 })
+
+describe("TemplateService instantiation rollback", () => {
+  /**
+   * `rollbackToken` and `adapter.rollback` shipped together and were never
+   * connected, so a failure AFTER the resources were created left them behind
+   * with no instance record pointing at them: invisible to update, detach and
+   * rebind, and impossible to find again.
+   */
+  async function attempt(options: { failSnapshot?: boolean; rollback?: jest.Mock }) {
+    const repository = new InMemoryTemplateRepository()
+    const rollback = options.rollback ?? jest.fn(async () => {})
+    const adapter: TemplateDomainAdapter = {
+      ...skillAdapter,
+      instantiate: async ({ definition }) => ({
+        resources: [{ domain: "skill", id: `created:${definition.id}` }],
+        rollbackToken: { skillId: "created" },
+      }),
+      snapshot: options.failSnapshot
+        ? async () => {
+            throw new Error("snapshot unavailable")
+          }
+        : skillAdapter.snapshot,
+      rollback,
+    }
+    const service = new TemplateService({
+      repository,
+      catalog: new TemplateCatalog(),
+      adapters: [adapter],
+      now: () => 1_000,
+      id: () => "generated",
+    })
+    const draft = await service.createDraft({
+      id: "skill.rollback",
+      domain: "skill",
+      metadata: { name: "Rollback" },
+      payload: { content: "v1" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const release = await service.publish(draft.id, {
+      expectedRevision: 1,
+      confirmedBump: "minor",
+    })
+    const plan = await service.preflight({
+      definitionId: release.id,
+      version: release.version!,
+      platform: "desktop",
+      bindings: {},
+    })
+    return { repository, rollback, run: () => service.instantiate({ plan, confirmed: true }) }
+  }
+
+  it("rolls back resources when recording the instance fails", async () => {
+    const { repository, rollback, run } = await attempt({ failSnapshot: true })
+    await expect(run()).rejects.toThrow(/snapshot unavailable/i)
+    expect(rollback).toHaveBeenCalledWith({ skillId: "created" })
+    // Nothing half-written left behind either.
+    expect(await repository.listInstances()).toEqual([])
+  })
+
+  it("leaves a successful instantiation alone", async () => {
+    const { rollback, run } = await attempt({})
+    await expect(run()).resolves.toBeDefined()
+    expect(rollback).not.toHaveBeenCalled()
+  })
+
+  /** The original failure is the one worth reporting. */
+  it("reports the real failure even when the rollback also fails", async () => {
+    const rollback = jest.fn(async () => {
+      throw new Error("rollback also failed")
+    })
+    const { run } = await attempt({ failSnapshot: true, rollback })
+    await expect(run()).rejects.toThrow(/snapshot unavailable/i)
+  })
+})

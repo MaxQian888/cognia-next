@@ -39731,6 +39731,7 @@
       "allTrust": "全部信任级别",
       "clear": "清除筛选",
       "domain": "模板类型",
+      "domainInert": "{domain}（暂无内容）",
       "hiddenHere": "本工作区隐藏了 {count} 个模板",
       "scope": "范围",
       "search": "搜索模板",
