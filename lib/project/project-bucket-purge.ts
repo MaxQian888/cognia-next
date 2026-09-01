@@ -128,6 +128,10 @@ export function purgeProjectBuckets(
       key === AGENT_TEAM_STORAGE_PREFIX ||
       key.startsWith(`${AGENT_TEAM_STORAGE_PREFIX}:`)
     ) {
+      // Still worth doing after persist v8, even though a current bucket holds
+      // no squads: an INACTIVE account's bucket has never been rehydrated, so
+      // it can still be carrying pre-v8 rows that the Dexie cascade will never
+      // see. Live squads are dropped by `deleteProjectCascade` instead.
       purgePersistedSnapshot(storage, key, projectId, purgeAgentTeamState)
     }
   }

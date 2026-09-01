@@ -69,7 +69,10 @@ export const CORE_TABLE_NAMES = [
   "agentTeamRetrospectives",
   "agentTeamRuns",
   "agentTeamSteeringReceipts",
+  "agentTeamTasks",
   "agentTeamTrajectory",
+  "agentTeammates",
+  "agentTeams",
   "agentTraces",
   "approvedBinaries",
   "artifactVersions",
@@ -464,6 +467,12 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "templateDefinitions",
   "templatePackages",
   "templateInstances",
+  // v215 — Squad definitions. The phone reached the RUNS of a squad long
+  // before it could see the squad itself, so a paired device listed nothing
+  // to run. Definitions, roster and tasks all cross.
+  "agentTeams",
+  "agentTeammates",
+  "agentTeamTasks",
   // ADR-0131 cross-shell inbox relay: drafts sync in full; outboundQueue
   // syncs as a status projection (`syncedFromHost: true`, no segments).
   "connectorDrafts",
@@ -498,6 +507,9 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "templateDefinitions",
   "templatePackages",
   "templateInstances",
+  "agentTeams",
+  "agentTeammates",
+  "agentTeamTasks",
   "connectorDrafts",
   "outboundQueue",
 ] as const
@@ -672,6 +684,12 @@ const AUTO_INCREMENT_METADATA_TABLES = new Set<CoreTableName>([
 ])
 
 const USER_CONTENT_TABLES = new Set<CoreTableName>([
+  // Squad definitions carry per-teammate system prompts and the task the squad
+  // was created for, all user-authored. `agentTeamRuns` alongside them is
+  // metadata-only because it records execution, not instructions.
+  "agentTeams",
+  "agentTeammates",
+  "agentTeamTasks",
   "sessions",
   "sessionState",
   "chatDrafts",

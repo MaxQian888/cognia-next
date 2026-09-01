@@ -165,32 +165,26 @@ describe("partializeAgentTeamState", () => {
       workspaceTab: initialState.workspaceTab,
       tasksView: initialState.tasksView,
       lastAdapterSyncVersion: initialState.lastAdapterSyncVersion,
-      teams: { team_a: persistedTeam("team_a", "Alpha") },
-      teammates: { mate_a: { id: "mate_a" } },
-      tasks: { task_a: { id: "task_a" } },
       editorSession: initialState.editorSession,
     })
   })
 
-  it("keeps dispatchDecision and externalPickup on persisted teams", () => {
-    const decision = {
-      kind: "external-handoff",
-      fromPattern: "external_handoff",
-      confidence: 0.6,
-      reason: "needs external agent",
-    }
-    const pickup = { requestedAt: new Date("2026-07-02T00:00:00Z") }
-    const team = {
-      ...persistedTeam("team_x", "Xray"),
-      dispatchDecision: decision,
-      externalPickup: pickup,
-    }
-    const state = { ...initialState, teams: { team_x: team } } as never
-    const persisted = partializeAgentTeamState(state) as { teams: Record<string, unknown> }
-    expect(persisted.teams.team_x).toMatchObject({
-      dispatchDecision: decision,
-      externalPickup: pickup,
-    })
+  /**
+   * Squads, roster and tasks are Dexie's from persist v8 on
+   * (`dexie-bridge.ts`). Keeping a copy here as well would leave the subsystem
+   * with two durable stores and no rule for which wins, and the localStorage
+   * one can be neither workspace-scoped nor synced to a paired device.
+   */
+  it("leaves the definitions to Dexie rather than keeping a second copy", () => {
+    const persisted = partializeAgentTeamState({
+      ...initialState,
+      teams: { team_a: persistedTeam("team_a", "Alpha") },
+      teammates: { mate_a: { id: "mate_a" } },
+      tasks: { task_a: { id: "task_a" } },
+    } as never)
+    expect(persisted).not.toHaveProperty("teams")
+    expect(persisted).not.toHaveProperty("teammates")
+    expect(persisted).not.toHaveProperty("tasks")
   })
 })
 
@@ -222,7 +216,10 @@ describe("agent-team account storage buckets", () => {
     clearAgentTeamAccountStorage()
 
     expect(useAgentTeamStore.getState().teams).toEqual({})
-    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("team_a")
+    // The bucket survives. It no longer holds the squads themselves (Dexie does
+    // from persist v8), so what proves it was not deleted is that the key is
+    // still there with the preferences that remain in it.
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("defaultConfig")
   })
 
   it("resets a phantom running team to idle on an account switch", () => {
@@ -310,7 +307,11 @@ describe("agent-team onRehydrateStorage stale-status reset", () => {
     activateAgentTeamAccountStorage("acct_legacy")
 
     expect(localStorage.getItem("cognia-agent-teams")).toBeNull()
-    expect(localStorage.getItem("cognia-agent-teams:acct_legacy")).toContain("legacy_team")
+    // Adoption is proved by the squad reaching memory, not by it staying in the
+    // bucket: from persist v8 the bucket no longer carries squads at all, and
+    // the Dexie mirror is what writes the adopted rows down.
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["legacy_team"])
+    expect(localStorage.getItem("cognia-agent-teams:acct_legacy")).not.toBeNull()
 
     localStorage.setItem(
       "cognia-agent-teams",

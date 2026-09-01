@@ -9,6 +9,7 @@ import { AgentTeamRuntimeInitializer } from "./agent-team-runtime-initializer"
 import { ExternalAgentInitializer } from "./external-agent-initializer"
 import { MemoryJobWorkerInitializer } from "./memory-job-worker-initializer"
 import { OcrRuntimeInitializer } from "./ocr-runtime-initializer"
+import { AgentTeamBridgeInitializer } from "./agent-team-bridge-initializer"
 import { TemplatePlatformInitializer } from "./template-platform-initializer"
 import { VectorCredentialMigrationInitializer } from "./vector-credential-migration-initializer"
 
@@ -24,6 +25,7 @@ export function KnowledgeAgentBootInitializers() {
       <ProjectKnowledgeWorkerInitializer />
       <VectorCredentialMigrationInitializer />
       <TemplatePlatformInitializer />
+      <AgentTeamBridgeInitializer />
     </>
   )
 }

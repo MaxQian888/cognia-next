@@ -70,8 +70,17 @@ import type { AgentTeamState } from "./types"
  * on older rows; every consumer guards for absence, so no migration branch
  * is needed. `externalPickup` Dates round-trip as ISO strings through the
  * JSON storage — same as `routingAssessment.createdAt`.
+ *
+ *   - v8: teams / teammates / tasks leave this blob for Dexie
+ *     (`agentTeams`, `agentTeammates`, `agentTeamTasks`, schema v215).
+ *     `stores/agent/agent-team-store/dexie-bridge.ts` is the mirror. The
+ *     migration does NOT move the rows itself: it leaves them in the
+ *     rehydrated state, and the bridge writes anything memory holds that the
+ *     tables do not on its first sync. That way the move happens once the
+ *     account database is actually open, rather than inside a synchronous
+ *     storage callback that has no way to await one.
  */
-const PERSIST_VERSION = 7
+const PERSIST_VERSION = 8
 const AGENT_TEAM_STORAGE_KEY = "cognia-agent-teams"
 
 function agentTeamAccountStorageKey(accountId: string): string {
@@ -259,9 +268,10 @@ export function partializeAgentTeamState(state: AgentTeamState) {
     workspaceTab: state.workspaceTab,
     tasksView: state.tasksView,
     lastAdapterSyncVersion: state.lastAdapterSyncVersion,
-    teams: state.teams,
-    teammates: state.teammates,
-    tasks: state.tasks,
+    // teams / teammates / tasks are Dexie's from v8 on. Leaving them here as
+    // well would give the subsystem two durable copies with no rule for which
+    // wins, and the localStorage one cannot be workspace-scoped or synced.
+    // `dexie-bridge.ts` owns them; only what is left is UI-shaped preference.
     editorSession: state.editorSession,
   }
 }

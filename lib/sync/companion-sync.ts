@@ -61,6 +61,11 @@ import {
   syncTemplateInstances,
   syncTemplatePackages,
 } from "./handlers/template-platform"
+import {
+  syncAgentTeamTasks,
+  syncAgentTeammates,
+  syncAgentTeams,
+} from "./handlers/agent-team-definitions"
 import type { SyncCursor, SyncOutcome, SyncableTable } from "./types"
 
 export type SyncFn = (transport: Transport, cursor: SyncCursor) => Promise<SyncOutcome>
@@ -176,6 +181,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "templateDefinitions", stage: "background", run: syncTemplateDefinitions },
   { table: "templatePackages", stage: "background", run: syncTemplatePackages },
   { table: "templateInstances", stage: "background", run: syncTemplateInstances },
+  // v215 — Squad definitions. Background, and after the runs they explain: a
+  // roster arriving before its squad is a row with nothing to attach to.
+  { table: "agentTeams", stage: "background", run: syncAgentTeams },
+  { table: "agentTeammates", stage: "background", run: syncAgentTeammates },
+  { table: "agentTeamTasks", stage: "background", run: syncAgentTeamTasks },
 ]
 
 /** Which stage each table is pulled in. */
@@ -245,6 +255,9 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   templateDefinitions: syncDomain("tombstone"),
   templatePackages: syncDomain("tombstone"),
   templateInstances: syncDomain("tombstone"),
+  agentTeams: syncDomain("tombstone"),
+  agentTeammates: syncDomain("tombstone"),
+  agentTeamTasks: syncDomain("tombstone"),
   connectorDrafts: syncDomain("tombstone"),
   // Terminal projections age out client-side (handlers/outbound-queue.ts);
   // the host prunes without tombstones after 14 days.

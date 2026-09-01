@@ -212,6 +212,23 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Template instance provenance and update baselines".to_string(),
             has_tombstones: false,
         },
+        // v215 Squad definitions. The runs half has synced since v145, so a
+        // paired device saw run history for squads it could not name.
+        SyncTableDescriptor {
+            name: "agentTeams".to_string(),
+            description: "Squad definitions (roster and task ids; run history syncs separately)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "agentTeammates".to_string(),
+            description: "Squad roster members and their per-teammate configuration".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "agentTeamTasks".to_string(),
+            description: "Squad task board entries (definition-side; execution state lives in agentTeamRuns)".to_string(),
+            has_tombstones: false,
+        },
         // ADR-0131 cross-shell inbox relay.
         SyncTableDescriptor {
             name: "connectorDrafts".to_string(),
@@ -248,6 +265,9 @@ mod tests {
         assert!(r.contains("templateDefinitions"));
         assert!(r.contains("templatePackages"));
         assert!(r.contains("templateInstances"));
+        assert!(r.contains("agentTeams"));
+        assert!(r.contains("agentTeammates"));
+        assert!(r.contains("agentTeamTasks"));
         assert!(r.contains("connectorDrafts"));
         assert!(r.contains("outboundQueue"));
         // No literal total. This was `24` and went stale the moment a table was

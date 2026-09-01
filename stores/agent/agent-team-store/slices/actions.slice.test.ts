@@ -2067,7 +2067,10 @@ describe("account storage isolation", () => {
     clearAgentTeamAccountStorage()
 
     expect(useAgentTeamStore.getState().teams).toEqual({})
-    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("Alpha team")
+    // The bucket survives. It no longer carries the squads themselves (Dexie
+    // does from persist v8), so what proves it was not deleted is the key still
+    // being there with the preferences that remain in it.
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("defaultConfig")
   })
 
   it("purges only the deleted account's team bucket", () => {

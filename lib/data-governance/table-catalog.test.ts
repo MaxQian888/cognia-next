@@ -46,7 +46,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(336)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(341)
     db.close()
   })
 
@@ -82,8 +82,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 25 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(25)
+  it("maps all 28 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(28)
     // ADR-0131 inbox relay: drafts + outbound status projection are mirrored.
     expect(COMPANION_SYNC_TABLES.has("connectorDrafts")).toBe(true)
     expect(COMPANION_SYNC_TABLES.has("outboundQueue")).toBe(true)

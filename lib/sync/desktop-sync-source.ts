@@ -193,6 +193,12 @@ export async function readDexieDelta(
       return readTemplatePackagesDelta(since)
     case "templateInstances":
       return readTemplateInstancesDelta(since)
+    case "agentTeams":
+      return readAgentTeamsDelta(since)
+    case "agentTeammates":
+      return readAgentTeammatesDelta(since)
+    case "agentTeamTasks":
+      return readAgentTeamTasksDelta(since)
     case "connectorDrafts":
       return readConnectorDraftsDelta(since)
     case "outboundQueue":
@@ -273,6 +279,26 @@ async function readTemplatePackagesDelta(since: number): Promise<SyncDelta<unkno
 async function readTemplateInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().templateInstances.where("updatedAt").above(since).toArray()
   return finalizeDelta("templateInstances", rows, since)
+}
+
+/**
+ * Squad definitions. `updatedAt` is stamped by the Dexie mirror rather than by
+ * the domain types, which never had one, so the cursor is the mirror's record
+ * of when it last wrote the row.
+ */
+async function readAgentTeamsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTeams.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTeams", rows, since)
+}
+
+async function readAgentTeammatesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTeammates.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTeammates", rows, since)
+}
+
+async function readAgentTeamTasksDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().agentTeamTasks.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTeamTasks", rows, since)
 }
 
 /**

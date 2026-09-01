@@ -638,16 +638,20 @@ describe("agent-team-store store-level config", () => {
     // Tracks `PERSIST_VERSION`. This said 6 for as long as the suite could not
     // load, which is what a dark test costs: the bump to 7 landed with nothing
     // watching.
-    expect(parsed.version).toBe(7)
+    expect(parsed.version).toBe(8)
     expect(parsed.state.displayMode).toBe("compact")
     // partialize keeps templates / defaultConfig / displayMode / workspaceTab /
-    // lastAdapterSyncVersion AND (v4+) the durable team definitions.
+    // lastAdapterSyncVersion. Squad templates stay here because they are
+    // profile-shared by design.
     expect(parsed.state.workspaceTab).toBeDefined()
     expect(parsed.state.defaultConfig).toBeDefined()
     expect(parsed.state.lastAdapterSyncVersion).toBeDefined()
-    // v4+ persists durable team maps (empty after reset, but present).
-    expect(parsed.state.teams).toBeDefined()
-    expect(parsed.state.tasks).toBeDefined()
+    // v8 hands the durable definitions to Dexie (`dexie-bridge.ts`). A second
+    // copy here would be a durable store with no rule for which one wins, and
+    // this one can be neither workspace-scoped nor synced to a paired device.
+    expect(parsed.state.teams).toBeUndefined()
+    expect(parsed.state.teammates).toBeUndefined()
+    expect(parsed.state.tasks).toBeUndefined()
     // v6 persists the project Editor session map.
     expect(parsed.state.editorSession).toBeDefined()
     // live runtime ephemera stays out of the persisted slice

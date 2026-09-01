@@ -393,7 +393,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 214
+export const CURRENT_SCHEMA_VERSION = 215
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -690,6 +690,12 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   cdpAuditEvents:
     "&id, grantId, sessionId, browserSessionId, origin, outcome, createdAt, [sessionId+createdAt]",
   agentTeamRuns: "&id, teamId, projectId, status, priority, updatedAt, [teamId+updatedAt]",
+  // v215 — Squad DEFINITIONS. The runtime half above has been here since v145;
+  // these three were the last of the subsystem still in a localStorage blob,
+  // which is why `AgentTeam.projectId` was a filter rather than a boundary.
+  agentTeams: "&id, projectId, status, createdAt, updatedAt, [projectId+createdAt]",
+  agentTeammates: "&id, teamId, role, updatedAt, [teamId+createdAt]",
+  agentTeamTasks: "&id, teamId, status, assignedTo, updatedAt, [teamId+order]",
   agentTeamChildRuns:
     "&id, runId, teamId, teammateId, taskId, repositoryId, status, sessionId, updatedAt, [runId+updatedAt]",
   agentTeamTrajectory:
@@ -1316,6 +1322,9 @@ export class CogniaDB extends Dexie {
   agentTeamBoard!: Table<AgentTeamBoardRow, string>
   // v145 — durable local AgentTeam runtime. Never registered for sync/export.
   agentTeamRuns!: Table<import("@/types/agent/agent-team-runtime").AgentTeamRunRecord, string>
+  agentTeams!: Table<import("./agent-team-definitions").AgentTeamRow, string>
+  agentTeammates!: Table<import("./agent-team-definitions").AgentTeammateRow, string>
+  agentTeamTasks!: Table<import("./agent-team-definitions").AgentTeamTaskRow, string>
   agentTeamChildRuns!: Table<import("@/types/agent/agent-team-runtime").AgentTeamChildRun, string>
   agentTeamTrajectory!: Table<
     import("@/types/agent/agent-team-runtime").AgentTeamTrajectoryEvent,

@@ -104,6 +104,10 @@ const PROJECT_SCOPED_TABLES = [
   // portable library entries, confined by `TemplateDefinitionRow.workspaceId`
   // rather than owned, and deleting a workspace must not delete the library.
   "templateInstances",
+  // v215 — Squad DEFINITIONS. A live squad belongs to the workspace it was
+  // created in (its runs already cascaded); reusable squad templates stay
+  // profile-shared and are not here.
+  "agentTeams",
 ] as const
 
 /** Child/event tables dropped by parent id (parent collected via its projectId). */
@@ -125,6 +129,8 @@ const CHILD_TABLES: Array<{ table: string; parentTable: string; fk: string }> = 
   { table: "agentTeamDeliveryGraphs", parentTable: "agentTeamRuns", fk: "runId" },
   { table: "agentTeamDeliveryNodes", parentTable: "agentTeamRuns", fk: "runId" },
   { table: "agentTeamRetrospectives", parentTable: "agentTeamRuns", fk: "runId" },
+  { table: "agentTeammates", parentTable: "agentTeams", fk: "teamId" },
+  { table: "agentTeamTasks", parentTable: "agentTeams", fk: "teamId" },
 ]
 
 /**
