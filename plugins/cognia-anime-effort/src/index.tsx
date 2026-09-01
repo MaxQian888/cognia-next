@@ -199,7 +199,15 @@ export function AnimeEffortControl({ pluginId }: ExtensionProps) {
       >
         <div className="aef-hero" data-level={level}>
           <PluginImage
-            src="/plugins/cognia-anime-effort/operator.webp"
+            // `public/illustrations/`, the app's committed static-artwork
+            // namespace, rather than `public/plugins/`. That path reads as the
+            // plugin ROOT convention (`/plugins/<id>`, what `pluginPath`
+            // carries) and as the `app/plugins/` route, and this is neither.
+            // The builtin-asset pipeline under `/_cognia/builtin-plugins/` is
+            // not the home for it either: that tree is gitignored, wiped on
+            // every build, and generated only for the five asset-delivered
+            // builtins. This plugin is statically imported.
+            src="/illustrations/cognia-anime-effort/operator.webp"
             alt={t("panel.operatorAlt")}
             className="aef-operator"
           />
