@@ -16340,6 +16340,7 @@
         "description": "允许此设备查看、恢复并控制由主机持有的终端会话。此权限独立于远程控制和智能体控制。",
         "disabledToast": "已为 {label} 关闭终端访问。",
         "enabledToast": "已为 {label} 启用终端访问。",
+        "hostOnly": "终端访问权限只能在承载会话的那台机器上更改。请到那台机器上打开此设备列表。",
         "operationFailed": "无法保存终端访问权限。",
         "reason": "确认授予 {label} 终端访问权限",
         "title": "允许终端访问",

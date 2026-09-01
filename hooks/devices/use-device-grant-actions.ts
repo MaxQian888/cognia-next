@@ -190,9 +190,16 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
 
   const pause = useCallback(
     async (deviceId: string, label: string) => {
-      // Same biometric gate as revoke: Rust treats pause as a deny-list entry,
-      // so without the gate an attacker at a momentarily-unlocked desktop could
-      // silently disable every paired phone.
+      // Same biometric gate as revoke: without it an attacker at a
+      // momentarily-unlocked desktop could silently disable every paired phone.
+      //
+      // `companion_suspend_device`, not `companion_revoke_device`. Pause used
+      // to write the deny list through the revoke arm, which meant a paused
+      // device was a revoked device: revoke tears down the signaling
+      // registration and revokes the device key, so the row came back only
+      // after re-pairing. `companion_unrevoke_device` says as much in its own
+      // docblock — un-revoke "never actually undid anything". Suspend keeps
+      // the identity, which is what makes Resume below able to mean something.
       const result = await guard(
         {
           reason: tPause("reason", { label }),
@@ -201,7 +208,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
         },
         async () => {
           await pausePairedDevice(deviceId)
-          await hostCall("companion_revoke_device", { deviceId })
+          await hostCall("companion_suspend_device", { deviceId })
         }
       )
       if (result.kind === "blocked") {
@@ -217,9 +224,14 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
 
   const resume = useCallback(
     async (deviceId: string, label: string) => {
-      // Resume undoes the deny-list entry pause put in place — gate it on the
-      // same biometric so a paused row can only be revived by the person
-      // physically holding the desktop.
+      // Lifts the suspension pause put in place — gate it on the same
+      // biometric so a paused row can only be revived by the person physically
+      // holding the desktop.
+      //
+      // The canonical name. `companion_unrevoke_device` maps to the same
+      // `LifecycleAction::Resume` and stays registered because the plugin API
+      // surface calls it, but naming the action the host actually performs is
+      // what lets a reader tell suspend from revoke here.
       const result = await guard(
         {
           reason: tResume("reason", { label }),
@@ -228,7 +240,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
         },
         async () => {
           await resumePairedDevice(deviceId)
-          await hostCall("companion_unrevoke_device", { deviceId })
+          await hostCall("companion_resume_device", { deviceId })
         }
       )
       if (result.kind === "blocked") {

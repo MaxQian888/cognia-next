@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Provider-initializer runtime effects the headless brain must NOT run (ADR-0059). Rows name SYMBOLS, never whole files: one initializer routinely mixes brain work with a genuinely renderer-bound effect, and a file-level excuse would silence both. Every reason must say WHY the brain is the wrong host — a physical boundary, or a host-split pair whose brain half is registered in lib/headless/runtimes/. 'Not ported yet' is not a reason; that is debt, and it belongs in the registry instead.",
+  "note": "Provider-initializer runtime effects the headless brain must NOT run (ADR-0059). Rows name SYMBOLS, never whole files: one initializer routinely mixes brain work with a genuinely renderer-bound effect, and a file-level excuse would silence both. Every reason must say WHY the brain is the wrong host \u2014 a physical boundary, or a host-split pair whose brain half is registered in lib/headless/runtimes/. 'Not ported yet' is not a reason; that is debt, and it belongs in the registry instead.",
   "initializers": {
     "components/providers/initializers/anthropic-usage-scheduler-initializer.tsx": {
       "symbols": ["startUsageScheduler"],
@@ -8,7 +8,7 @@
     },
     "components/providers/initializers/code-adoption-tracker-initializer.tsx": {
       "symbols": ["startCodeAdoptionTracker"],
-      "reason": "The tracker persists through lib/code-adoption/client.ts, whose code_adoption_turn_begin / code_adoption_turn_end are target:client, capability:client.local, transports:[\"internal\"] in the command manifest and local-only in the dispositions ledger — write attribution is measured against the local working tree the desktop edits. Wiring the brain to it would first require reclassifying those two commands, which is a protocol decision (D7 makes the manifest authoritative), not a registration."
+      "reason": "The tracker persists through lib/code-adoption/client.ts, whose code_adoption_turn_begin / code_adoption_turn_end are target:client, capability:client.local, transports:[\"internal\"] in the command manifest and local-only in the dispositions ledger \u2014 write attribution is measured against the local working tree the desktop edits. Wiring the brain to it would first require reclassifying those two commands, which is a protocol decision (D7 makes the manifest authoritative), not a registration."
     },
     "components/providers/initializers/codex-usage-scheduler-initializer.tsx": {
       "symbols": ["startCodexUsageScheduler"],
@@ -16,15 +16,15 @@
     },
     "components/providers/initializers/deferred-boot-initializers-impl.tsx": {
       "symbols": ["startRendererWorkOutbox"],
-      "reason": "The renderer half of ADR-0125 durable work submission: it drains the browser-local queue of work this client originated. The brain is the receiving authority, not a submitter, and runs the server half — registered as `work-submission-outbox` in lib/headless/runtimes/initializers.ts. Running both in one process would have the brain drain its own inbox back into itself."
+      "reason": "The renderer half of ADR-0125 durable work submission: it drains the browser-local queue of work this client originated. The brain is the receiving authority, not a submitter, and runs the server half \u2014 registered as `work-submission-outbox` in lib/headless/runtimes/initializers.ts. Running both in one process would have the brain drain its own inbox back into itself."
     },
     "components/providers/initializers/issue-tracker-initializer.tsx": {
-      "symbols": ["installIssueNotificationCommands"],
-      "reason": "Registers the `issue.open` notification command, whose whole body is a Next App Router `router.push`. Navigation is an act on a UI surface the brain does not have; the paired device that RECEIVES the notification installs this command in its own renderer. The other eight effects in this initializer are brain work and are registered as `issue-tracker` in lib/headless/runtimes/issue-tracker.ts."
+      "symbols": ["installCollabRefreshScheduler", "installIssueNotificationCommands"],
+      "reason": "Registers the `issue.open` notification command, whose whole body is a Next App Router `router.push`. Navigation is an act on a UI surface the brain does not have; the paired device that RECEIVES the notification installs this command in its own renderer. The other eight effects in this initializer are brain work and are registered as `issue-tracker` in lib/headless/runtimes/issue-tracker.ts. installCollabRefreshScheduler is the BROWSER half of the collab pull: it gates every tick on document.visibilityState, re-runs on window focus, and returns a no-op when either global is missing, so registering it in a brain would add a runtime that starts cleanly and refreshes nothing. The brain half is registered as `collab-refresh` in lib/headless/runtimes/collab-refresh.ts and runs the same host-neutral requestCollabRefresh on the same collabRefreshDelay backoff, without a visibility question it has no way to ask."
     },
     "components/providers/initializers/managed-ide-broker-initializer.tsx": {
       "symbols": ["attachManagedIdeBroker"],
-      "reason": "The Tauri-event-bound entry point; the brain uses the sibling attachManagedIdeBrokerTransport (lib/plugin/ide/broker-runtime.ts:1184) with the companion transport plus content upload/redeem, registered as `managed-ide-broker` in lib/headless/runtimes/managed-ide-broker.ts. One subsystem, two host-specific attach points — not a gap."
+      "reason": "The Tauri-event-bound entry point; the brain uses the sibling attachManagedIdeBrokerTransport (lib/plugin/ide/broker-runtime.ts:1184) with the companion transport plus content upload/redeem, registered as `managed-ide-broker` in lib/headless/runtimes/managed-ide-broker.ts. One subsystem, two host-specific attach points \u2014 not a gap."
     },
     "components/providers/initializers/online-eval-initializer.tsx": {
       "symbols": ["startOnlineEvalScheduler"],
@@ -32,19 +32,27 @@
     },
     "components/providers/initializers/remote-notification-initializer.tsx": {
       "symbols": ["installRemoteNotificationListener"],
-      "reason": "The CLIENT side of `notification://remote` — it ingests frames a headless server publishes into this device's Notification Center. The brain is the publisher (lib/notifications/runtime.ts -> remote_notification_publish) and must not subscribe to itself. Already recorded in the roster doc at lib/headless/runtimes/index.ts."
+      "reason": "The CLIENT side of `notification://remote` \u2014 it ingests frames a headless server publishes into this device's Notification Center. The brain is the publisher (lib/notifications/runtime.ts -> remote_notification_publish) and must not subscribe to itself. Already recorded in the roster doc at lib/headless/runtimes/index.ts."
     },
     "components/providers/initializers/selection-toolbar-initializer.tsx": {
-      "symbols": ["watchSelectionSpeech"],
-      "reason": "Reads the OS-level text selection through the desktop selection-perception bus (ADR-0093/0095). Desktop selection awareness is one of ADR-0059 D7's recorded physical boundaries: there is no OS selection to observe in a container."
+      "symbols": ["subscribeQuickActions", "watchSelectionSpeech"],
+      "reason": "Reads the OS-level text selection through the desktop selection-perception bus (ADR-0093/0095). Desktop selection awareness is one of ADR-0059 D7's recorded physical boundaries: there is no OS selection to observe in a container. subscribeQuickActions keeps the selection overlay's action list in step with the plugin quick-action registry. It exists to repaint a native always-on-top window over whatever application currently owns the OS text selection, which is the same recorded ADR-0059 D7 physical boundary as watchSelectionSpeech above. A brain has no window server to paint on and no selection to act on, so the subscription would fire into nothing."
     },
     "components/providers/initializers/selection-toolbar-restore-initializer.tsx": {
       "symbols": ["startSelectionToolbar"],
-      "reason": "Restores the always-on-top native selection-toolbar window (ADR-0093). A recorded physical boundary in ADR-0059 D7 — the brain has no window server to place an overlay on."
+      "reason": "Restores the always-on-top native selection-toolbar window (ADR-0093). A recorded physical boundary in ADR-0059 D7 \u2014 the brain has no window server to place an overlay on."
     },
     "components/providers/initializers/session-import-watch-initializer.tsx": {
       "symbols": ["startSessionImportWatch"],
       "reason": "Owns the OS filesystem watch over desktop external-agent history roots. Its session_import_watch_start / session_import_watch_stop commands are target:client, capability:client.local, transports:[\"internal\"] in protocol/companion-commands.json and local-only in protocol/headless-command-dispositions.json. A brain has no Tauri event source or those per-user desktop history paths to watch."
+    },
+    "components/providers/initializers/sites-initializer.tsx": {
+      "symbols": ["bootSites", "installSiteNotificationCommands"],
+      "reason": "bootSites is host-neutral by construction and lives in lib/sites/boot.ts precisely so a headless host could run it, but CloudflareSitesService reaches its provider tokens through createLocalKeyringStore (lib/credentials/keyring-store.ts:242), which THROWS off Tauri rather than degrading. Running it in a brain would throw once per owned Site and recover none of them. Giving KeyringStore a headless implementation is a credentials decision about where a cloud install's provider tokens live, not a registration, and it must land before this does. installSiteNotificationCommands is the `site.open` twin of the issue tracker's exclusion above: its whole body is a Next App Router router.push, and navigation acts on a UI surface the brain does not have."
+    },
+    "components/providers/initializers/vector-credential-migration-initializer.tsx": {
+      "symbols": ["registerExistingTwinVectorBackend"],
+      "reason": "Both effects in this initializer are a one-time desktop migration, and the initializer says so with its own isTauri() guard. registerExistingTwinVectorBackend re-registers a Twin vector backend from settings that migrateVectorCredentials just moved out of localStorage and into the OS keyring, and its own body opens with `if (!isTauri()) return` (lib/db/twin-runtime-settings.ts:121), so registering it in a brain would install a runtime whose first statement is a return. A brain's vector backend is configured through the server secret store, never migrated out of a browser's localStorage, because it never had one."
     },
     "components/providers/initializers/webview-heartbeat-initializer.tsx": {
       "symbols": ["startWebviewHeartbeat"],

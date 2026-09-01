@@ -14,6 +14,7 @@ registerHeadlessRuntime({
   hosts: ["brain"],
   start: (ctx) =>
     setHostEventPublisher(async (topic, event) => {
+      // invoke-parity-exempt: a `ws_bridge.rs:route_respond` route, not a Tauri command — the brain reaches it over `/internal/bridge`, and `route_respond` validates the topic against a closed allowlist before publishing.
       await ctx.bridge.invoke("companion_event_publish", { topic, event })
     }),
 })

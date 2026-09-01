@@ -18,7 +18,7 @@ import { toast } from "sonner"
 
 import { setRemoteTerminalAllowed } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import { isTauri, transport } from "@/lib/tauri"
+import { transport } from "@/lib/tauri"
 import type { TerminalHostDescriptor } from "@/types/mobile/paired-device"
 
 /** Which elevated grants a device holds, as reported by the host's SecurityStore. */
@@ -29,8 +29,24 @@ export interface DeviceGrantSummary {
   terminal: boolean
 }
 
+/**
+ * Flip the host's `terminal.open` grant for one device.
+ *
+ * Deliberately unguarded. This used to open with `if (!isTauri()) return`,
+ * which made every shell that is not the host silently succeed: the caller
+ * went on to write the Dexie mirror and toast "Terminal access disabled" while
+ * the host kept serving the device. A grant that fails open is worse than one
+ * that fails, and the mirror claiming a state the host does not hold is the
+ * exact drift this module was extracted to prevent.
+ *
+ * The transport already knows the answer without a round trip.
+ * `companion_set_remote_terminal` is `target: "client"`, so
+ * `CompanionTransport` rejects it with `command_transport_forbidden` and
+ * `WebStubTransport` rejects it too — the host's own `authorize_transport`
+ * would answer 403 anyway. Letting that rejection through is what turns a lie
+ * into a refusal the caller can render.
+ */
 export async function setRemoteTerminalRustSide(deviceId: string, allowed: boolean): Promise<void> {
-  if (!isTauri()) return
   await transport.call<void>("companion_set_remote_terminal", { deviceId, allowed })
 }
 
@@ -64,11 +80,14 @@ export async function provisionTerminalHostDescriptor(
  * permission it describes out of sync, which is the same class of bug as a
  * toggle writing a store nobody reads.
  *
- * Falls back to the mirror (`undefined`) when the host cannot be asked
- * (web/mobile shells, where `transport.call` has no Tauri backend).
+ * Falls back to the mirror (`undefined`) when the host cannot be asked. That
+ * is the transport's answer, not a shell check: `companion_list_device_grants`
+ * is `target: "client"`, so a companion or web shell rejects it locally
+ * without a round trip and the catch below turns the rejection into the same
+ * `undefined`. One less `isTauri()` standing between a caller and a transport
+ * that already knows.
  */
 export async function readDeviceGrants(): Promise<Map<string, DeviceGrantSummary> | undefined> {
-  if (!isTauri()) return undefined
   try {
     const rows = await transport.call<DeviceGrantSummary[]>("companion_list_device_grants")
     // A host that answers with nothing is not an error — it just cannot tell
@@ -104,6 +123,24 @@ export function useDeviceGrants(): {
   return { grants, refresh }
 }
 
+/**
+ * Separate "this shell cannot change a host grant" from "the write failed".
+ *
+ * Both surface as a thrown call, and collapsing them would tell someone
+ * standing at the host that their machine is broken, or tell someone on a
+ * phone to retry something no retry can reach. The Host reuses its own
+ * `command_transport_forbidden` code for the client-side refusal, so the code
+ * is the same on either side of the wire.
+ */
+function hostRefusalMessage(error: unknown, t: (key: string) => string): string {
+  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined
+  const message = error instanceof Error ? error.message : ""
+  const unreachable =
+    code === "command_transport_forbidden" ||
+    /tauri-only command from web mode|cannot be answered by a paired host/.test(message)
+  return unreachable ? t("hostOnly") : t("operationFailed")
+}
+
 export type ToggleRemoteTerminal = (
   deviceId: string,
   devicePublicKey: string,
@@ -129,7 +166,16 @@ export function useRemoteTerminalGrantToggle(
   return useCallback<ToggleRemoteTerminal>(
     async (deviceId, devicePublicKey, label, next) => {
       if (!next) {
-        await setRemoteTerminalRustSide(deviceId, false)
+        // Host first, mirror second, and no mirror write at all if the host
+        // refused. Disabling reduces privilege so it needs no biometric, but
+        // it still needs to have happened: the old order wrote Dexie and
+        // toasted success on a shell where the host call was a no-op.
+        try {
+          await setRemoteTerminalRustSide(deviceId, false)
+        } catch (error) {
+          toast.error(hostRefusalMessage(error, tTerminal))
+          return
+        }
         await setRemoteTerminalAllowed(deviceId, false)
         await onChanged?.()
         toast.success(tTerminal("disabledToast", { label }))
@@ -155,8 +201,8 @@ export function useRemoteTerminalGrantToggle(
             }
           }
         )
-      } catch {
-        toast.error(tTerminal("operationFailed"))
+      } catch (error) {
+        toast.error(hostRefusalMessage(error, tTerminal))
         return
       }
       if (result.kind === "blocked") {

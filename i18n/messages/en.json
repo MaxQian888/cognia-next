@@ -16340,6 +16340,7 @@
         "description": "Lets this device view, resume, and control host-owned terminal sessions. This permission is independent from remote control and agent control.",
         "disabledToast": "Terminal access disabled for {label}.",
         "enabledToast": "Terminal access enabled for {label}.",
+        "hostOnly": "Terminal access can only be changed on the machine that hosts the sessions. Open this device list there.",
         "operationFailed": "The terminal permission could not be saved.",
         "reason": "Confirm granting terminal access to {label}",
         "title": "Allow terminal access",

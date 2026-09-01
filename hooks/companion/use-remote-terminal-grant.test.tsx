@@ -8,6 +8,7 @@
 import "fake-indexeddb/auto"
 import { act, renderHook, waitFor } from "@testing-library/react"
 
+import companionMessages from "@/i18n/messages/en/mobile/companion.json"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { addPairedDevice, listPairedDevices } from "@/lib/db/paired-devices"
@@ -86,9 +87,7 @@ afterEach(() => {
 })
 
 describe("readDeviceGrants / useDeviceGrants", () => {
-  it("returns undefined off Tauri and when the host cannot answer, and a map otherwise", async () => {
-    setTauri(false)
-    expect(await readDeviceGrants()).toBeUndefined()
+  it("returns undefined when the host cannot answer, and a map otherwise", async () => {
     setTauri(true)
 
     callSpy.mockImplementation(async (name: string) => {
@@ -135,13 +134,31 @@ describe("readDeviceGrants / useDeviceGrants", () => {
 })
 
 describe("provisionTerminalHostDescriptor / setRemoteTerminalRustSide", () => {
-  it("throws when the host returns no descriptor and skips the host off Tauri", async () => {
+  it("throws when the host returns no descriptor", async () => {
     callSpy.mockImplementation(async () => ({}) as never)
     await expect(provisionTerminalHostDescriptor("dev-a", "pk")).rejects.toThrow(/descriptor/)
+  })
+
+  /**
+   * The fail-open this module used to have. `setRemoteTerminalRustSide` opened
+   * with `if (!isTauri()) return`, so on a companion or web shell the caller
+   * wrote the Dexie mirror and toasted success while the host kept serving the
+   * device. It must reach the transport unconditionally and let the refusal
+   * through.
+   */
+  it("never resolves without reaching the transport", async () => {
     setTauri(false)
     callSpy.mockClear()
-    await setRemoteTerminalRustSide("dev-a", true)
-    expect(callSpy).not.toHaveBeenCalled()
+    callSpy.mockImplementation(async () => {
+      throw Object.assign(new Error("cannot be answered by a paired host"), {
+        code: "command_transport_forbidden",
+      })
+    })
+    await expect(setRemoteTerminalRustSide("dev-a", true)).rejects.toThrow()
+    expect(callSpy).toHaveBeenCalledWith("companion_set_remote_terminal", {
+      deviceId: "dev-a",
+      allowed: true,
+    })
   })
 })
 
@@ -223,5 +240,38 @@ describe("useRemoteTerminalGrantToggle", () => {
     expect(row.allowRemoteTerminal).toBe(false)
     expect(onChanged).toHaveBeenCalledTimes(1)
     expect(toastMock.success).toHaveBeenCalled()
+  })
+
+  /**
+   * The whole point of the un-fail-open. A shell that cannot reach the host
+   * must leave the mirror alone: a mirror reading "off" over a host still
+   * serving the device is the one state nobody can recover from by looking.
+   */
+  it("leaves the mirror untouched and says where to go when the host is unreachable", async () => {
+    await getDb().pairedDevices.update("dev-a", { allowRemoteTerminal: true })
+    const onChanged = jest.fn()
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_set_remote_terminal") {
+        throw Object.assign(new Error("cannot be answered by a paired host"), {
+          code: "command_transport_forbidden",
+        })
+      }
+      return undefined as never
+    })
+    const { result } = renderHook(() => useRemoteTerminalGrantToggle(onChanged))
+    await act(async () => {
+      await result.current("dev-a", "pk-a", "Phone", false)
+    })
+    const [row] = await listPairedDevices()
+    expect(row.allowRemoteTerminal).toBe(true)
+    expect(onChanged).not.toHaveBeenCalled()
+    expect(toastMock.success).not.toHaveBeenCalled()
+    // The harness resolves real messages, so this also pins that `hostOnly`
+    // exists in the catalogue — and that the refusal is not the generic
+    // "could not be saved", which would send someone to retry a call no retry
+    // can reach.
+    const shown = toastMock.error.mock.calls.at(0)?.[0] as string
+    expect(shown).toBe(companionMessages.remoteTerminal.hostOnly)
+    expect(shown).not.toBe(companionMessages.remoteTerminal.operationFailed)
   })
 })

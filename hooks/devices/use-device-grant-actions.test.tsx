@@ -140,24 +140,35 @@ describe("Locked Use follows remote control down", () => {
 
 describe("lifecycle", () => {
   /**
-   * Rust treats pause as a deny-list entry, so without the gate an attacker at
-   * a momentarily-unlocked desktop could silently disable every paired phone.
+   * Without the gate an attacker at a momentarily-unlocked desktop could
+   * silently disable every paired phone.
    */
-  it("gates pause and writes the deny list", async () => {
+  it("gates pause and suspends rather than revokes", async () => {
     const { actions: a } = actions()
     await a.pause("d1", "Phone")
     expect(guardCalls).toHaveLength(1)
     expect(db.pausePairedDevice).toHaveBeenCalledWith("d1")
-    expect(hostCalls).toContainEqual({ name: "companion_revoke_device", args: { deviceId: "d1" } })
+    expect(hostCalls).toContainEqual({ name: "companion_suspend_device", args: { deviceId: "d1" } })
   })
 
-  it("gates resume and lifts the deny list", async () => {
+  /**
+   * The distinction Pause exists for. Revoke tears down the signaling
+   * registration and the device key, so a device paused through the revoke arm
+   * needed re-pairing to come back and Resume could not reach it.
+   */
+  it("never revokes on pause", async () => {
+    const { actions: a } = actions()
+    await a.pause("d1", "Phone")
+    expect(hostCalls.map((call) => call.name)).not.toContain("companion_revoke_device")
+  })
+
+  it("gates resume and lifts the suspension", async () => {
     const { actions: a } = actions()
     await a.resume("d1", "Phone")
     expect(guardCalls).toHaveLength(1)
     expect(db.resumePairedDevice).toHaveBeenCalledWith("d1")
     expect(hostCalls).toContainEqual({
-      name: "companion_unrevoke_device",
+      name: "companion_resume_device",
       args: { deviceId: "d1" },
     })
   })

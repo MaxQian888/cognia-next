@@ -41,6 +41,10 @@
  *   the run bridge that dispatches an issue to an agent engine, the lifecycle →
  *   Notification Center watcher, label seeding and the GitHub refresh schedule
  *   (host-neutral `bootIssueTracker` in lib/issues/boot.ts).
+ * - `collab-refresh` — pulls the four collab read caches (ADR-0149) on the
+ *   shared backoff. The desktop's `installCollabRefreshScheduler` is excluded
+ *   because it gates on `document.visibilityState`, so in a brain it would
+ *   register and refresh nothing. Same body, no visibility question.
  * - `plan-notification` — the ADR-0045 `plan.respond` notification command;
  *   approve/reject/start mutate the brain-side plan runtime, and an orchestrated
  *   plan starts running from here.
@@ -127,6 +131,7 @@ import "./integration-runtime"
 import "./performance-runtime"
 import "./workflow-trigger-bridge"
 import "./issue-tracker"
+import "./collab-refresh"
 import "./plan-notification"
 
 export {}

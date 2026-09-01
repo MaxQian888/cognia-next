@@ -12,10 +12,11 @@
  *    triggers (`register_default_event_channels`).
  *  - Headless brain: no Tauri runtime. The first headless runtime,
  *    `lib/headless/runtimes/host-event-publisher.ts`, registers a publisher
- *    that pipes `{ topic, event }` through
- *    `ctx.bridge.invoke("companion_event_publish", …)`, which
- *    `ws_bridge.rs:route_respond` validates against a topic allowlist before
- *    publishing on the same bus.
+ *    that pipes `{ topic, event }` through `ctx.bridge` as the
+ *    `companion_event_publish` route, which `ws_bridge.rs:route_respond`
+ *    validates against a topic allowlist before publishing on the same bus.
+ *    That route lives on the bridge, not in `generate_handler!`, which is why
+ *    its call site carries an `invoke-parity-exempt` marker.
  *  - Anywhere else (browser / mobile / tests): no-op — thin clients never
  *    publish host events.
  *
