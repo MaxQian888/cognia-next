@@ -38730,6 +38730,12 @@
       "noMatchesDescription": "放宽筛选，或清空搜索，看剩下的。",
       "noMatchesTitle": "没有匹配的小队",
       "openFleet": "宿主实时活动",
+      "palette": {
+        "start": "启动 {name}",
+        "pause": "暂停 {name}",
+        "resume": "恢复 {name}",
+        "meta": "小队控制"
+      },
       "railLabel": "小队列表",
       "search": "搜索小队",
       "stats": {

@@ -25,6 +25,12 @@
     "noMatchesDescription": "Widen the filter or clear the search to see the rest.",
     "noMatchesTitle": "No Squads match",
     "openFleet": "Live host activity",
+    "palette": {
+      "start": "Start {name}",
+      "pause": "Pause {name}",
+      "resume": "Resume {name}",
+      "meta": "Squad control"
+    },
     "railLabel": "Squad list",
     "search": "Search Squads",
     "stats": {
