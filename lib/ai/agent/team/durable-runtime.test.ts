@@ -98,9 +98,13 @@ describe("durable AgentTeam coordinator", () => {
         detail: "Do not break the public API",
       }),
     ])
-    expect(await getDb().executionRuns.get("run-constraints")).toMatchObject({
+    // Addressed the way `agent-team-bridge` addresses it. Keying the row on the
+    // bare run id made this path create a SECOND execution row for the same
+    // run (`sourceId: <teamId>` rather than `<runId>`), which nothing deduped.
+    expect(await getDb().executionRuns.get("run-constraints")).toBeUndefined()
+    expect(await getDb().executionRuns.get("execution:team:run-constraints")).toMatchObject({
       kind: "team",
-      sourceId: "team-1",
+      sourceId: "run-constraints",
       status: "running",
     })
   })

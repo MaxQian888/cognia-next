@@ -7,6 +7,7 @@ import {
   EXECUTION_FILTER_KINDS,
   mapRunStatus,
   mapExecStatus,
+  supersededTeamRunIds,
 } from "./monitor-model"
 import type { UnifiedExecutionRow } from "./monitor-model"
 import type { ExecutionLegSnapshot } from "./types"
@@ -86,6 +87,60 @@ describe("buildExecutionMonitorModel", () => {
         label: "Canonical workflow",
       }),
     ])
+  })
+
+  it("collapses a legacy team row onto the canonical one", () => {
+    // Two writers created a row for the same team run under two conventions:
+    // `execution:team:<runId>` with `sourceId: <runId>`, and the bare
+    // `<runId>` with `sourceId: <teamId>`. Journal rows are only deduped
+    // against workflow / scheduler rows, never against each other, so the
+    // cockpit listed the run twice. The second copy carried no `sessionId`,
+    // so its coordination tab read "unavailable".
+    const canonical: ExecutionRun = {
+      id: "execution:team:run_team_1",
+      kind: "team",
+      sourceId: "run_team_1",
+      sessionId: "session-1",
+      title: "Ship the thing",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 3000,
+      updatedAt: 3000,
+    }
+    const legacy: ExecutionRun = {
+      id: "run_team_1",
+      kind: "team",
+      sourceId: "team-9",
+      title: "Agent team run",
+      status: "queued",
+      currentRevision: 0,
+      startedAt: 2900,
+      updatedAt: 2900,
+    }
+    const rows = buildExecutionMonitorModel({
+      brokerLegs: [],
+      executionRuns: [canonical, legacy],
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      rowId: "journal:execution:team:run_team_1",
+      sessionId: "session-1",
+    })
+  })
+
+  it("leaves two genuinely different team runs alone", () => {
+    const runs: ExecutionRun[] = ["a", "b"].map((n) => ({
+      id: `execution:team:run_team_${n}`,
+      kind: "team",
+      sourceId: `run_team_${n}`,
+      title: `Run ${n}`,
+      status: "running",
+      currentRevision: 0,
+      startedAt: 3000,
+      updatedAt: 3000,
+    }))
+    expect(supersededTeamRunIds(runs).size).toBe(0)
+    expect(buildExecutionMonitorModel({ brokerLegs: [], executionRuns: runs })).toHaveLength(2)
   })
 
   it("keeps the cancellable broker projection when it matches a canonical live run", () => {

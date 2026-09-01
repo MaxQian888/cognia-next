@@ -137,8 +137,11 @@ describe("runTeamLifecycle durable preflight", () => {
         recoveryReason: "Execution environment cannot enforce: sandbox",
       })
     )
+    // Addressed through `agentTeamExecutionRunId`, the same key the row was
+    // created under. Appending to the bare run id wrote the terminal event to a
+    // journal nothing reads.
     expect(appendExecutionRunEvent).toHaveBeenCalledWith(
-      "run-durable",
+      "execution:team:run-durable",
       expect.objectContaining({ type: "run.failed" })
     )
   })

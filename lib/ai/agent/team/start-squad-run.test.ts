@@ -299,15 +299,82 @@ describe("startSquadRun — run binding", () => {
     expect(order).toEqual(["bind", "run"])
   })
 
-  it("still dispatches when there is no session — just uncarded", async () => {
+  it("records the run without a session, so an uncarded run is still listable", async () => {
+    // Gating the row on a session left every Issue- and schedule-dispatched
+    // run with no journal row at all unless the Squad happened to be
+    // `durable-v2`, so the cockpit could not list a run that was genuinely
+    // happening. The row is created either way; what a session adds is the
+    // `sessionId` that binds progress and gates back to a thread.
     const h = harness()
     const res = await startSquadRun(
       { squadId: "squad-1", goal: "g", origin: "chat", triggeredFrom: chatTrigger },
       h.deps
     )
     expect(res.started).toBe(true)
-    expect(ensureTeamExecutionRunMock).not.toHaveBeenCalled()
+    expect(ensureTeamExecutionRunMock).toHaveBeenCalledTimes(1)
+    const seed = ensureTeamExecutionRunMock.mock.calls[0]![0] as Record<string, unknown>
+    expect(seed).toMatchObject({ objective: "g" })
+    expect(seed.sessionId).toBeUndefined()
     expect(h.runCalls).toHaveLength(1)
+  })
+
+  it("stamps the Squad's workspace on the run, so the row is attributable", async () => {
+    // `inProject` treats an absent projectId as global, so omitting it did not
+    // hide the row: it made the run show up in every workspace at once.
+    const h = harness()
+    h.deps.loadStore = async () =>
+      ({
+        getTeam: (id: string) => ({ id, name: "S", projectId: "proj-7" }),
+        getTeammates: () => [],
+        getTeamTasks: () => [],
+        updateTeam: () => undefined,
+        addMessage: () => undefined,
+        setTaskStatus: () => undefined,
+        updateTeammate: () => undefined,
+      }) as never
+    await startSquadRun(
+      { squadId: "squad-1", goal: "g", origin: "chat", triggeredFrom: chatTrigger },
+      h.deps
+    )
+    expect(ensureTeamExecutionRunMock.mock.calls[0]![0]).toMatchObject({ projectId: "proj-7" })
+  })
+
+  it("hands the conversation's working directory to the lifecycle", async () => {
+    // ADR-0144: the conversation answers "where does work happen". The Squad's
+    // own `config.workingDir` was written when it was configured and knows
+    // nothing about the workspace the conversation is in.
+    const h = harness()
+    h.deps.resolveSessionCwd = async () => "/w/repo"
+    await startSquadRun(
+      {
+        squadId: "squad-1",
+        goal: "g",
+        origin: "chat",
+        triggeredFrom: chatTrigger,
+        session: session(),
+      },
+      h.deps
+    )
+    expect(h.runCalls[0]!.deps).toMatchObject({ sessionWorkingDir: "/w/repo" })
+  })
+
+  it("omits the working directory when the resolver fails", async () => {
+    const h = harness()
+    h.deps.resolveSessionCwd = async () => {
+      throw new Error("no workspace")
+    }
+    const res = await startSquadRun(
+      {
+        squadId: "squad-1",
+        goal: "g",
+        origin: "chat",
+        triggeredFrom: chatTrigger,
+        session: session(),
+      },
+      h.deps
+    )
+    expect(res.started).toBe(true)
+    expect(h.runCalls[0]!.deps).not.toHaveProperty("sessionWorkingDir")
   })
 
   it("never lets a binding failure reject the dispatch", async () => {

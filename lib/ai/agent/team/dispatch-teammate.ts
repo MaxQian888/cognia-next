@@ -300,6 +300,15 @@ async function runToolEnabled(
             twinInjectSource: "team",
           }
         : {}),
+      // Long-term memory (ADR-0069). `resolveSendOptions` decides per its own
+      // enabled/temporary gate whether to recall; `build-options` needs BOTH
+      // the deps and a user message, and a teammate's task prompt is that
+      // message. Without this pair the injection branch was skipped silently on
+      // every teammate turn, so a conversation handed to a Squad lost the
+      // memories the direct path would have recalled.
+      ...(teamCtx.memoryDeps && prompt.trim()
+        ? { memoryDeps: teamCtx.memoryDeps, memoryUserMessage: prompt }
+        : {}),
     })
     // Name the turn for lifecycle-hook scoping. `resolveSendOptions` defaults
     // every turn to `"chat"` because that is what it normally resolves; a

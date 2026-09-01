@@ -149,6 +149,23 @@ export interface RunTeamLifecycleDeps {
   /** Parent IM ceiling inherited by every teammate dispatch in this run. */
   parentPermissionCeiling?: import("@/types/agent/permission-ceiling").AgentPermissionCeiling
   /**
+   * The conversation's resolved working directory (ADR-0144), when the surface
+   * that started this run has one.
+   *
+   * A Squad is an executor a conversation is handed to, and the conversation
+   * already answers "where does work happen" through
+   * `resolveEffectiveCwdForSession` — its workspace root, its editor pin, its
+   * project. The team's own `config.workingDir` was written once when the
+   * Squad was configured and knows none of that, so a Squad run started from a
+   * conversation in workspace B used to work in whatever directory the Squad
+   * was set up with.
+   *
+   * Only consulted when the Squad has no explicitly configured repositories:
+   * a Squad that names its own repositories is stating where it works, and
+   * that statement outranks the caller's ambient directory.
+   */
+  sessionWorkingDir?: string
+  /**
    * Depth of the team-completion → workflow → team chain that produced this
    * run (0 = root). Threaded by the `action.team.run` executor from the
    * outer run's `trigger.payload.chainDepth`; the terminal `trigger.team`
@@ -298,10 +315,23 @@ export async function runTeamLifecycle(
     if (ac.signal.aborted) {
       return { runId: "", status: "cancelled", reason: "Aborted before start" }
     }
-    const team = deps.storeReader.getTeam(teamId)
-    if (!team) {
+    const storedTeam = deps.storeReader.getTeam(teamId)
+    if (!storedTeam) {
       return { runId: "", status: "failed", reason: `Team ${teamId} not found` }
     }
+    // Fold the caller's directory in ONCE, here, rather than at each of the
+    // four places `config.workingDir` is read (root construction, the durable
+    // primary-repository path, and both dispatch paths). A local clone: the
+    // store still holds what the Squad was configured with, because the
+    // conversation's directory belongs to this run, not to the Squad.
+    const team: AgentTeam =
+      deps.sessionWorkingDir &&
+      !(storedTeam.config.repositories && storedTeam.config.repositories.length > 0)
+        ? {
+            ...storedTeam,
+            config: { ...storedTeam.config, workingDir: deps.sessionWorkingDir },
+          }
+        : storedTeam
     const allMembers = deps.storeReader.getTeammates(teamId)
     const workers = allMembers.filter((m) => m.role === "teammate")
     if (workers.length === 0) {
@@ -426,9 +456,11 @@ export async function runTeamLifecycle(
           updatedAt: Date.now(),
         }).catch(() => false)
         const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
-        if (await getExecutionRun(runId).catch(() => undefined)) {
+        const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
+        const executionRunId = agentTeamExecutionRunId(runId)
+        if (await getExecutionRun(executionRunId).catch(() => undefined)) {
           await runEventJournal
-            .append(runId, {
+            .append(executionRunId, {
               id: `execution-event:${runId}:team-terminal:failed`,
               ts: Date.now(),
               type: "run.failed",
@@ -870,6 +902,11 @@ export async function runTeamLifecycle(
       buildDeps: usesTwin || mayRecruit,
       listAvailable: mayRecruit,
     })
+    // Once per run, after the twin deps so the memory backend can share their
+    // vector-store client instead of opening a second one. See
+    // `./team/memory-context`.
+    const { resolveTeamMemoryRuntime } = await import("./team/memory-context")
+    const memoryDeps = await resolveTeamMemoryRuntime(twinDeps)
 
     // ── Workspace isolation: one Registry/Bundle authority ──
     // A tool-capable local dispatch may only receive a Registry alias. Browser
@@ -937,6 +974,7 @@ export async function runTeamLifecycle(
       storeWriter: deps.storeWriter,
       ...(rateLimitResume ? { rateLimitResume } : {}),
       ...(twinDeps ? { twinDeps } : {}),
+      ...(memoryDeps ? { memoryDeps } : {}),
       ...(availableTwins.length > 0 ? { availableTwins } : {}),
       // Lazily populated by dispatchTeammate on first claim — see
       // `lib/ai/agent/team/dispatch-teammate.ts`.
@@ -1133,7 +1171,9 @@ export async function runTeamLifecycle(
           updatedAt: Date.now(),
         }).catch(() => false)
         const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
-        const executionRun = await getExecutionRun(runId).catch(() => undefined)
+        const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
+        const executionRunId = agentTeamExecutionRunId(runId)
+        const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
         if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
           const eventType =
             durableStatus === "completed"
@@ -1146,7 +1186,7 @@ export async function runTeamLifecycle(
                     ? "run.paused"
                     : "run.waiting"
           await runEventJournal
-            .append(runId, {
+            .append(executionRunId, {
               id: `execution-event:${runId}:team-terminal:${durableStatus}`,
               ts: Date.now(),
               type: eventType,

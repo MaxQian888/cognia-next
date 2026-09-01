@@ -121,6 +121,8 @@ export interface StartSquadRunDeps {
   loadCharacter?: (
     characterId: string
   ) => Promise<{ id: string; name: string; systemPrompt: string } | undefined>
+  /** Returns `resolveEffectiveCwdForSession` (ADR-0144). */
+  resolveSessionCwd?: (session: ChatSession) => Promise<string | null>
 }
 
 async function defaultLoadStore(): Promise<SquadStoreLike> {
@@ -144,6 +146,11 @@ async function defaultLoadBuildDeps(): Promise<
   return buildAgentTeamRuntimeDeps as unknown as (options?: {
     entryPersona?: { id: string; name: string; systemPrompt: string }
   }) => Record<string, unknown>
+}
+
+async function defaultResolveSessionCwd(session: ChatSession): Promise<string | null> {
+  const { resolveEffectiveCwdForSession } = await import("@/hooks/chat/use-effective-cwd")
+  return resolveEffectiveCwdForSession(session)
 }
 
 async function defaultLoadCharacter(characterId: string) {
@@ -191,9 +198,10 @@ export async function startSquadRun(
     return { started: false, reason: "dispatch_error" }
   }
 
-  const squad = store.getTeam(squadId) as { name?: unknown } | undefined
+  const squad = store.getTeam(squadId) as { name?: unknown; projectId?: unknown } | undefined
   if (!squad) return { started: false, reason: "squad_not_found" }
   const squadName = typeof squad.name === "string" ? squad.name : undefined
+  const projectId = typeof squad.projectId === "string" ? squad.projectId : undefined
 
   const entryPersona = input.characterId
     ? await (deps.loadCharacter ?? defaultLoadCharacter)(input.characterId)
@@ -217,6 +225,14 @@ export async function startSquadRun(
   const partial = buildAgentTeamRuntimeDeps(entryPersona ? { entryPersona } : undefined)
   const runId = input.runId ?? mintSquadRunId()
 
+  // Where the conversation says work happens. The Squad's own `workingDir` was
+  // written when it was configured and knows nothing about the workspace the
+  // conversation is in; the lifecycle prefers this only when the Squad has not
+  // named its own repositories.
+  const sessionWorkingDir = input.session
+    ? await (deps.resolveSessionCwd ?? defaultResolveSessionCwd)(input.session).catch(() => null)
+    : null
+
   const lifecycleDeps: Record<string, unknown> = {
     ...partial,
     runId,
@@ -227,6 +243,7 @@ export async function startSquadRun(
     ...(input.planApprovalDelegate ? { planApprovalDelegate: input.planApprovalDelegate } : {}),
     ...(input.requirePlanApprovalFloor ? { requirePlanApprovalFloor: true } : {}),
     ...(input.permissionCeiling ? { parentPermissionCeiling: input.permissionCeiling } : {}),
+    ...(sessionWorkingDir ? { sessionWorkingDir } : {}),
     storeReader: {
       getTeam: (id: string) => store.getTeam(id),
       getTeammates: (id: string) => store.getTeammates(id),
@@ -245,26 +262,38 @@ export async function startSquadRun(
   // firing the lifecycle. Afterwards would race: the lifecycle can emit its
   // first events — and a runner can wake on them — before the binding exists,
   // and a runner only projects onto a binding it can already see.
-  if (input.session) {
+  //
+  // Unconditional, not gated on a session. A run started from an Issue or a
+  // schedule has no conversation, and gating the row on one left those runs
+  // with no journal row at all unless the Squad happened to be `durable-v2`
+  // (the only other writer) — so the cockpit could not list a run that was
+  // genuinely happening. Without a session the row is uncarded: no thread to
+  // project progress onto and no control callback to match, which the run
+  // list says out loud rather than offering buttons that do nothing.
+  {
     const now = Date.now()
     const seed = {
       sourceRunId: runId,
-      objective: input.goal.trim() || squadId,
+      objective: input.goal.trim() || squadName || squadId,
+      // Attributes the run to the Squad's workspace. `inProject` treats an
+      // absent value as global, so omitting it did not hide the row — it made
+      // it permanently unattributable, showing up in every workspace.
+      ...(projectId ? { projectId } : {}),
       // Names the conversation on the run itself, so the run list and any
       // gate can find their way back to the thread that is waiting.
-      sessionId: input.session.id,
+      ...(input.session ? { sessionId: input.session.id } : {}),
       startedAt: now,
       updatedAt: now,
     }
     try {
       const bridge = await import("@/lib/execution/agent-team-bridge")
-      if (input.bindConnectorRun) {
+      if (input.bindConnectorRun && input.session) {
         await bridge.ensureImTeamExecutionRun({ seed, session: input.session })
       } else {
         await bridge.ensureTeamExecutionRun(seed)
       }
     } catch {
-      /* best-effort: an unbound run still executes, it is just uncarded */
+      /* best-effort: an unrecorded run still executes */
     }
   }
 

@@ -30,6 +30,7 @@ import {
   hasLiveBrokerLeg,
   journalRunRow,
   journalSourceKey,
+  supersededTeamRunIds,
   schedulerExecutionRow,
   sortExecutionRowsByRecency,
   workflowRunRow,
@@ -166,9 +167,13 @@ export function buildCockpitRows(input: BuildCockpitRowsInput): UnifiedExecution
     rows.push(brokerLegRow(leg))
   }
 
+  const supersededTeamRuns = supersededTeamRunIds(input.executionRuns ?? [])
   for (const run of input.executionRuns ?? []) {
     if (!inProject(run.projectId, input.projectId)) continue
     journalSourceKeys.add(journalSourceKey(run))
+    // Same run, written twice under two id conventions. See
+    // `supersededTeamRunIds`.
+    if (supersededTeamRuns.has(run.id)) continue
     if (hasLiveBrokerLeg(run, input.brokerLegs)) continue
     rows.push(journalRunRow(run))
   }

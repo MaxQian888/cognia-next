@@ -26,6 +26,20 @@ import {
 
 const mockStart = jest.fn(async () => {})
 const mockAbort = jest.fn()
+// The default `startTeam` goes through the ADR-0140 funnel, not straight to
+// the manager, so the run gets the id convention, the `projectId` stamp and an
+// execution row it previously had none of.
+const mockStartSquadRun = jest.fn(
+  async () =>
+    ({ started: true, runId: "run_team_1" }) as {
+      started: boolean
+      runId?: string
+      reason?: string
+    }
+)
+jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+  startSquadRun: (...args: unknown[]) => mockStartSquadRun(...(args as [])),
+}))
 jest.mock("@/lib/ai/agent/agent-team", () => ({
   agentTeamManager: { start: (...args: unknown[]) => mockStart(...(args as [])) },
 }))
@@ -464,8 +478,14 @@ describe("default deps", () => {
     expect(deps.createTask({ teamId: "team-1", title: "x", description: "" })).toMatchObject({
       id: "tt-created",
     })
-    await deps.startTeam("team-1", "im")
-    expect(mockStart).toHaveBeenCalledWith("team-1", { origin: "im" })
+    await deps.startTeam("team-1", "im", "KEY-1: Fix the thing")
+    expect(mockStartSquadRun).toHaveBeenCalledWith({
+      squadId: "team-1",
+      goal: "KEY-1: Fix the thing",
+      origin: "im",
+      triggeredFrom: { source: "im" },
+    })
+    expect(mockStart).not.toHaveBeenCalled()
     deps.abortTeam("team-1", "why")
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockAbort).toHaveBeenCalledWith("team-1", expect.any(Error))

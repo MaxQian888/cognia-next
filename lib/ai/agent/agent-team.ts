@@ -11,6 +11,7 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { mintSquadRunId } from "./team/start-squad-run"
 import { stackedDeliveryOn } from "@/lib/stack/team-policy"
 import type {
   AgentTeam,
@@ -40,6 +41,12 @@ export interface AgentTeamManager {
       ultracode?: boolean
       /** Trigger origin; headless origins resolve HITL gates via gate-policy. */
       origin?: import("./team/gate-policy").TeamRunOrigin
+      /**
+       * The conversation that asked for this run, when the caller has one.
+       * Names the thread on the execution row so a gate can find its way back
+       * to what is waiting — see `TeamExecutionRunSeed.sessionId`.
+       */
+      sessionId?: string
     }
   ): Promise<void>
   pause(id: string): Promise<void>
@@ -148,8 +155,39 @@ async function runManaged(
 ): Promise<void> {
   const deps = await ensureConfiguredDeps()
   useAgentTeamStore.getState().setTeamStatus(id, "executing")
+  // Mint the run id HERE and record the execution row before the lifecycle
+  // starts, the way `startSquadRun` does for chat and IM.
+  //
+  // ADR-0140 made `startSquadRun` the funnel, but it reaches `runTeamLifecycle`
+  // directly, so everything that starts a Squad through the manager — the
+  // scheduler, `ctx.agent.runTeam`, the external bridge's `team_run`,
+  // `action.team.compose` — produced a run with no journal row at all unless
+  // the Squad happened to be `durable-v2`. The cockpit could not list a run
+  // that was genuinely happening. This is the manager's half of the same
+  // funnel; the ids converge because both derive from
+  // `agentTeamExecutionRunId`, so whichever writes first wins.
+  //
+  // It is not moved into `runTeamLifecycle` because the lifecycle is also what
+  // `startSquadRun` calls, which has already created the row (with the
+  // conversation binding IM needs) by the time it gets there.
+  const runId = existingRunId ?? mintSquadRunId()
+  const startingTeam = useAgentTeamStore.getState().teams[id]
+  try {
+    const { ensureTeamExecutionRun } = await import("@/lib/execution/agent-team-bridge")
+    const at = Date.now()
+    await ensureTeamExecutionRun({
+      sourceRunId: runId,
+      objective: startingTeam?.task || startingTeam?.name || id,
+      ...(startingTeam?.projectId ? { projectId: startingTeam.projectId } : {}),
+      ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
+      startedAt: at,
+      updatedAt: at,
+    })
+  } catch {
+    /* best-effort: an unrecorded run still executes */
+  }
   const result = await runTeamLifecycle(id, {
-    ...(existingRunId ? { runId: existingRunId } : {}),
+    runId,
     storeReader: bindStoreReader(),
     storeWriter: bindStoreWriter(),
     runLeadPlanning: deps.runLeadPlanning,

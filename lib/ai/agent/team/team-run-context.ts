@@ -177,6 +177,15 @@ export interface TeamRunContext {
    */
   readonly twinDeps?: TwinRuntimeDepsForBuild
   /**
+   * Per-run long-term memory read deps (ADR-0069), built once by
+   * `resolveTeamMemoryRuntime`. Threaded into every teammate dispatch so
+   * `resolveSendOptions` can recall against the same backend the direct chat
+   * path would have used. Undefined when memory is off, temporary, or
+   * unreachable; injection then degrades to no recall, which is what a Squad
+   * turn did before this field existed.
+   */
+  readonly memoryDeps?: import("@/lib/memory/runtime/apply-memory-context").ApplyMemoryContextDeps
+  /**
    * Twins the lead may recruit as fresh members during adaptive re-planning
    * (see `replan-checkpoint.ts`). Empty when the team can't recruit or none
    * exist. Content-free summaries only.

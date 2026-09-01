@@ -250,6 +250,35 @@ export function journalSourceKey(run: ExecutionRun): string {
   return `${run.kind}:${run.sourceId}`
 }
 
+/**
+ * Ids of team runs that some OTHER team row already names as its source.
+ *
+ * Journal rows are deduped against workflow / scheduler / goal / plan rows,
+ * never against each other, and for a stretch two paths created a journal row
+ * for the same team run under different conventions: `startSquadRun` went
+ * through `agentTeamExecutionRunId` (`execution:team:<runId>`, `sourceId:
+ * <runId>`), while the durable coordinator used the bare `<runId>` as the id
+ * with `sourceId: <teamId>`. Both rendered. The second copy carried no
+ * `sessionId`, so its coordination tab said "unavailable" and its gate
+ * receipts went nowhere.
+ *
+ * Both writers now agree, but rows created before that still sit in local
+ * databases, so the legacy copy is collapsed on read rather than migrated —
+ * a display defect is not worth a schema version. The legacy row is exactly
+ * the one whose own `id` is the canonical row's `sourceId`.
+ */
+export function supersededTeamRunIds(runs: readonly ExecutionRun[]): Set<string> {
+  const sourceIds = new Set<string>()
+  for (const run of runs) {
+    if (run.kind === "team") sourceIds.add(run.sourceId)
+  }
+  const superseded = new Set<string>()
+  for (const run of runs) {
+    if (run.kind === "team" && sourceIds.has(run.id)) superseded.add(run.id)
+  }
+  return superseded
+}
+
 export function journalRunRow(run: ExecutionRun): UnifiedExecutionRow {
   const snapshot = run.latestSnapshot
   const ratio = snapshot?.progress.trustworthy ? snapshot.progress.ratio : undefined
@@ -330,10 +359,12 @@ export function buildExecutionMonitorModel(input: BuildMonitorModelInput): Unifi
     rows.push(brokerLegRow(leg))
   }
 
+  const supersededTeamRuns = supersededTeamRunIds(input.executionRuns ?? [])
   for (const run of input.executionRuns ?? []) {
     if (["completed", "failed", "cancelled"].includes(run.status)) continue
     if (!inProject(run.projectId, input.projectId)) continue
     journalSourceKeys.add(journalSourceKey(run))
+    if (supersededTeamRuns.has(run.id)) continue
     if (hasLiveBrokerLeg(run, input.brokerLegs)) continue
     rows.push(journalRunRow(run))
   }

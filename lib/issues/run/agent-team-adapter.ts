@@ -54,8 +54,15 @@ export interface AgentTeamRunAdapterDeps {
   getTeam: (teamId: string) => AgentTeam | undefined
   getTask: (taskId: string) => AgentTeamTask | undefined
   createTask: (input: CreateTaskInput) => AgentTeamTask
-  /** Kick off the run; resolves at terminal state. */
-  startTeam: (teamId: string, origin: IssueRunOrigin) => Promise<void>
+  /**
+   * Kick off the run.
+   *
+   * `goal` is the issue, stated as the Squad's objective. The previous
+   * `agentTeamManager.start` took none, so the lead planned against whatever
+   * objective the Squad had been configured with while the issue arrived as
+   * one more task in the list — the run row then had nothing to call itself.
+   */
+  startTeam: (teamId: string, origin: IssueRunOrigin, goal?: string) => Promise<void>
   abortTeam: (teamId: string, reason: string) => void
   /** Durable-v2 artifact readers (best-effort; may return nothing for legacy runs). */
   collectArtifacts: (run: IssueRun) => Promise<IssueRunArtifact[]>
@@ -87,9 +94,25 @@ export function createDefaultAgentTeamRunAdapterDeps(): AgentTeamRunAdapterDeps 
       if (!loadedStore) throw new Error("agent team store not loaded")
       return loadedStore.getState().createTask(input)
     },
-    startTeam: async (teamId, origin) => {
-      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
-      await agentTeamManager.start(teamId, { origin })
+    startTeam: async (teamId, origin, goal) => {
+      // `startSquadRun` is the one funnel (ADR-0140). Going straight to
+      // `agentTeamManager.start` skipped the run-id convention, the
+      // `projectId` stamp and the execution row itself, so an issue-dispatched
+      // run was invisible in the cockpit unless the Squad was `durable-v2`.
+      //
+      // No `session`: an issue is not a conversation. The run is therefore
+      // uncarded — no thread to project progress onto and no control callback
+      // to match — which the run row states rather than implies.
+      const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+      const result = await startSquadRun({
+        squadId: teamId,
+        goal: goal ?? "",
+        origin,
+        triggeredFrom: { source: origin === "im" ? "im" : "ui" },
+      })
+      if (!result.started) {
+        throw new Error(`squad run refused: ${result.reason ?? "unknown"}`)
+      }
     },
     abortTeam: (teamId, reason) => {
       void import("@/lib/ai/agent/agent-team-runtime").then(({ abortTeam }) =>
@@ -214,9 +237,11 @@ export function createAgentTeamRunAdapter(
       })
       // Resolves at terminal state — never awaited here. A start that throws
       // synchronously (team vanished between canRun and start) still surfaces.
-      deps.startTeam(teamId, context.origin).catch((error) => {
-        deps.onStartError?.(error)
-      })
+      deps
+        .startTeam(teamId, context.origin, `${issue.identifier}: ${issue.title}`)
+        .catch((error) => {
+          deps.onStartError?.(error)
+        })
       return run
     },
     async poll(run: IssueRun): Promise<IssueRunPollResult> {

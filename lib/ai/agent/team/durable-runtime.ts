@@ -30,6 +30,7 @@ import { createFairTeamScheduler } from "./fair-scheduler"
 import { createDecisionLedger } from "./decision-ledger"
 import { createEvidenceBundle } from "./evidence-bundle"
 import { createExecutionRun, getExecutionRun, runEventJournal } from "@/lib/db/execution-runs"
+import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 
 export interface DurableChildControl {
   /** Must route through the runtime's PII-gated steering adapter. */
@@ -207,20 +208,33 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
     } else if (existing.teamId !== team.id) {
       throw new Error(`Durable run ${runId} belongs to another team`)
     }
-    const executionRun = await getExecutionRun(runId)
+    // The execution row is addressed the way `agent-team-bridge` addresses it,
+    // never by the bare `runId`. Both this path and `startSquadRun` create a
+    // row for the same run, and the bridge's contract is that "the ids
+    // converge because both derive from `agentTeamExecutionRunId`, so
+    // whichever path runs first wins and the second is a no-op". Keying this
+    // one on the bare id broke that: `journalSourceKey` is `${kind}:${sourceId}`,
+    // so `team:<runId>` and `team:<teamId>` never deduped and the cockpit
+    // listed the same run twice — the second copy with no `sessionId`, so its
+    // coordination tab read "unavailable" and its gate receipts went nowhere.
+    const executionRunId = agentTeamExecutionRunId(runId)
+    const executionRun = await getExecutionRun(executionRunId)
     if (!executionRun) {
       await createExecutionRun({
-        id: runId,
+        id: executionRunId,
         kind: "team",
-        sourceId: team.id,
+        sourceId: runId,
         ...(team.projectId ? { projectId: team.projectId } : {}),
-        title: "Agent team run",
+        // The objective, not a constant. On the uncarded path (a run with no
+        // conversation) this is the only row that gets created, so a generic
+        // title would be the only thing the run list could ever say about it.
+        title: team.task || "Agent team run",
         status: "queued",
         currentRevision: 0,
         startedAt: at,
         updatedAt: at,
       })
-      await runEventJournal.append(runId, {
+      await runEventJournal.append(executionRunId, {
         id: `execution-event:${runId}:started`,
         ts: at,
         type: "run.started",
@@ -228,7 +242,7 @@ export function createDurableTeamCoordinator(options: DurableTeamCoordinatorOpti
         payload: { summary: "Agent team run started" },
       })
     } else if (["waiting", "paused", "recovery_required"].includes(executionRun.status)) {
-      await runEventJournal.append(runId, {
+      await runEventJournal.append(executionRunId, {
         id: `execution-event:${runId}:resumed:${at}`,
         ts: at,
         type: "run.resumed",
