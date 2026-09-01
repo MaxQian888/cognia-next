@@ -1,7 +1,14 @@
 /**
  * Default icon per search kind (ADR-0129). Providers usually attach a more
- * specific icon; this is the fallback for rows without one (stored recents,
- * plugin providers that skipped it).
+ * specific icon. This is the fallback for rows without one, which is stored
+ * recents and plugin providers that skipped it.
+ *
+ * The map is typed as a full `Record<GlobalSearchKind, …>`, so a new kind is
+ * supposed to be a compile error here. It was not: `squad` and `site` were both
+ * absent for as long as those kinds have existed, and every row that reached
+ * this fallback rendered the generic command glyph. Full-repo `tsc` OOMs in this
+ * repo before it checks anything, which is why the type never spoke up and why
+ * `kind-icons.test.ts` walking `KIND_SCOPES` is the check that actually holds.
  */
 
 import {
@@ -12,6 +19,7 @@ import {
   CompassIcon,
   ContactIcon,
   FolderIcon,
+  GlobeIcon,
   InboxIcon,
   LayoutTemplateIcon,
   MessageSquareIcon,
@@ -26,6 +34,7 @@ import {
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
+  UsersRoundIcon,
   WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -40,6 +49,11 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   message: MessageSquareTextIcon,
   character: UserRoundIcon,
   team: UsersIcon,
+  // Distinct from `team` on purpose. A Squad and a guild of Characters are two
+  // different things that both surface in the same result list, and the row
+  // text alone does not separate them. Matches the Squads entry on the phone's
+  // Me list (`components/mobile/me/me-entries.ts`).
+  squad: UsersRoundIcon,
   workspace: FolderIcon,
   workflow: WorkflowIcon,
   skill: SparklesIcon,
@@ -55,6 +69,8 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   "pi-package": PackageIcon,
   device: SmartphoneIcon,
   issue: CircleDotIcon,
+  // Same glyph the `/sites` rail and the sites provider already use.
+  site: GlobeIcon,
 }
 
 export function kindIcon(kind: GlobalSearchKind): LucideIcon {
