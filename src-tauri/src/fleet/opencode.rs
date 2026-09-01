@@ -20,6 +20,16 @@ use std::path::{Path, PathBuf};
 
 use super::install::MANAGED_MARKER;
 
+/// Bumped whenever the plugin's wire contract changes, independently of
+/// `MANAGED_MARKER`.
+///
+/// The marker alone is what `classify` used to read, so a plugin written by an
+/// older build stayed `Installed` forever and kept calling a URL that no longer
+/// exists. It cannot be the marker itself: that string is shared with the
+/// Claude hook script and the Codex config, and bumping it would mark those
+/// stale for a change that has nothing to do with them.
+const OPENCODE_PLUGIN_CONTRACT: &str = "cognia-opencode-contract v2 (unversioned ack/nack paths)";
+
 /// `~/.config/opencode/plugin/`. OpenCode's global plugin dir (singular
 /// `plugin`, per current docs). `None` when there's no config dir.
 fn opencode_plugin_dir() -> Option<PathBuf> {
@@ -42,6 +52,7 @@ pub fn opencode_plugin_source() -> String {
     // braces are doubled for `format!`.
     format!(
         r#"// {marker}
+// {contract}
 // Cognia fleet monitor plugin for OpenCode. Forwards session activity and
 // proxies permission prompts to the Cognia desktop app. Fails open.
 import {{ readFileSync }} from "node:fs"
@@ -124,7 +135,7 @@ async function settleCommand(cfg, command, ok, value) {{
     ? {{ id: command.id, result: value || null }}
     : {{ id: command.id, error: String(value && value.message ? value.message : value) }}
   try {{
-    await fetch(`https://127.0.0.1:${{cfg.port}}/api/v1/fleet/opencode/commands/${{suffix}}`, {{
+    await fetch(`https://127.0.0.1:${{cfg.port}}/api/fleet/opencode/commands/${{suffix}}`, {{
       method: "POST",
       headers: {{ "Content-Type": "application/json", "X-Cognia-Fleet-Token": cfg.token }},
       body: JSON.stringify(body),
@@ -319,6 +330,7 @@ export const CogniaFleet = async ({{ directory, serverUrl }}) => {{
 }}
 "#,
         marker = MANAGED_MARKER,
+        contract = OPENCODE_PLUGIN_CONTRACT,
         env_keys = env_keys_js(),
     )
 }
@@ -353,7 +365,15 @@ fn classify(plugin_dir: &Path) -> OpencodeStatus {
         return OpencodeStatus::Unavailable;
     }
     match std::fs::read_to_string(opencode_plugin_path_from(plugin_dir)) {
-        Ok(contents) if contents.contains(MANAGED_MARKER) => OpencodeStatus::Installed,
+        // Both, not just the marker. A plugin carrying the marker but an older
+        // contract is calling a URL this build no longer serves, so it reads as
+        // Stale and the settings row offers a one-click reinstall.
+        Ok(contents)
+            if contents.contains(MANAGED_MARKER)
+                && contents.contains(OPENCODE_PLUGIN_CONTRACT) =>
+        {
+            OpencodeStatus::Installed
+        }
         Ok(_) => OpencodeStatus::Stale,
         Err(_) => OpencodeStatus::NotInstalled,
     }
@@ -445,7 +465,11 @@ mod tests {
         assert!(src.contains("output.status = decision.status"));
         // Send-message reverse channel: command poll + client execution.
         assert!(src.contains("/api/fleet/opencode/commands"));
-        assert!(src.contains("/api/v1/fleet/opencode/commands/${suffix}"));
+        assert!(src.contains("/api/fleet/opencode/commands/${suffix}"));
+        // The stamp `classify` reads. Without it in the emitted source, every
+        // freshly written plugin would immediately read back as Stale.
+        assert!(src.contains(OPENCODE_PLUGIN_CONTRACT));
+        assert!(!src.contains("/api/v1/"), "runtime paths on this listener are unversioned");
         assert!(src.contains("settleCommand"));
         assert!(src.contains("createOpencodeClient as createV2Client"));
         assert!(src.contains("client.session.promptAsync"));

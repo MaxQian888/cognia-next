@@ -30,12 +30,18 @@ pub fn router() -> Router {
             "/api/fleet/opencode/commands",
             post(opencode_commands_handler),
         )
+        // Unversioned, like every other route on this listener. The generator
+        // rejects a versioned runtime path outright
+        // (`gen-companion-api.mjs`), and `docs/api/README.md` states that
+        // versioned public paths are intentionally absent and 404. These two
+        // predated the scan reaching this file, so nothing enforced either
+        // claim here and the rule quietly had two exceptions.
         .route(
-            "/api/v1/fleet/opencode/commands/ack",
+            "/api/fleet/opencode/commands/ack",
             post(opencode_command_ack_handler),
         )
         .route(
-            "/api/v1/fleet/opencode/commands/nack",
+            "/api/fleet/opencode/commands/nack",
             post(opencode_command_nack_handler),
         )
 }
@@ -596,7 +602,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .method("POST")
-                    .uri("/api/v1/fleet/opencode/commands/ack")
+                    .uri("/api/fleet/opencode/commands/ack")
                     .header("content-type", "application/json")
                     .header(FLEET_TOKEN_HEADER, &token)
                     .extension(loopback_peer())
@@ -637,7 +643,7 @@ mod tests {
         let request = |peer: ConnectInfo<SocketAddr>, token: Option<&str>| {
             let mut builder = axum::http::Request::builder()
                 .method("POST")
-                .uri("/api/v1/fleet/opencode/commands/nack")
+                .uri("/api/fleet/opencode/commands/nack")
                 .header("content-type", "application/json");
             if let Some(token) = token {
                 builder = builder.header(FLEET_TOKEN_HEADER, token);

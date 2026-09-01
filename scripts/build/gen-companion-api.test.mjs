@@ -626,6 +626,44 @@ test("runtime route collection ignores test routers and rejects duplicate regist
   ])
 })
 
+test("a nested router's routes are collected under the prefix the listener mounts them at", () => {
+  // Seventeen live routes were invisible to the contract because their routers
+  // are merged after `with_state` from files the scan never opened, and their
+  // paths are relative to a `nest()` prefix.
+  const nested = `
+    Router::new()
+      .route("/health", get(health))
+      .route("/webhook/{adapter_type}/{adapter_id}", any(webhook));
+  `
+
+  assert.deepEqual([...extractRuntimeRoutes(nested, "/connectors")].sort(), [
+    "* /connectors/webhook/{adapter_type}/{adapter_id}",
+    "GET /connectors/health",
+  ])
+
+  // A root-mounted router is unchanged.
+  assert.deepEqual([...extractRuntimeRoutes(nested)].sort(), [
+    "* /webhook/{adapter_type}/{adapter_id}",
+    "GET /health",
+  ])
+})
+
+test("a declared mount that the server never nests is reported, not silently trusted", () => {
+  const nested = `Router::new().route("/health", get(health));`
+  const server = `Router::new().nest("/connectors", connectors::router());`
+
+  assert.deepEqual(
+    collectRuntimeRoutes([["connectors.rs", nested, "/connectors"]], server).errors,
+    [],
+  )
+
+  // A scan describing a surface nobody serves reads exactly like coverage.
+  assert.deepEqual(
+    collectRuntimeRoutes([["connectors.rs", nested, "/typo"]], server).errors,
+    ["declared route mount is never nested in server.rs: /typo (connectors.rs)"],
+  )
+})
+
 test("repairs required OpenAPI parameters for templated runtime routes", () => {
   const operation = {
     parameters: [{ in: "query", name: "format", schema: { type: "string" } }],

@@ -12,6 +12,17 @@ Next.js application is a static export.
 | [`workflow-webhook.openapi.yaml`](./workflow-webhook.openapi.yaml)         | Workflow webhook receiver                                       | Configurable loopback port | Optional per-trigger HMAC-SHA-256                                                         |
 | [`connectors-webhook.openapi.yaml`](./connectors-webhook.openapi.yaml)     | Connector ingress and OneBot WebSocket                          | Configurable               | Adapter-specific                                                                          |
 
+`connectors-webhook.openapi.yaml` describes the **standalone** connectors
+listener. On a headless host the same router is also nested under
+`/connectors` on the companion listener, and on a `/integrations/lark` mount
+alongside it. Those seventeen mounted routes are declared in
+`protocol/companion-api-routes.json` with a stated reason and are, for now,
+absent from both generated specs: they are inbound third-party surfaces
+(webhooks, OAuth callbacks, browser login) and loopback fleet ingress, not
+paired-device commands. Authoring them into the headless document is tracked as
+follow-up and needs each handler's real status codes rather than a generic
+shape.
+
 For a verified local import, TLS certificate, token, HTTP request, and
 WebSocket setup, see the bilingual Fumadocs page
 `subsystems/companion-api/apifox-debugging`.

@@ -120,7 +120,12 @@
     { "path": "/ws/acp", "method": "get", "document": "public" },
     { "path": "/a2a", "method": "post", "document": "public" },
     { "path": "/ide/relay/{relay_id}", "method": "get", "document": "public" },
-    { "path": "/ide/relay/{relay_id}/", "method": "get", "document": "none" },
+    {
+      "path": "/ide/relay/{relay_id}/",
+      "method": "get",
+      "document": "none",
+      "reason": "Opaque reverse proxy to a locally-spawned code-server. The relay forwards whatever that server serves, so there is no stable shape to document."
+    },
     {
       "path": "/ide/relay/{relay_id}/{tail}",
       "runtimePath": "/ide/relay/{relay_id}/{*tail}",
@@ -145,9 +150,132 @@
     { "path": "/ide/content", "method": "post", "document": "headless" },
     { "path": "/ide/content/{handle_id}", "method": "get", "document": "headless" },
 
-    { "path": "/metrics", "method": "get", "document": "none" },
-    { "path": "/operator/maintenance/backups", "method": "post", "document": "none" },
-    { "path": "/operator/lark/admin", "method": "post", "document": "none" },
-    { "path": "/operator/lark/admin/{request_id}", "method": "get", "document": "none" }
+    {
+      "path": "/metrics",
+      "method": "get",
+      "document": "none",
+      "reason": "Loopback Prometheus scrape, not a paired-device surface."
+    },
+    {
+      "path": "/operator/maintenance/backups",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback operator surface, gated on the operator bearer rather than a device grant."
+    },
+    {
+      "path": "/operator/lark/admin",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback operator surface, gated on the operator bearer rather than a device grant."
+    },
+    {
+      "path": "/operator/lark/admin/{request_id}",
+      "method": "get",
+      "document": "none",
+      "reason": "Loopback operator surface, gated on the operator bearer rather than a device grant."
+    },
+
+    {
+      "path": "/api/fleet/hook",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback ingress for locally-installed agent plugins, authenticated by X-Cognia-Fleet-Token rather than a device grant. Not reachable by a paired device."
+    },
+    {
+      "path": "/api/fleet/opencode/commands",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback ingress for locally-installed agent plugins, authenticated by X-Cognia-Fleet-Token rather than a device grant. Not reachable by a paired device."
+    },
+    {
+      "path": "/api/fleet/opencode/commands/ack",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback ingress for locally-installed agent plugins, authenticated by X-Cognia-Fleet-Token rather than a device grant. Not reachable by a paired device."
+    },
+    {
+      "path": "/api/fleet/opencode/commands/nack",
+      "method": "post",
+      "document": "none",
+      "reason": "Loopback ingress for locally-installed agent plugins, authenticated by X-Cognia-Fleet-Token rather than a device grant. Not reachable by a paired device."
+    },
+    {
+      "path": "/connectors/health",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound third-party surface (IM webhook or OAuth callback), not a paired-device command. The same router is served standalone by cognia-connectors and described by docs/api/connectors-webhook.openapi.yaml; the companion mount still needs those operations authored from the handlers."
+    },
+    {
+      "path": "/connectors/oauth/lark/callback",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound third-party surface (IM webhook or OAuth callback), not a paired-device command. The same router is served standalone by cognia-connectors and described by docs/api/connectors-webhook.openapi.yaml; the companion mount still needs those operations authored from the handlers."
+    },
+    {
+      "path": "/connectors/oauth/connector/{kind}/callback",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound third-party surface (IM webhook or OAuth callback), not a paired-device command. The same router is served standalone by cognia-connectors and described by docs/api/connectors-webhook.openapi.yaml; the companion mount still needs those operations authored from the handlers."
+    },
+    {
+      "path": "/connectors/oauth/docs/{provider}/callback",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound third-party surface (IM webhook or OAuth callback), not a paired-device command. The same router is served standalone by cognia-connectors and described by docs/api/connectors-webhook.openapi.yaml; the companion mount still needs those operations authored from the handlers."
+    },
+    {
+      "path": "/connectors/webhook/{adapter_type}/{adapter_id}",
+      "method": "post",
+      "document": "none",
+      "reason": "Inbound third-party surface (IM webhook or OAuth callback), not a paired-device command. The same router is served standalone by cognia-connectors and described by docs/api/connectors-webhook.openapi.yaml; the companion mount still needs those operations authored from the handlers."
+    },
+    {
+      "path": "/connectors/ws/onebot/{adapter_id}",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound third-party surface (IM webhook or OAuth callback), not a paired-device command. The same router is served standalone by cognia-connectors and described by docs/api/connectors-webhook.openapi.yaml; the companion mount still needs those operations authored from the handlers."
+    },
+    {
+      "path": "/integrations/lark/web/login",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
+      "path": "/integrations/lark/web/callback",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
+      "path": "/integrations/lark/entry/resolve",
+      "method": "post",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
+      "path": "/integrations/lark/intent/{request_id}",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
+      "path": "/integrations/lark/shortcut/import",
+      "method": "post",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
+      "path": "/integrations/lark/plus/create",
+      "method": "post",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    },
+    {
+      "path": "/integrations/lark/jssdk/config",
+      "method": "get",
+      "document": "none",
+      "reason": "Inbound Lark surface called by Lark and by the user's browser, not by a paired device. Authoring it into the headless spec needs each handler's real status codes."
+    }
   ]
 }

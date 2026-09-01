@@ -39,17 +39,43 @@ const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/companion_api/rpc/plugins.rs",
   "src-tauri/src/companion_api/rpc/diagnostics.rs",
 ]
+/**
+ * Every file that registers a route on the companion listener.
+ *
+ * `mount` is the `nest()` prefix `server.rs` mounts that router under. It used
+ * to be absent along with the files themselves, so seventeen live routes were
+ * invisible to `validateRouteContract` in BOTH directions: it could not report
+ * them as undeclared, and the contract could not report a declaration as
+ * unmounted. Two of them were versioned paths the generator explicitly bans.
+ *
+ * The connectors router is also served standalone at root by
+ * `crates/cognia-connectors/src/server_lifecycle.rs`, documented separately in
+ * `docs/api/connectors-webhook.openapi.yaml`. The mount scopes this scan to the
+ * companion-server copy, which is the one this contract is about.
+ */
 const RUNTIME_ROUTE_SOURCES = [
-  "src-tauri/src/companion_api/server.rs",
-  "src-tauri/src/companion_api/api.rs",
+  { path: "src-tauri/src/companion_api/server.rs" },
+  { path: "src-tauri/src/companion_api/api.rs" },
+  { path: "src-tauri/src/fleet/routes.rs" },
+  { path: "src-tauri/src/companion_api/lark_entry.rs", mount: "/integrations/lark" },
+  { path: "crates/cognia-connectors/src/axum_app.rs", mount: "/connectors" },
+  { path: "crates/cognia-connectors/src/ws_server.rs", mount: "/connectors" },
 ]
 
-const routeSchema = z.object({
-  path: z.string().startsWith("/"),
-  runtimePath: z.string().startsWith("/").optional(),
-  method: z.enum(["get", "post", "put", "patch", "delete"]),
-  document: z.enum(["public", "headless", "none"]),
-})
+const routeSchema = z
+  .object({
+    path: z.string().startsWith("/"),
+    runtimePath: z.string().startsWith("/").optional(),
+    method: z.enum(["get", "post", "put", "patch", "delete"]),
+    document: z.enum(["public", "headless", "none"]),
+    /** Why this route is in no published spec. Required when `document` is "none". */
+    reason: z.string().min(1).optional(),
+  })
+  .refine((route) => route.document !== "none" || Boolean(route.reason), {
+    // An undocumented route with no stated reason is indistinguishable from one
+    // nobody noticed, which is how seventeen of them stayed invisible.
+    message: "a route documented nowhere must say why",
+  })
 
 const routeContractSchema = z.object({
   schemaVersion: z.literal(1),
@@ -1259,7 +1285,7 @@ function extractRouteMethods(expression) {
   return methods
 }
 
-export function extractRuntimeRoutes(source) {
+export function extractRuntimeRoutes(source, mount = "") {
   const testModule = source.search(/^\s*#\[cfg\(test\)\]\s*\n\s*mod tests\s*\{/m)
   const runtimeSource = testModule === -1 ? source : source.slice(0, testModule)
   const routes = new Set()
@@ -1267,17 +1293,25 @@ export function extractRuntimeRoutes(source) {
   for (const match of runtimeSource.matchAll(routePattern)) {
     const expression = readRouteExpression(runtimeSource, match.index + match[0].length)
     for (const method of extractRouteMethods(expression)) {
-      routes.add(`${method === "any" ? "*" : method.toUpperCase()} ${match[1]}`)
+      // A nested router registers relative paths; the mount is what the
+      // listener actually serves them under.
+      const path = mount ? `${mount}${match[1] === "/" ? "" : match[1]}` : match[1]
+      routes.add(`${method === "any" ? "*" : method.toUpperCase()} ${path}`)
     }
   }
   return routes
 }
 
-export function collectRuntimeRoutes(sources) {
+export function collectRuntimeRoutes(sources, serverSource = "") {
   const routes = new Set()
   const errors = []
-  for (const [sourcePath, source] of sources) {
-    for (const route of extractRuntimeRoutes(source)) {
+  for (const [sourcePath, source, mount] of sources) {
+    // A mount that `server.rs` does not actually nest is a scan describing a
+    // surface nobody serves, which reads exactly like coverage.
+    if (mount && serverSource && !serverSource.includes(`.nest("${mount}"`)) {
+      errors.push(`declared route mount is never nested in server.rs: ${mount} (${sourcePath})`)
+    }
+    for (const route of extractRuntimeRoutes(source, mount)) {
       if (routes.has(route)) errors.push(`duplicate runtime route registration: ${route} (${sourcePath})`)
       routes.add(route)
     }
@@ -3201,7 +3235,8 @@ export function inspectCommittedContract() {
   const bridgeFixtureSource = readRepo(BRIDGE_FIXTURE_PATH)
   const publicSpec = parseYaml(publicSource, PUBLIC_SPEC_PATH)
   const runtime = collectRuntimeRoutes(
-    RUNTIME_ROUTE_SOURCES.map((sourcePath) => [sourcePath, readRepo(sourcePath)])
+    RUNTIME_ROUTE_SOURCES.map(({ path, mount }) => [path, readRepo(path), mount]),
+    readRepo("src-tauri/src/companion_api/server.rs"),
   )
   const runtimeRoutes = runtime.routes
   const remoteNames = extractKnownCommands(readRepo(RPC_SOURCE_PATH))
