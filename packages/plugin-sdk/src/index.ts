@@ -64,6 +64,58 @@ export {
   wrapUntrustedContent,
 } from "@/lib/web/untrusted-content"
 
+/**
+ * The reasoning-tier vocabulary, re-exported (not re-declared) for the same
+ * reason the untrusted-content banner above is.
+ *
+ * `THINKING_LEVELS` is pinned to the union persisted on `ChatSession`, so a new
+ * tier fails typecheck if the two drift. A plugin that hand-copied the list
+ * would just keep offering the old one, and a plugin that hand-wrote the
+ * `{ effort, thinkingLevel }` pair would eventually disagree with itself, which
+ * is precisely what `thinkingLevelPatch` exists to prevent. Any plugin that
+ * reads or writes a session's tier composes these.
+ *
+ * The narrowing half ships with the vocabulary for the same reason: the full
+ * ladder is what a session MAY hold, not what a given provider/model can carry.
+ * Publishing `THINKING_LEVELS` without `availableThinkingLevels` /
+ * `clampThinkingLevel` / `visibleThinkingLevels` would leave every author able
+ * to offer `max` on a surface that folds it into `high`, naming a depth the
+ * request never carries.
+ */
+export {
+  EFFORT_SLIDER_LEVELS,
+  SDK_EFFORT_LEVELS,
+  THINKING_LEVELS,
+  availableThinkingLevels,
+  clampThinkingLevel,
+  externalAgentThinkingLevels,
+  isUltracodeLevel,
+  resolveThinkingLevel,
+  thinkingLevelPatch,
+  thinkingLevelToEffort,
+  visibleThinkingLevels,
+} from "@/lib/ai/thinking-level"
+export type { Effort, EffortTier, ThinkingLevel } from "@/lib/ai/thinking-level"
+
+/**
+ * The pure half of the composed answer, published alongside the vocabulary
+ * above because the vocabulary alone is a trap.
+ *
+ * The full ladder is what a session MAY hold. Which tiers to OFFER depends on
+ * four things a session row does not carry: the runtime lane executing the turn,
+ * the app-level model/provider defaults behind an unpinned session, whether the
+ * model reasons at all, and the user's hidden-tier preference. `resolveEffortSurface`
+ * takes all four as values, so it decides nothing on its own and reads nothing.
+ *
+ * The half that GATHERS those four from the host's stores lives at
+ * `@cognia/plugin-sdk/api/effort-surface`, with the subscription that says when
+ * they change. It is a subpath and not this barrel on purpose: the root
+ * publishes types and pure functions only, so importing a type from here never
+ * pulls the settings and agent-runtime stores into a plugin's module graph.
+ */
+export { resolveEffortSurface } from "@/lib/ai/effort-surface"
+export type { EffortSurface, EffortSurfaceInput } from "@/lib/ai/effort-surface"
+
 export {
   AUTHOR_CAPABILITY_CONTRACTS,
   CANONICAL_PLUGIN_CAPABILITIES,

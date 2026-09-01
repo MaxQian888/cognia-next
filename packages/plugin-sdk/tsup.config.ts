@@ -15,6 +15,7 @@ const runtimeEntries = {
   integration: "src/api/integration.ts",
   "context-panel": "src/api/context-panel.ts",
   editor: "src/api/editor.ts",
+  "effort-surface": "src/api/effort-surface.ts",
   webview: "src/api/webview.ts",
   abort: "src/api/abort.ts",
   "agent-turn": "src/api/agent-turn.ts",

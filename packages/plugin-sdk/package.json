@@ -27,6 +27,12 @@
       "require": "./dist/team.cjs",
       "default": "./dist/team.js"
     },
+    "./api/effort-surface": {
+      "types": "./dist/effort-surface.d.ts",
+      "import": "./dist/effort-surface.js",
+      "require": "./dist/effort-surface.cjs",
+      "default": "./dist/effort-surface.js"
+    },
     "./api/abort": {
       "types": "./dist/abort.d.ts",
       "import": "./dist/abort.js",

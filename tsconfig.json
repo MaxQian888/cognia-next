@@ -72,6 +72,7 @@
       "@cognia/plugin-sdk/api/connector": ["./packages/plugin-sdk/src/api/connector.ts"],
       "@cognia/plugin-sdk/api/context-panel": ["./packages/plugin-sdk/src/api/context-panel.ts"],
       "@cognia/plugin-sdk/api/editor": ["./packages/plugin-sdk/src/api/editor.ts"],
+      "@cognia/plugin-sdk/api/effort-surface": ["./packages/plugin-sdk/src/api/effort-surface.ts"],
       "@cognia/plugin-sdk/api/host-environment": [
         "./packages/plugin-sdk/src/api/host-environment.ts"
       ],
