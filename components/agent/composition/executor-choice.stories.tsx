@@ -15,9 +15,23 @@ function executor(over: Partial<ChatExecutor> = {}): ChatExecutor {
 }
 
 const SQUADS = [
-  { id: "a", name: "Research Squad" },
-  { id: "b", name: "Refactor Crew" },
-  { id: "c", name: "Release Readiness" },
+  {
+    id: "a",
+    name: "Research Squad",
+    status: "executing",
+    memberCount: 4,
+    live: true,
+    waiting: false,
+  },
+  { id: "b", name: "Refactor Crew", status: "idle", memberCount: 2, live: false, waiting: false },
+  {
+    id: "c",
+    name: "Release Readiness",
+    status: "executing",
+    memberCount: 6,
+    live: true,
+    waiting: true,
+  },
 ]
 
 const meta = {

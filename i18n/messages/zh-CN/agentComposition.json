@@ -45,11 +45,17 @@
   },
   "executor": {
     "label": "执行体",
+    "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
     "needsSession": "会话开始后可选。",
+    "noMatches": "没有匹配的小队。",
     "noSquads": "还没有小队——去设置里新建一个。",
     "runsOnSquad": "模型与思考深度由小队成员各自的配置决定。",
+    "searchPlaceholder": "筛选小队",
     "singleAgent": "单个 Agent",
-    "squadMissing": "小队已不存在"
+    "squadMissing": "小队已不存在",
+    "statusIdle": "空闲",
+    "statusLive": "运行中",
+    "statusWaiting": "等待你"
   },
   "inherit": "跟随预置 · {preset}",
   "inheritGeneric": "跟随预置",
