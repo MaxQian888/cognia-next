@@ -159,6 +159,7 @@
     "0157-references-and-result-reuse",
     "0158-artifacts-and-canvas",
     "0159-selection-action-platform",
-    "0160-docker-machines-are-real-machines"
+    "0160-docker-machines-are-real-machines",
+    "0161-agent-identity-runtime-and-host"
   ]
 }
