@@ -10,9 +10,14 @@ jest.mock("@/lib/db/issues", () => ({ listIssues: jest.fn() }))
 
 let projectsForTest: unknown[] = []
 let issuesForTest: unknown[] = []
-jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: (query: unknown) =>
-    String(query).includes("listIssueProjects") ? projectsForTest : issuesForTest,
+let isSyncing = false
+jest.mock("@/hooks/data/use-dexie-first-query", () => ({
+  useDexieFirstQuery: ({ query }: { query: unknown }) => ({
+    data: String(query).includes("listIssueProjects") ? projectsForTest : issuesForTest,
+    isSyncing,
+    lastSyncedAt: null,
+    error: null,
+  }),
 }))
 
 let activeProjectId: string | null = "w1"
@@ -42,12 +47,20 @@ beforeEach(() => {
   projectsForTest = []
   issuesForTest = []
   activeProjectId = "w1"
+  isSyncing = false
 })
 
 describe("ProjectsMobileBody", () => {
   it("shows an empty state", () => {
     render(<ProjectsMobileBody />)
     expect(screen.getByTestId("projects-mobile-empty")).toBeInTheDocument()
+  })
+
+  it("skeletonises the container list rather than claiming it is empty mid-sync", () => {
+    isSyncing = true
+    render(<ProjectsMobileBody />)
+    expect(screen.getByTestId("projects-mobile-skeleton")).toBeInTheDocument()
+    expect(screen.queryByTestId("projects-mobile-empty")).not.toBeInTheDocument()
   })
 
   it("counts the containers in the header", () => {

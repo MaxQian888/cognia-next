@@ -35,6 +35,7 @@ import { getDb } from "./schema"
 import { allocateIssueNumber } from "./issue-counters"
 import { appendIssueEvent, deleteIssueEvents } from "./issue-events"
 import { deleteIssueRuns } from "./issue-runs"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newIssueId(): string {
   return `iss_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -453,11 +454,22 @@ export async function linkIssueToGithub(
  */
 export async function deleteIssue(id: string): Promise<void> {
   const db = getDb()
-  await db.transaction("rw", db.issues, db.issueEvents, db.issueRuns, async () => {
-    await deleteIssueEvents(id)
-    await deleteIssueRuns(id)
-    await db.issues.delete(id)
-  })
+  await db.transaction(
+    "rw",
+    db.issues,
+    db.issueEvents,
+    db.issueRuns,
+    db.syncTombstones,
+    async () => {
+      await deleteIssueEvents(id)
+      await deleteIssueRuns(id)
+      await db.issues.delete(id)
+      // `issues` is companion-synced, and a pull only ever carries rows that
+      // still exist, so without this the board on a paired phone keeps an
+      // issue the host deleted.
+      await recordTombstones("issues", [id])
+    }
+  )
 }
 
 /**

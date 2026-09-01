@@ -123,6 +123,32 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: true,
         },
         SyncTableDescriptor {
+            name: "projects".to_string(),
+            // The scope every issue read filters on. `activeProjectId` is
+            // device-local, so a phone resolves it to the literal
+            // `project-default` and its workspace switcher listed only the row
+            // it auto-created, which left the board empty even once `issues`
+            // mirrored. Date fields cross as epoch ms and are revived on write.
+            description: "Workspaces (read-only mirror; the phone picks its own active one locally)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "issues".to_string(),
+            description: "Issue tracker items (read-only board; no issue_* command exists, so sync is the only path)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "issueProjects".to_string(),
+            description: "Delivery containers the board groups by".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "labels".to_string(),
+            // Without these every LabelChip renders an unresolved id.
+            description: "Label catalogue for the issue board and the inbox".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
             name: "plugins".to_string(),
             description: "Installed plugins (toggle from mobile via plugin_set_enabled)".to_string(),
             has_tombstones: false,

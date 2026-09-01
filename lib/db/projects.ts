@@ -12,6 +12,7 @@ import { locateWorkspaceForPath } from "@/lib/workspace/locate-workspace"
 import type { Project } from "@/types"
 import { getDb } from "./schema"
 import { getSettings, saveSettings } from "./settings"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 /** All persisted projects. Empty array when none have been saved yet. */
 export async function getAllProjects(): Promise<Project[]> {
@@ -26,6 +27,10 @@ export async function putProject(project: Project): Promise<void> {
 /** Remove a project row by id. No-op when the id is unknown. */
 export async function deleteProjectRow(id: string): Promise<void> {
   await getDb().projects.delete(id)
+  // Companion-synced. A pull carries only rows that still exist, so without a
+  // tombstone a deleted workspace stays in the phone's switcher forever, and
+  // the phone can still be sitting on it as its own active scope.
+  await recordTombstones("projects", [id])
 }
 
 /** The persisted active-workspace id, or null when none is set. */

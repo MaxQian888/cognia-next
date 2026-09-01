@@ -9886,7 +9886,11 @@
             "agentTeamTasks",
             "sessionState",
             "twins",
-            "twinDrafts"
+            "twinDrafts",
+            "projects",
+            "issues",
+            "issueProjects",
+            "labels"
           ],
           "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },

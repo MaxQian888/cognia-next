@@ -34,6 +34,7 @@ import {
   CalendarClockIcon,
   ChartBarIcon,
   ClipboardCheckIcon,
+  CircleDotIcon,
   DatabaseIcon,
   HardDriveIcon,
   HistoryIcon,
@@ -57,6 +58,7 @@ import {
   SmartphoneIcon,
   SparklesIcon,
   TargetIcon,
+  RocketIcon,
   WorkflowIcon,
   TerminalSquareIcon,
   TypeIcon,
@@ -333,6 +335,27 @@ export const ME_ENTRIES: MeEntry[] = [
     href: "/workspace",
     section: "connection",
     keywords: ["workspace", "worktree", "roots", "project", "工作区", "工作树", "项目"],
+  },
+  {
+    // The tracker had no mobile entry point at all: `/issues` and `/projects`
+    // are full-viewport routes with complete mobile bodies that only a deep
+    // link could reach. Now that the tables sync, the rows have contents.
+    id: "issues",
+    pairedOnly: true,
+    icon: CircleDotIcon,
+    labelKey: "issuesRow",
+    href: "/issues",
+    section: "connection",
+    keywords: ["issue", "tracker", "board", "bug", "task", "问题", "看板", "缺陷"],
+  },
+  {
+    id: "issue-projects",
+    pairedOnly: true,
+    icon: RocketIcon,
+    labelKey: "issueProjectsRow",
+    href: "/projects",
+    section: "connection",
+    keywords: ["project", "milestone", "delivery", "container", "项目", "里程碑", "交付"],
   },
   {
     id: "source-control",

@@ -55,6 +55,7 @@ import { syncConnectorDrafts } from "./handlers/connector-drafts"
 import { syncOutboundQueue } from "./handlers/outbound-queue"
 import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwins, syncTwinDrafts } from "./handlers/twins"
+import { syncProjects, syncIssues, syncIssueProjects, syncLabels } from "./handlers/issues"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
 import { syncWorkflowRuns } from "./handlers/workflow-runs"
@@ -162,6 +163,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // thin client's Inbox shows delivery state without running any adapter.
   { table: "connectorDrafts", stage: "interactive", run: syncConnectorDrafts },
   { table: "outboundQueue", stage: "interactive", run: syncOutboundQueue },
+  // The workspace list is a scope, not a library: the header chip, the
+  // switcher and every issue read resolve against it, so it has to land
+  // before the surfaces that filter on it, not alongside the settings pages.
+  { table: "projects", stage: "interactive", run: syncProjects },
 
   // ── background ────────────────────────────────────────────────────────
   { table: "skills", stage: "background", run: syncSkills },
@@ -177,6 +182,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // nothing to attach to.
   { table: "twins", stage: "background", run: syncTwins },
   { table: "twinDrafts", stage: "background", run: syncTwinDrafts },
+  // The issue tracker. Labels first so the board never paints a chip as a raw
+  // id, then the containers it groups by, then the issues themselves.
+  { table: "labels", stage: "background", run: syncLabels },
+  { table: "issueProjects", stage: "background", run: syncIssueProjects },
+  { table: "issues", stage: "background", run: syncIssues },
   { table: "plugins", stage: "background", run: syncPlugins },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
   // Long-term memory. Decrypts row by row against the profile DEK, so it is
@@ -256,6 +266,12 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   // A draft is created, reviewed once, and then deleted with its twin or its
   // job. Deletion rides a tombstone so an accepted draft stops being offered.
   twinDrafts: syncDomain("tombstone"),
+  // `internal`: a workspace row is names, paths and counts, and the phone
+  // picks its own active one rather than following the desktop's.
+  projects: syncDomain("tombstone", "internal"),
+  issues: syncDomain("tombstone"),
+  issueProjects: syncDomain("tombstone"),
+  labels: syncDomain("tombstone", "internal"),
   plugins: syncDomain("tombstone"),
   adapterInstances: syncDomain("tombstone"),
   settings: syncDomain("tombstone", "internal"),

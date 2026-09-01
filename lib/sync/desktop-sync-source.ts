@@ -181,6 +181,14 @@ export async function readDexieDelta(
       return readTwinsDelta(since)
     case "twinDrafts":
       return readTwinDraftsDelta(since)
+    case "projects":
+      return readProjectsDelta(since)
+    case "issues":
+      return readIssuesDelta(since)
+    case "issueProjects":
+      return readIssueProjectsDelta(since)
+    case "labels":
+      return readLabelsDelta(since)
     case "goals":
       return readGoalsDelta(since)
     case "plans":
@@ -435,6 +443,47 @@ async function readTwinDraftsDelta(since: number): Promise<SyncDelta<unknown>> {
     .map((row) => ({ ...row, updatedAt: Math.max(row.createdAt ?? 0, row.reviewedAt ?? 0) }))
     .filter((row) => row.updatedAt > since)
   return finalizeDelta("twinDrafts", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * Workspaces.
+ *
+ * `Project` stores `createdAt` / `updatedAt` / `lastAccessedAt` as `Date`
+ * objects, which JSON turns into ISO strings. The three consumers on the
+ * phone (the header chip, the switcher, and the issue board's scope) sort and
+ * compare them, so the wire carries epoch ms and `handlers/issues.ts` revives
+ * them. Sending the `Date`s untouched would put strings in Dexie where the
+ * type promises `Date`, which fails at the first `.getTime()`.
+ *
+ * The table indexes only `id` and `lastAccessedAt`, so this scans. There are
+ * as many rows as the user has workspaces.
+ */
+async function readProjectsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const all = await getDb().projects.toArray()
+  const rows = all
+    .map((row) => ({
+      ...row,
+      createdAt: new Date(row.createdAt).getTime(),
+      updatedAt: new Date(row.updatedAt).getTime(),
+      lastAccessedAt: new Date(row.lastAccessedAt).getTime(),
+    }))
+    .filter((row) => row.updatedAt > since)
+  return finalizeDelta("projects", rows as UpdatedAtRow[], since)
+}
+
+async function readIssuesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().issues.where("updatedAt").above(since).toArray()
+  return finalizeDelta("issues", rows as UpdatedAtRow[], since)
+}
+
+async function readIssueProjectsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().issueProjects.where("updatedAt").above(since).toArray()
+  return finalizeDelta("issueProjects", rows as UpdatedAtRow[], since)
+}
+
+async function readLabelsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().labels.where("updatedAt").above(since).toArray()
+  return finalizeDelta("labels", rows as UpdatedAtRow[], since)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {

@@ -82,8 +82,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 31 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(31)
+  it("maps all 35 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(35)
     // The unread pointers the mobile Chat badge and Inbox dot count. They used
     // to count `inboundLedger`, which is host-only, so both read 0 on a phone.
     expect(COMPANION_SYNC_TABLES.has("sessionState")).toBe(true)

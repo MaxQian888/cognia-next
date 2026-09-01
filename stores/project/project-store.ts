@@ -64,6 +64,18 @@ interface ProjectState {
   /** Hydrate the project list + active pointer from Dexie. Idempotent. */
   load: () => Promise<void>
 
+  /**
+   * Re-read the persisted workspace list after someone else wrote it.
+   *
+   * `load()` returns early once `loaded` is true, which is right for a boot
+   * hydrator and wrong for companion sync: `projects` is mirrored from the
+   * Host, and without this the rows landed in Dexie and stayed invisible to
+   * the switcher until the app was restarted. Locally-created rows that have
+   * not been persisted yet are kept, and the active pointer is left alone
+   * because it is device-local.
+   */
+  adoptPersistedProjects: (persisted: Project[]) => void
+
   /** Create a project, append it to the list, and return it. Pure: does NOT auto-activate. */
   createProject: (options: CreateProjectOptions) => Project
   updateProject: (id: string, updates: ProjectUpdates) => void
@@ -155,6 +167,16 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // loaded so the store works in-memory.
         set({ loaded: true })
       }
+    },
+
+    adoptPersistedProjects: (persisted) => {
+      const byId = new Map(persisted.map((project) => [project.id, project]))
+      // An in-memory row the Host has never seen must survive the merge, or
+      // a workspace created seconds ago disappears on the next pull.
+      for (const project of get().projects) {
+        if (!byId.has(project.id)) byId.set(project.id, project)
+      }
+      set({ projects: [...byId.values()] })
     },
 
     createProject: (options) => {

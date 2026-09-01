@@ -491,6 +491,19 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // the offline footprint and the privacy surface for a live-only panel.
   "twins",
   "twinDrafts",
+  // The issue tracker. Zero `issue_*` / `label_*` commands exist, so sync is
+  // the only way a phone can render the board it already mounts.
+  // `projects` rides along because it is the scope every issue read filters
+  // on: `activeProjectId` is device-local, so a phone resolves it to the
+  // literal `project-default` and would keep showing an empty board even with
+  // every issue mirrored, having no way to name the workspace they live in.
+  // `issueCounters` is deliberately absent: it is keyed by `scopeId` rather
+  // than `id`, and it is the write-side number allocator, which a read-only
+  // mirror has no business holding.
+  "projects",
+  "issues",
+  "issueProjects",
+  "labels",
 ])
 
 /**
@@ -529,6 +542,10 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "sessionState",
   "twins",
   "twinDrafts",
+  "projects",
+  "issues",
+  "issueProjects",
+  "labels",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]

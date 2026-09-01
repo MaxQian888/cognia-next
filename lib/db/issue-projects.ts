@@ -27,6 +27,7 @@ import { getDb } from "./schema"
 import { deleteIssueCounter } from "./issue-counters"
 import { deleteIssueEventsForIssues } from "./issue-events"
 import { deleteIssueRunsForIssues } from "./issue-runs"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newIssueProjectId(): string {
   return `iprj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -217,13 +218,18 @@ function sameResource(a: IssueProjectResource, b: IssueProjectResource): boolean
  */
 export async function deleteIssueProject(id: string): Promise<void> {
   const db = getDb()
+  // Table array rather than positional args: Dexie's `transaction` overloads
+  // stop at five tables, and the tombstone store is the sixth.
   await db.transaction(
     "rw",
-    db.issueProjects,
-    db.issues,
-    db.issueEvents,
-    db.issueRuns,
-    db.issueCounters,
+    [
+      db.issueProjects,
+      db.issues,
+      db.issueEvents,
+      db.issueRuns,
+      db.issueCounters,
+      db.syncTombstones,
+    ],
     async () => {
       const issues = await db.issues.where("issueProjectId").equals(id).toArray()
       const issueIds = issues.map((issue) => issue.id)
@@ -232,6 +238,12 @@ export async function deleteIssueProject(id: string): Promise<void> {
       await db.issues.bulkDelete(issueIds)
       await deleteIssueCounter(id)
       await db.issueProjects.delete(id)
+      // Both tables are companion-synced. The cascade has to tombstone the
+      // issues too, not just the container, or a paired phone keeps rendering
+      // them under a container it no longer has.
+      const at = Date.now()
+      await recordTombstones("issueProjects", [id], at)
+      await recordTombstones("issues", issueIds, at)
     }
   )
 }

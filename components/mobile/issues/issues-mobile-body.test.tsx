@@ -7,12 +7,20 @@ jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 let issuesResult: unknown[] = []
 let projectsResult: unknown[] = []
 let labelsResult: unknown[] = []
-jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: (fn: () => Promise<unknown>) => {
-    const source = fn.toString()
-    if (source.includes("listIssueProjects")) return projectsResult
-    if (source.includes("listLabels")) return labelsResult
-    return issuesResult
+let isSyncing = false
+// The body reads each table dexie-first now, so mounting also kicks a
+// targeted pull. The stub dispatches on the query source the same way the
+// `useClientLiveQuery` stub did, and exposes `isSyncing` so the skeleton
+// branch can be asserted.
+jest.mock("@/hooks/data/use-dexie-first-query", () => ({
+  useDexieFirstQuery: ({ query }: { query: () => Promise<unknown> }) => {
+    const source = query.toString()
+    const data = source.includes("listIssueProjects")
+      ? projectsResult
+      : source.includes("listLabels")
+        ? labelsResult
+        : issuesResult
+    return { data, isSyncing, lastSyncedAt: null, error: null }
   },
 }))
 jest.mock("@/lib/db/issues", () => ({ listIssues: jest.fn() }))
@@ -56,12 +64,23 @@ beforeEach(() => {
   issuesResult = []
   projectsResult = []
   labelsResult = []
+  isSyncing = false
 })
 
 describe("IssuesMobileBody", () => {
   it("shows an empty state when there is nothing", () => {
     render(<IssuesMobileBody />)
     expect(screen.getByTestId("issues-mobile-empty")).toBeInTheDocument()
+  })
+
+  it("skeletonises the board rather than claiming it is empty mid-sync", () => {
+    // "No issues" and "this phone has not pulled the board yet" are different
+    // answers. Until these tables synced the second was always rendered as
+    // the first, on every paired device.
+    isSyncing = true
+    render(<IssuesMobileBody />)
+    expect(screen.getByTestId("issues-mobile-skeleton")).toBeInTheDocument()
+    expect(screen.queryByTestId("issues-mobile-empty")).not.toBeInTheDocument()
   })
 
   it("groups by status and renders a row per issue", () => {

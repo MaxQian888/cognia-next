@@ -4,11 +4,9 @@
  * Read-only issue list for the mobile (Capacitor) shell.
  *
  * Deliberately read-mostly, following `components/mobile/agent-teams/team-board-mobile.tsx`:
- * no touch drag, no inline editing. Writing from mobile means registering the
- * tracker's tables as syncable, which is a seven-site fan-out ending in Rust
- * (`src-tauri/src/companion_api/sync_registry.rs`) — a separate piece of work.
- * Until then the phone shows the board's contents and links back to the
- * desktop surface rather than offering controls that would not round-trip.
+ * no touch drag, no inline editing. The tables are companion-synced now, so
+ * the board actually has contents to show. Writes stay off: there is no
+ * `issue_*` command at all, so a control here would have nothing to call.
  */
 
 import { useMemo, useState } from "react"
@@ -17,7 +15,8 @@ import { useTranslations } from "next-intl"
 import { LabelChip } from "@/components/labels/label-chip"
 import { IssuePriorityIcon, IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { Badge } from "@/components/ui/badge"
-import { useClientLiveQuery } from "@/hooks/data"
+import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
+import { ListSkeleton } from "@/components/mobile/discover/list-skeleton"
 import { listIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
 import { listLabels } from "@/lib/db/labels"
@@ -38,17 +37,28 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
   const t = useTranslations("issues")
   const projectId = useProjectStore((s) => s.activeProjectId)
 
-  const rows = useClientLiveQuery(
-    () => (projectId ? listIssues({ projectId }) : Promise.resolve([])),
-    [projectId],
-    []
-  )
-  const projects = useClientLiveQuery(
-    () => (projectId ? listIssueProjects({ projectId }) : Promise.resolve([])),
-    [projectId],
-    []
-  )
-  const labels = useClientLiveQuery(() => listLabels("issue"), [], [] as LabelRow[])
+  // Dexie-first: each read kicks a targeted pull for its own table, so a phone
+  // that has never synced the tracker fills in rather than rendering an empty
+  // board it has no way to correct.
+  const issuesQuery = useDexieFirstQuery({
+    query: () => (projectId ? listIssues({ projectId }) : Promise.resolve([])),
+    deps: [projectId],
+    initial: [] as Awaited<ReturnType<typeof listIssues>>,
+    table: "issues",
+  })
+  const rows = issuesQuery.data
+  const projects = useDexieFirstQuery({
+    query: () => (projectId ? listIssueProjects({ projectId }) : Promise.resolve([])),
+    deps: [projectId],
+    initial: [] as Awaited<ReturnType<typeof listIssueProjects>>,
+    table: "issueProjects",
+  }).data
+  const labels = useDexieFirstQuery({
+    query: () => listLabels("issue"),
+    deps: [],
+    initial: [] as LabelRow[],
+    table: "labels",
+  }).data
 
   const labelsById = useMemo(
     () => new Map((labels ?? []).map((label) => [label.id, label])),
@@ -84,7 +94,12 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
         </Badge>
       </header>
 
-      {total === 0 ? (
+      {total === 0 && issuesQuery.isSyncing ? (
+        // "No issues" and "this phone has not pulled the board yet" are
+        // different answers, and until these tables synced the second was
+        // always rendered as the first.
+        <ListSkeleton rows={3} testId="issues-mobile-skeleton" className="p-4" />
+      ) : total === 0 ? (
         <p
           className="py-16 text-center text-sm text-muted-foreground"
           data-testid="issues-mobile-empty"

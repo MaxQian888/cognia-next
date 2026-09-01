@@ -17,6 +17,7 @@
 import type { LabelRow, LabelScope } from "@/types/labels"
 import { defaultLabelColor } from "@/types/labels"
 import { getDb } from "./schema"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 function newLabelId(): string {
   return `lbl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -130,8 +131,12 @@ export async function deleteLabel(id: string): Promise<void> {
     db.conversationOverrides,
     db.cannedResponses,
     db.issues,
+    db.syncTombstones,
     async () => {
       await db.labels.delete(id)
+      // Companion-synced. Without a tombstone a deleted label lingers in the
+      // phone's catalogue and keeps resolving on chips the host has stripped.
+      await recordTombstones("labels", [id])
 
       const now = Date.now()
 
