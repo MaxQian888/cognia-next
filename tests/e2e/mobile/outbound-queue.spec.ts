@@ -58,6 +58,7 @@ const COMMAND_KINDS = [
   // Twin subsystem
   "twin_ingest_source",
   "twin_source_create",
+  "twin_source_update",
   "twin_source_delete",
   "twin_draft_review",
   // Wave 2 desktop-write mutating RPCs
