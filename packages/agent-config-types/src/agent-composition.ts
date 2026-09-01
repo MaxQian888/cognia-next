@@ -318,9 +318,29 @@ export interface AgentCompositionSelectionV1 {
   orchestrationRef?: string
   /**
    * Reference to an `AgentExecutionPolicy` binding. The composition never
-   * describes a runtime itself — it points at the existing authority.
+   * describes a runtime itself, it points at the existing authority.
+   *
+   * NOT the imported-session resume marker. This field used to carry an
+   * external agent's native session id for imported conversations, a third
+   * unrelated meaning on top of its documented one and the runtime lane. That
+   * moved to {@link verifiedNativeResume}.
    */
   runtimeBindingRef?: string
+  /**
+   * This imported conversation has been verified against the external agent
+   * that produced it, so its turns may resume the agent's own native session
+   * instead of starting a fresh one.
+   *
+   * A marker, not an id: the native session id already lives on the session row
+   * (`importRuntimeBinding.nativeSessionId`) and the verification does not
+   * change it. What is per-session here is the DECISION, which is why it rides
+   * the selection.
+   *
+   * Deliberately absent from {@link compositionDigestPayload}: verifying a
+   * resume target does not change what the composition is, and a turn's frozen
+   * composition identity must not move because of it.
+   */
+  verifiedNativeResume?: true
   /**
    * The `agentModeId` this selection was migrated from, kept so an older
    * client (or an export) can still round-trip the session.

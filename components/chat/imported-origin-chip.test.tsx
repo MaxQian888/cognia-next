@@ -154,7 +154,7 @@ describe("ImportedOriginChip", () => {
     await waitFor(() => expect(resumeNative).toHaveBeenCalledWith(imported))
     expect(setSessionComposition).toHaveBeenCalledWith(imported.id, {
       presetId: "standard",
-      runtimeBindingRef: "native-1",
+      verifiedNativeResume: true,
     })
     // One write picks the lane AND the agent, so the chip can no longer leave
     // the composer on an external lane with nothing selected.

@@ -1330,7 +1330,9 @@ describe("useClaudeChat — actions", () => {
     useAgentRuntimeStore.setState({
       runtimeRef: { kind: "external", agentId: "ext-1" },
       sessionCompositions: {
-        "import:codex:thread-1": { presetId: "standard", runtimeBindingRef: "thread-1" },
+        // The marker, not the id. The native session id lives on the session
+        // row, which is where the resume reads it from.
+        "import:codex:thread-1": { presetId: "standard", verifiedNativeResume: true },
       },
     })
     getSessionMock.mockResolvedValue({
@@ -1338,6 +1340,7 @@ describe("useClaudeChat — actions", () => {
       title: "Imported Codex",
       importOwnership: "native-bound",
       branchSeed: { kind: "transcript", content: "Imported context" },
+      importRuntimeBinding: { nativeSessionId: "thread-1", presetId: "codex" },
     })
     executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "continued" })
     const { result } = renderHook(() => useClaudeChat())
@@ -1351,6 +1354,31 @@ describe("useClaudeChat — actions", () => {
     )
     expect(clearBranchSeedMock).toHaveBeenCalledWith("import:codex:thread-1")
     expect(freezeImportedSessionMock).not.toHaveBeenCalled()
+  })
+
+  // Verification is what unlocks the resume. Without it the turn must start a
+  // fresh session rather than reattach to one nobody confirmed is still there.
+  it("starts a fresh session for an imported conversation that was never verified", async () => {
+    useAgentRuntimeStore.setState({
+      runtimeRef: { kind: "external", agentId: "ext-1" },
+      sessionCompositions: { "import:codex:thread-1": { presetId: "standard" } },
+    })
+    getSessionMock.mockResolvedValue({
+      id: "import:codex:thread-1",
+      title: "Imported Codex",
+      importOwnership: "native-bound",
+      importRuntimeBinding: { nativeSessionId: "thread-1", presetId: "codex" },
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "continued" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("continue", undefined, { sessionId: "import:codex:thread-1" })
+    })
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "continue",
+      expect.not.objectContaining({ sessionId: "thread-1" })
+    )
   })
 
   // ADR-0127 §1: the external rail rides the per-session coalescer — a burst

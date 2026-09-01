@@ -173,9 +173,12 @@ export function ImportedOriginChip({
       return
     }
     const runtime = useAgentRuntimeStore.getState()
+    // A marker, not an id. `result.nativeSessionId` is the one already on the
+    // session row, so storing it here only recorded that verification had
+    // happened, while squatting on a field that means something else.
     runtime.setSessionComposition(session.id, {
       ...compositionForSession(session.id),
-      runtimeBindingRef: result.nativeSessionId,
+      verifiedNativeResume: true,
     })
     runtime.setSessionRuntimeRef(session.id, { kind: "external", agentId: result.agentId })
     toast.success(t("resumeReady"))

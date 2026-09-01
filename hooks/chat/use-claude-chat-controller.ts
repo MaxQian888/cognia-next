@@ -2163,9 +2163,14 @@ export function useClaudeChat() {
                 })
               : await executeOnExternalAgent(externalSendText, {
                   agentId: extAgentId,
+                  // Resume the agent's own native session, but only for an
+                  // import whose binding has been verified. The id comes from
+                  // the session row, which is where it has always lived. The
+                  // composition carries the verification decision, nothing more.
                   ...(sessionId.startsWith("import:") &&
-                  compositionForSession(sessionId).runtimeBindingRef
-                    ? { sessionId: compositionForSession(sessionId).runtimeBindingRef }
+                  compositionForSession(sessionId).verifiedNativeResume &&
+                  session?.importRuntimeBinding?.nativeSessionId
+                    ? { sessionId: session.importRuntimeBinding.nativeSessionId }
                     : {}),
                   workingDirectory: sendOptions.cwd,
                   // The composer's thinking level, which before this reached only the
