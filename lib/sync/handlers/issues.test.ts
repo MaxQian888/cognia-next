@@ -7,7 +7,14 @@ import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 
 import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
-import { reviveProject, syncIssues, syncLabels, syncProjects } from "./issues"
+import {
+  reviveProject,
+  syncIssueEvents,
+  syncIssueRuns,
+  syncIssues,
+  syncLabels,
+  syncProjects,
+} from "./issues"
 
 function makeTransport(rows: unknown[], deleted_ids: string[] = [], next_since = 1): Transport {
   return {
@@ -104,5 +111,60 @@ describe("syncLabels", () => {
     )
     expect(out.ok).toBe(true)
     expect(await getDb().labels.get("l1")).toMatchObject({ name: "bug" })
+  })
+})
+
+describe("syncIssueEvents", () => {
+  it("mirrors the trail, comments included", async () => {
+    const out = await syncIssueEvents(
+      makeTransport([
+        {
+          id: "e1",
+          issueId: "a",
+          kind: "commented",
+          ts: 7,
+          payload: { kind: "commented", body: "ship it" },
+        },
+      ]),
+      { since: 0 }
+    )
+    expect(out.ok).toBe(true)
+    expect(await getDb().issueEvents.get("e1")).toMatchObject({ kind: "commented", ts: 7 })
+  })
+
+  it("removes a trail the host tombstoned with its issue", async () => {
+    await syncIssueEvents(
+      makeTransport([{ id: "gone", issueId: "a", kind: "created", ts: 1, payload: {} }]),
+      { since: 0 }
+    )
+    await syncIssueEvents(makeTransport([], ["gone"]), { since: 0 })
+    expect(await getDb().issueEvents.get("gone")).toBeUndefined()
+  })
+})
+
+describe("syncIssueRuns", () => {
+  it("mirrors dispatch history, which executionRuns cannot answer for", async () => {
+    // `executionRuns` already syncs and carries the generic run summary, but
+    // it has no idea which issue asked for the work.
+    const out = await syncIssueRuns(
+      makeTransport([
+        {
+          id: "r1",
+          issueId: "a",
+          projectId: "ws1",
+          adapterId: "agent-task",
+          kind: "agent-task",
+          targetId: "t1",
+          status: "succeeded",
+          by: { kind: "human" },
+          startedAt: 1,
+          updatedAt: 9,
+          artifacts: [],
+        },
+      ]),
+      { since: 0 }
+    )
+    expect(out.ok).toBe(true)
+    expect(await getDb().issueRuns.get("r1")).toMatchObject({ issueId: "a", status: "succeeded" })
   })
 })

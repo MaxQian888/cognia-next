@@ -284,15 +284,24 @@ export async function settleIssueRun(
 }
 
 /** Cascade target for `deleteIssue`. */
-export async function deleteIssueRuns(issueId: string): Promise<void> {
-  await getDb().issueRuns.where("issueId").equals(issueId).delete()
+export async function deleteIssueRuns(issueId: string): Promise<string[]> {
+  const table = getDb().issueRuns
+  const ids = (await table.where("issueId").equals(issueId).primaryKeys()) as string[]
+  await table.where("issueId").equals(issueId).delete()
+  return ids
 }
 
-/** Cascade target for deleting a whole issue-project. */
-export async function deleteIssueRunsForIssues(issueIds: readonly string[]): Promise<void> {
-  if (issueIds.length === 0) return
-  await getDb()
-    .issueRuns.where("issueId")
+/** Cascade target for deleting a whole issue-project. Returns the ids it removed. */
+export async function deleteIssueRunsForIssues(issueIds: readonly string[]): Promise<string[]> {
+  if (issueIds.length === 0) return []
+  const table = getDb().issueRuns
+  const ids = (await table
+    .where("issueId")
+    .anyOf([...issueIds])
+    .primaryKeys()) as string[]
+  await table
+    .where("issueId")
     .anyOf([...issueIds])
     .delete()
+  return ids
 }

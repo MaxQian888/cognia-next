@@ -19,16 +19,14 @@
  *
  * `issueCounters` is deliberately not synced: it is keyed by `scopeId`
  * instead of `id`, and it is the write-side identifier allocator. A read-only
- * mirror holding the allocator would be wrong even if the key fitted.
- * `issueEvents` and `issueRuns` are also left out for now. The first is an
- * append-only activity log cursored on `ts`, and the second is covered for
- * the phone's purposes by `executionRuns`, which already syncs.
+ * mirror holding the allocator would be wrong even if the key fitted. It is
+ * the only table of the tracker that stays behind.
  */
 
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { Project } from "@/types"
-import type { Issue, IssueProject } from "@/types/issues"
+import type { Issue, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
 import type { LabelRow } from "@/types/labels"
 
 import type { SyncCursor, SyncOutcome } from "../types"
@@ -94,6 +92,38 @@ export function syncIssueProjects(transport: Transport, cursor: SyncCursor): Pro
 export function syncLabels(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
   return runSyncHandler<LabelRow>(
     { table: "labels", getTable: () => getDb().labels as never },
+    transport,
+    cursor
+  )
+}
+
+/**
+ * Pull the activity trail, comments included.
+ *
+ * The host cursors this on `ts` rather than `updatedAt`, because an event is
+ * appended and never edited. That makes the pull append-only in practice: a
+ * row already on the phone is never re-sent, and rows only leave through the
+ * tombstone their issue records when it is deleted.
+ */
+export function syncIssueEvents(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
+  return runSyncHandler<IssueEvent>(
+    { table: "issueEvents", getTable: () => getDb().issueEvents as never },
+    transport,
+    cursor
+  )
+}
+
+/**
+ * Pull dispatch history.
+ *
+ * `executionRuns` already syncs and carries the generic run summary, but it
+ * has no idea which issue asked for the work. These rows are what let the
+ * detail sheet say that this issue was dispatched, to which engine, and how
+ * it ended.
+ */
+export function syncIssueRuns(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
+  return runSyncHandler<IssueRun>(
+    { table: "issueRuns", getTable: () => getDb().issueRuns as never },
     transport,
     cursor
   )

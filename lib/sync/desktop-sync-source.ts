@@ -189,6 +189,10 @@ export async function readDexieDelta(
       return readIssueProjectsDelta(since)
     case "labels":
       return readLabelsDelta(since)
+    case "issueEvents":
+      return readIssueEventsDelta(since)
+    case "issueRuns":
+      return readIssueRunsDelta(since)
     case "goals":
       return readGoalsDelta(since)
     case "plans":
@@ -484,6 +488,31 @@ async function readIssueProjectsDelta(since: number): Promise<SyncDelta<unknown>
 async function readLabelsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().labels.where("updatedAt").above(since).toArray()
   return finalizeDelta("labels", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * The activity trail.
+ *
+ * An event is appended and never edited, so it carries no `updatedAt` and the
+ * cursor is `ts`, which is indexed. `finalizeDelta` reads `updatedAt ??
+ * createdAt` by default and would find neither, so the watermark is passed
+ * explicitly rather than aliased onto the row: an `updatedAt` written here
+ * would end up persisted on a type that has no such field.
+ */
+async function readIssueEventsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().issueEvents.where("ts").above(since).toArray()
+  return finalizeDelta("issueEvents", rows as UpdatedAtRow[], since, false, (row) =>
+    Number((row as { ts?: number }).ts ?? 0)
+  )
+}
+
+/**
+ * Dispatch history. Unlike the trail, a run row IS rewritten in place when the
+ * engine settles it, so `updatedAt` is both present and indexed.
+ */
+async function readIssueRunsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().issueRuns.where("updatedAt").above(since).toArray()
+  return finalizeDelta("issueRuns", rows as UpdatedAtRow[], since)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {

@@ -233,17 +233,20 @@ export async function deleteIssueProject(id: string): Promise<void> {
     async () => {
       const issues = await db.issues.where("issueProjectId").equals(id).toArray()
       const issueIds = issues.map((issue) => issue.id)
-      await deleteIssueEventsForIssues(issueIds)
-      await deleteIssueRunsForIssues(issueIds)
+      const eventIds = await deleteIssueEventsForIssues(issueIds)
+      const runIds = await deleteIssueRunsForIssues(issueIds)
       await db.issues.bulkDelete(issueIds)
       await deleteIssueCounter(id)
       await db.issueProjects.delete(id)
-      // Both tables are companion-synced. The cascade has to tombstone the
-      // issues too, not just the container, or a paired phone keeps rendering
-      // them under a container it no longer has.
+      // Every table this cascade touches is companion-synced, so each level
+      // needs its own tombstone. Recording only the container would leave a
+      // paired phone rendering its issues under something it no longer has,
+      // and their trails and runs under issues that are themselves gone.
       const at = Date.now()
       await recordTombstones("issueProjects", [id], at)
       await recordTombstones("issues", issueIds, at)
+      await recordTombstones("issueEvents", eventIds, at)
+      await recordTombstones("issueRuns", runIds, at)
     }
   )
 }

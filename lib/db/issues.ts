@@ -461,13 +461,17 @@ export async function deleteIssue(id: string): Promise<void> {
     db.issueRuns,
     db.syncTombstones,
     async () => {
-      await deleteIssueEvents(id)
-      await deleteIssueRuns(id)
+      const eventIds = await deleteIssueEvents(id)
+      const runIds = await deleteIssueRuns(id)
       await db.issues.delete(id)
-      // `issues` is companion-synced, and a pull only ever carries rows that
-      // still exist, so without this the board on a paired phone keeps an
-      // issue the host deleted.
-      await recordTombstones("issues", [id])
+      // All three tables are companion-synced, and a pull only ever carries
+      // rows that still exist, so without these the board on a paired phone
+      // keeps an issue the host deleted, and its trail and runs outlive even
+      // that as rows pointing at nothing.
+      const at = Date.now()
+      await recordTombstones("issues", [id], at)
+      await recordTombstones("issueEvents", eventIds, at)
+      await recordTombstones("issueRuns", runIds, at)
     }
   )
 }

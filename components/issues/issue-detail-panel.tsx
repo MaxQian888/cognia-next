@@ -37,6 +37,7 @@ import { publishRunToCollab } from "@/lib/collab/publish"
 import { Separator } from "@/components/ui/separator"
 import { useClientLiveQuery } from "@/hooks/data"
 import { parseGithubMirrorId } from "@/lib/db/github-issue-mirror"
+import { activityValues } from "@/lib/issues/activity-values"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { getCollabWorkspace } from "@/lib/db/collab-workspace-mirror"
@@ -668,29 +669,6 @@ export function IssueDetailPanel({
       </div>
     </div>
   )
-}
-
-/**
- * ICU values for an activity line. Statuses and priorities are localized here
- * rather than stored localized, so a language switch relabels history too.
- */
-function activityValues(
-  payload: { kind: string; from?: unknown; to?: unknown },
-  t: (key: string) => string
-): Record<string, string> {
-  const localize = (value: unknown): string => {
-    if (typeof value === "string") {
-      if (payload.kind === "status_changed") return t(`status.${value}`)
-      if (payload.kind === "priority_changed") return t(`priority.${value}`)
-      return value
-    }
-    if (value && typeof value === "object" && "kind" in value) {
-      const actor = value as { kind: string; label?: string }
-      return actor.label ?? t(`actor.${actor.kind}`)
-    }
-    return ""
-  }
-  return { from: localize(payload.from), to: localize(payload.to) }
 }
 
 function PropertyRow({ label, children }: { label: string; children: React.ReactNode }) {

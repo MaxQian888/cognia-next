@@ -82,8 +82,8 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 35 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(35)
+  it("maps all 37 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(37)
     // The unread pointers the mobile Chat badge and Inbox dot count. They used
     // to count `inboundLedger`, which is host-only, so both read 0 on a phone.
     expect(COMPANION_SYNC_TABLES.has("sessionState")).toBe(true)
@@ -228,18 +228,27 @@ describe("DataTableCatalog", () => {
       cleanupPolicy: "quick",
     })
     // v174 execution bridge: the issue side owns the engine binding, so a run
-    // is authoritative user history — device-local, never companion-synced
-    // (the engine rows it points at are not synced either), and swept only by
-    // the `deleteIssue` cascade.
+    // is authoritative user history, swept only by the `deleteIssue` cascade.
+    // It reaches a paired phone read-only: the mobile detail sheet says which
+    // engine ran an issue and how it ended, which nothing else can answer.
+    // `executionRuns` carries the generic run summary but has no idea which
+    // issue asked for the work.
     expect(policyForTable("issueRuns")).toMatchObject({
       role: "authoritative",
       sensitivity: "confidential",
       backupPolicy: { mode: "device-local" },
-      syncPolicy: { mode: "none" },
+      syncPolicy: { mode: "companion-readonly" },
       retentionPolicy: { mode: "permanent", enforcement: "explicit-delete" },
       cleanupPolicy: "protected",
     })
-    expect(COMPANION_SYNC_TABLES.has("issueRuns")).toBe(false)
+    expect(COMPANION_SYNC_TABLES.has("issueRuns")).toBe(true)
+    // The trail crosses too, so the phone renders one merged activity and
+    // comment timeline rather than a detail sheet that stops at the fields.
+    expect(COMPANION_SYNC_TABLES.has("issueEvents")).toBe(true)
+    // The number allocator stays behind: it is keyed by `scopeId` rather than
+    // `id`, and a read-only mirror has no business holding a write-side
+    // allocator even if the key fitted.
+    expect(COMPANION_SYNC_TABLES.has("issueCounters")).toBe(false)
   })
 })
 

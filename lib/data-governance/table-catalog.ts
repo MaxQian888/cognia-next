@@ -504,6 +504,12 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "issues",
   "issueProjects",
   "labels",
+  // The detail sheet's two halves. Append-mostly children of `issues`: the
+  // activity trail is cursored on `ts` because an event is never edited, and
+  // runs on `updatedAt` because a run is settled in place when the engine
+  // reports a terminal state.
+  "issueEvents",
+  "issueRuns",
 ])
 
 /**
@@ -546,6 +552,8 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "issues",
   "issueProjects",
   "labels",
+  "issueEvents",
+  "issueRuns",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]

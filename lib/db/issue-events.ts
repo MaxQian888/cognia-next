@@ -117,16 +117,31 @@ export async function listIssueComments(issueId: string): Promise<IssueEvent[]> 
   return rows.filter((event) => event.kind === "commented")
 }
 
-/** Cascade target for `deleteIssue`. */
-export async function deleteIssueEvents(issueId: string): Promise<void> {
-  await getDb().issueEvents.where("issueId").equals(issueId).delete()
+/**
+ * Cascade target for `deleteIssue`. Returns the ids it removed.
+ *
+ * The caller needs them because `issueEvents` is companion-synced and a pull
+ * only ever carries rows that still exist, so a trail dropped without a
+ * tombstone stays on a paired phone under an issue that is already gone.
+ */
+export async function deleteIssueEvents(issueId: string): Promise<string[]> {
+  const table = getDb().issueEvents
+  const ids = (await table.where("issueId").equals(issueId).primaryKeys()) as string[]
+  await table.where("issueId").equals(issueId).delete()
+  return ids
 }
 
-/** Cascade target for deleting a whole issue-project. */
-export async function deleteIssueEventsForIssues(issueIds: readonly string[]): Promise<void> {
-  if (issueIds.length === 0) return
-  await getDb()
-    .issueEvents.where("issueId")
+/** Cascade target for deleting a whole issue-project. Returns the ids it removed. */
+export async function deleteIssueEventsForIssues(issueIds: readonly string[]): Promise<string[]> {
+  if (issueIds.length === 0) return []
+  const table = getDb().issueEvents
+  const ids = (await table
+    .where("issueId")
+    .anyOf([...issueIds])
+    .primaryKeys()) as string[]
+  await table
+    .where("issueId")
     .anyOf([...issueIds])
     .delete()
+  return ids
 }

@@ -7,6 +7,8 @@ jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 let issuesResult: unknown[] = []
 let projectsResult: unknown[] = []
 let labelsResult: unknown[] = []
+let eventsResult: unknown[] = []
+let runsResult: unknown[] = []
 let isSyncing = false
 // The body reads each table dexie-first now, so mounting also kicks a
 // targeted pull. The stub dispatches on the query source the same way the
@@ -15,11 +17,18 @@ let isSyncing = false
 jest.mock("@/hooks/data/use-dexie-first-query", () => ({
   useDexieFirstQuery: ({ query }: { query: () => Promise<unknown> }) => {
     const source = query.toString()
+    // The detail sheet reads the trail and the runs through the same hook, so
+    // they need their own arms. Falling through to `issuesResult` handed the
+    // sheet issue rows dressed as events.
     const data = source.includes("listIssueProjects")
       ? projectsResult
       : source.includes("listLabels")
         ? labelsResult
-        : issuesResult
+        : source.includes("listIssueEvents")
+          ? eventsResult
+          : source.includes("listIssueRuns")
+            ? runsResult
+            : issuesResult
     return { data, isSyncing, lastSyncedAt: null, error: null }
   },
 }))
@@ -64,6 +73,8 @@ beforeEach(() => {
   issuesResult = []
   projectsResult = []
   labelsResult = []
+  eventsResult = []
+  runsResult = []
   isSyncing = false
 })
 

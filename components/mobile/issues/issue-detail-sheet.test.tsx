@@ -5,6 +5,19 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${Object.values(vars).join(",")}` : key,
 }))
 
+let eventsResult: unknown[] = []
+let runsResult: unknown[] = []
+jest.mock("@/hooks/data/use-dexie-first-query", () => ({
+  useDexieFirstQuery: ({ query }: { query: () => Promise<unknown> }) => ({
+    data: String(query).includes("listIssueRuns") ? runsResult : eventsResult,
+    isSyncing: false,
+    lastSyncedAt: null,
+    error: null,
+  }),
+}))
+jest.mock("@/lib/db/issue-events", () => ({ listIssueEvents: jest.fn() }))
+jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
+
 import { fireEvent, render, screen } from "@testing-library/react"
 import { statusCategoryOf } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
@@ -107,5 +120,74 @@ describe("IssueDetailSheet", () => {
     const { props } = renderSheet()
     fireEvent.keyDown(document.body, { key: "Escape" })
     expect(props.onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  describe("activity trail and runs", () => {
+    beforeEach(() => {
+      eventsResult = []
+      runsResult = []
+    })
+
+    it("renders the dispatch history the phone could not see before", () => {
+      runsResult = [
+        {
+          id: "r1",
+          issueId: "i1",
+          adapterId: "agent-task",
+          status: "failed",
+          summary: "half the tests",
+          error: "boom",
+        },
+      ]
+      renderSheet()
+      expect(screen.getByTestId("issues-mobile-detail-runs")).toBeInTheDocument()
+      expect(screen.getByTestId("issues-mobile-run-failed")).toBeInTheDocument()
+      expect(screen.getByText("run.status.failed")).toBeInTheDocument()
+      expect(screen.getByText("run.adapter.agent-task.name")).toBeInTheDocument()
+      expect(screen.getByText("boom")).toBeInTheDocument()
+    })
+
+    it("renders the merged activity and comment timeline", () => {
+      eventsResult = [
+        {
+          id: "e1",
+          issueId: "i1",
+          kind: "status_changed",
+          ts: 2,
+          payload: { kind: "status_changed", from: "todo", to: "in_progress" },
+        },
+        {
+          id: "e2",
+          issueId: "i1",
+          kind: "commented",
+          ts: 1,
+          payload: { kind: "commented", body: "looks right to me" },
+        },
+      ]
+      renderSheet()
+      expect(screen.getByTestId("issues-mobile-detail-activity")).toBeInTheDocument()
+      // The values go through the shared formatter, so the enum halves come
+      // back localized rather than as raw `todo` / `in_progress`.
+      expect(
+        screen.getByText("activity.status_changed:status.todo,status.in_progress")
+      ).toBeInTheDocument()
+      expect(screen.getByText("looks right to me")).toBeInTheDocument()
+    })
+
+    it("asks for neither on a federated row, which keeps its history elsewhere", () => {
+      // A GitHub or agent-board row has no trail in our tables. Rendering an
+      // empty one would claim nothing ever happened to it.
+      eventsResult = [{ id: "e1", issueId: "gh", kind: "created", ts: 1, payload: {} }]
+      runsResult = [{ id: "r1", issueId: "gh", adapterId: "agent-task", status: "succeeded" }]
+      renderSheet({ item: item({ kind: "github", sourceId: "owner/repo#1" }) })
+      expect(screen.queryByTestId("issues-mobile-detail-activity")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("issues-mobile-detail-runs")).not.toBeInTheDocument()
+    })
+
+    it("shows neither section when the issue has no history", () => {
+      renderSheet()
+      expect(screen.queryByTestId("issues-mobile-detail-activity")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("issues-mobile-detail-runs")).not.toBeInTheDocument()
+    })
   })
 })

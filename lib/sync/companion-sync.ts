@@ -55,7 +55,14 @@ import { syncConnectorDrafts } from "./handlers/connector-drafts"
 import { syncOutboundQueue } from "./handlers/outbound-queue"
 import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwins, syncTwinDrafts } from "./handlers/twins"
-import { syncProjects, syncIssues, syncIssueProjects, syncLabels } from "./handlers/issues"
+import {
+  syncProjects,
+  syncIssues,
+  syncIssueProjects,
+  syncIssueEvents,
+  syncIssueRuns,
+  syncLabels,
+} from "./handlers/issues"
 import { syncTwinProfile } from "./handlers/twin-profile"
 import { syncWorkflows } from "./handlers/workflows"
 import { syncWorkflowRuns } from "./handlers/workflow-runs"
@@ -187,6 +194,10 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "labels", stage: "background", run: syncLabels },
   { table: "issueProjects", stage: "background", run: syncIssueProjects },
   { table: "issues", stage: "background", run: syncIssues },
+  // The detail sheet's two halves, after the issues they hang off: a trail
+  // keyed by an issue that has not arrived is a row with nothing to attach to.
+  { table: "issueEvents", stage: "background", run: syncIssueEvents },
+  { table: "issueRuns", stage: "background", run: syncIssueRuns },
   { table: "plugins", stage: "background", run: syncPlugins },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
   // Long-term memory. Decrypts row by row against the profile DEK, so it is
@@ -272,6 +283,11 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   issues: syncDomain("tombstone"),
   issueProjects: syncDomain("tombstone"),
   labels: syncDomain("tombstone", "internal"),
+  // Appended, never edited, so the cursor is `ts` and the pull only ever
+  // carries rows the phone has not seen. Deletion still needs a tombstone,
+  // because the cascade from a deleted issue has to reach here too.
+  issueEvents: syncDomain("tombstone", "confidential", "opaque"),
+  issueRuns: syncDomain("tombstone"),
   plugins: syncDomain("tombstone"),
   adapterInstances: syncDomain("tombstone"),
   settings: syncDomain("tombstone", "internal"),

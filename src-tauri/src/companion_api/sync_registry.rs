@@ -149,6 +149,18 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: true,
         },
         SyncTableDescriptor {
+            name: "issueEvents".to_string(),
+            // Comments live in this table too (`kind: "commented"`), so the
+            // trail and the discussion are one timeline.
+            description: "Issue activity trail (append-only, cursored on ts; deleted with the issue it belongs to)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "issueRuns".to_string(),
+            description: "Issue dispatch history (settled in place, so cursored on updatedAt)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
             name: "plugins".to_string(),
             description: "Installed plugins (toggle from mobile via plugin_set_enabled)".to_string(),
             has_tombstones: false,
