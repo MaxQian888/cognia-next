@@ -29,6 +29,7 @@ import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-block
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchPlanSubcommand } from "./actions/plan"
+import { dispatchSquadSubcommand } from "./actions/squad"
 import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
@@ -506,6 +507,19 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     argumentOptions: ["status", "new", "from-goal", "from-team", "to-team", "cancel"],
     handler: async (ctx) => {
       const result = await dispatchPlanSubcommand(ctx)
+      ctx.pushSystemMessage(result.system)
+    },
+  },
+  {
+    name: "squad",
+    description:
+      "Address the Squad running this conversation: status, roster board, and start / pause / resume / stop (ADR-0140).",
+    scope: "builtin",
+    category: "goal",
+    argumentHint: "<status | list | run [objective] | pause | resume | stop | tasks>",
+    argumentOptions: ["status", "list", "run", "pause", "resume", "stop", "tasks"],
+    handler: async (ctx) => {
+      const result = await dispatchSquadSubcommand(ctx)
       ctx.pushSystemMessage(result.system)
     },
   },
