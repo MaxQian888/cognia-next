@@ -1,31 +1,34 @@
-//! `cognia-server` — headless deployment of the cognia companion API
-//! (Phase D skeleton).
+//! `cognia-server` — headless deployment of the cognia companion API.
 //!
-//! # What this binary does today
+//! # What this binary does
 //!
 //! - Opens (or creates) a SQLite-backed `AppStore` at
 //!   `--data-dir/cognia-server.sqlite`.
-//! - Loads / generates the TLS material in the same `--data-dir` so the
+//! - Loads or generates the TLS material in the same `--data-dir` so the
 //!   self-signed cert is stable across restarts.
 //! - Exposes two subcommands:
-//!   - `cognia-server pair --device-name <name>` — issues a one-time Owner
-//!     invitation and prints a `cgnp3|<base64>` payload the user can paste into the
-//!     mobile app (no QR display in this skeleton — a UTF-8 QR renderer
-//!     is a follow-up).
-//!   - `cognia-server serve --port <port>` — boots the axum HTTPS server
-//!     (Phase D follow-up will rewire RPC handlers to consume `AppStore`
-//!     instead of the Tauri-WebView bridges; today this command logs the
-//!     intended state and exits).
+//!   - `cognia-server pair --device-name <name>` issues a one-time Owner
+//!     invitation and prints a `cgnp3|<base64>` payload the user pastes into
+//!     the mobile app.
+//!   - `cognia-server serve --port <port>` boots the axum HTTPS server, the
+//!     `SecurityStore`, the `EventBus`, all four bridges and the signaling hub,
+//!     and supervises the Node brain that owns the data plane.
 //!
-//! # What's deliberately left for follow-up
+//! # How it serves without an AppHandle
 //!
-//! The existing `companion_api::server::spawn_server` expects a
-//! `SharedState` containing a `tauri::AppHandle`, and many RPC handlers
-//! round-trip mutations through the WebView via the desktop_messages /
-//! sync / desktop_writes bridges. Wiring an `AppHandle`-free serving path
-//! that consumes `AppStore` for those mutations is the next milestone.
-//! This skeleton proves that the abstraction compiles and is exercisable
-//! from a standalone binary; ADR-0014 follow-up tracks the rewrite.
+//! `companion_api::server::spawn_server` used to require a `SharedState`
+//! carrying a `tauri::AppHandle`, and every mutating RPC round-tripped through
+//! the WebView. That is no longer true, and this docblock claimed it was long
+//! after the milestone it called "next" had shipped.
+//!
+//! `companion_api::dispatch_host::DispatchHost` is the seam: it is either
+//! `Tauri(AppHandle)` or `Headless(Arc<HeadlessServices>)`, and every arm asks
+//! it for what it needs rather than reaching for `app.state::<T>()`.
+//! `headless::HeadlessServices` is the process-global registry standing in for
+//! Tauri's managed state, and `headless::brain` supervises the Node process
+//! that answers the data plane over `/internal/bridge`. An arm that genuinely
+//! requires one host says so with `tauri_app(name)` or `headless()`, and the
+//! refusal names which host it needed.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

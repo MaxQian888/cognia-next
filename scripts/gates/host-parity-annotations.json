@@ -1,27 +1,8 @@
 {
   "version": 1,
-  "note": "Per-subsystem judgment on why it carries host guards (isTauri / isHeadlessHost / usePlatform). Produced by `pnpm audit:host-parity:report` and classified by hand — the census is mechanical, the classification is not. `confidence: \"low\"` marks a row decided from naming and a spot check rather than a full read; those are where a reviewer should look first. Classifications: physically-impossible (the host genuinely lacks the surface), unmigrated (no physical reason — the work just was not done), ui-assumption (backend can reach parity; the UI keys off the host instead of a capability), seam-infrastructure (this IS the host-detection/transport layer; branching on host is its job).",
+  "note": "Per-subsystem judgment on why it carries host guards (isTauri / isHeadlessHost / usePlatform). Produced by `pnpm audit:host-parity:report` and classified by hand \u2014 the census is mechanical, the classification is not. `confidence: \"low\"` marks a row decided from naming and a spot check rather than a full read; those are where a reviewer should look first. Classifications: physically-impossible (the host genuinely lacks the surface), unmigrated (no physical reason \u2014 the work just was not done), ui-assumption (backend can reach parity; the UI keys off the host instead of a capability), seam-infrastructure (this IS the host-detection/transport layer; branching on host is its job).",
   "subsystems": {
-    "app/discover": {
-      "classification": "ui-assumption"
-    },
     "app/global-error.tsx": {
-      "classification": "ui-assumption"
-    },
-    "app/goals": {
-      "classification": "ui-assumption"
-    },
-    "app/inbox": {
-      "classification": "ui-assumption"
-    },
-    "app/issues": {
-      "classification": "ui-assumption",
-      "note": "One `usePlatform()` in page.tsx choosing the board's layout density. The tracker's runtime half is host-neutral and now boots in the brain too (lib/headless/runtimes/issue-tracker.ts)."
-    },
-    "app/me": {
-      "classification": "ui-assumption"
-    },
-    "app/memory": {
       "classification": "ui-assumption"
     },
     "app/page.tsx": {
@@ -57,14 +38,14 @@
     "components/data": {
       "classification": "ui-assumption"
     },
-    "components/devices": {
-      "classification": "ui-assumption",
-      "note": "Device controls and ownership candidates must be selected from runtime capabilities; the current guards still key presentation and grant affordances directly off the shell."
-    },
     "components/desktop": {
       "classification": "physically-impossible",
       "note": "Native window/menu chrome. Some children may be ui-assumption; split when paying down.",
       "confidence": "low"
+    },
+    "components/devices": {
+      "classification": "ui-assumption",
+      "note": "Device controls and ownership candidates must be selected from runtime capabilities; the current guards still key presentation and grant affordances directly off the shell."
     },
     "components/discover": {
       "classification": "ui-assumption"
@@ -102,19 +83,16 @@
     "components/rag": {
       "classification": "ui-assumption"
     },
-    "components/scheduler": {
-      "classification": "ui-assumption"
-    },
     "components/selection-toolbar": {
       "classification": "physically-impossible",
-      "note": "ADR-0093/0095 — needs a visible desktop and screen-recording permission."
+      "note": "ADR-0093/0095 \u2014 needs a visible desktop and screen-recording permission."
     },
     "components/session-import": {
       "classification": "ui-assumption"
     },
     "components/settings": {
       "classification": "ui-assumption",
-      "note": "145 guards / 93 files — the largest single cluster, and 21 sections are hard-marked `desktopOnly: true`. This is the primary target of the `desktopOnly → requires: [capability]` migration."
+      "note": "145 guards / 93 files \u2014 the largest single cluster, and 21 sections are hard-marked `desktopOnly: true`. This is the primary target of the `desktopOnly \u2192 requires: [capability]` migration."
     },
     "components/shared": {
       "classification": "ui-assumption"
@@ -144,10 +122,11 @@
     "components/workflow": {
       "classification": "ui-assumption"
     },
-    "hooks/a2ui": {
-      "classification": "ui-assumption"
+    "components/workspace": {
+      "classification": "ui-assumption",
+      "note": "One `isTauri()` in workspace-picker-list.tsx, and it is half right: the desktop opens a native folder dialog, while a paired phone or browser opens the HOST's tree through `fs_list_workspace_dir`. The capability half of that decision is already the gate (`gate(\"fs_list_workspace_dir\").available`); the `isTauri()` beside it stands in for \"can I show a native dialog\", which is a UI question keyed off the host rather than off a capability. Only an unpaired browser genuinely has neither path."
     },
-    "hooks/account": {
+    "hooks/a2ui": {
       "classification": "ui-assumption"
     },
     "hooks/agent": {
@@ -168,22 +147,18 @@
     "hooks/codeserver": {
       "classification": "ui-assumption"
     },
-    "hooks/companion": {
-      "classification": "unmigrated",
-      "note": "`setRemoteTerminalRustSide` returns early on `!isTauri()` and only then calls `transport.call(\"companion_set_remote_terminal\")` — the guard, not the transport, is what blocks a cloud host from granting a paired device terminal access. Dropping the guard is the migration; the arm itself is host-neutral."
-    },
     "hooks/connectors": {
       "classification": "ui-assumption"
     },
     "hooks/data": {
       "classification": "ui-assumption"
     },
+    "hooks/desktop": {
+      "classification": "ui-assumption"
+    },
     "hooks/devices": {
       "classification": "ui-assumption",
       "note": "Device discovery and grant actions currently branch on Tauri even though Companion and remote-host transports expose capability-based equivalents."
-    },
-    "hooks/desktop": {
-      "classification": "ui-assumption"
     },
     "hooks/fleet": {
       "classification": "ui-assumption"
@@ -213,11 +188,19 @@
     "hooks/scheduler": {
       "classification": "ui-assumption"
     },
+    "hooks/sites": {
+      "classification": "physically-impossible",
+      "note": "`use-site-action-gate.ts` reads `usePlatform()` to disable host-privileged Sites controls outside Tauri, and its own docblock names why the boundary is physical: builds run through `sandbox_exec`, previews spawn a PTY, provider tokens need the OS keyring, and the manifest lives on disk. Getting it wrong is worse than an error, because the keyring silently falls back to an in-memory store and a saved token would look accepted and vanish. The console renders on every host and disables with a reason rather than blanking, which is the shape this classification asks for."
+    },
     "hooks/skills": {
       "classification": "ui-assumption"
     },
     "hooks/system": {
       "classification": "ui-assumption"
+    },
+    "hooks/terminal": {
+      "classification": "physically-impossible",
+      "note": "Two guards. `use-ssh-host-key-change.tsx` gates TRUSTING a changed host key on `isTauri()`, because the known-hosts file it would write lives on the machine running the SSH client, and its comment says so. `use-terminal-autocomplete.ts` passes `detectPlatform()` as data for path-shape completion, which is a fact about the host being completed against rather than a branch."
     },
     "hooks/ui": {
       "classification": "ui-assumption"
@@ -251,14 +234,14 @@
     },
     "lib/automation": {
       "classification": "physically-impossible",
-      "note": "AX/UIA against a real desktop. Consent is NOT in this category — see ADR-0059: it routes to a paired device via notifications.remote."
+      "note": "AX/UIA against a real desktop. Consent is NOT in this category \u2014 see ADR-0059: it routes to a paired device via notifications.remote."
     },
     "lib/biometric": {
       "classification": "physically-impossible"
     },
     "lib/browser": {
       "classification": "unmigrated",
-      "note": "`installSnapshotInvalidation` gates on `isTauri()` because the snapshot-dirty event arrives on the Tauri event plane. The code already degrades honestly (the cache stays conservative and `fresh` bypasses it), so this is a missed optimisation on a cloud host rather than a broken feature — it clears when the browser events move onto the swappable seam."
+      "note": "`installSnapshotInvalidation` gates on `isTauri()` because the snapshot-dirty event arrives on the Tauri event plane. The code already degrades honestly (the cache stays conservative and `fresh` bypasses it), so this is a missed optimisation on a cloud host rather than a broken feature \u2014 it clears when the browser events move onto the swappable seam."
     },
     "lib/canvas": {
       "classification": "unmigrated"
@@ -294,7 +277,7 @@
     },
     "lib/connectors": {
       "classification": "unmigrated",
-      "note": "installConnectorRuntime gates on isTauri() and the brain bypasses it with skipHostGate. The transports themselves are migrated: all nine IM adapters subscribe through `connectorListen` (lib/connectors/events.ts), which is the only production file here importing @tauri-apps/api/event and is a declared SEAM_OWNER — so the four IM platforms that once could not receive on a cloud host now can. What remains is the bootstrap gate itself."
+      "note": "installConnectorRuntime gates on isTauri() and the brain bypasses it with skipHostGate. The transports themselves are migrated: all nine IM adapters subscribe through `connectorListen` (lib/connectors/events.ts), which is the only production file here importing @tauri-apps/api/event and is a declared SEAM_OWNER \u2014 so the four IM platforms that once could not receive on a cloud host now can. What remains is the bootstrap gate itself."
     },
     "lib/credentials": {
       "classification": "unmigrated"
@@ -308,6 +291,10 @@
     "lib/device": {
       "classification": "seam-infrastructure",
       "confidence": "low"
+    },
+    "lib/docs-providers": {
+      "classification": "seam-infrastructure",
+      "note": "This IS the host-support declaration for the cloud-document providers. `listAvailableDocsProviders` and `isDocsProviderHostSupported` filter a registry by each provider's own `hosts` list, which is the registry's job and the reason a mobile user sees WHY a provider is missing instead of an empty picker. The one `isTauri()` outside that, in `providers/google/http.ts`, picks the Tauri transport over `fetch` and is the same seam question."
     },
     "lib/external-bridge": {
       "classification": "unmigrated"
@@ -323,7 +310,7 @@
     },
     "lib/git": {
       "classification": "unmigrated",
-      "note": "The git RPC arms carry NO host gate at all — they are host-neutral and work headless today. host-feature-manifest.ts still declares source-control.git as tauri-only (class E finding)."
+      "note": "The git RPC arms carry NO host gate at all \u2014 they are host-neutral and work headless today. host-feature-manifest.ts still declares source-control.git as tauri-only (class E finding)."
     },
     "lib/goal": {
       "classification": "unmigrated"
@@ -357,7 +344,7 @@
     },
     "lib/native/codex-app-dispatch.ts": {
       "classification": "physically-impossible",
-      "note": "Drives the installed Codex DESKTOP app, not a service. `codex_app_dispatch.rs` resolves `~/.codex/app-server-control/app-server-control.sock` (`codex_home()`), and when that socket is absent `connect_or_launch` recovers by opening `codex://threads/new` through the OS URL-scheme handler — a container has neither the app nor a handler to register the scheme. Same footing as AX/UIA: the SUBJECT is missing, not the plumbing. Note the plumbing is in fact host-neutral (`run_cdp_control` shells a Node sidecar), so do not 'fix' this by making the sidecar host-agnostic — the socket still never appears. Reclassified 2026-08-16; the 2026-08-15 audit's \"no physical reason found\" was wrong."
+      "note": "Drives the installed Codex DESKTOP app, not a service. `codex_app_dispatch.rs` resolves `~/.codex/app-server-control/app-server-control.sock` (`codex_home()`), and when that socket is absent `connect_or_launch` recovers by opening `codex://threads/new` through the OS URL-scheme handler \u2014 a container has neither the app nor a handler to register the scheme. Same footing as AX/UIA: the SUBJECT is missing, not the plumbing. Note the plumbing is in fact host-neutral (`run_cdp_control` shells a Node sidecar), so do not 'fix' this by making the sidecar host-agnostic \u2014 the socket still never appears. Reclassified 2026-08-16; the 2026-08-15 audit's \"no physical reason found\" was wrong."
     },
     "lib/network": {
       "classification": "unmigrated"
@@ -375,7 +362,7 @@
     },
     "lib/platform": {
       "classification": "seam-infrastructure",
-      "note": "detect.ts + capabilities.ts + host-feature-manifest.ts — the tables themselves."
+      "note": "detect.ts + capabilities.ts + host-feature-manifest.ts \u2014 the tables themselves."
     },
     "lib/plugin": {
       "classification": "unmigrated",
@@ -429,7 +416,7 @@
     },
     "lib/tauri": {
       "classification": "seam-infrastructure",
-      "note": "121 guards — the transport seam itself. `pickTransport()` choosing Tauri/Companion/WebStub per host is the mechanism parity rests on, not a gap in it."
+      "note": "121 guards \u2014 the transport seam itself. `pickTransport()` choosing Tauri/Companion/WebStub per host is the mechanism parity rests on, not a gap in it."
     },
     "lib/tauri.ts": {
       "classification": "seam-infrastructure"
@@ -471,12 +458,12 @@
     "lib/workspace": {
       "classification": "unmigrated"
     },
-    "packages/document": {
-      "classification": "unmigrated"
-    },
     "packages/agent-config-types": {
       "classification": "physically-impossible",
       "note": "The only guard token is documentation in the settings-sync contract explaining why machine-local wallpaper refs cannot cross hosts; no runtime branch exists in this package."
+    },
+    "packages/document": {
+      "classification": "unmigrated"
     },
     "packages/provider-core": {
       "classification": "unmigrated"
@@ -484,37 +471,9 @@
     "packages/vector": {
       "classification": "unmigrated"
     },
-    "plugins/clipboard-history": {
-      "classification": "physically-impossible",
-      "note": "System clipboard."
-    },
-    "plugins/clipboard-tools": {
-      "classification": "physically-impossible",
-      "note": "System clipboard."
-    },
-    "plugins/cognia-backend-refactor": {
-      "classification": "unmigrated",
-      "confidence": "low"
-    },
     "plugins/impeccable": {
       "classification": "unmigrated",
       "confidence": "low"
-    },
-    "plugins/ocr": {
-      "classification": "unmigrated"
-    },
-    "plugins/skill-recorder": {
-      "classification": "physically-impossible",
-      "note": "Records native desktop interaction (ADR-0106)."
-    },
-    "plugins/web-clone": {
-      "classification": "unmigrated"
-    },
-    "plugins/web-tools": {
-      "classification": "unmigrated"
-    },
-    "plugins/workspace-tools": {
-      "classification": "unmigrated"
     },
     "stores/account": {
       "classification": "unmigrated"

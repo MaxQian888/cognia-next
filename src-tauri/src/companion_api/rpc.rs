@@ -2036,9 +2036,17 @@ fn inject_caller_device_grants(
 
 /// RCE-grade commands that ONLY the headless brain's service token may call
 /// (ADR-0059 W4/D6). A public device principal presenting one is rejected with
-/// 403. The external-agent arms are remote code execution by construction —
-/// every decision is also written to the audit log. R12 adds the
-/// `connectors_*` management arms.
+/// 403. The external-agent arms are remote code execution by construction, and
+/// every decision is also written to the audit log.
+///
+/// **Not the runtime authority.** `is_service_only_command` reads
+/// `SERVICE_ONLY_COMMANDS_SET`, which is derived from the command manifest's
+/// `target: "service"` entries, because D7 makes the manifest authoritative.
+/// This array is the EXPECTATION that set is pinned against, so a command
+/// reclassified in `protocol/companion-commands.json` cannot quietly become
+/// service-scoped without a reader here noticing. It had already drifted by
+/// seven names before that pin existed: two `connectors_*` and five
+/// `mcp_oauth_*`.
 #[cfg(test)]
 const SERVICE_ONLY_COMMANDS: &[&str] = &[
     // ADR-0059 R12 — the brain manages the public webhook ingress registry.
@@ -2179,6 +2187,19 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "lark_entry_issue",
     "lark_result_complete",
     "lark_metrics_record",
+    // Connector egress that carries account credentials to a third party. A
+    // paired device asking this host to upload on its behalf is asking it to
+    // spend a token the device does not hold.
+    "connectors_discord_upload",
+    "connectors_onebot_probe",
+    // MCP OAuth. The whole family reads and writes the account's OAuth entries
+    // in the secret store, which is the brain's to manage and never a paired
+    // device's to enumerate.
+    "mcp_oauth_authenticate",
+    "mcp_oauth_clear",
+    "mcp_oauth_load_entry",
+    "mcp_oauth_refresh",
+    "mcp_oauth_status",
 ];
 
 static SERVICE_ONLY_COMMANDS_SET: once_cell::sync::Lazy<HashSet<&'static str>> =
@@ -2569,9 +2590,12 @@ pub async fn rpc_handler(
     // here means an unauthorized device never burns a rate-limit token or
     // touches the sidecar.
     // Service-scope gate (ADR-0059 W4): RCE-grade commands are reachable only
-    // with the headless brain's `"service"` token, never a device JWT. No-op
-    // until R11/R12 populate SERVICE_ONLY_COMMANDS; the `signaling::dispatch`
-    // path gets the mirrored gate when the arms land (they thread the scope).
+    // with the headless brain's `"service"` token, never a device JWT. Live,
+    // over the 122 commands the manifest marks `target: "service"`. This used
+    // to say the gate was a no-op "until R11/R12 populate
+    // SERVICE_ONLY_COMMANDS", which stopped being true two waves ago and is
+    // exactly the kind of stale claim a reader trusts. The `signaling::dispatch`
+    // path threads the scope and carries the mirrored gate.
     if is_service_only_command(&name) && ctx.scope != "service" {
         return Err(RpcError::forbidden(
             "this command requires the headless service token",

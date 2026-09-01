@@ -1,15 +1,18 @@
 //! Desktop-write bridge for Wave 2 mutating RPCs.
 //!
 //! Symmetric to [`super::desktop_messages_bridge`] but generic over the
-//! command name. The phone hits `_rpc/<command>` for any of:
+//! command name. The phone hits `_rpc/<command>` and the bridge carries it.
 //!
-//!   - `character_upsert` / `character_delete` / `character_bind_twin`
-//!   - `skill_set_enabled`
-//!   - `plugin_set_enabled`
-//!   - `adapter_update_policy`
-//!   - `app_settings_update`
-//!   - `twin_profile_get` (read-only, but routes through the same bridge
-//!     because the projection requires a Dexie scan)
+//! There is no list of commands here on purpose. This docblock used to name
+//! eight, which was true when it was written and drifted to a third of the
+//! real set: the bridged family is now 133 commands, spanning character and
+//! skill and plugin writes, host state, performance leases, the mobile
+//! outbound queue, connector drafts, workflow triggers, remote session
+//! attach and detach, and chunked attachment upload. The authority is the
+//! `match name` in `rpc/data_sync.rs`, and the TypeScript half is the `case`
+//! arms plus five delegated families in
+//! `lib/companion/desktop-write-source.ts`. A list here could only ever be a
+//! second copy going stale again.
 //!
 //! Rather than emit a bespoke Tauri event per command (the messages-
 //! bridge approach), this bridge emits one unified

@@ -6,10 +6,12 @@
  * exit carries no code, and a failed write must throw rather than resolve.
  */
 
-const listenMock = jest.fn()
-jest.mock("@tauri-apps/api/event", () => ({
-  listen: (topic: string, handler: (event: { payload: unknown }) => void) =>
-    listenMock(topic, handler),
+const subscribeMock = jest.fn()
+jest.mock("@/lib/tauri", () => ({
+  transport: {
+    subscribe: (topic: string, handler: (payload: unknown) => void) =>
+      subscribeMock(topic, handler),
+  },
 }))
 
 const openSerialPortMock = jest.fn()
@@ -35,13 +37,13 @@ import {
 
 const config = { ...DEFAULT_SERIAL_CONFIG, port: "/dev/cu.usbserial-1420" }
 /** topic → the handler the session registered for it. */
-const handlers = new Map<string, (event: { payload: unknown }) => void>()
+const handlers = new Map<string, (payload: never) => void>()
 
 beforeEach(() => {
   handlers.clear()
-  listenMock.mockReset().mockImplementation((topic: string, handler) => {
+  subscribeMock.mockReset().mockImplementation((topic: string, handler) => {
     handlers.set(topic, handler)
-    return Promise.resolve(() => handlers.delete(topic))
+    return () => handlers.delete(topic)
   })
   openSerialPortMock.mockReset().mockResolvedValue({ sessionId: "sess-1" })
   writeSerialPortMock.mockReset().mockResolvedValue(true)
@@ -71,7 +73,7 @@ it("decodes inbound base64 into the data stream", async () => {
   const session = await SerialTerminalSession.open(config)
   const seen: Uint8Array[] = []
   session.onData((bytes) => seen.push(bytes))
-  handlers.get(serialDataTopic("sess-1"))?.({ payload: { base64: btoa("boot\r\n") } })
+  handlers.get(serialDataTopic("sess-1"))?.({ base64: btoa("boot\r\n") })
   expect(new TextDecoder().decode(seen[0])).toBe("boot\r\n")
 })
 
@@ -88,7 +90,8 @@ it("writes the failure into the stream and exits with no code", async () => {
   session.onExit((code) => exits.push(code))
 
   handlers.get(serialStatusTopic("sess-1"))?.({
-    payload: { status: "error", reason: "the device closed the port" },
+    status: "error",
+    reason: "the device closed the port",
   })
 
   expect(seen.join("")).toContain("the device closed the port")

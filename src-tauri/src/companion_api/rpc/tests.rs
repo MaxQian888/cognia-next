@@ -1022,6 +1022,40 @@ fn plugin_permission_commands_have_remote_safe_classification() {
     }
 }
 
+/// The pin the seven-name drift needed.
+///
+/// `is_service_only_command` reads the manifest, so the const above is only
+/// documentation until something compares them. It had already fallen behind by
+/// two `connectors_*` and five `mcp_oauth_*` names, which meant a reader
+/// checking "is this service-scoped" against the array got the wrong answer for
+/// seven commands while the runtime got the right one.
+#[test]
+fn the_service_only_array_matches_what_the_manifest_actually_gates() {
+    let documented: std::collections::HashSet<&str> =
+        SERVICE_ONLY_COMMANDS.iter().copied().collect();
+    let enforced: std::collections::HashSet<&str> =
+        SERVICE_ONLY_COMMANDS_SET.iter().copied().collect();
+
+    let missing: Vec<&str> = {
+        let mut v: Vec<&str> = enforced.difference(&documented).copied().collect();
+        v.sort_unstable();
+        v
+    };
+    let extra: Vec<&str> = {
+        let mut v: Vec<&str> = documented.difference(&enforced).copied().collect();
+        v.sort_unstable();
+        v
+    };
+    assert!(
+        missing.is_empty(),
+        "the manifest gates these as service-scope and the array does not list them: {missing:?}"
+    );
+    assert!(
+        extra.is_empty(),
+        "the array claims these are service-scope and the manifest does not: {extra:?}"
+    );
+}
+
 #[test]
 fn lsp_facade_is_control_gated_but_not_service_only() {
     for command in ["lsp_host_ensure", "lsp_host_request"] {

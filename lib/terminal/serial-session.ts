@@ -28,7 +28,7 @@
  * 115200-baud device saturates it.
  */
 
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { transport } from "@/lib/tauri"
 
 import { BaseTerminalSession } from "./base-session"
 import {
@@ -73,7 +73,7 @@ export class SerialTerminalSession extends BaseTerminalSession {
   readonly info: SessionInfo
   readonly config: SerialConfig
   private status: SerialConnectionStatus = "connected"
-  private unlisten: UnlistenFn[] = []
+  private unlisten: (() => void)[] = []
 
   private constructor(sessionId: string, config: SerialConfig, projectId: string | null) {
     super()
@@ -105,25 +105,34 @@ export class SerialTerminalSession extends BaseTerminalSession {
     const result = await openSerialPort(config)
     if ("error" in result) throw new Error(result.error)
     const session = new SerialTerminalSession(result.sessionId, config, projectId)
-    await session.subscribe()
+    session.subscribe()
     return session
   }
 
-  private async subscribe(): Promise<void> {
-    const data = await listen<SerialDataEvent>(serialDataTopic(this.info.id), (event) => {
-      this.dispatchData(decodeBase64(event.payload.base64))
+  private subscribe(): void {
+    // `transport.subscribe` rather than a bare `listen` import. The direct
+    // import throws on every host that is not Tauri, and this module is
+    // reachable from a companion shell's module graph even though
+    // `connectSerialFromDock` refuses to open a port there. The transport
+    // answers for its own host instead of the import failing first.
+    const data = transport.subscribe<SerialDataEvent>(serialDataTopic(this.info.id), (payload) => {
+      this.dispatchData(decodeBase64(payload.base64))
     })
-    const status = await listen<SerialStatusEvent>(serialStatusTopic(this.info.id), (event) => {
-      this.status = event.payload.status
-      if (event.payload.status !== "error") return
-      // A cable pulled mid-transfer is the one status a monitor must show in
-      // the stream itself: the scrollback above it is real data, and without a
-      // marker the user cannot tell where the device stopped answering.
-      const reason = event.payload.reason ?? "the serial connection failed"
-      this.dispatchData(new TextEncoder().encode(`\r\n[31m[serial] ${reason}[0m\r\n`))
-      this.teardown()
-      this.handleExit(null)
-    })
+    const status = transport.subscribe<SerialStatusEvent>(
+      serialStatusTopic(this.info.id),
+      (payload) => {
+        this.status = payload.status
+        if (payload.status !== "error") return
+        // A cable pulled mid-transfer is the one status a monitor must show
+        // in the stream itself: the scrollback above it is real data, and
+        // without a marker the user cannot tell where the device stopped
+        // answering.
+        const reason = payload.reason ?? "the serial connection failed"
+        this.dispatchData(new TextEncoder().encode(`\r\n\u001b[31m[serial] ${reason}\u001b[0m\r\n`))
+        this.teardown()
+        this.handleExit(null)
+      }
+    )
     this.unlisten = [data, status]
   }
 
