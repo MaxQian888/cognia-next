@@ -41,7 +41,12 @@ describe("SshConfigImportDialog", () => {
     // A machine that has never used ssh has no config; that is ordinary and
     // must not read as "nothing to import from a file that exists".
     await openWith(async () => ({ kind: "absent", path: "/Users/dev/.ssh/config" }))
-    expect(await screen.findByTestId("ssh-config-import-absent")).toBeInTheDocument()
+    const absent = await screen.findByTestId("ssh-config-import-absent")
+    expect(absent).toBeInTheDocument()
+    // We looked at a real path and it was not there: the ordinary fresh-machine
+    // case, which needs no apology and no instruction.
+    expect(absent.textContent).toContain("absent")
+    expect(absent.textContent).not.toContain("unreadableHere")
     expect(screen.getByTestId("ssh-config-import-confirm")).toBeDisabled()
   })
 
@@ -178,4 +183,16 @@ Match host bastion
     await waitFor(() => expect(screen.queryByTestId("ssh-config-import-dialog")).toBeNull())
     expect(onImport).not.toHaveBeenCalled()
   })
+})
+
+/**
+ * `readSshConfigFile` returns `{ kind: "absent", path: null }` when it could
+ * not resolve a home directory at all, which is every shell without a local
+ * filesystem. Rendering that as "no config found at ~/.ssh/config" invited the
+ * reader to go create a file this build would still never read.
+ */
+it("separates a shell that cannot look from a machine that has no config", async () => {
+  await openWith(async () => ({ kind: "absent", path: null }))
+  const absent = await screen.findByTestId("ssh-config-import-absent")
+  expect(absent.textContent).toContain("unreadableHere")
 })

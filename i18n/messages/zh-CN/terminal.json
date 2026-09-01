@@ -150,8 +150,15 @@
       "local": "本地 (-L)",
       "remote": "远程 (-R)"
     },
+    "error": {
+      "toggleLocalOnly": "该隧道只能在持有该 SSH 连接的桌面上启停。",
+      "sessionUnreachable": "这个标签页与宿主的连接未打开，读不到它的隧道。",
+      "hostTooOld": "该宿主的版本早于端口转发上报功能。",
+      "unknown": "读取隧道失败：{reason}"
+    },
     "open": "显示端口转发",
     "queued": "{count} 个等待中",
+    "readOnly": "这里只能查看。启停隧道会打开一个监听端口，只能在持有该 SSH 连接的桌面上操作。",
     "state": {
       "failed": "失败",
       "listening": "监听中",

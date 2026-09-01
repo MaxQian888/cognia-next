@@ -465,3 +465,26 @@ it("keeps its own error line for every other failure", async () => {
   expect(await screen.findByTestId("ssh-connect-error")).toHaveTextContent("connection refused")
   expect(screen.queryByTestId("ssh-host-key-dialog")).not.toBeInTheDocument()
 })
+
+/**
+ * The card's own rule, at the top of `ssh-host-controls.tsx`: a disabled
+ * button with no sentence next to it is indistinguishable from a working host
+ * you simply cannot click. The probe stayed desktop-only after connecting
+ * stopped being desktop-only, so it is the control most likely to be misread
+ * as "SSH does not work on my phone".
+ */
+describe("the probe's desktop-only disable", () => {
+  it("says why it is greyed out off the desktop", async () => {
+    tauri = false
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    expect(await screen.findByTestId("ssh-probe")).toBeDisabled()
+    expect(screen.getByTestId("ssh-probe-desktop-only")).toBeInTheDocument()
+  })
+
+  it("says nothing extra on the desktop, where the button works", async () => {
+    tauri = true
+    render(<SshHostControls row={row()} connect={jest.fn()} />)
+    expect(await screen.findByTestId("ssh-probe")).not.toBeDisabled()
+    expect(screen.queryByTestId("ssh-probe-desktop-only")).toBeNull()
+  })
+})

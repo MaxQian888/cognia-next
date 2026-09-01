@@ -249,6 +249,28 @@ export function RemoteBrowserPreview({
     const setup = async () => {
       try {
         setConnection("connecting")
+        /*
+          Asked FIRST, and that ordering is the whole point.
+
+          `browser_runtime_status` is the one RPC the gateway answers when the
+          `workspace-runtime-exec` feature is not compiled; every other one,
+          `browser_capability` included, is refused with `browser_disabled`.
+          Asking it last meant the build that most needs the explanation never
+          reached it: the capability probe threw first and the pane rendered a
+          bare error code, while the sentence that says "this build does not
+          include the remote runtime" sat behind a call that could not run.
+        */
+        const status = await transport
+          .call<BrowserRuntimeStatus>("browser_runtime_status", { workspaceId })
+          .catch(() => null)
+        if (status && !status.healthy) {
+          setRuntimeReason(status.reason ?? "browser_runtime_unhealthy")
+        }
+        if (disposed) return
+        // Nothing downstream can succeed without the runtime, and every one of
+        // those calls fails in a vocabulary the pane cannot translate. Stop on
+        // the honest reason instead of collecting a second, worse one.
+        if (status && !status.compiled) return
         const readiness = await transport.call<{ capabilities: string[] }>("browser_capability", {
           workspaceId,
           userEnabled: true,
@@ -279,16 +301,6 @@ export function RemoteBrowserPreview({
         const engine = new RemoteChromiumEngine(summary.id)
         engineRef.current = engine
         setEngine(engine)
-        // `browser_runtime_status` is the one RPC the gateway answers even when
-        // the runtime feature is not compiled, so it is how a client learns the
-        // difference between "not built", "switched off" and "unhealthy"
-        // instead of assuming health and failing later, opaquely.
-        const status = await transport
-          .call<BrowserRuntimeStatus>("browser_runtime_status", { workspaceId })
-          .catch(() => null)
-        if (status && !status.healthy) {
-          setRuntimeReason(status.reason ?? "browser_runtime_unhealthy")
-        }
         configureRemoteBrowserEngine(engine, {
           enabled: status?.enabled ?? true,
           healthy: status?.healthy ?? true,

@@ -299,6 +299,7 @@
         "skip": "跳过"
       },
       "title": "导入 SSH 主机",
+      "unreadableHere": "当前壳读不到本机的 ~/.ssh/config。该文件在运行桌面端的那台机器上，在那里导入后主机就会出现在这里。",
       "via": "经由跳板机"
     },
     "connect": "连接",
@@ -321,6 +322,7 @@
     },
     "forwarding": {
       "add": "添加规则",
+      "desktopApplies": "在这里配置，由桌面端生效。跳板链和转发规则会从发给宿主的 profile 里剥掉，所以在配对设备上这些字段只被记录、不会生效：手机指定一个 profile 得到的是 shell，永远不是监听端口。",
       "errors": {
         "duplicate_local_port": "已有其他规则监听这个本地端口。",
         "duplicate_remote_port": "已有其他规则占用服务器上的这个端口。",
@@ -367,6 +369,7 @@
       "desktopOnly": "忘记旧密钥需要写入这台机器的 known_hosts，只有桌面应用能做到。两个指纹都在上面：请通过其他渠道核实新指纹，然后在桌面端重新信任。"
     },
     "newName": "新 SSH 主机",
+    "notSynced": "只保存在本设备。把这些推送给宿主的是桌面端，所以在这里新增的主机在桌面同步之前不会存在于宿主上，点连接会提示 profile 不在宿主上。跳板机和端口转发按设计永远不会同步。",
     "remove": "移除 SSH 主机",
     "title": "SSH 主机",
     "toasts": {

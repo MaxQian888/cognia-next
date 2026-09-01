@@ -51,7 +51,17 @@ function num(value: string, fallback: number): number {
  * keystroke elsewhere in this sidebar.
  */
 const RUN_ON_REQUIREMENTS = Object.freeze([requireHostFeature("workflow.execution")])
-const RUN_ON_KINDS: readonly DeviceKind[] = Object.freeze(["remote-host"])
+/*
+  SSH hosts are listed too, and always disabled.
+
+  `placementKindFor` returns null for an SSH host, so `buildDeviceOptions` gives
+  it `not_permitted` and it renders greyed with a reason. Excluding the kind
+  outright made a saved SSH box vanish from this Select with no explanation,
+  which is the exact question `placement-directory.ts` says it exists to stop
+  people asking. `/devices` already explains it; the picker is where the
+  question is actually asked.
+*/
+const RUN_ON_KINDS: readonly DeviceKind[] = Object.freeze(["remote-host", "ssh-host"])
 
 export function SettingsTab({ useStore }: { useStore: EditorStore }) {
   const t = useTranslations("workflowEditor.settings")
@@ -96,6 +106,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
   // `PlacementReason` is a closed, append-only union; its labels live with the
   // device console because that is where the vocabulary is owned.
   const tPlacement = useTranslations("devices.placementReason")
+  const tSsh = useTranslations("devices.ssh")
   const hostOptions = useDeviceOptions({ requirements: RUN_ON_REQUIREMENTS, kinds: RUN_ON_KINDS })
   const runOn = settings.runOn ?? { mode: "colocate" as const }
   const runOnValue = runOn.mode === "pinned" ? `pinned:${runOn.ref}` : runOn.mode
@@ -160,7 +171,17 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                           {option.row.label}
                           {option.verdict.ready ? null : (
                             <span className="ml-2 text-[10px] text-muted-foreground">
-                              {tPlacement(option.verdict.reason)}
+                              {/*
+                                "Not permitted" is the typed verdict, and for an
+                                SSH host it is also the wrong sentence: nothing
+                                was denied, the machine simply offers a shell
+                                and nothing else. The console already owns that
+                                wording, so the picker borrows it rather than
+                                widening the closed `PlacementReason` union.
+                              */}
+                              {option.row.kind === "ssh-host"
+                                ? tSsh("shellOnly")
+                                : tPlacement(option.verdict.reason)}
                             </span>
                           )}
                         </SelectItem>

@@ -90,11 +90,17 @@ jest.mock("@/components/terminal/terminal-history-panel", () => ({
     <div data-testid="terminal-history-panel-stub" data-session-id={sessionId} />
   ),
 }))
+jest.mock("@/components/terminal/terminal-forward-panel", () => ({
+  TerminalForwardPanel: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid="terminal-forward-panel-stub" data-session-id={sessionId} />
+  ),
+}))
 
 // Force transport selection so tests are deterministic.
 let mockTransport: "ws" | "tauri-channel" | "unsupported" = "ws"
 jest.mock("@/lib/terminal/pick-transport", () => ({
   selectTerminalTransport: () => mockTransport,
+  selectTerminalTransportChain: () => (mockTransport === "unsupported" ? [] : [mockTransport]),
 }))
 
 import userEvent from "@testing-library/user-event"
@@ -299,4 +305,43 @@ describe("MobileTerminalScreen", () => {
       expect(panel).toHaveAttribute("data-session-id", "s-1")
     })
   })
+})
+
+/**
+ * A phone can open an SSH tab (the host resolves the profile id and connects),
+ * so it can have tunnels. The rail is the only surface that names them, and it
+ * was mounted on the desktop dock only.
+ */
+it("gives the active tab a port-forward rail", async () => {
+  mockTransport = "ws"
+  useTerminalStore.getState().registerSession(info())
+  render(<MobileTerminalScreen />)
+  const rail = await screen.findByTestId("terminal-forward-panel-stub")
+  expect(rail.getAttribute("data-session-id")).toBe("s-1")
+})
+
+/**
+ * The picker has listed saved profiles since it was written. The phone was the
+ * one caller that never passed them, so a profile configured on the desktop was
+ * invisible on the device most likely to want a one-tap launch.
+ */
+it("offers saved launch profiles behind the shell picker", async () => {
+  mockTransport = "ws"
+  useSettingsStore.setState({
+    settings: {
+      terminal: {
+        profiles: [{ id: "prof-1", name: "Deploy box", shell: "/bin/bash" }],
+      },
+    },
+  } as never)
+  render(<MobileTerminalScreen />)
+  await userEvent.click(screen.getByTestId("mobile-terminal-shell-picker"))
+  await userEvent.click(await screen.findByTestId("terminal-shell-picker-profile-prof-1"))
+
+  await waitFor(() => expect(mockSpawnFromDock).toHaveBeenCalled())
+  // Only the id travels: the host resolves shell, cwd and env from its own
+  // synchronized copy, the same contract a remote spawn frame has.
+  const req = mockSpawnFromDock.mock.calls.at(-1)?.[0] as { req: Record<string, unknown> }
+  expect(req.req.profileId).toBe("prof-1")
+  expect(req.req.shell).toBe("")
 })

@@ -154,8 +154,19 @@ export function SshConfigImportDialog({
           ) : null}
 
           {stage.kind === "absent" ? (
+            /*
+              Two different answers, and they were rendered as one.
+
+              `path === null` means `readSshConfigFile` could not resolve a home
+              directory at all — the shell has no local filesystem to look in,
+              which is every non-Tauri shell. Telling that reader "no config
+              found at ~/.ssh/config" invites them to go create a file that this
+              build would still never read. A real path means we looked there
+              and it genuinely is not there, which is the ordinary fresh-machine
+              case and needs no apology.
+            */
             <p className="text-xs text-muted-foreground" data-testid="ssh-config-import-absent">
-              {t("absent", { path: stage.path ?? "~/.ssh/config" })}
+              {stage.path === null ? t("unreadableHere") : t("absent", { path: stage.path })}
             </p>
           ) : null}
 

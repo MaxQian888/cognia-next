@@ -70,9 +70,13 @@ export interface TerminalShellPickerProps {
   /** Spawn a tab from a saved profile id. */
   onNewProfile?: (profileId: string) => void | Promise<void>
   /**
-   * Saved SSH hosts to offer alongside the local profiles. The caller is
-   * responsible for withholding these off-desktop — SSH sessions are spawned
-   * through Tauri commands and have no web or mobile path.
+   * Saved SSH hosts to offer alongside the local profiles.
+   *
+   * Offered on every shell. A desktop builds the request itself and hands it to
+   * `ssh_terminal_spawn`; anywhere else the host resolves the profile id
+   * against its own `ssh_profiles` map and dials with credentials that never
+   * leave it. What a paired device does NOT get is a jump chain or a port
+   * forward, which `buildSynchronizedSshProfiles` strips by design.
    */
   sshHosts?: readonly SshHostProfile[]
   /** Connect a tab to a saved SSH host. */

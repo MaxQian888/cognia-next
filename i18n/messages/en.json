@@ -9177,6 +9177,7 @@
       "probe": {
         "action": "Test connection",
         "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward.",
+        "desktopOnly": "Testing a connection dials from this machine, so it can only be done from the desktop app. Opening a shell still works here: the paired desktop dials for you.",
         "invalid": "This profile cannot produce a connection ({reason}), so the host was never contacted. Fix it in Settings → Terminal.",
         "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
         "reachableVerified": "Reachable. The host key matched the one already trusted.",
@@ -36242,6 +36243,7 @@
             "skip": "Skip"
           },
           "title": "Import SSH hosts",
+          "unreadableHere": "This shell cannot read a local ~/.ssh/config. The file lives on the machine running the desktop app; import it there and the hosts will be here too.",
           "via": "through a jump host"
         },
         "connect": "Connect",
@@ -36264,6 +36266,7 @@
         },
         "forwarding": {
           "add": "Add rule",
+          "desktopApplies": "Configured here, applied by the desktop. A jump chain and a forwarding rule are stripped from the profile the Host receives, so on a paired device these fields are recorded and never take effect: a phone naming a profile gets a shell, never a listening port.",
           "errors": {
             "duplicate_local_port": "Another rule already listens on this local port.",
             "duplicate_remote_port": "Another rule already uses this port on the server.",
@@ -36310,6 +36313,7 @@
           "unknownFingerprint": "Not readable from known_hosts"
         },
         "newName": "New SSH host",
+        "notSynced": "Saved on this device only. The desktop app is what pushes these to the Host, so a host added here will not exist there until the desktop syncs it, and Connect will report that the profile is not on the Host. Jump hosts and port forwards never sync at all, by design.",
         "remove": "Remove SSH host",
         "title": "SSH hosts",
         "toasts": {
@@ -40214,8 +40218,15 @@
         "local": "Local (-L)",
         "remote": "Remote (-R)"
       },
+      "error": {
+        "hostTooOld": "This host is running a build that predates port-forward reporting.",
+        "sessionUnreachable": "This tab's connection to the host is not open, so its tunnels cannot be read.",
+        "toggleLocalOnly": "This tunnel can only be started or stopped from the desktop that holds the SSH connection.",
+        "unknown": "Could not read the tunnels: {reason}"
+      },
       "open": "Show port forwards",
       "queued": "{count} waiting",
+      "readOnly": "Read-only here. Starting or stopping a tunnel opens a listening port, so it can only be done from the desktop that holds the SSH connection.",
       "state": {
         "failed": "Failed",
         "listening": "Listening",

@@ -11,6 +11,13 @@
  * A toggle sends the change and renders the reply, which is the state *after*
  * the change rather than an echo of the request: binding a socket can fail, and
  * when it does the reason belongs on the row that failed.
+ *
+ * Read everywhere, steer only from the desktop. `TerminalHost::forward_status`
+ * admits any attached connection while `set_forward_enabled` is local-identity
+ * only (ADR-0082, forwarding amendment), so a phone gets the list and a
+ * disabled switch with the reason next to it. Before this the panel mounted
+ * unconditionally, called two `target: "client"` RPCs from every shell, and
+ * printed `command_transport_forbidden` at the user every two seconds.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -23,8 +30,12 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import {
+  canControlSshForwards,
   readSshForwardStatus,
   setSshForwardEnabled,
+  SSH_FORWARD_HOST_TOO_OLD,
+  SSH_FORWARD_SESSION_UNREACHABLE,
+  SSH_FORWARD_TOGGLE_LOCAL_ONLY,
   type SshForwardRunState,
   type SshForwardStatus,
 } from "@/lib/terminal/ssh-forward-control"
@@ -41,6 +52,11 @@ export interface TerminalForwardPanelProps {
   /** Injected in tests; defaults to the real host calls. */
   read?: typeof readSshForwardStatus
   setEnabled?: typeof setSshForwardEnabled
+  /**
+   * Whether this shell may start or stop a tunnel. Injected in tests; defaults
+   * to "the SSH client runs here", which is the only place the host accepts it.
+   */
+  canSteer?: boolean
 }
 
 const STATE_DOT: Record<SshForwardRunState, string> = {
@@ -56,6 +72,7 @@ export function TerminalForwardPanel({
   className,
   read = readSshForwardStatus,
   setEnabled = setSshForwardEnabled,
+  canSteer = canControlSshForwards(),
 }: TerminalForwardPanelProps) {
   const t = useTranslations("terminal.forwards")
   // Mounted with `key={sessionId}`, so every piece of state below belongs to
@@ -118,6 +135,23 @@ export function TerminalForwardPanel({
     [apply, sessionId, setEnabled]
   )
 
+  /**
+   * Turn a refusal into a sentence.
+   *
+   * The three markers are the failures this surface can explain; anything else
+   * is genuinely unexpected and keeps its own text inside a translated frame,
+   * so the user at least learns what was being attempted.
+   */
+  const explain = useCallback(
+    (reason: string): string => {
+      if (reason.includes(SSH_FORWARD_TOGGLE_LOCAL_ONLY)) return t("error.toggleLocalOnly")
+      if (reason.includes(SSH_FORWARD_SESSION_UNREACHABLE)) return t("error.sessionUnreachable")
+      if (reason.includes(SSH_FORWARD_HOST_TOO_OLD)) return t("error.hostTooOld")
+      return t("error.unknown", { reason })
+    },
+    [t]
+  )
+
   // Nothing to steer and nothing to report: no rail, no button, no poll.
   if (!isSsh || (forwards.length === 0 && !error)) return null
 
@@ -170,9 +204,17 @@ export function TerminalForwardPanel({
                 className="px-3 py-4 text-[11px] text-red-500"
                 data-testid="terminal-forward-error"
               >
-                {error}
+                {explain(error)}
               </p>
             ) : null}
+            {canSteer ? null : (
+              <p
+                className="border-b px-2.5 py-2 text-[10px] text-muted-foreground"
+                data-testid="terminal-forward-read-only"
+              >
+                {t("readOnly")}
+              </p>
+            )}
             <ul className="divide-y">
               {forwards.map((rule) => (
                 <li
@@ -192,7 +234,7 @@ export function TerminalForwardPanel({
                     <Switch
                       className="ml-auto scale-75"
                       checked={rule.enabled}
-                      disabled={busyId === rule.id}
+                      disabled={busyId === rule.id || !canSteer}
                       onCheckedChange={(next) => void toggle(rule.id, next)}
                       aria-label={t(`toggle.${rule.direction}`, { summary: rule.summary })}
                       data-testid={`terminal-forward-toggle-${rule.id}`}

@@ -44,10 +44,16 @@ function setSession(kind?: string): void {
 
 function renderPanel(
   read: jest.Mock,
-  setEnabled: jest.Mock = jest.fn(async () => [])
+  setEnabled: jest.Mock = jest.fn(async () => []),
+  canSteer = true
 ): ReturnType<typeof render> {
   return render(
-    <TerminalForwardPanel sessionId="s-1" read={read as never} setEnabled={setEnabled as never} />
+    <TerminalForwardPanel
+      sessionId="s-1"
+      read={read as never}
+      setEnabled={setEnabled as never}
+      canSteer={canSteer}
+    />
   )
 }
 
@@ -160,12 +166,13 @@ describe("TerminalForwardPanel", () => {
     const user = userEvent.setup()
     renderPanel(read as never)
     await user.click(await screen.findByTestId("terminal-forward-open"))
-    // Opening triggers a second read, which fails.
-    await waitFor(() =>
-      expect(screen.getByTestId("terminal-forward-error").textContent).toBe(
-        "terminal host is offline"
-      )
-    )
+    // Opening triggers a second read, which fails. An unplanned failure keeps
+    // its own text, but inside a translated frame that says what was attempted.
+    await waitFor(() => {
+      const text = screen.getByTestId("terminal-forward-error").textContent ?? ""
+      expect(text).toContain("error.unknown")
+      expect(text).toContain("terminal host is offline")
+    })
     expect(screen.getByTestId("terminal-forward-lfwd-1")).toBeInTheDocument()
   })
 
@@ -212,5 +219,63 @@ describe("TerminalForwardPanel", () => {
     } finally {
       jest.useRealTimers()
     }
+  })
+})
+
+describe("a shell that does not hold the SSH connection", () => {
+  /**
+   * The read is legal from anywhere and the write is not, so the rail still
+   * earns its place: it is the only surface that says which tunnels exist.
+   * Hiding it would merge "no tunnels" with "tunnels you may not touch".
+   */
+  it("shows the tunnels, disables the switch, and says why", async () => {
+    setSession("ssh")
+    const read = jest.fn(async () => [row()])
+    const setEnabled = jest.fn(async () => [])
+    renderPanel(read, setEnabled, false)
+
+    await userEvent.click(await screen.findByTestId("terminal-forward-open"))
+    expect(await screen.findByTestId("terminal-forward-lfwd-1")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-forward-toggle-lfwd-1")).toBeDisabled()
+    expect(screen.getByTestId("terminal-forward-read-only").textContent).toBe("readOnly")
+    expect(setEnabled).not.toHaveBeenCalled()
+  })
+
+  it("translates a refusal instead of printing the marker", async () => {
+    setSession("ssh")
+    const read = jest.fn(async () => {
+      throw new Error("ssh_forward_session_unreachable")
+    })
+    renderPanel(
+      read,
+      jest.fn(async () => []),
+      false
+    )
+
+    await userEvent.click(await screen.findByTestId("terminal-forward-open"))
+    await waitFor(() =>
+      expect(screen.getByTestId("terminal-forward-error").textContent).toBe(
+        "error.sessionUnreachable"
+      )
+    )
+  })
+
+  it("keeps an unexpected failure readable inside a translated frame", async () => {
+    setSession("ssh")
+    const read = jest.fn(async () => {
+      throw new Error("something nobody planned for")
+    })
+    renderPanel(
+      read,
+      jest.fn(async () => []),
+      false
+    )
+
+    await userEvent.click(await screen.findByTestId("terminal-forward-open"))
+    await waitFor(() => {
+      const text = screen.getByTestId("terminal-forward-error").textContent ?? ""
+      expect(text).toContain("error.unknown")
+      expect(text).toContain("something nobody planned for")
+    })
   })
 })

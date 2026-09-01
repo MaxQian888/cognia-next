@@ -561,6 +561,14 @@ it("signs its ticket with the resolved endpoint when one carries a device", asyn
   expect(issueCompanionSocketTicket).not.toHaveBeenCalled()
 })
 
+/**
+ * Modelled on what the gateway actually does, not on a stub that answers
+ * everything. On a build without `workspace-runtime-exec`, `browser_capability`
+ * and `browser_session_ensure` are refused with `browser_disabled`; only
+ * `browser_runtime_status` answers. This test used to let the capability probe
+ * succeed, so it stayed green while the production path rendered a bare error
+ * code and the sentence explaining "not compiled" was unreachable.
+ */
 it("reports why the runtime is unusable instead of assuming health", async () => {
   mockRuntimeStatus = {
     compiled: false,
@@ -569,6 +577,10 @@ it("reports why the runtime is unusable instead of assuming health", async () =>
     healthy: false,
     reason: "workspace-runtime-exec is not compiled",
   }
+  transportCall.mockImplementation((name: string) => {
+    if (name === "browser_runtime_status") return Promise.resolve(mockRuntimeStatus)
+    return Promise.reject(new Error("browser_disabled"))
+  })
   render(
     <RemoteBrowserPreview
       chatSessionId="chat-1"
@@ -578,6 +590,9 @@ it("reports why the runtime is unusable instead of assuming health", async () =>
   )
   // This suite's intl mock renders the key alone, without its values.
   await screen.findByText("browser.remote.runtimeUnavailable")
+  // And it stopped there rather than collecting a second, worse failure from
+  // the calls that cannot succeed without the runtime.
+  expect(transportCall).not.toHaveBeenCalledWith("browser_session_ensure", expect.anything())
 })
 
 // The remote preview used to carry a bare recorder section and no console or

@@ -31,6 +31,8 @@ import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
 import { getFriendlyDeviceLabel } from "@/lib/device/device-identity"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
+import { selectSavedSshHosts } from "@/lib/terminal/saved-ssh-hosts"
+import { useSettingsStore } from "@/stores/settings"
 
 export interface UseDeviceOptionsInput {
   requirements: readonly PlacementRequirement[]
@@ -50,6 +52,10 @@ export function useDeviceOptions(input: UseDeviceOptionsInput): DeviceOption[] {
   const { hosts, activeHostId } = useRemoteHostStore(
     useShallow((state) => ({ hosts: state.hosts, activeHostId: state.activeHostId }))
   )
+  // The one canonical read. Three call sites once spelled this
+  // `settings.terminalSettings`, a key `AppSettings` has never declared, so
+  // every saved host silently resolved to `undefined`.
+  const sshHosts = useSettingsStore(selectSavedSshHosts)
   const { requirements, kinds } = input
   const [mountedAt] = useState(() => Date.now())
   const now = input.now ?? mountedAt
@@ -69,10 +75,18 @@ export function useDeviceOptions(input: UseDeviceOptionsInput): DeviceOption[] {
       },
       pairedDevices: pairedDevices ?? [],
       remoteHosts: hosts as unknown as readonly RemoteHostInput[],
-      // A picker asks "where could this run", and an SSH host is never an
-      // answer to that: `placementKindFor` returns null for it. Listing them
-      // here would only add permanently-disabled rows to every Select.
-      sshHosts: [],
+      /*
+        Listed, not withheld.
+
+        `placementKindFor` returns null for an SSH host, so `buildDeviceOptions`
+        gives it `not_permitted` and every picker renders it disabled. That is
+        exactly what `placement-directory.ts` says it exists to do: "Why is my
+        SSH box not in this list?" is the question a silent omission produces.
+        This call site used to pass `[]` and answer that question with nothing,
+        which also left the module's `candidate === null` branch reachable only
+        from its own test.
+      */
+      sshHosts: sshHosts ?? [],
       workers: [],
       sandboxConnections: [],
       activeHostId,
@@ -86,5 +100,5 @@ export function useDeviceOptions(input: UseDeviceOptionsInput): DeviceOption[] {
     })
     const scoped = kinds ? rows.filter((row) => kinds.includes(row.kind)) : rows
     return buildDeviceOptions(scoped, requirements, now)
-  }, [pairedDevices, hosts, activeHostId, requirements, kinds, now])
+  }, [pairedDevices, hosts, sshHosts, activeHostId, requirements, kinds, now])
 }

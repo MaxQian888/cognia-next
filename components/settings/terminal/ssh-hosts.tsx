@@ -190,6 +190,23 @@ export function SshHosts() {
         <p className="text-[11px] text-muted-foreground">{t("helper")}</p>
       </div>
 
+      {/*
+        `persistHosts` returns early off the desktop: settings are written, the
+        Host is never told. That is correct (an SSH profile names a destination
+        and a credential, and installing one from a paired device would let it
+        drive outbound connections from the Host, ADR-0082), but the editor said
+        nothing about it. Everything here stayed editable and none of it took
+        effect, which is the worst of the three possible answers.
+      */}
+      {isTauri() ? null : (
+        <p
+          className="text-[11px] text-amber-600 dark:text-amber-500"
+          data-testid="ssh-hosts-not-synced"
+        >
+          {t("notSynced")}
+        </p>
+      )}
+
       {hosts.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">{t("empty")}</p>
       ) : (

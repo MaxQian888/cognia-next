@@ -9177,6 +9177,7 @@
       "probe": {
         "action": "测试连接",
         "cost": "测试会真正建立一次连接：它会经过每一个跳板并完成认证、在对方日志中留下记录、可能向 ssh-agent 索要口令，并在首次连接时信任主机密钥。它不会打开任何端口转发。",
+        "desktopOnly": "测试连接是从这台机器发起的，只能在桌面端做。在这里打开 shell 仍然可用：由配对的桌面替你拨号。",
         "invalid": "该配置无法生成连接（{reason}），因此没有联系过这台主机。请在 设置 → 终端 中修正。",
         "reachableLearned": "可达。这是第一次连接，主机密钥已被信任并保存。",
         "reachableVerified": "可达。主机密钥与已信任的一致。",
@@ -36242,6 +36243,7 @@
             "skip": "跳过"
           },
           "title": "导入 SSH 主机",
+          "unreadableHere": "当前壳读不到本机的 ~/.ssh/config。该文件在运行桌面端的那台机器上，在那里导入后主机就会出现在这里。",
           "via": "经由跳板机"
         },
         "connect": "连接",
@@ -36264,6 +36266,7 @@
         },
         "forwarding": {
           "add": "添加规则",
+          "desktopApplies": "在这里配置，由桌面端生效。跳板链和转发规则会从发给宿主的 profile 里剥掉，所以在配对设备上这些字段只被记录、不会生效：手机指定一个 profile 得到的是 shell，永远不是监听端口。",
           "errors": {
             "duplicate_local_port": "已有其他规则监听这个本地端口。",
             "duplicate_remote_port": "已有其他规则占用服务器上的这个端口。",
@@ -36310,6 +36313,7 @@
           "unknownFingerprint": "无法从 known_hosts 中读取"
         },
         "newName": "新 SSH 主机",
+        "notSynced": "只保存在本设备。把这些推送给宿主的是桌面端，所以在这里新增的主机在桌面同步之前不会存在于宿主上，点连接会提示 profile 不在宿主上。跳板机和端口转发按设计永远不会同步。",
         "remove": "移除 SSH 主机",
         "title": "SSH 主机",
         "toasts": {
@@ -40214,8 +40218,15 @@
         "local": "本地 (-L)",
         "remote": "远程 (-R)"
       },
+      "error": {
+        "hostTooOld": "该宿主的版本早于端口转发上报功能。",
+        "sessionUnreachable": "这个标签页与宿主的连接未打开，读不到它的隧道。",
+        "toggleLocalOnly": "该隧道只能在持有该 SSH 连接的桌面上启停。",
+        "unknown": "读取隧道失败：{reason}"
+      },
       "open": "显示端口转发",
       "queued": "{count} 个等待中",
+      "readOnly": "这里只能查看。启停隧道会打开一个监听端口，只能在持有该 SSH 连接的桌面上操作。",
       "state": {
         "failed": "失败",
         "listening": "监听中",

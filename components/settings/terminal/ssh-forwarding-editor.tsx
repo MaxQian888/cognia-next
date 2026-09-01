@@ -14,6 +14,8 @@
  */
 
 import { useTranslations } from "next-intl"
+
+import { isTauri } from "@/lib/platform/detect"
 import { PlusIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -70,6 +72,21 @@ export function SshForwardingEditor({ profile, allProfiles, onChange }: SshForwa
 
   return (
     <div className="space-y-3 rounded border border-dashed p-2.5" data-testid="ssh-forwarding">
+      {/*
+        `buildSynchronizedSshProfiles` emits neither a jump chain nor a
+        forwarding rule (ADR-0082, forwarding amendment), so on a paired device
+        every field below is recorded and none of it is ever applied. Saying so
+        is not an apology for a missing feature: it is the difference between
+        "this does nothing here" and "this is broken".
+      */}
+      {isTauri() ? null : (
+        <p
+          className="text-[11px] text-amber-600 dark:text-amber-500"
+          data-testid="ssh-forwarding-desktop-applies"
+        >
+          {t("desktopApplies")}
+        </p>
+      )}
       <div className="space-y-1">
         <Label className="text-[11px]">{t("jumpHost.label")}</Label>
         <Select

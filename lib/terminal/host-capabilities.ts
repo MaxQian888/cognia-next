@@ -146,9 +146,75 @@ export async function ensureHostCapabilities(): Promise<TerminalHostCapabilities
   return inFlight
 }
 
+/**
+ * Protocol features the host advertised in its hello ack.
+ *
+ * Rust holds the list in `crates/cognia-terminal/src/host_wire.rs:PROTOCOL_FEATURES`
+ * and `protocol.rs` makes it load-bearing: a client rejects an unmapped frame
+ * discriminant outright, so a newer host must not push a kind an older client
+ * has never heard of. The negotiation channel has been on the wire since the
+ * beginning and nothing in TypeScript read it, which meant "does this host
+ * speak frames 24/25?" could only be answered by trying and failing.
+ *
+ * Only the hello ack carries this (Rust pins that with
+ * `only_the_hello_ack_carries_the_host_description`), so it warms on the same
+ * probe as the host description and shares its in-flight promise.
+ */
+export type TerminalProtocolFeature = "pathInjection" | "flowControl" | "history" | "sshForwarding"
+
+let features: readonly string[] | null = null
+
+/**
+ * Record the ack's feature list.
+ *
+ * An unknown string is kept rather than dropped: the question callers ask is
+ * "did the host name this feature", and a build that has not heard of a newer
+ * feature name still answers that correctly for the ones it knows.
+ */
+export function recordProtocolFeatures(value: unknown): void {
+  if (!Array.isArray(value)) return
+  const next = value.filter((entry): entry is string => typeof entry === "string")
+  if (features && features.length === next.length && features.every((f, i) => f === next[i])) {
+    return
+  }
+  features = next
+  for (const listener of listeners) listener()
+}
+
+/**
+ * What the host said it speaks, or `null` when no host has introduced itself.
+ *
+ * `null` is deliberately not the empty list. "The host has not said" and "the
+ * host named nothing" lead to opposite decisions: the first should fall back to
+ * trying, the second should not.
+ */
+export function getProtocolFeatures(): readonly string[] | null {
+  return features
+}
+
+/**
+ * Whether the host named `feature`.
+ *
+ * Unknown hosts answer `true`. A host that never introduced itself is the
+ * local PTY or a probe that has not run yet, and refusing a capability the
+ * host may well have would turn a missing probe into a missing feature.
+ */
+export function hostSupportsProtocolFeature(feature: TerminalProtocolFeature): boolean {
+  if (features === null) return true
+  return features.includes(feature)
+}
+
+/** The cached feature list, running the host probe once when it is cold. */
+export async function ensureProtocolFeatures(): Promise<readonly string[] | null> {
+  if (features) return features
+  await ensureHostCapabilities()
+  return features
+}
+
 /** Test-only: forget the host so a re-stubbed one is observed. */
 export function __resetHostCapabilitiesForTests(): void {
   cached = null
+  features = null
   inFlight = null
   listeners.clear()
 }

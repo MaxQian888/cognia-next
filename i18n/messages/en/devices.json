@@ -187,12 +187,13 @@
     "forwardsLoopback": "Both ends always bind 127.0.0.1. A forward reachable from the network would turn one machine into an open relay for the other.",
     "probe": {
       "action": "Test connection",
-      "running": "Testing…",
-      "reachableVerified": "Reachable. The host key matched the one already trusted.",
-      "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
-      "unreachable": "Could not connect: {message}",
+      "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward.",
+      "desktopOnly": "Testing a connection dials from this machine, so it can only be done from the desktop app. Opening a shell still works here: the paired desktop dials for you.",
       "invalid": "This profile cannot produce a connection ({reason}), so the host was never contacted. Fix it in Settings → Terminal.",
-      "cost": "A test opens a real connection. It authenticates through every jump host, appears in their logs, may ask an ssh-agent for a passphrase, and trusts the host key if this is the first time. It never opens a port forward."
+      "reachableLearned": "Reachable. This was the first connection, so the host key has now been trusted and saved.",
+      "reachableVerified": "Reachable. The host key matched the one already trusted.",
+      "running": "Testing…",
+      "unreachable": "Could not connect: {message}"
     },
     "viaHostTitle": "Connected by the paired host",
     "viaHostBody": "This shell does not hold SSH credentials, so the paired host opens the connection with the key or password it keeps. Only hosts the host's own desktop has registered can be opened this way, and no host key is reported back over this transport.",

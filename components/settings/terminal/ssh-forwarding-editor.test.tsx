@@ -5,6 +5,19 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+/*
+  `var`, not `let`. `components/ui/button` pulls in `lib/tauri`, which calls
+  `pickTransport()` at module scope, which calls this mock before a `let`
+  binding has been initialized. `var` hoists as `undefined`, so the `?? true`
+  below gives the module-load call the desktop answer it expects.
+*/
+// eslint-disable-next-line no-var
+var mockTauri: boolean | undefined
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: () => mockTauri ?? true,
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -186,5 +199,28 @@ describe("SshForwardingEditor", () => {
     await user.click(screen.getByLabelText("jumpHost.label"))
     await user.click(await screen.findByRole("option", { name: "bastion" }))
     expect(onChange).toHaveBeenLastCalledWith({ jumpHostId: "bastion" })
+  })
+})
+
+/**
+ * `buildSynchronizedSshProfiles` emits neither a jump chain nor a forwarding
+ * rule, so on a paired device every field here is recorded and none of it is
+ * applied. The editor stayed fully interactive and said nothing about it.
+ */
+describe("where these rules take effect", () => {
+  afterEach(() => {
+    mockTauri = undefined
+  })
+
+  it("says the desktop applies them, on a shell that does not", () => {
+    mockTauri = false
+    renderEditor(host("target"))
+    expect(screen.getByTestId("ssh-forwarding-desktop-applies")).toBeInTheDocument()
+  })
+
+  it("stays quiet on the desktop, which does apply them", () => {
+    mockTauri = true
+    renderEditor(host("target"))
+    expect(screen.queryByTestId("ssh-forwarding-desktop-applies")).toBeNull()
   })
 })

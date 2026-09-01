@@ -56,10 +56,13 @@ import {
   TerminalInstance,
   type TerminalInstanceHandle,
 } from "@/components/terminal/terminal-instance"
+import { TerminalForwardPanel } from "@/components/terminal/terminal-forward-panel"
 import { TerminalSearchOverlay } from "@/components/terminal/terminal-search-overlay"
 import { TerminalTabStrip } from "@/components/terminal/terminal-tab-strip"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
 import { useMediaQuery, useResizableLayout } from "@/hooks/ui"
+import type { TerminalProfile } from "@/lib/terminal/profiles"
+import { getLiveSession } from "@/lib/terminal/session-registry"
 import { detachFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
 import { TerminalShellPicker } from "@/components/terminal/terminal-shell-picker"
 import { connectSshFromDock, resolveSshHostLaunch } from "@/lib/terminal/ssh-connect"
@@ -91,6 +94,9 @@ export function MobileTerminalScreen() {
   )
   const settingsShell = useSettingsStore(
     (s) => (s.settings?.terminal as { defaultShell?: string } | undefined)?.defaultShell
+  )
+  const settingsProfiles = useSettingsStore(
+    (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
   )
   const settingsFontSize = useSettingsStore(
     (s) => (s.settings?.terminal as { fontSize?: number } | undefined)?.fontSize
@@ -182,7 +188,7 @@ export function MobileTerminalScreen() {
     [activeProjectId, hostKeyGuard, sshHosts, t]
   )
 
-  const handleNew = useCallback(async (shell?: string) => {
+  const handleNew = useCallback(async (shell?: string): Promise<string | null> => {
     const resolved =
       shell ??
       resolveDefaultShell({
@@ -191,7 +197,7 @@ export function MobileTerminalScreen() {
       })
     const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
     const env = project?.terminalConfig?.env
-    await spawnFromDock({
+    const outcome = await spawnFromDock({
       req: {
         shell: resolved,
         // Mobile defaults — the remote host re-fits on attach.
@@ -204,7 +210,47 @@ export function MobileTerminalScreen() {
       },
       store: useTerminalStore.getState(),
     })
+    return outcome.kind === "spawned" ? outcome.sessionId : null
   }, [project, activeProjectId, settingsShell])
+
+  /**
+   * Launch a saved profile by id.
+   *
+   * The picker has listed profiles since it was written; the phone was the one
+   * caller that never passed them, so a profile the user configured on the
+   * desktop was invisible on the device most likely to want a one-tap launch.
+   * Only the id travels — the host resolves shell, cwd and env from its own
+   * synchronized copy, exactly as it does for a remote spawn frame.
+   */
+  const handleNewProfile = useCallback(
+    async (profileId: string): Promise<void> => {
+      await spawnFromDock({
+        req: { shell: "", rows: 28, cols: 80, profileId, projectId: activeProjectId ?? undefined },
+        store: useTerminalStore.getState(),
+      })
+    },
+    [activeProjectId]
+  )
+
+  /**
+   * Attach to one of the host's tmux sessions.
+   *
+   * These are the HOST's sessions, which is the whole point on a phone: a
+   * session left running on the desktop is the thing you most want to pick up
+   * from a device you happen to be holding. `terminal_list_tmux_sessions` and
+   * its siblings carry http/websocket/webrtc, so the list is real here.
+   */
+  const handleAttachTmuxSession = useCallback(
+    async (sessionName: string) => {
+      const { buildTmuxAttachCommand } = await import("@/lib/terminal/multiplexer")
+      const spawned = await handleNew()
+      if (!spawned) return
+      const session = getLiveSession(spawned)
+      if (!session) return
+      await session.write(`${buildTmuxAttachCommand(sessionName)}\n`)
+    },
+    [handleNew]
+  )
 
   const handleClose = useCallback((id: string) => {
     void detachFromDock(id, useTerminalStore.getState())
@@ -274,9 +320,16 @@ export function MobileTerminalScreen() {
           onNew={(shell) => {
             void handleNew(shell)
           }}
+          profiles={settingsProfiles}
+          onNewProfile={(profileId) => {
+            void handleNewProfile(profileId)
+          }}
           sshHosts={sshHosts}
           onNewSshHost={(hostId) => {
             void handleNewSshHost(hostId)
+          }}
+          onAttachTmuxSession={(sessionName) => {
+            void handleAttachTmuxSession(sessionName)
           }}
         />
       </header>
@@ -344,6 +397,11 @@ export function MobileTerminalScreen() {
                       onClose={() => setSearchOpen(false)}
                       instanceRef={instanceRef}
                     />
+                    {/* A phone can open an SSH tab, so it can have tunnels to
+                        read. The panel hides itself for a local PTY and for an
+                        SSH tab with no rules, and disables its own switches
+                        here because starting a forward is desktop-only. */}
+                    <TerminalForwardPanel key={activeRow.id} sessionId={activeRow.id} />
                   </>
                 ) : (
                   <div

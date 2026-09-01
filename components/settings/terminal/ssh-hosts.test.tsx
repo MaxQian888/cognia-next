@@ -676,3 +676,25 @@ describe("SshHosts", () => {
     })
   })
 })
+
+/**
+ * `persistHosts` returns early off the desktop: the settings write happens, the
+ * Host is never told. That is deliberate (installing an SSH profile from a
+ * paired device would let it drive outbound connections from the Host), but the
+ * editor said nothing, so every field stayed editable and none of it took
+ * effect.
+ */
+describe("the editor's reach", () => {
+  it("says the Host was not told, on a shell that cannot tell it", async () => {
+    mockTauri = false
+    render(<SshHosts />)
+    expect(await screen.findByTestId("ssh-hosts-not-synced")).toBeInTheDocument()
+  })
+
+  it("says nothing extra on the desktop, which does sync", async () => {
+    mockTauri = true
+    render(<SshHosts />)
+    await screen.findByTestId("ssh-hosts")
+    expect(screen.queryByTestId("ssh-hosts-not-synced")).toBeNull()
+  })
+})

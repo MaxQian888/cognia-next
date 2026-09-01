@@ -18,7 +18,7 @@ import {
   type TerminalErrorCode,
   type TerminalFrame,
 } from "./protocol"
-import { recordHostCapabilities } from "./host-capabilities"
+import { recordHostCapabilities, recordProtocolFeatures } from "./host-capabilities"
 import { toWebSocketBase } from "@/lib/network/ws-url"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
@@ -269,7 +269,13 @@ export class RemoteTerminalSession extends BaseTerminalSession {
     )
     try {
       const response = await session.sendCommand(TerminalFrameKind.Hello, EMPTY_SESSION_ID)
-      recordHostCapabilities(decodeTerminalJson<{ host?: unknown }>(response).host)
+      const ack = decodeTerminalJson<{ host?: unknown; protocolFeatures?: unknown }>(response)
+      recordHostCapabilities(ack.host)
+      // The hello ack is the only frame that carries the feature list (Rust
+      // pins that), so this is the one place it can be learned. Reading it here
+      // rather than at each call site means the probe the spawn path already
+      // runs doubles as the protocol negotiation `protocol.rs` requires.
+      recordProtocolFeatures(ack.protocolFeatures)
     } finally {
       session.intentionalClose = true
       session.disposeConnectionListeners()
@@ -403,6 +409,32 @@ export class RemoteTerminalSession extends BaseTerminalSession {
     await this.sendCommand(TerminalFrameKind.ReleaseControl, this.info.id)
     this.ownedControllerId = null
     this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
+  }
+
+  /**
+   * Read this session's SSH tunnels, or change one and read them back.
+   *
+   * Frames 24/25 have been implemented host-side since forwarding shipped, and
+   * `TerminalHost::forward_status` deliberately admits *any* attached
+   * connection, local or remote — only `set_forward_enabled` is local-identity
+   * only (ADR-0082, forwarding amendment). Nothing in TypeScript ever sent
+   * them, so `lib/terminal/ssh-forward-control.ts` called the Tauri-only RPCs
+   * from every shell and a paired phone got `command_transport_forbidden` every
+   * two seconds instead of the read the host was willing to answer.
+   *
+   * The reply is the post-change truth for both payloads, which is why a toggle
+   * returns a snapshot rather than an ack: binding a socket happens on its own
+   * schedule and can fail.
+   */
+  async sshForwardControl(
+    payload: { kind: "status" } | { kind: "setEnabled"; forwardId: string; enabled: boolean }
+  ): Promise<unknown> {
+    const response = await this.sendCommand(
+      TerminalFrameKind.SshForwardControl,
+      this.info.id,
+      payload
+    )
+    return decodeTerminalJson<{ forwards?: unknown }>(response).forwards
   }
 
   async kill(): Promise<void> {

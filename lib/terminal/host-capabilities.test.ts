@@ -22,6 +22,9 @@ import {
   parseHostCapabilities,
   recordHostCapabilities,
   subscribeHostCapabilities,
+  getProtocolFeatures,
+  hostSupportsProtocolFeature,
+  recordProtocolFeatures,
 } from "./host-capabilities"
 
 const HOST = {
@@ -167,5 +170,59 @@ describe("ensureHostCapabilities", () => {
     })
     await expect(ensureHostCapabilities()).resolves.toEqual(HOST)
     expect(mockDescribeHost).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("protocol features", () => {
+  beforeEach(() => {
+    __resetHostCapabilitiesForTests()
+  })
+
+  it("starts unknown, which is not the same as empty", () => {
+    expect(getProtocolFeatures()).toBeNull()
+  })
+
+  /**
+   * The local PTY never sends a hello, and a probe that has not run yet has not
+   * proved anything. Answering `false` there would turn "nobody asked" into
+   * "the host cannot", which is how a working feature gets hidden.
+   */
+  it("assumes an un-introduced host speaks everything", () => {
+    expect(hostSupportsProtocolFeature("sshForwarding")).toBe(true)
+  })
+
+  it("answers from the list once a host has introduced itself", () => {
+    recordProtocolFeatures(["flowControl", "history"])
+    expect(hostSupportsProtocolFeature("flowControl")).toBe(true)
+    expect(hostSupportsProtocolFeature("sshForwarding")).toBe(false)
+  })
+
+  it("treats a host that named nothing as naming nothing", () => {
+    recordProtocolFeatures([])
+    expect(getProtocolFeatures()).toEqual([])
+    expect(hostSupportsProtocolFeature("history")).toBe(false)
+  })
+
+  it("ignores junk rather than forgetting what the host said", () => {
+    recordProtocolFeatures(["history"])
+    recordProtocolFeatures("history")
+    recordProtocolFeatures(null)
+    expect(getProtocolFeatures()).toEqual(["history"])
+  })
+
+  it("keeps a name this build has never heard of", () => {
+    recordProtocolFeatures(["history", "somethingNewer"])
+    expect(getProtocolFeatures()).toEqual(["history", "somethingNewer"])
+  })
+
+  it("notifies subscribers, and only when the list actually changed", () => {
+    const listener = jest.fn()
+    const stop = subscribeHostCapabilities(listener)
+    recordProtocolFeatures(["history"])
+    recordProtocolFeatures(["history"])
+    expect(listener).toHaveBeenCalledTimes(1)
+    recordProtocolFeatures(["history", "sshForwarding"])
+    expect(listener).toHaveBeenCalledTimes(2)
+    stop()
   })
 })

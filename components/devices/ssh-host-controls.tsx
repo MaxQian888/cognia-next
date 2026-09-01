@@ -306,6 +306,19 @@ export function SshHostControls({ row, connect = connectSshFromDock }: SshHostCo
         </Button>
       </div>
 
+      {/*
+        A disabled button with no sentence next to it is indistinguishable from
+        a working host you simply cannot click — this card says so at :191 and
+        then broke its own rule here. The probe is the one control that stays
+        desktop-only after SSH stopped being desktop-only, so it is exactly the
+        one a reader will misread as "SSH does not work on my phone".
+      */}
+      {!local && profile ? (
+        <p className="text-xs text-muted-foreground" data-testid="ssh-probe-desktop-only">
+          {t("probe.desktopOnly")}
+        </p>
+      ) : null}
+
       <SshProbeResult state={probeState} />
 
       {hostKeyGuard.dialog}

@@ -150,8 +150,15 @@
       "local": "Local (-L)",
       "remote": "Remote (-R)"
     },
+    "error": {
+      "toggleLocalOnly": "This tunnel can only be started or stopped from the desktop that holds the SSH connection.",
+      "sessionUnreachable": "This tab's connection to the host is not open, so its tunnels cannot be read.",
+      "hostTooOld": "This host is running a build that predates port-forward reporting.",
+      "unknown": "Could not read the tunnels: {reason}"
+    },
     "open": "Show port forwards",
     "queued": "{count} waiting",
+    "readOnly": "Read-only here. Starting or stopping a tunnel opens a listening port, so it can only be done from the desktop that holds the SSH connection.",
     "state": {
       "failed": "Failed",
       "listening": "Listening",
