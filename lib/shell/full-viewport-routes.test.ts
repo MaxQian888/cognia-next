@@ -37,6 +37,20 @@ describe("needsFullViewport", () => {
     expect(needsFullViewport("/workflows")).toBe(false)
   })
 
+  /**
+   * `SubPageShell` is `flex h-full min-h-0 flex-1 overflow-y-auto` with a
+   * sticky header on all 48 `/me/*` pages. Only `/me/terminal` used to be
+   * listed, so the other 47 resolved `h-full` against a parent with no height
+   * and rendered as a short strip under a sticky header that had stopped
+   * sticking. `/me` itself is a scrolling row list and must not be caught.
+   */
+  it("gives every /me sub-page a height without catching /me itself", () => {
+    expect(needsFullViewport("/me")).toBe(false)
+    for (const route of ["/me/terminal", "/me/scheduler", "/me/storage", "/me/notifications"]) {
+      expect(needsFullViewport(route)).toBe(true)
+    }
+  })
+
   it("leaves an ordinary scrolling route alone", () => {
     expect(needsFullViewport("/")).toBe(false)
     expect(needsFullViewport("/settings")).toBe(false)

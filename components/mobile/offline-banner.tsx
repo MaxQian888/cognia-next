@@ -7,9 +7,17 @@
  *   - The network is offline, OR
  *   - The mobile outbound queue has pending rows (regardless of network).
  *
- * On non-mobile platforms it stays hidden (`usePlatform()` gate). The queue
- * count is read through a Dexie live query, so newly enqueued/drained rows
- * update the banner reactively — no polling timer.
+ * Gated on the COMPACT LAYOUT, not on the native platform. It used to ask
+ * `usePlatform() === "mobile"`, which is the capability question, and the
+ * compact shell also draws in a narrow browser tab: a 375px window got the
+ * phone frame with no offline or queue indicator anywhere in it. The queue is
+ * not native-only either — `lib/queue/outbound-queue.ts` says in its own
+ * header that the runner is platform-agnostic and serves attached Web, Mobile
+ * and Desktop callers — so a browser could hold pending rows and show nothing
+ * about them.
+ *
+ * The queue count is read through a Dexie live query, so newly enqueued and
+ * drained rows update the banner reactively rather than on a polling timer.
  */
 
 import { useTranslations } from "next-intl"
@@ -18,7 +26,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { useClientLiveQuery } from "@/hooks/data"
 import { useNetworkStatus } from "@/hooks/use-network-status"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { getQueueSummary, inFlight, needsAttention } from "@/lib/queue/outbound-queue"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
@@ -29,7 +37,7 @@ export interface OfflineBannerProps {
 
 export function OfflineBanner({ className }: OfflineBannerProps) {
   const t = useTranslations("mobile.offline")
-  const platform = usePlatform()
+  const compact = useCompactLayout()
   const { status, loading } = useNetworkStatus()
   // `getQueueSummary` reads the `mobileOutboundQueue` table, so wrapping it in
   // a live query makes the banner react to enqueue/drain writes instead of
@@ -44,7 +52,7 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
     { inFlight: 0, stuck: 0 }
   )
 
-  if (platform !== "mobile") return null
+  if (!compact) return null
   if (loading) return null
 
   const offline = !status.connected

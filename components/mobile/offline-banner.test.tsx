@@ -5,9 +5,9 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 
 import { OfflineBanner } from "./offline-banner"
 
-const platformMock = jest.fn(() => "mobile")
-jest.mock("@/hooks/use-platform", () => ({
-  usePlatform: () => platformMock(),
+const compactMock = jest.fn(() => true)
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => compactMock(),
 }))
 
 const useNetworkStatusMock = jest.fn(() => ({
@@ -80,7 +80,7 @@ jest.mock("next-intl", () => ({
 }))
 
 beforeEach(() => {
-  platformMock.mockReset().mockReturnValue("mobile")
+  compactMock.mockReset().mockReturnValue(true)
   useNetworkStatusMock
     .mockReset()
     .mockReturnValue({ loading: false, status: { connected: true, connectionType: "wifi" } })
@@ -88,10 +88,26 @@ beforeEach(() => {
 })
 
 describe("<OfflineBanner />", () => {
-  it("renders nothing on web", () => {
-    platformMock.mockReturnValue("web")
+  /**
+   * Behind the desktop frame there is no compact shell and no phone chrome to
+   * attach a banner to. Narrowness rather than platform is the question: a
+   * 375px browser tab draws the compact shell and had no offline indicator
+   * anywhere in it because this asked `usePlatform()`.
+   */
+  it("renders nothing when the desktop frame owns the layout", () => {
+    compactMock.mockReturnValue(false)
     const { container } = render(<OfflineBanner />)
     expect(container.firstChild).toBeNull()
+  })
+
+  it("renders in a narrow browser, not only in a native shell", async () => {
+    compactMock.mockReturnValue(true)
+    useNetworkStatusMock.mockReturnValue({
+      loading: false,
+      status: { connected: false, connectionType: "none" },
+    })
+    render(<OfflineBanner />)
+    expect(await screen.findByTestId("offline-banner")).toBeInTheDocument()
   })
 
   it("renders nothing while network state is loading", () => {

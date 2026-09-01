@@ -17,6 +17,7 @@ import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
 import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
 import { useBreakpoint } from "@/hooks/ui"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import {
   BackfillDialog,
   SchedulerSidebar,
@@ -57,6 +58,26 @@ import { toast } from "sonner"
 export default function SchedulerPage() {
   const router = useRouter()
   const t = useTranslations("scheduler")
+  // The phone-shaped scheduler already exists, at `/me/scheduler`: host bar,
+  // stat strip, search, both chip rows, the list, the detail view and the
+  // create / edit sheets. What was missing is that nothing sent a narrow
+  // viewport there, so `/scheduler` from the rail or a deep link rendered this
+  // master-detail layout at 375px. `/me/scheduler` bounces the other way on a
+  // wide layout, so the two are a mutually exclusive pair rather than a loop.
+  //
+  // A redirect rather than a second compact body. One scheduler with two
+  // entrances beats two schedulers that will disagree about filters within a
+  // release.
+  const compact = useCompactLayout()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true)
+  }, [])
+  useEffect(() => {
+    if (!mounted || !compact) return
+    router.replace("/me/scheduler")
+  }, [compact, mounted, router])
   const schedulerHost = getSchedulerDataSource().host
   // Reactive view of the same choice. `getSchedulerDataSource()` is read once
   // per render and does not re-run when the host bar flips the target, which
@@ -736,6 +757,13 @@ export default function SchedulerPage() {
 
   // Loading state — show layout-matching skeleton instead of a bare spinner so
   // the user perceives the page shape immediately.
+  // Nothing of the desktop layout paints while the redirect is in flight. The
+  // skeleton rather than `null` so a slow route change does not flash an empty
+  // frame, and it is the same skeleton this page shows before it initialises.
+  if (compact) {
+    return <SchedulerSkeleton />
+  }
+
   if (!isInitialized) {
     return <SchedulerSkeleton />
   }

@@ -14,7 +14,7 @@
  * flat list of unified items → push-detail. The data layer (sources
  * registry, `useUnifiedScheduledItems`, `useScheduler`) is shared verbatim.
  *
- * Non-mobile platforms get bounced to `/scheduler` — the full layout is the
+ * A layout that is not compact gets bounced to `/scheduler` — the full one is the
  * better experience there.
  */
 
@@ -56,7 +56,7 @@ import { useScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
-import { usePlatform } from "@/hooks/use-platform"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
 import { workspaceScopeForSchedulerHost } from "@/lib/scheduler/task-workspace-binding"
@@ -73,7 +73,11 @@ export default function MobileSchedulerPage() {
   const t = useTranslations("scheduler")
   const tMobile = useTranslations("mobile.me")
   const router = useRouter()
-  const platform = usePlatform()
+  // Width, not runtime. `/me` next door already learned this: asking
+  // `usePlatform()` here bounced a 375px browser out of the phone-shaped
+  // scheduler and into `/scheduler`, which has no compact body at all, so the
+  // narrow tab landed on a desktop three-pane layout it cannot render.
+  const compact = useCompactLayout()
 
   const [mounted, setMounted] = useState(false)
   useEffect(() => {
@@ -83,9 +87,9 @@ export default function MobileSchedulerPage() {
 
   useEffect(() => {
     if (!mounted) return
-    if (platform === "mobile") return
+    if (compact) return
     router.replace("/scheduler")
-  }, [mounted, platform, router])
+  }, [compact, mounted, router])
 
   const {
     statistics,
@@ -272,9 +276,9 @@ export default function MobileSchedulerPage() {
     [unifiedItems]
   )
 
-  // Prevent flash of mobile chrome on non-mobile platforms during the redirect.
+  // Prevent a flash of phone chrome behind the desktop frame during the redirect.
   if (!mounted) return null
-  if (platform !== "mobile") return null
+  if (!compact) return null
 
   const showingDetail = !!selectedTask || !!selectedUnifiedItem
 

@@ -96,10 +96,18 @@ const UNBRANCHED_ROUTES = [
   "/logs?channel=traces&view=dashboard",
   "/source-control",
   "/workspace",
-  "/scheduler",
-  "/plugins",
   "/skills",
   "/twin",
+] as const
+
+/**
+ * Routes that redirect a compact layout somewhere phone-shaped instead of
+ * rendering their desktop body at 375px. The assertion is the redirect: the
+ * destination has its own tests, and leaving these in the list above would
+ * check the wrong page while claiming they have no branch.
+ */
+const COMPACT_REDIRECTS: readonly (readonly [string, string])[] = [
+  ["/scheduler", "/me/scheduler"],
 ] as const
 
 test.describe("mobile — desktop routes reached on a phone", () => {
@@ -113,6 +121,14 @@ test.describe("mobile — desktop routes reached on a phone", () => {
     // no paired desktop to answer for anything these pages ask about.
     await setCogniaSettings(page, { mobileRuntimeMode: "standalone" })
   })
+
+  for (const [from, to] of COMPACT_REDIRECTS) {
+    test(`${from} sends a phone to ${to}`, async ({ page }) => {
+      await page.goto(from, { waitUntil: "domcontentloaded" })
+      await waitForTestGlobals(page, 30_000)
+      await expect.poll(() => new URL(page.url()).pathname, { timeout: 15_000 }).toBe(to)
+    })
+  }
 
   for (const route of UNBRANCHED_ROUTES) {
     test(`${route} survives a mobile viewport`, async ({ page }) => {

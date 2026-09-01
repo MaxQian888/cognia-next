@@ -42,8 +42,17 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   "/twin",
   "/browser",
   "/issues",
-  // The terminal owns its safe-area accessory row and its resizable split.
-  "/me/terminal",
+  // Every `/me/*` sub-page. `SubPageShell` is `flex h-full min-h-0 flex-1
+  // overflow-y-auto` with a sticky header, which is the shape that needs a
+  // definite height: under `min-h-[100dvh]` the `h-full` resolves against a
+  // parent with no height of its own, so the sticky header stops sticking and
+  // the body renders as a short strip with the rest of the screen blank. The
+  // terminal at `/me/terminal` was listed alone and is the one that got
+  // noticed; the other 47 sub-pages have the same shell.
+  //
+  // Prefix-only. `/me` itself is a scrolling list of rows and must keep
+  // scrolling with the page.
+  "/me/",
   // `StepShell` is `h-full` so it can share one sizing rule with the desktop
   // shell, where it fills the chrome's content slot.
   "/onboarding",

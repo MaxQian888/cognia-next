@@ -20,9 +20,9 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: routerReplace, push: jest.fn(), back: jest.fn() }),
 }))
 
-let platformValue: "tauri" | "mobile" | "web" = "mobile"
-jest.mock("@/hooks/use-platform", () => ({
-  usePlatform: () => platformValue,
+let compactValue = true
+jest.mock("@/hooks/ui/use-compact-layout", () => ({
+  useCompactLayout: () => compactValue,
 }))
 
 const createTaskMock = jest.fn(async () => undefined)
@@ -270,29 +270,34 @@ beforeEach(() => {
   sourcePause.mockReset()
   sourceResume.mockReset()
   sourceDelete.mockReset()
-  platformValue = "mobile"
+  compactValue = true
   unifiedItemsRef = []
   countsByKindRef = { app: 0, workflow: 0, backup: 0, plugin: 0, system: 0, connector: 0 }
   schedulerStateRef.current.selectedTask = null
 })
 
-describe("MobileSchedulerPage platform gate", () => {
-  it("renders the mobile body on Capacitor", () => {
-    platformValue = "mobile"
+describe("MobileSchedulerPage layout gate", () => {
+  it("renders the phone body on a compact layout", () => {
+    compactValue = true
     render(<MobileSchedulerPage />)
     expect(screen.getByTestId("mobile-scheduler-page")).toBeInTheDocument()
     expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it("returns null and redirects to /scheduler on the web", () => {
-    platformValue = "web"
-    const { container } = render(<MobileSchedulerPage />)
-    expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/scheduler")
+  /**
+   * Width, not runtime. This used to ask `usePlatform()`, so a 375px browser
+   * was bounced out of the only scheduler that fits it and into `/scheduler`,
+   * which renders a master-detail layout a narrow tab cannot show. `/scheduler`
+   * now bounces the other way, so the pair is mutually exclusive.
+   */
+  it("stays put in a narrow browser, which is not a native runtime", () => {
+    compactValue = true
+    render(<MobileSchedulerPage />)
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it("returns null and redirects to /scheduler on Tauri desktop", () => {
-    platformValue = "tauri"
+  it("returns null and redirects to /scheduler when the layout is wide", () => {
+    compactValue = false
     const { container } = render(<MobileSchedulerPage />)
     expect(container.firstChild).toBeNull()
     expect(routerReplace).toHaveBeenCalledWith("/scheduler")
