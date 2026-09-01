@@ -121,6 +121,100 @@ impl DispatchHost {
         }
     }
 
+    /// Start (or reuse) a workbench for `root` on whichever host owns it.
+    ///
+    /// The four lifecycle verbs below were headless-only, which made a paired
+    /// phone's `codeserver_ensure` answer `503 headless_host_required` on a
+    /// desktop-hosted companion server. The manifest classifies them
+    /// `target: execution` over http/websocket/webrtc, so the client was told
+    /// it could call them; the dispatcher then said no. Branching them the way
+    /// the read verbs above already branch closes that.
+    ///
+    /// The two hosts differ in more than plumbing and the return value says so.
+    /// A headless instance is device-scoped and reachable through the
+    /// `/ide/relay/{id}` front door, so its status carries a `relayPath`. A
+    /// desktop instance is neither: the relay resolves its upstream port from
+    /// `headless_services()`, which a desktop process does not have. So the
+    /// desktop status is honest about `relayPath: null` and a caller reaches
+    /// the workbench only from this machine, over the loopback plane, through
+    /// [`Self::ide_loopback_port`].
+    pub async fn ide_ensure(
+        &self,
+        root: &str,
+        profile: crate::codeserver::profile::IdeProfile,
+        device_id: &str,
+    ) -> Result<crate::codeserver::remote::RemoteCodeServerStatus, String> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::codeserver::CodeServerState>()
+                    .ensure_profile(app, root, profile)
+                    .await?;
+                Ok(crate::codeserver::remote::desktop_running_status(profile))
+            }
+            Self::Headless(services) => services.code_server.ensure(root, profile, device_id).await,
+        }
+    }
+
+    /// Whether a workbench is serving `root`, and under which profile.
+    ///
+    /// The desktop map is not device-scoped — `authorize_workspace_root` has
+    /// already bound the root to the active project — so `device_id` is only
+    /// consulted on the headless side, which additionally records which devices
+    /// may drive an instance.
+    pub async fn ide_status(
+        &self,
+        root: &str,
+        device_id: &str,
+    ) -> Result<crate::codeserver::remote::RemoteCodeServerStatus, String> {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                let (running, _port, profile) = app
+                    .state::<crate::codeserver::CodeServerState>()
+                    .status(root)
+                    .await;
+                // The tuple's port is deliberately dropped here. Disclosure is
+                // the arm's decision, made against `ExecutionPlane`, not this
+                // seam's — same rule the headless side encodes by keeping
+                // `loopback_port` a separate question from `status`.
+                Ok(match (running, profile) {
+                    (true, Some(profile)) => {
+                        crate::codeserver::remote::desktop_running_status(profile)
+                    }
+                    _ => crate::codeserver::remote::stopped_status(),
+                })
+            }
+            Self::Headless(services) => services.code_server.status(root, device_id).await,
+        }
+    }
+
+    /// Stop the workbench serving `root`. `true` when one was running.
+    pub async fn ide_stop(&self, root: &str) -> bool {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::codeserver::CodeServerState>()
+                    .stop(root)
+                    .await
+            }
+            Self::Headless(services) => services.code_server.stop(root).await,
+        }
+    }
+
+    /// Stop every workbench this host owns.
+    pub async fn ide_stop_all(&self) {
+        match self {
+            Self::Tauri(app) => {
+                use tauri::Manager;
+                app.state::<crate::codeserver::CodeServerState>()
+                    .stop_all()
+                    .await
+            }
+            Self::Headless(services) => services.code_server.stop_all().await,
+        }
+    }
+
     /// The workbench's loopback port for `root`, when this host is running one
     /// and the caller may drive it.
     ///

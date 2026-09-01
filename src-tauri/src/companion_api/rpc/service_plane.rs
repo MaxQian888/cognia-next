@@ -668,9 +668,21 @@ pub(super) async fn dispatch(
             })
         }
 
+        // ── Keyring arms: host-neutral on purpose (ADR-0152 D6) ──
+        // These four are the only `connectors_*` commands raised to the device
+        // plane (`target: host-admin`, http/ws/webrtc transports, `host.admin`
+        // capability, step-up lease). The manifest therefore advertises them to
+        // every paired phone, so demanding `host.headless()` here answered 503
+        // on a desktop-hosted companion server for a command the client was
+        // told it could call.
+        //
+        // Nothing below needs `HeadlessServices`: `crate::connectors::keyring`
+        // is a process-global module over the OS keychain, the same one the
+        // Tauri commands in `crates/cognia-connectors/src/commands.rs` wrap.
+        // Both hosts run in the process that owns that keychain, so the arm is
+        // correct on either. The authorization that actually matters already
+        // ran in `remote_execution::authorize_capability`.
         "connectors_keyring_set" => {
-            host.headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value: String = required(&args, "value")?;
@@ -684,8 +696,6 @@ pub(super) async fn dispatch(
         }
 
         "connectors_keyring_get" => {
-            host.headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             let value = tokio::task::spawn_blocking(move || {
@@ -698,8 +708,6 @@ pub(super) async fn dispatch(
         }
 
         "connectors_keyring_delete" => {
-            host.headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let credential: String = required(&args, "credential")?;
             tokio::task::spawn_blocking(move || {
@@ -712,8 +720,6 @@ pub(super) async fn dispatch(
         }
 
         "connectors_keyring_list" => {
-            host.headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let adapter_id: String = required_aliased(&args, "adapter_id", "adapterId")?;
             let accounts: Vec<String> = required(&args, "accounts")?;
             let present = tokio::task::spawn_blocking(move || {
@@ -742,12 +748,24 @@ pub(super) async fn dispatch(
             let url: String = required(&args, "url")?;
             let headers: Option<std::collections::HashMap<String, String>> =
                 optional(&args, "headers")?;
+            // A caller-preallocated handle lets the adapter subscribe to every
+            // event topic before the handshake begins, so the server's first
+            // frame cannot race listener registration. The desktop command
+            // branches on exactly this (`crates/cognia-connectors/src/commands.rs`);
+            // dropping it here made a reconnect on the brain come back under a
+            // fresh id while the adapter was still listening on the old one.
+            let handle_id: Option<String> = optional_aliased(&args, "handle_id", "handleId")?;
             let emitter = std::sync::Arc::new(super::super::event_bus::ConnectorEventEmitter(
                 std::sync::Arc::clone(&services.event_bus),
             ));
-            let handle_id = crate::connectors::ws_client::open_ws(emitter, url, headers)
-                .await
-                .map_err(RpcError::internal)?;
+            let handle_id = match handle_id {
+                Some(id) => {
+                    crate::connectors::ws_client::open_ws_with_handle(emitter, url, headers, id)
+                        .await
+                }
+                None => crate::connectors::ws_client::open_ws(emitter, url, headers).await,
+            }
+            .map_err(RpcError::internal)?;
             to_json(handle_id)
         }
 
@@ -755,10 +773,29 @@ pub(super) async fn dispatch(
             host.headless()
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let handle_id: String = required_aliased(&args, "handle_id", "handleId")?;
-            let data: String = required(&args, "data")?;
-            crate::connectors::ws_client::ws_send(&handle_id, data)
-                .await
-                .map_err(RpcError::internal)?;
+            // Text OR binary, never both and never neither — the same rule the
+            // desktop command enforces. `lib/connectors/tauri/commands.ts`
+            // sends `{ handleId, binary: Array.from(bytes) }` for a binary
+            // frame, so requiring `data` here made every binary send on the
+            // brain a 422: Matrix media, Lark file frames and OneBot's binary
+            // protocol were text-only on a headless host.
+            let data: Option<String> = optional(&args, "data")?;
+            let binary: Option<Vec<u8>> = optional(&args, "binary")?;
+            match (data, binary) {
+                (Some(data), None) => crate::connectors::ws_client::ws_send(&handle_id, data)
+                    .await
+                    .map_err(RpcError::internal)?,
+                (None, Some(binary)) => {
+                    crate::connectors::ws_client::ws_send_binary(&handle_id, binary)
+                        .await
+                        .map_err(RpcError::internal)?
+                }
+                _ => {
+                    return Err(RpcError::malformed(
+                        "exactly one of data or binary must be provided".to_string(),
+                    ))
+                }
+            }
             Ok(Value::Null)
         }
 

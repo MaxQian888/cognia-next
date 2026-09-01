@@ -2688,6 +2688,10 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "ttlMs": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -3317,6 +3321,10 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "handleId": {
+          "type": "string",
+          "format": "uuid"
         }
       },
       "additionalProperties": false
@@ -3324,8 +3332,7 @@
     "connectors_ws_send": {
       "type": "object",
       "required": [
-        "handleId",
-        "data"
+        "handleId"
       ],
       "properties": {
         "handleId": {
@@ -3333,8 +3340,38 @@
         },
         "data": {
           "type": "string"
+        },
+        "binary": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
         }
       },
+      "oneOf": [
+        {
+          "required": [
+            "data"
+          ],
+          "not": {
+            "required": [
+              "binary"
+            ]
+          }
+        },
+        {
+          "required": [
+            "binary"
+          ],
+          "not": {
+            "required": [
+              "data"
+            ]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "conversation_overrides_update": {
@@ -8399,6 +8436,87 @@
           "items": {
             "type": "string"
           }
+        },
+        "venvScope": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "isolated"
+          ]
+        },
+        "hostSettings": {
+          "type": "object",
+          "properties": {
+            "interpreterPath": {
+              "type": "string"
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "callTimeoutMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "useVenv": {
+              "type": "boolean"
+            },
+            "idleShutdownMin": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxConcurrentCalls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxOutboundHostCalls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "installer": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "uv",
+                    "pip",
+                    "custom"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "createArgs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "installArgs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            "venvScope": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "isolated"
+              ]
+            },
+            "sandboxed": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

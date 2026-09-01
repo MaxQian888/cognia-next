@@ -846,15 +846,10 @@ pub(super) async fn dispatch(
 
         "codeserver_supported" => to_json(crate::codeserver::download::resolve_platform().is_ok()),
         "codeserver_ensure" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
             let profile = optional::<crate::codeserver::profile::IdeProfile>(&args, "profile")?
                 .unwrap_or_default();
-            services
-                .code_server
-                .ensure(&root, profile, device_id)
+            host.ide_ensure(&root, profile, device_id)
                 .await
                 .and_then(|status| {
                     serde_json::to_value(status)
@@ -863,13 +858,9 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::service_unavailable)
         }
         "codeserver_status" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
-            let status = services
-                .code_server
-                .status(&root, device_id)
+            let status = host
+                .ide_status(&root, device_id)
                 .await
                 .map_err(RpcError::service_unavailable)?;
             // The workbench answers on a loopback port on the HOST, so the port
@@ -892,17 +883,11 @@ pub(super) async fn dispatch(
                 .map_err(|error| RpcError::internal(format!("serialize code-server status: {error}")))
         }
         "codeserver_stop" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
             let root = authorize_workspace_root(host, required(&args, "root")?)?;
-            to_json(services.code_server.stop(&root).await)
+            to_json(host.ide_stop(&root).await)
         }
         "codeserver_stop_all" => {
-            let services = host
-                .headless()
-                .ok_or_else(|| RpcError::headless_host_required(name))?;
-            services.code_server.stop_all().await;
+            host.ide_stop_all().await;
             Ok(Value::Null)
         }
         "codeserver_open_file" => {

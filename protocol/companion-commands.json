@@ -14,7 +14,31 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "account_bind_person",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "account_password_create_verifier",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "account_password_rotate",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -38,7 +62,19 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "account_rebind_verifier",
+      "name": "account_person",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "account_unbind_local",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -50,7 +86,7 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "account_unbind_local",
+      "name": "account_unbind_person",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -279,6 +315,18 @@
     },
     {
       "name": "agent_session_api",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "agent_start",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -1814,6 +1862,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "claude_plugin_hook_response",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "claude_plugin_tool_response",
       "target": "execution",
       "operation": "write",
@@ -2678,6 +2738,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "codex_oauth_cancel_device_code",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "codex_oauth_discover",
       "target": "client",
       "operation": "side-effect",
@@ -2703,6 +2775,30 @@
     },
     {
       "name": "codex_oauth_request_device_code",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_browser_access_get",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_browser_access_set",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -2846,6 +2942,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "companion_mdns_browse",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "companion_mdns_start",
       "target": "client",
       "operation": "side-effect",
@@ -2979,6 +3087,30 @@
     },
     {
       "name": "companion_push_status",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_reachability_get",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_reachability_set",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -3327,6 +3459,66 @@
     },
     {
       "name": "companion_unrevoke_device",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_wake_worker",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_worker_ack_events",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_worker_attach_channel",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_worker_detach_channel",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_worker_send_frame",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -3986,6 +4178,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "crash_delete_submission",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "crash_list_reports",
       "target": "client",
       "operation": "side-effect",
@@ -4046,6 +4250,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "crash_refresh_submission",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "crash_set_context",
       "target": "client",
       "operation": "side-effect",
@@ -4058,7 +4274,43 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "crash_submission_records",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "crash_submit_report",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "crash_take_pending",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "crash_withdraw_submission",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -4538,6 +4790,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "desktop_zoom",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "destroy_pet_window",
       "target": "client",
       "operation": "side-effect",
@@ -4790,6 +5054,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "external_agent_probe_runtime_version",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "external_agent_release_run",
       "target": "execution",
       "operation": "side-effect",
@@ -4822,6 +5098,18 @@
       "approval": "signed-policy",
       "idempotency": "required",
       "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "external_agent_sessions_read",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -5495,6 +5783,18 @@
       "approval": "none",
       "idempotency": "structural",
       "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "fs_walk_workspace",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -9015,6 +9315,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "plugin_python_host_response",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "plugin_python_import",
       "target": "service",
       "operation": "side-effect",
@@ -9045,6 +9357,18 @@
       "capability": "service.internal",
       "risk": "critical",
       "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "plugin_python_install_uv",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
       "idempotency": "required",
       "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
@@ -9675,6 +9999,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "plugin_workspace_repo_dir",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "plugin_workspace_repo_remove",
       "target": "execution",
       "operation": "write",
@@ -9916,6 +10252,42 @@
     },
     {
       "name": "proxy_http_request",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "proxy_http_stream_ack",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "proxy_http_stream_cancel",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "proxy_http_stream_open",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -10923,6 +11295,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "selection_toolbar_copy_result",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "selection_toolbar_current_candidate",
       "target": "client",
       "operation": "side-effect",
@@ -10948,6 +11332,30 @@
     },
     {
       "name": "selection_toolbar_finish",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "selection_toolbar_open_permission_settings",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "selection_toolbar_replace",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -11055,6 +11463,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "selection_toolbar_undo",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "send_to_external_agent",
       "target": "execution",
       "operation": "side-effect",
@@ -11063,6 +11483,30 @@
       "approval": "signed-policy",
       "idempotency": "required",
       "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "server_ops_events_close",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "server_ops_events_open",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -11799,6 +12243,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "subscription_get_account_detail",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "subscription_get_active",
       "target": "client",
       "operation": "side-effect",
@@ -11859,7 +12315,43 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "subscription_reauthenticate_codex_account",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "subscription_refresh_codex_account",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "subscription_rename_account",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "subscription_replace_account_credential",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -12748,6 +13240,18 @@
     },
     {
       "name": "telemetry_configure_sidecar",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "telemetry_otlp_cancel",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",
@@ -14140,6 +14644,18 @@
     },
     {
       "name": "voice_live_ws_open",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "wake_paired_host",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",

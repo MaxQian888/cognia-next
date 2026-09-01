@@ -195,13 +195,23 @@ export const STREAM_COMMAND_REPLACEMENTS = {
  * desktop.
  */
 export const HEADLESS_OWNED_ARMS = {
-  codeserver_ensure:
-    "code-server lifecycle is owned entirely by the remote host — `HeadlessServices.code_server` is documented as 'Pinned code-server lifecycle and device-bound relay owned entirely by this remote host. The paired desktop cannot install or upgrade it.' A desktop-hosted companion server has no instance to ensure, so 503 is the truthful answer",
-  codeserver_status:
-    "reports the state of the remote host's pinned code-server; a desktop host owns no such instance",
-  codeserver_stop:
-    "stops the remote host's pinned instance; there is nothing for a desktop host to stop",
-  codeserver_stop_all: "stops every instance the remote host owns; same reason as codeserver_stop",
+  // Empty, and that is the finding this table was built to force.
+  //
+  // It used to hold the four `codeserver_*` lifecycle arms on the claim that
+  // "a desktop-hosted companion server has no instance to ensure". That claim
+  // was read off `HeadlessServices.code_server`'s docstring, which describes
+  // the REMOTE host's pinned instance and is still true about that field. It
+  // was never true about the desktop: `src-tauri/src/lib.rs` manages a
+  // `CodeServerState`, `src-tauri/src/codeserver/commands.rs` exposes the same
+  // four verbs as Tauri commands, and `lib/codeserver/client.ts` drives them.
+  // So the arms were refusing a request a desktop host was perfectly able to
+  // serve, for four commands the manifest advertises to every paired phone as
+  // `target: execution` over http/websocket/webrtc.
+  //
+  // They now branch through `DispatchHost::ide_{ensure,status,stop,stop_all}`,
+  // the same seam `ide_read_user_settings` and `ide_open_file` already used.
+  // Keep the table: the next arm that genuinely belongs to the remote host
+  // needs a row here, and a row that outlives its subject fails the gate.
 }
 
 /** Findings that are gated. Anything else is report-only. */

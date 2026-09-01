@@ -4717,9 +4717,35 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "browser"
+        "x-cognia-wire-source": "src-tauri/src/companion_api/browser_gateway.rs BrowserRuntimeStatus",
+        "description": "Four separate booleans because they fail for four different reasons and collapsing them would hide which fix applies. `healthy` is true only after a live workspace-runtime health request: compile flags and environment presence never count as runtime health. `reason` names the first gate that said no.",
+        "required": [
+          "compiled",
+          "enabled",
+          "configured",
+          "healthy"
+        ],
+        "properties": {
+          "compiled": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "healthy": {
+            "type": "boolean"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7026,16 +7052,26 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs applyEdit",
+        "description": "`reflected` is true only when a stale open buffer was replaced through a WorkspaceEdit, so the change entered the undo stack. `opened` is false only when the file was gone or unreadable, which the caller degrades on rather than treating as an error.",
+        "required": [
+          "reflected",
+          "opened",
+          "path"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "reflected": {
+            "type": "boolean"
+          },
+          "opened": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7073,16 +7109,27 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs notify + protocol.mjs notificationKind",
+        "description": "`kind` is the narrowed kind actually shown. An unrecognised kind reads as `info` rather than being dropped, so this echoes back what the user saw.",
+        "required": [
+          "shown",
+          "kind"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "shown": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7125,16 +7172,22 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs openFile",
+        "description": "The extension revealed `path`. `opened` is always true: a failure throws instead.",
+        "required": [
+          "opened",
+          "path"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "opened": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7165,16 +7218,99 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs readActive",
+        "description": "What the user is looking at. Every field is present; `path`, `selection` and `selectedText` are null when no file editor is focused (or nothing is selected). Whole-file bodies are deliberately absent. The app PII-gates this payload before it reaches a model.",
+        "required": [
+          "path",
+          "selection",
+          "selectedText",
+          "diagnostics",
+          "openEditors"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "selection": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "startLine",
+              "startColumn",
+              "endLine",
+              "endColumn"
+            ],
+            "properties": {
+              "startLine": {
+                "type": "integer"
+              },
+              "startColumn": {
+                "type": "integer"
+              },
+              "endLine": {
+                "type": "integer"
+              },
+              "endColumn": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "selectedText": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs diagnosticSeverityName + the readActive/captureDiagnosticsContext mappers",
+              "description": "One editor diagnostic, 1-based line and column. `severity` is the narrowed vocabulary `diagnosticSeverityName` emits, not VS Code's numeric enum.",
+              "required": [
+                "message",
+                "severity",
+                "line",
+                "column"
+              ],
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning",
+                    "info",
+                    "hint"
+                  ]
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "column": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "openEditors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7209,16 +7345,21 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs revealInExplorer",
+        "required": [
+          "revealed",
+          "path"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "revealed": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7259,16 +7400,22 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs runInTerminal",
+        "description": "`sent` reports that the text reached the terminal, not that the command succeeded: the extension host cannot read a terminal's output back. `terminal` is the reused terminal's name.",
+        "required": [
+          "sent",
+          "terminal"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "sent": {
+            "type": "boolean"
+          },
+          "terminal": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7302,16 +7449,28 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs saveAll",
+        "description": "A partial flush is reported rather than thrown, so `failed` names the files whose disk copy the caller must not trust.",
+        "required": [
+          "saved",
+          "failed"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "saved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7354,16 +7513,21 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
+        "type": "object",
+        "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs showDiff",
+        "required": [
+          "shown",
+          "path"
         ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "properties": {
+          "shown": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -7400,16 +7564,7 @@
       },
       "outputSchemaSource": "contract",
       "outputSchema": {
-        "type": [
-          "object",
-          "array",
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ],
-        "x-cognia-opaque-reason": "The reply is whatever the companion VS Code extension returns for the verb, and the extension owns that shape (a save report, an active-editor context, or nothing at all). Narrowing it here would freeze an editor-side contract this crate does not define.",
-        "x-cognia-schema-owner": "codeserver"
+        "type": "null"
       },
       "outputTyped": true
     },
@@ -8907,9 +9062,35 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "companion"
+        "x-cognia-wire-source": "src-tauri/src/companion_api/rpc.rs endpoints_response",
+        "description": "Where else this host can be reached. `lanBaseUrl` is null on a loopback-bound server or a host with no routable interface; `tunnelBaseUrl` is null when no tunnel is running. `fingerprint` pins the self-signed certificate.",
+        "required": [
+          "lanBaseUrl",
+          "tunnelBaseUrl",
+          "fingerprint",
+          "serverId"
+        ],
+        "properties": {
+          "lanBaseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tunnelBaseUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "serverId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -9451,6 +9632,10 @@
             },
             "example": {}
           },
+          "ttlMs": {
+            "type": "integer",
+            "minimum": 0
+          },
           "adapter_id": {
             "type": "string"
           },
@@ -9459,6 +9644,10 @@
           },
           "source_url": {
             "type": "string"
+          },
+          "ttl_ms": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "additionalProperties": false,
@@ -11504,6 +11693,14 @@
               "type": "string"
             },
             "example": {}
+          },
+          "handleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "handle_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "additionalProperties": false
@@ -11529,9 +11726,6 @@
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "data"
-        ],
         "properties": {
           "handleId": {
             "type": "string"
@@ -11539,10 +11733,40 @@
           "data": {
             "type": "string"
           },
+          "binary": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
           "handle_id": {
             "type": "string"
           }
         },
+        "oneOf": [
+          {
+            "required": [
+              "data"
+            ],
+            "not": {
+              "required": [
+                "binary"
+              ]
+            }
+          },
+          {
+            "required": [
+              "binary"
+            ],
+            "not": {
+              "required": [
+                "data"
+              ]
+            }
+          }
+        ],
         "additionalProperties": false,
         "allOf": [
           {
@@ -19443,9 +19667,30 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "host"
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts hostCapabilities",
+        "description": "What this host physically is, and which surfaces it can reach. `capabilities` is the append-only `CORE_CAPABILITY_IDS` vocabulary from lib/platform/capabilities.ts; an id a client does not recognise is a newer host, not an error.",
+        "required": [
+          "platform",
+          "capabilities"
+        ],
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "tauri",
+              "mobile",
+              "web",
+              "headless"
+            ]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -19649,9 +19894,223 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "host"
+        "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts HostFeatureManifestV1 | HostFeatureManifestV2",
+        "description": "The effective manifest: what this host offers THIS caller, already filtered by the caller's device grants. A client renders capability from this and never self-judges by command name. Deliberately open to extra properties: the manifest is versioned and additive, and a v1 host answering a v2 client must stay readable.",
+        "required": [
+          "schemaVersion",
+          "hostBuildId",
+          "platform",
+          "generatedAt",
+          "features",
+          "limits"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "hostBuildId": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "tauri",
+              "mobile",
+              "web",
+              "headless"
+            ]
+          },
+          "generatedAt": {
+            "type": "integer"
+          },
+          "features": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts",
+              "required": [
+                "version",
+                "operations"
+              ],
+              "properties": {
+                "version": {
+                  "type": "integer"
+                },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "limits": {
+            "type": "object",
+            "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts",
+            "description": "Byte and count ceilings the host will actually enforce. Published so a client can refuse before the user commits, instead of after the host rejects.",
+            "required": [
+              "rpcJsonBodyBytes",
+              "skillMaxResources",
+              "skillMaxResourceBytes",
+              "skillUploadChunkBytes",
+              "mcpRequestBodyBytes",
+              "maxConcurrentProxyCalls"
+            ],
+            "properties": {
+              "rpcJsonBodyBytes": {
+                "type": "integer"
+              },
+              "skillMaxResources": {
+                "type": "integer"
+              },
+              "skillMaxResourceBytes": {
+                "type": "integer"
+              },
+              "skillUploadChunkBytes": {
+                "type": "integer"
+              },
+              "mcpRequestBodyBytes": {
+                "type": "integer"
+              },
+              "attachmentMaxBytes": {
+                "type": "integer"
+              },
+              "attachmentMaxPerMessage": {
+                "type": "integer"
+              },
+              "attachmentAcceptTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "maxConcurrentProxyCalls": {
+                "type": "integer"
+              },
+              "maxHostStateSnapshotBytes": {
+                "type": "integer"
+              },
+              "maxHostStateActionBatch": {
+                "type": "integer"
+              },
+              "maxPendingHostStateActions": {
+                "type": "integer"
+              },
+              "hostStateReplayRetentionMs": {
+                "type": "integer"
+              }
+            }
+          },
+          "hostIdentity": {
+            "type": "object",
+            "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "desktop",
+                  "cloud"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "hostStateScope": {
+            "type": "object",
+            "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts",
+            "description": "The scope the host's own host-state actually lives under. A client that addresses host-state by its own pairing id asks for a namespace the host never wrote to, and every host_state_* call is refused with host_state_scope_mismatch.",
+            "required": [
+              "accountId",
+              "runtimeTargetId"
+            ],
+            "properties": {
+              "accountId": {
+                "type": "string"
+              },
+              "runtimeTargetId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "protocol": {
+            "type": "object",
+            "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts",
+            "required": [
+              "min",
+              "max"
+            ],
+            "properties": {
+              "min": {
+                "type": "integer"
+              },
+              "max": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "transportCapabilities": {
+            "type": "object",
+            "properties": {
+              "eventStreamReady": {
+                "type": "integer",
+                "enum": [
+                  1
+                ]
+              }
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "lib/platform/host-feature-manifest.ts",
+              "description": "One command the host declares it can actually serve right now. `healthy: false` with a `reason` is the honest answer a client renders as disabled-with-explanation, which is why an unhealthy operation is published rather than omitted.",
+              "required": [
+                "name",
+                "feature",
+                "featureVersion",
+                "healthy"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "feature": {
+                  "type": "string"
+                },
+                "featureVersion": {
+                  "type": "integer"
+                },
+                "healthy": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "deviceGrants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "outputTyped": true
     },
@@ -19694,9 +20153,40 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "host"
+        "x-cognia-wire-source": "packages/agent-config-types/src/host-state.ts",
+        "description": "A cut of one host-state channel. `digest` and `cutHostSeq` are what a replica reconciles against; `state` is the channel's own payload, whose shape belongs to the channel.",
+        "required": [
+          "channel",
+          "hostId",
+          "hostGeneration",
+          "cutHostSeq",
+          "revision",
+          "digest",
+          "state"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "hostId": {
+            "type": "string"
+          },
+          "hostGeneration": {
+            "type": "integer"
+          },
+          "cutHostSeq": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "state": {
+            "type": "object"
+          }
+        }
       },
       "outputTyped": true
     },
@@ -19734,9 +20224,46 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "host"
+        "x-cognia-wire-source": "packages/agent-config-types/src/host-state.ts",
+        "description": "`recovery` is load-bearing: while it is `recovering` nothing the host reports about a turn can be trusted, and `degraded` means recovery ran and failed rather than that state is fresh.",
+        "required": [
+          "hostId",
+          "hostGeneration",
+          "hostSeq",
+          "leaseExpiresAt",
+          "pendingDispatch",
+          "pendingBroadcast",
+          "recovery"
+        ],
+        "properties": {
+          "hostId": {
+            "type": "string"
+          },
+          "hostGeneration": {
+            "type": "integer"
+          },
+          "hostSeq": {
+            "type": "integer"
+          },
+          "leaseExpiresAt": {
+            "type": "integer"
+          },
+          "pendingDispatch": {
+            "type": "integer"
+          },
+          "pendingBroadcast": {
+            "type": "integer"
+          },
+          "recovery": {
+            "type": "string",
+            "enum": [
+              "recovering",
+              "ready",
+              "degraded"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -19855,9 +20382,54 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "host"
+        "x-cognia-wire-source": "packages/agent-config-types/src/host-state.ts",
+        "description": "One receipt per submitted action, in submission order.",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "packages/agent-config-types/src/host-state.ts",
+              "description": "Per-action outcome. `duplicate` is a success (the idempotency key already landed), not a failure; `rejected` and `conflicted` carry the reason on `rejection`.",
+              "required": [
+                "actionId",
+                "outcome",
+                "hostGeneration",
+                "hostSeq"
+              ],
+              "properties": {
+                "actionId": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "applied",
+                    "duplicate",
+                    "rejected",
+                    "conflicted"
+                  ]
+                },
+                "hostGeneration": {
+                  "type": "integer"
+                },
+                "hostSeq": {
+                  "type": "integer"
+                },
+                "rejection": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -21943,9 +22515,29 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "mcp"
+        "x-cognia-wire-source": "crates/cognia-mcp-server/src/types.rs McpServerStatus",
+        "description": "`port` and `startedAt` are null exactly when `running` is false.",
+        "required": [
+          "running"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -23101,9 +23693,74 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "ocr"
+        "x-cognia-wire-source": "crates/cognia-ocr/src/native.rs ModelStatus",
+        "description": "`integrity` is separate from `installed` on purpose: a corrupt model is present on disk and must not be used, which one boolean cannot say. `legacy_files` are pre-v6 Paddle files that are never loaded and are reported only so a user can clean them up.",
+        "required": [
+          "backend",
+          "integrity",
+          "installed",
+          "model_dir",
+          "files",
+          "total_bytes"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "integrity": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "missing",
+              "corrupt",
+              "unknown"
+            ]
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "model_dir": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "crates/cognia-ocr/src/native.rs ModelFileStatus",
+              "required": [
+                "file_name",
+                "installed",
+                "expected_bytes"
+              ],
+              "properties": {
+                "file_name": {
+                  "type": "string"
+                },
+                "installed": {
+                  "type": "boolean"
+                },
+                "expected_bytes": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "total_bytes": {
+            "type": "integer"
+          },
+          "legacy_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "outputTyped": true
     },
@@ -24195,9 +24852,75 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "performance"
+        "x-cognia-wire-source": "lib/perf/host-dispatch.ts perf_system_details",
+        "description": "One shape for both hosts. A Node/headless host reports `family: \"node\"` and `tauriVersion: \"unsupported\"` rather than omitting the fields, so a client renders one table instead of branching on which host answered.",
+        "required": [
+          "os",
+          "osVersion",
+          "arch",
+          "family",
+          "hostname",
+          "cpuCount",
+          "totalMemoryBytes",
+          "usedMemoryBytes",
+          "appVersion",
+          "tauriVersion",
+          "profile",
+          "enabledFeatures"
+        ],
+        "properties": {
+          "os": {
+            "type": "string"
+          },
+          "osVersion": {
+            "type": "string"
+          },
+          "kernelVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "arch": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "cpu": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cpuCount": {
+            "type": "integer"
+          },
+          "totalMemoryBytes": {
+            "type": "integer"
+          },
+          "usedMemoryBytes": {
+            "type": "integer"
+          },
+          "appVersion": {
+            "type": "string"
+          },
+          "tauriVersion": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "enabledFeatures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "outputTyped": true
     },
@@ -26459,8 +27182,172 @@
               "type": "string"
             }
           },
+          "venvScope": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "isolated"
+            ]
+          },
+          "hostSettings": {
+            "type": "object",
+            "properties": {
+              "interpreterPath": {
+                "type": "string"
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "example": {}
+              },
+              "callTimeoutMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "useVenv": {
+                "type": "boolean"
+              },
+              "idleShutdownMin": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxConcurrentCalls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxOutboundHostCalls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "installer": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "uv",
+                      "pip",
+                      "custom"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "createArgs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "installArgs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "venvScope": {
+                "type": "string",
+                "enum": [
+                  "shared",
+                  "isolated"
+                ]
+              },
+              "sandboxed": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
           "plugin_id": {
             "type": "string"
+          },
+          "venv_scope": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "isolated"
+            ]
+          },
+          "host_settings": {
+            "type": "object",
+            "properties": {
+              "interpreterPath": {
+                "type": "string"
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "example": {}
+              },
+              "callTimeoutMs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "useVenv": {
+                "type": "boolean"
+              },
+              "idleShutdownMin": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxConcurrentCalls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxOutboundHostCalls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "installer": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "uv",
+                      "pip",
+                      "custom"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "createArgs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "installArgs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "venvScope": {
+                "type": "string",
+                "enum": [
+                  "shared",
+                  "isolated"
+                ]
+              },
+              "sandboxed": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false,
@@ -34051,9 +34938,78 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "session"
+        "x-cognia-wire-source": "packages/agent-config-types/src/transcript.ts",
+        "description": "`hasMore` and `nextCursor` are the only correct way to page; item counts are capped by `transcript_capabilities.maxTimelinePageSize`.",
+        "required": [
+          "items",
+          "revision",
+          "hasMore"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "packages/agent-config-types/src/transcript.ts CompletedTurnTimelineItem | ActiveTurnTimelineItem | SystemTimelineItem",
+              "description": "One timeline row. `kind` selects the variant and the fields that come with it; the shared head is `itemKey` / `revision` / `startedAt`. Left open so a newer host's variant fields survive an older client.",
+              "required": [
+                "itemKey",
+                "revision",
+                "startedAt",
+                "kind"
+              ],
+              "properties": {
+                "itemKey": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                },
+                "startedAt": {
+                  "type": "integer"
+                },
+                "completedAt": {
+                  "type": "integer"
+                },
+                "durationMs": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "completed-turn",
+                    "active-turn",
+                    "system"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "completed",
+                    "failed",
+                    "active"
+                  ]
+                },
+                "turnKey": {
+                  "type": "string"
+                },
+                "detailRevision": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": "string"
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -34113,9 +35069,86 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "session"
+        "x-cognia-wire-source": "packages/agent-config-types/src/transcript.ts",
+        "description": "`approximateBytes` is what the host measured against `maxTurnMessagePageBytes`, so a short page is a byte-budget cut rather than the end of the turn. `hasMore` says which.",
+        "required": [
+          "messages",
+          "revision",
+          "detailRevision",
+          "total",
+          "approximateBytes",
+          "hasMore"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "packages/agent-config-types/src/transcript.ts TranscriptMessage",
+              "description": "`parts` is the AI-SDK UIMessage part union and is owned by that package, so it is not narrowed here. Everything around it is.",
+              "required": [
+                "id",
+                "sessionId",
+                "role",
+                "parts",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "turnKey": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "parts": {
+                  "type": "array"
+                },
+                "senderId": {
+                  "type": "string"
+                },
+                "senderKind": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "assistant",
+                    "system"
+                  ]
+                },
+                "metadata": {
+                  "type": "object"
+                },
+                "createdAt": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "detailRevision": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "approximateBytes": {
+            "type": "integer"
+          },
+          "nextCursor": {
+            "type": "string"
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -34976,9 +36009,34 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "sync"
+        "x-cognia-wire-source": "lib/sync/types.ts SyncDelta",
+        "description": "One table's delta. `rows` are upserts and `deleted_ids` are tombstones; both share the `next_since` cursor space so an upsert and a deletion each cross the wire exactly once. `has_more` is set only by paged tables, and the caller keeps pulling while it is true.",
+        "required": [
+          "rows",
+          "deleted_ids",
+          "next_since"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "deleted_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_since": {
+            "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -41865,9 +42923,48 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "object",
-        "additionalProperties": true,
-        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
-        "x-cognia-schema-owner": "transcript"
+        "x-cognia-wire-source": "packages/agent-config-types/src/transcript.ts",
+        "description": "The paging and size budget this host will honour. A client that pages past these gets a refusal, so it reads them first rather than discovering them one rejection at a time.",
+        "required": [
+          "version",
+          "maxTimelinePageSize",
+          "maxTurnMessagePageSize",
+          "maxTurnMessagePageBytes",
+          "maxSummaryBytes",
+          "maxSummaryMediaRefs",
+          "mediaVariants"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "maxTimelinePageSize": {
+            "type": "integer"
+          },
+          "maxTurnMessagePageSize": {
+            "type": "integer"
+          },
+          "maxTurnMessagePageBytes": {
+            "type": "integer"
+          },
+          "maxSummaryBytes": {
+            "type": "integer"
+          },
+          "maxSummaryMediaRefs": {
+            "type": "integer"
+          },
+          "mediaVariants": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "thumbnail",
+                "canonical"
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -44298,5 +45395,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "16e7f8892618a4407161b8ce8a47cfefcf33b14335dafbdb9c3b28fe5ecc08cd"
+  "catalogHash": "8fc303c443e3c4d003c6689fbfcf858e9ae87746d3e800e5f865ad3e5a4ac8a1"
 }

@@ -629,7 +629,28 @@ fn running_status(profile: IdeProfile, relay_id: &str) -> RemoteCodeServerStatus
     }
 }
 
-fn stopped_status() -> RemoteCodeServerStatus {
+/// The status a **desktop**-hosted workbench reports across the companion
+/// boundary.
+///
+/// `relay_path` is `None`, and that is a fact rather than an omission. The
+/// `/ide/relay/{id}` mount is served by [`relay_request`], which resolves the
+/// upstream port through `crate::headless::headless_services()`. A desktop host
+/// has no such registry, so there is no front-door path to its workbench and
+/// naming one would hand the caller a 404 dressed up as a URL. A caller on the
+/// loopback plaintext plane still receives the real port, through
+/// `DispatchHost::ide_loopback_port` — that is how a browser running on this
+/// same machine embeds the workbench directly.
+pub(crate) fn desktop_running_status(profile: IdeProfile) -> RemoteCodeServerStatus {
+    RemoteCodeServerStatus {
+        running: true,
+        port: None,
+        version: CODE_SERVER_VERSION.to_string(),
+        profile: Some(profile),
+        relay_path: None,
+    }
+}
+
+pub(crate) fn stopped_status() -> RemoteCodeServerStatus {
     RemoteCodeServerStatus {
         running: false,
         port: None,
