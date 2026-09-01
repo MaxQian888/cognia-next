@@ -31,8 +31,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { BAUD_RATES } from "@/lib/terminal/serial"
 import { isTauri } from "@/lib/tauri"
 import type { TerminalProfile } from "@/lib/terminal/profiles"
 import type { SshHostProfile } from "@/lib/terminal/ssh-profiles"
@@ -44,6 +48,13 @@ import {
   type ShellPlatform,
 } from "@/lib/terminal/shell-detect"
 import { useHostCapabilities } from "@/hooks/terminal/use-host-capabilities"
+
+/**
+ * What a serial row opens at when the user clicks it rather than reaching for
+ * the baud submenu. 115200 is what most USB-serial adapters and modern
+ * bootloaders ship at, so it is the one-click case.
+ */
+const DEFAULT_SERIAL_BAUD = 115200
 
 /** Probe PATH for which of `bins` resolve to a real executable. */
 export type DetectShells = (bins: string[]) => Promise<ReadonlySet<string>>
@@ -66,6 +77,22 @@ export interface TerminalShellPickerProps {
   sshHosts?: readonly SshHostProfile[]
   /** Connect a tab to a saved SSH host. */
   onNewSshHost?: (hostId: string) => void | Promise<void>
+  /**
+   * Open a serial port as a tab. Omitted on every shell that is not holding
+   * the hardware: a port is a device node on this machine, and
+   * `terminal_open_serial` is `target: "client"` for exactly that reason.
+   */
+  onNewSerialPort?: (path: string, baudRate: number) => void | Promise<void>
+  /**
+   * Attach to a running tmux session. The session list comes from the tmux
+   * server, so it is the HOST's sessions, and attaching spawns a normal shell
+   * that runs the attach command.
+   */
+  onAttachTmuxSession?: (sessionName: string) => void | Promise<void>
+  /** Test seam for the serial port scan. */
+  listSerialPorts?: () => Promise<readonly { path: string; product: string | null }[]>
+  /** Test seam for the tmux session scan. */
+  listTmuxSessions?: () => Promise<readonly { name: string; windowCount: number }[]>
   /**
    * How big the affordance is drawn.
    *
@@ -124,12 +151,39 @@ const defaultDetectShells: DetectShells = async (bins) => {
   return found
 }
 
+/**
+ * The two device scans, behind the same shape as `defaultDetectShells`: they
+ * resolve to an empty list on any failure, so a host without tmux or without a
+ * serial adapter simply shows no section rather than an error row.
+ */
+async function defaultListSerialPorts() {
+  if (!isTauri()) return []
+  const { listSerialPorts } = await import("@/lib/terminal/serial")
+  return (await listSerialPorts()).map((port) => ({
+    path: port.path,
+    product: port.product ?? port.manufacturer,
+  }))
+}
+
+async function defaultListTmuxSessions() {
+  if (!isTauri()) return []
+  const { listTmuxSessions } = await import("@/lib/terminal/multiplexer")
+  return (await listTmuxSessions()).map((session) => ({
+    name: session.name,
+    windowCount: session.windowCount,
+  }))
+}
+
 export function TerminalShellPicker({
   onNew,
   profiles,
   onNewProfile,
   sshHosts,
   onNewSshHost,
+  onNewSerialPort,
+  onAttachTmuxSession,
+  listSerialPorts = defaultListSerialPorts,
+  listTmuxSessions = defaultListTmuxSessions,
   variant = "dock",
   triggerTestId,
   newTestId,
@@ -175,6 +229,46 @@ export function TerminalShellPicker({
       alive = false
     }
   }, [baseOptions, detectShells, host])
+
+  // Device scans. Run once when the picker mounts rather than on every menu
+  // open: enumerating serial ports walks the OS device tree and listing tmux
+  // sessions is a socket round-trip, and neither answer changes often enough
+  // to pay that on each click. A device plugged in after mount appears on the
+  // next dock mount, which is the same freshness the shell scan has.
+  const [serialPorts, setSerialPorts] = useState<
+    readonly { path: string; product: string | null }[]
+  >([])
+  const [tmuxSessions, setTmuxSessions] = useState<
+    readonly { name: string; windowCount: number }[]
+  >([])
+  useEffect(() => {
+    if (!onNewSerialPort) return
+    let alive = true
+    void listSerialPorts()
+      .then((ports) => {
+        if (alive) setSerialPorts(ports)
+      })
+      .catch(() => {
+        /* no adapter, or no permission to enumerate — show no section */
+      })
+    return () => {
+      alive = false
+    }
+  }, [listSerialPorts, onNewSerialPort])
+  useEffect(() => {
+    if (!onAttachTmuxSession) return
+    let alive = true
+    void listTmuxSessions()
+      .then((sessions) => {
+        if (alive) setTmuxSessions(sessions)
+      })
+      .catch(() => {
+        /* tmux not installed, or no server running — show no section */
+      })
+    return () => {
+      alive = false
+    }
+  }, [listTmuxSessions, onAttachTmuxSession])
 
   // The host already filtered to shells that exist on it, so there is nothing
   // left for the PATH scan to narrow — and nothing it *could* narrow, since it
@@ -249,6 +343,73 @@ export function TerminalShellPicker({
                 >
                   {host.name}
                 </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          {tmuxSessions.length > 0 && onAttachTmuxSession ? (
+            <>
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                {t("terminal.shellPicker.tmuxLabel")}
+              </DropdownMenuLabel>
+              {tmuxSessions.map((session) => (
+                <DropdownMenuItem
+                  key={session.name}
+                  onSelect={() => {
+                    void onAttachTmuxSession(session.name)
+                  }}
+                  className="text-xs"
+                  data-testid={`terminal-shell-picker-tmux-${session.name}`}
+                >
+                  {t("terminal.shellPicker.tmuxSession", {
+                    name: session.name,
+                    count: session.windowCount,
+                  })}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          {serialPorts.length > 0 && onNewSerialPort ? (
+            <>
+              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
+                {t("terminal.shellPicker.serialLabel")}
+              </DropdownMenuLabel>
+              {serialPorts.map((port) => (
+                /* Baud is a submenu rather than a fixed default because a
+                   device at the wrong rate produces not an error but garbage,
+                   which reads as a broken adapter. The row itself opens at
+                   115200, the modern default and the one most USB adapters
+                   ship at, so the common case is still one click. */
+                <DropdownMenuSub key={port.path}>
+                  <DropdownMenuSubTrigger
+                    className="text-xs"
+                    data-testid={`terminal-shell-picker-serial-${port.path}`}
+                    onClick={() => {
+                      void onNewSerialPort(port.path, DEFAULT_SERIAL_BAUD)
+                    }}
+                  >
+                    {/* The product name is what a user recognises ("CH340");
+                        the path is what identifies the device. Both, because a
+                        machine with two identical adapters has two identical
+                        product names. */}
+                    {port.product ? `${port.product} — ${port.path}` : port.path}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    {BAUD_RATES.map((baud) => (
+                      <DropdownMenuItem
+                        key={baud}
+                        className="text-xs"
+                        onSelect={() => {
+                          void onNewSerialPort(port.path, baud)
+                        }}
+                        data-testid={`terminal-shell-picker-serial-${port.path}-${baud}`}
+                      >
+                        {t("terminal.shellPicker.serialBaud", { baud })}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
               ))}
               <DropdownMenuSeparator />
             </>

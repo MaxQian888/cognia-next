@@ -3066,6 +3066,25 @@
       },
       "additionalProperties": false
     },
+    "MultiplexerInfo": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-terminal/src/multiplexer.rs MultiplexerInfo",
+      "description": "Whether the HOST process was launched from inside a multiplexer. `socketPath` is the tmux server socket, a GNU screen session name, or the zellij session id, verbatim as the environment reports it, because each is what that tool's own attach command takes. `version` is null when nothing was detected and also when the binary could not answer, which is not the same as an unknown multiplexer.",
+      "required": ["type", "socketPath", "version"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["tmux", "screen", "zellij", "none"]
+        },
+        "socketPath": {
+          "type": ["string", "null"]
+        },
+        "version": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
     "NativeLogFileList": {
       "type": "array",
       "x-cognia-wire-source": "Vec<cognia_observability::log_query::NativeLogFileInfo>. modifiedMs is skipped when None.",
@@ -5383,6 +5402,50 @@
         },
         "expiresAt": {
           "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TmuxSession": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-terminal/src/multiplexer.rs TmuxSession",
+      "description": "`attached` is derived from tmux's `session_attached` client COUNT, so two attached clients is still true. `createdAt` is unix seconds, the unit tmux reports.",
+      "required": ["name", "windowCount", "attached", "createdAt"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "windowCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attached": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TmuxWindow": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-terminal/src/multiplexer.rs TmuxWindow",
+      "required": ["index", "name", "active", "paneCount"],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "paneCount": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -8033,6 +8096,9 @@
     "terminal_complete_paths": {
       "$ref": "#/$defs/TerminalPathCandidateList"
     },
+    "terminal_detect_multiplexer": {
+      "$ref": "#/$defs/MultiplexerInfo"
+    },
     "terminal_exec": {
       "$ref": "#/$defs/TerminalExecResult"
     },
@@ -8059,6 +8125,18 @@
     },
     "terminal_list_path_executables": {
       "$ref": "#/$defs/TerminalPathExecutableList"
+    },
+    "terminal_list_tmux_sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TmuxSession"
+      }
+    },
+    "terminal_list_tmux_windows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TmuxWindow"
+      }
     },
     "thread_handoff_abort": {
       "$ref": "#/$defs/ThreadHandoffTicket"

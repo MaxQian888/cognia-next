@@ -888,6 +888,12 @@ const KNOWN_COMMANDS: &[&str] = &[
     "terminal_complete_paths",
     "terminal_list_path_executables",
     "terminal_kill_port",
+    // Multiplexer detection and tmux enumeration. Gated on the same
+    // `terminal.open` grant as the session listing above: which tmux sessions a
+    // machine is running is a statement about what its owner is doing.
+    "terminal_detect_multiplexer",
+    "terminal_list_tmux_sessions",
+    "terminal_list_tmux_windows",
     // Terminal-host administration. The desktop drives these through the local
     // `terminal_host_service` command, which no remote client can reach — so a
     // browser's terminal settings used to write a local mirror and nothing
@@ -1356,6 +1362,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     // Same on both axes: a prefix-filtered read of the host's `$PATH`, served
     // from a 15-second scan cache.
     "terminal_list_path_executables",
+    // Multiplexer reads. Detection is a read of this process's own
+    // environment; the two tmux listings are one socket round-trip that
+    // mutates nothing on the server.
+    "terminal_detect_multiplexer",
+    "terminal_list_tmux_sessions",
+    "terminal_list_tmux_windows",
     "codeserver_supported",
     "codeserver_status",
     // Pro IDE reads. `read_active` reflects the editor rather than mutating it,

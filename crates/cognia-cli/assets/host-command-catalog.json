@@ -38971,6 +38971,61 @@
       "outputTyped": true
     },
     {
+      "name": "terminal_detect_multiplexer",
+      "category": "development",
+      "resource": "terminal",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "terminal_detect_multiplexer (terminal.open)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-terminal/src/multiplexer.rs MultiplexerInfo",
+        "description": "Whether the HOST process was launched from inside a multiplexer. `socketPath` is the tmux server socket, a GNU screen session name, or the zellij session id, verbatim as the environment reports it, because each is what that tool's own attach command takes. `version` is null when nothing was detected and also when the binary could not answer, which is not the same as an unknown multiplexer.",
+        "required": [
+          "type",
+          "socketPath",
+          "version"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tmux",
+              "screen",
+              "zellij",
+              "none"
+            ]
+          },
+          "socketPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "terminal_exec",
       "category": "development",
       "resource": "terminal",
@@ -39898,6 +39953,133 @@
         "x-cognia-wire-source": "Vec<String> — cognia_terminal::path_scan::list_path_executables_inner.",
         "items": {
           "type": "string"
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_list_tmux_sessions",
+      "category": "development",
+      "resource": "terminal",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "terminal_list_tmux_sessions (terminal.open)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "crates/cognia-terminal/src/multiplexer.rs TmuxSession",
+          "description": "`attached` is derived from tmux's `session_attached` client COUNT, so two attached clients is still true. `createdAt` is unix seconds, the unit tmux reports.",
+          "required": [
+            "name",
+            "windowCount",
+            "attached",
+            "createdAt"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "windowCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "attached": {
+              "type": "boolean"
+            },
+            "createdAt": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_list_tmux_windows",
+      "category": "development",
+      "resource": "terminal",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "terminal_list_tmux_windows (terminal.open)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sessionName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "session_name"
+                ]
+              },
+              {
+                "required": [
+                  "sessionName"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "x-cognia-wire-source": "crates/cognia-terminal/src/multiplexer.rs TmuxWindow",
+          "required": [
+            "index",
+            "name",
+            "active",
+            "paneCount"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "name": {
+              "type": "string"
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "paneCount": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "outputTyped": true
@@ -45395,5 +45577,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "8fc303c443e3c4d003c6689fbfcf858e9ae87746d3e800e5f865ad3e5a4ac8a1"
+  "catalogHash": "9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67"
 }

@@ -87,8 +87,14 @@ export interface SessionInfo {
   alive?: boolean
   /** Stable identity of the durable terminal host that owns the process. */
   hostId?: string
-  /** Host-owned process kind. */
-  kind?: "localPty" | "ssh"
+  /**
+   * Process kind. `localPty` and `ssh` are host-owned and arrive on the wire.
+   * `serial` never does: a serial port is not a host session, it is a device
+   * node this client opened, and it appears here only so the dock can label
+   * the tab and skip the affordances (resize, exit code, shell integration)
+   * that a cable has no answer for.
+   */
+  kind?: "localPty" | "ssh" | "serial"
   profileId?: string
   /**
    * TOFU verdict for the remote server key, present only on `kind: "ssh"`

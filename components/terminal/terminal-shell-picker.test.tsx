@@ -18,6 +18,25 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => null,
+  // The submenu is flattened: the trigger renders inline and the content is
+  // always visible, so a test clicks a baud row directly instead of driving
+  // Radix's hover/keyboard open. What is under test is which callback fires
+  // with which arguments, not Radix's own menu behaviour.
+  DropdownMenuSub: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuSubTrigger: ({
+    children,
+    onClick,
+    "data-testid": testId,
+  }: {
+    children: ReactNode
+    onClick?: () => void
+    "data-testid"?: string
+  }) => (
+    <div data-testid={testId} role="button" tabIndex={0} onClick={onClick}>
+      {children}
+    </div>
+  ),
+  DropdownMenuSubContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({
     children,
     onSelect,
@@ -218,6 +237,111 @@ describe("TerminalShellPicker", () => {
     expect(screen.queryByText("Draft")).toBeNull()
     fireEvent.click(screen.getByTestId("terminal-shell-picker-ssh-ssh-1"))
     expect(onNewSshHost).toHaveBeenCalledWith("ssh-1")
+  })
+
+  it("lists serial ports and opens the clicked one at the default baud", async () => {
+    const onNewSerialPort = jest.fn()
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSerialPort={onNewSerialPort}
+        listSerialPorts={async () => [
+          { path: "/dev/cu.usbserial-1420", product: "CH340" },
+          { path: "/dev/cu.Bluetooth-Incoming-Port", product: null },
+        ]}
+      />
+    )
+    // Product name and path together: a machine with two identical adapters
+    // has two identical product names, and the path is what tells them apart.
+    expect(screen.getByText("CH340 — /dev/cu.usbserial-1420")).toBeTruthy()
+    expect(screen.getByText("/dev/cu.Bluetooth-Incoming-Port")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("terminal-shell-picker-serial-/dev/cu.usbserial-1420"))
+    expect(onNewSerialPort).toHaveBeenCalledWith("/dev/cu.usbserial-1420", 115200)
+  })
+
+  /**
+   * A device at the wrong baud produces garbage rather than an error, which
+   * reads as a broken adapter. The rate has to be choosable.
+   */
+  it("offers every baud rate for a port", async () => {
+    const onNewSerialPort = jest.fn()
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSerialPort={onNewSerialPort}
+        listSerialPorts={async () => [{ path: "/dev/ttyUSB0", product: null }]}
+      />
+    )
+    for (const baud of [9600, 115200, 921600]) {
+      expect(screen.getByTestId(`terminal-shell-picker-serial-/dev/ttyUSB0-${baud}`)).toBeTruthy()
+    }
+    fireEvent.click(screen.getByTestId("terminal-shell-picker-serial-/dev/ttyUSB0-9600"))
+    expect(onNewSerialPort).toHaveBeenCalledWith("/dev/ttyUSB0", 9600)
+  })
+
+  it("lists tmux sessions and attaches the chosen one", async () => {
+    const onAttachTmuxSession = jest.fn()
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onAttachTmuxSession={onAttachTmuxSession}
+        listTmuxSessions={async () => [{ name: "work", windowCount: 3 }]}
+      />
+    )
+    fireEvent.click(screen.getByTestId("terminal-shell-picker-tmux-work"))
+    expect(onAttachTmuxSession).toHaveBeenCalledWith("work")
+  })
+
+  /**
+   * No handler means this shell cannot do it, so the scan must not even run.
+   * A dropdown that enumerates the OS device tree on a phone is pure cost.
+   */
+  it("skips both scans when no handler is wired", async () => {
+    const listSerialPorts = jest.fn().mockResolvedValue([])
+    const listTmuxSessions = jest.fn().mockResolvedValue([])
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        listSerialPorts={listSerialPorts}
+        listTmuxSessions={listTmuxSessions}
+      />
+    )
+    expect(listSerialPorts).not.toHaveBeenCalled()
+    expect(listTmuxSessions).not.toHaveBeenCalled()
+    expect(screen.queryByText("terminal.shellPicker.serialLabel")).toBeNull()
+    expect(screen.queryByText("terminal.shellPicker.tmuxLabel")).toBeNull()
+  })
+
+  /**
+   * A host with no tmux server and no serial adapter is the common case. It
+   * must render no section rather than an error row.
+   */
+  it("shows no section when a scan throws", async () => {
+    await renderPicker(
+      <TerminalShellPicker
+        onNew={jest.fn()}
+        platform="macos"
+        detectShells={noDetect}
+        onNewSerialPort={jest.fn()}
+        onAttachTmuxSession={jest.fn()}
+        listSerialPorts={async () => {
+          throw new Error("no permission to enumerate")
+        }}
+        listTmuxSessions={async () => {
+          throw new Error("no server running")
+        }}
+      />
+    )
+    expect(screen.queryByText("terminal.shellPicker.serialLabel")).toBeNull()
+    expect(screen.queryByText("terminal.shellPicker.tmuxLabel")).toBeNull()
   })
 
   it("omits the SSH group when no hosts are supplied", async () => {

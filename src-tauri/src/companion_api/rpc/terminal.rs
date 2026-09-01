@@ -8,6 +8,9 @@ pub(super) const COMMANDS: &[&str] = &[
     "terminal_complete_paths",
     "terminal_list_path_executables",
     "terminal_kill_port",
+    "terminal_detect_multiplexer",
+    "terminal_list_tmux_sessions",
+    "terminal_list_tmux_windows",
     "terminal_host_status",
     "terminal_host_configure",
     "terminal_host_sync_profiles",
@@ -120,6 +123,27 @@ pub(super) async fn dispatch(
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
+        // ── Multiplexer ───────────────────────────────────────────────────
+        //
+        // Gated on the same `terminal.open` grant as the session listing above,
+        // and for the same reason: knowing which tmux sessions a machine is
+        // running is knowing what its owner is working on. Detection reads only
+        // this process's own environment, so it says whether the HOST was
+        // launched from a multiplexer, never anything about the caller.
+        "terminal_detect_multiplexer" => {
+            ensure_terminal_rpc_authorized(device_id).await?;
+            to_json(crate::terminal::multiplexer::detect_multiplexer().await)
+        }
+        "terminal_list_tmux_sessions" => {
+            ensure_terminal_rpc_authorized(device_id).await?;
+            to_json(crate::terminal::multiplexer::list_tmux_sessions().await)
+        }
+        "terminal_list_tmux_windows" => {
+            ensure_terminal_rpc_authorized(device_id).await?;
+            let session_name: String = required_aliased(&args, "session_name", "sessionName")?;
+            to_json(crate::terminal::multiplexer::list_tmux_windows(&session_name).await)
+        }
+
         // ── Terminal host administration ──────────────────────────────────
         //
         // The desktop drives these through the local `terminal_host_service`

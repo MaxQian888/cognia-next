@@ -13311,6 +13311,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "terminal_close_serial",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "terminal_complete_paths",
       "target": "execution",
       "operation": "read",
@@ -13331,6 +13343,18 @@
       "approval": "none",
       "idempotency": "required",
       "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_detect_multiplexer",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
@@ -13503,6 +13527,54 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "terminal_list_serial_ports",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_list_tmux_sessions",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_list_tmux_windows",
+      "target": "execution",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_open_serial",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "terminal_reattach",
       "target": "client",
       "operation": "side-effect",
@@ -13528,6 +13600,30 @@
     },
     {
       "name": "terminal_resize",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_serial_status",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "terminal_serial_write",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",

@@ -10905,6 +10905,11 @@
       },
       "additionalProperties": false
     },
+    "terminal_detect_multiplexer": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "terminal_exec": {
       "type": "object",
       "required": [
@@ -11141,6 +11146,24 @@
         },
         "limit": {
           "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "terminal_list_tmux_sessions": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "terminal_list_tmux_windows": {
+      "type": "object",
+      "required": [
+        "sessionName"
+      ],
+      "properties": {
+        "sessionName": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

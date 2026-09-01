@@ -62,6 +62,7 @@ import {
   type SpawnOutcome,
 } from "@/lib/terminal/spawn-orchestrator"
 import { getLiveSession } from "@/lib/terminal/session-registry"
+import { isTauri } from "@/lib/tauri"
 import { useEdgeResize } from "@/hooks/ui/use-edge-resize"
 import { useTerminalTransport } from "@/hooks/terminal/use-terminal-transport"
 import { usePlatform } from "@/hooks/use-platform"
@@ -294,6 +295,58 @@ export function TerminalDock() {
       })
     },
     [activeProjectId, hostKeyGuard, settingsSshHosts, t]
+  )
+
+  /**
+   * Open a serial port as a tab.
+   *
+   * Not routed through `spawnWithFeedback`: a port is not a shell, so none of
+   * the profile / cwd / default-shell precedence applies, and the outcome the
+   * user needs is whether the device node opened rather than which shell was
+   * chosen. `unsupported` is its own outcome because a companion shell has no
+   * device node to open, and telling that user their adapter failed would be a
+   * lie about their hardware.
+   */
+  const handleNewSerialPort = useCallback(
+    async (path: string, baudRate: number) => {
+      const { DEFAULT_SERIAL_CONFIG } = await import("@/lib/terminal/serial")
+      const { connectSerialFromDock } = await import("@/lib/terminal/serial-connect")
+      const result = await connectSerialFromDock({
+        config: { ...DEFAULT_SERIAL_CONFIG, port: path, baudRate },
+        projectId: activeProjectId ?? undefined,
+        store: useTerminalStore.getState(),
+      })
+      if (result.kind === "unsupported") {
+        toast.error(t("serialDesktopOnly"))
+        return
+      }
+      if (result.kind === "error") {
+        toast.error(t("serialOpenError", { path, message: result.message }))
+        return
+      }
+      toast.success(t("serialConnected", { path, baud: baudRate }))
+    },
+    [activeProjectId, t]
+  )
+
+  /**
+   * Attach to a running tmux session.
+   *
+   * Spawns an ordinary shell and writes the attach command into it, which is
+   * exactly what `buildTmuxAttachCommand` documents itself as being for: tmux
+   * attaches a CLIENT, and the client has to be a process in a PTY. There is
+   * no native "attach" to call.
+   */
+  const handleAttachTmuxSession = useCallback(
+    async (sessionName: string) => {
+      const { buildTmuxAttachCommand } = await import("@/lib/terminal/multiplexer")
+      const spawned = await spawnWithFeedback({})
+      if (!spawned) return
+      const session = getLiveSession(spawned)
+      if (!session) return
+      await session.write(`${buildTmuxAttachCommand(sessionName)}\n`)
+    },
+    [spawnWithFeedback]
   )
 
   /** Plain "+ New": the configured default profile, else the resolved shell. */
@@ -649,6 +702,8 @@ export function TerminalDock() {
                 onNewProfile={handleNewFromProfile}
                 sshHosts={pickerSshHosts}
                 onNewSshHost={handleNewSshHost}
+                onNewSerialPort={isTauri() ? handleNewSerialPort : undefined}
+                onAttachTmuxSession={isTauri() ? handleAttachTmuxSession : undefined}
               />
             ) : null}
             {canSpawn && activeRow ? (

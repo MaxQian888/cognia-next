@@ -66,6 +66,13 @@ sha2 = "0.11"
 # backend features below mirror `src-tauri` and `cognia-secrets` — without them
 # keyring silently falls back to its MOCK store and the secrets never persist.
 keyring = { version = "4", default-features = false }
+# Serial monitor (`multiplexer.rs`'s sibling, `serial.rs`). `default-features`
+# is off deliberately: the default set turns on `libudev`, which makes a Linux
+# build need `libudev-dev` on the machine. The cost is that Linux port
+# enumeration falls back to a sysfs scan and reports no USB vendor/product
+# metadata, which `serial.rs` says out loud rather than reporting empty strings
+# as if the device had none. macOS and Windows are unaffected.
+tokio-serial = { version = "5.5.0", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "4", features = ["windows-native-keyring-store"] }

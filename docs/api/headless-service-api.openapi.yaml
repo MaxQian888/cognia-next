@@ -72584,6 +72584,128 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/terminal_detect_multiplexer:
+    post:
+      operationId: internalRpcTerminalDetectMultiplexer
+      tags:
+        - headless-rpc
+      summary: terminal_detect_multiplexer (terminal.open)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: crates/cognia-terminal/src/multiplexer.rs MultiplexerInfo
+                description: Whether the HOST process was launched from inside a multiplexer. `socketPath` is the tmux server socket, a
+                  GNU screen session name, or the zellij session id, verbatim as the environment reports it, because
+                  each is what that tool's own attach command takes. `version` is null when nothing was detected and
+                  also when the binary could not answer, which is not the same as an unknown multiplexer.
+                required:
+                  - type
+                  - socketPath
+                  - version
+                properties:
+                  type:
+                    type: string
+                    enum:
+                      - tmux
+                      - screen
+                      - zellij
+                      - none
+                  socketPath:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    type:
+                      - string
+                      - "null"
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/terminal_exec:
     post:
       operationId: internalRpcTerminalExec
@@ -73911,6 +74033,251 @@ paths:
                 x-cognia-wire-source: Vec<String> — cognia_terminal::path_scan::list_path_executables_inner.
                 items:
                   type: string
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/terminal_list_tmux_sessions:
+    post:
+      operationId: internalRpcTerminalListTmuxSessions
+      tags:
+        - headless-rpc
+      summary: terminal_list_tmux_sessions (terminal.open)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  x-cognia-wire-source: crates/cognia-terminal/src/multiplexer.rs TmuxSession
+                  description: "`attached` is derived from tmux's `session_attached` client COUNT, so two attached clients is still true.
+                    `createdAt` is unix seconds, the unit tmux reports."
+                  required:
+                    - name
+                    - windowCount
+                    - attached
+                    - createdAt
+                  properties:
+                    name:
+                      type: string
+                    windowCount:
+                      type: integer
+                      minimum: 0
+                    attached:
+                      type: boolean
+                    createdAt:
+                      type: integer
+                  additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/terminal_list_tmux_windows:
+    post:
+      operationId: internalRpcTerminalListTmuxWindows
+      tags:
+        - headless-rpc
+      summary: terminal_list_tmux_windows (terminal.open)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionName:
+                  type: string
+                  minLength: 1
+                session_name:
+                  type: string
+                  minLength: 1
+              additionalProperties: false
+              allOf:
+                - anyOf:
+                    - required:
+                        - session_name
+                    - required:
+                        - sessionName
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  x-cognia-wire-source: crates/cognia-terminal/src/multiplexer.rs TmuxWindow
+                  required:
+                    - index
+                    - name
+                    - active
+                    - paneCount
+                  properties:
+                    index:
+                      type: integer
+                      minimum: 0
+                    name:
+                      type: string
+                    active:
+                      type: boolean
+                    paneCount:
+                      type: integer
+                      minimum: 0
+                  additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.
           content:
@@ -81757,6 +82124,7 @@ components:
           - team_task_create
           - team_task_move
           - terminal_complete_paths
+          - terminal_detect_multiplexer
           - terminal_exec
           - terminal_host_configure
           - terminal_host_status
@@ -81766,6 +82134,8 @@ components:
           - terminal_list_all
           - terminal_list_for_project
           - terminal_list_path_executables
+          - terminal_list_tmux_sessions
+          - terminal_list_tmux_windows
           - thread_handoff_abort
           - thread_handoff_accept
           - thread_handoff_commit
@@ -81919,10 +82289,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 610
-  generatedRequestSchemaCount: 610
+  internalCommandCount: 613
+  generatedRequestSchemaCount: 613
   runtimeInferredRequestSchemaCount: 75
-  contractRequestSchemaCount: 535
+  contractRequestSchemaCount: 538
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 610
+  generatedResponseSchemaCount: 613
   loopbackOnly: true
