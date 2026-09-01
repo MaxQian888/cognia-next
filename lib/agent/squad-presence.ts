@@ -8,6 +8,11 @@
  * names, while the page that only reports on Squads had the whole picture. Two
  * surfaces, one question, and the one where the decision is made knew less.
  *
+ * `hooks/squads/use-squad-fleet.ts` is the third caller and keeps everything
+ * this does not do: narrowing by the URL facets, the before-narrowing counts,
+ * and the Dexie-is-still-loading answer. What it no longer keeps is a second
+ * copy of the live-status vocabulary, the workspace scoping and this sort.
+ *
  * Pure by design. It takes the store's own record shapes rather than reaching
  * into zustand, so it runs in the fast node Jest project and neither consumer
  * has to own the derivation.
@@ -26,12 +31,18 @@ export function isLiveSquadStatus(status: string | undefined): boolean {
   return status !== undefined && LIVE_SQUAD_STATUSES.has(status)
 }
 
-/** The subset of `AgentTeam` this derivation reads. */
-export interface SquadPresenceTeam {
+/**
+ * The subset of `AgentTeam` this derivation reads.
+ *
+ * Generic over the status union so a caller holding the real `TeamStatus` enum
+ * gets rows carrying it back, rather than having to widen to `string` and cast
+ * on the way out.
+ */
+export interface SquadPresenceTeam<S extends string = string> {
   id: string
   name: string
   description?: string
-  status: string
+  status: S
   projectId?: string
 }
 
@@ -46,11 +57,11 @@ export interface SquadPresenceGate {
   status: string
 }
 
-export interface SquadPresenceRow {
+export interface SquadPresenceRow<S extends string = string> {
   id: string
   name: string
   description?: string
-  status: string
+  status: S
   memberCount: number
   /** Planning or executing. */
   live: boolean
@@ -58,8 +69,8 @@ export interface SquadPresenceRow {
   waiting: boolean
 }
 
-export interface CollectSquadPresenceInput {
-  teams: Readonly<Record<string, SquadPresenceTeam>>
+export interface CollectSquadPresenceInput<S extends string = string> {
+  teams: Readonly<Record<string, SquadPresenceTeam<S>>>
   teammates: Readonly<Record<string, SquadPresenceMember>>
   /** Open approval gates. Only `status === "open"` counts as waiting. */
   gates?: readonly SquadPresenceGate[]
@@ -83,12 +94,12 @@ export interface CollectSquadPresenceInput {
  * Squad hides the only actionable row on the surface. Waiting first, then
  * working, then by name.
  */
-export function collectSquadPresence({
+export function collectSquadPresence<S extends string = string>({
   teams,
   teammates,
   gates = [],
   workspaceId = null,
-}: CollectSquadPresenceInput): SquadPresenceRow[] {
+}: CollectSquadPresenceInput<S>): SquadPresenceRow<S>[] {
   const waitingIds = new Set<string>()
   for (const gate of gates) {
     if (gate.status === "open" && gate.teamId) waitingIds.add(gate.teamId)
