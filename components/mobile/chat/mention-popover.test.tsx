@@ -157,6 +157,30 @@ describe("MentionPopover", () => {
     expect(panel.style.bottom).toContain("150px")
   })
 
+  /**
+   * The panel paints itself with `bg-[var(--surface-bg)]`, and that variable is
+   * only ever set by the three `[data-surface-layer=...]` rules. This renders
+   * through a portal onto `document.body`, so it inherits no tier from the
+   * composer and has to declare its own; without it the variable is undefined,
+   * the background declaration is invalid, and `cn` has already dropped Sheet's
+   * `bg-background` for conflicting with it.
+   */
+  it("declares its own surface tier, because a portal inherits none", () => {
+    render(
+      <MentionPopover
+        open={true}
+        query=""
+        members={[mkCharacter({ id: "a", name: "Alice" })]}
+        composerHeight={150}
+        onPick={() => undefined}
+        onDismiss={() => undefined}
+      />
+    )
+    const panel = screen.getByTestId("mobile-mention-popover-panel")
+    expect(panel).toHaveAttribute("data-surface-layer", "overlay")
+    expect(panel.className).toContain("bg-[var(--surface-bg)]")
+  })
+
   it("falls back to ~5rem (80px) clearance when the composer is not yet measured", () => {
     render(
       <MentionPopover

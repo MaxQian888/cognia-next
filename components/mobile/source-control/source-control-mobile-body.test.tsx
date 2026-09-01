@@ -44,12 +44,18 @@ jest.mock("@/components/source-control/branch-header", () => ({
 jest.mock("@/components/source-control/changes-view", () => ({
   ChangesView: ({
     density,
+    variant,
     onSelectFile,
   }: {
     density: string
+    variant: string
     onSelectFile: (path: string, staged: boolean) => void
   }) => (
-    <button data-testid={`changes-view-${density}`} onClick={() => onSelectFile("a.ts", false)}>
+    <button
+      data-testid={`changes-view-${density}`}
+      data-variant={variant}
+      onClick={() => onSelectFile("a.ts", false)}
+    >
       changes
     </button>
   ),
@@ -100,6 +106,19 @@ it("renders the list as the page and the commit box pinned below it", () => {
   // dock's narrow pane. Compact targets at 375px are the reason.
   expect(screen.getByTestId("changes-view-touch")).toBeInTheDocument()
   expect(screen.getByTestId("commit-box").textContent).toBe("1")
+})
+
+/**
+ * `ChangesView`'s `panel` variant renders a `CommitBox` of its own above the
+ * list. This screen pins one below it, so asking for `panel` put two live
+ * commit boxes on the page, sharing a draft but not their sign-off, identity
+ * and history state. The mock hides that, which is exactly why the variant is
+ * asserted here rather than the rendered count.
+ */
+it("asks the list NOT to bring a second commit box", () => {
+  render(<SourceControlMobileBody />)
+  expect(screen.getByTestId("changes-view-touch")).toHaveAttribute("data-variant", "review")
+  expect(screen.getAllByTestId("commit-box")).toHaveLength(1)
 })
 
 /**

@@ -52,6 +52,20 @@ function makeRun(over: Partial<WorkflowRunRow>): WorkflowRunRow {
 }
 
 describe("<RunVerticalGantt />", () => {
+  /**
+   * The component takes no rest spread, so a caller writing
+   * `data-surface-layer` on the JSX tag had it dropped, and the
+   * `bg-[var(--surface-bg)]` it was paired with then resolved against whichever
+   * ancestor happened to carry a tier, or against nothing at all.
+   */
+  it("forwards the surface tier onto its own root", () => {
+    render(<RunVerticalGantt runs={[makeRun({ id: "r1" })]} data-surface-layer="raised" />)
+    expect(screen.getByTestId("run-vertical-gantt")).toHaveAttribute(
+      "data-surface-layer",
+      "raised"
+    )
+  })
+
   it("renders empty state", () => {
     render(<RunVerticalGantt runs={[]} />)
     expect(screen.getByTestId("run-vertical-gantt-empty")).toHaveTextContent("No runs yet.")

@@ -19,6 +19,12 @@
  * support for the chat dock's narrow pane. The stage / unstage / discard
  * targets grow, and the diff drops to a single-column hunk view.
  *
+ * `variant="review"` rather than `"panel"`, because `"panel"` is what makes
+ * `ChangesView` render a `CommitBox` of its own at the TOP of the list. This
+ * screen pins its own at the bottom, and passing `"panel"` put two live commit
+ * boxes on the page: same draft, separate sign-off, identity-dialog and
+ * history state, either one able to commit.
+ *
  * Deliberately absent: the stash, timeline, remotes, tags, compare, worktree
  * and stack dialogs the desktop `SyncToolbar` opens. Each is its own
  * multi-pane surface, and offering a trigger that opens an unusable dialog is
@@ -200,7 +206,7 @@ export function SourceControlMobileBody() {
       {status ? (
         <PullToRefresh onRefresh={refresh} className="min-h-0 flex-1">
           <ChangesView
-            variant="panel"
+            variant="review"
             density="touch"
             rootDir={rootDir}
             status={status}

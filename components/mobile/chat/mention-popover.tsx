@@ -83,6 +83,15 @@ export function MentionPopover({
         onCloseAutoFocus={(e) => e.preventDefault()}
         onPointerDownOutside={() => onDismiss()}
         data-testid="mobile-mention-popover-panel"
+        // The tier attribute has to be HERE, on the element that reads
+        // `--surface-bg`. `SheetContent` renders through a portal onto
+        // `document.body`, so it inherits no tier from the composer that owns
+        // it, and the three `[data-surface-layer=...]` rules in globals.css are
+        // the only place `--surface-bg` is ever set. Without this the variable
+        // is undefined, `bg-[var(--surface-bg)]` is an invalid declaration, and
+        // `cn`'s twMerge has already dropped Sheet's own `bg-background` for
+        // conflicting with it, which left the popover fully transparent.
+        data-surface-layer="overlay"
         className={cn(
           // Float as a centred popover, not a true edge-to-edge bottom
           // sheet: matches the original visual (max-md, rounded all

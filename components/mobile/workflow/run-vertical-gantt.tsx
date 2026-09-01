@@ -30,6 +30,16 @@ export interface RunVerticalGanttProps {
    */
   onCancelRun?: (run: WorkflowRunRow) => void
   className?: string
+  /**
+   * Surface tier for the list's own box, forwarded onto the root element.
+   *
+   * Declared rather than swept up by a rest spread, because this component
+   * takes no `...rest`: a caller that wrote `data-surface-layer` on the JSX tag
+   * had it silently dropped, and a `bg-[var(--surface-bg)]` in the same
+   * `className` then resolved against whichever ancestor happened to carry a
+   * tier, or against nothing at all.
+   */
+  "data-surface-layer"?: "base" | "raised" | "overlay"
 }
 
 function formatDuration(run: WorkflowRunRow): string {
@@ -47,6 +57,7 @@ export function RunVerticalGantt({
   hrefForRun,
   onCancelRun,
   className,
+  "data-surface-layer": surfaceLayer,
 }: RunVerticalGanttProps) {
   const t = useTranslations("mobile.workflow")
   const reduce = useReducedMotion()
@@ -62,6 +73,7 @@ export function RunVerticalGantt({
   return (
     <motion.ol
       className={cn("flex flex-col", className)}
+      data-surface-layer={surfaceLayer}
       data-testid="run-vertical-gantt"
       aria-label={t("runsHeader")}
       initial={reduce ? false : "initial"}
