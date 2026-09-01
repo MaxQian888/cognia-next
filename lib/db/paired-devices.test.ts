@@ -12,6 +12,7 @@ import {
   setAgentControlAllowed,
   setRemoteControlAllowed,
   setRemoteTerminalAllowed,
+  setSshFilesAllowed,
   touchPairedDevice,
 } from "./paired-devices"
 import { getDb } from "./schema"
@@ -633,6 +634,39 @@ describe("setLockedComputerUseAllowed", () => {
     expect(await setLockedComputerUseAllowed("dev-locked", true)).toBe(true)
     expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBe(true)
     expect(await setLockedComputerUseAllowed("missing", true)).toBe(false)
+  })
+})
+
+describe("setSshFilesAllowed", () => {
+  /**
+   * ADR-0162. Deny by default and independent of the terminal grant: a device
+   * that can open a shell already reads every file on that machine, so the
+   * combination this mirror has to be able to hold is the other one, file
+   * transfer without a shell.
+   */
+  it("is a separate deny-by-default capability that a terminal grant does not set", async () => {
+    await addPairedDevice({
+      deviceId: "dev-sftp",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    expect((await getPairedDevice("dev-sftp"))?.allowSshFiles).toBeUndefined()
+
+    await setRemoteTerminalAllowed("dev-sftp", true, {
+      hostId: "host-a",
+      endpoint: "unix:///tmp/host.sock",
+      bootstrapSecret: "s",
+      signature: "sig",
+      issuedAt: 1,
+    })
+    expect((await getPairedDevice("dev-sftp"))?.allowSshFiles).toBeUndefined()
+
+    expect(await setSshFilesAllowed("dev-sftp", true)).toBe(true)
+    expect((await getPairedDevice("dev-sftp"))?.allowSshFiles).toBe(true)
+    expect(await setSshFilesAllowed("missing", true)).toBe(false)
   })
 })
 

@@ -366,7 +366,11 @@ fn channel_event_for(frame: TerminalFrame) -> Option<HostChannelEvent> {
 fn is_response_kind(kind: FrameKind) -> bool {
     matches!(
         kind,
-        FrameKind::Ack | FrameKind::HostSnapshot | FrameKind::SessionSnapshot | FrameKind::Error
+        FrameKind::Ack
+            | FrameKind::HostSnapshot
+            | FrameKind::SessionSnapshot
+            | FrameKind::SftpSnapshot
+            | FrameKind::Error
     )
 }
 
@@ -598,6 +602,60 @@ async fn request_over_host_stream_with_timeout(
     })
     .await
     .map_err(|_| "terminal host request timed out".to_string())?
+}
+
+/// How long one SFTP operation may take on the host socket.
+///
+/// Longer than the general request timeout because the host may have to dial a
+/// machine, walk a jump chain and authenticate before it can answer the first
+/// listing. Every later call on that profile reuses the pooled session and
+/// returns in milliseconds.
+const SFTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The largest number of file bytes one SFTP chunk may carry.
+///
+/// Bounded by the terminal frame ceiling rather than by anything about SFTP.
+/// A chunk crosses the host socket as base64 inside a JSON frame, so 64 KiB of
+/// frame is 48 KiB of bytes before the envelope. 32 KiB leaves room for the
+/// path and still fills a network packet many times over.
+/// `sftp_download_open` and `sftp_upload_open` answer with this number so a
+/// client sizes its reads from the host rather than from a constant of its own,
+/// which is the host-negotiated chunk size ADR-0162 calls for.
+pub const SFTP_CHUNK_BYTES: usize = 32 * 1024;
+
+/// Perform one SFTP operation on the terminal host (ADR-0162).
+///
+/// Connects as a **local** client, which is the entire authorization
+/// handshake: `TerminalHost` refuses frame 26 on any connection that is not
+/// local, so the only way to reach it is from this process, after the RPC layer
+/// has checked `ssh.files`, taken the approval, and written the audit row.
+/// `terminal_host_remote_configure` reaches `update_config` the same way.
+///
+/// A fresh connection per call rather than a pooled one. The SFTP session
+/// itself is pooled inside the host, keyed on the profile's configuration
+/// fingerprint and independent of which client connection asked, so the socket
+/// here carries one request and nothing that outlives it. A Unix socket connect
+/// costs microseconds against an SFTP round trip that costs milliseconds, and
+/// the alternative is a shared client whose lifetime nothing owns.
+pub async fn terminal_host_sftp(
+    app: Option<&tauri::AppHandle>,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut stream =
+        connect_terminal_host_client(app, ClientIdentity::local("companion-rpc:sftp")).await?;
+    let response = request_over_host_stream_with_timeout(
+        &mut stream,
+        TerminalFrame::command(
+            FrameKind::SftpControl,
+            Uuid::nil(),
+            1,
+            serde_json::to_vec(&payload).map_err(|error| error.to_string())?,
+        ),
+        SFTP_REQUEST_TIMEOUT,
+    )
+    .await?;
+    serde_json::from_slice(&response.payload)
+        .map_err(|error| format!("terminal host returned an invalid SFTP snapshot: {error}"))
 }
 
 pub async fn terminal_host_remote_list(

@@ -52,6 +52,16 @@ pub enum GrantKind {
     AgentControl,
     /// Create, attach to, and control interactive terminal sessions.
     Terminal,
+    /// Browse and transfer files over an SSH profile the desktop synchronized
+    /// (ADR-0162).
+    ///
+    /// Separate from [`GrantKind::Terminal`] because it is a strictly smaller
+    /// thing to grant. A device with a shell on that machine can already `cat`
+    /// and `>` every file on it, so `ssh.files` adds nothing to a device that
+    /// holds `terminal.open`. The reverse is the case worth having: files
+    /// without a shell is read and write without code execution, and folding
+    /// the two switches together would make that combination unexpressible.
+    SshFiles,
 }
 
 impl GrantKind {
@@ -60,6 +70,7 @@ impl GrantKind {
             GrantKind::Control => "control",
             GrantKind::AgentControl => "agent-control",
             GrantKind::Terminal => "terminal",
+            GrantKind::SshFiles => "ssh-files",
         }
     }
 
@@ -81,16 +92,18 @@ impl GrantKind {
             ],
             GrantKind::AgentControl => &["process.spawn"],
             GrantKind::Terminal => &["terminal.open"],
+            GrantKind::SshFiles => &["ssh.files"],
         }
     }
 
     /// Every kind, so callers can project a whole capability snapshot without
     /// restating the list (and silently forgetting one when a kind is added).
-    pub fn all() -> [GrantKind; 3] {
+    pub fn all() -> [GrantKind; 4] {
         [
             GrantKind::Control,
             GrantKind::AgentControl,
             GrantKind::Terminal,
+            GrantKind::SshFiles,
         ]
     }
 
@@ -99,6 +112,7 @@ impl GrantKind {
             "control" => Some(GrantKind::Control),
             "agent-control" | "agent_control" => Some(GrantKind::AgentControl),
             "terminal" => Some(GrantKind::Terminal),
+            "ssh-files" | "ssh_files" => Some(GrantKind::SshFiles),
             _ => None,
         }
     }
@@ -156,11 +170,7 @@ mod tests {
 
     #[test]
     fn grant_kind_round_trips_through_its_wire_name() {
-        for kind in [
-            GrantKind::Control,
-            GrantKind::AgentControl,
-            GrantKind::Terminal,
-        ] {
+        for kind in GrantKind::all() {
             assert_eq!(GrantKind::parse(kind.as_str()), Some(kind));
         }
         // Underscore spelling accepted so a config written either way works.
@@ -168,6 +178,7 @@ mod tests {
             GrantKind::parse("agent_control"),
             Some(GrantKind::AgentControl)
         );
+        assert_eq!(GrantKind::parse("ssh_files"), Some(GrantKind::SshFiles));
         assert_eq!(GrantKind::parse("root"), None);
     }
 
@@ -199,18 +210,21 @@ mod tests {
         // processes or open a shell, so no capability may appear under two
         // kinds — revoking one grant would otherwise leave the other's
         // capability behind.
-        for (a, b) in [
-            (GrantKind::Control, GrantKind::AgentControl),
-            (GrantKind::Control, GrantKind::Terminal),
-            (GrantKind::AgentControl, GrantKind::Terminal),
-        ] {
-            for capability in a.capabilities() {
-                assert!(
-                    !b.capabilities().contains(capability),
-                    "{capability} is in both {} and {}",
-                    a.as_str(),
-                    b.as_str()
-                );
+        // Derived from `all()` rather than listed, so a kind added without a
+        // line here is still checked against every other one.
+        for a in GrantKind::all() {
+            for b in GrantKind::all() {
+                if a == b {
+                    continue;
+                }
+                for capability in a.capabilities() {
+                    assert!(
+                        !b.capabilities().contains(capability),
+                        "{capability} is in both {} and {}",
+                        a.as_str(),
+                        b.as_str()
+                    );
+                }
             }
         }
     }
@@ -221,6 +235,20 @@ mod tests {
         // "terminal.open" and nothing else. If this drifts, the terminal
         // toggle stops controlling terminal access.
         assert_eq!(GrantKind::Terminal.capabilities(), &["terminal.open"]);
+    }
+
+    #[test]
+    fn file_transfer_is_its_own_grant_and_a_shell_does_not_carry_it() {
+        // ADR-0162. Granting Terminal must not also grant `ssh.files`: the
+        // console renders two switches, and one that silently moved the other
+        // would report a permission the owner did not give. The reverse is
+        // equally deliberate, which is what makes "files without a shell" a
+        // grant somebody can actually make.
+        assert_eq!(GrantKind::SshFiles.capabilities(), &["ssh.files"]);
+        assert!(!GrantKind::Terminal.capabilities().contains(&"ssh.files"));
+        assert!(!GrantKind::SshFiles
+            .capabilities()
+            .contains(&"terminal.open"));
     }
 
     #[test]

@@ -36,6 +36,7 @@ const TEST_IDS: Record<DeviceGrantRow["id"], string> = {
   control: "paired-device-remote-control",
   agentControl: "paired-device-agent-control",
   terminal: "paired-device-remote-terminal",
+  sshFiles: "paired-device-ssh-files",
   lockedComputerUse: "paired-device-locked-computer-use",
 }
 
@@ -52,6 +53,7 @@ function GrantSection({
   const tRc = useTranslations("mobile.companion.remoteControl")
   const tAc = useTranslations("mobile.companion.agentControl")
   const tTerminal = useTranslations("mobile.companion.remoteTerminal")
+  const tSshFiles = useTranslations("mobile.companion.sshFiles")
   const tLocked = useTranslations("mobile.companion.lockedComputerUse")
 
   const namespace =
@@ -61,7 +63,9 @@ function GrantSection({
         ? tAc
         : grant.id === "terminal"
           ? tTerminal
-          : tLocked
+          : grant.id === "sshFiles"
+            ? tSshFiles
+            : tLocked
 
   const deviceId = row.deviceId ?? ""
   const revoked = row.adminState === "revoked"
@@ -96,7 +100,11 @@ function GrantSection({
    * requirement.
    */
   const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
-  const terminalBlocked = grant.id === "terminal" && !terminalReach.available
+  // Same machine-not-account question as the terminal row: this grant reaches
+  // SSH profiles the host resolves from its own keyring, so a host with no
+  // shell to run them has nothing to grant.
+  const terminalBlocked =
+    (grant.id === "terminal" || grant.id === "sshFiles") && !terminalReach.available
   const shellBlocked = !shellReach.available
 
   /**
@@ -121,6 +129,7 @@ function GrantSection({
     if (grant.id === "terminal") {
       return void actions.toggleRemoteTerminal(deviceId, row.pubkey ?? "", row.label, next)
     }
+    if (grant.id === "sshFiles") return void actions.toggleSshFiles(deviceId, row.label, next)
     return void actions.toggleLockedComputerUse(deviceId, row.label, next)
   }
 
@@ -150,6 +159,18 @@ function GrantSection({
           {grant.id === "terminal" ? (
             <p className="text-[11px] text-muted-foreground" data-testid="grant-terminal-ssh-note">
               {t("access.terminalReachesSsh")}
+            </p>
+          ) : null}
+          {/*
+            ADR-0162 refuses to claim a confinement it cannot enforce, and the
+            place that has to say so is the switch. An SFTP path is the remote
+            machine's absolute path and that machine resolves its own symlinks,
+            so there is no root to confine this to. Saying it here is one of the
+            three places the record commits to.
+          */}
+          {grant.id === "sshFiles" ? (
+            <p className="text-[11px] text-muted-foreground" data-testid="grant-ssh-files-note">
+              {t("access.sshFilesReachIsWhole")}
             </p>
           ) : null}
         </div>
@@ -189,7 +210,7 @@ function GrantSection({
         <SurfaceUnavailableNotice
           reach={terminalReach}
           className="mt-2"
-          data-testid="grant-terminal-unavailable"
+          data-testid={`grant-${grant.id}-unavailable`}
         />
       ) : null}
 

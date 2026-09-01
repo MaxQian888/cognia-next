@@ -195,6 +195,7 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
       control: row.allowRemoteControl === true,
       agentControl: row.allowAgentControl === true,
       terminal: row.allowRemoteTerminal === true,
+      sshFiles: row.allowSshFiles === true,
       lockedComputerUse: row.allowLockedComputerUse === true,
     },
     revoked: adminState === "revoked",

@@ -3594,9 +3594,6 @@
       },
       "additionalProperties": false
     },
-    "external_agent_detect_runtimes": {
-      "type": "object"
-    },
     "external_agent_list": {
       "type": "object"
     },
@@ -9566,6 +9563,255 @@
           "type": "integer",
           "format": "int32",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_create_dir": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_delete_entry": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        },
+        "isDir": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_download_close": {
+      "type": "object",
+      "required": [
+        "transferId"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_download_open": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_download_read_chunk": {
+      "type": "object",
+      "required": [
+        "transferId",
+        "offset"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "example": ""
+        },
+        "offset": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "example": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_list_dir": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_realpath": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_rename_entry": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "from": {
+          "type": "string",
+          "example": ""
+        },
+        "to": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_session_close": {
+      "type": "object",
+      "required": [
+        "profileId"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_stat": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_abort": {
+      "type": "object",
+      "required": [
+        "transferId"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_commit": {
+      "type": "object",
+      "required": [
+        "transferId"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_open": {
+      "type": "object",
+      "required": [
+        "profileId",
+        "path",
+        "size"
+      ],
+      "properties": {
+        "profileId": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        },
+        "size": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "example": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_write_chunk": {
+      "type": "object",
+      "required": [
+        "transferId",
+        "data"
+      ],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "example": ""
+        },
+        "data": {
+          "type": "string",
+          "example": ""
         }
       },
       "additionalProperties": false

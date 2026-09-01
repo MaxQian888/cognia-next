@@ -574,6 +574,7 @@ pub struct DeviceGrantSummary {
     pub control: bool,
     pub agent_control: bool,
     pub terminal: bool,
+    pub ssh_files: bool,
 }
 
 #[tauri::command]
@@ -599,6 +600,7 @@ pub async fn companion_list_device_grants() -> Result<Vec<DeviceGrantSummary>, S
                 control: holds(super::device_grants::GrantKind::Control),
                 agent_control: holds(super::device_grants::GrantKind::AgentControl),
                 terminal: holds(super::device_grants::GrantKind::Terminal),
+                ssh_files: holds(super::device_grants::GrantKind::SshFiles),
                 device_id: device.device_id,
             }
         })
@@ -643,6 +645,27 @@ pub async fn companion_set_remote_terminal(device_id: String, allowed: bool) -> 
     apply_device_grant(
         &device_id,
         super::device_grants::GrantKind::Terminal,
+        allowed,
+    )
+}
+
+/// Grant or revoke file transfer over the host's saved SSH profiles (ADR-0162).
+///
+/// Deliberately not folded into the terminal switch. A device with a shell on
+/// the target machine can already read and write every file on it, so this adds
+/// nothing on top of `terminal.open`; the combination worth expressing is the
+/// other one, files without a shell, which is read and write without code
+/// execution. Two switches make that sayable and one would not.
+///
+/// The grant is honest about its reach: it authorizes reading and writing the
+/// target machine as the profile's user, with no path confinement, because SFTP
+/// paths are that machine's absolute paths and it resolves its own symlinks.
+/// The console row says so, and so does ADR-0162.
+#[tauri::command]
+pub async fn companion_set_ssh_files(device_id: String, allowed: bool) -> Result<(), String> {
+    apply_device_grant(
+        &device_id,
+        super::device_grants::GrantKind::SshFiles,
         allowed,
     )
 }

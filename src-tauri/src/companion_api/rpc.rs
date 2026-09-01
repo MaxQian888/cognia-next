@@ -47,6 +47,7 @@ mod host_state;
 mod native_tools;
 mod plugins;
 mod service_plane;
+mod sftp;
 mod source_control;
 mod terminal;
 
@@ -904,6 +905,24 @@ const KNOWN_COMMANDS: &[&str] = &[
     "terminal_host_status",
     "terminal_host_configure",
     "terminal_host_sync_profiles",
+    // ADR-0162 file transfer over a synchronized SSH profile. Authorized as
+    // `ssh.files`, which is its own grant: `workspace.write` is safe under that
+    // name only because `authorize_workspace_root` confines it, and SFTP has no
+    // confinement to offer.
+    "sftp_list_dir",
+    "sftp_stat",
+    "sftp_realpath",
+    "sftp_create_dir",
+    "sftp_rename_entry",
+    "sftp_delete_entry",
+    "sftp_download_open",
+    "sftp_download_read_chunk",
+    "sftp_download_close",
+    "sftp_upload_open",
+    "sftp_upload_write_chunk",
+    "sftp_upload_commit",
+    "sftp_upload_abort",
+    "sftp_session_close",
     // ── Plugins ─────────────────────────────────────────────────────────────
     // Native install/uninstall manage the on-disk plugin dir + Rust snapshot.
     // Headless mutations publish a Node-brain reconciliation event; desktop
@@ -1368,6 +1387,13 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "terminal_detect_multiplexer",
     "terminal_list_tmux_sessions",
     "terminal_list_tmux_windows",
+    // SFTP reads. Same (profile, path) returns the same listing or stat, and a
+    // chunk read at the same offset returns the same bytes; an idempotency key
+    // would cache an answer a file browser wants fresh.
+    "sftp_list_dir",
+    "sftp_stat",
+    "sftp_realpath",
+    "sftp_download_read_chunk",
     "codeserver_supported",
     "codeserver_status",
     // Pro IDE reads. `read_active` reflects the editor rather than mutating it,
@@ -1884,6 +1910,25 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     // device's approval prompts) under a borrowed id.
     "session_attach",
     "session_detach",
+    // ADR-0162 file transfer. Every transfer handle is bound to the device that
+    // obtained the approval, and every operation is attributed to it in the
+    // terminal host's audit ring. Trusting a `deviceId` from the payload would
+    // let one paired device write into another's upload and would put a
+    // borrowed name in the ledger.
+    "sftp_list_dir",
+    "sftp_stat",
+    "sftp_realpath",
+    "sftp_create_dir",
+    "sftp_rename_entry",
+    "sftp_delete_entry",
+    "sftp_download_open",
+    "sftp_download_read_chunk",
+    "sftp_download_close",
+    "sftp_upload_open",
+    "sftp_upload_write_chunk",
+    "sftp_upload_commit",
+    "sftp_upload_abort",
+    "sftp_session_close",
     // Attachment upload — every row is bound to the device that opened it, so
     // a second device cannot append to, commit, or resolve someone else's
     // upload even holding its id.
@@ -3257,6 +3302,10 @@ pub(super) async fn dispatch(
 
     if terminal::COMMANDS.contains(&name) {
         return terminal::dispatch(name, args, state, host, device_id, account_id, scope).await;
+    }
+
+    if sftp::COMMANDS.contains(&name) {
+        return sftp::dispatch(name, args, state, host, device_id, account_id, scope).await;
     }
 
     if plugins::COMMANDS.contains(&name) {

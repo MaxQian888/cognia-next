@@ -449,6 +449,23 @@ impl DispatchHost {
         crate::terminal_host_bridge::terminal_host_remote_configure(app, settings).await
     }
 
+    /// Run one SFTP operation on the terminal host (ADR-0162).
+    ///
+    /// The host refuses the frame this reaches unless the connection is local,
+    /// so this call is the only door and the RPC layer above it is the only
+    /// gate. `payload` is the frame body: it names an operation and a
+    /// synchronized profile, never a destination the caller chose.
+    pub async fn terminal_host_sftp(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let app = match self {
+            Self::Tauri(app) => Some(app),
+            Self::Headless(_) => None,
+        };
+        crate::terminal_host_bridge::terminal_host_sftp(app, payload).await
+    }
+
     /// Install a paired device's terminal profiles on the host.
     pub async fn terminal_host_sync_profiles(
         &self,

@@ -31,6 +31,7 @@ import {
   setAgentControlAllowed,
   setLockedComputerUseAllowed,
   setRemoteControlAllowed,
+  setSshFilesAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useSettingsStore } from "@/stores/settings"
@@ -77,6 +78,7 @@ export interface DeviceGrantActions {
     label: string,
     next: boolean
   ) => Promise<void>
+  toggleSshFiles: (deviceId: string, label: string, next: boolean) => Promise<void>
   toggleLockedComputerUse: (deviceId: string, label: string, next: boolean) => Promise<void>
   pause: (deviceId: string, label: string) => Promise<void>
   resume: (deviceId: string, label: string) => Promise<void>
@@ -132,6 +134,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
   const tResume = useTranslations("mobile.companion.resume")
   const tRc = useTranslations("mobile.companion.remoteControl")
   const tAc = useTranslations("mobile.companion.agentControl")
+  const tSshFiles = useTranslations("mobile.companion.sshFiles")
   const tLocked = useTranslations("mobile.companion.lockedComputerUse")
 
   const notifyChanged = useCallback(async () => {
@@ -212,6 +215,42 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
   // one enforcement point identically — including the descriptor provisioning
   // and the rollback when the host call fails.
   const toggleRemoteTerminal = useRemoteTerminalGrantToggle(notifyChanged)
+
+  const toggleSshFiles = useCallback(
+    async (deviceId: string, label: string, next: boolean) => {
+      // ADR-0162. Gated like the other grants and for a sharper reason than
+      // most: this hands out read and write of a remote machine as the SSH
+      // profile's user, with no path confinement to fall back on, so the
+      // biometric prompt is the last thing between an unlocked desktop and
+      // somebody's production filesystem.
+      if (!next) {
+        await hostCall("companion_set_ssh_files", { deviceId, allowed: false })
+        await setSshFilesAllowed(deviceId, false)
+        await notifyChanged()
+        toast.success(tSshFiles("disabledToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tSshFiles("reason", { label }),
+          title: tSshFiles("title"),
+          description: tSshFiles("description"),
+        },
+        async () => {
+          await hostCall("companion_set_ssh_files", { deviceId, allowed: true })
+          await setSshFilesAllowed(deviceId, true)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tSshFiles("blocked", { reason: result.reason }))
+        return
+      }
+      await notifyChanged()
+      toast.success(tSshFiles("enabledToast", { label }))
+    },
+    [guard, notifyChanged, tSshFiles]
+  )
 
   const toggleLockedComputerUse = useCallback(
     async (deviceId: string, label: string, next: boolean) => {
@@ -357,6 +396,7 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
     toggleRemoteControl: wrap(toggleRemoteControl),
     toggleAgentControl: wrap(toggleAgentControl),
     toggleRemoteTerminal,
+    toggleSshFiles: wrap(toggleSshFiles),
     toggleLockedComputerUse: wrap(toggleLockedComputerUse),
     pause: wrap(pause),
     resume: wrap(resume),

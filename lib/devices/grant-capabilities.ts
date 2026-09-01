@@ -42,6 +42,14 @@ export const GRANT_CAPABILITIES: Readonly<Record<DeviceGrantId, readonly string[
     agentControl: Object.freeze(["process.spawn"]),
     terminal: Object.freeze(["terminal.open"]),
     /**
+     * ADR-0162. Separate from `terminal` because it is a strictly smaller
+     * thing to grant: a device with a shell on the machine already reads and
+     * writes every file on it, so this adds nothing on top of `terminal.open`.
+     * The combination worth being able to express is the other one, files
+     * without a shell, and one switch could not say it.
+     */
+    sshFiles: Object.freeze(["ssh.files"]),
+    /**
      * Locked Use is not a `GrantKind`: it is a separate allow list
      * (`locked_use_allow_list.rs`) with no SecurityStore capability behind it,
      * so there is nothing to intersect and the state comes from the mirror bit
@@ -55,6 +63,7 @@ export const DEVICE_GRANT_IDS: readonly DeviceGrantId[] = Object.freeze([
   "control",
   "agentControl",
   "terminal",
+  "sshFiles",
   "lockedComputerUse",
 ])
 
@@ -85,12 +94,24 @@ export interface GrantEvidence {
    * The host's all-of verdict per grant, from `companion_list_device_grants`.
    * Used when {@link hostCapabilities} is unavailable.
    */
-  hostVerdict?: { control: boolean; agentControl: boolean; terminal: boolean }
+  hostVerdict?: {
+    control: boolean
+    agentControl: boolean
+    terminal: boolean
+    sshFiles: boolean
+  }
   /** The Dexie mirror bits. The last fallback, and never authoritative. */
   mirror: {
     control: boolean
     agentControl: boolean
     terminal: boolean
+    /**
+     * Absent from every row written before ADR-0162, which is every row on an
+     * upgrading install. `undefined` reads as "not granted here", and the
+     * mirror is the last fallback anyway: a shell that can reach the host gets
+     * the real answer from `hostCapabilities` before this is consulted.
+     */
+    sshFiles?: boolean
     lockedComputerUse: boolean
   }
   /** A revoked device holds nothing, whatever any table still says. */
@@ -178,7 +199,7 @@ export function buildGrantRows(evidence: GrantEvidence): DeviceGrantRow[] {
       }
     }
 
-    const kind = id as "control" | "agentControl" | "terminal"
+    const kind = id as "control" | "agentControl" | "terminal" | "sshFiles"
 
     if (evidence.revoked) {
       return {
@@ -213,7 +234,7 @@ export function buildGrantRows(evidence: GrantEvidence): DeviceGrantRow[] {
       }
     }
 
-    const granted = evidence.mirror[kind]
+    const granted = evidence.mirror[kind] === true
     return {
       id,
       state: granted ? "granted" : "denied",

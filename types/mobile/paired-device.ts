@@ -116,6 +116,23 @@ export interface PairedDeviceRow {
   terminalHostDescriptor?: TerminalHostDescriptor
 
   /**
+   * Independent grant for browsing and transferring files over the SSH
+   * profiles this desktop has synchronized to the host (ADR-0162).
+   *
+   * Separate from {@link allowRemoteTerminal} because it is a strictly smaller
+   * thing to give: a device with a shell on that machine already reads and
+   * writes every file on it, so this adds nothing on top of a terminal grant.
+   * The combination worth being able to express is the other one, files
+   * without a shell, which is read and write without code execution.
+   *
+   * Additive, non-indexed column, so no Dexie version bump. Absent on every
+   * row written before ADR-0162, and absent reads as not granted. The
+   * SecurityStore is the authority either way, and this mirror is consulted
+   * only by a shell that cannot reach the host to ask.
+   */
+  allowSshFiles?: boolean
+
+  /**
    * Separate Locked Use grant. This is meaningful only together with
    * `allowRemoteControl`; the native lease validator requires both.
    */

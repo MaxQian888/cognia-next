@@ -454,5 +454,15 @@
     "sourceDesktop": "Registered by the active project",
     "sourceHeadless": "Fixed when the server started",
     "title": "Folders this Host allows"
+  },
+  "sshFiles": {
+    "blocked": "File transfer was not changed ({reason}).",
+    "col": "SSH file transfer",
+    "description": "Lets this device browse and transfer files over the SSH hosts this machine has saved. It reads and writes those machines as the profile's user, with no folder limit, which is what a shell on them already allows.",
+    "disabledToast": "SSH file transfer disabled for {label}.",
+    "enabledToast": "SSH file transfer enabled for {label}.",
+    "reason": "Confirm granting SSH file transfer to {label}",
+    "title": "Allow SSH file transfer",
+    "toggleAria": "Toggle SSH file transfer for {label}"
   }
 }

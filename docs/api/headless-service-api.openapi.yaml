@@ -63429,6 +63429,1711 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_create_dir:
+    post:
+      operationId: internalRpcSftpCreateDir
+      tags:
+        - headless-rpc
+      summary: sftp_create_dir (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error
+                  envelope carrying the server's own words."
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_delete_entry:
+    post:
+      operationId: internalRpcSftpDeleteEntry
+      tags:
+        - headless-rpc
+      summary: sftp_delete_entry (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+                isDir:
+                  type: boolean
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error
+                  envelope carrying the server's own words."
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_download_close:
+    post:
+      operationId: internalRpcSftpDownloadClose
+      tags:
+        - headless-rpc
+      summary: sftp_download_close (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transferId
+              properties:
+                transferId:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The handle is gone. Closing one that already expired reports the same thing, because the caller's intent is
+                  satisfied either way.
+                required:
+                  - closed
+                properties:
+                  closed:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_download_open:
+    post:
+      operationId: internalRpcSftpDownloadOpen
+      tags:
+        - headless-rpc
+      summary: sftp_download_open (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: An approved download. `chunkBytes` is what the host will serve per read, negotiated here rather than
+                  assumed by the client, and `size` is what the remote machine reported at open.
+                required:
+                  - transferId
+                  - size
+                  - chunkBytes
+                properties:
+                  transferId:
+                    type: string
+                    format: uuid
+                  size:
+                    type: integer
+                    minimum: 0
+                  chunkBytes:
+                    type: integer
+                    minimum: 1
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_download_read_chunk:
+    post:
+      operationId: internalRpcSftpDownloadReadChunk
+      tags:
+        - headless-rpc
+      summary: sftp_download_read_chunk (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transferId
+                - offset
+              properties:
+                transferId:
+                  type: string
+                  example: ""
+                offset:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: One chunk of the file, base64 encoded. `eof` is true when the server returned fewer bytes than asked for,
+                  which is how a read loop stops. A short read mid-file is legal SFTP and the host loops over it, so a
+                  short answer here really is the end.
+                required:
+                  - data
+                  - eof
+                properties:
+                  data:
+                    type: string
+                    contentEncoding: base64
+                  eof:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_list_dir:
+    post:
+      operationId: internalRpcSftpListDir
+      tags:
+        - headless-rpc
+      summary: sftp_list_dir (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: One directory on the remote machine. `.` and `..` are dropped where they are read, so this is entries only.
+                required:
+                  - entries
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      x-cognia-wire-source: crates/cognia-terminal/src/sftp.rs SftpEntry
+                      description: One entry on the remote machine. `size` is bytes, `modified` is the SFTP mtime in unix seconds and is
+                        absent when the server did not report one, and `permissions` is the raw mode word rather than a
+                        rendered string, because the client renders it and the server's own words are the only truth
+                        about it.
+                      required:
+                        - name
+                        - path
+                        - kind
+                        - size
+                      properties:
+                        name:
+                          type: string
+                        path:
+                          type: string
+                        kind:
+                          type: string
+                          enum:
+                            - dir
+                            - file
+                            - symlink
+                            - other
+                        size:
+                          type: integer
+                          minimum: 0
+                        modified:
+                          type:
+                            - integer
+                            - "null"
+                        permissions:
+                          type:
+                            - integer
+                            - "null"
+                      additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_realpath:
+    post:
+      operationId: internalRpcSftpRealpath
+      tags:
+        - headless-rpc
+      summary: sftp_realpath (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The path as the remote machine resolves it, symlinks included. The one place a client learns where a
+                  relative path actually lands.
+                required:
+                  - path
+                properties:
+                  path:
+                    type: string
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_rename_entry:
+    post:
+      operationId: internalRpcSftpRenameEntry
+      tags:
+        - headless-rpc
+      summary: sftp_rename_entry (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - from
+                - to
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                from:
+                  type: string
+                  example: ""
+                to:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error
+                  envelope carrying the server's own words."
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_session_close:
+    post:
+      operationId: internalRpcSftpSessionClose
+      tags:
+        - headless-rpc
+      summary: sftp_session_close (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: How many pooled connections for that profile were dropped. Zero is the ordinary answer when nothing was
+                  open.
+                required:
+                  - closed
+                properties:
+                  closed:
+                    type: integer
+                    minimum: 0
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_stat:
+    post:
+      operationId: internalRpcSftpStat
+      tags:
+        - headless-rpc
+      summary: sftp_stat (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: runtime-inferred
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: One entry on the remote machine.
+                required:
+                  - entry
+                properties:
+                  entry:
+                    type: object
+                    x-cognia-wire-source: crates/cognia-terminal/src/sftp.rs SftpEntry
+                    description: One entry on the remote machine. `size` is bytes, `modified` is the SFTP mtime in unix seconds and is
+                      absent when the server did not report one, and `permissions` is the raw mode word rather than a
+                      rendered string, because the client renders it and the server's own words are the only truth about
+                      it.
+                    required:
+                      - name
+                      - path
+                      - kind
+                      - size
+                    properties:
+                      name:
+                        type: string
+                      path:
+                        type: string
+                      kind:
+                        type: string
+                        enum:
+                          - dir
+                          - file
+                          - symlink
+                          - other
+                      size:
+                        type: integer
+                        minimum: 0
+                      modified:
+                        type:
+                          - integer
+                          - "null"
+                      permissions:
+                        type:
+                          - integer
+                          - "null"
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_upload_abort:
+    post:
+      operationId: internalRpcSftpUploadAbort
+      tags:
+        - headless-rpc
+      summary: sftp_upload_abort (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transferId
+              properties:
+                transferId:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "The handle is gone. The partial file is deliberately left where it is: removing it would be a delete
+                  nobody asked for, and those bytes are what a later resume starts from."
+                required:
+                  - aborted
+                properties:
+                  aborted:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_upload_commit:
+    post:
+      operationId: internalRpcSftpUploadCommit
+      tags:
+        - headless-rpc
+      summary: sftp_upload_commit (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transferId
+              properties:
+                transferId:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: What is actually on the remote machine now. `size` is re-read from the machine rather than reported from
+                  the write head, so a file something else also wrote is described truthfully. `complete` is that size
+                  measured against what the client declared at open.
+                required:
+                  - path
+                  - size
+                  - declaredSize
+                  - complete
+                properties:
+                  path:
+                    type: string
+                  size:
+                    type: integer
+                    minimum: 0
+                  declaredSize:
+                    type: integer
+                    minimum: 0
+                  complete:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_upload_open:
+    post:
+      operationId: internalRpcSftpUploadOpen
+      tags:
+        - headless-rpc
+      summary: sftp_upload_open (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profileId
+                - path
+                - size
+              properties:
+                profileId:
+                  type: string
+                  example: ""
+                path:
+                  type: string
+                  example: ""
+                size:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  example: 0
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: An approved upload. `writeHead` is where the host will start writing, taken from what is already on the
+                  remote machine rather than from the client's memory of what it sent.
+                required:
+                  - transferId
+                  - chunkBytes
+                  - writeHead
+                properties:
+                  transferId:
+                    type: string
+                    format: uuid
+                  chunkBytes:
+                    type: integer
+                    minimum: 1
+                  writeHead:
+                    type: integer
+                    minimum: 0
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/sftp_upload_write_chunk:
+    post:
+      operationId: internalRpcSftpUploadWriteChunk
+      tags:
+        - headless-rpc
+      summary: sftp_upload_write_chunk (ssh.files)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: runtime-inferred
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - transferId
+                - data
+              properties:
+                transferId:
+                  type: string
+                  example: ""
+                data:
+                  type: string
+                  example: ""
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: The host's write head after this chunk, which is where the next one goes and where a resume starts. The
+                  client never names an offset the host did not reach.
+                required:
+                  - writeHead
+                properties:
+                  writeHead:
+                    type: integer
+                    minimum: 0
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/skill_set_enabled:
     post:
       operationId: internalRpcSkillSetEnabled
@@ -65145,6 +66850,16 @@ paths:
                     - plans
                     - connectorDrafts
                     - outboundQueue
+                    - agentTeams
+                    - agentTeammates
+                    - agentTeamTasks
+                    - sessionState
+                    - twins
+                    - twinDrafts
+                    - projects
+                    - issues
+                    - issueProjects
+                    - labels
                   description: |
                     Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live
                     registry: `sync_registry.rs::default_tables`, listable via
@@ -82045,6 +83760,20 @@ components:
           - session_list
           - session_timeline
           - session_turn_messages
+          - sftp_create_dir
+          - sftp_delete_entry
+          - sftp_download_close
+          - sftp_download_open
+          - sftp_download_read_chunk
+          - sftp_list_dir
+          - sftp_realpath
+          - sftp_rename_entry
+          - sftp_session_close
+          - sftp_stat
+          - sftp_upload_abort
+          - sftp_upload_commit
+          - sftp_upload_open
+          - sftp_upload_write_chunk
           - skill_set_enabled
           - skills_bundle_upload_abort
           - skills_bundle_upload_commit
@@ -82289,10 +84018,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 613
-  generatedRequestSchemaCount: 613
-  runtimeInferredRequestSchemaCount: 75
+  internalCommandCount: 627
+  generatedRequestSchemaCount: 627
+  runtimeInferredRequestSchemaCount: 89
   contractRequestSchemaCount: 538
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 613
+  generatedResponseSchemaCount: 627
   loopbackOnly: true

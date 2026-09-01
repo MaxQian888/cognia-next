@@ -1219,6 +1219,7 @@ pub fn run() {
             companion_api::commands::companion_set_remote_control,
             companion_api::commands::companion_set_agent_control,
             companion_api::commands::companion_set_remote_terminal,
+            companion_api::commands::companion_set_ssh_files,
             companion_api::commands::companion_migrate_legacy_device_grants,
             companion_api::commands::companion_set_locked_computer_use,
             companion_api::commands::companion_seed_locked_computer_use,

@@ -306,6 +306,13 @@ enum DevicesCommand {
         /// Create, attach to, and control interactive terminal sessions.
         #[arg(long)]
         terminal: bool,
+        /// Browse and transfer files over the SSH profiles this host has
+        /// synchronized (ADR-0162). This is read and write of the target
+        /// machine as the profile's user, with no path confinement, because
+        /// SFTP names that machine's absolute paths and it resolves its own
+        /// symlinks.
+        #[arg(long = "ssh-files")]
+        ssh_files: bool,
         /// Defaults to the tenant this host is bound to.
         #[arg(long)]
         tenant_id: Option<String>,
@@ -319,6 +326,8 @@ enum DevicesCommand {
         agent_control: bool,
         #[arg(long)]
         terminal: bool,
+        #[arg(long = "ssh-files")]
+        ssh_files: bool,
         /// Defaults to the tenant this host is bound to.
         #[arg(long)]
         tenant_id: Option<String>,
@@ -710,6 +719,7 @@ fn selected_kinds(
     control: bool,
     agent_control: bool,
     terminal: bool,
+    ssh_files: bool,
 ) -> Result<Vec<GrantKind>, String> {
     let mut kinds = Vec::new();
     if control {
@@ -721,8 +731,11 @@ fn selected_kinds(
     if terminal {
         kinds.push(GrantKind::Terminal);
     }
+    if ssh_files {
+        kinds.push(GrantKind::SshFiles);
+    }
     if kinds.is_empty() {
-        return Err("pass --control, --agent-control, and/or --terminal".to_string());
+        return Err("pass --control, --agent-control, --terminal, and/or --ssh-files".to_string());
     }
     Ok(kinds)
 }
@@ -927,6 +940,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             control,
             agent_control,
             terminal,
+            ssh_files,
             tenant_id,
         } => {
             let tenant_id = resolve_tenant(tenant_id);
@@ -935,7 +949,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 .ok_or("device is unknown or revoked")?
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>();
-            for kind in selected_kinds(control, agent_control, terminal)? {
+            for kind in selected_kinds(control, agent_control, terminal, ssh_files)? {
                 let before = capabilities.len();
                 capabilities.extend(
                     grant_kind_capabilities(kind)
@@ -966,6 +980,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
             control,
             agent_control,
             terminal,
+            ssh_files,
             tenant_id,
         } => {
             let tenant_id = resolve_tenant(tenant_id);
@@ -974,7 +989,7 @@ async fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::e
                 .ok_or("device is unknown or revoked")?
                 .into_iter()
                 .collect::<std::collections::BTreeSet<_>>();
-            for kind in selected_kinds(control, agent_control, terminal)? {
+            for kind in selected_kinds(control, agent_control, terminal, ssh_files)? {
                 let mut changed = false;
                 for capability in grant_kind_capabilities(kind) {
                     // Do not short-circuit: revoking a grant kind must remove

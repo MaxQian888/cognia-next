@@ -58,15 +58,16 @@ describe("DeviceKind", () => {
 
 describe("DeviceGrantId", () => {
   /**
-   * Three of these mirror `GrantKind` in `device_grants.rs`; the fourth,
-   * Locked Use, is a separate allow list with no SecurityStore capability.
-   * Pinning the list here means adding a grant forces a decision about both.
+   * Four of these mirror `GrantKind` in `device_grants.rs`. The fifth, Locked
+   * Use, is a separate allow list with no SecurityStore capability. Pinning the
+   * list here means adding a grant forces a decision about both.
    */
   it("covers every grant the Access surface can show", () => {
     const expected: readonly DeviceGrantId[] = [
       "control",
       "agentControl",
       "terminal",
+      "sshFiles",
       "lockedComputerUse",
     ]
     expect(DEVICE_GRANT_IDS).toEqual(expected)

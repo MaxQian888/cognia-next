@@ -313,6 +313,11 @@
       "category": "system"
     },
     {
+      "id": "sftp",
+      "title": "Sftp",
+      "category": "development"
+    },
+    {
       "id": "skills",
       "title": "Skills",
       "category": "extensions"
@@ -35153,6 +35158,791 @@
       "outputTyped": true
     },
     {
+      "name": "sftp_create_dir",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "write",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_create_dir (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error envelope carrying the server's own words.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_delete_entry",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "write",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_delete_entry (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          },
+          "isDir": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error envelope carrying the server's own words.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_download_close",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "ssh.files",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_download_close (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "transferId"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The handle is gone. Closing one that already expired reports the same thing, because the caller's intent is satisfied either way.",
+        "required": [
+          "closed"
+        ],
+        "properties": {
+          "closed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_download_open",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "read",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "sftp_download_open (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "An approved download. `chunkBytes` is what the host will serve per read, negotiated here rather than assumed by the client, and `size` is what the remote machine reported at open.",
+        "required": [
+          "transferId",
+          "size",
+          "chunkBytes"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "chunkBytes": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_download_read_chunk",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "read",
+      "capability": "ssh.files",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "sftp_download_read_chunk (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "transferId",
+          "offset"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "example": ""
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "One chunk of the file, base64 encoded. `eof` is true when the server returned fewer bytes than asked for, which is how a read loop stops. A short read mid-file is legal SFTP and the host loops over it, so a short answer here really is the end.",
+        "required": [
+          "data",
+          "eof"
+        ],
+        "properties": {
+          "data": {
+            "type": "string",
+            "contentEncoding": "base64"
+          },
+          "eof": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_list_dir",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "read",
+      "capability": "ssh.files",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "sftp_list_dir (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "One directory on the remote machine. `.` and `..` are dropped where they are read, so this is entries only.",
+        "required": [
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "x-cognia-wire-source": "crates/cognia-terminal/src/sftp.rs SftpEntry",
+              "description": "One entry on the remote machine. `size` is bytes, `modified` is the SFTP mtime in unix seconds and is absent when the server did not report one, and `permissions` is the raw mode word rather than a rendered string, because the client renders it and the server's own words are the only truth about it.",
+              "required": [
+                "name",
+                "path",
+                "kind",
+                "size"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "dir",
+                    "file",
+                    "symlink",
+                    "other"
+                  ]
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "modified": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "permissions": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_realpath",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "read",
+      "capability": "ssh.files",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "sftp_realpath (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The path as the remote machine resolves it, symlinks included. The one place a client learns where a relative path actually lands.",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_rename_entry",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "write",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_rename_entry (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "from": {
+            "type": "string",
+            "example": ""
+          },
+          "to": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error envelope carrying the server's own words.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_session_close",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "ssh.files",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_session_close (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "How many pooled connections for that profile were dropped. Zero is the ordinary answer when nothing was open.",
+        "required": [
+          "closed"
+        ],
+        "properties": {
+          "closed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_stat",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "read",
+      "capability": "ssh.files",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "sftp_stat (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "One entry on the remote machine.",
+        "required": [
+          "entry"
+        ],
+        "properties": {
+          "entry": {
+            "type": "object",
+            "x-cognia-wire-source": "crates/cognia-terminal/src/sftp.rs SftpEntry",
+            "description": "One entry on the remote machine. `size` is bytes, `modified` is the SFTP mtime in unix seconds and is absent when the server did not report one, and `permissions` is the raw mode word rather than a rendered string, because the client renders it and the server's own words are the only truth about it.",
+            "required": [
+              "name",
+              "path",
+              "kind",
+              "size"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dir",
+                  "file",
+                  "symlink",
+                  "other"
+                ]
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "modified": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "permissions": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_upload_abort",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_upload_abort (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "transferId"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The handle is gone. The partial file is deliberately left where it is: removing it would be a delete nobody asked for, and those bytes are what a later resume starts from.",
+        "required": [
+          "aborted"
+        ],
+        "properties": {
+          "aborted": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_upload_commit",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "write",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_upload_commit (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "transferId"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "What is actually on the remote machine now. `size` is re-read from the machine rather than reported from the write head, so a file something else also wrote is described truthfully. `complete` is that size measured against what the client declared at open.",
+        "required": [
+          "path",
+          "size",
+          "declaredSize",
+          "complete"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "declaredSize": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_upload_open",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "write",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "sftp_upload_open (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path",
+          "size"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "An approved upload. `writeHead` is where the host will start writing, taken from what is already on the remote machine rather than from the client's memory of what it sent.",
+        "required": [
+          "transferId",
+          "chunkBytes",
+          "writeHead"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "chunkBytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "writeHead": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "sftp_upload_write_chunk",
+      "category": "development",
+      "resource": "sftp",
+      "target": "execution",
+      "operation": "write",
+      "capability": "ssh.files",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "sftp_upload_write_chunk (ssh.files)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "transferId",
+          "data"
+        ],
+        "properties": {
+          "transferId": {
+            "type": "string",
+            "example": ""
+          },
+          "data": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "description": "The host's write head after this chunk, which is where the next one goes and where a resume starts. The client never names an offset the host did not reach.",
+        "required": [
+          "writeHead"
+        ],
+        "properties": {
+          "writeHead": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "skill_set_enabled",
       "category": "extensions",
       "resource": "skills",
@@ -35988,7 +36778,17 @@
               "templateInstances",
               "plans",
               "connectorDrafts",
-              "outboundQueue"
+              "outboundQueue",
+              "agentTeams",
+              "agentTeammates",
+              "agentTeamTasks",
+              "sessionState",
+              "twins",
+              "twinDrafts",
+              "projects",
+              "issues",
+              "issueProjects",
+              "labels"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -45577,5 +46377,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67"
+  "catalogHash": "ab11dfc21c318bebb471737e53271d04cdeed61e113831bdf1595862aa2476c3"
 }

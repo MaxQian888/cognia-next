@@ -36,6 +36,7 @@ const RPC_DISPATCH_SOURCE_PATHS = [
   "src-tauri/src/companion_api/rpc/source_control.rs",
   "src-tauri/src/companion_api/rpc/filesystem.rs",
   "src-tauri/src/companion_api/rpc/terminal.rs",
+  "src-tauri/src/companion_api/rpc/sftp.rs",
   "src-tauri/src/companion_api/rpc/plugins.rs",
   "src-tauri/src/companion_api/rpc/diagnostics.rs",
 ]
@@ -586,7 +587,7 @@ const HOST_CATEGORIES = [
     description: "Git, files, terminals, browsers, code-server, and language servers.",
     skill: "cognia-host-development",
     pattern:
-      /^(browser_|codeserver_|fs_|git_|github_workspace_|project_environment_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
+      /^(browser_|codeserver_|fs_|git_|github_workspace_|project_environment_|sftp_|terminal_|lsp_|ensure_dir$|ensure_dir_confined$|ensure_system_lsp_host$|read_agent_config$|read_project_mcp_config$|write_agent_config$|read_text_file$|write_text_file$|write_text_file_confined$|default_export_dir$)/,
   },
   {
     id: "system",

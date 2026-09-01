@@ -278,6 +278,20 @@ export async function setRemoteTerminalAllowed(
   return updated > 0
 }
 
+/**
+ * Persist the independent SSH file-transfer grant (ADR-0162).
+ *
+ * No descriptor to provision, unlike the terminal grant: this rides the SSH
+ * profiles the desktop already synchronized to the host, and a paired device
+ * still names a profile identifier and nothing more.
+ */
+export async function setSshFilesAllowed(deviceId: string, allowed: boolean): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowSshFiles: allowed,
+  })
+  return updated > 0
+}
+
 export async function setLockedComputerUseAllowed(
   deviceId: string,
   allowed: boolean

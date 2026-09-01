@@ -3260,6 +3260,7 @@ fn every_known_command_has_a_dispatch_arm() {
         include_str!("source_control.rs"),
         include_str!("filesystem.rs"),
         include_str!("terminal.rs"),
+        include_str!("sftp.rs"),
         include_str!("plugins.rs"),
         include_str!("diagnostics.rs"),
     ]
@@ -4461,6 +4462,7 @@ fn command_families_cover_known_non_browser_commands_once() {
         super::source_control::COMMANDS,
         super::filesystem::COMMANDS,
         super::terminal::COMMANDS,
+        super::sftp::COMMANDS,
         super::plugins::COMMANDS,
         super::diagnostics::COMMANDS,
     ];

@@ -55,16 +55,29 @@ describe("GRANT_CAPABILITIES mirror", () => {
     }
   })
 
-  it("keeps the three real grants disjoint, as the Rust test does", () => {
-    const pairs = [
-      ["control", "agentControl"],
-      ["control", "terminal"],
-      ["agentControl", "terminal"],
-    ] as const
-    for (const [a, b] of pairs) {
-      const overlap = GRANT_CAPABILITIES[a].filter((c) => GRANT_CAPABILITIES[b].includes(c))
-      expect(overlap).toEqual([])
+  it("keeps the real grants disjoint, as the Rust test does", () => {
+    // Derived from the id list rather than enumerated, so a grant added here
+    // is checked against every existing one without a line being remembered.
+    const real = DEVICE_GRANT_IDS.filter((id) => GRANT_CAPABILITIES[id].length > 0)
+    for (const a of real) {
+      for (const b of real) {
+        if (a === b) continue
+        const overlap = GRANT_CAPABILITIES[a].filter((c) => GRANT_CAPABILITIES[b].includes(c))
+        expect(overlap).toEqual([])
+      }
     }
+  })
+
+  /**
+   * ADR-0162 turns on this pair not overlapping. A shell already reads and
+   * writes every file on the machine, so folding `ssh.files` into the terminal
+   * grant would make "files without code execution" unexpressible, and folding
+   * it the other way would hand out a shell to anyone granted file transfer.
+   */
+  it("keeps file transfer separable from a shell in both directions", () => {
+    expect(GRANT_CAPABILITIES.sshFiles).toEqual(["ssh.files"])
+    expect(GRANT_CAPABILITIES.terminal).not.toContain("ssh.files")
+    expect(GRANT_CAPABILITIES.sshFiles).not.toContain("terminal.open")
   })
 })
 

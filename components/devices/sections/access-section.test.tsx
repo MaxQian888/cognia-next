@@ -33,6 +33,7 @@ function actions(): DeviceGrantActions {
     toggleRemoteControl: jest.fn(async () => {}),
     toggleAgentControl: jest.fn(async () => {}),
     toggleRemoteTerminal: jest.fn(async () => {}),
+    toggleSshFiles: jest.fn(async () => {}),
     toggleLockedComputerUse: jest.fn(async () => {}),
     pause: jest.fn(async () => {}),
     resume: jest.fn(async () => {}),
@@ -98,14 +99,36 @@ describe("AccessSection — grants", () => {
 
   it("says when a grant is only known from the local mirror", () => {
     const grants = buildGrantRows({
-      mirror: { control: true, agentControl: false, terminal: false, lockedComputerUse: false },
+      mirror: {
+        control: true,
+        agentControl: false,
+        terminal: false,
+        sshFiles: false,
+        lockedComputerUse: false,
+      },
       revoked: false,
     })
     render(<AccessSection row={row({ grants })} actions={actions()} />)
     // Every real grant falls back the same way when the host is unreachable.
+    // Derived rather than a literal, so a grant added without a fallback line
+    // fails here instead of quietly rendering one row that explains nothing.
+    const realGrants = grants.filter((grant) => grant.id !== "lockedComputerUse")
     expect(
       screen.getAllByText("From the local mirror — this host could not be asked.")
-    ).toHaveLength(3)
+    ).toHaveLength(realGrants.length)
+  })
+
+  /**
+   * ADR-0162 states the reach in three places, and this is the one a person
+   * actually reads before flipping the switch. Losing it would leave the
+   * console implying a confinement the wire cannot enforce.
+   */
+  it("says that SSH file transfer has no folder limit", async () => {
+    const handlers = actions()
+    render(<AccessSection row={row()} actions={handlers} />)
+    expect(screen.getByTestId("grant-ssh-files-note")).toHaveTextContent(/no folder limit/i)
+    await userEvent.click(screen.getByTestId("paired-device-ssh-files-d1"))
+    expect(handlers.toggleSshFiles).toHaveBeenCalledWith("d1", "Phone", true)
   })
 
   it("routes each switch to its own action", async () => {
@@ -181,7 +204,13 @@ describe("AccessSection — a device that belongs to somebody else", () => {
     return row({
       grants: buildGrantRows({
         hostCapabilities: ["agent.run", "workspace.read", "workspace.write"],
-        mirror: { control: true, agentControl: false, terminal: false, lockedComputerUse: false },
+        mirror: {
+          control: true,
+          agentControl: false,
+          terminal: false,
+          sshFiles: false,
+          lockedComputerUse: false,
+        },
         revoked: false,
         ownerSuspended: true,
       }),

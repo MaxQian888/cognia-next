@@ -136,7 +136,8 @@ export interface DeviceWanSummary {
 }
 
 /** The four grants the owner can hand a paired device. */
-export type DeviceGrantId = "control" | "agentControl" | "terminal" | "lockedComputerUse"
+export type DeviceGrantId =
+  "control" | "agentControl" | "terminal" | "sshFiles" | "lockedComputerUse"
 
 /**
  * `partial` is the state this console exists to expose.

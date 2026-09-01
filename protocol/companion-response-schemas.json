@@ -5879,6 +5879,35 @@
         }
       },
       "additionalProperties": false
+    },
+    "SftpEntry": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-terminal/src/sftp.rs SftpEntry",
+      "description": "One entry on the remote machine. `size` is bytes, `modified` is the SFTP mtime in unix seconds and is absent when the server did not report one, and `permissions` is the raw mode word rather than a rendered string, because the client renders it and the server's own words are the only truth about it.",
+      "required": ["name", "path", "kind", "size"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["dir", "file", "symlink", "other"]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified": {
+          "type": ["integer", "null"]
+        },
+        "permissions": {
+          "type": ["integer", "null"]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -8343,6 +8372,198 @@
     },
     "write_text_file_confined": {
       "$ref": "#/$defs/NullResult"
+    },
+    "sftp_list_dir": {
+      "type": "object",
+      "description": "One directory on the remote machine. `.` and `..` are dropped where they are read, so this is entries only.",
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SftpEntry"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_stat": {
+      "type": "object",
+      "description": "One entry on the remote machine.",
+      "required": ["entry"],
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/SftpEntry"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_realpath": {
+      "type": "object",
+      "description": "The path as the remote machine resolves it, symlinks included. The one place a client learns where a relative path actually lands.",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_create_dir": {
+      "type": "object",
+      "description": "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error envelope carrying the server's own words.",
+      "required": ["ok"],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_rename_entry": {
+      "type": "object",
+      "description": "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error envelope carrying the server's own words.",
+      "required": ["ok"],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_delete_entry": {
+      "type": "object",
+      "description": "The remote machine accepted the change. There is nothing else to report: a failure arrives as an error envelope carrying the server's own words.",
+      "required": ["ok"],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_download_open": {
+      "type": "object",
+      "description": "An approved download. `chunkBytes` is what the host will serve per read, negotiated here rather than assumed by the client, and `size` is what the remote machine reported at open.",
+      "required": ["transferId", "size", "chunkBytes"],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chunkBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_download_read_chunk": {
+      "type": "object",
+      "description": "One chunk of the file, base64 encoded. `eof` is true when the server returned fewer bytes than asked for, which is how a read loop stops. A short read mid-file is legal SFTP and the host loops over it, so a short answer here really is the end.",
+      "required": ["data", "eof"],
+      "properties": {
+        "data": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "eof": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_download_close": {
+      "type": "object",
+      "description": "The handle is gone. Closing one that already expired reports the same thing, because the caller's intent is satisfied either way.",
+      "required": ["closed"],
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_open": {
+      "type": "object",
+      "description": "An approved upload. `writeHead` is where the host will start writing, taken from what is already on the remote machine rather than from the client's memory of what it sent.",
+      "required": ["transferId", "chunkBytes", "writeHead"],
+      "properties": {
+        "transferId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "chunkBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "writeHead": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_write_chunk": {
+      "type": "object",
+      "description": "The host's write head after this chunk, which is where the next one goes and where a resume starts. The client never names an offset the host did not reach.",
+      "required": ["writeHead"],
+      "properties": {
+        "writeHead": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_commit": {
+      "type": "object",
+      "description": "What is actually on the remote machine now. `size` is re-read from the machine rather than reported from the write head, so a file something else also wrote is described truthfully. `complete` is that size measured against what the client declared at open.",
+      "required": ["path", "size", "declaredSize", "complete"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "declaredSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_upload_abort": {
+      "type": "object",
+      "description": "The handle is gone. The partial file is deliberately left where it is: removing it would be a delete nobody asked for, and those bytes are what a later resume starts from.",
+      "required": ["aborted"],
+      "properties": {
+        "aborted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sftp_session_close": {
+      "type": "object",
+      "description": "How many pooled connections for that profile were dropped. Zero is the ordinary answer when nothing was open.",
+      "required": ["closed"],
+      "properties": {
+        "closed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -454,5 +454,15 @@
     "sourceDesktop": "由当前项目注册",
     "sourceHeadless": "服务器启动时固定",
     "title": "该主机允许的目录"
+  },
+  "sshFiles": {
+    "blocked": "文件传输权限未更改（{reason}）。",
+    "col": "SSH 文件传输",
+    "description": "允许该设备浏览并传输本机已保存的 SSH 主机上的文件。它以该配置的用户身份读写那些机器，没有目录范围限制，这正是在那些机器上开一个 shell 本来就能做的事。",
+    "disabledToast": "已关闭 {label} 的 SSH 文件传输。",
+    "enabledToast": "已开启 {label} 的 SSH 文件传输。",
+    "reason": "确认向 {label} 授予 SSH 文件传输权限",
+    "title": "允许 SSH 文件传输",
+    "toggleAria": "切换 {label} 的 SSH 文件传输"
   }
 }

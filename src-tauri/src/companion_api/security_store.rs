@@ -2414,6 +2414,14 @@ fn default_capabilities_for_role(role: &str) -> &'static [&'static str] {
             "process.spawn",
             "secret.manage",
             "host.admin",
+            // ADR-0162 file transfer over a synchronized SSH profile. An owner
+            // device already holds `terminal.open` and `process.spawn`, so it
+            // could reach the same bytes through a shell; withholding the
+            // interface while granting the shell would be a distinction the
+            // machine does not make. A MEMBER device gets nothing here and
+            // needs the explicit `ssh-files` grant, which is where the ADR's
+            // "off by default" bites.
+            "ssh.files",
             // Dormant, deliberately, and pinned by
             // `every_grantable_capability_has_an_enforcement_point`. Neither
             // name is the required capability of any command in
@@ -2533,6 +2541,12 @@ pub(crate) fn is_assignable_device_capability(capability: &str) -> bool {
             | "performance.observe"
             | "performance.traces"
             | "performance.capture"
+            // ADR-0162. Deliberately not `workspace.write`: that name is safe
+            // because `authorize_workspace_root` confines it to a registered
+            // directory, and SFTP has no equivalent confinement to offer. A
+            // device holding this reads and writes the target machine as the
+            // profile's user, and the name has to say so.
+            | "ssh.files"
     )
 }
 
@@ -2583,6 +2597,7 @@ const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
 const MIGRATION_DEVICE_USER: &str = "device-user-v1";
 const MIGRATION_DEVICE_QUARANTINE: &str = "device-quarantine-v1";
 const MIGRATION_CLIENT_PLANE_GRANTS: &str = "client-plane-grants-v1";
+const MIGRATION_SSH_FILES_GRANT: &str = "ssh-files-grant-v1";
 
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
 /// `SELECT *` so that a future column landing in a different position cannot
@@ -2674,6 +2689,7 @@ fn apply_schema_migrations(
     migrate_device_user(conn, now)?;
     migrate_device_quarantine(conn, now, backup_target)?;
     migrate_client_plane_grants(conn, now)?;
+    migrate_ssh_files_grant(conn, now)?;
     Ok(())
 }
 
@@ -2698,6 +2714,41 @@ fn apply_schema_migrations(
 /// and neither class does. Selecting on that grant is what keeps this backfill
 /// from handing a browser extension the client data plane its comment
 /// explicitly denies it.
+/// Give owner devices paired before ADR-0162 the `ssh.files` grant.
+///
+/// Its own marker rather than a line added to [`backfilled_capabilities_for_role`]:
+/// that migration's marker is already committed on every existing host, so a
+/// name appended to its list would reach a fresh database and nobody else. Each
+/// backfill therefore owns the list it backfills.
+///
+/// Owner devices only, and re-granting is safe for the same reason the client
+/// plane's was: until this build `is_assignable_device_capability` rejected the
+/// name, so nobody can have revoked it on purpose and no revocation is being
+/// undone. A member device is untouched, which is where the ADR's "granted
+/// separately" lives.
+fn migrate_ssh_files_grant(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_SSH_FILES_GRANT)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let devices: Vec<(String, String)> = {
+        let mut statement = tx.prepare(
+            "SELECT d.id, d.tenant_id FROM devices d
+             WHERE d.status IN ('active', 'suspended') AND d.role = 'owner'",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (device_id, tenant_id) in devices {
+        upsert_capability_grant(&tx, &tenant_id, &device_id, "ssh.files", now)?;
+    }
+    mark_migration(&tx, MIGRATION_SSH_FILES_GRANT, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn migrate_client_plane_grants(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
     if migration_applied(conn, MIGRATION_CLIENT_PLANE_GRANTS)? {
         return Ok(());
@@ -3381,7 +3432,7 @@ CREATE TABLE devices (
         );
 
         // Every child row still points at a live parent.
-        for table in ["device_keys", "capability_grants", "socket_tickets"] {
+        for table in ["device_keys", "socket_tickets"] {
             let count: i64 = conn
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                     row.get(0)
@@ -3389,6 +3440,23 @@ CREATE TABLE devices (
                 .unwrap();
             assert_eq!(count, 1, "{table} lost its row across the rebuild");
         }
+        // Grants are checked by identity rather than by count, because the
+        // backfills that run alongside this rebuild legitimately ADD rows.
+        // Counting would turn every future default-grant migration into a
+        // failure of a test that is about a table rebuild.
+        let seeded: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM capability_grants
+                 WHERE id = 'grant-1' AND device_id = 'device-active'
+                   AND capability = 'terminal.open'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            seeded, 1,
+            "capability_grants lost its row across the rebuild"
+        );
         let violations = {
             let mut statement = conn.prepare("PRAGMA foreign_key_check").unwrap();
             let mut rows = statement.query([]).unwrap();
@@ -5307,8 +5375,10 @@ CREATE TABLE devices (
             .iter()
             .map(|descriptor| descriptor.capability.as_str())
             .collect();
-        let exempt: std::collections::HashSet<&str> =
-            NO_COMMAND_REQUIRES_IT.iter().map(|(name, _)| *name).collect();
+        let exempt: std::collections::HashSet<&str> = NO_COMMAND_REQUIRES_IT
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
 
         // Every name the store accepts. Kept next to the matches! arm it
         // mirrors, because a new arm with no entry here is exactly the drift
@@ -5333,6 +5403,7 @@ CREATE TABLE devices (
             "performance.observe",
             "performance.traces",
             "performance.capture",
+            "ssh.files",
         ];
         for capability in ASSIGNABLE {
             assert!(
@@ -5405,6 +5476,54 @@ CREATE TABLE devices (
             missing.is_empty(),
             "an owner device cannot run these commands: {missing:?}"
         );
+    }
+
+    /// An owner paired before ADR-0162 gets `ssh.files` on upgrade, and a
+    /// member does not.
+    ///
+    /// Without the backfill the grant would reach only hosts paired after this
+    /// build, which is nobody who already uses the product. The member half is
+    /// the other decision: the console's second switch is what turns it on for
+    /// a device that is not the owner, and a migration that granted it wholesale
+    /// would have made that switch describe something already given.
+    #[test]
+    fn the_ssh_files_backfill_reaches_owners_and_stops_at_members() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "owner-a", 100);
+
+        {
+            let conn = store.conn.lock();
+            conn.execute(
+                "INSERT INTO devices (id, tenant_id, display_name, role, status, created_at, updated_at)
+                 VALUES ('member-a', 'tenant-a', 'Shared phone', 'member', 'active', 101, 101)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM capability_grants WHERE capability = 'ssh.files'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM security_migrations WHERE key = ?1",
+                [MIGRATION_SSH_FILES_GRANT],
+            )
+            .unwrap();
+        }
+        assert!(!store
+            .has_capability("tenant-a", "owner-a", "ssh.files")
+            .unwrap());
+
+        {
+            let mut conn = store.conn.lock();
+            migrate_ssh_files_grant(&mut conn, 200).unwrap();
+        }
+        assert!(store
+            .has_capability("tenant-a", "owner-a", "ssh.files")
+            .unwrap());
+        assert!(!store
+            .has_capability("tenant-a", "member-a", "ssh.files")
+            .unwrap());
     }
 
     /// A device paired BEFORE the client-plane defaults existed must end up

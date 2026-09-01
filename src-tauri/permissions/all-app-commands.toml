@@ -228,6 +228,7 @@ commands.allow = [
   "companion_set_locked_computer_use",
   "companion_set_remote_control",
   "companion_set_remote_terminal",
+  "companion_set_ssh_files",
   "companion_set_worker",
   "companion_signaling_configure",
   "companion_signaling_devices_status",
