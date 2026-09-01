@@ -12,6 +12,7 @@ import {
   withBuiltinAgents,
 } from "./builtin-agents"
 import { READ_ONLY_BUILTIN_TOOLS } from "./tool-suppression"
+import { builtinAgentById } from "@/lib/agent/builtin-catalog/catalog"
 import type { AgentSummary } from "./discover-agents"
 
 function agent(id: string): AgentSummary {
@@ -67,6 +68,22 @@ describe("exploreAgent / planAgent", () => {
     expect(a.id).toBe(PLAN_AGENT_ID)
     expect(a.def.prompt.trim().length).toBeGreaterThan(0)
     expect(a.def.tools).toEqual([...READ_ONLY_BUILTIN_TOOLS])
+  })
+
+  // Before the shared catalog this file and `lib/claude/agents/subagents/` each
+  // wrote their own `Explore` and `Plan`, with different prompts and different
+  // descriptions, so one name meant two different agents.
+  it("projects the shared catalog rather than keeping a second copy", () => {
+    for (const [id, make] of [
+      [EXPLORE_AGENT_ID, exploreAgent],
+      [PLAN_AGENT_ID, planAgent],
+      [GENERAL_PURPOSE_AGENT_ID, generalPurposeAgent],
+    ] as const) {
+      const entry = builtinAgentById(id)
+      expect(entry).toBeDefined()
+      expect(make().def.prompt).toBe(entry!.prompt)
+      expect(make().description).toBe(entry!.description)
+    }
   })
 
   it("both are canonical built-ins", () => {

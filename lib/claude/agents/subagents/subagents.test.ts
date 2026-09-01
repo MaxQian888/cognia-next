@@ -10,6 +10,11 @@ import {
 } from "./index"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
+import { builtinAgentById } from "@/lib/agent/builtin-catalog/catalog"
+import {
+  registerSubagent,
+  unregisterSubagentsByPlugin,
+} from "@/lib/plugin/registries/subagent-registry"
 
 describe("workflow subagent definitions", () => {
   it("every subagent exposes a description, prompt, and tools list", () => {
@@ -164,6 +169,62 @@ describe("resolveDispatchableSubagents — built-in dispatch targets", () => {
     expect(def?.prompt).toBe(workflowDesignerAgent.prompt)
     // Built-ins stay leaves — they do not opt into further nesting.
     expect(def?.allowNesting).toBeUndefined()
+  })
+
+  // The parity that this catalog exists for: the app and the CLI used to write
+  // their own `Explore` and `Plan`, with different prompts and descriptions, so
+  // one name meant two different agents depending on which shell dispatched it.
+  it("dispatches the shared catalog's Explore and Plan, not a second copy", () => {
+    for (const id of ["Explore", "Plan"]) {
+      const entry = builtinAgentById(id)
+      const def = getDispatchableSubagentDef(id)
+      expect(entry).toBeDefined()
+      expect(def?.prompt).toBe(entry!.prompt)
+      expect(def?.description).toBe(entry!.description)
+      // Read-only by construction, so the prompt slipping cannot let them edit.
+      expect(def?.tools?.length).toBeGreaterThan(0)
+    }
+  })
+
+  // ADR-0161 precedence: a built-in is a default you can replace. Naming your
+  // own agent `Explore` replaces `Explore` rather than sitting beside it under
+  // a second name.
+  it("lets a user template claim a built-in id and shadow it", () => {
+    const shadow: SubAgentTemplate = {
+      id: "user-shadow-explore",
+      name: "Explore",
+      description: "my own explorer",
+      category: "research",
+      taskTemplate: "explore {{x}}",
+      config: { systemPrompt: "mine." },
+      isBuiltIn: false,
+    }
+    useSubagentRuntimeStore.getState().addTemplate(shadow)
+    try {
+      const rows = resolveDispatchableSubagents().filter((x) => x.id === "Explore")
+      expect(rows).toHaveLength(1)
+      expect(rows[0].def.description).toBe("my own explorer")
+      expect(resolveDispatchableSubagents().map((x) => x.id)).not.toContain("template:explore")
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("user-shadow-explore")
+    }
+  })
+
+  // Plugin ids stay namespaced: isolation there is a security property, not a
+  // naming convention, so a plugin cannot claim a built-in's name.
+  it("keeps a plugin subagent namespaced even when it names a built-in", () => {
+    registerSubagent(
+      "Explore",
+      { id: "Explore", name: "Explore", description: "plugin explorer", prompt: "p" },
+      { pluginId: "acme" }
+    )
+    try {
+      const ids = resolveDispatchableSubagents().map((x) => x.id)
+      expect(ids).toContain("acme:Explore")
+      expect(getDispatchableSubagentDef("Explore")?.description).not.toBe("plugin explorer")
+    } finally {
+      unregisterSubagentsByPlugin("acme")
+    }
   })
 
   it("unions built-ins with user templates", () => {

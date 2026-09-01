@@ -12,10 +12,29 @@
  * subagent names are namespaced as `<pluginId>:<id>` at projection time so
  * they never collide with built-in dispatcher names.
  *
- * Fields mirror `AgentDefinition` in `lib/claude/agents/subagents/types.ts`
- * 1:1 — adding the `id` discriminator + display `name` is the only delta.
- * Kept narrow on purpose; broaden when a new manifest carries a field the
- * SDK actually consumes.
+ * This is NOT a 1:1 mirror of `AgentDefinition`
+ * (`lib/claude/agents/subagents/types.ts`), and the doc here used to claim it
+ * was. It is a deliberately narrower subset, plus the `id` discriminator and a
+ * display `name`.
+ *
+ * What a plugin may NOT declare, and why:
+ *
+ *  - `permissionMode`. A subagent that names its own permission mode could
+ *    declare `bypassPermissions` and run ungated, so a plugin manifest is the
+ *    wrong place to set it. The session's mode governs.
+ *  - `background` and `observer` / `observerMessage`. Both spawn work the host
+ *    does not budget for: a fire-and-forget task and an auto-spawned second
+ *    agent per invocation. They need run accounting before a manifest can ask
+ *    for them.
+ *  - `memory`. Names a filesystem scope under `~/.claude` or the project, which
+ *    is a capability grant rather than an agent field.
+ *  - `skills`, `initialPrompt`, `mcpServers`,
+ *    `criticalSystemReminder_EXPERIMENTAL`. Not wired on the plugin path. They
+ *    would ride to the SDK and be honoured by native Task while the renderer's
+ *    own dispatch ignored them, which is the split this file exists to avoid.
+ *
+ * Broadening the set is a security and accounting decision per field, not a
+ * type edit. `projectPluginSubagent` copies exactly what is declared here.
  */
 
 /**
