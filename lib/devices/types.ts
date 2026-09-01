@@ -135,7 +135,7 @@ export interface DeviceWanSummary {
   canWake: boolean
 }
 
-/** The four grants the owner can hand a paired device. */
+/** The grants the owner can hand a paired device. */
 export type DeviceGrantId =
   "control" | "agentControl" | "terminal" | "sshFiles" | "lockedComputerUse"
 
