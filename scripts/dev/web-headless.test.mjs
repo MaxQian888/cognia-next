@@ -309,6 +309,24 @@ test("a root that is not a usable directory is refused before anything starts", 
   assert.match(file.stderr, /workspaces dir is not a directory/)
 })
 
+test("--workspaces-dir=PATH narrows too, rather than falling through", async (t) => {
+  // Commander's spelling, which `pnpm dev:headless` itself accepts. Matched
+  // only in its split form here, the equals form fell through to the default
+  // root: a request to narrow answered with the whole checkout, and the banner
+  // printing that wider root as though it had been asked for.
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-web-headless-equals-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  const { workspacesDir } = await dryRun([`--workspaces-dir=${root}`])
+
+  assert.equal(workspacesDir, await realpath(root))
+  assert.notEqual(workspacesDir, defaultWorkspacesDir)
+
+  const empty = await run(["--dry-run", "--workspaces-dir="])
+  assert.equal(empty.code, 4, empty.stderr)
+  assert.match(empty.stderr, /--workspaces-dir needs a directory path/)
+})
+
 test("a --workspaces-dir with no value is refused, not silently widened", async () => {
   // `argv[flagIndex + 1]` on its own resolved `<cwd>/--dry-run` as a path, and
   // a trailing flag fell through to the default root -- the opposite of the

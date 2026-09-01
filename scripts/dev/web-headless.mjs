@@ -62,6 +62,19 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url))
  * no remote client can widen it.
  */
 function requestedWorkspacesDir(argv = process.argv, env = process.env) {
+  // Both spellings. `--workspaces-dir=PATH` is what commander accepts and what
+  // `pnpm dev:headless` therefore takes, so matching only the split form here
+  // meant the equals form fell through to the default root: a request to NARROW
+  // silently answered with the whole checkout, and the banner below then
+  // printed that wider root as though it were what was asked for. The valueless
+  // form is loudly refused for exactly that reason, so this one cannot be
+  // allowed to widen quietly.
+  const equalsIndex = argv.findIndex((arg) => arg.startsWith("--workspaces-dir="))
+  if (equalsIndex !== -1) {
+    const flagValue = argv[equalsIndex].slice("--workspaces-dir=".length).trim()
+    if (!flagValue) return { error: "--workspaces-dir needs a directory path" }
+    return { path: path.resolve(flagValue) }
+  }
   const flagIndex = argv.indexOf("--workspaces-dir")
   // A flag with no value is a mistake, not a request for the default. Left to
   // `argv[flagIndex + 1]` alone, `--workspaces-dir --dry-run` resolved
@@ -87,14 +100,18 @@ function requestedWorkspacesDir(argv = process.argv, env = process.env) {
 async function resolveWorkspacesDir(argv, env) {
   const requested = requestedWorkspacesDir(argv, env)
   if (requested.error) return { ok: false, message: requested.error }
+  // Both reads inside the guard. `stat` left outside it turned a directory that
+  // vanished (or stopped being readable) between the two calls into an
+  // unhandled rejection at the top level: a Node stack trace and exit code 1,
+  // where the whole point of resolving here is the diagnostic and exit code 4.
   let resolved
   try {
     resolved = await realpath(requested.path)
+    if (!(await stat(resolved)).isDirectory()) {
+      return { ok: false, message: `workspaces dir is not a directory: ${resolved}` }
+    }
   } catch {
     return { ok: false, message: `workspaces dir does not exist: ${requested.path}` }
-  }
-  if (!(await stat(resolved)).isDirectory()) {
-    return { ok: false, message: `workspaces dir is not a directory: ${resolved}` }
   }
   return { ok: true, path: resolved }
 }
