@@ -50,6 +50,12 @@ log = "0.4"
 # implementation affected by RUSTSEC-2023-0071. Ed25519/ECDSA SSH keys remain
 # supported through the ring backend.
 russh = { version = "=0.62.6", default-features = false, features = ["ring"] }
+# SFTP over the SSH connection `ssh.rs` already dialled (ADR-0162). Transport
+# agnostic by design: it takes any `AsyncRead + AsyncWrite`, so it rides
+# `channel.into_stream()` from the same russh session rather than opening a
+# second SSH stack of its own. Apache-2.0, and upstream tests against the same
+# russh 0.62 line this crate pins.
+russh-sftp = "2.4"
 thiserror = "2"
 # ADR-0067 Tier C — `terminal_host_service` moved in from `app_lib`;
 # versions copied verbatim from `src-tauri/Cargo.toml` so the move adds

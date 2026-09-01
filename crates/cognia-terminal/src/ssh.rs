@@ -753,13 +753,37 @@ async fn open_jump_chain(
     Ok(handles)
 }
 
-async fn connect_remote(
+/// A dialled and authenticated SSH connection, before anything is asked of it.
+///
+/// The split exists because a terminal and an SFTP session (ADR-0162) want the
+/// same connection policy and different channels on top of it: a PTY plus a
+/// shell for one, the `sftp` subsystem for the other. Sharing this means there
+/// is exactly one place a host key is trusted, one place a jump chain is walked
+/// and one place a credential leaves the keyring, which is the property that
+/// makes "SFTP grants what a shell grants" true by construction rather than by
+/// two implementations agreeing.
+struct DialedSsh {
+    handle: Arc<client::Handle<ClientHandler>>,
+    /// Bastions, outermost first. Held for their lifetime alone, never read,
+    /// because dropping a hop's handle tears down the SSH session carrying
+    /// every hop nested inside it, target included.
+    jump_handles: Vec<Arc<client::Handle<ClientHandler>>>,
+    /// What the handler recorded while checking the target's host key. The
+    /// caller drains it, because a verdict reported twice is a verdict the
+    /// second reader cannot trust.
+    observation: Arc<StdMutex<HostObservation>>,
+}
+
+/// Walk the jump chain, reach the target, prove who we are.
+///
+/// `forwards` belongs to the target alone. A bastion carries none, so an
+/// inbound channel on a hop has nowhere to land and is refused.
+async fn dial_authenticated(
     request: &SshSpawnRequest,
     credentials: &SshCredentials,
     known_hosts_path: &Path,
-    integration_nonce: &str,
     forwards: Option<Arc<ForwardRegistry>>,
-) -> Result<(RemoteConnection, HostObservation, SshIntegrationNegotiation), String> {
+) -> Result<DialedSsh, String> {
     let jump_handles = open_jump_chain(request, credentials, known_hosts_path).await?;
     let (handler, observation) = make_handler(
         &request.host,
@@ -808,7 +832,25 @@ async fn connect_remote(
         &credentials.target,
     )
     .await?;
-    let handle = Arc::new(handle);
+    Ok(DialedSsh {
+        handle: Arc::new(handle),
+        jump_handles,
+        observation,
+    })
+}
+
+async fn connect_remote(
+    request: &SshSpawnRequest,
+    credentials: &SshCredentials,
+    known_hosts_path: &Path,
+    integration_nonce: &str,
+    forwards: Option<Arc<ForwardRegistry>>,
+) -> Result<(RemoteConnection, HostObservation, SshIntegrationNegotiation), String> {
+    let DialedSsh {
+        handle,
+        jump_handles,
+        observation,
+    } = dial_authenticated(request, credentials, known_hosts_path, forwards).await?;
 
     let probed_shell = probe_remote_shell(&handle).await;
 
@@ -1618,6 +1660,91 @@ pub async fn spawn_hosted_ssh(
         host_key_fingerprint: fingerprint,
         integration_enabled: integration.enabled,
         integration_degraded_reason: integration.degraded_reason,
+    })
+}
+
+/// An SFTP subsystem riding a freshly dialled SSH connection.
+///
+/// The handles are held and never read. Dropping the target handle closes the
+/// channel the SFTP session speaks over, and dropping a bastion collapses
+/// everything nested inside it, so the struct is what keeps the transfer alive.
+pub struct HostedSftp {
+    pub session: russh_sftp::client::SftpSession,
+    pub host_key_status: HostKeyStatus,
+    pub host_key_fingerprint: String,
+    handle: Arc<client::Handle<ClientHandler>>,
+    jump_handles: Vec<Arc<client::Handle<ClientHandler>>>,
+}
+
+impl HostedSftp {
+    /// Whether the SSH connection underneath is still up.
+    ///
+    /// A pooled session that has quietly lost its transport would otherwise be
+    /// handed to the next caller, who would learn about it one operation later
+    /// and with a worse error.
+    pub fn is_connected(&self) -> bool {
+        !self.handle.is_closed() && self.jump_handles.iter().all(|hop| !hop.is_closed())
+    }
+}
+
+/// Open SFTP against a saved profile.
+///
+/// Credentials are resolved here, natively, exactly as `spawn_hosted_ssh`
+/// resolves them. Nothing about this path lets a caller supply a destination or
+/// a secret: it takes the same `SshSpawnRequest` the terminal takes, which the
+/// host builds from a profile its own desktop synchronized (ADR-0162).
+///
+/// Forwarding is deliberately never passed. An SFTP session has no use for a
+/// listening socket, and refusing to plumb one is what keeps ADR-0082's
+/// forwarding decision true for this path by construction.
+pub async fn open_hosted_sftp(
+    req: SshSpawnRequest,
+    known_hosts_path: PathBuf,
+) -> Result<HostedSftp, String> {
+    req.validate()?;
+    let credential_request = req.clone();
+    let credentials =
+        tokio::task::spawn_blocking(move || load_all_credentials(&credential_request))
+            .await
+            .map_err(|error| format!("SSH credential task failed: {error}"))??;
+
+    let DialedSsh {
+        handle,
+        jump_handles,
+        observation,
+    } = dial_authenticated(&req, &credentials, &known_hosts_path, None).await?;
+
+    let channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|error| format!("SFTP session channel failed: {error}"))?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|error| format!("SFTP subsystem request failed: {error}"))?;
+    let session = russh_sftp::client::SftpSession::new(channel.into_stream())
+        .await
+        .map_err(|error| format!("SFTP handshake failed: {error}"))?;
+
+    let observed = {
+        let mut guard = observation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *guard)
+    };
+    let host_key_status = observed
+        .status
+        .ok_or_else(|| "SSH server did not present a host key".to_string())?;
+    let host_key_fingerprint = observed
+        .fingerprint
+        .ok_or_else(|| "SSH host-key fingerprint is unavailable".to_string())?;
+
+    Ok(HostedSftp {
+        session,
+        host_key_status,
+        host_key_fingerprint,
+        handle,
+        jump_handles,
     })
 }
 
