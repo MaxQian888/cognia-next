@@ -38,8 +38,33 @@ import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 import { useRemoteTerminalGrantToggle } from "@/hooks/companion/use-remote-terminal-grant"
 import { isTauri, transport } from "@/lib/tauri"
 
+/**
+ * Raised when the enforcement side cannot be reached from this shell.
+ *
+ * Every command below is `target: "client"` with `transports: ["internal"]` in
+ * `protocol/companion-commands.json`: it is written by the desktop renderer
+ * through Tauri IPC and by nothing else. A phone or a browser tab genuinely
+ * cannot make these writes, and that is a sentence to say rather than a call to
+ * skip.
+ */
+export class DeviceGrantHostUnreachableError extends Error {
+  constructor(readonly command: string) {
+    super(`${command} is written by the desktop shell, which this is not`)
+    this.name = "DeviceGrantHostUnreachableError"
+  }
+}
+
+/**
+ * Write one grant to the host's own SecurityStore.
+ *
+ * This used to `return` when `isTauri()` was false, which meant a device
+ * console open on a phone wrote the Dexie mirror, skipped the host, and showed
+ * a success toast for a grant nobody made. The switch then read back as
+ * enabled from the mirror it had just written. Throwing is what lets the caller
+ * roll back and say so.
+ */
 async function hostCall(command: string, args: Record<string, unknown>): Promise<void> {
-  if (!isTauri()) return
+  if (!isTauri()) throw new DeviceGrantHostUnreachableError(command)
   await transport.call<void>(command, args)
 }
 
@@ -56,6 +81,37 @@ export interface DeviceGrantActions {
   pause: (deviceId: string, label: string) => Promise<void>
   resume: (deviceId: string, label: string) => Promise<void>
   revoke: (deviceId: string, label: string) => Promise<void>
+}
+
+/**
+ * Run a grant action, turning a host refusal into a toast.
+ *
+ * Every action below writes the host FIRST and the Dexie mirror second, so a
+ * refusal leaves nothing written and there is nothing to roll back. What was
+ * missing was a place for the refusal to land: `guard` re-throws whatever its
+ * action throws, and each of these is called as `void actions.pause(...)` from
+ * an onClick, so the rejection was unhandled and the user saw nothing at all.
+ *
+ * `label` is the second argument of every action this wraps.
+ * `toggleRemoteTerminal` is deliberately NOT wrapped: it comes from
+ * `useRemoteTerminalGrantToggle`, which reports its own refusals and rolls back
+ * its own descriptor provisioning.
+ */
+function reportingHostFailures<A extends [string, string, ...unknown[]]>(
+  fn: (...args: A) => Promise<void>,
+  onFailure: (error: unknown, label: string) => void
+): (...args: A) => Promise<void> {
+  return async (...args: A) => {
+    try {
+      await fn(...args)
+    } catch (error) {
+      onFailure(error, args[1])
+    }
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): DeviceGrantActions {
@@ -87,10 +143,10 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       if (!next) {
         // Locked Use first: it is only meaningful together with control, and
         // the native lease validator requires both.
-        await setLockedComputerUseAllowed(deviceId, false)
         await hostCall("companion_set_locked_computer_use", { deviceId, allowed: false })
-        await setRemoteControlAllowed(deviceId, false)
+        await setLockedComputerUseAllowed(deviceId, false)
         await hostCall("companion_set_remote_control", { deviceId, allowed: false })
+        await setRemoteControlAllowed(deviceId, false)
         await notifyChanged()
         toast.success(tRc("disabledToast", { label }))
         return
@@ -102,8 +158,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tRc("description"),
         },
         async () => {
-          await setRemoteControlAllowed(deviceId, true)
           await hostCall("companion_set_remote_control", { deviceId, allowed: true })
+          await setRemoteControlAllowed(deviceId, true)
         }
       )
       if (result.kind === "blocked") {
@@ -124,8 +180,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
       // working directory and environment — but within that, the device
       // decides what runs.
       if (!next) {
-        await setAgentControlAllowed(deviceId, false)
         await hostCall("companion_set_agent_control", { deviceId, allowed: false })
+        await setAgentControlAllowed(deviceId, false)
         await notifyChanged()
         toast.success(tAc("disabledToast", { label }))
         return
@@ -137,8 +193,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tAc("description"),
         },
         async () => {
-          await setAgentControlAllowed(deviceId, true)
           await hostCall("companion_set_agent_control", { deviceId, allowed: true })
+          await setAgentControlAllowed(deviceId, true)
         }
       )
       if (result.kind === "blocked") {
@@ -160,8 +216,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
   const toggleLockedComputerUse = useCallback(
     async (deviceId: string, label: string, next: boolean) => {
       if (!next) {
-        await setLockedComputerUseAllowed(deviceId, false)
         await hostCall("companion_set_locked_computer_use", { deviceId, allowed: false })
+        await setLockedComputerUseAllowed(deviceId, false)
         await notifyChanged()
         toast.success(tLocked("disabledToast", { label }))
         return
@@ -173,8 +229,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tLocked("description"),
         },
         async () => {
-          await setLockedComputerUseAllowed(deviceId, true)
           await hostCall("companion_set_locked_computer_use", { deviceId, allowed: true })
+          await setLockedComputerUseAllowed(deviceId, true)
         }
       )
       if (result.kind === "blocked") {
@@ -207,8 +263,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tPause("description"),
         },
         async () => {
-          await pausePairedDevice(deviceId)
           await hostCall("companion_suspend_device", { deviceId })
+          await pausePairedDevice(deviceId)
         }
       )
       if (result.kind === "blocked") {
@@ -239,8 +295,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
           description: tResume("description"),
         },
         async () => {
-          await resumePairedDevice(deviceId)
           await hostCall("companion_resume_device", { deviceId })
+          await resumePairedDevice(deviceId)
         }
       )
       if (result.kind === "blocked") {
@@ -257,8 +313,8 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
   const revoke = useCallback(
     async (deviceId: string, label: string) => {
       const doRevoke = async () => {
-        await revokePairedDevice(deviceId)
         await hostCall("companion_revoke_device", { deviceId })
+        await revokePairedDevice(deviceId)
       }
       if (!requireBiometricForRevoke) {
         await doRevoke()
@@ -285,13 +341,25 @@ export function useDeviceGrantActions(onChanged?: () => void | Promise<void>): D
     [guard, notifyChanged, requireBiometricForRevoke, tRev]
   )
 
+  // Wrapped at the boundary rather than inside each body: the seven actions
+  // already differ in their success and "blocked" toasts, and a refusal reads
+  // the same for all of them.
+  const wrap = <A extends [string, string, ...unknown[]]>(fn: (...args: A) => Promise<void>) =>
+    reportingHostFailures(fn, (error, label) => {
+      toast.error(
+        error instanceof DeviceGrantHostUnreachableError
+          ? t("hostOnly", { label })
+          : t("hostRefused", { label, reason: describeError(error) })
+      )
+    })
+
   return {
-    toggleRemoteControl,
-    toggleAgentControl,
+    toggleRemoteControl: wrap(toggleRemoteControl),
+    toggleAgentControl: wrap(toggleAgentControl),
     toggleRemoteTerminal,
-    toggleLockedComputerUse,
-    pause,
-    resume,
-    revoke,
+    toggleLockedComputerUse: wrap(toggleLockedComputerUse),
+    pause: wrap(pause),
+    resume: wrap(resume),
+    revoke: wrap(revoke),
   }
 }

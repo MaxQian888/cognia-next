@@ -43,6 +43,22 @@ jest.mock("sonner", () => ({
   },
 }))
 
+/**
+ * Real writes by default; one test makes the mirror throw so the split between
+ * a disabled host and a still-enabled mirror can be observed.
+ */
+const mirrorFailure = { message: null as string | null }
+jest.mock("@/lib/db/paired-devices", () => {
+  const actual = jest.requireActual("@/lib/db/paired-devices")
+  return {
+    ...actual,
+    setRemoteTerminalAllowed: async (...args: unknown[]) => {
+      if (mirrorFailure.message) throw new Error(mirrorFailure.message)
+      return actual.setRemoteTerminalAllowed(...args)
+    },
+  }
+})
+
 const TAURI_KEY = "__TAURI_INTERNALS__"
 function setTauri(on: boolean) {
   if (on) (window as unknown as Record<string, unknown>)[TAURI_KEY] = {}
@@ -64,6 +80,7 @@ beforeEach(async () => {
   await whenSeeded()
   setTauri(true)
   guardOutcome.blocked = null
+  mirrorFailure.message = null
   toastMock.success.mockReset()
   toastMock.error.mockReset()
   callSpy = jest.spyOn(transport, "call")
@@ -207,6 +224,34 @@ describe("useRemoteTerminalGrantToggle", () => {
     })
     expect(onChanged).not.toHaveBeenCalled()
     expect(toastMock.error).toHaveBeenCalled()
+  })
+
+  /**
+   * Host first means a refusal leaves nothing to undo, but it also means the
+   * SECOND step can fail on its own. The device has genuinely lost the grant,
+   * so this is fail-closed; what is wrong is the mirror, which still reads
+   * enabled. A success toast over a switch that stays on is the one answer
+   * that cannot be right.
+   */
+  it("says so when the host disabled the grant but the mirror could not follow", async () => {
+    const onChanged = jest.fn()
+    const { result } = renderHook(() => useRemoteTerminalGrantToggle(onChanged))
+    await act(async () => {
+      await result.current("dev-a", "pk-a", "Phone", true)
+    })
+    toastMock.success.mockReset()
+    toastMock.error.mockReset()
+
+    mirrorFailure.message = "the database is closed"
+    await act(async () => {
+      await result.current("dev-a", "pk-a", "Phone", false)
+    })
+    expect(callSpy).toHaveBeenCalledWith("companion_set_remote_terminal", {
+      deviceId: "dev-a",
+      allowed: false,
+    })
+    expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining("the database is closed"))
+    expect(toastMock.success).not.toHaveBeenCalled()
   })
 
   it("respects the biometric gate: cancelled is silent, other blocks toast", async () => {

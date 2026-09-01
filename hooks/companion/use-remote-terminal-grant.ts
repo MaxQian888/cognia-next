@@ -176,7 +176,22 @@ export function useRemoteTerminalGrantToggle(
           toast.error(hostRefusalMessage(error, tTerminal))
           return
         }
-        await setRemoteTerminalAllowed(deviceId, false)
+        try {
+          await setRemoteTerminalAllowed(deviceId, false)
+        } catch (error) {
+          // The host is already disabled, so this is fail-closed: the device
+          // has lost the grant. What is wrong is the mirror, which still reads
+          // enabled and will keep reading that way until something reconciles
+          // it. Saying so beats a success toast over a switch that stays on.
+          toast.error(
+            tTerminal("mirrorStale", {
+              label,
+              reason: error instanceof Error ? error.message : String(error),
+            })
+          )
+          await onChanged?.()
+          return
+        }
         await onChanged?.()
         toast.success(tTerminal("disabledToast", { label }))
         return

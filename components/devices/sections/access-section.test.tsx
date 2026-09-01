@@ -213,29 +213,59 @@ describe("AccessSection — a device that belongs to somebody else", () => {
 })
 
 /**
- * The terminal grant is written from a machine, not from an account:
- * `useDeviceGrantActions.hostCall` is a no-op off the desktop, so flipping it
- * anywhere else writes the mirror and leaves the host's answer untouched. It
- * used to be a dead switch with no sentence beside it, which collapses "never
- * existed here", "one pairing away" and "broken right now" into one silence.
+ * Access is written from a machine, not from an account. Every control on this
+ * card maps to a `companion_*` command the manifest files as `target: "client"`
+ * with `transports: ["internal"]`, which means the desktop renderer writes it
+ * over Tauri IPC and no other shell can. Flipping one anywhere else used to
+ * write the Dexie mirror, skip the host, and toast success.
+ *
+ * The terminal row was gated for exactly this reason and the rest were not, so
+ * three switches and three buttons stayed live while being unwritable.
  */
-describe("AccessSection — the terminal grant off the desktop", () => {
-  it("disables the switch and says which block it is", () => {
+describe("AccessSection — writing access off the desktop", () => {
+  it("disables the terminal switch and says which block it is", () => {
     hostProfile = "mobile-companion"
     render(<AccessSection row={row()} actions={actions()} />)
     expect(screen.getByTestId("paired-device-remote-terminal-d1")).toBeDisabled()
     expect(screen.getByTestId("grant-terminal-unavailable")).toBeInTheDocument()
   })
 
-  it("leaves the other grants alone", () => {
+  it("disables every other grant for the same reason", () => {
     hostProfile = "mobile-companion"
     render(<AccessSection row={row()} actions={actions()} />)
-    expect(screen.getByTestId("paired-device-remote-control-d1")).toBeEnabled()
+    for (const id of [
+      "paired-device-remote-control-d1",
+      "paired-device-agent-control-d1",
+      "paired-device-locked-computer-use-d1",
+    ]) {
+      expect(screen.getByTestId(id)).toBeDisabled()
+    }
+  })
+
+  it("disables pause and revoke, which write the same way", () => {
+    hostProfile = "mobile-companion"
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.getByTestId("paired-device-pause-d1")).toBeDisabled()
+    expect(screen.getByTestId("paired-device-revoke-d1")).toBeDisabled()
+  })
+
+  /**
+   * One sentence for the card, not one per control. Four identical reason
+   * lines beside four switches is the shape this file already rejected for
+   * `ownerSuspended`.
+   */
+  it("explains it once for the whole section", () => {
+    hostProfile = "mobile-companion"
+    render(<AccessSection row={row()} actions={actions()} />)
+    expect(screen.getByTestId("device-access-shell-unavailable")).toBeInTheDocument()
   })
 
   it("says nothing when the desktop can write it", () => {
     render(<AccessSection row={row()} actions={actions()} />)
     expect(screen.queryByTestId("grant-terminal-unavailable")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("device-access-shell-unavailable")).not.toBeInTheDocument()
+    expect(screen.getByTestId("paired-device-remote-control-d1")).toBeEnabled()
+    expect(screen.getByTestId("paired-device-pause-d1")).toBeEnabled()
   })
 
   /**

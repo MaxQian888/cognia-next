@@ -80,7 +80,24 @@ function GrantSection({
    * this one.
    */
   const terminalReach = useSurfaceReach({ capability: "pty", requirement: "desktop-shell" })
+
+  /**
+   * ...and so is every other grant on this card.
+   *
+   * All four switches write through `companion_set_*`, which the manifest files
+   * as `target: "client"` with `transports: ["internal"]`: the desktop renderer
+   * writes them over Tauri IPC and nothing else can. The terminal row was
+   * gated and the other three were not, so on a phone or a browser tab they
+   * looked live, flipped, and reported a grant the host never heard about.
+   *
+   * `capability: "webview"` is the formality here — `requirement:
+   * "desktop-shell"` short-circuits ahead of the capability check in
+   * `resolveSurfaceReach`, and being the desktop process is the whole
+   * requirement.
+   */
+  const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
   const terminalBlocked = grant.id === "terminal" && !terminalReach.available
+  const shellBlocked = !shellReach.available
 
   /**
    * Locked Use is meaningful only together with remote control — the native
@@ -94,6 +111,7 @@ function GrantSection({
     revoked ||
     !grant.available ||
     terminalBlocked ||
+    shellBlocked ||
     (grant.id === "lockedComputerUse" && !controlHeld)
 
   const onChange = (next: boolean) => {
@@ -191,6 +209,19 @@ function GrantSection({
 
 export function AccessSection({ row, actions }: { row: DeviceRow; actions: DeviceGrantActions }) {
   const t = useTranslations("devices")
+  /**
+   * Pause, resume and revoke are `companion_suspend_device`,
+   * `companion_resume_device` and `companion_revoke_device`, the same
+   * `target: "client"` / `transports: ["internal"]` shape as the four grant
+   * switches, so they too are writable only from the desktop process. One
+   * notice for the whole section rather than one per control: the fact is
+   * about this shell, not about any single button, which is how
+   * `ownerSuspended` below already reads.
+   *
+   * Above the early return, because a hook cannot be called conditionally.
+   */
+  const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
+  const shellBlocked = !shellReach.available
 
   if (row.kind !== "paired-device") {
     return (
@@ -238,6 +269,13 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
           </Alert>
         ) : null}
 
+        {shellBlocked ? (
+          <SurfaceUnavailableNotice
+            reach={shellReach}
+            data-testid="device-access-shell-unavailable"
+          />
+        ) : null}
+
         {/* Two grants abreast once the pane can seat them: each is a short
             title, a sentence and a switch, so a single column at full pane
             width is mostly empty space to the right of every switch. */}
@@ -255,6 +293,7 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
               <Button
                 size="sm"
                 variant="outline"
+                disabled={shellBlocked}
                 onClick={() => void actions.pause(deviceId, row.label)}
                 data-testid={`paired-device-pause-${deviceId}`}
               >
@@ -266,6 +305,7 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
               <Button
                 size="sm"
                 variant="outline"
+                disabled={shellBlocked}
                 onClick={() => void actions.resume(deviceId, row.label)}
                 data-testid={`paired-device-resume-${deviceId}`}
               >
@@ -276,7 +316,7 @@ export function AccessSection({ row, actions }: { row: DeviceRow; actions: Devic
             <Button
               size="sm"
               variant="destructive"
-              disabled={revoked}
+              disabled={revoked || shellBlocked}
               onClick={() => void actions.revoke(deviceId, row.label)}
               data-testid={`paired-device-revoke-${deviceId}`}
             >

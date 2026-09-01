@@ -2,8 +2,9 @@
  * @jest-environment jsdom
  */
 import { renderHook } from "@testing-library/react"
+import { toast } from "sonner"
 
-import { useDeviceGrantActions } from "./use-device-grant-actions"
+import { useDeviceGrantActions, type DeviceGrantActions } from "./use-device-grant-actions"
 
 const db = {
   setRemoteControlAllowed: jest.fn(async () => {}),
@@ -27,11 +28,14 @@ jest.mock("@/lib/db/paired-devices", () => ({
   revokePairedDevice: (...a: unknown[]) => db.revokePairedDevice(...(a as [])),
 }))
 
+/** Flipped per-test to stand in for a phone or a browser tab. */
+const shell = { isTauri: true, refuse: null as string | null }
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => true,
+  isTauri: () => shell.isTauri,
   transport: {
     call: async (name: string, args: Record<string, unknown>) => {
       hostCalls.push({ name, args })
+      if (shell.refuse) throw new Error(shell.refuse)
     },
   },
 }))
@@ -67,6 +71,8 @@ beforeEach(() => {
   hostCalls.length = 0
   guardCalls.length = 0
   guardResult = { kind: "allowed" }
+  shell.isTauri = true
+  shell.refuse = null
   jest.clearAllMocks()
 })
 
@@ -253,5 +259,67 @@ describe("useDeviceGrantActions — Settings → Security → deletePairing", ()
     const { actions: a } = actions()
     await a.toggleRemoteControl("d1", "Phone", true)
     expect(guardCalls).toHaveLength(1)
+  })
+})
+
+/**
+ * Every command here is `target: "client"` with `transports: ["internal"]`, so
+ * only the desktop renderer can write it. The hook used to `return` when
+ * `isTauri()` was false, which wrote the Dexie mirror, skipped the host, and
+ * toasted success for a grant nobody made.
+ */
+describe("a shell that cannot reach the host writes nothing", () => {
+  const off = () => {
+    shell.isTauri = false
+  }
+
+  it.each([
+    ["toggleRemoteControl", (a: DeviceGrantActions) => a.toggleRemoteControl("d1", "Phone", true)],
+    ["toggleAgentControl", (a: DeviceGrantActions) => a.toggleAgentControl("d1", "Phone", true)],
+    [
+      "toggleLockedComputerUse",
+      (a: DeviceGrantActions) => a.toggleLockedComputerUse("d1", "Phone", true),
+    ],
+    ["pause", (a: DeviceGrantActions) => a.pause("d1", "Phone")],
+    ["resume", (a: DeviceGrantActions) => a.resume("d1", "Phone")],
+    ["revoke", (a: DeviceGrantActions) => a.revoke("d1", "Phone")],
+  ])("%s leaves the mirror untouched and reports it", async (_name, run) => {
+    off()
+    const { actions: a } = actions()
+    // Resolves rather than rejecting: these are called as `void actions.x(...)`
+    // from an onClick, so a rejection would be swallowed by the runtime and the
+    // user would see nothing.
+    await expect(run(a)).resolves.toBeUndefined()
+    expect(hostCalls).toEqual([])
+    for (const write of Object.values(db)) expect(write).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The host is written first so a refusal leaves nothing to roll back. The old
+ * order wrote Dexie first, so a Rust failure left the mirror claiming a grant
+ * the SecurityStore had refused.
+ */
+describe("the host is written before the mirror", () => {
+  it("does not write the mirror when the host refuses", async () => {
+    shell.refuse = "the security store is locked"
+    const { actions: a } = actions()
+    await a.toggleRemoteControl("d1", "Phone", true)
+    expect(hostCalls.map((call) => call.name)).toEqual(["companion_set_remote_control"])
+    expect(db.setRemoteControlAllowed).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("orders the pair host-then-mirror on the way in", async () => {
+    const order: string[] = []
+    db.setRemoteControlAllowed.mockImplementation(async () => {
+      order.push("mirror")
+    })
+    const { actions: a } = actions()
+    await a.toggleRemoteControl("d1", "Phone", true)
+    order.unshift(...hostCalls.map(() => "host"))
+    expect(order).toEqual(["host", "mirror"])
   })
 })
