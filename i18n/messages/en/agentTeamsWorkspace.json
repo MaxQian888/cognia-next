@@ -290,7 +290,8 @@
       "runtime": "Runtime",
       "search": "Search teams, runs, or objectives",
       "status": "Status",
-      "team": "Team"
+      "team": "Team",
+      "toggle": "Filters"
     },
     "gates": "{count} pending gates",
     "priority": "Priority {value}",
@@ -298,6 +299,7 @@
     "queueInactive": "Not queued",
     "queuePosition": "Queue #{value}",
     "selectRun": "Select run {id}",
+    "selectedCount": "{count, plural, =1 {1 run selected} other {# runs selected}}",
     "slots": "{active}/{max} slots",
     "stale": "Trajectory stale",
     "status": {
@@ -1089,12 +1091,12 @@
       "description": "Enable worktree isolation and run the team; each agent's branch will appear here.",
       "title": "No agent branches yet"
     },
-    "refresh": "Refresh",
-    "title": "Agent branches",
     "moved": {
-      "title": "Worktrees moved",
+      "action": "Open workspace",
       "description": "Live environments and the branches isolated runs leave behind are both on the workspace page now. They belong to the repository, not to one squad.",
-      "action": "Open workspace"
-    }
+      "title": "Worktrees moved"
+    },
+    "refresh": "Refresh",
+    "title": "Agent branches"
   }
 }

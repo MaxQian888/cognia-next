@@ -44,6 +44,7 @@ import { TeamRunsList } from "@/components/agent/team/runs-list"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useIsMobile } from "@/hooks/ui"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { settingsHref } from "@/lib/settings/deep-link"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
@@ -52,7 +53,7 @@ import { cn } from "@/lib/utils"
 /** Statuses that mean "this Squad is doing something right now". */
 const LIVE_TEAM_STATUSES = new Set(["planning", "executing"])
 
-export type SquadFleetTab = "runs" | "board"
+export type SquadFleetTab = "squads" | "runs" | "board"
 
 export interface SquadFleetConsoleProps {
   /** From `?id=` — deep links survive a static export this way. */
@@ -75,7 +76,7 @@ export interface SquadFleetConsoleProps {
 export function SquadFleetConsole({
   selectedId,
   onSelect,
-  tab = "runs",
+  tab: requestedTab,
   onTabChange,
 }: SquadFleetConsoleProps) {
   const t = useTranslations("squads.fleet")
@@ -92,6 +93,28 @@ export function SquadFleetConsole({
   // exists: `source === "none"` is an unpaired browser, and pointing it at a
   // hidden route would be a dead end.
   const { source: fleetSource } = useFleetSnapshot()
+  // On a phone `FeaturePageShell` puts the left pane behind a Sheet, which is
+  // right for `/issues` (its rail is a filter and the centre is the content)
+  // and wrong here: the rail IS the content. A page called Squads that answers
+  // "no durable runs match these filters" and hides every Squad behind an
+  // unlabelled icon is telling a phone the one thing it did not open the page
+  // to learn. So the rail becomes the first tab and the Sheet goes away: one
+  // scrolling column, three named destinations, nothing hidden behind a glyph.
+  const isMobile = useIsMobile()
+  // Unasked-for, a phone opens on the Squads themselves and a wide pane on the
+  // runs console, because on a wide pane the list is already on screen in the
+  // rail. Landing a phone on "no durable runs match these filters" was the
+  // page answering a question nobody asked while withholding the one they did.
+  //
+  // `squads` exists only on a phone, so asking for it on a wide pane, from a
+  // shared link or after a resize, would select a tab with no trigger and no
+  // content.
+  const tab: SquadFleetTab =
+    requestedTab === undefined || (requestedTab === "squads" && !isMobile)
+      ? isMobile
+        ? "squads"
+        : "runs"
+      : requestedTab
 
   const waitingSquadIds = useMemo(
     () =>
@@ -295,8 +318,27 @@ export function SquadFleetConsole({
           }
         />
       }
-      leftPane={{ label: t("railLabel"), content: rail }}
-      {...(inspector ? { rightPane: { label: t("inspectorLabel"), content: inspector } } : {})}
+      // Both panes fold into the tabs on a phone, so the shell must not also
+      // offer them as Sheets: two doors to the same list is how a surface
+      // starts disagreeing with itself.
+      {...(isMobile
+        ? {}
+        : {
+            leftPane: {
+              label: t("railLabel"),
+              content: rail,
+              // Wider than the shell's 18% default. A row here carries a name
+              // AND a status badge, and the badge is `shrink-0`, so at the
+              // default the name is what gives way: on a 800px pane with the
+              // inspector open the rail rendered "R" and "Tri…". A list you
+              // cannot read the names in is not a list.
+              defaultSize: 24,
+              minSize: 16,
+            },
+          })}
+      {...(!isMobile && inspector
+        ? { rightPane: { label: t("inspectorLabel"), content: inspector } }
+        : {})}
       centerClassName="min-h-0"
     >
       {/* Controlled, not `defaultValue`. This page re-renders on every live
@@ -309,6 +351,11 @@ export function SquadFleetConsole({
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
         <TabsList className="mx-4 mt-3 w-fit shrink-0">
+          {isMobile ? (
+            <TabsTrigger value="squads" data-testid="squad-fleet-tab-squads">
+              {t("tabs.squads")}
+            </TabsTrigger>
+          ) : null}
           <TabsTrigger value="runs" data-testid="squad-fleet-tab-runs">
             {t("tabs.runs")}
           </TabsTrigger>
@@ -316,6 +363,14 @@ export function SquadFleetConsole({
             {t("tabs.board")}
           </TabsTrigger>
         </TabsList>
+        {/* The rail and the inspector in one column, which is the shape a phone
+            reads: the list, and under it whatever the selection is about. */}
+        {isMobile ? (
+          <TabsContent value="squads" className="min-h-0 flex-1 overflow-y-auto">
+            {rail}
+            {inspector ? <div className="border-t">{inspector}</div> : null}
+          </TabsContent>
+        ) : null}
         <TabsContent value="runs" className="min-h-0 flex-1 overflow-y-auto p-4">
           <AgentTeamCommandCenter heading={false} />
         </TabsContent>

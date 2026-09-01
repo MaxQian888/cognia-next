@@ -3,7 +3,16 @@
 import { useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNow, useTranslations } from "next-intl"
-import { MoonIcon, PauseIcon, PlayIcon, RefreshCwIcon, SquareIcon, XCircleIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  MoonIcon,
+  PauseIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  SlidersHorizontalIcon,
+  SquareIcon,
+  XCircleIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -12,6 +21,9 @@ import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { useIsMobile } from "@/hooks/ui"
+import { cn } from "@/lib/utils"
 import { getDb } from "@/lib/db/schema"
 import {
   controlDurableRuns,
@@ -57,6 +69,12 @@ export function AgentTeamCommandCenter({
   const [failureClass, setFailureClass] = useState("all")
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  // A phone gets the same controls, arranged for a phone. Seven dropdowns and
+  // six always-disabled buttons stacked above the first run is the desktop
+  // console poured into a column: four rows of chrome before any answer to
+  // "what is happening", on the surface whose whole job is to say that.
+  const isMobile = useIsMobile()
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   const snapshot = useLiveQuery(
     async () => {
@@ -176,6 +194,122 @@ export function AgentTeamCommandCenter({
     }
   }
 
+  /**
+   * The six dropdowns, defined once and placed twice: inline on a wide row,
+   * inside the disclosure on a phone. One definition, because two would be
+   * two places to add the seventh filter.
+   */
+  // What the disclosure's badge counts: dropdowns actually narrowing the list.
+  // The search box is outside the disclosure and speaks for itself.
+  const activeFilterCount = [
+    status,
+    repository,
+    project,
+    teamFilter,
+    runtime,
+    gate,
+    failureClass,
+  ].filter((value) => value !== "all").length
+
+  const filterControls = (
+    <>
+      <NativeSelect
+        value={status}
+        onChange={(event) => setStatus(event.target.value as AgentTeamRunStatus | "all")}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.status")}
+      >
+        <NativeSelectOption value="all">{t("filters.allStatuses")}</NativeSelectOption>
+        {Array.from(new Set(snapshot.runs.map((run) => run.status))).map((value) => (
+          <NativeSelectOption key={value} value={value}>
+            {t(`status.${value}`)}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      <NativeSelect
+        value={repository}
+        onChange={(event) => setRepository(event.target.value)}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.repository")}
+      >
+        <NativeSelectOption value="all">{t("filters.allRepositories")}</NativeSelectOption>
+        {repositories.map((value) => (
+          <NativeSelectOption key={value} value={value}>
+            {value}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      <NativeSelect
+        value={project}
+        onChange={(event) => setProject(event.target.value)}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.project")}
+      >
+        <NativeSelectOption value="all">{t("filters.allProjects")}</NativeSelectOption>
+        {projects.map((value) => (
+          <NativeSelectOption key={value} value={value}>
+            {value}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      <NativeSelect
+        value={teamFilter}
+        onChange={(event) => setTeamFilter(event.target.value)}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.team")}
+      >
+        <NativeSelectOption value="all">{t("filters.allTeams")}</NativeSelectOption>
+        {Object.values(teams).map((team) => (
+          <NativeSelectOption key={team.id} value={team.id}>
+            {team.name}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      <NativeSelect
+        value={runtime}
+        onChange={(event) => setRuntime(event.target.value)}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.runtime")}
+      >
+        <NativeSelectOption value="all">{t("filters.allRuntimes")}</NativeSelectOption>
+        {/* i18n-exempt: runtime protocol identifier */}
+        <NativeSelectOption value="legacy">legacy</NativeSelectOption>
+        {/* i18n-exempt: runtime protocol identifier */}
+        <NativeSelectOption value="durable-v2">durable-v2</NativeSelectOption>
+      </NativeSelect>
+      <NativeSelect
+        value={gate}
+        onChange={(event) => setGate(event.target.value)}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.gate")}
+      >
+        <NativeSelectOption value="all">{t("filters.allGates")}</NativeSelectOption>
+        <NativeSelectOption value="pending">{t("filters.pendingGate")}</NativeSelectOption>
+        <NativeSelectOption value="clear">{t("filters.clearGate")}</NativeSelectOption>
+      </NativeSelect>
+      <NativeSelect
+        value={failureClass}
+        onChange={(event) => setFailureClass(event.target.value)}
+        wrapperClassName="w-auto"
+        className="h-8 text-xs"
+        aria-label={t("filters.failureClass")}
+      >
+        <NativeSelectOption value="all">{t("filters.allFailures")}</NativeSelectOption>
+        {failureClasses.map((value) => (
+          <NativeSelectOption key={value} value={value}>
+            {value}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    </>
+  )
+
   return (
     <section className="space-y-4" data-testid="agent-team-command-center">
       {heading ? (
@@ -185,7 +319,7 @@ export function AgentTeamCommandCenter({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1.5" data-testid="command-center-filters">
+      <div className="space-y-2" data-testid="command-center-filters">
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -193,116 +327,73 @@ export function AgentTeamCommandCenter({
           aria-label={t("filters.search")}
           className="h-8 w-full text-xs sm:w-56"
         />
-        <NativeSelect
-          value={status}
-          onChange={(event) => setStatus(event.target.value as AgentTeamRunStatus | "all")}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.status")}
-        >
-          <NativeSelectOption value="all">{t("filters.allStatuses")}</NativeSelectOption>
-          {Array.from(new Set(snapshot.runs.map((run) => run.status))).map((value) => (
-            <NativeSelectOption key={value} value={value}>
-              {t(`status.${value}`)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          value={repository}
-          onChange={(event) => setRepository(event.target.value)}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.repository")}
-        >
-          <NativeSelectOption value="all">{t("filters.allRepositories")}</NativeSelectOption>
-          {repositories.map((value) => (
-            <NativeSelectOption key={value} value={value}>
-              {value}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          value={project}
-          onChange={(event) => setProject(event.target.value)}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.project")}
-        >
-          <NativeSelectOption value="all">{t("filters.allProjects")}</NativeSelectOption>
-          {projects.map((value) => (
-            <NativeSelectOption key={value} value={value}>
-              {value}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          value={teamFilter}
-          onChange={(event) => setTeamFilter(event.target.value)}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.team")}
-        >
-          <NativeSelectOption value="all">{t("filters.allTeams")}</NativeSelectOption>
-          {Object.values(teams).map((team) => (
-            <NativeSelectOption key={team.id} value={team.id}>
-              {team.name}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          value={runtime}
-          onChange={(event) => setRuntime(event.target.value)}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.runtime")}
-        >
-          <NativeSelectOption value="all">{t("filters.allRuntimes")}</NativeSelectOption>
-          {/* i18n-exempt: runtime protocol identifier */}
-          <NativeSelectOption value="legacy">legacy</NativeSelectOption>
-          {/* i18n-exempt: runtime protocol identifier */}
-          <NativeSelectOption value="durable-v2">durable-v2</NativeSelectOption>
-        </NativeSelect>
-        <NativeSelect
-          value={gate}
-          onChange={(event) => setGate(event.target.value)}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.gate")}
-        >
-          <NativeSelectOption value="all">{t("filters.allGates")}</NativeSelectOption>
-          <NativeSelectOption value="pending">{t("filters.pendingGate")}</NativeSelectOption>
-          <NativeSelectOption value="clear">{t("filters.clearGate")}</NativeSelectOption>
-        </NativeSelect>
-        <NativeSelect
-          value={failureClass}
-          onChange={(event) => setFailureClass(event.target.value)}
-          wrapperClassName="w-auto"
-          className="h-8 text-xs"
-          aria-label={t("filters.failureClass")}
-        >
-          <NativeSelectOption value="all">{t("filters.allFailures")}</NativeSelectOption>
-          {failureClasses.map((value) => (
-            <NativeSelectOption key={value} value={value}>
-              {value}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+        {/* On a phone the six dropdowns sit behind one disclosure that counts
+            how many are narrowing the list, so a filtered view still announces
+            itself while an unfiltered one costs a single row. Above the
+            breakpoint they stay inline, where they always were. */}
+        {isMobile ? (
+          <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-full justify-between text-xs"
+                data-testid="command-center-filters-toggle"
+              >
+                <span className="flex items-center gap-1.5">
+                  <SlidersHorizontalIcon aria-hidden className="size-3.5" />
+                  {t("filters.toggle")}
+                  {activeFilterCount > 0 ? (
+                    <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                      {activeFilterCount}
+                    </Badge>
+                  ) : null}
+                </span>
+                <ChevronDownIcon
+                  aria-hidden
+                  className={cn("size-3.5 transition-transform", filtersOpen && "rotate-180")}
+                />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="grid grid-cols-2 gap-1.5 pt-2">
+              {filterControls}
+            </CollapsibleContent>
+          </Collapsible>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5">{filterControls}</div>
+        )}
       </div>
 
-      <div className="flex flex-wrap gap-2" aria-label={t("bulkActions")}>
-        {ACTIONS.map(({ action, icon: Icon }) => (
-          <Button
-            key={action}
-            size="sm"
-            variant="outline"
-            disabled={busy || selected.size === 0}
-            onClick={() => void apply(action, [...selected])}
-          >
-            <Icon className="mr-1 size-3.5" />
-            {t(`actions.${action}`)}
-          </Button>
-        ))}
-      </div>
+      {/* Bulk actions act on a selection, and on a phone six permanently
+          disabled buttons is a screenful of chrome that can do nothing. They
+          appear with the selection there, and say how many rows they will act
+          on. The wide row keeps them standing, where the space is free and
+          their presence is what tells you the selection is worth making. */}
+      {!isMobile || selected.size > 0 ? (
+        <div
+          className="flex flex-wrap items-center gap-2"
+          aria-label={t("bulkActions")}
+          data-testid="command-center-actions"
+        >
+          {isMobile ? (
+            <span className="text-xs text-muted-foreground">
+              {t("selectedCount", { count: selected.size })}
+            </span>
+          ) : null}
+          {ACTIONS.map(({ action, icon: Icon }) => (
+            <Button
+              key={action}
+              size="sm"
+              variant="outline"
+              disabled={busy || selected.size === 0}
+              onClick={() => void apply(action, [...selected])}
+            >
+              <Icon className="mr-1 size-3.5" />
+              {t(`actions.${action}`)}
+            </Button>
+          ))}
+        </div>
+      ) : null}
 
       {visible.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">{t("empty")}</Card>

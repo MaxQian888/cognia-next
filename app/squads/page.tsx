@@ -24,7 +24,11 @@ function SquadsPageInner() {
   // `FeaturePageShell` renders its children through two different trees and
   // remounts the subtree when the breakpoint resolves, which would drop a tab
   // held in the console's own state.
-  const tab: SquadFleetTab = searchParams?.get("tab") === "board" ? "board" : "runs"
+  // Undefined when the URL names none, so the console can open a phone on the
+  // Squads and a wide pane on the runs console.
+  const rawTab = searchParams?.get("tab")
+  const tab: SquadFleetTab | undefined =
+    rawTab === "board" || rawTab === "squads" || rawTab === "runs" ? rawTab : undefined
 
   const replaceParam = useCallback(
     (key: string, value: string | null) => {
@@ -42,7 +46,7 @@ function SquadsPageInner() {
     [replaceParam]
   )
   const onTabChange = useCallback(
-    (next: SquadFleetTab) => replaceParam("tab", next === "board" ? "board" : null),
+    (next: SquadFleetTab) => replaceParam("tab", next === "runs" ? null : next),
     [replaceParam]
   )
 
@@ -50,7 +54,7 @@ function SquadsPageInner() {
     <SquadFleetConsole
       {...(selectedId ? { selectedId } : {})}
       onSelect={onSelect}
-      tab={tab}
+      {...(tab ? { tab } : {})}
       onTabChange={onTabChange}
     />
   )

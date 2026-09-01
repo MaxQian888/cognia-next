@@ -14,7 +14,8 @@
     "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
     "tabs": {
       "board": "看板",
-      "runs": "运行"
+      "runs": "运行",
+      "squads": "小队"
     },
     "title": "小队",
     "waiting": "等你答复"

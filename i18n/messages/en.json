@@ -2526,7 +2526,8 @@
         "runtime": "Runtime",
         "search": "Search teams, runs, or objectives",
         "status": "Status",
-        "team": "Team"
+        "team": "Team",
+        "toggle": "Filters"
       },
       "gates": "{count} pending gates",
       "priority": "Priority {value}",
@@ -2534,6 +2535,7 @@
       "queueInactive": "Not queued",
       "queuePosition": "Queue #{value}",
       "selectRun": "Select run {id}",
+      "selectedCount": "{count, plural, =1 {1 run selected} other {# runs selected}}",
       "slots": "{active}/{max} slots",
       "stale": "Trajectory stale",
       "status": {
@@ -38686,7 +38688,8 @@
       "summary": "{live, plural, =0 {none working} other {# working}} of {total, plural, =1 {1 Squad} other {# Squads}}",
       "tabs": {
         "board": "Board",
-        "runs": "Runs"
+        "runs": "Runs",
+        "squads": "Squads"
       },
       "title": "Squads",
       "waiting": "Needs you"

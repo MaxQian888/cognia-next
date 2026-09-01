@@ -29,6 +29,9 @@ jest.mock("@/components/agent/workspace/team-run-controls", () => ({
     <div data-testid="run-controls">{status}</div>
   ),
 }))
+let isMobile = false
+jest.mock("@/hooks/ui", () => ({ useIsMobile: () => isMobile }))
+
 let fleetSource: "tauri" | "companion" | "none" = "none"
 jest.mock("@/hooks/fleet/use-fleet-snapshot", () => ({
   useFleetSnapshot: () => ({ source: fleetSource, snapshot: { sessions: [] } }),
@@ -77,6 +80,7 @@ function gates(entries: Array<{ teamId?: string; status?: "open" | "interrupted"
 
 beforeEach(() => {
   gates([])
+  isMobile = false
   fleetSource = "none"
   useProjectStore.setState({ activeProjectId: null } as never)
 })
@@ -231,5 +235,69 @@ describe("SquadFleetConsole host activity link", () => {
     fleetSource = "none"
     renderWithTooltips(<SquadFleetConsole onSelect={() => {}} />)
     expect(screen.queryByTestId("squad-fleet-host-activity")).toBeNull()
+  })
+})
+
+describe("SquadFleetConsole on a phone", () => {
+  beforeEach(() => {
+    isMobile = true
+  })
+
+  /**
+   * `FeaturePageShell` puts the left pane behind a Sheet on a narrow viewport,
+   * which is right for `/issues`, whose rail is a filter and whose centre is
+   * the content. Here the rail IS the content: a page called Squads that
+   * answered "no durable runs match these filters" and hid every Squad behind
+   * an unlabelled glyph was withholding the one thing a phone opened it for.
+   */
+  it("makes the Squad list a named tab rather than a Sheet behind a glyph", () => {
+    render(<SquadFleetConsole onSelect={() => {}} tab="squads" />)
+    expect(screen.getByTestId("squad-fleet-tab-squads")).toBeInTheDocument()
+    expect(screen.getAllByTestId("squad-fleet-row").length).toBeGreaterThan(0)
+  })
+
+  /** Two doors to the same list is how a surface starts disagreeing with itself. */
+  it("stops the shell offering the same panes as Sheets", () => {
+    render(<SquadFleetConsole selectedId="a" onSelect={() => {}} tab="squads" />)
+    expect(screen.queryByTestId("feature-shell-squads-left-trigger")).toBeNull()
+    expect(screen.queryByTestId("feature-shell-squads-right-trigger")).toBeNull()
+  })
+
+  /** The list, and under it whatever the selection is about: one column. */
+  it("puts the selected Squad's detail under the list", () => {
+    render(<SquadFleetConsole selectedId="a" onSelect={() => {}} tab="squads" />)
+    expect(screen.getByTestId("squad-fleet-inspector")).toBeInTheDocument()
+  })
+
+  /**
+   * Landing a phone on "no durable runs match these filters" answered a
+   * question nobody asked while withholding the one they did.
+   */
+  it("opens on the Squads when the URL names no tab", () => {
+    render(<SquadFleetConsole onSelect={() => {}} />)
+    expect(screen.getAllByTestId("squad-fleet-row").length).toBeGreaterThan(0)
+  })
+
+  it("offers no Squads tab on a wide pane", () => {
+    isMobile = false
+    render(<SquadFleetConsole onSelect={() => {}} />)
+    expect(screen.queryByTestId("squad-fleet-tab-squads")).toBeNull()
+  })
+
+  /**
+   * A `?tab=squads` link opened on a wide pane, or a resize past the
+   * breakpoint, would otherwise select a tab with no trigger and no content.
+   */
+  it("resolves a phone-only tab to the runs console on a wide pane", () => {
+    isMobile = false
+    render(<SquadFleetConsole onSelect={() => {}} tab="squads" />)
+    expect(screen.getByTestId("command-center")).toBeInTheDocument()
+  })
+
+  /** A wide pane already shows the list in its rail, so it opens on the runs. */
+  it("still opens a wide pane on the runs console", () => {
+    isMobile = false
+    render(<SquadFleetConsole onSelect={() => {}} />)
+    expect(screen.getByTestId("command-center")).toBeInTheDocument()
   })
 })

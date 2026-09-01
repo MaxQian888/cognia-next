@@ -290,7 +290,8 @@
       "runtime": "运行时",
       "search": "搜索团队、运行或目标",
       "status": "状态",
-      "team": "团队"
+      "team": "团队",
+      "toggle": "筛选"
     },
     "gates": "{count} 个待处理审批门",
     "priority": "优先级 {value}",
@@ -298,6 +299,7 @@
     "queueInactive": "未排队",
     "queuePosition": "队列第 {value} 位",
     "selectRun": "选择运行 {id}",
+    "selectedCount": "已选 {count} 个运行",
     "slots": "{active}/{max} 个并发槽位",
     "stale": "轨迹已过期",
     "status": {
@@ -1089,12 +1091,12 @@
       "description": "启用工作树隔离并运行团队后，各 agent 的分支会显示在这里。",
       "title": "暂无 agent 分支"
     },
-    "refresh": "刷新",
-    "title": "Agent 分支",
     "moved": {
-      "title": "工作树已迁移",
+      "action": "打开工作区",
       "description": "实时环境与隔离运行留下的分支现在都在工作区页面。它们属于仓库，不属于某一个小队。",
-      "action": "打开工作区"
-    }
+      "title": "工作树已迁移"
+    },
+    "refresh": "刷新",
+    "title": "Agent 分支"
   }
 }

@@ -2526,7 +2526,8 @@
         "runtime": "运行时",
         "search": "搜索团队、运行或目标",
         "status": "状态",
-        "team": "团队"
+        "team": "团队",
+        "toggle": "筛选"
       },
       "gates": "{count} 个待处理审批门",
       "priority": "优先级 {value}",
@@ -2534,6 +2535,7 @@
       "queueInactive": "未排队",
       "queuePosition": "队列第 {value} 位",
       "selectRun": "选择运行 {id}",
+      "selectedCount": "已选 {count} 个运行",
       "slots": "{active}/{max} 个并发槽位",
       "stale": "轨迹已过期",
       "status": {
@@ -38686,7 +38688,8 @@
       "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
       "tabs": {
         "board": "看板",
-        "runs": "运行"
+        "runs": "运行",
+        "squads": "小队"
       },
       "title": "小队",
       "waiting": "等你答复"
