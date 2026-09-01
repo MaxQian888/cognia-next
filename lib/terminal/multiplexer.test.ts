@@ -15,16 +15,16 @@ import {
 } from "./multiplexer"
 
 jest.mock("@/lib/tauri", () => ({
-  isTauri: jest.fn(() => false),
+  transport: { call: jest.fn() },
 }))
 
-import { isTauri } from "@/lib/tauri"
-const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+import { transport } from "@/lib/tauri"
+const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
 
 describe("multiplexer", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    mockIsTauri.mockReturnValue(false)
+    mockCall.mockRejectedValue(new Error("no transport"))
   })
 
   describe("detectMultiplexerFromEnv", () => {
@@ -164,24 +164,59 @@ describe("multiplexer", () => {
     })
   })
 
-  describe("detectMultiplexer (Tauri integration)", () => {
-    it("returns none when not in Tauri", async () => {
-      const result = await detectMultiplexer()
-      expect(result.type).toBe("none")
+  // The three probes below run against whichever host the routed transport is
+  // pointed at. They used to short-circuit on `!isTauri()`, which made a
+  // browser paired to a Host report "no tmux" for a machine that had it.
+  describe("detectMultiplexer", () => {
+    it("asks the routed transport, whatever host it points at", async () => {
+      mockCall.mockResolvedValue({
+        type: "tmux",
+        socketPath: "/tmp/tmux-501/default",
+        version: "3.4",
+      })
+
+      await expect(detectMultiplexer()).resolves.toEqual({
+        type: "tmux",
+        socketPath: "/tmp/tmux-501/default",
+        version: "3.4",
+      })
+      expect(mockCall).toHaveBeenCalledWith("terminal_detect_multiplexer")
+    })
+
+    it("reads a rejected call as 'no multiplexer', not as a failure", async () => {
+      await expect(detectMultiplexer()).resolves.toEqual({
+        type: "none",
+        socketPath: null,
+        version: null,
+      })
     })
   })
 
-  describe("listTmuxSessions (Tauri integration)", () => {
-    it("returns empty when not in Tauri", async () => {
-      const result = await listTmuxSessions()
-      expect(result).toEqual([])
+  describe("listTmuxSessions", () => {
+    it("returns the host's sessions", async () => {
+      const sessions = [{ name: "main", windowCount: 2, attached: true, createdAt: 1 }]
+      mockCall.mockResolvedValue(sessions)
+
+      await expect(listTmuxSessions()).resolves.toEqual(sessions)
+      expect(mockCall).toHaveBeenCalledWith("terminal_list_tmux_sessions")
+    })
+
+    it("returns empty when the host cannot answer", async () => {
+      await expect(listTmuxSessions()).resolves.toEqual([])
     })
   })
 
-  describe("listTmuxWindows (Tauri integration)", () => {
-    it("returns empty when not in Tauri", async () => {
-      const result = await listTmuxWindows("main")
-      expect(result).toEqual([])
+  describe("listTmuxWindows", () => {
+    it("passes the session name through to the host", async () => {
+      const windows = [{ index: 0, name: "zsh", active: true, paneCount: 1 }]
+      mockCall.mockResolvedValue(windows)
+
+      await expect(listTmuxWindows("main")).resolves.toEqual(windows)
+      expect(mockCall).toHaveBeenCalledWith("terminal_list_tmux_windows", { sessionName: "main" })
+    })
+
+    it("returns empty when the host cannot answer", async () => {
+      await expect(listTmuxWindows("main")).resolves.toEqual([])
     })
   })
 })

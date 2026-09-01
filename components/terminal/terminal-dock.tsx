@@ -703,7 +703,7 @@ export function TerminalDock() {
                 sshHosts={pickerSshHosts}
                 onNewSshHost={handleNewSshHost}
                 onNewSerialPort={isTauri() ? handleNewSerialPort : undefined}
-                onAttachTmuxSession={isTauri() ? handleAttachTmuxSession : undefined}
+                onAttachTmuxSession={handleAttachTmuxSession}
               />
             ) : null}
             {canSpawn && activeRow ? (

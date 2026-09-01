@@ -155,6 +155,10 @@ const defaultDetectShells: DetectShells = async (bins) => {
  * The two device scans, behind the same shape as `defaultDetectShells`: they
  * resolve to an empty list on any failure, so a host without tmux or without a
  * serial adapter simply shows no section rather than an error row.
+ *
+ * They differ in reach. tmux rides the routed transport and so describes
+ * whichever host the app is driving; serial is a `transports: ["internal"]`
+ * command and really does only describe this machine.
  */
 async function defaultListSerialPorts() {
   if (!isTauri()) return []
@@ -166,7 +170,10 @@ async function defaultListSerialPorts() {
 }
 
 async function defaultListTmuxSessions() {
-  if (!isTauri()) return []
+  // No `isTauri()` guard: the three `terminal_list_tmux_*` commands are
+  // remote-reachable, and `listTmuxSessions` already answers [] for a host that
+  // has no tmux and for a standalone browser whose transport rejects. Guarding
+  // here made a browser paired to a Host report "no tmux" for a machine with it.
   const { listTmuxSessions } = await import("@/lib/terminal/multiplexer")
   return (await listTmuxSessions()).map((session) => ({
     name: session.name,

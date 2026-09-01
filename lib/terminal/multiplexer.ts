@@ -4,11 +4,19 @@
  * Detects whether the terminal session is running inside a multiplexer
  * (tmux, screen, zellij) and exposes utilities to list/attach sessions.
  *
- * Detection uses Tauri commands on desktop (inspecting env vars + running
- * queries). In browser/mobile, detection returns "none".
+ * Detection runs `terminal_detect_multiplexer` and the two `terminal_list_tmux_*`
+ * commands, all three of which carry `transports: ["http","websocket","webrtc"]`
+ * in the command manifest. They therefore answer for whichever host the routed
+ * transport is pointed at: the local desktop, or the Host a browser/phone is
+ * paired to. Going through `@tauri-apps/api/core` directly is what used to make
+ * this desktop-only, and it was a lib assumption rather than a real boundary.
+ *
+ * A host with no tmux installed is a normal answer, not an error, so every
+ * probe below degrades to "none"/[] rather than throwing. That same fallback
+ * covers a standalone browser, where the stub transport rejects every call.
  */
 
-import { isTauri } from "@/lib/tauri"
+import { transport } from "@/lib/tauri"
 
 /** Supported multiplexer types. */
 export type MultiplexerType = "tmux" | "screen" | "zellij" | "none"
@@ -49,16 +57,12 @@ export interface TmuxWindow {
 
 /**
  * Detect which multiplexer (if any) is active in the current environment.
- * Checks $TMUX, $STY (screen), $ZELLIJ environment variables via Tauri.
+ * Checks $TMUX, $STY (screen), $ZELLIJ environment variables on the host the
+ * routed transport is pointed at.
  */
 export async function detectMultiplexer(): Promise<MultiplexerInfo> {
-  if (!isTauri()) {
-    return { type: "none", socketPath: null, version: null }
-  }
-
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
-    return await invoke<MultiplexerInfo>("terminal_detect_multiplexer")
+    return await transport.call<MultiplexerInfo>("terminal_detect_multiplexer")
   } catch {
     return { type: "none", socketPath: null, version: null }
   }
@@ -69,11 +73,8 @@ export async function detectMultiplexer(): Promise<MultiplexerInfo> {
  * Returns empty array if tmux is not installed or not detected.
  */
 export async function listTmuxSessions(): Promise<TmuxSession[]> {
-  if (!isTauri()) return []
-
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
-    return await invoke<TmuxSession[]>("terminal_list_tmux_sessions")
+    return await transport.call<TmuxSession[]>("terminal_list_tmux_sessions")
   } catch {
     return []
   }
@@ -83,11 +84,8 @@ export async function listTmuxSessions(): Promise<TmuxSession[]> {
  * List windows for a specific tmux session.
  */
 export async function listTmuxWindows(sessionName: string): Promise<TmuxWindow[]> {
-  if (!isTauri()) return []
-
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
-    return await invoke<TmuxWindow[]>("terminal_list_tmux_windows", { sessionName })
+    return await transport.call<TmuxWindow[]>("terminal_list_tmux_windows", { sessionName })
   } catch {
     return []
   }
