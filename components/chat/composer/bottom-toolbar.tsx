@@ -59,7 +59,7 @@ import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
 import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
@@ -138,7 +138,7 @@ function GenericBottomToolbar({
   const toolbarWidth = useElementWidth(rootRef)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
-  const runtimeRef = useAgentRuntimeStore((s) => s.runtimeRef)
+  const runtimeRef = useRuntimeRefForSession(session?.id)
   // Live, not derived from the `session` prop: binding a Squad has to change
   // this row in the same tick the chip changes, and the prop's freshness is
   // the caller's business.
@@ -187,6 +187,7 @@ function GenericBottomToolbar({
       // The chip names the sidecar runtime that will really serve the turn, and
       // that is derived from the provider, so it has to be told which one.
       providerId={providerId}
+      sessionId={session?.id}
     />
   )
 

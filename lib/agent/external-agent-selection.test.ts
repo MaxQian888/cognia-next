@@ -19,6 +19,7 @@ function selection() {
 }
 
 beforeEach(() => {
+  useAgentRuntimeStore.setState({ sessionRuntimeRefs: {} })
   useAgentRuntimeStore.getState().setRuntimeRef(BUILTIN_RUNTIME_REF)
   useExternalAgentStore.getState().setActiveAgent(null)
 })
@@ -71,6 +72,19 @@ describe("clearExternalAgentSelectionIfActive", () => {
     useExternalAgentStore.getState().setActiveAgent("agent-2")
     clearExternalAgentSelectionIfActive("agent-1")
     expect(selection()).toEqual({ runtime: null, external: "agent-2" })
+  })
+
+  // A session that pinned the deleted agent is dangling too. Its composer chip
+  // would repair itself on the next render, but a send from a chip that is not
+  // mounted (a scheduled leg, a background run) would still be handed the id.
+  it("drops every session override that named the removed agent", () => {
+    const store = useAgentRuntimeStore.getState()
+    store.setSessionRuntimeRef("s1", { kind: "external", agentId: "agent-1" })
+    store.setSessionRuntimeRef("s2", { kind: "external", agentId: "agent-2" })
+    clearExternalAgentSelectionIfActive("agent-1")
+    expect(useAgentRuntimeStore.getState().sessionRuntimeRefs).toEqual({
+      s2: { kind: "external", agentId: "agent-2" },
+    })
   })
 
   it("never touches the lane while it is on the builtin runtime", () => {

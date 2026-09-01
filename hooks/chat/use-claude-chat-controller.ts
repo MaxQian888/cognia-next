@@ -171,7 +171,8 @@ import {
 } from "@/lib/claude/subagent-bridge"
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
-import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
+import { useExternalAgentStore } from "@/stores/agent"
+import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
@@ -1132,7 +1133,7 @@ export function useClaudeChat() {
         typeof effectiveContent === "string" &&
         callOptions?.resourceContext === undefined &&
         (callOptions?.attachmentManifest?.length ?? 0) === 0 &&
-        useAgentRuntimeStore.getState().runtimeRef.kind === "builtin" &&
+        runtimeRefForSession(sessionId).kind === "builtin" &&
         !session?.collaboration &&
         !isStandaloneChatMode()
       if (hostStateEligible) {
@@ -1235,9 +1236,7 @@ export function useClaudeChat() {
           sessionId,
           provider:
             sendOptions.provider ??
-            (useAgentRuntimeStore.getState().runtimeRef.kind === "builtin"
-              ? "unknown"
-              : "external"),
+            (runtimeRefForSession(sessionId).kind === "builtin" ? "unknown" : "external"),
           surface: "chat",
         })
       }
@@ -1364,7 +1363,7 @@ export function useClaudeChat() {
       // Read ONCE for the whole send. The store used to be consulted at three
       // separate points below, so a runtime switch part-way through a send
       // could be observed differently by each of them.
-      const composerRuntimeRef = useAgentRuntimeStore.getState().runtimeRef
+      const composerRuntimeRef = runtimeRefForSession(sessionId)
       const manualExternal = !hasNoToolSurface && composerRuntimeRef.kind !== "builtin"
 
       // Resolve rule-based delegation before opening the Task Workspace and

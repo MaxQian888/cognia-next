@@ -142,9 +142,11 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
 }))
 
 const mockSetRuntimeRef = jest.fn()
+const mockSetSessionRuntimeRef = jest.fn()
 const runtimeState = {
   runtimeRef: { kind: "builtin" } as AgentRuntimeRef,
   setRuntimeRef: mockSetRuntimeRef,
+  setSessionRuntimeRef: mockSetSessionRuntimeRef,
 }
 
 // Configurations the paired host owns. The hook itself is covered by its own
@@ -175,6 +177,11 @@ function hostConfig(
 
 jest.mock("@/stores/agent", () => ({
   useAgentRuntimeStore: (selector: (s: typeof runtimeState) => unknown) => selector(runtimeState),
+}))
+// The lane is per session, so the chip reads it through the selector rather
+// than off the store's default field.
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: () => runtimeState.runtimeRef,
 }))
 
 const mockSetExternalEnabled = jest.fn()
@@ -211,6 +218,7 @@ beforeEach(() => {
   externalAgentState.connectionStatus = {}
   externalAgentState.agentValidity = {}
   mockSetRuntimeRef.mockClear()
+  mockSetSessionRuntimeRef.mockClear()
   mockSelectExternalAgent.mockClear()
   mockSetExternalEnabled.mockClear()
 })
@@ -452,6 +460,32 @@ describe("AgentRuntimeSelector — invalid selection repair", () => {
     externalAgentState.agents = { a1: { ...agent("a1", "My Plugin Agent"), protocol: "acme:rpc" } }
     render(<AgentRuntimeSelector />)
     expect(screen.getByTestId("radio-item-external:a1")).toHaveAttribute("aria-disabled", "true")
+  })
+})
+
+describe("AgentRuntimeSelector — the lane belongs to the session", () => {
+  // Writing the app default from inside a conversation is the defect ADR-0117
+  // fixed for the mode: it retargets every other conversation, including one
+  // mid-turn.
+  it("writes the session's own lane when it has one", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector sessionId="s1" />)
+    fireEvent.click(screen.getByTestId("radio-item-external:a1"))
+    expect(mockSetSessionRuntimeRef).toHaveBeenCalledWith("s1", {
+      kind: "external",
+      agentId: "a1",
+    })
+    expect(mockSetRuntimeRef).not.toHaveBeenCalled()
+  })
+
+  // On the new-chat surface there is no conversation yet, so the choice seeds
+  // the one it is about to start.
+  it("writes the app default when there is no session", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("radio-item-external:a1"))
+    expect(mockSetRuntimeRef).toHaveBeenCalledWith({ kind: "external", agentId: "a1" })
+    expect(mockSetSessionRuntimeRef).not.toHaveBeenCalled()
   })
 })
 

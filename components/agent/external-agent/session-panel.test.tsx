@@ -32,8 +32,11 @@ jest.mock("@/hooks/agent/use-external-agent", () => ({
 
 const useAgentRuntimeMock = jest.fn()
 
-jest.mock("@/stores/agent", () => ({
-  useAgentRuntimeStore: (selector: (s: unknown) => unknown) => selector(useAgentRuntimeMock()),
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: () =>
+    (useAgentRuntimeMock() as { runtime?: string })?.runtime === "external"
+      ? { kind: "external", agentId: "a1" }
+      : { kind: "builtin" },
 }))
 
 const hasPluginToolbarMock = jest.fn(() => false)

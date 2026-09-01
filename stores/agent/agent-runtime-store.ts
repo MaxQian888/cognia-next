@@ -67,7 +67,18 @@ interface AgentRuntimeState {
    * effects to reconcile a disagreement.
    */
   runtimeRef: AgentRuntimeRef
-  /** @deprecated Mirror of `runtimeRef.kind`. Written only by `setRuntimeRef`. */
+  /**
+   * What each live session actually runs on.
+   *
+   * Same split as `defaultComposition` / `sessionCompositions`, and for the same
+   * reason. ADR-0117 moved the mode onto the session because one global value
+   * retargeted every other session, including one mid-turn. The runtime lane
+   * was left global and read at send time, which was the identical defect on
+   * the larger axis: switching runtime in one conversation changed where every
+   * other conversation's next turn would run.
+   */
+  sessionRuntimeRefs: Record<string, AgentRuntimeRef>
+  /** @deprecated Mirror of the DEFAULT `runtimeRef.kind`. Written only by `setRuntimeRef`. */
   runtime: AgentRuntime
   /**
    * Legacy flat mode id.
@@ -99,8 +110,14 @@ interface AgentRuntimeState {
    */
   externalHostConfig: ExternalHostConfigSelection | null
 
-  /** The single writer for the lane. Every mirror above is derived from it. */
+  /**
+   * Set the lane a NEW session starts on. Every mirror above is derived from it.
+   */
   setRuntimeRef: (ref: AgentRuntimeRef) => void
+  /** Set the lane for one live session, leaving every other session alone. */
+  setSessionRuntimeRef: (sessionId: string, ref: AgentRuntimeRef) => void
+  /** Drop one session's override so it falls back to the app default. */
+  clearSessionRuntimeRef: (sessionId: string) => void
   setModeId: (modeId: string) => void
   setDefaultComposition: (selection: AgentCompositionSelectionV1) => void
   setSessionComposition: (sessionId: string, selection: AgentCompositionSelectionV1) => void
@@ -206,6 +223,7 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
   persist(
     (set) => ({
       runtimeRef: BUILTIN_RUNTIME_REF,
+      sessionRuntimeRefs: {},
       runtime: "claude-sdk",
       modeId: "general",
       defaultComposition: { presetId: STANDARD_PRESET_ID },
@@ -214,6 +232,17 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
       externalHostConfig: null,
 
       setRuntimeRef: (runtimeRef) => set({ runtimeRef, ...legacyMirrors(runtimeRef) }),
+      setSessionRuntimeRef: (sessionId, ref) =>
+        set((state) => ({
+          sessionRuntimeRefs: { ...state.sessionRuntimeRefs, [sessionId]: ref },
+        })),
+      clearSessionRuntimeRef: (sessionId) =>
+        set((state) => {
+          if (!Object.hasOwn(state.sessionRuntimeRefs, sessionId)) return state
+          const next = { ...state.sessionRuntimeRefs }
+          delete next[sessionId]
+          return { sessionRuntimeRefs: next }
+        }),
       setModeId: (modeId) => set({ modeId, defaultComposition: selectionFromModeId(modeId) }),
       setDefaultComposition: (selection) =>
         // Mirror back onto `modeId` so unmigrated readers stay consistent
@@ -272,6 +301,31 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
     }
   )
 )
+
+/**
+ * The runtime a session's next turn runs on.
+ *
+ * Falls back to the app default for a session that never chose one, which is
+ * every session created before a per-session choice existed.
+ */
+export function runtimeRefForSession(sessionId: string | undefined): AgentRuntimeRef {
+  return selectRuntimeRefForSession(useAgentRuntimeStore.getState(), sessionId)
+}
+
+/** The reactive form. A selector, so a component re-renders on its OWN lane. */
+export function useRuntimeRefForSession(sessionId: string | undefined): AgentRuntimeRef {
+  return useAgentRuntimeStore((state) => selectRuntimeRefForSession(state, sessionId))
+}
+
+function selectRuntimeRefForSession(
+  state: AgentRuntimeState,
+  sessionId: string | undefined
+): AgentRuntimeRef {
+  if (sessionId && Object.hasOwn(state.sessionRuntimeRefs, sessionId)) {
+    return state.sessionRuntimeRefs[sessionId]
+  }
+  return state.runtimeRef
+}
 
 /**
  * The composition a session should run under.

@@ -16,9 +16,9 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 let mockRuntime: "claude-sdk" | "external" = "claude-sdk"
-jest.mock("@/stores/agent", () => ({
-  useAgentRuntimeStore: <T,>(selector: (s: { runtime: string }) => T) =>
-    selector({ runtime: mockRuntime }),
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: () =>
+    mockRuntime === "external" ? { kind: "external", agentId: "a1" } : { kind: "builtin" },
 }))
 
 jest.mock("@/hooks/use-element-width", () => ({ useElementWidth: () => 300 }))

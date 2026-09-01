@@ -23,9 +23,9 @@ jest.mock("@/stores/settings", () => ({
 // so the runtime is an input to every assertion below. Pinned to the built-in
 // Claude rail here; the external rail has its own describe block.
 let mockRuntime: "claude-sdk" | "external" = "claude-sdk"
-jest.mock("@/stores/agent", () => ({
-  useAgentRuntimeStore: <T,>(selector: (s: { runtime: string }) => T) =>
-    selector({ runtime: mockRuntime }),
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: () =>
+    mockRuntime === "external" ? { kind: "external", agentId: "a1" } : { kind: "builtin" },
 }))
 
 // `useElementWidth` measures a real DOMRect, which jsdom always reports as 0.

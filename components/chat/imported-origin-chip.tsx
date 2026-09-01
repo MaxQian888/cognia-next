@@ -177,7 +177,7 @@ export function ImportedOriginChip({
       ...compositionForSession(session.id),
       runtimeBindingRef: result.nativeSessionId,
     })
-    runtime.setRuntimeRef({ kind: "external", agentId: result.agentId })
+    runtime.setSessionRuntimeRef(session.id, { kind: "external", agentId: result.agentId })
     toast.success(t("resumeReady"))
   }
 

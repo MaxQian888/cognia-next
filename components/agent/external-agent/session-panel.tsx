@@ -12,7 +12,7 @@
  * so the chat surface stays unchanged for built-in runs.
  */
 
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { ExternalAgentCommands } from "./commands"
 import { ExternalAgentConfigOptions } from "./config-options"
@@ -50,13 +50,19 @@ import { cn } from "@/lib/utils"
 
 interface Props {
   className?: string
+  /**
+   * The conversation this panel describes. The runtime lane is per session, so
+   * without it the panel would answer for whatever lane a DIFFERENT
+   * conversation happens to be on.
+   */
+  sessionId?: string
 }
 
-export function ExternalAgentSessionPanel({ className }: Props) {
+export function ExternalAgentSessionPanel({ className, sessionId }: Props) {
   const [focusOpen, setFocusOpen] = useState(false)
   const [focus, setFocus] = useState("")
   const [providerUndoWarningOpen, setProviderUndoWarningOpen] = useState(false)
-  const runtime = useAgentRuntimeStore((s) => s.runtime)
+  const runtime = useRuntimeRefForSession(sessionId).kind === "builtin" ? "claude-sdk" : "external"
   const t = useTranslations("chat.header")
   const {
     isExecuting,

@@ -106,6 +106,9 @@ jest.mock("@/stores/agent", () => ({
   useAgentRuntimeStore: <T,>(selector: (s: typeof agentRuntimeState) => T) =>
     selector(agentRuntimeState),
 }))
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: () => agentRuntimeState.runtimeRef,
+}))
 
 let chatStoreState = {
   messages: [] as unknown[],

@@ -768,7 +768,7 @@ export function ChatPane({
       <ChatColumn className="mt-2">
         <WorkSubmissionNotice sessionId={activeSession.id} />
       </ChatColumn>
-      <ExternalAgentSessionPanel />
+      <ExternalAgentSessionPanel sessionId={activeSession.id} />
       {/* The surface swap (loader / welcome ⇄ transcript) is a crossfade IN
           PLACE, not a reflow. `popLayout` lifts the exiting branch out of the
           flex column for the duration of its exit, so the entering branch owns

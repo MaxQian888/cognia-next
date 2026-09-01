@@ -20,7 +20,7 @@
  */
 
 import { useSettingsStore } from "@/stores/settings"
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import {
   availableThinkingLevels,
@@ -128,7 +128,10 @@ export function useEffortSurface(session: ChatSession | null): EffortSurface {
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const hiddenTiers = useSettingsStore((s) => s.settings?.composerBehavior?.hiddenEffortTiers)
-  const runtime = useAgentRuntimeStore((s) => s.runtime)
+  // The lane belongs to THIS session, so a runtime chosen in another
+  // conversation must not decide whether this one shows a thinking dial.
+  const runtimeRef = useRuntimeRefForSession(session?.id)
+  const runtime: AgentRuntime = runtimeRef.kind === "builtin" ? "claude-sdk" : "external"
 
   return resolveEffortSurface({
     runtime,

@@ -1,6 +1,10 @@
 /** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
-import { compositionForSession, useAgentRuntimeStore } from "./agent-runtime-store"
+import {
+  compositionForSession,
+  runtimeRefForSession,
+  useAgentRuntimeStore,
+} from "./agent-runtime-store"
 import { BUILTIN_RUNTIME_REF } from "@/lib/ai/agent/runtime-catalog/types"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 // Touch the outer agent barrel so its `export *` lines are covered.
@@ -179,6 +183,48 @@ describe("useAgentRuntimeStore", () => {
     expect(compositionForSession(undefined).presetId).toBe(
       useAgentRuntimeStore.getState().defaultComposition.presetId
     )
+  })
+})
+
+describe("the lane belongs to the session", () => {
+  // The defect this fixes is the one ADR-0117 fixed for the mode and left on
+  // the runtime: a single global value retargeted every other conversation,
+  // including one mid-turn.
+  beforeEach(() => {
+    useAgentRuntimeStore.setState({ sessionRuntimeRefs: {} })
+    useAgentRuntimeStore.getState().setRuntimeRef(BUILTIN_RUNTIME_REF)
+  })
+
+  it("falls back to the app default for a session that never chose", () => {
+    expect(runtimeRefForSession("never-chose")).toEqual({ kind: "builtin" })
+    expect(runtimeRefForSession(undefined)).toEqual({ kind: "builtin" })
+  })
+
+  it("scopes a choice to one session without touching the default or its peers", () => {
+    useAgentRuntimeStore.getState().setSessionRuntimeRef("s1", { kind: "external", agentId: "a1" })
+    expect(runtimeRefForSession("s1")).toEqual({ kind: "external", agentId: "a1" })
+    expect(runtimeRefForSession("s2")).toEqual({ kind: "builtin" })
+    expect(useAgentRuntimeStore.getState().runtimeRef).toEqual({ kind: "builtin" })
+  })
+
+  it("seeds a new session from the default without freezing it there", () => {
+    useAgentRuntimeStore.getState().setRuntimeRef({ kind: "external", agentId: "a1" })
+    expect(runtimeRefForSession("fresh")).toEqual({ kind: "external", agentId: "a1" })
+    useAgentRuntimeStore.getState().setSessionRuntimeRef("fresh", BUILTIN_RUNTIME_REF)
+    expect(runtimeRefForSession("fresh")).toEqual({ kind: "builtin" })
+    expect(runtimeRefForSession("other")).toEqual({ kind: "external", agentId: "a1" })
+  })
+
+  it("clears an override back to the default", () => {
+    useAgentRuntimeStore.getState().setSessionRuntimeRef("s1", { kind: "external", agentId: "a1" })
+    useAgentRuntimeStore.getState().clearSessionRuntimeRef("s1")
+    expect(runtimeRefForSession("s1")).toEqual({ kind: "builtin" })
+  })
+
+  it("leaves the state alone when clearing a session that never chose", () => {
+    const before = useAgentRuntimeStore.getState().sessionRuntimeRefs
+    useAgentRuntimeStore.getState().clearSessionRuntimeRef("never-chose")
+    expect(useAgentRuntimeStore.getState().sessionRuntimeRefs).toBe(before)
   })
 })
 

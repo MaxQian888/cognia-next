@@ -18,7 +18,7 @@
  * Pairs with `<AgentModeSelector>` (Agent Modes, orthogonal to runtime).
  */
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   BotIcon,
@@ -46,16 +46,23 @@ import { ConnectionStatusBadge } from "@/components/agent/external-agent/connect
 import { ExternalAgentManager } from "@/components/agent/external-agent/manager"
 import { cn } from "@/lib/utils"
 import { useAgentRuntimeStore } from "@/stores/agent"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useAgentRuntimeCatalog } from "@/hooks/agent/use-agent-runtime-catalog"
 import { selectExternalAgent } from "@/lib/agent/external-agent-selection"
 import { BUILTIN_RUNTIME_REF } from "@/lib/ai/agent/runtime-catalog/types"
-import type { AgentRuntimeDescriptor } from "@/lib/ai/agent/runtime-catalog/types"
+import type { AgentRuntimeDescriptor, AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 interface Props {
   className?: string
   /** Disable the selector externally (e.g. while a turn is streaming). */
   disabled?: boolean
+  /**
+   * The conversation this chip belongs to. The lane is per session (ADR-0117's
+   * split, extended to the runtime axis), so without it the chip would write
+   * the app default and retarget every other conversation.
+   */
+  sessionId?: string
   /**
    * The provider the next turn will use. It decides which sidecar runtime the
    * builtin row is really describing, which is the whole reason the row can
@@ -64,15 +71,26 @@ interface Props {
   providerId?: string
 }
 
-export function AgentRuntimeSelector({ className, disabled, providerId }: Props) {
+export function AgentRuntimeSelector({ className, disabled, providerId, sessionId }: Props) {
   const t = useTranslations("agentRuntime")
   const tExternal = useTranslations("externalAgent")
   const tHostConfigs = useTranslations("externalAgent.hostConfigs")
   const [manageOpen, setManageOpen] = useState(false)
 
-  const runtimeRef = useAgentRuntimeStore((s) => s.runtimeRef)
-  const setRuntimeRef = useAgentRuntimeStore((s) => s.setRuntimeRef)
+  const runtimeRef = useRuntimeRefForSession(sessionId)
+  const setDefaultRuntimeRef = useAgentRuntimeStore((s) => s.setRuntimeRef)
+  const setSessionRuntimeRef = useAgentRuntimeStore((s) => s.setSessionRuntimeRef)
   const setExternalEnabled = useExternalAgentStore((s) => s.setEnabled)
+
+  // Writing the app default when there is no session is what a composer on the
+  // new-chat surface should do: the choice seeds the conversation it starts.
+  const setRuntimeRef = useCallback(
+    (ref: AgentRuntimeRef) => {
+      if (sessionId) setSessionRuntimeRef(sessionId, ref)
+      else setDefaultRuntimeRef(ref)
+    },
+    [sessionId, setSessionRuntimeRef, setDefaultRuntimeRef]
+  )
 
   const { runtimes, selected, externalEnabled, configuredExternalCount } =
     useAgentRuntimeCatalog(providerId)

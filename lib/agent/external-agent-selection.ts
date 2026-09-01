@@ -55,5 +55,13 @@ export function clearExternalAgentSelectionIfActive(agentId: string): void {
     // landing back on Cognia's own runtime.
     runtime.setRuntimeRef(BUILTIN_RUNTIME_REF)
   }
+  // Sessions that pinned this agent are dangling too. Their composer chip would
+  // repair itself on the next render, but a send from a chip that is not mounted
+  // (a scheduled leg, a background run) would still be handed the dead id.
+  for (const [sessionId, ref] of Object.entries(runtime.sessionRuntimeRefs)) {
+    if (ref.kind === "external" && ref.agentId === agentId) {
+      runtime.clearSessionRuntimeRef(sessionId)
+    }
+  }
   if (external.activeAgentId === agentId) external.setActiveAgent(null)
 }

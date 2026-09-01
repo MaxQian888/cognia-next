@@ -8,7 +8,7 @@ import type { ChatSession } from "@cognia/agent-config-types"
 
 const acknowledge = jest.fn(async (_id: string) => {})
 const resumeNative = jest.fn()
-const setRuntimeRef = jest.fn()
+const setSessionRuntimeRef = jest.fn()
 const setSessionComposition = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
   acknowledgeImportDivergence: (id: string) => acknowledge(id),
@@ -19,7 +19,7 @@ jest.mock("@/lib/session-import/native-resume", () => ({
 jest.mock("@/stores/agent/agent-runtime-store", () => ({
   compositionForSession: () => ({ presetId: "standard" }),
   useAgentRuntimeStore: {
-    getState: () => ({ setRuntimeRef, setSessionComposition }),
+    getState: () => ({ setSessionRuntimeRef, setSessionComposition }),
   },
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
@@ -52,7 +52,7 @@ function session(over: Partial<ChatSession> = {}): ChatSession {
 beforeEach(() => {
   acknowledge.mockClear()
   resumeNative.mockReset()
-  setRuntimeRef.mockClear()
+  setSessionRuntimeRef.mockClear()
   setSessionComposition.mockClear()
   toastSuccess.mockClear()
   toastError.mockClear()
@@ -158,7 +158,10 @@ describe("ImportedOriginChip", () => {
     })
     // One write picks the lane AND the agent, so the chip can no longer leave
     // the composer on an external lane with nothing selected.
-    expect(setRuntimeRef).toHaveBeenCalledWith({ kind: "external", agentId: "agent-1" })
+    expect(setSessionRuntimeRef).toHaveBeenCalledWith(imported.id, {
+      kind: "external",
+      agentId: "agent-1",
+    })
   })
 
   it("keeps the current runtime when native resume verification fails", async () => {
@@ -172,6 +175,6 @@ describe("ImportedOriginChip", () => {
     )
     fireEvent.click(screen.getByTestId("imported-native-resume"))
     await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(setRuntimeRef).not.toHaveBeenCalled()
+    expect(setSessionRuntimeRef).not.toHaveBeenCalled()
   })
 })
