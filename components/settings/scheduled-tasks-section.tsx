@@ -55,6 +55,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { SettingsAlert } from "@/components/settings/common/settings-section"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { isTauri } from "@/lib/tauri"
+import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
+import { useCapability } from "@/hooks/use-host-profile"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useSystemScheduler } from "@/hooks/scheduler/use-system-scheduler"
@@ -396,7 +399,14 @@ function DefaultsCard({ defaults, onChange, tDefaults }: DefaultsCardProps) {
   const tExecution = useTranslations("scheduler.settings.defaults.execution")
 
   const [testingChannel, setTestingChannel] = useState<NotificationChannel | null>(null)
-  const isWebMode = !isTauri()
+  /**
+   * Whether this device can put a notification in front of a human, which is
+   * not the same question as `isTauri()`. `push-display` is in the mobile
+   * baseline (`lib/platform/capabilities.ts`), so a phone answers yes, yet
+   * `!isTauri()` called every phone a browser and told it the desktop channel
+   * was unavailable on a device that shows notifications natively.
+   */
+  const canDisplayNotifications = useCapability("push-display")
 
   // Layer 2 of the `im` channel — the ops chat a task notification falls back
   // to when the task names no `imTarget`. It lives on AppSettings rather than
@@ -594,7 +604,7 @@ function DefaultsCard({ defaults, onChange, tDefaults }: DefaultsCardProps) {
                 )
               })}
             </div>
-            {channels.includes("desktop") && isWebMode && (
+            {channels.includes("desktop") && !canDisplayNotifications && (
               <p className="text-xs text-muted-foreground">{tNotification("desktopOnlyHint")}</p>
             )}
           </div>
@@ -732,7 +742,16 @@ interface SystemSchedulerCardProps {
 }
 
 function SystemSchedulerCard({ tSystem }: SystemSchedulerCardProps) {
-  const desktopAvailable = isTauri()
+  /**
+   * The OS scheduler stays desktop-only, and correctly so: every `scheduler_*`
+   * command is `transports: ["internal"]`, because launchd/Task Scheduler
+   * entries are registered by the process that owns the login session. What was
+   * wrong was the sentence. "Unavailable on web" is not what a paired phone or
+   * a headless host needs to hear, and `needs-desktop-shell` says the true
+   * thing for all three shapes at once.
+   */
+  const reach = useSurfaceReach({ capability: "shell", requirement: "desktop-shell" })
+  const desktopAvailable = reach.available
 
   return (
     <Card>
@@ -747,9 +766,7 @@ function SystemSchedulerCard({ tSystem }: SystemSchedulerCardProps) {
         {desktopAvailable ? (
           <SystemSchedulerCardBody tSystem={tSystem} />
         ) : (
-          <SettingsAlert icon={<AlertTriangle className="h-4 w-4" />}>
-            {tSystem("unavailableOnWeb")}
-          </SettingsAlert>
+          <SurfaceUnavailableNotice reach={reach} data-testid="system-scheduler-unavailable" />
         )}
       </CardContent>
     </Card>

@@ -6,6 +6,24 @@ import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
 
+// The system-scheduler card now asks for reach rather than for the shell, so
+// the existing `mockedIsTauri` switches keep driving it: on the desktop the
+// surface is available, everywhere else the honest block is
+// `needs-desktop-shell` (a headless host runs plenty and still has no window).
+const canDisplayNotificationsRef = { current: false }
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: () => canDisplayNotificationsRef.current,
+}))
+
+jest.mock("@/hooks/platform/use-surface-reach", () => ({
+  useSurfaceReach: () => {
+    const { isTauri } = jest.requireMock("@/lib/tauri") as { isTauri: () => boolean }
+    return isTauri()
+      ? { available: true }
+      : { available: false, block: "needs-desktop-shell", remedy: null }
+  },
+}))
+
 jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() },
 }))
@@ -76,6 +94,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   appSettingsRef.value = null
   mockedIsTauri.mockReturnValue(false)
+  canDisplayNotificationsRef.current = false
   mockedSigningHook.mockReturnValue({ enabled: false, loading: false })
   mockedSystemHook.mockReturnValue({
     capabilities: null,
@@ -233,6 +252,26 @@ describe("ScheduledTasksSection — defaults card", () => {
     fireEvent.click(desktopCheckbox)
     const td = useSchedulerStore.getState().permissionPolicy.taskDefaults
     expect(td?.notification?.channels).toContain("desktop")
+  })
+
+  // `push-display` is in the mobile baseline, so a phone can show a desktop-class
+  // notification. The hint used to key off `!isTauri()`, which called every
+  // phone a browser and warned it about a channel it actually supports.
+  it("warns about the desktop channel only where notifications cannot be displayed", () => {
+    render(<ScheduledTasksSection />)
+    fireEvent.click(document.getElementById("channel-desktop") as HTMLInputElement)
+    expect(
+      screen.getByText(/desktop notifications only fire in the desktop build/i)
+    ).toBeInTheDocument()
+  })
+
+  it("drops the warning on a device that can display notifications", () => {
+    canDisplayNotificationsRef.current = true
+    render(<ScheduledTasksSection />)
+    fireEvent.click(document.getElementById("channel-desktop") as HTMLInputElement)
+    expect(
+      screen.queryByText(/desktop notifications only fire in the desktop build/i)
+    ).not.toBeInTheDocument()
   })
 
   it("disables the webhook URL input when webhook is not in the channel list", () => {
@@ -467,12 +506,15 @@ describe("ScheduledTasksSection — webhook signing loading branch", () => {
 })
 
 describe("ScheduledTasksSection — system scheduler card", () => {
-  it("renders the desktop-only fallback alert on web", () => {
+  it("says the surface needs the desktop app, not that this is 'web'", () => {
     mockedIsTauri.mockReturnValue(false)
     render(<ScheduledTasksSection />)
-    expect(
-      screen.getByText(/native scheduler integration is available in the desktop build only/i)
-    ).toBeInTheDocument()
+    // The old copy said "available in the desktop build only", which reads as a
+    // build complaint to a paired phone and is wrong for a headless host that
+    // runs the scheduler and simply has no login session to register into.
+    expect(screen.getByTestId("system-scheduler-unavailable")).toHaveTextContent(
+      /needs the desktop app itself/i
+    )
   })
 
   it("renders availability + elevation badges on desktop", () => {

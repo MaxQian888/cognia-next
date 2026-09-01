@@ -17,6 +17,14 @@ jest.mock("@cognia/logging", () => ({
 // `const`.
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
 
+// The Test action is gated on reach, not on `isTauri()`: `claude_feature_call`
+// is internal-only, so the honest block is `needs-desktop-shell` rather than a
+// claim about which shell this is.
+const reachRef = { current: { available: true } as { available: boolean; block?: string } }
+jest.mock("@/hooks/platform/use-surface-reach", () => ({
+  useSurfaceReach: () => reachRef.current,
+}))
+
 const discoverMcpServerViaSidecar = jest.fn()
 jest.mock("@/lib/claude/feature-call", () => ({
   discoverMcpServerViaSidecar: (...a: unknown[]) => discoverMcpServerViaSidecar(...a),
@@ -101,6 +109,7 @@ function renderDetail(overrides: Partial<React.ComponentProps<typeof McpServerDe
 
 beforeEach(() => {
   mockIsTauri.mockReturnValue(true)
+  reachRef.current = { available: true }
   for (const fn of Object.values(handlers)) fn.mockReset()
   discoverMcpServerViaSidecar.mockReset()
   recordMcpCapabilities.mockClear()
@@ -169,10 +178,16 @@ describe("McpServerDetail", () => {
     expect(recordMcpCapabilities).not.toHaveBeenCalled()
   })
 
-  it("disables the test action off the desktop", () => {
-    mockIsTauri.mockReturnValue(false)
+  it("disables the test action, and names the real reason, when the shell cannot reach a sidecar", () => {
+    reachRef.current = { available: false, block: "needs-desktop-shell" }
     renderDetail()
-    expect(screen.getByText("test").closest("button")).toBeDisabled()
+
+    const button = screen.getByText("test").closest("button")
+    expect(button).toBeDisabled()
+    // Not "requires desktop mode": a phone paired to a Host is not a browser
+    // that needs a different build, and the shared vocabulary says so.
+    // The next-intl stub returns the bare key, so this is `surfaceReach.block.*`.
+    expect(button).toHaveAttribute("title", "block.needs-desktop-shell")
   })
 
   it("offers a trust review only while the server is unreviewed", async () => {

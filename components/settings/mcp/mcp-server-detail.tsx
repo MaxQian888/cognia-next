@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { loggers } from "@cognia/logging"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { discoverMcpServerViaSidecar, type McpDiscoveryResult } from "@/lib/claude/feature-call"
@@ -85,19 +85,28 @@ export function McpServerDetail({
   const tRow = useTranslations("mcp.row")
   const tCard = useTranslations("mcp.card")
   const tTest = useTranslations("mcp.test")
+  const tReach = useTranslations("surfaceReach")
   const [testing, setTesting] = useState(false)
   const [reviewing, setReviewing] = useState(false)
   const [testResult, setTestResult] = useState<McpDiscoveryResult | null>(null)
   const { logs } = useMcpServerLogs(server.name, { limit: 8 })
 
+  /**
+   * Discovery runs `claude_feature_call`, which is `transports: ["internal"]`,
+   * so the gate itself is right. Its wording was not: "requires desktop mode"
+   * is a platform claim, and a phone paired to a Host is not a browser that
+   * needs a different build. `needs-desktop-shell` names the actual reason and
+   * reuses the vocabulary every other gated surface already reads from.
+   */
+  const testReach = useSurfaceReach({ capability: "sidecar", requirement: "desktop-shell" })
   const label = server.displayName?.trim() || server.name
   const trustState = server.trust?.state ?? "legacy"
   const config = server.config as Record<string, unknown>
 
   const runTest = async () => {
     if (testing) return
-    if (!isTauri()) {
-      toast.error(tTest("desktopOnly"))
+    if (!testReach.available) {
+      toast.error(tReach(`block.${testReach.block}`))
       return
     }
     setTesting(true)
@@ -213,8 +222,8 @@ export function McpServerDetail({
             variant="outline"
             size="sm"
             onClick={() => void runTest()}
-            disabled={testing || !isTauri()}
-            title={isTauri() ? tRow("testTooltip") : tRow("testDesktopOnly")}
+            disabled={testing || !testReach.available}
+            title={testReach.available ? tRow("testTooltip") : tReach(`block.${testReach.block}`)}
           >
             {testing ? (
               <Loader2Icon className="size-3.5 animate-spin sm:mr-1.5" />
