@@ -254,7 +254,11 @@ export function MobileCanvas({
     >
       {connectActive ? (
         <div
-          className="pointer-events-none absolute inset-x-0 top-2 z-20 mx-auto w-fit rounded-pill bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-md"
+          // The floating hint is the one thing over the canvas that must
+          // read as lifted. `data-elevation` puts that depth on the scale the
+          // style pack tunes; `shadow-md` is a value no pack can reach.
+          data-elevation="2"
+          className="pointer-events-none absolute inset-x-0 top-2 z-20 mx-auto w-fit rounded-pill bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
           data-testid="mobile-connect-banner"
         >
           {connectBannerText}

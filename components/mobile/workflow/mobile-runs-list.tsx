@@ -142,7 +142,11 @@ export function MobileRunsList({ workflowId }: MobileRunsListProps) {
       <RunVerticalGantt
         runs={runs}
         onCancelRun={cancelling ? undefined : setCancelTarget}
-        className="rounded-md border border-border bg-card"
+        // The Gantt takes a className rather than children, so the tier is
+        // set through the same attribute `Surface` writes instead of wrapping
+        // it in one and giving the chart a second box to size against.
+        data-surface-layer="raised"
+        className="rounded-control border border-border bg-[var(--surface-bg)]"
       />
 
       <AlertDialog

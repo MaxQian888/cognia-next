@@ -225,9 +225,14 @@ function ActiveRow({
       ref={setNodeRef}
       style={style}
       data-testid={`mobile-home-editor-active-${item.id}`}
+      data-elevation={isDragging ? "2" : undefined}
       className={cn(
         "flex items-center gap-2 rounded border bg-card px-2 py-1.5",
-        isDragging && "opacity-50 shadow-md"
+        // `data-elevation` rather than `shadow-md`: the elevation scale is
+        // what a style pack retunes, and a flat pack has no way to reach a raw
+        // shadow utility. The row lifting under a finger is exactly the depth
+        // cue that pack is choosing about.
+        isDragging && "opacity-50"
       )}
     >
       <button

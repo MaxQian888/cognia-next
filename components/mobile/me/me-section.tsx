@@ -14,6 +14,7 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 import { ItemGroup, ItemSeparator } from "@/components/ui/item"
+import { Surface } from "@/components/surface/surface"
 
 export interface MeSectionProps {
   title: string
@@ -49,16 +50,30 @@ export function MeSection({
         </h2>
         {description ? <p className="text-[11px] text-muted-foreground/80">{description}</p> : null}
       </div>
-      <ItemGroup className="overflow-hidden rounded-xl border bg-card" aria-label={title}>
-        {withSeparators
-          ? items.map((child, idx) => (
-              <React.Fragment key={(child as React.ReactElement).key ?? idx}>
-                {idx > 0 ? <ItemSeparator /> : null}
-                {child}
-              </React.Fragment>
-            ))
-          : items}
-      </ItemGroup>
+      {/* `Surface` rather than `bg-card rounded-xl`: this group is every row
+          block on all 48 `/me` pages, so it is the single largest thing a
+          style pack could not reach on a phone. `raised` is the tier a card
+          sits at, and `panel` is the named radius step that tracks `--radius`
+          instead of pinning 12px. The border stays a class because a tier
+          implies a background, not a stroke. */}
+      <Surface
+        asChild
+        layer="raised"
+        radius="panel"
+        className="overflow-hidden border"
+        aria-label={title}
+      >
+        <ItemGroup>
+          {withSeparators
+            ? items.map((child, idx) => (
+                <React.Fragment key={(child as React.ReactElement).key ?? idx}>
+                  {idx > 0 ? <ItemSeparator /> : null}
+                  {child}
+                </React.Fragment>
+              ))
+            : items}
+        </ItemGroup>
+      </Surface>
     </section>
   )
 }

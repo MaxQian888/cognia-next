@@ -97,9 +97,18 @@ export function MobileWorkflowCopilotSheet({
         aria-label={t("copilotTitle")}
         aria-hidden={!open}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 flex h-[88vh] flex-col rounded-t-2xl border-t bg-background shadow-2xl transition-transform duration-300 ease-out",
+          // The `overlay` tier, the named `stage` step, and an elevation,
+          // instead of `bg-background rounded-t-2xl shadow-2xl`. This is the
+          // copilot's whole frame, so under a sharp pack it was the one sheet
+          // in the editor that stayed rounded, and under any pack it kept a
+          // depth nothing had chosen. `rounded-t-stage` rather than
+          // `radius="stage"`, because only the top corners are rounded and the
+          // prop sets all four.
+          "fixed inset-x-0 bottom-0 z-50 flex h-[88vh] flex-col rounded-t-stage border-t bg-[var(--surface-bg)] transition-transform duration-300 ease-out",
           open ? "translate-y-0" : "pointer-events-none translate-y-full"
         )}
+        data-surface-layer="overlay"
+        data-elevation="3"
         data-testid="mobile-copilot-sheet"
         data-state={open ? "open" : "closed"}
       >

@@ -87,7 +87,13 @@ export function MentionPopover({
           // Float as a centred popover, not a true edge-to-edge bottom
           // sheet: matches the original visual (max-md, rounded all
           // corners) while still receiving Sheet's animation tokens.
-          "mx-auto w-[calc(100%-1rem)] max-w-md gap-0 rounded-2xl border bg-popover p-0 text-popover-foreground",
+          // `overlay` tier plus the named `stage` step, rather than
+          // `bg-popover rounded-2xl`. A style pack retunes both; the two
+          // literals it replaces reach neither, and this panel is rendered by
+          // the DESKTOP composer too, so squaring the UI used to leave one
+          // 16px-rounded popover behind.
+          "mx-auto w-[calc(100%-1rem)] max-w-md gap-0 rounded-stage border p-0 text-popover-foreground",
+          "bg-[var(--surface-bg)]",
           className
         )}
         style={{

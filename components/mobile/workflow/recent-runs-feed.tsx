@@ -11,6 +11,7 @@ import { listWorkflows } from "@/lib/db/workflows"
 import type { WorkflowRow, WorkflowRunRow } from "@/types/workflow/visual"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
+import { Surface } from "@/components/surface/surface"
 
 export interface RecentRunsFeedProps {
   /** Cap on how many runs to show. */
@@ -53,15 +54,17 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
         {t("runsHeader")}
       </h2>
       {runs.length === 0 ? (
-        <p
-          className="rounded-md border border-dashed border-border bg-card/40 px-4 py-4 text-center text-xs text-muted-foreground"
-          data-testid="recent-runs-empty"
+        <Surface
+          asChild
+          radius="control"
+          className="border border-dashed border-border px-4 py-4 text-center text-xs text-muted-foreground"
         >
-          {t("noRuns")}
-        </p>
+          <p data-testid="recent-runs-empty">{t("noRuns")}</p>
+        </Surface>
       ) : (
         <motion.ul
-          className="flex flex-col divide-y divide-border rounded-md border border-border bg-card"
+          data-surface-layer="raised"
+          className="flex flex-col divide-y divide-border rounded-control border border-border bg-[var(--surface-bg)]"
           initial={reduce ? false : "initial"}
           animate="animate"
           variants={STAGGER_CONTAINER}

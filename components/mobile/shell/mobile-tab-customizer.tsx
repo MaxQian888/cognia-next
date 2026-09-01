@@ -210,10 +210,13 @@ function TabRow({
       ref={setNodeRef}
       style={style}
       data-testid={`mobile-tab-customizer-row-${id}`}
+      data-elevation={isDragging ? "2" : undefined}
       className={cn(
         "flex items-center gap-2 rounded border bg-card px-2 py-1.5",
         !visible && "opacity-70",
-        isDragging && "opacity-50 shadow-md"
+        // Same as the quick-actions editor beside it: the drag lift is an
+        // elevation the style pack owns, not a fixed shadow utility.
+        isDragging && "opacity-50"
       )}
     >
       <button

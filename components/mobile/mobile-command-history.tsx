@@ -39,6 +39,7 @@ import { getDb } from "@/lib/db/schema"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { execTerminalCommand, type RemoteExecResult } from "@/lib/terminal/remote-api"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
+import { Surface } from "@/components/surface/surface"
 
 /** Replay-dialog lifecycle: confirm → running → captured result. */
 type RunPhase = { kind: "confirm" } | { kind: "running" } | { kind: "done"; result: RemoteExecResult }
@@ -161,19 +162,21 @@ export function MobileCommandHistory() {
       </div>
 
       {rows.length === 0 ? (
-        <p
-          className="rounded-xl border bg-card px-3 py-6 text-center text-xs text-muted-foreground"
-          data-testid="command-history-empty"
+        <Surface
+          asChild
+          radius="panel"
+          className="border px-3 py-6 text-center text-xs text-muted-foreground"
         >
-          {t("empty")}
-        </p>
+          <p data-testid="command-history-empty">{t("empty")}</p>
+        </Surface>
       ) : groups.length === 0 ? (
-        <p
-          className="rounded-xl border bg-card px-3 py-6 text-center text-xs text-muted-foreground"
-          data-testid="command-history-no-results"
+        <Surface
+          asChild
+          radius="panel"
+          className="border px-3 py-6 text-center text-xs text-muted-foreground"
         >
-          {t("noResults")}
-        </p>
+          <p data-testid="command-history-no-results">{t("noResults")}</p>
+        </Surface>
       ) : (
         groups.map((group) => (
           <MeSection
