@@ -675,6 +675,18 @@ export interface BuildOptionsContext {
    * "workflow", team member sends "agent-team".
    */
   traceSurface?: SpanSurface
+  /**
+   * The external agent this turn will run on, when it is not running on
+   * Cognia's own runtime.
+   *
+   * Without it the frozen execution spec described every turn as a sidecar
+   * runtime, including the ones dispatched to Codex or Claude Code, so the
+   * agent trace and the execution fingerprint both named a runtime that was
+   * not running. `runtimeFromLegacy` only distinguishes "claude" from anything
+   * else, but the id is carried rather than a flag so the decision trace says
+   * WHICH agent.
+   */
+  externalRuntimeId?: string
   /** Frozen logical turn id shared by every attempt and plugin tool call. */
   turnId?: string
   /** Final per-run identity supplied by durable execution owners before minting. */
@@ -4383,7 +4395,11 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // Chat sessions are agent sessions by definition; the legacy
       // provider id still drives the runtime mapping.
       policy: { executionKind: "agent" },
-      legacy: { providerId: opts.provider, modelId: opts.model },
+      legacy: {
+        providerId: opts.provider,
+        modelId: opts.model,
+        ...(ctx.externalRuntimeId ? { runtime: ctx.externalRuntimeId } : {}),
+      },
       identity:
         session?.id || ctx.executionIdentity
           ? { ...(session?.id ? { sessionId: session.id } : {}), ...ctx.executionIdentity }

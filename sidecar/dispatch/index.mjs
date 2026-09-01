@@ -37,9 +37,17 @@ export function dispatch(params) {
   if (adapterId) {
     const adapter = resolveRuntimeAdapter(adapterId)
     if (!adapter) {
-      // Fail closed: an unknown frozen adapter is a protocol error, never a
-      // guess. (The resolver can only produce known ids; this guards skew.)
-      throw new Error(`unknown frozen runtimeAdapter: ${adapterId}`)
+      // Fail closed: never guess a runtime. The two cases read differently on
+      // purpose. `external` is a KNOWN adapter that this host cannot serve at
+      // all (an external agent runs in the renderer's external-agent manager,
+      // not here), so a frame carrying it means a turn was routed to the wrong
+      // executor. Anything else is version skew between the resolver and this
+      // host.
+      throw new Error(
+        adapterId === "external"
+          ? 'runtimeAdapter "external" is not served by the sidecar: this turn belongs to the external-agent manager'
+          : `unknown frozen runtimeAdapter: ${adapterId}`
+      )
     }
     dispatchTelemetry.frozenDispatchCount += 1
     return adapter.dispatch(params)

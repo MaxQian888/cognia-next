@@ -6114,6 +6114,35 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
     expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
   })
 
+  // A turn dispatched to Codex used to be described as a sidecar runtime,
+  // because chat never told the resolver which lane it was on. The trace and
+  // the fingerprint both named a runtime that was not running.
+  it("names the external lane on the frozen spec when the turn runs on one", async () => {
+    const onResolvedExecutionSpec = jest.fn()
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      externalRuntimeId: "codex-1",
+      onResolvedExecutionSpec,
+    })
+
+    const execution = opts.execution as unknown as Record<string, unknown>
+    expect(execution.runtimeAdapter).toBe("external")
+    expect(onResolvedExecutionSpec.mock.calls[0][0].runtimeAdapter).toBe("external")
+  })
+
+  // The fingerprint is the turn's execution identity, so two turns that run on
+  // different runtimes must not share one.
+  it("gives an external turn a different execution fingerprint", async () => {
+    const builtin = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    const external = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      externalRuntimeId: "codex-1",
+    })
+    const fingerprint = (o: typeof builtin) =>
+      (o.execution as unknown as { executionFingerprint: string }).executionFingerprint
+    expect(fingerprint(builtin)).not.toBe(fingerprint(external))
+  })
+
   it("uses the durable caller's final run identity before fingerprinting", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1" }),

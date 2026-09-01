@@ -28,6 +28,7 @@ import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
 import { selectComposerEphemeralSkillIds, useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
+import { runtimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { isTauri } from "@/lib/tauri"
 import { renderWorkingSetForCompaction } from "@/lib/chat/working-set"
 import { loadCapturedCompactionCheckpoint } from "@/lib/rag/compaction-runtime"
@@ -64,6 +65,13 @@ export async function buildSendOptions(
   turnIdentity?: ChatTurnSkillIdentity
 ): Promise<SendOptions> {
   const appSettings = useSettingsStore.getState().settings
+  const runtimeRef = runtimeRefForSession(session?.id)
+  const externalRuntimeId =
+    runtimeRef.kind === "external"
+      ? runtimeRef.agentId
+      : runtimeRef.kind === "host"
+        ? runtimeRef.configId
+        : undefined
   // The composer keeps @-referenced files/folders in the chat store. Hand
   // them to resolveSendOptions so each turn announces the directories the
   // SDK's Read tool may need.
@@ -347,5 +355,11 @@ export async function buildSendOptions(
         }
       : undefined,
     onResolvedExecutionSpec,
+    // The lane this turn will actually take, so the frozen execution spec and
+    // the agent trace stop naming a sidecar runtime for a turn dispatched to an
+    // external agent. Read here rather than threaded in because the send path
+    // resolves it from the same store a few steps later, and two reads of one
+    // value are exactly how they drift.
+    ...(externalRuntimeId ? { externalRuntimeId } : {}),
   })
 }
