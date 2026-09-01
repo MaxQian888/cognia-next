@@ -7,6 +7,7 @@ import {
   getBrowserBuiltinRegistry,
   getBrowserBuiltinRegistryEntry,
 } from "./browser-builtin-registry"
+import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
 import type { PluginManifest } from "@/types/plugin"
 
 describe("browser-builtin-registry", () => {
@@ -15,6 +16,7 @@ describe("browser-builtin-registry", () => {
     const ids = entries.map((e) => e.manifest.id).sort()
     expect(ids).toEqual([
       "cognia-agent-team-examples",
+      "cognia-anime-effort",
       "cognia-anthropic-skills",
       "cognia-appearance-demo",
       "cognia-backend-refactor",
@@ -149,6 +151,68 @@ describe("browser-builtin-registry", () => {
       )
     } finally {
       env.restore()
+    }
+  })
+
+  /**
+   * Having the CSS on the entry is not having it in the document. `manifest.styles`
+   * is the gate the host reads first, so this drives the real load path instead
+   * of asserting the constant back to itself.
+   */
+  it("injects the tactical mind dial stylesheet through the host's own gate", async () => {
+    const entry = getBrowserBuiltinRegistryEntry("cognia-anime-effort")
+    expect(entry?.manifest.extensions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ point: "chat.input.actions" })])
+    )
+
+    const injected = await loadPluginStyles({
+      pluginId: entry!.manifest.id,
+      pluginRoot: entry!.path,
+      stylesEntry: entry!.manifest.styles,
+      bundledCss: entry!.bundledStyles,
+    })
+    expect(injected).toBe(true)
+
+    const css = document.querySelector<HTMLStyleElement>(
+      'style[data-plugin-styles="cognia-anime-effort"]'
+    )?.textContent
+    expect(css).toContain(".aef-panel")
+
+    // `@keyframes` is invalid inside `@scope` and only TOP-LEVEL at-rules are
+    // hoisted back out. Authored inside the reduced-motion media query it would
+    // be dropped, leaving `animation: aef-pulse` pointing at nothing.
+    // Compared against the at-rule itself: the hoist header is a comment that
+    // also spells "@scope", and matching that would pass either way.
+    expect(css!.indexOf("@keyframes aef-pulse")).toBeGreaterThanOrEqual(0)
+    expect(css!.indexOf("@keyframes aef-pulse")).toBeLessThan(css!.indexOf("@scope ("))
+
+    // Injection appends to `document.head`, which outlives the test. Left there
+    // it would be picked up by anything later in this file that queries the
+    // head, and a second injection of the same id would take the "already
+    // present" branch instead of the append branch this test exercises.
+    removePluginStyles("cognia-anime-effort")
+    expect(document.querySelector('style[data-plugin-styles="cognia-anime-effort"]')).toBeNull()
+  })
+
+  /**
+   * The loader falls back to `{ default: definition }` when an entry omits
+   * `moduleExports`, and the extension bridge resolves components by NAME out of
+   * that object. A builtin that declares `extensions[]` without publishing its
+   * namespace registers nothing and fails only as a runtime diagnostic.
+   */
+  it("publishes the named export every builtin extension declares", () => {
+    for (const entry of getBrowserBuiltinRegistry()) {
+      for (const extension of entry.manifest.extensions ?? []) {
+        expect({
+          plugin: entry.manifest.id,
+          export: extension.export,
+          resolved: typeof entry.moduleExports?.[extension.export],
+        }).toEqual({
+          plugin: entry.manifest.id,
+          export: extension.export,
+          resolved: "function",
+        })
+      }
     }
   })
 

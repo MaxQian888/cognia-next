@@ -1,0 +1,7 @@
+---
+"cognia-next": minor
+---
+
+Add the Tactical Mind Dial composer plugin, a themed reasoning-intensity control for the active conversation. It offers the tiers the conversation can really carry by asking the host for its own answer rather than deriving a second one, so the dial and the composer's effort chip always agree on the lane, the model behind an unpinned session, whether that model reasons at all, and the tiers you have hidden. The plugin SDK now publishes that resolver alongside the tier vocabulary.
+
+The plugin session store follows conversations created after startup, re-reads the active row on a switch and on a write that bypasses it, keeps the fields that have no column when it does, drops a conversation deleted elsewhere instead of serving it forever, writes the Squad handover to its own column rather than the imported-notes blob, completes whichever half of the reasoning tier a caller left out, and rolls the row back when the write behind it fails. Moving a conversation to another Workspace from a plugin now performs the whole move, roster and execution context included, and refuses the cases the in-app move refuses rather than half-writing them.

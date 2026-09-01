@@ -1,0 +1,119 @@
+{
+  "id": "cognia-anime-effort",
+  "name": "Tactical Mind Dial",
+  "version": "0.1.0",
+  "description": "An original tactical-anime reasoning intensity console for the active conversation.",
+  "type": "frontend",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "capabilities": ["components"],
+  "permissions": ["extension:ui", "session:read", "session:write"],
+  "main": "src/index.tsx",
+  "styles": "styles.css",
+  "activationEvents": ["startup"],
+  "extensions": [
+    {
+      "point": "chat.input.actions",
+      "entry": "src/index.tsx",
+      "export": "AnimeEffortControl",
+      "priority": 18,
+      "minWidth": 76,
+      "maxWidth": 118,
+      "labelKey": "control.label"
+    }
+  ],
+  "i18n": {
+    "locales": {
+      "en": {
+        "control.label": "Mind intensity",
+        "control.aria": "Mind intensity: {level}",
+        "control.unavailable": "Open a conversation to adjust its mind intensity",
+        "control.unsupported": "This model has no reasoning-depth control",
+        "panel.eyebrow": "COGNITION CONTROL // 07",
+        "panel.title": "Tactical mind dial",
+        "panel.subtitle": "The next turn will use this reasoning profile.",
+        "panel.operatorAlt": "Original tactical analyst operator",
+        "panel.levelAria": "Reasoning intensity profiles",
+        "panel.current": "ACTIVE",
+        "panel.applying": "SYNCING",
+        "panel.success": "Mind intensity set to {level}.",
+        "panel.error": "Could not update the current conversation.",
+        "level.off.name": "Standby",
+        "level.off.code": "00 / IDLE",
+        "level.off.desc": "Follow the model default. Fastest response, no requested depth.",
+        "level.low.name": "Recon",
+        "level.low.code": "01 / SCAN",
+        "level.low.desc": "Quick checks, summaries, and low-risk edits.",
+        "level.medium.name": "Patrol",
+        "level.medium.code": "02 / TRACE",
+        "level.medium.desc": "Balanced reasoning for everyday implementation work.",
+        "level.high.name": "Assault",
+        "level.high.code": "03 / BREAK",
+        "level.high.desc": "Deeper analysis for multi-file changes and hard bugs.",
+        "level.xhigh.name": "Siege",
+        "level.xhigh.code": "04 / SIEGE",
+        "level.xhigh.desc": "Extended reasoning for architecture and complex trade-offs.",
+        "level.max.name": "Contingency",
+        "level.max.code": "05 / LIMIT",
+        "level.max.desc": "Maximum native depth when the active model supports it.",
+        "level.ultracode.name": "Singularity",
+        "level.ultracode.code": "06 / CORE",
+        "level.ultracode.desc": "Cognia's deepest profile, with dynamic workflow tools enabled."
+      },
+      "zh-CN": {
+        "control.label": "思考强度",
+        "control.aria": "思考强度：{level}",
+        "control.unavailable": "打开一个对话后才能调整思考强度",
+        "control.unsupported": "当前模型不支持调节思考强度",
+        "panel.eyebrow": "认知控制 // 07",
+        "panel.title": "战术思考调节器",
+        "panel.subtitle": "下一轮对话将使用此推理配置。",
+        "panel.operatorAlt": "原创战术分析干员",
+        "panel.levelAria": "思考强度配置",
+        "panel.current": "已启用",
+        "panel.applying": "同步中",
+        "panel.success": "思考强度已切换为「{level}」。",
+        "panel.error": "无法更新当前对话。",
+        "level.off.name": "待机",
+        "level.off.code": "00 / 静默",
+        "level.off.desc": "跟随模型默认设置，响应最快，不额外要求推理深度。",
+        "level.low.name": "侦察",
+        "level.low.code": "01 / 扫描",
+        "level.low.desc": "适合快速检查、摘要与低风险修改。",
+        "level.medium.name": "巡航",
+        "level.medium.code": "02 / 索引",
+        "level.medium.desc": "兼顾速度与质量，适合日常实现任务。",
+        "level.high.name": "强袭",
+        "level.high.code": "03 / 突破",
+        "level.high.desc": "为多文件改动和棘手问题提供更深分析。",
+        "level.xhigh.name": "攻坚",
+        "level.xhigh.code": "04 / 围攻",
+        "level.xhigh.desc": "适合架构设计与复杂权衡的长程推理。",
+        "level.max.name": "危机",
+        "level.max.code": "05 / 极限",
+        "level.max.desc": "当模型支持时，启用其原生最高推理深度。",
+        "level.ultracode.name": "奇点",
+        "level.ultracode.code": "06 / 核心",
+        "level.ultracode.desc": "Cognia 最深思考配置，并启用动态工作流工具。"
+      }
+    }
+  },
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.tsx"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.tsx"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.tsx"
+    }
+  }
+}

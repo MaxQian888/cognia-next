@@ -43,6 +43,7 @@ import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.js
 import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
 import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
 import figmaExternalServiceManifest from "@/plugins/figma-external-service/plugin.json"
+import animeEffortManifest from "@/plugins/cognia-anime-effort/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -82,6 +83,7 @@ import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/in
 import sreAgentModule from "@/plugins/sre-agent/src/index"
 import * as githubDeliveryModule from "@/plugins/github-delivery/src/index"
 import figmaExternalServiceModule from "@/plugins/figma-external-service/src/index"
+import * as animeEffortModule from "@/plugins/cognia-anime-effort/src/index"
 
 export interface BrowserBuiltinAsset {
   url: string
@@ -223,6 +225,18 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     load: async () => resolvePluginModule(uiSurfaceReferenceModule),
     moduleExports: uiSurfaceReferenceModule as unknown as Record<string, unknown>,
     bundledStyles: uiSurfaceReferenceModule.REFERENCE_PLUGIN_CSS,
+  },
+  {
+    manifest: builtinManifest(animeEffortManifest, animeEffortModule),
+    path: "builtin://cognia-anime-effort",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(animeEffortModule),
+    // Required, not optional: the manifest declares `extensions[]`, and the
+    // bridge resolves `AnimeEffortControl` by name out of these exports. The
+    // `{ default: definition }` fallback drops it and the composer slot renders
+    // nothing.
+    moduleExports: animeEffortModule as unknown as Record<string, unknown>,
+    bundledStyles: animeEffortModule.ANIME_EFFORT_CSS,
   },
   {
     manifest: builtinManifest(clipboardHistoryManifest, clipboardHistoryModule),

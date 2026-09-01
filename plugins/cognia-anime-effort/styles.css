@@ -1,0 +1,10 @@
+/*
+ * Declared so `manifest.styles` is set. That key, not this file, is what gates
+ * style injection: `manager.ts` calls `loadPluginStyles`, which returns early
+ * on a missing `stylesEntry` before it ever looks at the bundled source.
+ *
+ * The rules themselves live in `ANIME_EFFORT_CSS` (src/index.tsx) and reach the
+ * document through the browser builtin registry's `bundledStyles`, which
+ * `loadPluginStyles` prefers for any `builtin://` root. Keeping one copy there,
+ * rather than duplicating ~200 lines here, is what stops the two drifting.
+ */

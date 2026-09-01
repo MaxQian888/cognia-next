@@ -91,6 +91,7 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   "clipboard-history": ["field_missing:tools"],
   "clipboard-tools": ["field_missing:tools", "field_missing:workflow"],
   "cognia-appearance-demo": [],
+  "cognia-anime-effort": [],
   "cognia-backend-refactor": [
     "field_missing:skills",
     "field_missing:character-pack",
