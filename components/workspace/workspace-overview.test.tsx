@@ -89,9 +89,10 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
 }))
 
+import { useState } from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { WorkspaceOverview } from "./workspace-overview"
+import { WorkspaceOverview, type WorkspaceTab } from "./workspace-overview"
 
 function issue(status: string) {
   return { id: `i-${status}-${Math.random()}`, status, issueProjectId: "p1" }
@@ -108,6 +109,16 @@ beforeEach(() => {
   listWorkspaceEnvironmentsMock.mockResolvedValue([])
 })
 
+/**
+ * The tab is a prop now (driven by `?tab=` on the page), so a click only moves
+ * the strip if something owns the value. This is the page's job in production,
+ * and this harness is the smallest stand-in for it.
+ */
+function ControlledOverview() {
+  const [tab, setTab] = useState<WorkspaceTab>("overview")
+  return <WorkspaceOverview tab={tab} onTabChange={setTab} />
+}
+
 describe("WorkspaceOverview", () => {
   it("titles itself with the active workspace name", () => {
     storeState = {
@@ -121,7 +132,7 @@ describe("WorkspaceOverview", () => {
 
   it("switches between Overview, Environments, and Source Control", async () => {
     const user = userEvent.setup()
-    render(<WorkspaceOverview />)
+    render(<ControlledOverview />)
     await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
     expect(screen.getByTestId("workspace-environments-stub")).toBeInTheDocument()
     await user.click(screen.getByRole("tab", { name: "workspace.sourceControl" }))
@@ -248,15 +259,35 @@ describe("WorkspaceOverview", () => {
         { id: "w1", name: "Repo", roots: [{ id: "r1", path: "/tmp/repo", isPrimary: true }] },
       ],
     }
-    render(<WorkspaceOverview />)
+    render(<ControlledOverview />)
     await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
     expect(screen.getByTestId("project-environment-manager-stub")).toBeInTheDocument()
   })
 
   it("does not offer provisioning rules for a workspace with no root", async () => {
     const user = userEvent.setup()
-    render(<WorkspaceOverview />)
+    render(<ControlledOverview />)
     await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
     expect(screen.queryByTestId("project-environment-manager-stub")).not.toBeInTheDocument()
+  })
+})
+
+describe("WorkspaceOverview tab addressing", () => {
+  it("opens on the tab it is told to, so a deep link lands where it points", () => {
+    render(<WorkspaceOverview tab="environments" onTabChange={() => {}} />)
+    expect(screen.getByTestId("workspace-environments-stub")).toBeInTheDocument()
+    // Radix keeps the other panel mounted and hidden rather than unmounting it.
+    expect(screen.getByTestId("workspace-overview")).toHaveAttribute("data-state", "inactive")
+  })
+
+  it("reports a tab change instead of owning it", async () => {
+    const user = userEvent.setup()
+    const onTabChange = jest.fn()
+    render(<WorkspaceOverview tab="overview" onTabChange={onTabChange} />)
+    await user.click(screen.getByRole("tab", { name: "workspace.sourceControl" }))
+    expect(onTabChange).toHaveBeenCalledWith("source-control")
+    // And it did NOT switch on its own. FeaturePageShell remounts this subtree
+    // when the breakpoint resolves, so an internally-owned tab snaps back.
+    expect(screen.getByTestId("workspace-overview")).toHaveAttribute("data-state", "active")
   })
 })

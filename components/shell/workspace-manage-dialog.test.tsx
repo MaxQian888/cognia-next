@@ -9,12 +9,30 @@ jest.mock("next-intl", () => ({
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
 
+/**
+ * "Browse server" walks the paired host, so the button is gated on that host
+ * publishing `fs_list_workspace_dir`. The gate reads a runtime snapshot the
+ * suite has no reason to assemble, so it is driven directly. Default: paired
+ * and able, which is what every pre-existing web case here assumes.
+ */
+const browseAvailable = { value: true }
+jest.mock("@/hooks/workspace/use-workspace-command-gate", () => ({
+  useWorkspaceCommandGate: () => () =>
+    browseAvailable.value
+      ? { available: true, reason: null }
+      : { available: false, reason: "pair a desktop first" },
+}))
+
 jest.mock("@/lib/claude/ipc", () => ({
   defaultExportDir: jest.fn(),
 }))
 
 jest.mock("@/lib/files/workspace-fs", () => ({
   listWorkspaceDir: jest.fn(),
+  // The picker asks the host which roots it will even admit to before it lists
+  // anything. Absent from this mock, every web case died on "not a function"
+  // inside the picker rather than on anything this suite is about.
+  listWorkspaceRoots: jest.fn(async () => []),
 }))
 
 const openDialogMock = jest.fn()
@@ -180,9 +198,16 @@ describe("WorkspaceManageDialog", () => {
     fireEvent.click(screen.getByTestId("workspace-new"))
     fireEvent.click(screen.getByRole("button", { name: "browseServer" }))
 
-    await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv"))
-    fireEvent.click(screen.getByRole("button", { name: "openFolder" }))
-    await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv/projects"))
+    // The picker passes `(root, relPath)`. Only the root is this test's subject,
+    // so match on it rather than pinning an arity that is the picker's business.
+    await waitFor(() => expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv", undefined))
+    // The picker asks the host for its roots before it lists anything, so the
+    // first entry appears a tick after the listing call resolves. `find*`
+    // rather than `get*`, which raced that render.
+    fireEvent.click(await screen.findByRole("button", { name: "openFolder" }))
+    await waitFor(() =>
+      expect(listWorkspaceDirMock).toHaveBeenCalledWith("/srv/projects", undefined)
+    )
     await waitFor(() => expect(screen.getByLabelText("pathLabel")).toHaveValue("/srv/projects"))
     fireEvent.click(screen.getByRole("button", { name: "chooseCurrent" }))
 
@@ -279,5 +304,40 @@ describe("WorkspaceManageDialog", () => {
     const id = useProjectStore.getState().projects[0].id
     fireEvent.click(screen.getByText("setActive"))
     expect(useProjectStore.getState().activeProjectId).toBe(id)
+  })
+})
+
+describe("WorkspaceManageDialog browse gating", () => {
+  afterEach(() => {
+    browseAvailable.value = true
+  })
+
+  it("says why browsing is unavailable instead of opening a picker with nothing to list", () => {
+    isTauriMock.mockReturnValue(false)
+    browseAvailable.value = false
+
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+
+    expect(screen.getByTestId("workspace-manage-browse")).toBeDisabled()
+    // Stated, not only hovered: a disabled button has no hover on a phone.
+    expect(screen.getByTestId("workspace-manage-browse-reason")).toHaveTextContent(
+      "pair a desktop first"
+    )
+  })
+
+  it("still lets a path be typed by hand with no host at all", () => {
+    isTauriMock.mockReturnValue(false)
+    browseAvailable.value = false
+
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    fireEvent.change(screen.getByPlaceholderText("addRootManual"), {
+      target: { value: "/srv/typed" },
+    })
+
+    // Typing needs no host. Only browsing does, which is why the button
+    // reactivates the moment there is something to add.
+    expect(screen.getByTestId("workspace-manage-browse")).not.toBeDisabled()
   })
 })

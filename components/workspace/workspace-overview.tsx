@@ -16,6 +16,12 @@
  * "double entry point" defect this repo keeps re-learning. Two doors into one
  * editor is fine.
 
+ * The open tab is a PROP, driven by `?tab=` in `app/workspace/page.tsx`. It was
+ * `defaultValue="overview"`, which `FeaturePageShell` quietly undoes: it renders
+ * its children through two different trees and remounts the subtree when the
+ * breakpoint resolves, so an uncontrolled tab snapped back on the first resize.
+ * A linkable tab is also what lets another surface point at Environments.
+ *
  * The same rule is why the header's switcher is `WorkspacePickerList`, the
  * exact list the rail popover and the mobile drawer render, and why the
  * Environments tab mounts `ProjectEnvironmentManager` whole instead of its two
@@ -70,7 +76,22 @@ function normalizePath(path: string): string {
   return p
 }
 
-export function WorkspaceOverview() {
+/** The four views, in the order the strip renders them. */
+export const WORKSPACE_TABS = [
+  "overview",
+  "environments",
+  "capabilities",
+  "source-control",
+] as const
+export type WorkspaceTab = (typeof WORKSPACE_TABS)[number]
+
+export interface WorkspaceOverviewProps {
+  /** From `?tab=`. Deep links survive a static export this way. */
+  tab?: WorkspaceTab
+  onTabChange?: (tab: WorkspaceTab) => void
+}
+
+export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOverviewProps = {}) {
   const t = useTranslations("issues")
   // The Capabilities tab has its own namespace: it is about the workspace's
   // relationship to the skill/MCP libraries, not about issues.
@@ -217,7 +238,12 @@ export function WorkspaceOverview() {
         />
       }
     >
-      <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col gap-4 p-4">
+      {/* Controlled, not `defaultValue`. See the header. */}
+      <Tabs
+        value={tab}
+        onValueChange={(next) => onTabChange?.(next as WorkspaceTab)}
+        className="flex min-h-0 flex-1 flex-col gap-4 p-4"
+      >
         <TabsList
           // `w-fit` alone let the four triggers add up to 406px inside a 375px
           // column, and the ancestor clipped the excess rather than scrolling

@@ -106,7 +106,14 @@
       "dormant": "闲置"
     },
     "neverUsed": "从未使用",
-    "openOwner": "打开{owner}"
+    "openOwner": "打开{owner}",
+    "pulses": {
+      "active": "运行中",
+      "attention": "需要处理",
+      "conflict": "冲突",
+      "dormant": "闲置",
+      "provisioning": "准备中"
+    }
   },
   "manage": {
     "activeBadge": "活动",

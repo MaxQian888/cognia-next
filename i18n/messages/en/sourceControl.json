@@ -459,6 +459,7 @@
     "removeDescription": "Remove the linked worktree at {path}?",
     "removeTitle": "Remove worktree?",
     "removed": "Worktree removed",
-    "title": "Worktrees"
+    "title": "Worktrees",
+    "mobileEntry": "Worktrees live in Workspace"
   }
 }

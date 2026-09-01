@@ -33,6 +33,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { WorkspaceKnowledgeSection } from "@/components/shell/workspace-knowledge-section"
 import { WorkspaceFolderPicker } from "@/components/shell/workspace-folder-picker"
 import { normalizeRoots } from "@/lib/workspace/roots"
+import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
 import {
   isWorkspaceTrusted,
   trustWorkspace,
@@ -64,9 +65,16 @@ function basename(path: string): string {
  * its name and its multi-root folder set. Each root carries an optional label,
  * a primary flag (the cwd), and a per-folder trust toggle (VS Code-style).
  *
- * The on-disk directory pickers use the Tauri native dialog and are hidden
- * outside the desktop shell; a manual path input is always available so the
- * web/mobile surfaces can still read and (text-)edit paths.
+ * The on-disk directory pickers use the Tauri native dialog outside the desktop
+ * shell, and a manual path input is always available so the web and mobile
+ * surfaces can still read and text-edit paths.
+ *
+ * "Browse server" walks the PAIRED HOST's filesystem, which is the machine the
+ * agent will actually run on. That only works when the host publishes
+ * `fs_list_workspace_dir`, so the button is gated on it rather than on
+ * `isTauri()`: an unpaired browser used to get a button that opened a picker
+ * with nothing to list, which reads as broken rather than as unavailable. The
+ * same hybrid answer `workspace-picker-list.tsx` computes for its own footer.
  */
 export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
   const t = useTranslations("workspace.manage")
@@ -86,6 +94,9 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
   // path → trusted? Undefined while loading.
   const [trustMap, setTrustMap] = useState<Record<string, boolean>>({})
   const desktop = isTauri()
+  const gate = useWorkspaceCommandGate()
+  // Only asked off the desktop, where the native dialog is not an option.
+  const browseGate = gate("fs_list_workspace_dir")
 
   const sorted = useMemo(
     () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
@@ -439,12 +450,35 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
                               onClick={handleWebAdd}
                               className="gap-1.5"
                               aria-label={!manualDir.trim() ? t("browseServer") : undefined}
+                              // Typing a path is always allowed. Only BROWSING
+                              // needs a host, so the button stays live the
+                              // moment there is something to add by hand.
+                              disabled={!manualDir.trim() && !browseGate.available}
+                              title={
+                                !manualDir.trim() && browseGate.reason
+                                  ? browseGate.reason
+                                  : undefined
+                              }
+                              data-testid="workspace-manage-browse"
                             >
                               {!manualDir.trim() && <FolderPlusIcon className="size-4" />}
                               {!manualDir.trim() ? t("browseServer") : t("addRoot")}
                             </Button>
                           )}
                         </div>
+                        {/*
+                          Stated, not only hovered. A disabled button has no
+                          hover on a touch device, and this is the sentence that
+                          tells an unpaired browser what to do about it.
+                        */}
+                        {!desktop && !browseGate.available && browseGate.reason ? (
+                          <p
+                            className="text-xs text-muted-foreground"
+                            data-testid="workspace-manage-browse-reason"
+                          >
+                            {browseGate.reason}
+                          </p>
+                        ) : null}
                       </div>
                     </section>
 

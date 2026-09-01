@@ -38617,6 +38617,7 @@
       "forceRemove": "强制移除",
       "forceRemoveDescription": "丢弃此工作树中未提交的更改。",
       "main": "主工作树",
+      "mobileEntry": "工作树在「工作区」页面管理",
       "open": "打开",
       "ownership": {
         "imported": "导入环境",
@@ -47485,6 +47486,13 @@
       "pin": "固定环境",
       "prunable": "可清理",
       "prune": "清理失效工作树",
+      "pulses": {
+        "active": "运行中",
+        "attention": "需要处理",
+        "conflict": "冲突",
+        "dormant": "闲置",
+        "provisioning": "准备中"
+      },
       "refresh": "刷新环境",
       "registryProtected": "Registry 所有权已变化，已阻止移除。",
       "remove": "移除工作树",

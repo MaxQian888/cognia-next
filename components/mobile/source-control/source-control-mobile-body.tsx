@@ -31,13 +31,22 @@
  * worse than not offering it. Pull, push and refresh are here, carrying their
  * ahead and behind counts, because they are one-tap actions and "is there
  * anything to pull" is the reason to open git on a phone at all.
+ *
+ * Worktrees are the one omission that now says where it went. `/workspace` has
+ * a real Environments tab that works at 375px (its list degrades to cards below
+ * 640px) and it is addressable as `?tab=environments`, so the honest answer
+ * stopped being silence: not rendering something AND not saying where it lives
+ * reads as "this build cannot do worktrees", which is not true.
  */
 
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
+import Link from "next/link"
 import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
+  BoxesIcon,
+  ChevronRightIcon,
   FolderOpenIcon,
   GitBranchIcon,
   RefreshCwIcon,
@@ -199,6 +208,21 @@ export function SourceControlMobileBody() {
           <RefreshCwIcon className="size-4" />
         </Button>
       </header>
+
+      {/*
+        A pointer, not a trigger. Tapping this navigates to a screen that
+        actually works on a phone, rather than opening the desktop worktree
+        sheet in 375px where its table has nowhere to go.
+      */}
+      <Link
+        href="/workspace?tab=environments"
+        className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground active:bg-accent"
+        data-testid="sc-mobile-worktrees-link"
+      >
+        <BoxesIcon aria-hidden className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{t("worktrees.mobileEntry")}</span>
+        <ChevronRightIcon aria-hidden className="size-3.5 shrink-0" />
+      </Link>
 
       {/* `status` is null until the first load resolves, and `ChangesView`
           requires it. The desktop panel guards the same way rather than

@@ -180,3 +180,13 @@ it("says so when git is unavailable and when the folder is not a repository", ()
   render(<SourceControlMobileBody />)
   expect(screen.getByTestId("sc-mobile-not-a-repo")).toBeInTheDocument()
 })
+
+describe("worktrees", () => {
+  it("says where worktrees live instead of silently omitting them", async () => {
+    render(<SourceControlMobileBody />)
+    const link = await screen.findByTestId("sc-mobile-worktrees-link")
+    // Addressable because /workspace puts its tab in the URL. A link to the
+    // page with no tab would land the user on Overview and leave them hunting.
+    expect(link).toHaveAttribute("href", "/workspace?tab=environments")
+  })
+})

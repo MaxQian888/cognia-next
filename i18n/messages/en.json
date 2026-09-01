@@ -38617,6 +38617,7 @@
       "forceRemove": "Force removal",
       "forceRemoveDescription": "Discard uncommitted changes in this worktree.",
       "main": "Main",
+      "mobileEntry": "Worktrees live in Workspace",
       "open": "Open",
       "ownership": {
         "imported": "Imported environment",
@@ -47485,6 +47486,13 @@
       "pin": "Pin environment",
       "prunable": "Prunable",
       "prune": "Prune stale worktrees",
+      "pulses": {
+        "active": "Running",
+        "attention": "Needs attention",
+        "conflict": "Conflict",
+        "dormant": "Dormant",
+        "provisioning": "Provisioning"
+      },
       "refresh": "Refresh environments",
       "registryProtected": "Registry ownership changed; removal was blocked.",
       "remove": "Remove worktree",

@@ -47,7 +47,7 @@ import userEvent from "@testing-library/user-event"
 import type { WorkspaceEnvironmentSummary } from "@/lib/task-workspace/types"
 import { gitTargetFromRemote } from "@/lib/git/target"
 
-import { WorkspaceEnvironmentList } from "./workspace-environment-list"
+import { bandOf, pulseOf, WorkspaceEnvironmentList } from "./workspace-environment-list"
 
 const managed: WorkspaceEnvironmentSummary = {
   environmentId: "ws-1",
@@ -485,5 +485,58 @@ describe("WorkspaceEnvironmentList — workspace scoping", () => {
     )
     expect(screen.queryByRole("link", { name: /someone/ })).not.toBeInTheDocument()
     expect(screen.getByText(/someone/)).toBeInTheDocument()
+  })
+})
+
+describe("pulseOf", () => {
+  it("separates a broken worktree from one that is merely reclaimable", () => {
+    // Both land in the attention band, and the band alone throws the
+    // distinction away: one is a failure, the other is an offer.
+    expect(pulseOf({ ...managed, state: "conflict" })).toBe("conflict")
+    expect(pulseOf(prunableManual)).toBe("attention")
+    expect(pulseOf({ ...manual, locked: true })).toBe("attention")
+  })
+
+  it("calls a worktree mid-provision provisioning, not merely active", () => {
+    expect(pulseOf({ ...managed, locked: false, state: "provisioning" })).toBe("provisioning")
+  })
+
+  it("reports a healthy row as active and a shelved one as dormant", () => {
+    expect(pulseOf({ ...managed, locked: false })).toBe("active")
+    expect(pulseOf({ ...managed, locked: false, state: "archived" })).toBe("dormant")
+    expect(pulseOf({ ...managed, locked: false, state: "removed" })).toBe("dormant")
+  })
+
+  it("never disagrees with the band the row was filed under", () => {
+    const rows: WorkspaceEnvironmentSummary[] = [
+      managed,
+      manual,
+      prunableManual,
+      { ...managed, locked: false, state: "conflict" },
+      { ...managed, locked: false, state: "archived" },
+      { ...managed, locked: false, state: "provisioning" },
+    ]
+    for (const row of rows) {
+      const pulse = pulseOf(row)
+      if (pulse === "conflict" || pulse === "attention") continue
+      if (pulse === "dormant") expect(bandOf(row)).toBe("dormant")
+      else expect(bandOf(row)).toBe("active")
+    }
+  })
+})
+
+describe("row pulse", () => {
+  it("leads every row with a named state a screen reader can read", async () => {
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+    const dot = await screen.findByTestId("workspace-environment-pulse-git:manual")
+    expect(dot).toHaveAttribute("data-pulse", "active")
+    expect(dot).toHaveAttribute("aria-label", "pulses.active")
+  })
+
+  it("marks a reclaimable worktree without relying on colour alone", async () => {
+    render(<WorkspaceEnvironmentList rootDir="/repo" />)
+    const dot = await screen.findByTestId("workspace-environment-pulse-git:prunable")
+    expect(dot).toHaveAttribute("data-pulse", "attention")
+    expect(dot).toHaveAttribute("aria-label", "pulses.attention")
   })
 })

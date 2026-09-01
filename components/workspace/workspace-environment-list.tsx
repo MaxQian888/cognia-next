@@ -135,6 +135,41 @@ export function bandOf(row: WorkspaceEnvironmentSummary): EnvironmentBand {
   return "active"
 }
 
+/**
+ * The one-glance state of a row.
+ *
+ * The bands already sort the list, but a band heading scrolls away and a row
+ * read halfway down a long list carries none of it. Every comparable tool
+ * (Warp's agent tabs, Cursor's worktree list, GitKraken's cards) leads the row
+ * with a coloured dot for exactly this reason.
+ *
+ * Derived from `bandOf` rather than beside it, so the dot cannot ever disagree
+ * with the group the row was filed under. `conflict` is split back out because
+ * it is the one attention state that is a FAILURE rather than an offer, and
+ * amber for "you could reclaim this" beside amber for "this is broken" is the
+ * distinction the band alone throws away.
+ */
+export type EnvironmentPulse = "conflict" | "attention" | "active" | "provisioning" | "dormant"
+
+export function pulseOf(row: WorkspaceEnvironmentSummary): EnvironmentPulse {
+  if (row.state === "conflict") return "conflict"
+  if (row.state === "provisioning") return "provisioning"
+  const band = bandOf(row)
+  if (band === "attention") return "attention"
+  if (band === "dormant") return "dormant"
+  return "active"
+}
+
+const PULSE_CLASS: Record<EnvironmentPulse, string> = {
+  conflict: "bg-destructive",
+  attention: "bg-amber-500",
+  // Only the one that is genuinely mid-flight animates. A pulsing dot on every
+  // healthy row is a screen full of movement that means nothing.
+  provisioning: "animate-pulse bg-sky-500",
+  active: "bg-emerald-500",
+  dormant: "bg-muted-foreground/40",
+}
+
 /** Short HEAD, the length every Git UI settled on. */
 function shortHead(head: string | null): string | null {
   if (!head) return null
@@ -441,10 +476,26 @@ export function WorkspaceEnvironmentList({
   const renderIdentity = (row: WorkspaceEnvironmentSummary) => {
     const head = shortHead(row.head)
     const owner = renderOwner(row)
+    const pulse = pulseOf(row)
     return (
       <>
-        <div className="truncate font-mono text-xs" title={row.path}>
-          {row.path}
+        <div className="flex min-w-0 items-center gap-1.5">
+          {/*
+            Named, not merely coloured. A dot that only exists as a hue is
+            unreadable to a screen reader and to a third of colour-blind users,
+            and this list is where someone decides what to delete.
+          */}
+          <span
+            role="img"
+            aria-label={t(`pulses.${pulse}`)}
+            title={t(`pulses.${pulse}`)}
+            data-testid={`workspace-environment-pulse-${row.environmentId}`}
+            data-pulse={pulse}
+            className={cn("size-2 shrink-0 rounded-full", PULSE_CLASS[pulse])}
+          />
+          <div className="min-w-0 flex-1 truncate font-mono text-xs" title={row.path}>
+            {row.path}
+          </div>
         </div>
         {/*
           Branch and HEAD used to be invisible here: `branch` only appeared as a

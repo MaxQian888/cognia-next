@@ -106,7 +106,14 @@
       "dormant": "Dormant"
     },
     "neverUsed": "Never used",
-    "openOwner": "Open {owner}"
+    "openOwner": "Open {owner}",
+    "pulses": {
+      "active": "Running",
+      "attention": "Needs attention",
+      "conflict": "Conflict",
+      "dormant": "Dormant",
+      "provisioning": "Provisioning"
+    }
   },
   "manage": {
     "activeBadge": "Active",
