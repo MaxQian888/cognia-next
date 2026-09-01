@@ -24,6 +24,7 @@ use crate::session::{
     detached_desk_channel, spawn_session_with_identity, EventSink, PathInjection, PtySession,
     SessionOrigin, SpawnRequest, TerminalEvent,
 };
+use crate::sftp::{SftpCall, SftpEntry, SftpError, SftpRegistry, SftpSessionInfo};
 use crate::ssh::{spawn_hosted_ssh, SshSpawnRequest};
 use crate::ssh_forward::ForwardStatus;
 
@@ -296,10 +297,30 @@ pub enum AuditKind {
     SessionDetached,
     SessionTerminated,
     SessionExited,
-    ControllerTaken { previous: Option<String> },
+    ControllerTaken {
+        previous: Option<String>,
+    },
     ControllerReleased,
     DeviceRevoked,
     AttachmentOverflow,
+    /// A file-transfer connection was opened to a synchronized SSH profile
+    /// (ADR-0162). Recorded on the first operation of a pooled session rather
+    /// than on every one: a 100 MB download is thousands of chunk reads, and
+    /// a row per chunk would push every other event out of the ring.
+    SftpConnected {
+        host: String,
+        username: String,
+    },
+    /// A remote file or directory was created, renamed, removed or written.
+    ///
+    /// Reads are deliberately not here, for the reason above. What a device
+    /// read is answered by the live session list, which names the profile and
+    /// moves its `lastUsedAt`; what a device CHANGED is answered here, because
+    /// it is not recoverable from any later observation.
+    SftpMutated {
+        operation: String,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -511,6 +532,14 @@ struct TerminalHostInner {
     path: Mutex<PathInjection>,
     attachment_queue: usize,
     state: Mutex<HostState>,
+    /// Pooled SFTP connections (ADR-0162).
+    ///
+    /// Host-owned for the same reason `path` is: the connections outlive the
+    /// client that opened them, and a browse from a phone must not have to
+    /// re-authenticate a machine this host is already talking to. Keyed on a
+    /// configuration fingerprint rather than a profile identifier, so a
+    /// profile repointed at another machine cannot be served the old one.
+    sftp: SftpRegistry,
 }
 
 #[derive(Clone)]
@@ -576,6 +605,7 @@ impl TerminalHost {
                     device_profiles: HashMap::new(),
                     audit: VecDeque::new(),
                 }),
+                sftp: SftpRegistry::new(),
             }),
         }
     }
@@ -1625,6 +1655,382 @@ impl TerminalHost {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SFTP over a synchronized SSH profile (ADR-0162)
+// ---------------------------------------------------------------------------
+
+/// File transfer, on the same terms as a shell.
+///
+/// Every method here takes the connection that asked and refuses one that is
+/// not local, exactly as [`TerminalHost::update_config`] does. That refusal is
+/// the whole reason frames 26 and 27 can exist at all: `/ws/terminal` is a
+/// transparent byte pipe, so a frame a device may send is a frame every device
+/// holding `terminal.open` may send. The device-facing surface is the `sftp_*`
+/// RPC family, which checks its own `ssh.files` capability, obtains the
+/// approval, writes the audit ledger, and only then talks to this frame as a
+/// local client. `terminal_host_remote_configure` reaches `update_config` the
+/// same way and for the same reason.
+///
+/// Attribution therefore arrives as an argument rather than from the
+/// connection: a local client is by definition not a device, and an audit row
+/// reading "a local client read the production box" would answer the wrong
+/// question. Nothing a device can send reaches these methods, so nothing a
+/// device can send can forge that argument either.
+impl TerminalHost {
+    /// The identity to attribute an SFTP operation to, refusing a non-local
+    /// connection.
+    pub(crate) fn sftp_actor(
+        &self,
+        connection_id: &str,
+        on_behalf_of_device: Option<&str>,
+    ) -> Result<ClientIdentity, HostError> {
+        let connection = parse_connection_id(connection_id)?;
+        let mut identity = self.identity(connection)?;
+        if !identity.local {
+            return Err(HostError::PermissionDenied);
+        }
+        if let Some(device_id) = on_behalf_of_device {
+            identity.device_id = Some(device_id.to_string());
+        }
+        Ok(identity)
+    }
+
+    /// The synchronized profile behind `profile_id`.
+    ///
+    /// Only the shared map, never `device_profiles`: a device's own profiles
+    /// are local PTY spawns it uploaded, and letting one name a destination for
+    /// a file transfer would be the device choosing which machine to reach.
+    /// ADR-0082 decision 8 says the desktop chooses, and this is that.
+    fn sftp_profile(&self, profile_id: &str) -> Result<SshSpawnRequest, SftpError> {
+        self.inner
+            .state
+            .lock()
+            .ssh_profiles
+            .get(profile_id)
+            .cloned()
+            .ok_or_else(|| {
+                SftpError::InvalidRequest(format!(
+                    "no SSH profile named {profile_id} is synchronized on this host"
+                ))
+            })
+    }
+
+    /// Resolve, reap, and record. The preamble every operation shares.
+    ///
+    /// Returns the profile and whether a connection for it was already pooled,
+    /// so the caller can tell "used the connection that was already open" from
+    /// "opened a new one to somebody's machine". Only the second is worth an
+    /// audit row, and only the second is what the grant actually authorized.
+    fn sftp_preamble(&self, profile_id: &str) -> Result<(SshSpawnRequest, bool), SftpError> {
+        self.inner
+            .sftp
+            .reap_idle(crate::sftp::IDLE_TTL, unix_millis());
+        let request = self.sftp_profile(profile_id)?;
+        let pooled = self.inner.sftp.is_pooled(&request);
+        Ok((request, pooled))
+    }
+
+    fn record_sftp_connection(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        request: &SshSpawnRequest,
+    ) {
+        push_audit(
+            &mut self.inner.state.lock(),
+            &sftp_audit_subject(profile_id),
+            Some(actor),
+            AuditKind::SftpConnected {
+                host: request.host.clone(),
+                username: request.username.clone(),
+            },
+        );
+    }
+
+    fn record_sftp_mutation(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        operation: &str,
+        path: &str,
+    ) {
+        push_audit(
+            &mut self.inner.state.lock(),
+            &sftp_audit_subject(profile_id),
+            Some(actor),
+            AuditKind::SftpMutated {
+                operation: operation.to_string(),
+                path: path.to_string(),
+            },
+        );
+    }
+
+    pub async fn sftp_list_dir(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        known_hosts_path: &Path,
+    ) -> Result<Vec<SftpEntry>, SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        let entries = self
+            .inner
+            .sftp
+            .list_dir(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        Ok(entries)
+    }
+
+    pub async fn sftp_stat(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        known_hosts_path: &Path,
+    ) -> Result<SftpEntry, SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        let entry = self
+            .inner
+            .sftp
+            .stat(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        Ok(entry)
+    }
+
+    pub async fn sftp_realpath(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        known_hosts_path: &Path,
+    ) -> Result<String, SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        let resolved = self
+            .inner
+            .sftp
+            .realpath(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        Ok(resolved)
+    }
+
+    pub async fn sftp_create_dir(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        known_hosts_path: &Path,
+    ) -> Result<(), SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        self.inner
+            .sftp
+            .create_dir(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        self.record_sftp_mutation(actor, profile_id, "createDir", path);
+        Ok(())
+    }
+
+    pub async fn sftp_rename(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        from: &str,
+        to: &str,
+        known_hosts_path: &Path,
+    ) -> Result<(), SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        self.inner
+            .sftp
+            .rename(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                from,
+                to,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        self.record_sftp_mutation(actor, profile_id, "rename", &format!("{from} -> {to}"));
+        Ok(())
+    }
+
+    pub async fn sftp_remove(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        is_dir: bool,
+        known_hosts_path: &Path,
+    ) -> Result<(), SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        self.inner
+            .sftp
+            .remove(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+                is_dir,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        self.record_sftp_mutation(
+            actor,
+            profile_id,
+            if is_dir { "removeDir" } else { "remove" },
+            path,
+        );
+        Ok(())
+    }
+
+    pub async fn sftp_read_chunk(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        offset: u64,
+        len: usize,
+        known_hosts_path: &Path,
+    ) -> Result<Vec<u8>, SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        let bytes = self
+            .inner
+            .sftp
+            .read_chunk(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+                offset,
+                len,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        Ok(bytes)
+    }
+
+    /// Append `bytes` at `offset`, answering with the host's new write head.
+    ///
+    /// The answer is the resume point a client records. It is the host's
+    /// arithmetic rather than the client's on purpose: a client that believed
+    /// it had written more than the server accepted would resume past a hole
+    /// and produce a file that is the right length and wrong.
+    pub async fn sftp_write_chunk(
+        &self,
+        actor: &ClientIdentity,
+        profile_id: &str,
+        path: &str,
+        offset: u64,
+        bytes: &[u8],
+        known_hosts_path: &Path,
+    ) -> Result<u64, SftpError> {
+        let (request, pooled) = self.sftp_preamble(profile_id)?;
+        let written = self
+            .inner
+            .sftp
+            .write_chunk(
+                SftpCall {
+                    request: &request,
+                    known_hosts_path,
+                },
+                path,
+                offset,
+                bytes,
+            )
+            .await?;
+        if !pooled {
+            self.record_sftp_connection(actor, profile_id, &request);
+        }
+        // One row per transfer, not one per chunk: the first chunk of a file
+        // is the one that says a write started, and the ring has 10,000 slots
+        // for every event this host records.
+        if offset == 0 {
+            self.record_sftp_mutation(actor, profile_id, "write", path);
+        }
+        Ok(written)
+    }
+
+    /// Every live file-transfer connection, for the host's session list.
+    ///
+    /// ADR-0162 requires this: a pooled connection with an idle timeout that
+    /// nobody can see would be the one real asymmetry with a shell, which
+    /// appears in `list` and in the audit ring.
+    pub fn sftp_sessions(&self, connection_id: &str) -> Result<Vec<SftpSessionInfo>, HostError> {
+        self.sftp_actor(connection_id, None)?;
+        self.inner
+            .sftp
+            .reap_idle(crate::sftp::IDLE_TTL, unix_millis());
+        Ok(self.inner.sftp.sessions())
+    }
+
+    /// Drop every pooled connection for a profile.
+    ///
+    /// Called when a profile is edited or deleted, and by a client that is done
+    /// browsing. Keyed on the identifier rather than the fingerprint, because
+    /// the caller means "nothing for this profile survives".
+    pub fn sftp_close_profile(
+        &self,
+        connection_id: &str,
+        profile_id: &str,
+    ) -> Result<usize, HostError> {
+        self.sftp_actor(connection_id, None)?;
+        Ok(self.inner.sftp.close_profile(profile_id))
+    }
+}
+
+/// What an SFTP audit row is about.
+///
+/// The audit ring keys on a session identifier, and a transfer has no terminal
+/// session. Naming the profile keeps the field answering the same question it
+/// answers for a shell: which of the host's things did this happen to.
+fn sftp_audit_subject(profile_id: &str) -> String {
+    format!("sftp:{profile_id}")
+}
+
 fn parse_connection_id(connection_id: &str) -> Result<Uuid, HostError> {
     Uuid::parse_str(connection_id).map_err(|_| HostError::ConnectionNotFound)
 }
@@ -2644,5 +3050,80 @@ mod tests {
             host.update_config(&local.connection_id, updated),
             Err(HostError::InvalidRequest(_))
         ));
+    }
+
+    /// A transfer is attributed to the device the RPC layer authorized, not to
+    /// the local connection that carried the frame.
+    ///
+    /// The frame is host-local by construction, so without this the audit ring
+    /// would record every phone's file access as "the desktop did it" and the
+    /// `ssh.files` grant would be unauditable. ADR-0162 makes that visibility a
+    /// decision rather than a nicety.
+    #[test]
+    fn an_sftp_row_names_the_device_on_whose_behalf_it_ran() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let client = host
+            .connect(ClientIdentity::local("companion-rpc"))
+            .unwrap();
+
+        let actor = host
+            .sftp_actor(&client.connection_id, Some("device-a"))
+            .unwrap();
+        assert_eq!(actor.device_id.as_deref(), Some("device-a"));
+        assert_eq!(actor.client_id, "companion-rpc");
+
+        host.record_sftp_mutation(&actor, "production", "remove", "/srv/app/config.yml");
+        let events = host.audit_events();
+        let row = events.last().unwrap();
+        assert_eq!(row.session_id, "sftp:production");
+        assert_eq!(row.device_id.as_deref(), Some("device-a"));
+        assert_eq!(
+            row.event,
+            AuditKind::SftpMutated {
+                operation: "remove".into(),
+                path: "/srv/app/config.yml".into(),
+            }
+        );
+    }
+
+    /// The desktop user's own browsing is attributed to nobody in particular,
+    /// which is correct: there is no device involved, and inventing one would
+    /// put a name in the ledger that names nothing.
+    #[test]
+    fn a_local_transfer_with_no_device_is_attributed_to_no_device() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let client = host.connect(ClientIdentity::local("desktop")).unwrap();
+        let actor = host.sftp_actor(&client.connection_id, None).unwrap();
+        assert!(actor.device_id.is_none());
+    }
+
+    /// Both host-level readers refuse a device connection, for the reason
+    /// frames 26 and 27 can exist: `/ws/terminal` forwards whatever a device
+    /// sends, so the refusal has to live here rather than in the adapter.
+    #[test]
+    fn the_transfer_plane_refuses_a_device_connection() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let device = host
+            .connect(ClientIdentity::remote("phone", "device-a", true))
+            .unwrap();
+        assert_eq!(
+            host.sftp_sessions(&device.connection_id),
+            Err(HostError::PermissionDenied)
+        );
+        assert_eq!(
+            host.sftp_close_profile(&device.connection_id, "production"),
+            Err(HostError::PermissionDenied)
+        );
+    }
+
+    /// Naming a profile the desktop never synchronized is refused before any
+    /// connection is attempted, so an identifier a device made up cannot cause
+    /// this host to dial anything.
+    #[test]
+    fn an_unknown_profile_is_refused_before_a_connection_is_attempted() {
+        let host = TerminalHost::new("host-a", test_config()).unwrap();
+        let error = host.sftp_profile("invented").unwrap_err();
+        assert_eq!(error.code(), "sftp_invalid_request");
+        assert!(error.to_string().contains("invented"));
     }
 }

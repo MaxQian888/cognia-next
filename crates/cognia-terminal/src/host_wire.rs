@@ -131,6 +131,131 @@ struct SshForwardSnapshotPayload {
     forwards: Vec<ForwardStatus>,
 }
 
+/// Client to host, frame 26. Host-local only (ADR-0162).
+///
+/// `onBehalfOfDevice` is the attribution the RPC layer supplies after it has
+/// authorized the caller. It is safe as an argument precisely because
+/// `TerminalHost::sftp_actor` refuses this frame on a non-local connection, so
+/// nothing a paired device can send ever reaches it.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SftpControlPayload {
+    Sessions,
+    #[serde(rename_all = "camelCase")]
+    ListDir {
+        profile_id: String,
+        path: String,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Stat {
+        profile_id: String,
+        path: String,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Realpath {
+        profile_id: String,
+        path: String,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    CreateDir {
+        profile_id: String,
+        path: String,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Rename {
+        profile_id: String,
+        from: String,
+        to: String,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Remove {
+        profile_id: String,
+        path: String,
+        #[serde(default)]
+        is_dir: bool,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    ReadChunk {
+        profile_id: String,
+        path: String,
+        offset: u64,
+        length: usize,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    WriteChunk {
+        profile_id: String,
+        path: String,
+        offset: u64,
+        /// Base64. JSON has no byte string, and a number array would cost
+        /// roughly four bytes on the wire per byte transferred.
+        data: String,
+        on_behalf_of_device: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    CloseProfile {
+        profile_id: String,
+    },
+}
+
+/// Host to client, frame 27.
+///
+/// An SFTP failure comes back as `failed` rather than as an error frame. A
+/// server answering "permission denied" for `/etc/shadow` is a *result*: the
+/// call reached the machine and the machine said no. Reporting it as a protocol
+/// error would merge it with "this frame is malformed", and the RPC layer needs
+/// the code to tell a caller which of the two happened.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SftpSnapshotPayload {
+    Entries {
+        entries: Vec<crate::sftp::SftpEntry>,
+    },
+    Entry {
+        entry: crate::sftp::SftpEntry,
+    },
+    Path {
+        path: String,
+    },
+    Chunk {
+        /// Base64, and shorter than requested at end of file.
+        data: String,
+        eof: bool,
+    },
+    #[serde(rename_all = "camelCase")]
+    Written {
+        /// The host's write head after this chunk, which is the client's
+        /// resume point.
+        write_head: u64,
+    },
+    Sessions {
+        sessions: Vec<crate::sftp::SftpSessionInfo>,
+    },
+    Closed {
+        closed: usize,
+    },
+    Ok,
+    Failed {
+        code: &'static str,
+        message: String,
+    },
+}
+
+impl SftpSnapshotPayload {
+    fn from_failure(error: crate::sftp::SftpError) -> Self {
+        Self::Failed {
+            code: error.code(),
+            message: error.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TransportStatePayload {
@@ -403,6 +528,17 @@ async fn dispatch_command(
                 )
                 .map_err(HostError::InvalidRequest)
             }),
+        FrameKind::SftpControl => match parse_json::<SftpControlPayload>(&frame.payload) {
+            Ok(payload) => match sftp_command(host, connection_id, payload, known_hosts_path).await
+            {
+                Ok(snapshot) => {
+                    json_frame(FrameKind::SftpSnapshot, session_id, sequence, &snapshot)
+                        .map_err(HostError::InvalidRequest)
+                }
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        },
         _ => Err(HostError::InvalidRequest(format!(
             "frame kind {:?} is not a client command",
             frame.kind
@@ -467,6 +603,151 @@ fn json_frame<T: Serialize>(
         return Err("terminal JSON response exceeds frame limit".into());
     }
     Ok(TerminalFrame::command(kind, session_id, sequence, payload))
+}
+
+/// Run one SFTP command, refusing a non-local connection before anything else.
+///
+/// The two error channels are deliberately different. A caller that is not
+/// entitled to this frame at all, or that named a profile this host has never
+/// been given, gets a `HostError` and therefore an error frame. A caller that
+/// reached the remote machine and was refused by it gets a `Failed` snapshot
+/// carrying the server's own words, because that is an answer rather than a
+/// protocol fault.
+async fn sftp_command(
+    host: &TerminalHost,
+    connection_id: &str,
+    payload: SftpControlPayload,
+    known_hosts_path: &Path,
+) -> Result<SftpSnapshotPayload, HostError> {
+    use base64::Engine as _;
+    const B64: base64::engine::general_purpose::GeneralPurpose =
+        base64::engine::general_purpose::STANDARD;
+
+    // `Sessions` and `CloseProfile` carry no device attribution: one is a read
+    // of this host's own state and the other is the host tidying up after
+    // itself, and neither is an operation on somebody's remote machine.
+    let device = match &payload {
+        SftpControlPayload::Sessions | SftpControlPayload::CloseProfile { .. } => None,
+        SftpControlPayload::ListDir {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::Stat {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::Realpath {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::CreateDir {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::Rename {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::Remove {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::ReadChunk {
+            on_behalf_of_device,
+            ..
+        }
+        | SftpControlPayload::WriteChunk {
+            on_behalf_of_device,
+            ..
+        } => on_behalf_of_device.clone(),
+    };
+    let actor = host.sftp_actor(connection_id, device.as_deref())?;
+
+    let outcome = match payload {
+        SftpControlPayload::Sessions => {
+            return Ok(SftpSnapshotPayload::Sessions {
+                sessions: host.sftp_sessions(connection_id)?,
+            })
+        }
+        SftpControlPayload::CloseProfile { profile_id } => {
+            return Ok(SftpSnapshotPayload::Closed {
+                closed: host.sftp_close_profile(connection_id, &profile_id)?,
+            })
+        }
+        SftpControlPayload::ListDir {
+            profile_id, path, ..
+        } => host
+            .sftp_list_dir(&actor, &profile_id, &path, known_hosts_path)
+            .await
+            .map(|entries| SftpSnapshotPayload::Entries { entries }),
+        SftpControlPayload::Stat {
+            profile_id, path, ..
+        } => host
+            .sftp_stat(&actor, &profile_id, &path, known_hosts_path)
+            .await
+            .map(|entry| SftpSnapshotPayload::Entry { entry }),
+        SftpControlPayload::Realpath {
+            profile_id, path, ..
+        } => host
+            .sftp_realpath(&actor, &profile_id, &path, known_hosts_path)
+            .await
+            .map(|path| SftpSnapshotPayload::Path { path }),
+        SftpControlPayload::CreateDir {
+            profile_id, path, ..
+        } => host
+            .sftp_create_dir(&actor, &profile_id, &path, known_hosts_path)
+            .await
+            .map(|()| SftpSnapshotPayload::Ok),
+        SftpControlPayload::Rename {
+            profile_id,
+            from,
+            to,
+            ..
+        } => host
+            .sftp_rename(&actor, &profile_id, &from, &to, known_hosts_path)
+            .await
+            .map(|()| SftpSnapshotPayload::Ok),
+        SftpControlPayload::Remove {
+            profile_id,
+            path,
+            is_dir,
+            ..
+        } => host
+            .sftp_remove(&actor, &profile_id, &path, is_dir, known_hosts_path)
+            .await
+            .map(|()| SftpSnapshotPayload::Ok),
+        SftpControlPayload::ReadChunk {
+            profile_id,
+            path,
+            offset,
+            length,
+            ..
+        } => host
+            .sftp_read_chunk(&actor, &profile_id, &path, offset, length, known_hosts_path)
+            .await
+            .map(|bytes| SftpSnapshotPayload::Chunk {
+                // Short means end of file, and the caller stops. `read_chunk_on`
+                // loops over partial reads precisely so this stays true.
+                eof: bytes.len() < length,
+                data: B64.encode(&bytes),
+            }),
+        SftpControlPayload::WriteChunk {
+            profile_id,
+            path,
+            offset,
+            data,
+            ..
+        } => match B64.decode(data.as_bytes()) {
+            Ok(bytes) => host
+                .sftp_write_chunk(&actor, &profile_id, &path, offset, &bytes, known_hosts_path)
+                .await
+                .map(|write_head| SftpSnapshotPayload::Written { write_head }),
+            Err(error) => Err(crate::sftp::SftpError::InvalidRequest(format!(
+                "chunk is not valid base64: {error}"
+            ))),
+        },
+    };
+    Ok(outcome.unwrap_or_else(SftpSnapshotPayload::from_failure))
 }
 
 fn error_frame(sequence: u64, session_id: Uuid, error: HostError) -> TerminalFrame {
@@ -622,6 +903,25 @@ mod tests {
             replay_bytes_per_session: 64 * 1024,
             total_replay_bytes: 128 * 1024,
             ..TerminalHostConfig::default()
+        }
+    }
+
+    fn ssh_profile_request() -> crate::ssh::SshSpawnRequest {
+        crate::ssh::SshSpawnRequest {
+            host: "prod.example".into(),
+            port: 22,
+            username: "deploy".into(),
+            auth_method: crate::ssh::SshAuthMethod::Password,
+            credential_ref: Some("production".into()),
+            private_key_path: None,
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            profile_id: "production".into(),
+            display_name: "Production".into(),
+            jump_chain: Vec::new(),
+            local_forwards: Vec::new(),
+            remote_forwards: Vec::new(),
         }
     }
 
@@ -901,6 +1201,246 @@ mod tests {
         assert_eq!(response.kind, FrameKind::Error);
         assert!(observed.path_injection().prepend.is_empty());
 
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// The security property that lets frames 26 and 27 exist at all.
+    ///
+    /// `/ws/terminal` is a transparent byte pipe, so any frame a paired device
+    /// may send is one every device holding `terminal.open` may send. SFTP is
+    /// authorized by `ssh.files` at the RPC layer instead, and this refusal is
+    /// what stops the frame from being a way around that. Without it, the
+    /// separate grant ADR-0162 spends a section justifying would be decorative.
+    #[tokio::test]
+    async fn a_device_connection_cannot_reach_the_sftp_frame() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::remote("phone", "device-a", true),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::SftpControl,
+                Uuid::nil(),
+                3,
+                serde_json::to_vec(&serde_json::json!({
+                    "kind": "listDir",
+                    "profileId": "production",
+                    "path": "/etc",
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Error);
+        let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(payload["code"], "permission_denied");
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// Even the read that names no machine. Listing the host's live transfers
+    /// tells a caller which production boxes this desktop is talking to, which
+    /// is not a device's business either.
+    #[tokio::test]
+    async fn a_device_connection_cannot_list_the_hosts_transfers() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::remote("phone", "device-a", true),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::SftpControl,
+                Uuid::nil(),
+                1,
+                serde_json::to_vec(&serde_json::json!({ "kind": "sessions" })).unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::Error);
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_local_client_reads_an_empty_transfer_list() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::SftpControl,
+                Uuid::nil(),
+                9,
+                serde_json::to_vec(&serde_json::json!({ "kind": "sessions" })).unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::SftpSnapshot);
+        assert_eq!(response.sequence, 9);
+        let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(payload["kind"], "sessions");
+        assert_eq!(payload["sessions"], serde_json::json!([]));
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// A profile the desktop never synchronized is refused before any network
+    /// call, and the refusal names a code the RPC layer can classify.
+    ///
+    /// This is ADR-0082 decision 8 restated for files: the device names an
+    /// identifier, the desktop decides what it points at, and an identifier
+    /// that points at nothing is not an invitation to dial anything.
+    #[tokio::test]
+    async fn an_unsynchronized_profile_fails_without_dialling() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::SftpControl,
+                Uuid::nil(),
+                4,
+                serde_json::to_vec(&serde_json::json!({
+                    "kind": "listDir",
+                    "profileId": "never-synchronized",
+                    "path": "/var/log",
+                    "onBehalfOfDevice": "device-a",
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        assert_eq!(response.kind, FrameKind::SftpSnapshot);
+        let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(payload["kind"], "failed");
+        assert_eq!(payload["code"], "sftp_invalid_request");
+        assert!(payload["message"]
+            .as_str()
+            .unwrap()
+            .contains("never-synchronized"));
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// A chunk that is not base64 is a client bug, and it must not be reported
+    /// as the remote machine refusing the write.
+    #[tokio::test]
+    async fn a_malformed_chunk_is_refused_as_an_invalid_request() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let mut ssh_profiles = HashMap::new();
+        ssh_profiles.insert("production".to_string(), ssh_profile_request());
+        let local = host.connect(ClientIdentity::local("seed")).unwrap();
+        host.replace_synchronized_profiles(&local.connection_id, HashMap::new(), ssh_profiles)
+            .unwrap();
+
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::SftpControl,
+                Uuid::nil(),
+                5,
+                serde_json::to_vec(&serde_json::json!({
+                    "kind": "writeChunk",
+                    "profileId": "production",
+                    "path": "/tmp/upload.bin",
+                    "offset": 0,
+                    "data": "not base64!!",
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(payload["kind"], "failed");
+        assert_eq!(payload["code"], "sftp_invalid_request");
+        drop(client);
+        serve.await.unwrap().unwrap();
+    }
+
+    /// Closing a profile nobody opened is a no-op rather than an error, so a
+    /// client tidying up after a failed browse does not have to know whether
+    /// the connection ever came up.
+    #[tokio::test]
+    async fn closing_an_unopened_profile_closes_nothing() {
+        let host = TerminalHost::new("host-test", test_config()).unwrap();
+        let (mut client, server) = tokio::io::duplex(16 * 1024);
+        let serve = tokio::spawn(serve_host_stream(
+            server,
+            host,
+            ClientIdentity::local("desktop"),
+            PathBuf::from("."),
+            PathBuf::from("known_hosts"),
+        ));
+
+        write_frame(
+            &mut client,
+            &TerminalFrame::command(
+                FrameKind::SftpControl,
+                Uuid::nil(),
+                2,
+                serde_json::to_vec(&serde_json::json!({
+                    "kind": "closeProfile",
+                    "profileId": "production",
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        let response = read_frame(&mut client).await.unwrap().unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+        assert_eq!(payload["kind"], "closed");
+        assert_eq!(payload["closed"], 0);
         drop(client);
         serve.await.unwrap().unwrap();
     }

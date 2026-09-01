@@ -68,6 +68,20 @@ pub enum FrameKind {
     SshForwardControl = 24,
     /// Host→client response to [`FrameKind::SshForwardControl`]. Never pushed.
     SshForwardSnapshot = 25,
+    /// Client to host request to browse or transfer files over a saved SSH
+    /// profile (ADR-0162). Answered with [`FrameKind::SftpSnapshot`].
+    ///
+    /// Host-local only. `TerminalHost` refuses this frame on a connection that
+    /// is not local, exactly as it refuses `update_config`, so a device that
+    /// reaches `/ws/terminal` with `terminal.open` gains nothing from it. The
+    /// device-facing surface is the `sftp_*` RPC family, which authorizes with
+    /// its own `ssh.files` capability and then talks to this frame as a local
+    /// client. `lib/terminal/protocol.ts` deliberately does not mirror 26 or
+    /// 27: a device receiving one has been handed a frame that means nothing
+    /// on its plane, and rejecting it is the correct answer.
+    SftpControl = 26,
+    /// Host to client response to [`FrameKind::SftpControl`]. Never pushed.
+    SftpSnapshot = 27,
 }
 
 impl TryFrom<u8> for FrameKind {
@@ -100,6 +114,8 @@ impl TryFrom<u8> for FrameKind {
             23 => Self::HistorySnapshot,
             24 => Self::SshForwardControl,
             25 => Self::SshForwardSnapshot,
+            26 => Self::SftpControl,
+            27 => Self::SftpSnapshot,
             other => return Err(ProtocolError::UnknownFrameKind(other)),
         })
     }
@@ -296,19 +312,19 @@ mod tests {
         assert_eq!(TerminalFrame::decode(&bytes).unwrap(), frame);
     }
 
-    /// Every discriminant in 1..=25 must survive the `u8` round trip, and the
+    /// Every discriminant in 1..=27 must survive the `u8` round trip, and the
     /// first unassigned value must be rejected rather than silently accepted —
     /// `decode` relies on this to reject a frame from a newer peer.
     #[test]
     fn every_frame_kind_round_trips_through_its_discriminant() {
-        for value in 1u8..=25 {
+        for value in 1u8..=27 {
             let kind = FrameKind::try_from(value)
                 .unwrap_or_else(|error| panic!("discriminant {value} is unmapped: {error}"));
             assert_eq!(kind as u8, value);
         }
         assert_eq!(
-            FrameKind::try_from(26),
-            Err(ProtocolError::UnknownFrameKind(26))
+            FrameKind::try_from(28),
+            Err(ProtocolError::UnknownFrameKind(28))
         );
         assert_eq!(
             FrameKind::try_from(0),
@@ -346,6 +362,8 @@ mod tests {
         assert_eq!(FrameKind::HistorySnapshot as u8, 23);
         assert_eq!(FrameKind::SshForwardControl as u8, 24);
         assert_eq!(FrameKind::SshForwardSnapshot as u8, 25);
+        assert_eq!(FrameKind::SftpControl as u8, 26);
+        assert_eq!(FrameKind::SftpSnapshot as u8, 27);
     }
 
     #[test]

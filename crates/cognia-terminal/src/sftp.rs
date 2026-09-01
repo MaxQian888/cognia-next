@@ -247,6 +247,16 @@ impl SftpRegistry {
         None
     }
 
+    /// Whether a connection for exactly this configuration is already pooled.
+    ///
+    /// Read-only on purpose: the caller is deciding whether an operation is
+    /// about to open a NEW connection to somebody's machine, which is the one
+    /// event worth an audit row. Reaping a dead entry here would make the
+    /// answer depend on when it was asked.
+    pub fn is_pooled(&self, request: &SshSpawnRequest) -> bool {
+        self.sessions.lock().contains_key(&pool_key(request))
+    }
+
     /// Every live session, for the host's session list and its audit log.
     pub fn sessions(&self) -> Vec<SftpSessionInfo> {
         let guard = self.sessions.lock();
