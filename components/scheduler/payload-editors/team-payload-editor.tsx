@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import type { AgentTeamDraft } from "./types"
+import { useProjectStore } from "@/stores/project/project-store"
 
 export interface TeamPayloadEditorProps {
   draft: AgentTeamDraft
@@ -51,7 +52,16 @@ export function TeamPayloadEditor({
       .then(() => {
         if (cancelled) return
         try {
-          setTeams(agentTeamManager.list().map((tm) => ({ id: tm.id, name: tm.name })))
+          // Workspace-scoped, like the assignee picker and the fleet console.
+          // Offering another workspace's Squad here schedules work that the
+          // resolved workspace binding will then attribute somewhere else.
+          const activeProjectId = useProjectStore.getState().activeProjectId
+          setTeams(
+            agentTeamManager
+              .list()
+              .filter((tm) => !activeProjectId || !tm.projectId || tm.projectId === activeProjectId)
+              .map((tm) => ({ id: tm.id, name: tm.name }))
+          )
         } catch {
           setTeams([])
         }

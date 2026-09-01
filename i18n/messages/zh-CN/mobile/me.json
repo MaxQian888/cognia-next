@@ -10,7 +10,6 @@
   "actionPair": "去配对",
   "agentModesRow": "代理模式",
   "agentRow": "Agent 默认设置",
-  "agentTeamsSettingsRow": "智能体团队",
   "appSecurity": "应用安全",
   "appearanceBackAria": "返回个人",
   "appearanceLink": "主题与壁纸",
@@ -200,9 +199,9 @@
   },
   "skillsRow": "技能",
   "slashCommandsRow": "斜杠命令",
-  "workspaceRow": "工作区",
   "sourceControlRow": "源代码管理",
   "speechRow": "语音",
+  "squadsRow": "小队",
   "storage": {
     "backupsDescription": "{count} 个文件 · {total}",
     "backupsEmpty": "尚无成功的备份。",
@@ -278,5 +277,6 @@
   "unpinned": "已从常用移除",
   "versionLabel": "版本",
   "webSearchRow": "网络搜索",
-  "workflowsSettingsRow": "工作流设置"
+  "workflowsSettingsRow": "工作流设置",
+  "workspaceRow": "工作区"
 }

@@ -9,12 +9,14 @@
     "inspectorLabel": "小队详情",
     "manageAction": "管理小队",
     "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
+    "openFleet": "宿主实时活动",
     "railLabel": "小队列表",
     "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
     "tabs": {
       "board": "看板",
       "runs": "运行"
     },
-    "title": "小队"
+    "title": "小队",
+    "waiting": "等你答复"
   }
 }

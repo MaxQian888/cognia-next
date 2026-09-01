@@ -3325,6 +3325,11 @@
         "description": "启用工作树隔离并运行团队后，各 agent 的分支会显示在这里。",
         "title": "暂无 agent 分支"
       },
+      "moved": {
+        "action": "打开工作区",
+        "description": "实时环境与隔离运行留下的分支现在都在工作区页面。它们属于仓库，不属于某一个小队。",
+        "title": "工作树已迁移"
+      },
       "refresh": "刷新",
       "title": "Agent 分支"
     }
@@ -16928,7 +16933,6 @@
       "actionPair": "去配对",
       "agentModesRow": "代理模式",
       "agentRow": "Agent 默认设置",
-      "agentTeamsSettingsRow": "智能体团队",
       "appSecurity": "应用安全",
       "appearanceBackAria": "返回个人",
       "appearanceLink": "主题与壁纸",
@@ -17120,6 +17124,7 @@
       "slashCommandsRow": "斜杠命令",
       "sourceControlRow": "源代码管理",
       "speechRow": "语音",
+      "squadsRow": "小队",
       "storage": {
         "backupsDescription": "{count} 个文件 · {total}",
         "backupsEmpty": "尚无成功的备份。",
@@ -38676,13 +38681,15 @@
       "inspectorLabel": "小队详情",
       "manageAction": "管理小队",
       "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
+      "openFleet": "宿主实时活动",
       "railLabel": "小队列表",
       "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
       "tabs": {
         "board": "看板",
         "runs": "运行"
       },
-      "title": "小队"
+      "title": "小队",
+      "waiting": "等你答复"
     }
   },
   "structuredConfig": {
@@ -47268,6 +47275,17 @@
       },
       "scanning": "正在查找目录……",
       "title": "正在使用的目录"
+    },
+    "agentBranches": {
+      "actions": {
+        "checkout": "检出",
+        "compare": "比较引用",
+        "delete": "删除"
+      },
+      "description": "隔离运行回收工作树后留下的分支。",
+      "empty": "该仓库里没有 agent 分支。",
+      "refresh": "刷新 agent 分支",
+      "title": "Agent 分支"
     },
     "capabilities": {
       "description": "技能与 MCP 服务器在本机统一定义，这里只记录本工作区的取舍：保持「继承」的条目会跟随全局设置，包括之后的改动。",

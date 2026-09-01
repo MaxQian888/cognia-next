@@ -39,6 +39,7 @@ import {
 import { SquadsNav } from "./squads-nav"
 import { SquadDetailPanel } from "./squad-detail-panel"
 import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
+import { useProjectStore } from "@/stores/project/project-store"
 
 function SquadsSectionInner() {
   const t = useTranslations("settings.squads")
@@ -49,17 +50,21 @@ function SquadsSectionInner() {
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
   const createTeam = useAgentTeamStore((s) => s.createTeam)
+  const workspaceId = useProjectStore((state) => state.activeProjectId)
 
   const squads = useMemo(
     () =>
       Object.values(teams)
+        // Workspace-scoped, like the assignee picker and the fleet console.
+        // A Squad with no project is shared, not foreign.
+        .filter((team) => !workspaceId || !team.projectId || team.projectId === workspaceId)
         .map((team) => ({
           id: team.id,
           name: team.name,
           memberCount: Object.values(teammates).filter((m) => m.teamId === team.id).length,
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [teams, teammates]
+    [teams, teammates, workspaceId]
   )
 
   const activePanel = useMemo(() => {

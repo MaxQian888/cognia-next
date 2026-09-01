@@ -3325,6 +3325,11 @@
         "description": "Enable worktree isolation and run the team; each agent's branch will appear here.",
         "title": "No agent branches yet"
       },
+      "moved": {
+        "action": "Open workspace",
+        "description": "Live environments and the branches isolated runs leave behind are both on the workspace page now. They belong to the repository, not to one squad.",
+        "title": "Worktrees moved"
+      },
       "refresh": "Refresh",
       "title": "Agent branches"
     }
@@ -16928,7 +16933,6 @@
       "actionPair": "Pair now",
       "agentModesRow": "Agent modes",
       "agentRow": "Agent defaults",
-      "agentTeamsSettingsRow": "Agent teams",
       "appSecurity": "App security",
       "appearanceBackAria": "Back to Me",
       "appearanceLink": "Theme & wallpaper",
@@ -17120,6 +17124,7 @@
       "slashCommandsRow": "Slash commands",
       "sourceControlRow": "Source control",
       "speechRow": "Speech & voice",
+      "squadsRow": "Squads",
       "storage": {
         "backupsDescription": "{count} files · {total}",
         "backupsEmpty": "No successful backups yet.",
@@ -38676,13 +38681,15 @@
       "inspectorLabel": "Squad detail",
       "manageAction": "Manage Squads",
       "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
+      "openFleet": "Live host activity",
       "railLabel": "Squad list",
       "summary": "{live, plural, =0 {none working} other {# working}} of {total, plural, =1 {1 Squad} other {# Squads}}",
       "tabs": {
         "board": "Board",
         "runs": "Runs"
       },
-      "title": "Squads"
+      "title": "Squads",
+      "waiting": "Needs you"
     }
   },
   "structuredConfig": {
@@ -47268,6 +47275,17 @@
       },
       "scanning": "Looking for folders…",
       "title": "Folders in use"
+    },
+    "agentBranches": {
+      "actions": {
+        "checkout": "Check out",
+        "compare": "Compare refs",
+        "delete": "Delete"
+      },
+      "description": "Branches an isolated run left behind, once its worktree was reclaimed.",
+      "empty": "No agent branches in this repository.",
+      "refresh": "Refresh agent branches",
+      "title": "Agent branches"
     },
     "capabilities": {
       "description": "Skills and MCP servers are defined once for the machine. This is where a workspace says which of them it actually uses — anything left on Inherit follows the library, including later changes to it.",

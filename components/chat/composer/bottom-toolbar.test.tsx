@@ -3,6 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
+import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { BottomToolbar, TOOLBAR_CHIP } from "./bottom-toolbar"
 import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { ChatSession } from "@cognia/agent-config-types"
@@ -27,6 +28,9 @@ jest.mock("next/navigation", () => ({
 
 // Stub the heavier sibling components — we only care about props.
 const lastSelectorProps: Record<string, unknown> = {}
+jest.mock("@/components/agent/composition/use-chat-executor", () => ({
+  useChatExecutor: jest.fn(() => ({})),
+}))
 jest.mock("@/components/agent/composition/composition-chip", () => ({
   CompositionChip: (props: Record<string, unknown>) => {
     Object.assign(lastSelectorProps, props)
@@ -143,6 +147,7 @@ const session: ChatSession = {
 
 beforeEach(() => {
   mockDefaultModel = "claude-sonnet-5"
+  ;(useChatExecutor as jest.Mock).mockReturnValue({})
   pushSpy.mockClear()
   chatStoreState = {
     messages: [],
@@ -265,6 +270,24 @@ describe("BottomToolbar — session-kind branching", () => {
     render(<BottomToolbar session={session} />)
     expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
     expect(screen.queryByTestId("composition-chip")).toBeNull()
+  })
+
+  /**
+   * The executor axis is not the mode axis. `use-claude-chat-controller`
+   * branches to `startSquadRun` ABOVE `resolveSendOptions`, so a Squad-bound
+   * turn never reaches the runtime and the binding keeps working after a switch
+   * to an external agent. Hiding the chip there hid the only control that could
+   * undo it, leaving the conversation permanently routed to a Squad with
+   * nothing on screen saying so.
+   */
+  it("keeps the chip on an external agent while a Squad is bound", () => {
+    agentRuntimeState.runtimeRef = { kind: "external", agentId: "a1" }
+    ;(useChatExecutor as jest.Mock).mockReturnValue({
+      squadId: "squad-1",
+      squadName: "Review Crew",
+    })
+    render(<BottomToolbar session={session} />)
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
   })
 
   // Effort qualifies the model, so its chip sits directly after the model chip

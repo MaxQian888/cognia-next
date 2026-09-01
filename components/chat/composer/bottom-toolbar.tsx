@@ -203,13 +203,22 @@ function GenericBottomToolbar({
   // On the wide row the preset sits directly on the toolbar and the axes get
   // their own button; inside the "⋯" overflow there is no row to spread over,
   // so both packings collapse into the single chip.
-  const modeControl = onBuiltinRuntime ? (
-    <CompositionChip
-      sessionId={session?.id}
-      disabled={isStreaming}
-      layout={compact || inBox ? "combined" : "split"}
-    />
-  ) : null
+  //
+  // Mounted on an external runtime too WHEN A SQUAD IS BOUND. The executor axis
+  // is not the mode axis: `use-claude-chat-controller` branches to
+  // `startSquadRun` above `resolveSendOptions`, so a Squad-bound turn never
+  // reaches the runtime at all and the binding keeps working after a switch to
+  // an external agent. Hiding the chip there hid the only control that could
+  // undo it, leaving a conversation permanently routed to a Squad with nothing
+  // on screen saying so.
+  const modeControl =
+    onBuiltinRuntime || executor.squadId ? (
+      <CompositionChip
+        sessionId={session?.id}
+        disabled={isStreaming}
+        layout={compact || inBox ? "combined" : "split"}
+      />
+    ) : null
 
   // Passive indicator, not a control — it belongs beside the context ring
   // rather than inside a menu the user has to open to learn whether this turn

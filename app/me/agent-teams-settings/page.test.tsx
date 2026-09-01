@@ -1,78 +1,28 @@
-/**
- * @jest-environment jsdom
- */
-import { render, screen } from "@testing-library/react"
+/** @jest-environment jsdom */
 
-import MobileAgentTeamsSettingsPage from "./page"
-import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { render } from "@testing-library/react"
 
-jest.mock("@/hooks/companion/use-companion-config")
-jest.mock("@/stores/agent/agent-team-store", () => ({
-  useAgentTeamStore: jest.fn(),
-}))
+const replace = jest.fn()
+jest.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }))
 
-const mockPaired = (paired: boolean) =>
-  (useCompanionConfig as jest.Mock).mockReturnValue({
-    config: null,
-    paired,
-    shortDeviceId: null,
-    loading: false,
-    reload: jest.fn(),
+import AgentTeamsSettingsPage from "./page"
+
+describe("/me/agent-teams-settings", () => {
+  /**
+   * The page this replaces was a `PairedOnly` read-only template list, on the
+   * ADR-0056 D6 reasoning that agent teams were a desktop-collaboration runtime
+   * a phone could only watch. ADR-0140 made a Squad host-neutral: `/squads`
+   * declares `standalone: "full"`, carries no `isTauri` gate, and shows strictly
+   * more, including the fleet a phone opens this for.
+   */
+  it("sends a phone to the Squad fleet", () => {
+    render(<AgentTeamsSettingsPage />)
+    expect(replace).toHaveBeenCalledWith("/squads")
   })
 
-const mockTemplates = (templates: Record<string, unknown>) =>
-  (useAgentTeamStore as unknown as jest.Mock).mockImplementation(
-    (selector: (s: { templates: unknown }) => unknown) => selector({ templates })
-  )
-
-beforeEach(() => {
-  jest.clearAllMocks()
-  mockPaired(true)
-  mockTemplates({
-    "parallel-review": {
-      id: "parallel-review",
-      name: "Parallel Code Review",
-      description: "Split code review across multiple specialized reviewers",
-      category: "review",
-      teammates: [{ name: "A" }, { name: "B" }],
-    },
-    research: {
-      id: "research",
-      name: "Research Squad",
-      description: "",
-      category: "research",
-      teammates: [{ name: "X" }],
-    },
-  })
-})
-
-describe("MobileAgentTeamsSettingsPage", () => {
-  it("shows the paired placeholder when unpaired", () => {
-    mockPaired(false)
-    render(<MobileAgentTeamsSettingsPage />)
-    expect(screen.getByTestId("paired-only-placeholder")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-team-row-parallel-review")).toBeNull()
-  })
-
-  it("lists the available team templates when paired", () => {
-    render(<MobileAgentTeamsSettingsPage />)
-    expect(screen.getByTestId("mobile-agent-teams-page")).toBeInTheDocument()
-    expect(screen.getByTestId("agent-team-row-parallel-review")).toBeInTheDocument()
-    expect(screen.getByTestId("agent-team-row-research")).toBeInTheDocument()
-    expect(screen.getByText("Parallel Code Review")).toBeInTheDocument()
-  })
-
-  it("renders the empty state when there are no templates", () => {
-    mockTemplates({})
-    render(<MobileAgentTeamsSettingsPage />)
-    expect(screen.getByTestId("me-section-agent-teams")).toBeInTheDocument()
-    expect(screen.queryByTestId("agent-team-row-parallel-review")).toBeNull()
-  })
-
-  it("surfaces the manage-on-desktop guidance and no runtime controls", () => {
-    render(<MobileAgentTeamsSettingsPage />)
-    expect(screen.getByTestId("agent-teams-manage-note")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /create|launch|run|new/i })).toBeNull()
+  /** A redirect, not a deletion: the Me row and any bookmark still name it. */
+  it("renders nothing of its own", () => {
+    const { container } = render(<AgentTeamsSettingsPage />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

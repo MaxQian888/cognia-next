@@ -13,26 +13,47 @@
 import { Suspense, useCallback } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
-import { SquadFleetConsole } from "@/components/squads/squad-fleet-console"
+import { SquadFleetConsole, type SquadFleetTab } from "@/components/squads/squad-fleet-console"
 
 function SquadsPageInner() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const selectedId = searchParams?.get("id") ?? undefined
+  // The centre tab lives here for the same reason `?id=` does, plus one more:
+  // `FeaturePageShell` renders its children through two different trees and
+  // remounts the subtree when the breakpoint resolves, which would drop a tab
+  // held in the console's own state.
+  const tab: SquadFleetTab = searchParams?.get("tab") === "board" ? "board" : "runs"
 
-  const onSelect = useCallback(
-    (squadId: string | null) => {
+  const replaceParam = useCallback(
+    (key: string, value: string | null) => {
       const next = new URLSearchParams(searchParams?.toString() ?? "")
-      if (squadId) next.set("id", squadId)
-      else next.delete("id")
+      if (value) next.set(key, value)
+      else next.delete(key)
       const query = next.toString()
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
     },
     [router, pathname, searchParams]
   )
 
-  return <SquadFleetConsole {...(selectedId ? { selectedId } : {})} onSelect={onSelect} />
+  const onSelect = useCallback(
+    (squadId: string | null) => replaceParam("id", squadId),
+    [replaceParam]
+  )
+  const onTabChange = useCallback(
+    (next: SquadFleetTab) => replaceParam("tab", next === "board" ? "board" : null),
+    [replaceParam]
+  )
+
+  return (
+    <SquadFleetConsole
+      {...(selectedId ? { selectedId } : {})}
+      onSelect={onSelect}
+      tab={tab}
+      onTabChange={onTabChange}
+    />
+  )
 }
 
 export default function SquadsPage() {

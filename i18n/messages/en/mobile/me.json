@@ -10,7 +10,6 @@
   "actionPair": "Pair now",
   "agentModesRow": "Agent modes",
   "agentRow": "Agent defaults",
-  "agentTeamsSettingsRow": "Agent teams",
   "appSecurity": "App security",
   "appearanceBackAria": "Back to Me",
   "appearanceLink": "Theme & wallpaper",
@@ -200,9 +199,9 @@
   },
   "skillsRow": "Skills",
   "slashCommandsRow": "Slash commands",
-  "workspaceRow": "Workspace",
   "sourceControlRow": "Source control",
   "speechRow": "Speech & voice",
+  "squadsRow": "Squads",
   "storage": {
     "backupsDescription": "{count} files · {total}",
     "backupsEmpty": "No successful backups yet.",
@@ -278,5 +277,6 @@
   "unpinned": "Removed from favorites",
   "versionLabel": "Version",
   "webSearchRow": "Web search",
-  "workflowsSettingsRow": "Workflow settings"
+  "workflowsSettingsRow": "Workflow settings",
+  "workspaceRow": "Workspace"
 }

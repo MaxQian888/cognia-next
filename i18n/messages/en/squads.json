@@ -9,12 +9,14 @@
     "inspectorLabel": "Squad detail",
     "manageAction": "Manage Squads",
     "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
+    "openFleet": "Live host activity",
     "railLabel": "Squad list",
     "summary": "{live, plural, =0 {none working} other {# working}} of {total, plural, =1 {1 Squad} other {# Squads}}",
     "tabs": {
       "board": "Board",
       "runs": "Runs"
     },
-    "title": "Squads"
+    "title": "Squads",
+    "waiting": "Needs you"
   }
 }

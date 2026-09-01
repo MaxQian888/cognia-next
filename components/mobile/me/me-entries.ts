@@ -448,14 +448,26 @@ export const ME_ENTRIES: MeEntry[] = [
     keywords: ["hook", "lifecycle", "trigger", "settings.json", "钩子", "生命周期"],
   },
   {
-    id: "agent-teams-settings",
-    pairedOnly: true,
+    // Not `pairedOnly` any more. That flag came from ADR-0056 D6, which read
+    // agent teams as a desktop-collaboration runtime a phone could only watch.
+    // ADR-0140 made a Squad host-neutral: `/squads` declares `standalone:
+    // "full"`, carries no `isTauri` gate, and reads a persisted store.
+    id: "squads",
     icon: UsersRoundIcon,
     spotIcon: "agent-teams",
-    labelKey: "agentTeamsSettingsRow",
-    href: "/me/agent-teams-settings",
+    labelKey: "squadsRow",
+    href: "/squads",
     section: "connection",
-    keywords: ["agent team", "template", "collaboration", "团队", "智能体团队", "模板"],
+    keywords: [
+      "squad",
+      "agent team",
+      "template",
+      "collaboration",
+      "小队",
+      "团队",
+      "智能体团队",
+      "模板",
+    ],
   },
   {
     id: "characters",

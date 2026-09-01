@@ -16,15 +16,14 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
   ["/me/mcp", "integrations"],
   ["/memory", "knowledge-agents"],
   ["/twin", "knowledge-agents"],
-  ["/squads", "knowledge-agents"],
-  ["/squads", "desktop-tools"],
+  // Once each. `/agent-teams` and `/me/agent-teams-settings` were both
+  // repointed here as they retired, and each repoint appended another pair.
   ["/squads", "knowledge-agents"],
   ["/squads", "desktop-tools"],
   ["/templates", "knowledge-agents"],
   ["/skills", "knowledge-agents"],
   ["/skills", "desktop-tools"],
   ["/me/memory-settings", "knowledge-agents"],
-  ["/me/agent-teams-settings", "knowledge-agents"],
   ["/me/ocr", "knowledge-agents"],
   ["/me/subagents", "knowledge-agents"],
   ["/me/teams", "knowledge-agents"],

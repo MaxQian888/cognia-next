@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 
 import { SquadFleetConsole } from "./squad-fleet-console"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import type { AgentTeam, AgentTeammate, TeamStatus } from "@/types/agent/agent-team"
 
 function squad(id: string, name: string, status: TeamStatus, description = ""): AgentTeam {
@@ -43,10 +44,20 @@ const MEMBERS = [
   ...["f1", "f2"].map((id) => member(id, "refactor")),
 ]
 
-function seed(teams: AgentTeam[], members: AgentTeammate[] = []) {
+function seed(teams: AgentTeam[], members: AgentTeammate[] = [], waitingOn: string[] = []) {
   useAgentTeamStore.setState({
     teams: Object.fromEntries(teams.map((t) => [t.id, t])) as never,
     teammates: Object.fromEntries(members.map((m) => [m.id, m])) as never,
+  })
+  usePendingGatesStore.setState({
+    gates: waitingOn.map((teamId, i) => ({
+      key: { scope: "team", id: `g${i}` },
+      gateType: "plan",
+      title: "Approve the plan",
+      teamId,
+      openedAt: 0,
+      status: "open",
+    })) as never,
   })
 }
 
@@ -77,6 +88,43 @@ type Story = StoryObj<typeof meta>
 
 /** Working Squads sort to the top — a fleet view is read for what is happening. */
 export const Fleet: Story = {
+  decorators: [
+    (Story) => {
+      seed(FLEET, MEMBERS)
+      return <Story />
+    },
+  ],
+}
+
+/**
+ * A Squad blocked on an approval sorts above a working one and wears the badge.
+ * It is the only row on the page that will not move until someone answers it,
+ * and burying it under an alphabetically earlier idle Squad hides the one
+ * actionable thing here.
+ */
+export const WaitingOnYou: Story = {
+  decorators: [
+    (Story) => {
+      seed(FLEET, MEMBERS, ["release"])
+      return <Story />
+    },
+  ],
+}
+
+/** The board tab, with a Squad chosen. */
+export const TaskBoard: Story = {
+  args: { selectedId: "research", tab: "board" },
+  decorators: [
+    (Story) => {
+      seed(FLEET, MEMBERS)
+      return <Story />
+    },
+  ],
+}
+
+/** The board belongs to one Squad, so it asks for one first. */
+export const BoardWithoutSelection: Story = {
+  args: { tab: "board" },
   decorators: [
     (Story) => {
       seed(FLEET, MEMBERS)

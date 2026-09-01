@@ -74,7 +74,7 @@ describe("me-entries registry", () => {
       "web-search": "browser",
       search: "discover",
       terminal: "terminal",
-      "agent-teams-settings": "agent-teams",
+      squads: "agent-teams",
       skills: "skills",
       scheduler: "scheduler",
       goals: "goals",
@@ -151,10 +151,13 @@ describe("me-entries registry", () => {
     })
     expect(byId("network")).toMatchObject({ href: "/me/network", section: "connection" })
     expect(byId("hooks")).toMatchObject({ href: "/me/hooks", section: "connection" })
-    expect(byId("agent-teams-settings")).toMatchObject({
-      href: "/me/agent-teams-settings",
-      section: "connection",
-    })
+    // Not `pairedOnly` and not `/me/…` any more. ADR-0056 D6 read agent teams
+    // as a desktop-collaboration runtime a phone could only watch, and
+    // ADR-0140 made a Squad host-neutral: `/squads` declares
+    // `standalone: "full"`, carries no `isTauri` gate, and shows the fleet a
+    // phone opens this for rather than a read-only template list.
+    expect(byId("squads")).toMatchObject({ href: "/squads", section: "connection" })
+    expect(byId("squads")?.pairedOnly).toBeUndefined()
   })
 
   it("surfaces the platform-agnostic desktop-parity sections", () => {

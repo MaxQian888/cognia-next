@@ -3,8 +3,11 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { SquadFleetConsole } from "./squad-fleet-console"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { AgentTeam, AgentTeammate, TeamStatus } from "@/types/agent/agent-team"
 
 // Both are surfaces of their own with live Dexie queries; this suite is about
@@ -16,6 +19,27 @@ jest.mock("@/components/agent/team/command-center", () => ({
 }))
 jest.mock("@/components/agent/team/runs-list", () => ({
   TeamRunsList: ({ teamId }: { teamId: string }) => <div data-testid="runs-list">{teamId}</div>,
+}))
+// The board is `AgentTeamTasks`, its own surface with its own suite.
+jest.mock("@/components/agent/workspace/tasks", () => ({
+  AgentTeamTasks: ({ teamId }: { teamId: string }) => <div data-testid="task-board">{teamId}</div>,
+}))
+jest.mock("@/components/agent/workspace/team-run-controls", () => ({
+  TeamRunControls: ({ status }: { status: string }) => (
+    <div data-testid="run-controls">{status}</div>
+  ),
+}))
+let fleetSource: "tauri" | "companion" | "none" = "none"
+jest.mock("@/hooks/fleet/use-fleet-snapshot", () => ({
+  useFleetSnapshot: () => ({ source: fleetSource, snapshot: { sessions: [] } }),
+}))
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    start: jest.fn(async () => {}),
+    pause: jest.fn(async () => {}),
+    resume: jest.fn(async () => {}),
+    shutdown: jest.fn(async () => {}),
+  },
 }))
 
 function squad(id: string, name: string, status: TeamStatus = "idle"): AgentTeam {
@@ -37,6 +61,25 @@ function seed(teams: AgentTeam[], members: AgentTeammate[] = []) {
     teammates: Object.fromEntries(members.map((m) => [m.id, m])) as never,
   })
 }
+
+function gates(entries: Array<{ teamId?: string; status?: "open" | "interrupted" }>) {
+  usePendingGatesStore.setState({
+    gates: entries.map((entry, i) => ({
+      key: { scope: "team", id: `g${i}` },
+      gateType: "plan",
+      title: "Approve the plan",
+      openedAt: 0,
+      status: entry.status ?? "open",
+      ...(entry.teamId ? { teamId: entry.teamId } : {}),
+    })) as never,
+  })
+}
+
+beforeEach(() => {
+  gates([])
+  fleetSource = "none"
+  useProjectStore.setState({ activeProjectId: null } as never)
+})
 
 beforeEach(() => seed([squad("a", "Alpha"), squad("b", "Bravo")]))
 
@@ -89,5 +132,104 @@ describe("SquadFleetConsole", () => {
     seed([])
     render(<SquadFleetConsole onSelect={jest.fn()} />)
     expect(screen.getByTestId("squad-fleet-empty")).toBeInTheDocument()
+  })
+})
+
+describe("SquadFleetConsole triage and scope", () => {
+  /**
+   * A fleet view is read to find what needs YOU. A Squad blocked on an approval
+   * is the one row that will not move until it is answered, and sorting it
+   * below an alphabetically earlier idle Squad buries the only actionable thing
+   * on the page. `PendingGate.teamId` has carried this all along.
+   */
+  it("puts a Squad waiting on a human above a working one", () => {
+    seed([squad("a", "Alpha", "executing"), squad("z", "Zulu")])
+    gates([{ teamId: "z" }])
+    render(<SquadFleetConsole onSelect={() => {}} />)
+    const rows = screen.getAllByTestId("squad-fleet-row")
+    expect(rows[0]).toHaveTextContent("Zulu")
+    expect(rows[0]).toHaveTextContent("Needs you")
+  })
+
+  /** A restored-but-dead gate is Dismiss-only and answers nothing. */
+  it("ignores an interrupted gate", () => {
+    seed([squad("a", "Alpha"), squad("z", "Zulu")])
+    gates([{ teamId: "z", status: "interrupted" }])
+    render(<SquadFleetConsole onSelect={() => {}} />)
+    const rows = screen.getAllByTestId("squad-fleet-row")
+    expect(rows[0]).toHaveTextContent("Alpha")
+    expect(screen.queryByTestId("squad-fleet-waiting")).not.toBeInTheDocument()
+  })
+
+  it("hides a Squad from another workspace and keeps an unscoped one", () => {
+    seed([
+      { ...squad("a", "Alpha"), projectId: "p1" } as AgentTeam,
+      { ...squad("b", "Bravo"), projectId: "p2" } as AgentTeam,
+      squad("c", "Charlie"),
+    ])
+    useProjectStore.setState({ activeProjectId: "p1" } as never)
+    render(<SquadFleetConsole onSelect={() => {}} />)
+    const names = screen.getAllByTestId("squad-fleet-row").map((r) => r.textContent)
+    expect(names.some((n) => n?.includes("Alpha"))).toBe(true)
+    expect(names.some((n) => n?.includes("Charlie"))).toBe(true)
+    expect(names.some((n) => n?.includes("Bravo"))).toBe(false)
+  })
+
+  /**
+   * The tab is a prop from `?tab=`, not local state. `FeaturePageShell` renders
+   * its children through two different trees, a resizable pane set and a narrow
+   * single column, and moving between them REMOUNTS the subtree, so a tab held
+   * in `useState` here snaps back the first time the breakpoint resolves.
+   */
+  it("reports a tab change instead of owning it", async () => {
+    const onTabChange = jest.fn()
+    const user = userEvent.setup()
+    render(<SquadFleetConsole onSelect={() => {}} onTabChange={onTabChange} />)
+    // Driven from the keyboard: Radix Tabs activates on arrow-key focus with
+    // its default `activationMode="automatic"`, and that path exercises the
+    // same `onValueChange` a click does while being the one a keyboard user
+    // actually takes.
+    screen.getByRole("tab", { name: "Runs" }).focus()
+    await user.keyboard("{ArrowRight}")
+    expect(onTabChange).toHaveBeenCalledWith("board")
+  })
+
+  it("offers the board only once a Squad is chosen", () => {
+    render(<SquadFleetConsole onSelect={() => {}} tab="board" />)
+    expect(screen.getByTestId("squad-fleet-board-unselected")).toBeInTheDocument()
+    expect(screen.queryByTestId("task-board")).not.toBeInTheDocument()
+  })
+
+  it("shows the chosen Squad's board and its run controls", () => {
+    render(<SquadFleetConsole selectedId="a" onSelect={() => {}} tab="board" />)
+    // A fleet console that says what every Squad is doing and cannot act on
+    // any of it is half a console.
+    expect(screen.getByTestId("run-controls")).toBeInTheDocument()
+    expect(screen.getByTestId("task-board")).toHaveTextContent("a")
+  })
+})
+
+describe("SquadFleetConsole host activity link", () => {
+  // A secondary header action renders inside a Tooltip, whose provider is
+  // mounted once in `app/layout.tsx` rather than per surface.
+  const renderWithTooltips = (ui: React.ReactElement) =>
+    render(<TooltipProvider>{ui}</TooltipProvider>)
+
+  /**
+   * `/fleet` is the live triage read of the HOST's sessions, where a parked
+   * permission can be answered remotely. Its contract is `standalone: "hidden"`
+   * and `companion: "remote"`, so offering it in an unpaired browser would be a
+   * link to a route that is not there.
+   */
+  it("offers the host fleet once a host is reachable", () => {
+    fleetSource = "companion"
+    renderWithTooltips(<SquadFleetConsole onSelect={() => {}} />)
+    expect(screen.getByTestId("squad-fleet-host-activity")).toHaveAttribute("href", "/fleet")
+  })
+
+  it("hides it in an unpaired browser", () => {
+    fleetSource = "none"
+    renderWithTooltips(<SquadFleetConsole onSelect={() => {}} />)
+    expect(screen.queryByTestId("squad-fleet-host-activity")).toBeNull()
   })
 })

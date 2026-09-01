@@ -26,7 +26,7 @@
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { ExternalLinkIcon, SettingsIcon, UsersIcon } from "lucide-react"
+import { ActivityIcon, ExternalLinkIcon, SettingsIcon, UsersIcon } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
@@ -34,6 +34,7 @@ import { FeaturePageHeader } from "@/components/feature-shell/feature-page-heade
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/status-badge"
 import { AgentTeamCommandCenter } from "@/components/agent/team/command-center"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
@@ -41,6 +42,9 @@ import { TeamRunControls } from "@/components/agent/workspace/team-run-controls"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import { TeamRunsList } from "@/components/agent/team/runs-list"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
+import { useProjectStore } from "@/stores/project/project-store"
+import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
 import { settingsHref } from "@/lib/settings/deep-link"
 import { squadPanelId } from "@/components/settings/squads/nav-config"
 import { cn } from "@/lib/utils"
@@ -48,36 +52,82 @@ import { cn } from "@/lib/utils"
 /** Statuses that mean "this Squad is doing something right now". */
 const LIVE_TEAM_STATUSES = new Set(["planning", "executing"])
 
+export type SquadFleetTab = "runs" | "board"
+
 export interface SquadFleetConsoleProps {
   /** From `?id=` — deep links survive a static export this way. */
   selectedId?: string
   onSelect: (squadId: string | null) => void
+  /**
+   * Which centre tab is open, from `?tab=`.
+   *
+   * In the URL rather than in local state for two reasons. `FeaturePageShell`
+   * renders its children through two different trees, a resizable pane set and
+   * a narrow single column, and moving between them REMOUNTS the subtree, so
+   * anything held in `useState` here silently snaps back the first time the
+   * breakpoint resolves. And a tab worth switching to is worth linking to,
+   * which is the same argument that put `?id=` there.
+   */
+  tab?: SquadFleetTab
+  onTabChange?: (tab: SquadFleetTab) => void
 }
 
-export function SquadFleetConsole({ selectedId, onSelect }: SquadFleetConsoleProps) {
+export function SquadFleetConsole({
+  selectedId,
+  onSelect,
+  tab = "runs",
+  onTabChange,
+}: SquadFleetConsoleProps) {
   const t = useTranslations("squads.fleet")
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
   const tasks = useAgentTeamStore((s) => s.tasks)
+  const workspaceId = useProjectStore((state) => state.activeProjectId)
+  // Which Squads are holding a run open on a human answer. `PendingGate.teamId`
+  // has carried this all along, so nothing new is stored to sort by it.
+  const gates = usePendingGatesStore((state) => state.gates)
+  // `/fleet` is the live triage read of the HOST's sessions, where a parked
+  // permission can be answered remotely. Its contract is `standalone: "hidden"`
+  // and `companion: "remote"`, so the link is offered only where the route
+  // exists: `source === "none"` is an unpaired browser, and pointing it at a
+  // hidden route would be a dead end.
+  const { source: fleetSource } = useFleetSnapshot()
+
+  const waitingSquadIds = useMemo(
+    () =>
+      new Set(gates.filter((gate) => gate.status === "open" && gate.teamId).map((g) => g.teamId!)),
+    [gates]
+  )
 
   const squads = useMemo(
     () =>
       Object.values(teams)
+        // Workspace-scoped, like every other console. `createTeam` stamps the
+        // active project and the store purges per project, so a Squad from
+        // another workspace is noise here. A Squad with no project is shared,
+        // not foreign, which is why an absent value passes.
+        .filter((team) => !workspaceId || !team.projectId || team.projectId === workspaceId)
         .map((team) => ({
           id: team.id,
           name: team.name,
           description: team.description,
           status: team.status,
           memberCount: Object.values(teammates).filter((m) => m.teamId === team.id).length,
+          waiting: waitingSquadIds.has(team.id),
         }))
-        // Working Squads first, then by name — a fleet view is read for what
-        // is happening, not alphabetically.
+        // Waiting on a person first, then working, then by name. A fleet view
+        // is read to find what needs YOU: a Squad blocked on an approval is
+        // the one row that will not move until it is answered, and sorting it
+        // below an alphabetically earlier idle Squad buries the only actionable
+        // thing on the page.
         .sort((a, b) => {
+          const aWait = a.waiting ? 0 : 1
+          const bWait = b.waiting ? 0 : 1
           const aLive = LIVE_TEAM_STATUSES.has(a.status) ? 0 : 1
           const bLive = LIVE_TEAM_STATUSES.has(b.status) ? 0 : 1
-          return aLive - bLive || a.name.localeCompare(b.name)
+          return aWait - bWait || aLive - bLive || a.name.localeCompare(b.name)
         }),
-    [teams, teammates]
+    [teams, teammates, workspaceId, waitingSquadIds]
   )
 
   const liveCount = squads.filter((s) => LIVE_TEAM_STATUSES.has(s.status)).length
@@ -143,12 +193,22 @@ export function SquadFleetConsole({ selectedId, onSelect }: SquadFleetConsolePro
                       {t("memberCount", { count: squad.memberCount })}
                     </ItemDescription>
                   </ItemContent>
-                  <StatusBadge
-                    value={squad.status}
-                    labelNamespace="agentTeam.status"
-                    className="shrink-0 text-[10px]"
-                    pulse={LIVE_TEAM_STATUSES.has(squad.status)}
-                  />
+                  {squad.waiting ? (
+                    <Badge
+                      variant="destructive"
+                      className="shrink-0 text-[10px]"
+                      data-testid="squad-fleet-waiting"
+                    >
+                      {t("waiting")}
+                    </Badge>
+                  ) : (
+                    <StatusBadge
+                      value={squad.status}
+                      labelNamespace="agentTeam.status"
+                      className="shrink-0 text-[10px]"
+                      pulse={LIVE_TEAM_STATUSES.has(squad.status)}
+                    />
+                  )}
                 </Item>
               </button>
             ))}
@@ -220,13 +280,34 @@ export function SquadFleetConsole({ selectedId, onSelect }: SquadFleetConsolePro
             icon: SettingsIcon,
             href: settingsHref("squads"),
           }}
+          secondaryActions={
+            fleetSource === "none"
+              ? []
+              : [
+                  {
+                    id: "fleet",
+                    label: t("openFleet"),
+                    icon: ActivityIcon,
+                    href: "/fleet",
+                    testId: "squad-fleet-host-activity",
+                  },
+                ]
+          }
         />
       }
       leftPane={{ label: t("railLabel"), content: rail }}
       {...(inspector ? { rightPane: { label: t("inspectorLabel"), content: inspector } } : {})}
       centerClassName="min-h-0"
     >
-      <Tabs defaultValue="runs" className="flex min-h-0 flex-1 flex-col gap-0">
+      {/* Controlled, not `defaultValue`. This page re-renders on every live
+          status change, and an uncontrolled Radix tab loses its selection
+          whenever its subtree is remounted, snapping the reader back to Runs
+          mid-read. Owning the value here makes the choice survive. */}
+      <Tabs
+        value={tab}
+        onValueChange={(next) => onTabChange?.(next as SquadFleetTab)}
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
         <TabsList className="mx-4 mt-3 w-fit shrink-0">
           <TabsTrigger value="runs" data-testid="squad-fleet-tab-runs">
             {t("tabs.runs")}

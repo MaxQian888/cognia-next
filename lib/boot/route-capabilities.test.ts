@@ -9,7 +9,6 @@ describe("resolveRouteBootCapabilities", () => {
     ["/me/mcp", "", ["integrations"]],
     ["/memory", "", ["knowledge-agents"]],
     ["/me/memory-settings", "", ["knowledge-agents"]],
-    ["/me/agent-teams-settings", "", ["knowledge-agents"]],
     ["/me/ocr", "", ["knowledge-agents"]],
     ["/squads", "", ["knowledge-agents", "desktop-tools"]],
     ["/me/scheduler", "", ["workflow-automation"]],
