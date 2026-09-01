@@ -13,6 +13,13 @@
  * is looking at another repository must bind the schedule to the repository it
  * is working in, not to whatever is on screen at that instant.
  *
+ * A Squad sits between the two. An `agent-team` task names the Squad it will
+ * run, and a Squad names its own workspace (`AgentTeam.projectId`, stamped at
+ * creation and purged per project), so a schedule pointed at a Squad in
+ * workspace A while the user is looking at workspace B belongs to A. It ranks
+ * below the conversation for the same reason the conversation outranks the UI:
+ * the more specific statement of intent wins.
+ *
  * Both lookups are also TIME-BOUNDED. Creating a task previously touched only
  * the scheduler's own database; making it wait on the main one would let a slow
  * or absent main database (a headless runner, a shell where it was never
@@ -25,6 +32,8 @@ import type { CreateScheduledTaskInput, ScheduledTask } from "@/types/scheduler"
 export interface TaskWorkspaceDeps {
   /** The workspace a conversation belongs to. */
   sessionWorkspace?: (sessionId: string) => Promise<string | null | undefined>
+  /** The workspace a Squad belongs to. */
+  squadWorkspace?: (squadId: string) => Promise<string | null | undefined>
   /** The workspace the user is in, falling back to Default. */
   activeWorkspace?: () => Promise<string | null | undefined>
   /** How long either lookup may take before the row is left unattributed. */
@@ -55,6 +64,11 @@ async function defaultSessionWorkspace(sessionId: string): Promise<string | null
   return (await getDb().sessions.get(sessionId))?.projectId
 }
 
+async function defaultSquadWorkspace(squadId: string): Promise<string | null | undefined> {
+  const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+  return useAgentTeamStore.getState().teams[squadId]?.projectId
+}
+
 async function defaultActiveWorkspace(): Promise<string | null | undefined> {
   const { resolveScopeProjectId } = await import("@/lib/db/project-scope")
   return resolveScopeProjectId()
@@ -67,7 +81,7 @@ async function defaultActiveWorkspace(): Promise<string | null | undefined> {
  * workspace. `null` only when every source is unavailable.
  */
 export async function resolveTaskWorkspace(
-  input: Pick<CreateScheduledTaskInput, "projectId" | "createdBy">,
+  input: Pick<CreateScheduledTaskInput, "projectId" | "createdBy" | "type" | "payload">,
   deps: TaskWorkspaceDeps = {}
 ): Promise<string | undefined> {
   if (input.projectId) return input.projectId
@@ -80,6 +94,21 @@ export async function resolveTaskWorkspace(
       budget
     )
     if (fromSession) return fromSession
+  }
+
+  // The Squad the task will run. Read only for an `agent-team` task, so no
+  // other task type pays for loading the store.
+  const squadId =
+    input.type === "agent-team" &&
+    typeof (input.payload as { teamId?: unknown })?.teamId === "string"
+      ? (input.payload as { teamId: string }).teamId
+      : undefined
+  if (squadId) {
+    const fromSquad = await within(
+      Promise.resolve().then(() => (deps.squadWorkspace ?? defaultSquadWorkspace)(squadId)),
+      budget
+    )
+    if (fromSquad) return fromSquad
   }
 
   const active = await within(

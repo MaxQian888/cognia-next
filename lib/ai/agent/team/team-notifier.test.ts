@@ -20,6 +20,40 @@ const setup = () => {
   }
 }
 
+describe("TeamNotifier detail link", () => {
+  /**
+   * `detailHref` was declared on the payload and forwarded to
+   * `notify({ href })`, and a repo-wide search for the field found exactly two
+   * hits: the type and the consumer. Nothing set it, so every Squad
+   * notification landed in the centre with no way back to the run.
+   */
+  it("points a notification at the run, using the cockpit's id convention", () => {
+    const deliver = jest.fn()
+    const notifier = createTeamNotifier({ runId: "run_team_9", teamId: "t1" }, { deliver })
+    notifier.notify({ level: "warn", title: "needs input", runId: "run_team_9", teamId: "t1" })
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detailHref: "/agent-runs?run=execution%3Ateam%3Arun_team_9",
+      })
+    )
+  })
+
+  it("leaves an explicit target alone", () => {
+    const deliver = jest.fn()
+    const notifier = createTeamNotifier({ runId: "run_team_9", teamId: "t1" }, { deliver })
+    notifier.notify({
+      level: "warn",
+      title: "t",
+      runId: "run_team_9",
+      teamId: "t1",
+      detailHref: "/issues?id=KEY-1",
+    })
+    expect(deliver).toHaveBeenCalledWith(
+      expect.objectContaining({ detailHref: "/issues?id=KEY-1" })
+    )
+  })
+})
+
 describe("TeamNotifier", () => {
   it("info level writes event-log only", () => {
     const { notifier, toast, osNotify, log } = setup()

@@ -10,11 +10,17 @@
  * on every call for the same reason it reads `docsProviderPrefixes()` — a test
  * that resets the registry must not leave the trigger's prefix list stale.
  *
- * Why these five and not the whole ⌘K catalogue: a mention has to produce TEXT
+ * Why these and not the whole ⌘K catalogue: a mention has to produce TEXT
  * a model can read. A memory, an issue, a plan, a conversation and an artifact
  * all have a body. A workflow or a template is a thing you RUN — pasting its
  * definition into a prompt teaches the model nothing it can act on, and there
  * are already `/workflow` and the template picker for running them.
+ *
+ * A Squad TEAMMATE passes that test and a Squad does not. A teammate is a role
+ * with a description, a specialization and a spawn prompt, which is exactly the
+ * readable material the rule asks for: `@teammate:Reviewer` is how you say
+ * "answer the way the reviewer would". The Squad itself is the run-thing, and
+ * it has `/squads` and the composer's executor selector for that.
  *
  * Every source is Dexie-backed and therefore works on every shell, which is the
  * other half of the point: `@` on a phone or in a plain browser previously
@@ -687,6 +693,70 @@ function registerBuiltinEntityMentionSources(): void {
       const { resultBodyText } = await import("./result-reference")
       const body = await resultBodyText(candidate.id)
       return body === null ? null : String(body.length)
+    },
+  })
+
+  registerEntityMentionSource({
+    entityKind: "teammate",
+    prefix: "teammate:",
+    async load(ctx) {
+      // The agent-team store, the same read `ctx.team` and the Squad surfaces
+      // use, so there is no second notion of "every teammate". Persisted, so
+      // this works on a phone and in a plain browser like the Dexie sources.
+      const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+      const state = useAgentTeamStore.getState()
+      const squads = state.teams
+      return Object.values(state.teammates)
+        .filter((member) => {
+          const squad = squads[member.teamId]
+          if (!squad) return false
+          // Same workspace rule as every other scoped source: a Squad with no
+          // project is shared, not foreign.
+          return !ctx.projectId || !squad.projectId || squad.projectId === ctx.projectId
+        })
+        .map((member) => {
+          const squad = squads[member.teamId]
+          const role = member.config?.specialization || member.role
+          return {
+            entityKind: "teammate" as const,
+            id: member.id,
+            title: member.name,
+            // The Squad, because two Squads routinely both have a "Reviewer"
+            // and the name alone cannot tell them apart.
+            subtitle: squad ? `${squad.name} · ${role}` : role,
+            href: squad ? `/squads?id=${encodeURIComponent(squad.id)}` : undefined,
+            searchText: haystack(member.name, member.description, role, squad?.name, member.id),
+          }
+        })
+    },
+    async snapshot(candidate) {
+      const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+      const member = useAgentTeamStore.getState().teammates[candidate.id]
+      if (!member) return null
+      // What the teammate IS, in the order a reader needs it. The spawn prompt
+      // last because it is the longest and the most instruction-shaped.
+      return [
+        `${member.name} (${member.config?.specialization || member.role})`,
+        member.description,
+        member.spawnPrompt,
+      ]
+        .filter((line): line is string => Boolean(line && line.trim()))
+        .join("\n\n")
+    },
+    async fingerprint(candidate) {
+      const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+      const member = useAgentTeamStore.getState().teammates[candidate.id]
+      if (!member) return null
+      // A teammate row carries no `updatedAt`, so the fingerprint is the body
+      // itself: the fields a snapshot reads are exactly the ones whose change
+      // must make a staged chip stale.
+      return [
+        member.name,
+        member.role,
+        member.config?.specialization ?? "",
+        member.description ?? "",
+        member.spawnPrompt ?? "",
+      ].join("\u0000")
     },
   })
 

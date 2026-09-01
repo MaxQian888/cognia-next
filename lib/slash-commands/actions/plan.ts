@@ -198,9 +198,16 @@ async function commandFromGoal(ctx: SlashContext): Promise<PlanCommandResult> {
 async function commandFromTeam(ctx: SlashContext): Promise<PlanCommandResult> {
   const sessionId = ctx.activeSessionId!
   const session = await loadSession(sessionId)
-  // A team chat uses its own team; a solo chat uses the synthetic `solo:<id>`
-  // team the plan-mode bridge fills from TodoWrite / TaskCreate tool calls.
-  const teamId = session?.teamId ?? soloTeamId(sessionId)
+  // Three sources, most specific first.
+  //
+  //  - `squadId` is the ADR-0140 binding: a conversation handed to a Squad,
+  //    which is where its task DAG actually lives. Reading only `teamId` sent
+  //    every Squad-bound conversation to the synthetic solo team, so
+  //    `/plan from-team` reported "no team tasks" for a Squad that had them.
+  //  - `teamId` is a character-team room, a different concept with the same word.
+  //  - the synthetic `solo:<id>` team the plan-mode bridge fills from
+  //    TodoWrite / TaskCreate tool calls.
+  const teamId = session?.squadId ?? session?.teamId ?? soloTeamId(sessionId)
   const state = useAgentTeamStore.getState()
   const team = state.teams[teamId]
   if (!team) {
@@ -235,7 +242,9 @@ async function commandToTeam(ctx: SlashContext): Promise<PlanCommandResult> {
   if (plan.steps.length === 0) return { system: `Plan "${plan.title}" has no steps to project.` }
 
   const session = await loadSession(sessionId)
-  const teamId = session?.teamId ?? soloTeamId(sessionId)
+  // Same precedence as `from-team`, so the round trip lands back where it came
+  // from rather than mirroring a Squad's plan into the solo team beside it.
+  const teamId = session?.squadId ?? session?.teamId ?? soloTeamId(sessionId)
   ensureSoloTeam(teamId)
   const store = useAgentTeamStore.getState()
   if (!store.teams[teamId]) {

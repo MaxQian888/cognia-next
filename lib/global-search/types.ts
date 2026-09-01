@@ -32,7 +32,10 @@ export type GlobalSearchKind =
   | "session"
   | "message"
   | "character"
+  /** A guild of Characters (`lib/db/teams.ts`), NOT an `AgentTeam`. */
   | "team"
+  /** A Squad: an executor a conversation can be handed to (ADR-0140). */
+  | "squad"
   | "workspace"
   | "workflow"
   | "skill"
@@ -80,6 +83,9 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   message: ["chats", "messages"],
   character: ["people"],
   team: ["people"],
+  // Library, not people: a Squad is a cross-conversation asset you configure
+  // and hand work to, beside workflows and templates, not somebody you talk to.
+  squad: ["library"],
   workspace: ["library"],
   workflow: ["library"],
   skill: ["library"],
@@ -129,6 +135,9 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   issue: 20,
   device: 21,
   site: 22,
+  // After the library definitions it can be handed work from: you reach for a
+  // Squad by name much less often than for the workflow or skill it will run.
+  squad: 23,
 }
 
 /** What the dialog does when an item is chosen. */

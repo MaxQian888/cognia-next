@@ -5456,7 +5456,8 @@
           "message": "message",
           "plan": "plan",
           "result": "result",
-          "session": "conversation"
+          "session": "conversation",
+          "teammate": "teammate"
         },
         "entityStaged": "Attached “{title}” to your next message.",
         "entityTitle": "Reference a record",

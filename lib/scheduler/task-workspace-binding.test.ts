@@ -37,6 +37,48 @@ describe("resolveTaskWorkspace", () => {
     ).resolves.toBe("owner")
   })
 
+  /**
+   * An `agent-team` task names the Squad it will run, and a Squad names its own
+   * workspace. A schedule pointed at a Squad in workspace A while the user is
+   * looking at B was being attributed to B, and then listed there.
+   */
+  it("binds an agent-team task to the Squad's workspace, not the one on screen", async () => {
+    await expect(
+      resolveTaskWorkspace(
+        { createdBy: { kind: "user" }, type: "agent-team", payload: { teamId: "sq1" } } as never,
+        deps({
+          squadWorkspace: async () => "squad-owner",
+          activeWorkspace: async () => "on-screen",
+        })
+      )
+    ).resolves.toBe("squad-owner")
+  })
+
+  /** The more specific statement of intent wins, and a conversation is more specific. */
+  it("still lets the creating conversation outrank the Squad", async () => {
+    await expect(
+      resolveTaskWorkspace(
+        {
+          createdBy: { kind: "agent", sessionId: "s1" },
+          type: "agent-team",
+          payload: { teamId: "sq1" },
+        } as never,
+        deps({ sessionWorkspace: async () => "owner", squadWorkspace: async () => "squad-owner" })
+      )
+    ).resolves.toBe("owner")
+  })
+
+  it("never loads the Squad store for another task type", async () => {
+    const squadWorkspace = jest.fn(async () => "squad-owner")
+    await expect(
+      resolveTaskWorkspace(
+        { createdBy: { kind: "user" }, type: "prompt", payload: { teamId: "sq1" } } as never,
+        deps({ squadWorkspace, activeWorkspace: async () => "w1" })
+      )
+    ).resolves.toBe("w1")
+    expect(squadWorkspace).not.toHaveBeenCalled()
+  })
+
   it("falls back to the active workspace for a hand-made task", async () => {
     await expect(
       resolveTaskWorkspace(

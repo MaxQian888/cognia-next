@@ -28,6 +28,15 @@ import type { EntitySelectionKind } from "@/types/artifact/artifact"
 const listSessionsMock = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({ listSessions: () => listSessionsMock() }))
 
+// The agent-team store, so `@teammate:` exercises its real `load` body.
+const agentTeamState = {
+  teams: {} as Record<string, unknown>,
+  teammates: {} as Record<string, unknown>,
+}
+jest.mock("@/stores/agent/agent-team-store", () => ({
+  useAgentTeamStore: { getState: () => agentTeamState },
+}))
+
 // Same for `@msg:`, which reaches the ADR-0099 engine rather than a table.
 const searchChatHistoryMock = jest.fn()
 jest.mock("@/lib/chat/search/engine", () => ({
@@ -58,6 +67,7 @@ const EXPECTED_PREFIXES: Record<EntitySelectionKind, string> = {
   message: "msg:",
   result: "result:",
   artifact: "artifact:",
+  teammate: "teammate:",
 }
 
 function fakeSource(kind: string, prefix: string): EntityMentionSource {
@@ -391,6 +401,101 @@ describe("@chat: candidates", () => {
       session({ id: "theirs", projectId: "q" }),
     ])
     expect((await chatCandidates({ projectId: "p" })).map((c) => c.id)).toEqual(["legacy", "mine"])
+  })
+})
+
+describe("@teammate: candidates", () => {
+  const source = () => getEntityMentionSourceByPrefix("teammate:")!
+
+  const squad = (over: Record<string, unknown> = {}) => ({
+    id: "sq1",
+    name: "Review Crew",
+    projectId: "p",
+    ...over,
+  })
+  const mate = (over: Record<string, unknown> = {}) => ({
+    id: "m1",
+    teamId: "sq1",
+    name: "Reviewer",
+    role: "teammate",
+    description: "reads every diff",
+    config: { specialization: "security" },
+    ...over,
+  })
+
+  beforeEach(() => {
+    invalidateEntityMentionCaches()
+    agentTeamState.teams = { sq1: squad() }
+    agentTeamState.teammates = { m1: mate() }
+  })
+
+  /**
+   * The registry's rule is that a mention must produce text a model can read.
+   * A teammate is a role with a description, a specialization and a spawn
+   * prompt, so `@teammate:Reviewer` means "answer the way the reviewer would".
+   */
+  it("offers the roster with its Squad on the second line", async () => {
+    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    expect(rows).toEqual([
+      expect.objectContaining({
+        entityKind: "teammate",
+        id: "m1",
+        title: "Reviewer",
+        // Two Squads routinely both have a "Reviewer".
+        subtitle: "Review Crew · security",
+        href: "/squads?id=sq1",
+      }),
+    ])
+  })
+
+  it("keeps a Squad that names no workspace, and drops another workspace's", async () => {
+    agentTeamState.teams = {
+      sq1: squad(),
+      shared: squad({ id: "shared", name: "Shared", projectId: undefined }),
+      other: squad({ id: "other", name: "Other", projectId: "q" }),
+    }
+    agentTeamState.teammates = {
+      m1: mate(),
+      m2: mate({ id: "m2", teamId: "shared" }),
+      m3: mate({ id: "m3", teamId: "other" }),
+    }
+    const rows = await searchEntityMentionCandidates(source(), "", { projectId: "p" })
+    expect(rows.map((r) => r.id).sort()).toEqual(["m1", "m2"])
+  })
+
+  it("drops a teammate whose Squad is gone", async () => {
+    agentTeamState.teams = {}
+    expect(await searchEntityMentionCandidates(source(), "", {})).toEqual([])
+  })
+
+  it("snapshots what the teammate is, longest field last", async () => {
+    agentTeamState.teammates = { m1: mate({ spawnPrompt: "Be exacting." }) }
+    const body = await source().snapshot({
+      entityKind: "teammate",
+      id: "m1",
+      title: "Reviewer",
+      searchText: "",
+    })
+    expect(body).toBe("Reviewer (security)\n\nreads every diff\n\nBe exacting.")
+  })
+
+  it("reports a deleted teammate as gone rather than empty", async () => {
+    agentTeamState.teammates = {}
+    const candidate = { entityKind: "teammate" as const, id: "m1", title: "R", searchText: "" }
+    expect(await source().snapshot(candidate)).toBeNull()
+    expect(await source().fingerprint!(candidate)).toBeNull()
+  })
+
+  /**
+   * A teammate row carries no `updatedAt`, so the fingerprint is the body
+   * itself: the fields a snapshot reads are exactly the ones whose change must
+   * make a staged chip stale.
+   */
+  it("goes stale when the prompt changes", async () => {
+    const candidate = { entityKind: "teammate" as const, id: "m1", title: "R", searchText: "" }
+    const before = await source().fingerprint!(candidate)
+    agentTeamState.teammates = { m1: mate({ spawnPrompt: "Now be lenient." }) }
+    expect(await source().fingerprint!(candidate)).not.toBe(before)
   })
 })
 

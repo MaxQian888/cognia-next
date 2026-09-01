@@ -117,6 +117,55 @@ describe("toUnifiedTeamTask", () => {
     expect(toUnifiedTeamTask(task({ description: "" }), team()).description).toBeUndefined()
   })
 
+  /**
+   * Every mirrored row claimed the team, even when `AgentTeamTask.assignedTo`
+   * named the teammate who had claimed it, so per-member attribution was
+   * invisible on the board. The tracker's actor vocabulary already had
+   * `"agent"` for exactly this.
+   */
+  it("names the teammate who claimed the task", () => {
+    const item = toUnifiedTeamTask(
+      task({ assignedTo: "m-7" }),
+      team(),
+      undefined,
+      new Map([["m-7", "Reviewer"]])
+    )
+    expect(item.assignee).toEqual({ kind: "agent", id: "m-7", label: "Reviewer" })
+  })
+
+  it("falls back to the team when the claimant is not on the roster", () => {
+    const item = toUnifiedTeamTask(task({ assignedTo: "ghost" }), team(), undefined, new Map())
+    expect(item.assignee).toEqual({ kind: "team", id: "team-1", label: "Squad" })
+  })
+
+  /**
+   * `labelIds: []` was hard-coded, so the filter bar's label facet silently
+   * excluded this whole source. Tags are free text and labels are rows, so a
+   * tag is only representable when a label of that name already exists.
+   */
+  it("resolves a tag to an existing label, case-insensitively", () => {
+    const item = toUnifiedTeamTask(
+      task({ tags: ["Backend", "unknown-tag"] }),
+      team(),
+      undefined,
+      undefined,
+      new Map([["backend", "label-be"]])
+    )
+    expect(item.labelIds).toEqual(["label-be"])
+  })
+
+  /** Read-only: a projection must never mint vocabulary the board then filters on. */
+  it("never invents a label for an unmatched tag", () => {
+    const item = toUnifiedTeamTask(
+      task({ tags: ["brand-new"] }),
+      team(),
+      undefined,
+      undefined,
+      new Map()
+    )
+    expect(item.labelIds).toEqual([])
+  })
+
   it("badges the originating issue", () => {
     const item = toUnifiedTeamTask(task(), team(), { identifier: "MERC-9", issueProjectId: "ip-9" })
     expect(item.origin.sourceLabel).toBe("Agent Team · MERC-9")

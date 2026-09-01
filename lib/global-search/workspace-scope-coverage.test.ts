@@ -62,6 +62,10 @@ const EXPECTED: Record<string, { scoping: Scoping; why: string }> = {
   "builtin.actions": { scoping: "global", why: "Command palette actions." },
   "builtin.characters": { scoping: "global", why: "Characters are defined machine-wide." },
   "builtin.teams": { scoping: "global", why: "Teams are defined machine-wide." },
+  "builtin.squads": {
+    scoping: "filter",
+    why: "A Squad belongs to a workspace: `createTeam` stamps the active project and the store purges per project. Out of scope it is noise, not a preference. Templates carry no projectId and `byProjectId` treats that as everywhere.",
+  },
   "builtin.devices": { scoping: "global", why: "The device fleet is not per-workspace." },
   "builtin.sites": {
     scoping: "global",

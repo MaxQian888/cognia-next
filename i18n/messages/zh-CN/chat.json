@@ -527,7 +527,8 @@
         "message": "消息",
         "plan": "计划",
         "result": "结果",
-        "session": "会话"
+        "session": "会话",
+        "teammate": "小队成员"
       },
       "entityStaged": "已把「{title}」附加到下一条消息。",
       "entityTitle": "引用一条记录",

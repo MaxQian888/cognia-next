@@ -16,6 +16,7 @@
  */
 
 import type { ApprovalKey } from "@/lib/runtime/approval-bus"
+import { agentTeamExecutionRunId } from "@/lib/execution/agent-team-bridge"
 
 export type TeamNotifyLevel = "info" | "warn" | "critical"
 
@@ -109,7 +110,23 @@ export function createTeamNotifier(
   }
 
   return {
-    notify: (p) => {
+    notify: (payload) => {
+      // Every Squad notification used to land in the centre unclickable.
+      // `detailHref` is declared on the payload and forwarded to `notify({ href })`,
+      // and a repo-wide search for the field found exactly two hits: the type
+      // and the consumer. Nothing ever set it. A run that says "needs your
+      // input" and cannot be opened is worse than one that says nothing.
+      //
+      // Defaulted here rather than at each of the ten call sites, so a
+      // notification added later inherits it. The id convention is
+      // `agentTeamExecutionRunId`, imported rather than spelled out: writing
+      // the prefix twice is the drift that produced the duplicate run row.
+      const p: TeamNotifyPayload = payload.detailHref
+        ? payload
+        : {
+            ...payload,
+            detailHref: `/agent-runs?run=${encodeURIComponent(agentTeamExecutionRunId(payload.runId))}`,
+          }
       if (p.dedupeKey && isDuplicate(p.dedupeKey)) return
       if (p.dedupeKey) recordFire(p.dedupeKey)
 

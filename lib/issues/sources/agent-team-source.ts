@@ -38,11 +38,19 @@ export function teamTaskIssueId(task: AgentTeamTask): string | undefined {
   return typeof value === "string" && value ? value : undefined
 }
 
-/** Project a team task into the board's normalized shape. */
+/**
+ * Project a team task into the board's normalized shape.
+ *
+ * `roster` and `labelIdsByName` are what let the projection carry information
+ * the task already had. Both are optional so a caller with neither still gets
+ * the previous behaviour rather than an error.
+ */
 export function toUnifiedTeamTask(
   task: AgentTeamTask,
   team: Pick<AgentTeam, "id" | "name">,
-  origin?: OriginIssueRef
+  origin?: OriginIssueRef,
+  roster?: ReadonlyMap<string, string>,
+  labelIdsByName?: ReadonlyMap<string, string>
 ): UnifiedIssueItem {
   const status = teamTaskStatusToIssueStatus(task.status)
   const createdAt = toMs(task.createdAt)
@@ -57,8 +65,21 @@ export function toUnifiedTeamTask(
     status,
     statusCategory: statusCategoryOf(status),
     priority: subAgentPriorityToIssuePriority(task.priority),
-    assignee: { kind: "team", id: team.id, label: team.name },
-    labelIds: [],
+    // The teammate who claimed it, when one has. Forcing every row to the team
+    // made per-member attribution invisible on the board even though
+    // `AgentTeamTask.assignedTo` had the answer, and the tracker's own actor
+    // vocabulary already has `"agent"` for exactly this.
+    assignee:
+      task.assignedTo && roster?.has(task.assignedTo)
+        ? { kind: "agent", id: task.assignedTo, label: roster.get(task.assignedTo)! }
+        : { kind: "team", id: team.id, label: team.name },
+    // A team task carries free-text `tags` and the board filters on label ids,
+    // so a tag is only representable when a label of that name already exists.
+    // Resolved, never created: this source is read-only, and minting label rows
+    // from a projection would have the board's vocabulary grow itself.
+    labelIds: (task.tags ?? [])
+      .map((tag) => labelIdsByName?.get(tag.toLowerCase()))
+      .filter((id): id is string => Boolean(id)),
     ...(origin ? { issueProjectId: origin.issueProjectId } : {}),
     order: task.order,
     createdAt,
@@ -76,6 +97,10 @@ export interface AgentTeamSourceDeps {
   readTeams: (projectId: string) => Promise<Array<{ team: AgentTeam; tasks: AgentTeamTask[] }>>
   runsByTarget: (projectId: string) => Promise<Map<string, IssueRun>>
   originRefsOf: (issueIds: readonly string[]) => Promise<Map<string, OriginIssueRef>>
+  /** Teammate id to display name, so a claimed task can name its claimant. */
+  readRoster: () => Promise<Map<string, string>>
+  /** Lower-cased label name to id, so a task tag can reach the board's filter. */
+  readLabelIds: () => Promise<Map<string, string>>
 }
 
 async function defaultReadTeams(projectId: string) {
@@ -88,10 +113,38 @@ async function defaultReadTeams(projectId: string) {
   }))
 }
 
+async function defaultReadRoster(): Promise<Map<string, string>> {
+  // Best-effort, like the labels below: a missing roster means a task shows
+  // the team as its assignee, which is what every task showed before. Never a
+  // reason to drop the whole board.
+  try {
+    const { useAgentTeamStore } = await import("@/stores/agent/agent-team-store")
+    const teammates = useAgentTeamStore.getState().teammates ?? {}
+    return new Map(Object.values(teammates).map((m) => [m.id, m.name]))
+  } catch {
+    return new Map()
+  }
+}
+
+async function defaultReadLabelIds(): Promise<Map<string, string>> {
+  // Issue labels are scoped by KIND, not by workspace, so there is nothing to
+  // pass here. Best-effort: without labels a tag stays invisible, which is what
+  // it was before. Never a reason to drop the whole board.
+  try {
+    const { listLabels } = await import("@/lib/db/labels")
+    const rows = await listLabels("issue")
+    return new Map(rows.map((row) => [row.name.toLowerCase(), row.id]))
+  } catch {
+    return new Map()
+  }
+}
+
 const defaultDeps: AgentTeamSourceDeps = {
   readTeams: defaultReadTeams,
   runsByTarget: (projectId) => mapIssueRunsByTarget(projectId, "agent-team"),
   originRefsOf: loadOriginIssueRefs,
+  readRoster: defaultReadRoster,
+  readLabelIds: defaultReadLabelIds,
 }
 
 export function createAgentTeamIssueSource(
@@ -121,13 +174,14 @@ export function createAgentTeamIssueSource(
         }
       }
       const origins = await deps.originRefsOf([...issueIds])
+      const [roster, labelIdsByName] = await Promise.all([deps.readRoster(), deps.readLabelIds()])
       const items: UnifiedIssueItem[] = []
       for (const { team, tasks } of teams) {
         for (const task of tasks) {
           const issueId = teamTaskIssueId(task) ?? runByTaskId.get(task.id)?.issueId
           const origin = issueId ? origins.get(issueId) : undefined
           if (query.issueProjectId && origin?.issueProjectId !== query.issueProjectId) continue
-          items.push(toUnifiedTeamTask(task, team, origin))
+          items.push(toUnifiedTeamTask(task, team, origin, roster, labelIdsByName))
         }
       }
       return items

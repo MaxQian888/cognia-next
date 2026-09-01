@@ -386,6 +386,24 @@ describe("/plan from-team — team_projection", () => {
     expect(res.system).toContain("projected from the team task list")
   })
 
+  /**
+   * ADR-0140 binds a conversation to a Squad with `ChatSession.squadId`, which
+   * is where its task DAG actually lives. Reading only `teamId` sent every
+   * Squad-bound conversation to the synthetic solo team, so `/plan from-team`
+   * reported "no team tasks" for a Squad that had them.
+   */
+  it("prefers the Squad the conversation is handed to", async () => {
+    getSessionMock.mockResolvedValue({ id: "ses_a", squadId: "squad_1", teamId: "team_real" })
+    teamStateMock.mockReturnValue({
+      teams: { squad_1: { id: "squad_1", name: "Review Crew" } },
+      tasks: { t1: { id: "t1", teamId: "squad_1", title: "a", dependencies: [], order: 0 } },
+    })
+    await dispatchPlanSubcommand(ctx({ args: "from-team" }))
+    expect((createPlan.mock.calls[0][0] as CreatePlanInput).metadata).toEqual({
+      teamId: "squad_1",
+    })
+  })
+
   it("prefers the session's own team over the solo bridge team", async () => {
     getSessionMock.mockResolvedValue({ id: "ses_a", teamId: "team_real" })
     teamStateMock.mockReturnValue({
