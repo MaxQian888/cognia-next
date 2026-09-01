@@ -470,7 +470,7 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "pet.panel.actions": "components/pet/pet-interaction-panel.tsx",
   "perf.panel": "components/performance/performance-dashboard.tsx",
   "terminal.toolbar": "components/terminal/terminal-dock.tsx",
-  "agent.team.panel": "components/agent/workspace/overview.tsx",
+  "agent.team.panel": "components/settings/squads/squad-detail-panel.tsx",
   "agent.team.report": "components/agent/workspace/activity-report/report-plugin-slot.tsx",
   "agent.teammate.actions": "components/agent/workspace/members.tsx",
   "agent.team.task.actions": "components/agent/workspace/board/task-card.tsx",

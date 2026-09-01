@@ -1,5 +1,6 @@
 {
   "detail": {
+    "advanced": "高级治理",
     "dangerDescription": "绑定到它的会话会回退为单个 Agent。已产生的运行记录会保留。",
     "dangerTitle": "删除这个小队",
     "deleteAction": "删除小队",
@@ -13,10 +14,10 @@
     "nameLabel": "名称",
     "noMembersDescription": "可以从模板添加成员，或在该小队自己的运行界面里添加。",
     "noMembersTitle": "还没有成员",
-    "rosterLabel": "成员",
-    "advanced": "高级治理"
+    "rosterLabel": "成员"
   },
   "nav": {
+    "autoCompose": "按目标自动编队",
     "create": "新建小队",
     "defaultLeadName": "小队负责人",
     "newSquadName": "新小队",

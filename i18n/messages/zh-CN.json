@@ -1990,6 +1990,9 @@
     },
     "live": "进行中",
     "loadMore": "加载更多",
+    "operations": {
+      "unavailable": "本设备没有这次小队运行的记录。"
+    },
     "outcome": {
       "action_unavailable": "该操作已失效——运行状态已经变化。",
       "already_retried": "该运行已经重试过了。",
@@ -2007,6 +2010,11 @@
       "unsupported": "没有任何处理器可以控制这种运行。",
       "unsupported_for_kind": "这种运行不支持该操作。"
     },
+    "report": {
+      "latestForSquad": "小队的最新执行报告。报告按小队保存，不按单次运行保存。",
+      "none": "这个小队还没有产出执行报告。",
+      "unavailable": "本设备没有这次小队运行的记录。"
+    },
     "status": {
       "cancelled": "已取消",
       "done": "已完成",
@@ -2021,7 +2029,9 @@
       "artifacts": "产物",
       "changes": "文件变更",
       "coordination": "协同",
+      "operations": "操作",
       "overview": "概览",
+      "report": "报告",
       "tests": "测试"
     },
     "tests": {
@@ -35463,6 +35473,7 @@
     },
     "squads": {
       "detail": {
+        "advanced": "高级治理",
         "dangerDescription": "绑定到它的会话会回退为单个 Agent。已产生的运行记录会保留。",
         "dangerTitle": "删除这个小队",
         "deleteAction": "删除小队",
@@ -35479,6 +35490,7 @@
         "rosterLabel": "成员"
       },
       "nav": {
+        "autoCompose": "按目标自动编队",
         "create": "新建小队",
         "defaultLeadName": "小队负责人",
         "newSquadName": "新小队",
@@ -38652,6 +38664,8 @@
   },
   "squads": {
     "fleet": {
+      "boardUnselectedDescription": "看板属于某一个小队。从列表里选一个，看它的任务。",
+      "boardUnselectedTitle": "先选一个小队",
       "configure": "配置这个小队",
       "description": "每个小队此刻在做什么。",
       "emptyDescription": "先去设置里新建一个，然后在输入框把会话交给它。",
@@ -38661,6 +38675,10 @@
       "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
       "railLabel": "小队列表",
       "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
+      "tabs": {
+        "board": "看板",
+        "runs": "运行"
+      },
       "title": "小队"
     }
   },

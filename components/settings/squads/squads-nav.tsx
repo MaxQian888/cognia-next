@@ -10,7 +10,7 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { PlusIcon, SearchIcon } from "lucide-react"
+import { PlusIcon, SearchIcon, SparklesIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,9 +34,20 @@ export interface SquadsNavProps {
   activePanel: SquadPanelId
   onSelect: (panel: SquadPanelId) => void
   onCreate: () => void
+  /**
+   * Compose a Squad from an objective instead of hand-building one. Optional
+   * so the rail still renders where auto-compose has no host.
+   */
+  onAutoCompose?: () => void
 }
 
-export function SquadsNav({ squads, activePanel, onSelect, onCreate }: SquadsNavProps) {
+export function SquadsNav({
+  squads,
+  activePanel,
+  onSelect,
+  onCreate,
+  onAutoCompose,
+}: SquadsNavProps) {
   const t = useTranslations("settings.squads.nav")
   const [query, setQuery] = useState("")
 
@@ -65,16 +76,35 @@ export function SquadsNav({ squads, activePanel, onSelect, onCreate }: SquadsNav
             data-testid="squads-nav-search"
           />
         </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="w-full text-xs"
-          onClick={onCreate}
-          data-testid="squads-nav-create"
-        >
-          <PlusIcon className="mr-1.5 size-3.5" />
-          {t("create")}
-        </Button>
+        <div className="flex gap-1.5">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="min-w-0 flex-1 text-xs"
+            onClick={onCreate}
+            data-testid="squads-nav-create"
+          >
+            <PlusIcon className="mr-1.5 size-3.5 shrink-0" />
+            <span className="truncate">{t("create")}</span>
+          </Button>
+          {/* Describe the goal and let the model staff the Squad. The dialog
+              behind this existed and was reachable only from a tab of the
+              retired `/agent-teams/workspace`, so the capability was built and
+              then had no door. */}
+          {onAutoCompose ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="shrink-0 px-2 text-xs"
+              onClick={onAutoCompose}
+              aria-label={t("autoCompose")}
+              title={t("autoCompose")}
+              data-testid="squads-nav-auto-compose"
+            >
+              <SparklesIcon className="size-3.5" />
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">

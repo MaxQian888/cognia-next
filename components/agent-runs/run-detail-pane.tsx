@@ -37,6 +37,8 @@ import { RunImOrigin, useRunImOrigin } from "@/components/execution/run-im-origi
 import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
 import { cn } from "@/lib/utils"
 import { isSquadRun, RunCoordinationTab } from "./run-coordination-tab"
+import { RunReportTab } from "./run-report-tab"
+import { RunOperationsTab } from "./run-operations-tab"
 import { useExecutionRunDetail } from "@/hooks/agent-runs/use-execution-run-detail"
 import { changeKindLabelKey, changesAreComplete } from "@/lib/execution/run-detail-model"
 import { runKindLabelKey } from "@/lib/execution/cockpit-model"
@@ -175,14 +177,31 @@ export function RunDetailPane({ row, actions }: RunDetailPaneProps) {
             capability.
           */}
           {squadRun ? (
-            <TabsTrigger value="coordination">{t("tabs.coordination")}</TabsTrigger>
+            <>
+              <TabsTrigger value="coordination">{t("tabs.coordination")}</TabsTrigger>
+              <TabsTrigger value="report">{t("tabs.report")}</TabsTrigger>
+              <TabsTrigger value="operations">{t("tabs.operations")}</TabsTrigger>
+            </>
           ) : null}
         </TabsList>
 
         {squadRun ? (
-          <TabsContent value="coordination" className="pt-2">
-            <RunCoordinationTab row={row} />
-          </TabsContent>
+          <>
+            <TabsContent value="coordination" className="pt-2">
+              <RunCoordinationTab row={row} />
+            </TabsContent>
+            {/* The report and durable-operations halves of the retired
+                workspace's activity and operations tabs. ADR-0140 moved
+                coordination here and left these two behind, so the execution
+                report, the `agent.team.report` plugin slot, and every durable
+                control a running Squad has had no host at all. */}
+            <TabsContent value="report" className="pt-2">
+              <RunReportTab row={row} />
+            </TabsContent>
+            <TabsContent value="operations" className="pt-2">
+              <RunOperationsTab row={row} />
+            </TabsContent>
+          </>
         ) : null}
 
         <TabsContent value="overview" className="pt-2">

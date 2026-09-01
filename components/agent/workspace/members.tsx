@@ -110,7 +110,6 @@ export function AgentTeamMembers({
   const handleAdd = (data: {
     name: string
     description: string
-    role: "lead" | "teammate"
     specialization?: string
     runtime: TeammateRuntime
   }) => {
@@ -120,7 +119,13 @@ export function AgentTeamMembers({
       teamId,
       name: data.name.trim(),
       description: data.description.trim() || data.name.trim(),
-      role: data.role,
+      // Always a worker. The dialog used to offer "Lead" as well, but
+      // `addTeammate` only appends to `teammateIds` and never moves
+      // `team.leadId`, so a member added that way matched neither the lead
+      // lookup (`id === leadId`) nor the worker filter (`role === "teammate"`)
+      // and simply did not appear. Every Squad is created with exactly one
+      // lead (`createTeam` seeds it), so there was nothing here to pick.
+      role: "teammate",
       config,
     })
     toast.success(t("saved", { name: data.name.trim() }))
@@ -387,7 +392,6 @@ function AddDialog({
   onSave: (data: {
     name: string
     description: string
-    role: "lead" | "teammate"
     specialization?: string
     runtime: TeammateRuntime
   }) => void
@@ -396,7 +400,6 @@ function AddDialog({
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
-  const [role, setRole] = useState<"lead" | "teammate">("teammate")
   const [specialization, setSpecialization] = useState("")
   const [runtime, setRuntime] = useState<TeammateRuntime>(DEFAULT_TEAMMATE_RUNTIME)
 
@@ -405,13 +408,11 @@ function AddDialog({
     onSave({
       name: name.trim(),
       description: description.trim(),
-      role,
       specialization: specialization.trim() || undefined,
       runtime,
     })
     setName("")
     setDescription("")
-    setRole("teammate")
     setSpecialization("")
     setRuntime(DEFAULT_TEAMMATE_RUNTIME)
   }
@@ -441,18 +442,6 @@ function AddDialog({
               placeholder={t("descriptionPlaceholder")}
               className="text-xs"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">{t("role")}</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as typeof role)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lead">{t("lead")}</SelectItem>
-                <SelectItem value="teammate">{t("teammate")}</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">{t("specialization")}</Label>

@@ -20,6 +20,19 @@
  * Slot must use a string-literal `point` attribute. Computed values
  * (`point={getPoint()}`) are rejected so the audit stays sound.
  *
+ * Reachability: this audit finds mounts by scanning FILES, not by walking the
+ * render graph, so a mount inside a component nothing renders counts as a
+ * mount. That is how all five `agent.team.*` slots stayed green for the whole
+ * time their host tabs were unreachable, after ADR-0140 retired
+ * `/agent-teams/workspace`: a plugin could contribute to any of them and the
+ * contribution would simply never appear.
+ *
+ * `check-unreachable-components.mjs` is what actually answers "does anything
+ * render this", and it stays green, so this audit does not repeat its import
+ * walk. What it does close is that gate's one escape hatch: its baseline exists
+ * to carry pre-existing debt, and a host parked there is a slot that silently
+ * cannot render. A binding file may not be on that list.
+ *
  * Usage:
  *   pnpm audit:slots          # exit 0 if green, 1 if red
  *   pnpm audit:slots --json   # machine-readable JSON to stdout
@@ -36,6 +49,26 @@ import {
 } from "../../lib/plugin/contracts/plugin-points"
 
 const SLOT_HOST_COMPONENTS = new Set(["PluginExtensionSlot", "PluginExtensionSlotWithOverflow"])
+
+/**
+ * Components `check-unreachable-components.mjs` has been told to tolerate.
+ * Read rather than imported so this audit keeps working if that gate is
+ * unavailable: an unreadable baseline means "nothing is excused", which fails
+ * open in the safe direction (no slot is flagged for being on a list we could
+ * not read).
+ */
+export function readUnreachableBaseline(repoRoot: string): Set<string> {
+  try {
+    const raw = fs.readFileSync(
+      path.join(repoRoot, "scripts", "gates", "unreachable-component-baseline.json"),
+      "utf8"
+    )
+    const parsed = JSON.parse(raw) as { files?: string[] }
+    return new Set(parsed.files ?? [])
+  } catch {
+    return new Set()
+  }
+}
 
 const SCAN_ROOTS = ["app", "components", "lib"]
 const SKIP_DIRS = new Set(["node_modules", "out", ".next", ".source", "scripts"])
@@ -308,9 +341,18 @@ export function evaluateAuditFromSources(
 
   const errors: string[] = []
   const warnings: string[] = []
+  const excusedAsUnreachable = readUnreachableBaseline(repoRoot)
 
   for (const entry of entries) {
     if (entry.status === "implemented") {
+      // A host on the unreachable baseline renders for nobody, so the mount
+      // inside it is a promise this audit would otherwise report as kept.
+      const parked = parseBindingPaths(entry.binding).filter((p) => excusedAsUnreachable.has(p))
+      if (parked.length > 0) {
+        errors.push(
+          `[unreachable-host] "${entry.point}" is implemented but its host ${parked.join(", ")} is on the unreachable-components baseline, so nothing renders the mount. Give the slot a host that is reachable, or mark the point deprecated.`
+        )
+      }
       if (entry.hostKind === "registration") {
         if (entry.registrationBindingMissing) {
           errors.push(

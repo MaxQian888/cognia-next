@@ -4,6 +4,7 @@ import * as path from "node:path"
 import {
   evaluateAuditFromSources,
   parseBindingPaths,
+  readUnreachableBaseline,
   runAudit,
   type ComputedAttribute,
   type DiscoveredMount,
@@ -40,6 +41,56 @@ function mockMount(point: string, file: string, line = 10): DiscoveredMount {
 }
 
 const repoRoot = process.platform === "win32" ? "C:\\repo" : "/repo"
+
+describe("audit-plugin-slots: unreachable hosts", () => {
+  /**
+   * This audit finds mounts by scanning files, so a mount inside a component
+   * nothing renders counts as a mount. That is exactly how all five
+   * `agent.team.*` slots stayed green while their host tabs were unreachable.
+   * `check-unreachable-components.mjs` answers the render question, and its
+   * baseline is the one way a dead host can be tolerated, so a slot host parked
+   * there is a promise this audit must stop reporting as kept.
+   */
+  it("fails when a slot's host sits on the unreachable-components baseline", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "slots-unreachable-"))
+    fs.mkdirSync(path.join(dir, "scripts", "gates"), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, "scripts", "gates", "unreachable-component-baseline.json"),
+      JSON.stringify({ files: ["components/host/X.tsx"] })
+    )
+    const contract = mockContract("X", "implemented", "stable", "components/host/X.tsx")
+    const report = evaluateAuditFromSources(
+      [mockMount("X", path.join(dir, "components/host/X.tsx"))],
+      [],
+      { repoRoot: dir, canonicalPoints: ["X"], getContract: () => contract }
+    )
+    expect(report.ok).toBe(false)
+    expect(report.errors.join("\n")).toContain("[unreachable-host]")
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("stays green when the host is not on that list", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "slots-reachable-"))
+    fs.mkdirSync(path.join(dir, "scripts", "gates"), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, "scripts", "gates", "unreachable-component-baseline.json"),
+      JSON.stringify({ files: ["components/other/Y.tsx"] })
+    )
+    const contract = mockContract("X", "implemented", "stable", "components/host/X.tsx")
+    const report = evaluateAuditFromSources(
+      [mockMount("X", path.join(dir, "components/host/X.tsx"))],
+      [],
+      { repoRoot: dir, canonicalPoints: ["X"], getContract: () => contract }
+    )
+    expect(report.ok).toBe(true)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  /** An unreadable baseline must not flag every slot in the repo. */
+  it("excuses nothing when the baseline cannot be read", () => {
+    expect(readUnreachableBaseline(path.join(os.tmpdir(), "definitely-not-a-repo")).size).toBe(0)
+  })
+})
 
 describe("audit-plugin-slots: evaluateAuditFromSources", () => {
   it("happy path: implemented + matching mount = no errors, no warnings", () => {

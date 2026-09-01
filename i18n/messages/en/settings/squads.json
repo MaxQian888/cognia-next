@@ -1,5 +1,6 @@
 {
   "detail": {
+    "advanced": "Advanced governance",
     "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",
     "dangerTitle": "Delete this Squad",
     "deleteAction": "Delete Squad",
@@ -13,10 +14,10 @@
     "nameLabel": "Name",
     "noMembersDescription": "Add teammates from a template, or from the Squad's own run surface.",
     "noMembersTitle": "No members yet",
-    "rosterLabel": "Members",
-    "advanced": "Advanced governance"
+    "rosterLabel": "Members"
   },
   "nav": {
+    "autoCompose": "Compose from an objective",
     "create": "New Squad",
     "defaultLeadName": "Squad Lead",
     "newSquadName": "New Squad",

@@ -44,6 +44,9 @@
     "renamed": "Renamed",
     "resync": "Resynced"
   },
+  "coordination": {
+    "unavailable": "Coordination is not available on this device. The squad run record is not synced here."
+  },
   "degraded": {
     "no_active_run": "no live run to steer",
     "not_admitted": "the run has not been admitted yet",
@@ -105,6 +108,9 @@
   },
   "live": "Live",
   "loadMore": "Load more",
+  "operations": {
+    "unavailable": "This device does not carry this Squad run's record."
+  },
   "outcome": {
     "action_unavailable": "That action is no longer available — the run has moved on.",
     "already_retried": "This run has already been retried.",
@@ -122,6 +128,11 @@
     "unsupported": "Nothing is registered to control this kind of run.",
     "unsupported_for_kind": "This kind of run cannot take that action."
   },
+  "report": {
+    "latestForSquad": "The Squad's latest execution report. Reports are kept per Squad, not per run.",
+    "none": "This Squad has not produced an execution report yet.",
+    "unavailable": "This device does not carry this Squad run's record."
+  },
   "status": {
     "cancelled": "Cancelled",
     "done": "Done",
@@ -135,9 +146,11 @@
     "approvals": "Approvals",
     "artifacts": "Artifacts",
     "changes": "Changes",
+    "coordination": "Coordination",
+    "operations": "Operations",
     "overview": "Overview",
-    "tests": "Tests",
-    "coordination": "Coordination"
+    "report": "Report",
+    "tests": "Tests"
   },
   "tests": {
     "counts": "{passed} passed · {failed} failed · {skipped} skipped",
@@ -146,8 +159,5 @@
     "inconclusiveHint": "The output could not be parsed — this is not a pass.",
     "passed": "Passed"
   },
-  "title": "Agent Runs",
-  "coordination": {
-    "unavailable": "Coordination is not available on this device. The squad run record is not synced here."
-  }
+  "title": "Agent Runs"
 }

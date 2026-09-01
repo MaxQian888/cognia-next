@@ -3,6 +3,19 @@
 /**
  * One Squad's identity and roster.
  *
+ * The roster is the real editor, not a read-only list. Adding, removing and
+ * configuring a teammate lived only in a tab of `/agent-teams/workspace`, and
+ * when ADR-0140 retired that route the affordance went with it: the only way
+ * left to put anyone in a Squad was to instantiate a template, so a Squad made
+ * with "New Squad" was permanently a lead with nobody to lead. This panel's own
+ * copy already promised "add teammates from a template, or from the Squad's own
+ * run surface"; the second half had stopped being true.
+ *
+ * `AgentTeamMembers` is mounted whole for the same reason `AgentTeamSettings`
+ * is: it already composes the member rows, the configure dialog and the
+ * `agent.teammate.actions` plugin slot, and a second composition would be two
+ * places to keep in step.
+ *
  * Deliberately not the eleven-accordion settings surface the old workspace
  * page carried. What a person needs from a *library* is: what is this called,
  * what is it for, who is on it — and a way to get rid of it. The deep
@@ -16,7 +29,7 @@
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, Trash2Icon, UsersIcon } from "lucide-react"
+import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -31,13 +44,13 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Empty, EmptyDescription, EmptyTitle } from "@/components/ui/empty"
-import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { DeferredTextInput } from "@/components/settings/common/deferred-text-input"
-import { StatusBadge } from "@/components/status-badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { AgentTeamSettings } from "@/components/agent/workspace/settings"
+import { AgentTeamMembers } from "@/components/agent/workspace/members"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { cn } from "@/lib/utils"
 
@@ -52,6 +65,7 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
   const tCommon = useTranslations("common")
   const squad = useAgentTeamStore((s) => s.teams[squadId])
   const teammatesRecord = useAgentTeamStore((s) => s.teammates)
+  const tasksRecord = useAgentTeamStore((s) => s.tasks)
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
   const [descDraft, setDescDraft] = useState<string | null>(null)
@@ -64,6 +78,16 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
         .sort((a, b) => a.name.localeCompare(b.name)),
     [teammatesRecord, squadId]
   )
+
+  // Counted from the tasks themselves rather than from `squad.taskIds`, which
+  // is a denormalised list the plugin context has no reason to trust.
+  const taskStats = useMemo(() => {
+    const tasks = Object.values(tasksRecord ?? {}).filter((task) => task.teamId === squadId)
+    return {
+      total: tasks.length,
+      completed: tasks.filter((task) => task.status === "completed").length,
+    }
+  }, [tasksRecord, squadId])
 
   if (!squad) {
     // The rail and the resolver both guard against this, so reaching it means
@@ -117,48 +141,36 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
         />
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2" data-testid="squad-detail-roster">
         <div className="flex items-center gap-2">
           <Label className="text-xs">{t("rosterLabel")}</Label>
           <span className="text-xs text-muted-foreground">
             {t("memberCount", { count: members.length })}
           </span>
         </div>
-        {members.length === 0 ? (
-          <Empty
-            className="rounded-md border border-dashed py-6"
-            data-testid="squad-detail-empty-roster"
-          >
-            <EmptyTitle className="text-sm">{t("noMembersTitle")}</EmptyTitle>
-            <EmptyDescription className="text-xs">{t("noMembersDescription")}</EmptyDescription>
-          </Empty>
-        ) : (
-          <div className="max-w-md divide-y rounded-md border">
-            {members.map((member) => (
-              <Item key={member.id} size="sm" data-testid="squad-detail-member">
-                <ItemMedia>
-                  <UsersIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                </ItemMedia>
-                <ItemContent className="min-w-0 gap-0.5">
-                  <ItemTitle className="block w-full min-w-0 truncate text-xs">
-                    {member.name}
-                  </ItemTitle>
-                  {member.role ? (
-                    <ItemDescription className="truncate text-[10px]">
-                      {member.role}
-                    </ItemDescription>
-                  ) : null}
-                </ItemContent>
-                <StatusBadge
-                  value={member.status}
-                  labelNamespace="agentTeam.status"
-                  className="shrink-0 text-[10px]"
-                />
-              </Item>
-            ))}
-          </div>
-        )}
+        <AgentTeamMembers team={squad} teammates={members} leadId={squad.leadId} />
       </div>
+
+      {/* Plugin-contributed Squad insight / governance panels. Context carries
+          ids and counts only, never task or message bodies.
+
+          Its declared host was `workspace/overview.tsx`, a tab of the retired
+          `/agent-teams/workspace`. Nothing rendered that file any more, so a
+          plugin could register here and the contribution simply never appeared,
+          with `audit:slots` green throughout because it scans files rather than
+          the render graph. Governance is what this pane is for, so the slot
+          belongs here. */}
+      <PluginExtensionSlot
+        point="agent.team.panel"
+        className="space-y-4"
+        context={{
+          teamId: squad.id,
+          status: squad.status,
+          teammateCount: members.filter((m) => m.role === "teammate").length,
+          taskCount: taskStats.total,
+          completedTaskCount: taskStats.completed,
+        }}
+      />
 
       <div className="rounded-md border border-destructive/40 p-3">
         <p className="text-xs font-medium">{t("dangerTitle")}</p>

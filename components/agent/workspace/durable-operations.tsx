@@ -33,6 +33,17 @@ import type { RunRetrospectiveBundle } from "@/types/execution/retrospective"
 
 export interface DurableOperationsProps {
   team: AgentTeam
+  /**
+   * The run to operate on.
+   *
+   * Omit it and the panel falls back to the Squad's most recent run, which is
+   * what its original host meant: a workspace showing one Squad has exactly one
+   * "current" run. A run cockpit does not. Dropped into `/agent-runs?run=<id>`
+   * without this, the panel answered about a DIFFERENT run than the one the
+   * reader clicked, the same shape of defect `ConsensusPanel` had before it
+   * took a `teamId`.
+   */
+  runId?: string
   onOpenEditor: () => void
   onOpenTerminal: (workspacePath?: string) => void
   onOpenBrowser: () => void
@@ -41,6 +52,7 @@ export interface DurableOperationsProps {
 
 export function DurableOperations({
   team,
+  runId,
   onOpenEditor,
   onOpenTerminal,
   onOpenBrowser,
@@ -68,12 +80,20 @@ export function DurableOperations({
   const data = useLiveQuery(
     async () => {
       const db = getDb()
-      const runs = await db.agentTeamRuns
-        .where("teamId")
-        .equals(team.id)
-        .reverse()
-        .sortBy("updatedAt")
-      const run = runs[0]
+      let run
+      if (runId) {
+        const named = await db.agentTeamRuns.get(runId)
+        // A run id that belongs to a different Squad is a caller error, not a
+        // reason to silently show this Squad's newest run instead.
+        run = named && named.teamId === team.id ? named : undefined
+      } else {
+        const runs = await db.agentTeamRuns
+          .where("teamId")
+          .equals(team.id)
+          .reverse()
+          .sortBy("updatedAt")
+        run = runs[0]
+      }
       if (!run) return null
       const [children, decisions, evidence, graph, retrospectiveRows] = await Promise.all([
         db.agentTeamChildRuns.where("runId").equals(run.id).toArray(),
@@ -106,7 +126,7 @@ export function DurableOperations({
         environment,
       }
     },
-    [team.id, team.config.environmentRef?.versionId],
+    [team.id, runId, team.config.environmentRef?.versionId],
     null
   )
 

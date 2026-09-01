@@ -76,7 +76,7 @@
     {
       "name": "conversation",
       "status": "adopted",
-      "consumers": ["components/agent/workspace/chat.tsx"]
+      "consumers": ["components/pet/pet-chat-transcript.tsx"]
     },
     {
       "name": "edge",

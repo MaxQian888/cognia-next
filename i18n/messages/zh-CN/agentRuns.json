@@ -44,6 +44,9 @@
     "renamed": "重命名",
     "resync": "已重新同步"
   },
+  "coordination": {
+    "unavailable": "本设备没有协同记录。小队运行记录没有同步到这里。"
+  },
   "degraded": {
     "no_active_run": "没有正在运行的会话可以介入",
     "not_admitted": "该运行尚未获得执行许可",
@@ -105,6 +108,9 @@
   },
   "live": "进行中",
   "loadMore": "加载更多",
+  "operations": {
+    "unavailable": "本设备没有这次小队运行的记录。"
+  },
   "outcome": {
     "action_unavailable": "该操作已失效——运行状态已经变化。",
     "already_retried": "该运行已经重试过了。",
@@ -122,6 +128,11 @@
     "unsupported": "没有任何处理器可以控制这种运行。",
     "unsupported_for_kind": "这种运行不支持该操作。"
   },
+  "report": {
+    "latestForSquad": "小队的最新执行报告。报告按小队保存，不按单次运行保存。",
+    "none": "这个小队还没有产出执行报告。",
+    "unavailable": "本设备没有这次小队运行的记录。"
+  },
   "status": {
     "cancelled": "已取消",
     "done": "已完成",
@@ -135,9 +146,11 @@
     "approvals": "审批",
     "artifacts": "产物",
     "changes": "文件变更",
+    "coordination": "协同",
+    "operations": "操作",
     "overview": "概览",
-    "tests": "测试",
-    "coordination": "协同"
+    "report": "报告",
+    "tests": "测试"
   },
   "tests": {
     "counts": "{passed} 通过 · {failed} 失败 · {skipped} 跳过",
@@ -146,8 +159,5 @@
     "inconclusiveHint": "输出无法解析——这不等于通过。",
     "passed": "通过"
   },
-  "title": "运行中心",
-  "coordination": {
-    "unavailable": "本设备没有协同记录。小队运行记录没有同步到这里。"
-  }
+  "title": "运行中心"
 }

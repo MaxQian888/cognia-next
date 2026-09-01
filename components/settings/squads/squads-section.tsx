@@ -19,7 +19,7 @@
  * mounted.
  */
 
-import { Suspense, useCallback, useEffect, useMemo } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 
@@ -38,6 +38,7 @@ import {
 } from "./nav-config"
 import { SquadsNav } from "./squads-nav"
 import { SquadDetailPanel } from "./squad-detail-panel"
+import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
 
 function SquadsSectionInner() {
   const t = useTranslations("settings.squads")
@@ -79,6 +80,12 @@ function SquadsSectionInner() {
     [router, pathname, searchParams]
   )
 
+  // Auto-compose: describe the objective, let the model staff the Squad. The
+  // dialog was only ever reachable from a tab of `/agent-teams/workspace`, so
+  // ADR-0140 took the door away without moving it anywhere. The library is
+  // where a Squad comes into existence, so it belongs beside "New Squad".
+  const [autoComposeOpen, setAutoComposeOpen] = useState(false)
+
   const handleCreate = useCallback(() => {
     const squad = createTeam({
       name: t("nav.newSquadName"),
@@ -115,6 +122,7 @@ function SquadsSectionInner() {
       activePanel={activePanel}
       onSelect={navigate}
       onCreate={handleCreate}
+      onAutoCompose={() => setAutoComposeOpen(true)}
     />
   )
 
@@ -156,6 +164,15 @@ function SquadsSectionInner() {
           </PanelTransition>
         </div>
       </div>
+
+      <AutoComposeDialog
+        open={autoComposeOpen}
+        onOpenChange={setAutoComposeOpen}
+        onComposed={(teamId) => {
+          setAutoComposeOpen(false)
+          navigate(squadPanelId(teamId))
+        }}
+      />
     </SettingsMasterDetail>
   )
 }
