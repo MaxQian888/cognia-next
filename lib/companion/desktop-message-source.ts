@@ -22,6 +22,7 @@
 
 import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
+import { MAX_MEDIA_RESPONSE_BYTES, type RuntimeBridge } from "@/lib/headless/types"
 import type {
   ChatSession,
   SessionTimelinePage,
@@ -132,21 +133,20 @@ interface SessionMediaRequestEvent {
   variant: "thumbnail" | "canonical" | "original"
 }
 
-/** Tiny Tauri shape so the file types-check in pure-web tests too. */
-interface TauriBridge {
-  listen<T>(event: string, handler: (e: { payload: T }) => void): Promise<() => void>
-  invoke(
-    name: string,
-    args?: Record<string, unknown> | Uint8Array,
-    options?: { headers: Record<string, string> }
-  ): Promise<unknown>
-}
+/**
+ * The bridge is the shared `RuntimeBridge`, not a local restatement of it.
+ *
+ * This file used to declare its own three-parameter `invoke`, which is what
+ * let `BridgeClient`'s two-parameter one satisfy it: the media bytes went into
+ * the `args` slot and the headers were dropped, silently, on the one host that
+ * needed them. `respondMedia` is a distinct required method for that reason.
+ */
 
 let installed = false
 
 export interface InstallOptions {
   /** Inject a Tauri bridge for tests; defaults to the dynamic real one. */
-  bridge?: TauriBridge
+  bridge?: RuntimeBridge
   /** Override the singleton-guard for tests. */
   forceReinstall?: boolean
 }
@@ -155,14 +155,28 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
   if (installed && !opts.forceReinstall) return () => {}
   installed = true
 
-  let bridge: TauriBridge
+  let bridge: RuntimeBridge
   if (opts.bridge) {
     bridge = opts.bridge
   } else {
     try {
       bridge = {
         listen,
-        invoke: (name, args, options) => invoke(name, args, options),
+        invoke: (name, args) => invoke(name, args),
+        // Tauri's raw invoke body plus `InvokeOptions.headers`, which is the
+        // shape `companion_media_response` reads. Header names are lowercase
+        // because the Rust side looks them up that way; Tauri normalizes, the
+        // JSON envelope on the headless path does not, and having both sides
+        // agree here is cheaper than discovering the difference in a timeout.
+        respondMedia: async ({ requestId, bytes, mediaType, etag, error }) => {
+          const headers: Record<string, string> = {
+            "x-cognia-request-id": requestId,
+            "content-type": mediaType,
+          }
+          if (etag) headers.etag = etag
+          if (error) headers["x-cognia-error"] = error
+          await invoke("companion_media_response", bytes, { headers })
+        },
       }
     } catch {
       installed = false
@@ -222,12 +236,16 @@ export async function installDesktopMessageSource(opts: InstallOptions = {}): Pr
 async function respondValue(
   requestId: string,
   result: unknown,
-  bridge: TauriBridge
+  bridge: RuntimeBridge
 ): Promise<void> {
   await bridge.invoke(RESPONSE_COMMAND, { requestId, result, error: null })
 }
 
-async function respondError(requestId: string, error: unknown, bridge: TauriBridge): Promise<void> {
+async function respondError(
+  requestId: string,
+  error: unknown,
+  bridge: RuntimeBridge
+): Promise<void> {
   await bridge.invoke(RESPONSE_COMMAND, {
     requestId,
     result: null,
@@ -237,7 +255,7 @@ async function respondError(requestId: string, error: unknown, bridge: TauriBrid
 
 async function respondSessionTimeline(
   request: SessionTimelineRequestEvent,
-  bridge: TauriBridge
+  bridge: RuntimeBridge
 ): Promise<void> {
   try {
     await respondValue(request.requestId, await readTranscriptTimeline(request), bridge)
@@ -248,7 +266,7 @@ async function respondSessionTimeline(
 
 async function respondSessionTurnMessages(
   request: SessionTurnMessagesRequestEvent,
-  bridge: TauriBridge
+  bridge: RuntimeBridge
 ): Promise<void> {
   try {
     await respondValue(request.requestId, await readTranscriptTurnMessages(request), bridge)
@@ -303,15 +321,14 @@ async function expandLegacyMediaRefs(row: StoredMessage): Promise<StoredMessage>
 
 async function respondSessionMedia(
   request: SessionMediaRequestEvent,
-  bridge: TauriBridge
+  bridge: RuntimeBridge
 ): Promise<void> {
-  const fail = async (code: "INVALID_PARAMS" | "MEDIA_NOT_FOUND") => {
-    await bridge.invoke("companion_media_response", new Uint8Array(), {
-      headers: {
-        "X-Cognia-Request-Id": request.requestId,
-        "X-Cognia-Error": code,
-        "Content-Type": "application/octet-stream",
-      },
+  const fail = async (code: "INVALID_PARAMS" | "MEDIA_NOT_FOUND" | "MEDIA_TOO_LARGE") => {
+    await bridge.respondMedia({
+      requestId: request.requestId,
+      bytes: new Uint8Array(),
+      mediaType: "application/octet-stream",
+      error: code,
     })
   }
   if (
@@ -347,16 +364,24 @@ async function respondSessionMedia(
     await fail("MEDIA_NOT_FOUND")
     return
   }
-  await bridge.invoke("companion_media_response", await readBlobBytes(blob), {
-    headers: {
-      "X-Cognia-Request-Id": request.requestId,
-      "Content-Type": blob.type || media.mediaType,
-      ETag: `"${request.hash}:${request.variant}"`,
-    },
+  const bytes = await readBlobBytes(blob)
+  // Refuse an oversized blob by name. The Host caps media at the same size and
+  // already has a 413 branch for it; without this check the frame is dropped
+  // on arrival and the device waits out the full timeout for a retryable 503
+  // that describes nothing.
+  if (bytes.byteLength > MAX_MEDIA_RESPONSE_BYTES) {
+    await fail("MEDIA_TOO_LARGE")
+    return
+  }
+  await bridge.respondMedia({
+    requestId: request.requestId,
+    bytes,
+    mediaType: blob.type || media.mediaType,
+    etag: `"${request.hash}:${request.variant}"`,
   })
 }
 
-async function respondUpdate(req: UpdateRequestEvent, bridge: TauriBridge): Promise<void> {
+async function respondUpdate(req: UpdateRequestEvent, bridge: RuntimeBridge): Promise<void> {
   try {
     const [session, message] = await Promise.all([
       getDb().sessions.get(req.sessionId),
@@ -380,7 +405,7 @@ async function respondUpdate(req: UpdateRequestEvent, bridge: TauriBridge): Prom
   }
 }
 
-async function respondDelete(req: DeleteRequestEvent, bridge: TauriBridge): Promise<void> {
+async function respondDelete(req: DeleteRequestEvent, bridge: RuntimeBridge): Promise<void> {
   try {
     const [session, message] = await Promise.all([
       getDb().sessions.get(req.sessionId),
@@ -404,7 +429,7 @@ async function respondDelete(req: DeleteRequestEvent, bridge: TauriBridge): Prom
   }
 }
 
-async function respondList(req: SessionListRequestEvent, bridge: TauriBridge): Promise<void> {
+async function respondList(req: SessionListRequestEvent, bridge: RuntimeBridge): Promise<void> {
   try {
     const page = await readSessionPage(req.limit, req.offset, req.before)
     await bridge.invoke(RESPONSE_COMMAND, {
@@ -423,7 +448,7 @@ async function respondList(req: SessionListRequestEvent, bridge: TauriBridge): P
 
 async function respondGetMessages(
   req: GetMessagesRequestEvent,
-  bridge: TauriBridge
+  bridge: RuntimeBridge
 ): Promise<void> {
   try {
     const page = await readMessagesPage(req.sessionId, req.limit, req.offset)
@@ -443,7 +468,7 @@ async function respondGetMessages(
 
 async function respondSendMessage(
   req: SendMessageRequestEvent,
-  bridge: TauriBridge
+  bridge: RuntimeBridge
 ): Promise<void> {
   try {
     const created = await persistIncomingMessage(req.sessionId, req.content, req.role)

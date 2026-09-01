@@ -15,7 +15,11 @@
  * re-hello; server pings answered with pong frames carrying the RSS gauge;
  * `token_refresh` frames update the token used on the next (re)connect.
  */
-import type { RuntimeBridge } from "@/lib/headless/types"
+import {
+  MAX_MEDIA_RESPONSE_BYTES,
+  type MediaResponse,
+  type RuntimeBridge,
+} from "@/lib/headless/types"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
 import { reconnectDelayMs } from "../runtime/reconnect-delay"
 
@@ -27,6 +31,7 @@ import {
   buildWorkerFrame,
   parseBridgeFrame,
   serializeBridgeFrame,
+  MEDIA_RESPONSE_COMMAND,
 } from "./protocol"
 
 export type BridgeClientState = "idle" | "connecting" | "connected" | "reconnecting" | "closed"
@@ -193,6 +198,56 @@ export class BridgeClient implements RuntimeBridge {
     }
     this.socket.send(serializeBridgeFrame(buildRespond(name, args)))
     return null
+  }
+
+  /**
+   * Answer a session-media read over the WS bridge.
+   *
+   * The v3 frame set is newline-delimited JSON text and `ws_bridge.rs` reads
+   * only `Message::Text`, so the bytes ride as base64 inside an ordinary
+   * `respond` payload rather than as a binary frame. That costs 33% inflation
+   * on a payload already capped at 10 MB, against a 64 MB frame ceiling, and
+   * buys not having to bump `BRIDGE_PROTOCOL_VERSION` and upgrade both halves
+   * in lockstep for one command.
+   *
+   * The payload is typed rather than a header bag. Tauri normalizes header
+   * casing and a JSON object does not, so mirroring "headers" across the two
+   * transports would make casing drift a silent 404 on one of them.
+   */
+  async respondMedia({ requestId, bytes, mediaType, etag, error }: MediaResponse): Promise<void> {
+    if (this.state !== "connected" || !this.socket) {
+      this.log("warn", `bridge respondMedia(${requestId}) dropped: not connected`)
+      return
+    }
+    if (bytes.byteLength > MAX_MEDIA_RESPONSE_BYTES) {
+      // Refused here as well as at the caller: this is the last point that
+      // knows the true encoded size, and an oversized frame is dropped by the
+      // server without resolving anything.
+      this.log("warn", `bridge respondMedia(${requestId}) refused: ${bytes.byteLength} bytes`)
+      this.socket.send(
+        serializeBridgeFrame(
+          buildRespond(MEDIA_RESPONSE_COMMAND, {
+            requestId,
+            bodyBase64: "",
+            mediaType: "application/octet-stream",
+            etag: null,
+            error: "MEDIA_TOO_LARGE",
+          })
+        )
+      )
+      return
+    }
+    this.socket.send(
+      serializeBridgeFrame(
+        buildRespond(MEDIA_RESPONSE_COMMAND, {
+          requestId,
+          bodyBase64: Buffer.from(bytes).toString("base64"),
+          mediaType,
+          etag: etag ?? null,
+          error: error ?? null,
+        })
+      )
+    )
   }
 
   sendWorkerFrame(connectionId: string, frame: string): void {

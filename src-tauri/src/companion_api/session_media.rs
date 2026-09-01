@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use super::{data_plane::DataPlane, SharedState};
 
-const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
+use super::desktop_messages_bridge::MAX_MEDIA_BYTES;
 
 #[derive(Debug, Deserialize)]
 pub struct MediaQuery {
@@ -51,6 +51,18 @@ pub async fn session_media_handler(
             StatusCode::BAD_REQUEST,
             "invalid_media_request",
             "session, hash, or variant is invalid",
+            false,
+        );
+    }
+    // A brain that does not announce `media` will never answer the request the
+    // data plane is about to emit, and the caller would learn that only from a
+    // thirty-second timeout reported as a retryable 503. Refuse now, with the
+    // reason. Always true when the desktop serves media through Tauri IPC.
+    if !super::ws_bridge::brain_serves_media() {
+        return media_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "media_service_unavailable",
+            "the connected brain does not serve session media; upgrade it",
             false,
         );
     }

@@ -188,6 +188,52 @@ pub struct SessionMediaRequest {
     pub variant: String,
 }
 
+/// Ceiling on one media answer, shared by both hosts.
+///
+/// It used to be spelled twice, in `commands.rs` and in `session_media.rs`,
+/// which is how `session_media.rs` grew a 413 branch that nothing could reach.
+pub const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
+
+/// Build a media answer from parts, whichever transport carried them.
+///
+/// The desktop arrives through Tauri's raw invoke body with metadata in
+/// headers; the headless bridge arrives as a typed JSON payload. They share
+/// this validation and deliberately do NOT share a parser: making the JSON
+/// path reuse a `tauri::ipc::Request` header reader would tie a wire format to
+/// an IPC type, and header-case normalization differs between them.
+///
+/// An oversized body is an error rather than a drop, so the request resolves
+/// and `session_media` can answer 413 instead of timing out.
+pub fn media_response_from_parts(
+    request_id: String,
+    bytes: Vec<u8>,
+    media_type: Option<String>,
+    etag: Option<String>,
+    error: Option<String>,
+) -> Result<MediaBridgeResponse, String> {
+    if request_id.is_empty() || request_id.len() > 128 {
+        return Err("missing media request id".to_string());
+    }
+    if bytes.len() > MAX_MEDIA_BYTES {
+        return Ok(MediaBridgeResponse {
+            request_id,
+            bytes: Vec::new(),
+            media_type: "application/octet-stream".to_string(),
+            etag: None,
+            error: Some("MEDIA_TOO_LARGE".to_string()),
+        });
+    }
+    Ok(MediaBridgeResponse {
+        request_id,
+        bytes,
+        media_type: media_type
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "application/octet-stream".to_string()),
+        etag: etag.filter(|value| !value.is_empty()),
+        error: error.filter(|value| !value.is_empty()),
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaBridgeResponse {
     pub request_id: String,

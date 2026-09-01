@@ -12,9 +12,10 @@
       "capabilities": [
         "sync",
         "messages",
-        "writes"
+        "writes",
+        "media"
       ],
-      "catalogHash": "9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67",
+      "catalogHash": "e94e518fbb840a82f2bc60b67db2700fe8ac744bfc85c5982754e80a16217273",
       "contractVersion": 1
     },
     "helloAck": {
@@ -23,7 +24,7 @@
       "serverVersion": "0.9.0",
       "protocol": 3,
       "accountId": "local_acct_a",
-      "catalogHash": "9eeba67d43cf91761d7f7fb8e61bda9baf5bc7574588e7688de53b3140b70d67",
+      "catalogHash": "e94e518fbb840a82f2bc60b67db2700fe8ac744bfc85c5982754e80a16217273",
       "contractVersion": 1
     },
     "eventSyncPull": {
@@ -95,6 +96,18 @@
         "requestId": "22222222-2222-4222-8222-222222222222",
         "result": null,
         "error": "character_upsert failed: dexie offline"
+      }
+    },
+    "respondSessionMedia": {
+      "v": 3,
+      "type": "respond",
+      "command": "companion_media_response",
+      "payload": {
+        "requestId": "33333333-3333-4333-8333-333333333333",
+        "bodyBase64": "Y29nbmlh",
+        "mediaType": "image/png",
+        "etag": "\"deadbeef:canonical\"",
+        "error": null
       }
     },
     "ping": {

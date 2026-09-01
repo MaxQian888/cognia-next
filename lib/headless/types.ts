@@ -22,7 +22,45 @@
 export interface RuntimeBridge {
   listen<T>(event: string, handler: (e: { payload: T }) => void): Promise<() => void>
   invoke(name: string, args: Record<string, unknown>): Promise<unknown>
+  /**
+   * Answer a pending `companion://session-media-request` with raw bytes.
+   *
+   * Separate from `invoke` on purpose, and required rather than optional.
+   * `respondSessionMedia` used to call `invoke(name, bytes, { headers })`
+   * against a locally-declared three-parameter interface, and TypeScript
+   * happily accepts a two-parameter function there: the bytes landed in the
+   * `args` slot, the headers were dropped, and the frame reached a
+   * `route_respond` that had no arm for it, so every attachment read on a
+   * headless host ended in a thirty-second timeout. A distinct method name is
+   * what makes that unrepresentable, because a two-parameter `invoke` is not
+   * assignable to a missing method. Optional would reintroduce it in new
+   * clothes, since `?.()` fails silently in exactly the same way.
+   *
+   * On desktop this maps onto Tauri's raw invoke body plus `InvokeOptions`
+   * headers. Over the WS bridge it becomes a typed `respond` payload, since
+   * the frame set is newline-delimited JSON text with no binary variant.
+   */
+  respondMedia(response: MediaResponse): Promise<void>
 }
+
+/** One answer to a session-media read. `error` and `bytes` are exclusive. */
+export interface MediaResponse {
+  requestId: string
+  bytes: Uint8Array
+  /** MIME type of `bytes`; ignored when `error` is set. */
+  mediaType: string
+  /** Strong validator the Host echoes back to the device. */
+  etag?: string | null
+  /** `INVALID_PARAMS` / `MEDIA_NOT_FOUND` / `MEDIA_TOO_LARGE`, else absent. */
+  error?: string | null
+}
+
+/**
+ * Ceiling on a single media answer, mirroring `MAX_MEDIA_BYTES` on the Rust
+ * side. Checked before the bytes are encoded so an oversized blob is refused
+ * with a named error instead of being dropped into a timeout.
+ */
+export const MAX_MEDIA_RESPONSE_BYTES = 10 * 1024 * 1024
 
 /** Which host processes a runtime is meant to run on. */
 export type HeadlessHost = "brain"

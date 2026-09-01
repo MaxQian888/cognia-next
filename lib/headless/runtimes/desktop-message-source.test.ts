@@ -21,6 +21,7 @@ function makeBridge() {
       invocations.push({ name, args })
       return null
     },
+    respondMedia: async () => {},
   }
   return { bridge, listeners, invocations }
 }

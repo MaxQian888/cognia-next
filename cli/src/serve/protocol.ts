@@ -141,6 +141,28 @@ export function serializeBridgeFrame(frame: BridgeFrame): string {
   return JSON.stringify(frame)
 }
 
+/**
+ * What this brain build can answer, announced in `hello`.
+ *
+ * `media` is load-bearing rather than decorative. The command catalog does not
+ * change when a `respond` command is added, so the catalog hash stays equal and
+ * an older brain connects to a newer server perfectly happily, then never
+ * answers a session-media request: the device waits out the full timeout and
+ * reports a retryable 503 that describes nothing. Declaring the capability lets
+ * the server refuse the read immediately, with a reason.
+ */
+/**
+ * `respond` command that carries a session-media answer.
+ *
+ * Named here rather than at the call site so the TS producer and the Rust
+ * `route_respond` arm are one grep apart. A producer whose command has no arm
+ * is dropped with a warning and resolves nothing, which is the exact shape of
+ * the bug this frame was added to fix.
+ */
+export const MEDIA_RESPONSE_COMMAND = "companion_media_response"
+
+export const DEFAULT_BRAIN_CAPABILITIES = ["sync", "messages", "writes", "media"] as const
+
 export function buildHello(opts: {
   brainVersion: string
   accountId: string
@@ -153,7 +175,7 @@ export function buildHello(opts: {
     brainVersion: opts.brainVersion,
     protocol: BRIDGE_PROTOCOL_VERSION,
     accountId: opts.accountId,
-    capabilities: opts.capabilities ?? ["sync", "messages", "writes"],
+    capabilities: opts.capabilities ?? [...DEFAULT_BRAIN_CAPABILITIES],
     catalogHash: HEADLESS_CATALOG_HASH,
     contractVersion: HEADLESS_CONTRACT_VERSION,
   }

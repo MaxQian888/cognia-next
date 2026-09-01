@@ -47,6 +47,7 @@ function makeCtx(): HeadlessRuntimeContext {
   const bridge: RuntimeBridge = {
     listen: async () => () => undefined,
     invoke: async () => null,
+    respondMedia: async () => {},
   }
   return {
     host: "brain",

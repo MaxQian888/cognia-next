@@ -9,6 +9,7 @@ function ctx(): HeadlessRuntimeContext {
     bridge: {
       listen: async () => () => undefined,
       invoke: async () => null,
+      respondMedia: async () => {},
     },
     notifyDbWrite: () => undefined,
     resolveMessage: (key) => key,

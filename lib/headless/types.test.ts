@@ -5,6 +5,7 @@ describe("headless runtime contracts", () => {
     const bridge: RuntimeBridge = {
       listen: async () => () => undefined,
       invoke: async () => ({ ok: true }),
+      respondMedia: async () => {},
     }
     const context: HeadlessRuntimeContext = {
       host: "brain",

@@ -29,6 +29,7 @@ describe("a2ui-dispatch headless smoke", () => {
         return () => listeners.delete(event)
       },
       invoke: async () => null,
+      respondMedia: async () => {},
     }
     const ctx: HeadlessRuntimeContext = {
       host: "brain",

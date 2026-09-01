@@ -403,6 +403,33 @@ pub fn brain_hello() -> Option<BrainHello> {
     SOCKET_BRIDGE.read().as_ref().map(|s| s.hello.clone())
 }
 
+/// Capability a brain must announce before it will answer a media read.
+///
+/// Adding a `respond` command does not change the command catalog, so the
+/// catalog hash stays equal and an older brain connects to a newer server
+/// perfectly happily. Without this check it then simply never answers a
+/// `companion://session-media-request`, and the device waits out the full
+/// timeout for a retryable 503 that describes nothing. The handshake already
+/// carries capabilities; this reads them.
+pub const MEDIA_CAPABILITY: &str = "media";
+
+/// Whether the connected brain announced it can answer media reads.
+///
+/// `true` when no brain is connected: the desktop data plane answers media
+/// through Tauri IPC and never consults this.
+pub fn brain_serves_media() -> bool {
+    SOCKET_BRIDGE
+        .read()
+        .as_ref()
+        .map(|slot| {
+            slot.hello
+                .capabilities
+                .iter()
+                .any(|capability| capability == MEDIA_CAPABILITY)
+        })
+        .unwrap_or(true)
+}
+
 /// Subscribe to bridge readiness transitions (R8 brain supervisor probe).
 pub fn subscribe_bridge_ready() -> watch::Receiver<bool> {
     READY.1.clone()
@@ -846,6 +873,51 @@ fn resolve_orchestration_response(payload: Value) -> Result<(), String> {
 
 /// Route a `respond` frame to the matching bridge's `resolve()`. All
 /// resolvers are no-op-safe for unknown / timed-out request ids.
+/// Decode one `companion_media_response` payload.
+///
+/// Typed fields rather than a header bag: Tauri normalizes header case and a
+/// JSON object does not, so mirroring "headers" across the two transports
+/// would let casing drift turn into a silent miss on one of them. Validation
+/// itself is shared with the desktop path
+/// (`desktop_messages_bridge::media_response_from_parts`).
+fn media_response_from_payload(
+    payload: Value,
+) -> Result<super::desktop_messages_bridge::MediaBridgeResponse, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let request_id = payload
+        .get("requestId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let encoded = payload
+        .get("bodyBase64")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    // Refuse on the ENCODED length first. Decoding to find out how big it is
+    // would mean allocating the very thing the cap exists to refuse, and
+    // base64 never shrinks its input.
+    if encoded.len() > super::desktop_messages_bridge::MAX_MEDIA_BYTES * 4 / 3 + 4 {
+        return Err(format!("media body too large ({} encoded bytes)", encoded.len()));
+    }
+    let bytes = STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("media body is not valid base64: {error}"))?;
+    super::desktop_messages_bridge::media_response_from_parts(
+        request_id,
+        bytes,
+        payload
+            .get("mediaType")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        payload.get("etag").and_then(Value::as_str).map(str::to_owned),
+        payload
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    )
+}
+
 fn route_respond(state: &SharedState, command: &str, payload: Value) {
     match command {
         "companion_sync_pull_response" => {
@@ -868,6 +940,24 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
             ) {
                 Ok(response) => state.desktop_writes_bridge.resolve(response),
                 Err(e) => log::warn!("companion-api ws-bridge: bad write respond payload: {e}"),
+            }
+        }
+        // The arm this whole path was missing. `respondSessionMedia` has always
+        // emitted this command, and without a match here every frame it sent
+        // hit the `other =>` warning below and was dropped, so the oneshot in
+        // `pending_media` never resolved and `GET /api/sessions/{id}/media/…`
+        // timed out on every headless host.
+        //
+        // Bytes ride as base64 in an ordinary `respond` payload because the v3
+        // frame set is JSON text only (see the `Message::Binary` arm above,
+        // which ignores binary), and a payload capped at 10 MB inflates to
+        // ~13.4 MB against a 64 MB frame ceiling.
+        "companion_media_response" => {
+            match media_response_from_payload(payload) {
+                Ok(response) => state.desktop_messages_bridge.resolve_media(response),
+                Err(error) => {
+                    log::warn!("companion-api ws-bridge: bad media respond payload: {error}")
+                }
             }
         }
         "companion_host_state_publish" => {
@@ -1226,6 +1316,105 @@ mod tests {
                 .expect("write respond payload parses");
         assert_eq!(write.request_id, "22222222-2222-4222-8222-222222222222");
         assert!(write.error.is_some());
+
+        // The frame that had no arm. `respondSessionMedia` was always emitted
+        // by the brain and always dropped here, so every attachment read on a
+        // headless host timed out after thirty seconds.
+        let media = media_response_from_payload(frames["respondSessionMedia"]["payload"].clone())
+            .expect("media respond payload parses");
+        assert_eq!(media.request_id, "33333333-3333-4333-8333-333333333333");
+        assert_eq!(media.bytes, b"cognia");
+        assert_eq!(media.media_type, "image/png");
+        assert_eq!(media.etag.as_deref(), Some("\"deadbeef:canonical\""));
+        assert!(media.error.is_none());
+    }
+
+    /// Every `respond` command the brain can emit must have an arm here.
+    ///
+    /// This is the gate the media bug got through. `respondSessionMedia` was
+    /// emitted by the brain for as long as the feature existed and `route_respond`
+    /// never matched it, so the frame hit the `other =>` warning, the oneshot in
+    /// `pending_media` was never resolved, and the read timed out. Nothing failed:
+    /// not the catalog parity test, not the AsyncAPI frame-set check, because both
+    /// describe frame *types* and this is a `command` inside one type.
+    ///
+    /// The golden fixture is the cross-language list of what the brain sends, so
+    /// scanning this file's own `route_respond` for each of its respond commands
+    /// closes the loop without a second hand-kept table.
+    #[test]
+    fn every_respond_command_in_the_golden_fixture_has_a_route_arm() {
+        let source = include_str!("ws_bridge.rs");
+        let routing = source
+            .split_once("fn route_respond(")
+            .expect("route_respond exists")
+            .1;
+        let body = routing.split_once("\n}").expect("route_respond has a body").0;
+
+        let raw = include_str!("../../../cli/src/serve/fixtures/bridge-frames.json");
+        let fixture: Value = serde_json::from_str(raw).expect("fixture parses");
+
+        let mut unrouted: Vec<String> = Vec::new();
+        let mut scanned = 0usize;
+        for frame in fixture["frames"]
+            .as_object()
+            .expect("frames is an object")
+            .values()
+        {
+            if frame["type"].as_str() != Some("respond") {
+                continue;
+            }
+            let command = frame["command"].as_str().expect("respond frames name a command");
+            scanned += 1;
+            if !body.contains(&format!("\"{command}\"")) {
+                unrouted.push(command.to_string());
+            }
+        }
+        // An empty `unrouted` also describes a walk that saw nothing, which is
+        // what a renamed fixture key or a changed `route_respond` signature
+        // would silently produce.
+        assert!(
+            scanned >= 4,
+            "expected at least the four known respond fixtures, scanned {scanned}"
+        );
+        assert!(
+            unrouted.is_empty(),
+            "respond commands the brain sends with no arm in route_respond: {unrouted:?}. \
+             A frame with no arm is logged and dropped, so whatever awaits it hangs."
+        );
+    }
+
+    #[test]
+    fn media_payloads_are_refused_before_they_can_allocate_or_mislead() {
+        // Oversize is judged on the ENCODED length. Decoding first to measure
+        // it would allocate exactly what the cap exists to refuse.
+        let huge = "A".repeat(super::super::desktop_messages_bridge::MAX_MEDIA_BYTES * 2);
+        let err = media_response_from_payload(serde_json::json!({
+            "requestId": "r1",
+            "bodyBase64": huge,
+        }))
+        .expect_err("an oversized body is refused");
+        assert!(err.contains("too large"), "{err}");
+
+        let err = media_response_from_payload(serde_json::json!({
+            "requestId": "r1",
+            "bodyBase64": "not base64!!",
+        }))
+        .expect_err("a malformed body is refused rather than silently emptied");
+        assert!(err.contains("base64"), "{err}");
+
+        // A missing request id cannot resolve anything, so it is an error and
+        // not a response addressed to nobody.
+        assert!(media_response_from_payload(serde_json::json!({ "bodyBase64": "" })).is_err());
+
+        // An error-only answer keeps its error and carries no bytes.
+        let denied = media_response_from_payload(serde_json::json!({
+            "requestId": "r1",
+            "bodyBase64": "",
+            "error": "MEDIA_NOT_FOUND",
+        }))
+        .expect("an error answer parses");
+        assert!(denied.bytes.is_empty());
+        assert_eq!(denied.error.as_deref(), Some("MEDIA_NOT_FOUND"));
     }
 
     // ── Handshake ─────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { BRIDGE_PROTOCOL_VERSION } from "./protocol"
 import { HEADLESS_CATALOG_HASH, HEADLESS_CONTRACT_VERSION } from "./headless-contract-identity"
+import { MAX_MEDIA_RESPONSE_BYTES } from "@/lib/headless/types"
 
 type Listener = (event: {
   data?: string
@@ -242,6 +243,68 @@ describe("BridgeClient", () => {
       h.client.invoke("companion_sync_pull_response", { requestId: "r1" })
     ).resolves.toBeNull()
     expect(logs.some((l) => l.includes("dropped"))).toBe(true)
+  })
+
+  it("answers a media read as a typed respond frame, base64 not raw bytes", async () => {
+    const h = makeClient()
+    await handshake(h)
+    h.sockets[0].sent.length = 0
+
+    await h.client.respondMedia({
+      requestId: "media-rid",
+      bytes: Uint8Array.from([99, 111, 103, 110, 105, 97]),
+      mediaType: "image/png",
+      etag: '"deadbeef:canonical"',
+    })
+
+    const frame = JSON.parse(h.sockets[0].sent[0]) as {
+      type: string
+      command: string
+      payload: Record<string, unknown>
+    }
+    expect(frame.type).toBe("respond")
+    // The command `route_respond` had no arm for. Emitting it under any other
+    // name, or through `invoke`, is what left the request hanging.
+    expect(frame.command).toBe("companion_media_response")
+    expect(frame.payload).toEqual({
+      requestId: "media-rid",
+      bodyBase64: "Y29nbmlh",
+      mediaType: "image/png",
+      etag: '"deadbeef:canonical"',
+      error: null,
+    })
+  })
+
+  it("refuses an oversized body with a named error instead of a dropped frame", async () => {
+    const h = makeClient()
+    await handshake(h)
+    h.sockets[0].sent.length = 0
+
+    await h.client.respondMedia({
+      requestId: "media-rid",
+      bytes: new Uint8Array(MAX_MEDIA_RESPONSE_BYTES + 1),
+      mediaType: "image/png",
+    })
+
+    const frame = JSON.parse(h.sockets[0].sent[0]) as { payload: Record<string, unknown> }
+    // A frame the server drops resolves nothing, and the device waits out the
+    // full timeout for a 503 that describes nothing. This resolves it.
+    expect(frame.payload.error).toBe("MEDIA_TOO_LARGE")
+    expect(frame.payload.bodyBase64).toBe("")
+  })
+
+  it("drops a media answer loudly when the socket is gone", async () => {
+    const h = makeClient()
+    await handshake(h)
+    h.client.close()
+    h.sockets[0].sent.length = 0
+
+    await h.client.respondMedia({
+      requestId: "media-rid",
+      bytes: new Uint8Array([1]),
+      mediaType: "image/png",
+    })
+    expect(h.sockets[0].sent).toEqual([])
   })
 
   it("logs the socket error cause while redacting service tokens", () => {

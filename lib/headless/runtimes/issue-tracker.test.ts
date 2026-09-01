@@ -10,7 +10,11 @@ function makeContext(): HeadlessRuntimeContext & { log: jest.Mock } {
   return {
     host: "brain",
     accountId: "account",
-    bridge: { listen: async () => () => undefined, invoke: jest.fn() },
+    bridge: {
+      listen: async () => () => undefined,
+      invoke: jest.fn(),
+      respondMedia: async () => {},
+    },
     notifyDbWrite: jest.fn(),
     resolveMessage: (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key),
     log: jest.fn(),

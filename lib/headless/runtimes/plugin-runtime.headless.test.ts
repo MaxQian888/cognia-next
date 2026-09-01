@@ -42,7 +42,11 @@ function context(pluginRuntime?: HeadlessRuntimeContext["pluginRuntime"]) {
   const ctx: HeadlessRuntimeContext = {
     host: "brain",
     accountId: "account-a",
-    bridge: { listen: async () => () => undefined, invoke: async () => null },
+    bridge: {
+      listen: async () => () => undefined,
+      invoke: async () => null,
+      respondMedia: async () => {},
+    },
     notifyDbWrite: () => undefined,
     resolveMessage: (key) => key,
     pluginRuntime,

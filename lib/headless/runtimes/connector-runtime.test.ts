@@ -53,6 +53,7 @@ jest.mock("@/lib/connectors/oauth-registry", () => ({
 const makeBridge = (): RuntimeBridge => ({
   listen: async () => () => undefined,
   invoke: async () => null,
+  respondMedia: async () => {},
 })
 
 const makeCtx = (): HeadlessRuntimeContext & { logs: Array<[string, string]> } => {

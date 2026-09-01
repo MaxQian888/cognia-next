@@ -28,6 +28,7 @@ describe("host-event-publisher runtime", () => {
       bridge: {
         listen: async () => () => undefined,
         invoke,
+        respondMedia: async () => {},
       },
       notifyDbWrite: () => undefined,
       resolveMessage: (key) => key,

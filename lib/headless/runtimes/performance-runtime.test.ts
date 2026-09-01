@@ -18,7 +18,11 @@ it("registers the Node performance host in the headless runtime roster", async (
   const context: HeadlessRuntimeContext = {
     host: "brain",
     accountId: "account",
-    bridge: { listen: async () => () => undefined, invoke: jest.fn() },
+    bridge: {
+      listen: async () => () => undefined,
+      invoke: jest.fn(),
+      respondMedia: async () => {},
+    },
     notifyDbWrite: jest.fn(),
     resolveMessage: (key) => key,
     log: jest.fn(),

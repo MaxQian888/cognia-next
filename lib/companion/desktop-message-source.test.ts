@@ -4,6 +4,7 @@
 
 import "fake-indexeddb/auto"
 
+import type { MediaResponse } from "@/lib/headless/types"
 import { messageRepository } from "@/lib/db"
 import { getDb } from "@/lib/db/schema"
 import * as messageMedia from "@/lib/db/message-media"
@@ -28,6 +29,11 @@ import {
   readTranscriptTimeline,
   readTranscriptTurnMessages,
 } from "./desktop-message-source"
+
+// Most of these tests never exercise the media path; they only have to
+// satisfy `RuntimeBridge`, whose `respondMedia` is required precisely so a
+// bridge that cannot answer media cannot be passed off as one that can.
+const respondMedia = jest.fn(async () => {})
 
 async function putExposedSession(id: string): Promise<void> {
   await getDb().sessions.put({
@@ -194,7 +200,7 @@ describe("installDesktopMessageSource — update", () => {
     const invoke = jest.fn(async () => ({}))
 
     await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
 
@@ -241,7 +247,7 @@ describe("installDesktopMessageSource — update", () => {
     const invoke = jest.fn(async () => ({}))
 
     await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
 
@@ -293,7 +299,7 @@ describe("installDesktopMessageSource — delete", () => {
     const invoke = jest.fn(async () => ({}))
 
     await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
 
@@ -330,7 +336,7 @@ describe("installDesktopMessageSource — delete", () => {
     const invoke = jest.fn(async () => ({}))
 
     await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
 
@@ -378,7 +384,7 @@ describe("installDesktopMessageSource — session_list", () => {
     const invoke = jest.fn(async () => ({}))
 
     await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
 
@@ -414,7 +420,7 @@ describe("installDesktopMessageSource — session_list", () => {
     const invoke = jest.fn(async () => ({}))
 
     await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
 
@@ -445,11 +451,11 @@ describe("install guard", () => {
     const invoke = jest.fn(async () => ({}))
 
     const teardown1 = await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
     const teardown2 = await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: false,
     })
     teardown2()
@@ -468,7 +474,7 @@ describe("install guard", () => {
     const invoke = jest.fn(async () => ({}))
 
     const teardown1 = await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: true,
     })
     // All bridge listeners registered once.
@@ -476,7 +482,7 @@ describe("install guard", () => {
 
     // Second call with forceReinstall: false short-circuits — no extra listens.
     const teardown2 = await installDesktopMessageSource({
-      bridge: { listen, invoke },
+      bridge: { listen, invoke, respondMedia },
       forceReinstall: false,
     })
     expect(listen).toHaveBeenCalledTimes(9)
@@ -803,9 +809,9 @@ describe("transcript bridge projections", () => {
     await getDb().messageMediaRefs.put({ messageId: "m1", sessionId: "s1", hash })
     type Listener = (event: { payload: unknown }) => void
     const handlers: Record<string, Listener> = {}
-    let resolveInvoke: ((value: unknown[]) => void) | undefined
-    const invoked = new Promise<unknown[]>((resolve) => {
-      resolveInvoke = resolve
+    let resolveMedia: ((value: MediaResponse) => void) | undefined
+    const answered = new Promise<MediaResponse>((resolve) => {
+      resolveMedia = resolve
     })
     await installDesktopMessageSource({
       forceReinstall: true,
@@ -814,10 +820,11 @@ describe("transcript bridge projections", () => {
           handlers[event] = handler
           return () => {}
         }),
-        invoke: jest.fn(async (...args: unknown[]) => {
-          if (args[0] === "companion_media_response") resolveInvoke?.(args)
-          return undefined
-        }) as never,
+        invoke: jest.fn(async () => undefined),
+        respondMedia: async () => {},
+        respondMedia: jest.fn(async (response: MediaResponse) => {
+          resolveMedia?.(response)
+        }),
       },
     })
 
@@ -830,14 +837,16 @@ describe("transcript bridge projections", () => {
         variant: "canonical",
       },
     })
-    const [, body, options] = await invoked
 
-    expect(body).toEqual(new Uint8Array([1, 2, 3]))
-    expect(options).toEqual({
-      headers: expect.objectContaining({
-        "X-Cognia-Request-Id": "media-rid",
-        "Content-Type": "image/png",
-      }),
+    // A typed answer, not an `invoke` with the bytes in the args slot. That
+    // shape type-checked against a locally-declared three-parameter interface
+    // and silently dropped both the bytes and the headers on the headless
+    // bridge, where `invoke` takes two.
+    await expect(answered).resolves.toEqual({
+      requestId: "media-rid",
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: "image/png",
+      etag: `"${hash}:canonical"`,
     })
   })
 
@@ -845,9 +854,9 @@ describe("transcript bridge projections", () => {
     const hash = "b".repeat(64)
     type Listener = (event: { payload: unknown }) => void
     const handlers: Record<string, Listener> = {}
-    let resolveInvoke: ((value: unknown[]) => void) | undefined
-    const invoked = new Promise<unknown[]>((resolve) => {
-      resolveInvoke = resolve
+    let resolveMedia: ((value: MediaResponse) => void) | undefined
+    const answered = new Promise<MediaResponse>((resolve) => {
+      resolveMedia = resolve
     })
     await installDesktopMessageSource({
       forceReinstall: true,
@@ -856,10 +865,11 @@ describe("transcript bridge projections", () => {
           handlers[event] = handler
           return () => {}
         }),
-        invoke: jest.fn(async (...args: unknown[]) => {
-          if (args[0] === "companion_media_response") resolveInvoke?.(args)
-          return undefined
-        }) as never,
+        invoke: jest.fn(async () => undefined),
+        respondMedia: async () => {},
+        respondMedia: jest.fn(async (response: MediaResponse) => {
+          resolveMedia?.(response)
+        }),
       },
     })
 
@@ -872,11 +882,9 @@ describe("transcript bridge projections", () => {
         variant: "canonical",
       },
     })
-    const [, body, options] = await invoked
+    const answer = await answered
 
-    expect(body).toEqual(new Uint8Array())
-    expect(options).toEqual({
-      headers: expect.objectContaining({ "X-Cognia-Error": "MEDIA_NOT_FOUND" }),
-    })
+    expect(answer.bytes).toEqual(new Uint8Array())
+    expect(answer.error).toBe("MEDIA_NOT_FOUND")
   })
 })

@@ -25,6 +25,7 @@ function context(withFilesystem = true): HeadlessRuntimeContext {
     bridge: {
       listen: async () => () => undefined,
       invoke: async () => null,
+      respondMedia: async () => {},
     },
     notifyDbWrite: () => undefined,
     backupFilesystem: withFilesystem ? filesystem : undefined,

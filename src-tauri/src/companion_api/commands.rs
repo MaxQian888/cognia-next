@@ -253,7 +253,6 @@ pub fn companion_media_response(
     request: tauri::ipc::Request<'_>,
     state: State<'_, CompanionServerState>,
 ) -> Result<(), String> {
-    const MAX_MEDIA_BYTES: usize = 10 * 1024 * 1024;
     let header = |name: &str| {
         request
             .headers()
@@ -261,24 +260,23 @@ pub fn companion_media_response(
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned)
     };
-    let request_id = header("x-cognia-request-id")
-        .filter(|value| !value.is_empty() && value.len() <= 128)
-        .ok_or_else(|| "missing media request id".to_string())?;
+    let request_id = header("x-cognia-request-id").unwrap_or_default();
     let bytes = match request.body() {
-        tauri::ipc::InvokeBody::Raw(bytes) if bytes.len() <= MAX_MEDIA_BYTES => bytes.clone(),
-        tauri::ipc::InvokeBody::Raw(_) => return Err("media response too large".to_string()),
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.clone(),
         _ => return Err("media response must use a raw invoke body".to_string()),
     };
-    state
-        .desktop_messages_bridge
-        .resolve_media(desktop_messages_bridge::MediaBridgeResponse {
-            request_id,
-            bytes,
-            media_type: header("content-type")
-                .unwrap_or_else(|| "application/octet-stream".to_string()),
-            etag: header("etag"),
-            error: header("x-cognia-error"),
-        });
+    // Oversize resolves the request with MEDIA_TOO_LARGE rather than returning
+    // Err. Returning Err left the caller's oneshot pending, so the device
+    // waited out the full timeout for a body the Host had already refused, and
+    // `session_media`'s 413 branch was unreachable.
+    let response = desktop_messages_bridge::media_response_from_parts(
+        request_id,
+        bytes,
+        header("content-type"),
+        header("etag"),
+        header("x-cognia-error"),
+    )?;
+    state.desktop_messages_bridge.resolve_media(response);
     Ok(())
 }
 
