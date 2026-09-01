@@ -69,10 +69,12 @@
     "allDomains": "全部类型",
     "allScopes": "全部范围",
     "allTrust": "全部信任级别",
+    "clear": "清除筛选",
     "domain": "模板类型",
     "hiddenHere": "本工作区隐藏了 {count} 个模板",
     "scope": "范围",
     "search": "搜索模板",
+    "title": "筛选",
     "trust": "信任级别"
   },
   "import": {
@@ -257,6 +259,7 @@
     "tagsHint": "尚未添加标签"
   },
   "mobile": {
+    "authoringOnDesktop": "发布、导出与草稿编辑在桌面端进行。",
     "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
     "title": "移动端模板访问"
   },

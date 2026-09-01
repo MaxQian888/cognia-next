@@ -16,6 +16,14 @@ jest.mock("next-intl", () => ({
 // with `history.replaceState`, so the mock reads the same place.
 jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
+  usePathname: () => "/templates",
+  // Filters are URL state now, shared with the phone body, so the Studio writes
+  // through the router. Same place these tests already drive.
+  useRouter: () => ({
+    replace: (href: string) => {
+      window.history.replaceState(null, "", href)
+    },
+  }),
 }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
 let mockDerivation: Record<string, unknown> | undefined

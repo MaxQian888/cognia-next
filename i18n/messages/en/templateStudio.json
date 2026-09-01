@@ -69,10 +69,12 @@
     "allDomains": "All types",
     "allScopes": "All scopes",
     "allTrust": "All trust levels",
+    "clear": "Clear filters",
     "domain": "Template type",
     "hiddenHere": "{count, plural, =1 {1 template is hidden in this workspace} other {# templates are hidden in this workspace}}",
     "scope": "Scope",
     "search": "Search templates",
+    "title": "Filters",
     "trust": "Trust level"
   },
   "import": {
@@ -257,6 +259,7 @@
     "tagsHint": "No tags yet"
   },
   "mobile": {
+    "authoringOnDesktop": "Publishing, exporting and editing a draft happen on the desktop app.",
     "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
     "title": "Mobile template access"
   },

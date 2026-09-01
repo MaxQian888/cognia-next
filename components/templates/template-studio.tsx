@@ -21,7 +21,8 @@ import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
 import { refreshTemplateOwners } from "@/lib/global-search/providers/library"
 import { useScopedTemplateCatalog } from "@/hooks/templates/use-scoped-template-catalog"
-import { TEMPLATE_SCOPE_TIERS, type TemplateScopeTier } from "@/lib/templates/scope"
+import { useTemplateRouteState } from "@/hooks/templates/use-template-route-state"
+import { TEMPLATE_SCOPE_TIERS } from "@/lib/templates/scope"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
   TemplateDefinitionEnvelope,
@@ -29,7 +30,6 @@ import type {
   TemplateInputSpec,
   TemplateJson,
   TemplatePlatform,
-  TemplateTrust,
   TemplateVersionBump,
 } from "@/lib/templates/contracts"
 import {
@@ -48,6 +48,7 @@ import type {
 } from "@/lib/templates/service"
 import type { TemplateDerivation } from "@/lib/templates/repository"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
+import { makeTemplateDraftId } from "@/lib/templates/draft-id"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -172,31 +173,18 @@ function downloadPackage(bytes: Uint8Array, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-/**
- * A stable, readable id for a new draft. Module scope because it reads the
- * clock, which the purity rule refuses inside a component even from an event
- * handler, and because the slug rule belongs with the other id helpers rather
- * than inline in a submit path.
- */
-function makeDraftId(domain: TemplateDomain, name: string): string {
-  const slug = name
-    .normalize("NFKC")
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-  return `user.${domain}.${slug}.${Date.now().toString(36)}`
-}
-
 export function TemplateStudio() {
   const t = useTranslations("templateStudio")
   const platform = usePlatform()
   const templatePlatform: TemplatePlatform =
     platform === "mobile" ? "mobile" : platform === "web" ? "web" : "desktop"
   const runtime = useMemo(() => getTemplateRuntime(), [])
-  const [query, setQuery] = useState("")
-  const [domain, setDomain] = useState<TemplateDomain | "all">("all")
-  const [trust, setTrust] = useState<TemplateTrust | "all">("all")
-  const [tier, setTier] = useState<TemplateScopeTier | "all">("all")
+  // Filters live in the URL, shared with the phone body through
+  // `useTemplateRouteState`, so a narrowed catalog is something you can send
+  // someone and it opens the same way on either surface.
+  const route = useTemplateRouteState()
+  const { query, domain, trust, scope: tier } = route
+  const { setQuery, setDomain, setTrust, setScope: setTier } = route
   // Scoped, not raw: a definition confined to another workspace is not this
   // workspace's to list, and one this workspace hid should not come back
   // because the Studio asked a different question than the phone did.
@@ -387,7 +375,7 @@ export function TemplateStudio() {
     if (!selected) return
     const forked = await runtime.service.fork(selected.id, {
       ...(selected.version ? { version: selected.version } : {}),
-      newId: makeDraftId(selected.domain, `${selected.metadata.name} copy`),
+      newId: makeTemplateDraftId(selected.domain, `${selected.metadata.name} copy`),
     })
     setSelectionKey(`id:${forked.id}`)
     // Ownership can have changed, and global search reads a snapshot of it.
@@ -440,7 +428,7 @@ export function TemplateStudio() {
   const createDraft = async () => {
     const trimmed = draftName.trim()
     if (!trimmed) return
-    const id = makeDraftId(draftDomain, trimmed)
+    const id = makeTemplateDraftId(draftDomain, trimmed)
     await runtime.service.createDraft({
       id,
       domain: draftDomain,
