@@ -4,6 +4,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PickerCheck, PickerRow, ResponsivePicker } from "./responsive-picker"
 
 // Radix Popover and cmdk both reach for pointer/scroll primitives jsdom lacks.
@@ -151,5 +152,55 @@ describe("PickerRow", () => {
     expect(screen.getByText("Bare")).toBeInTheDocument()
     // media, description, meta and note all absent leaves title plus the tick.
     expect(container.querySelectorAll("span").length).toBeLessThan(5)
+  })
+})
+
+describe("ResponsivePicker trigger composition", () => {
+  // The runtime chip wants a tooltip AND the picker on one button. Radix
+  // composes that by nesting `asChild` slots, and it only works in one order:
+  // the picker's trigger clones `TooltipTrigger`, which clones the button. Got
+  // the other way round, one of the two silently stops binding.
+  function renderComposed(isMobile: boolean) {
+    useIsMobileMock.mockReturnValue(isMobile)
+    return render(
+      <TooltipProvider>
+        <Tooltip>
+          <ResponsivePicker
+            open={false}
+            onOpenChange={() => {}}
+            title="Runtime"
+            trigger={
+              <TooltipTrigger asChild>
+                <button type="button" data-testid="composed-trigger" aria-label="pick a runtime">
+                  chip
+                </button>
+              </TooltipTrigger>
+            }
+          >
+            <CommandList>
+              <CommandItem value="a">A</CommandItem>
+            </CommandList>
+          </ResponsivePicker>
+          <TooltipContent>why this chip exists</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  it("lands both behaviours on ONE button in the popover shell", () => {
+    renderComposed(false)
+    const triggers = screen.getAllByTestId("composed-trigger")
+    expect(triggers).toHaveLength(1)
+    // The picker binds its own trigger state onto the same node the tooltip took.
+    expect(triggers[0]).toHaveAttribute("aria-expanded", "false")
+    expect(triggers[0]).toHaveAttribute("aria-label", "pick a runtime")
+  })
+
+  it("lands both behaviours on ONE button in the drawer shell", () => {
+    renderComposed(true)
+    const triggers = screen.getAllByTestId("composed-trigger")
+    expect(triggers).toHaveLength(1)
+    expect(triggers[0]).toHaveAttribute("aria-haspopup", "dialog")
+    expect(triggers[0]).toHaveAttribute("aria-label", "pick a runtime")
   })
 })
