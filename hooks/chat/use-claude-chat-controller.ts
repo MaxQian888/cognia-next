@@ -172,6 +172,7 @@ import {
 import { useSettingsStore } from "@/stores/settings"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
+import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
@@ -1131,7 +1132,7 @@ export function useClaudeChat() {
         typeof effectiveContent === "string" &&
         callOptions?.resourceContext === undefined &&
         (callOptions?.attachmentManifest?.length ?? 0) === 0 &&
-        useAgentRuntimeStore.getState().runtime !== "external" &&
+        useAgentRuntimeStore.getState().runtimeRef.kind === "builtin" &&
         !session?.collaboration &&
         !isStandaloneChatMode()
       if (hostStateEligible) {
@@ -1234,7 +1235,9 @@ export function useClaudeChat() {
           sessionId,
           provider:
             sendOptions.provider ??
-            (useAgentRuntimeStore.getState().runtime === "external" ? "external" : "unknown"),
+            (useAgentRuntimeStore.getState().runtimeRef.kind === "builtin"
+              ? "unknown"
+              : "external"),
           surface: "chat",
         })
       }
@@ -1358,8 +1361,11 @@ export function useClaudeChat() {
         session?.projectId
       )
       const hasNoToolSurface = sendOptions.toolSurface === "none"
-      const agentRuntime = useAgentRuntimeStore.getState().runtime
-      const manualExternal = !hasNoToolSurface && agentRuntime === "external"
+      // Read ONCE for the whole send. The store used to be consulted at three
+      // separate points below, so a runtime switch part-way through a send
+      // could be observed differently by each of them.
+      const composerRuntimeRef = useAgentRuntimeStore.getState().runtimeRef
+      const manualExternal = !hasNoToolSurface && composerRuntimeRef.kind !== "builtin"
 
       // Resolve rule-based delegation before opening the Task Workspace and
       // adoption windows so their durable agent identity reflects the runtime
@@ -1394,9 +1400,29 @@ export function useClaudeChat() {
           console.error("delegation routing failed", err)
         }
       }
-      const routedExternalAgentId = manualExternal
-        ? useAgentRuntimeStore.getState().externalAgentId
+      // One ref for the turn: the lane the composer picked, or the local agent a
+      // delegation rule chose. The router names an agent rather than a lane, so
+      // the ref is built here rather than pushed into its contract.
+      const turnRuntimeRef: AgentRuntimeRef | null = manualExternal
+        ? composerRuntimeRef
         : delegation?.targetAgentId
+          ? { kind: "external", agentId: delegation.targetAgentId }
+          : null
+      // The lane id. For a host run this is the configuration id, which is also
+      // the agent id the host mounts it under, so everything keyed by "which
+      // agent is this turn on" keeps working without a second field.
+      //
+      // A host selection used to answer `null` here, because this read the
+      // local-agent field and a host lane leaves that empty. The turn was
+      // therefore recorded as `agentKind: "in-app"` under the agent id
+      // "built-in", and it registered a durable chat receipt that the comment
+      // below explicitly says an external turn must not have.
+      const routedExternalAgentId =
+        turnRuntimeRef?.kind === "host"
+          ? turnRuntimeRef.configId
+          : turnRuntimeRef?.kind === "external"
+            ? turnRuntimeRef.agentId
+            : undefined
       const adoptionAgentKind = routedExternalAgentId ? "external" : "in-app"
       if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
@@ -1835,17 +1861,20 @@ export function useClaudeChat() {
         // instead of at a locally configured agent. Only the manual lane can
         // select one — a delegation rule names a local agent by id, and there
         // is no rule syntax for "whatever the host is called this week".
-        const hostSelection = manualExternal
-          ? useAgentRuntimeStore.getState().externalHostConfig
-          : null
-        // The lane id. For a host run this is the configuration id, which is
-        // also the agent id the host mounts it under, so everything keyed by
-        // "which agent is this turn on" keeps working without a second field.
-        const extAgentId = hostSelection
-          ? hostSelection.configId
-          : manualExternal
-            ? useAgentRuntimeStore.getState().externalAgentId
-            : delegation!.targetAgentId
+        const hostSelection =
+          turnRuntimeRef?.kind === "host"
+            ? {
+                configId: turnRuntimeRef.configId,
+                revision: turnRuntimeRef.revision,
+                lifecycleGeneration: turnRuntimeRef.lifecycleGeneration,
+              }
+            : null
+        const extAgentId = routedExternalAgentId
+        // Fail-closed backstop, not a reachable path. `turnRuntimeRef` is built
+        // from the composer's ref (which names its target) or from a delegation
+        // decision (`routeDelegation` refuses one with no `targetAgentId`), so
+        // reaching here means the two disagreed. Refusing beats dispatching a
+        // turn to nothing.
         if (!extAgentId) {
           // The optimistic user message is rolled back before the refusal:
           // nothing was sent, so it must not stay in the transcript.

@@ -801,6 +801,7 @@ afterEach(() => {
   // The external-branch test flips the (real) agent-runtime store; reset it so
   // subsequent tests keep taking the default claude-sdk path.
   useAgentRuntimeStore.setState({
+    runtimeRef: { kind: "builtin" },
     runtime: "claude-sdk",
     externalAgentId: null,
     sessionCompositions: {},
@@ -913,10 +914,14 @@ describe("useClaudeChat — actions", () => {
     expect(markChatTurnStartedMock).not.toHaveBeenCalled()
   })
 
-  it("settles a claimed turn when external mode has no selected agent", async () => {
-    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: null })
-    acceptChatTurnMock.mockResolvedValueOnce({ submissionId: "work:run-1" })
-    claimChatTurnForDispatchMock.mockResolvedValueOnce("claimed")
+  // "External lane with nothing selected" used to be a representable state: the
+  // lane and the target were separate persisted fields. It settled a claimed
+  // turn with `external_agent_not_selected`, which is now a fail-closed backstop
+  // rather than a reachable path. What replaces that test is the invariant: a
+  // rule that names no agent does not delegate, and the built-in path runs.
+  it("runs the built-in path when a delegation rule names no agent", async () => {
+    getConnectedAgentsMock.mockReturnValue([{ config: { id: "ext-1" } }])
+    checkDelegationMock.mockReturnValue({ shouldDelegate: true })
     const { result } = renderHook(() => useClaudeChat())
     await flush()
 
@@ -924,13 +929,37 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("durable")
     })
 
-    expect(sendPromptMock).not.toHaveBeenCalled()
     expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
-    expect(settleChatTurnForSessionMock).toHaveBeenCalledWith("sess-1", {
+    expect(sendPromptMock).toHaveBeenCalled()
+    expect(settleChatTurnForSessionMock).not.toHaveBeenCalledWith("sess-1", {
       outcome: "failed",
       errorCode: "external_agent_not_selected",
     })
-    expect(stopLeaseHeartbeatMock).toHaveBeenCalledTimes(1)
+  })
+
+  // The host lane answered `null` to "which agent is this turn on", because that
+  // read the LOCAL agent field and a host selection leaves it empty. The turn
+  // was therefore recorded as an in-app turn under the agent id "built-in", and
+  // it registered the durable chat receipt that an external turn must not have.
+  it("treats a host-owned agent turn as external, not as a built-in turn", async () => {
+    useAgentRuntimeStore.setState({
+      runtimeRef: {
+        kind: "host",
+        configId: "eac_1",
+        revision: "eacr_1",
+        lifecycleGeneration: 2,
+        name: "Pi",
+      },
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await result.current.send("host turn")
+    })
+
+    expect(acceptChatTurnMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
   it("keeps the legacy send path available when durable acceptance fails", async () => {
@@ -1064,7 +1093,7 @@ describe("useClaudeChat — actions", () => {
 
   it("runs an explicit zero-tool turn without a managed workspace", async () => {
     standaloneFlag.value = true
-    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
     resolveSendOptionsMock.mockResolvedValue({
       model: "sonnet",
       systemPrompt: "sys",
@@ -1262,7 +1291,7 @@ describe("useClaudeChat — actions", () => {
     // Concurrent-chat behavior: a focus switch mid-run must NOT redirect or
     // drop the in-flight external turn — every write targets the *sender's*
     // session slice (sess-1) regardless of which session is now focused.
-    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
     chatState.activeSessionId = "sess-1"
     executeOnExternalAgentMock.mockImplementation(
       async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
@@ -1299,8 +1328,7 @@ describe("useClaudeChat — actions", () => {
 
   it("reuses a verified imported native session on the external lane", async () => {
     useAgentRuntimeStore.setState({
-      runtime: "external",
-      externalAgentId: "ext-1",
+      runtimeRef: { kind: "external", agentId: "ext-1" },
       sessionCompositions: {
         "import:codex:thread-1": { presetId: "standard", runtimeBindingRef: "thread-1" },
       },
@@ -1328,7 +1356,7 @@ describe("useClaudeChat — actions", () => {
   // ADR-0127 §1: the external rail rides the per-session coalescer — a burst
   // of deltas inside one frame must not fan out into one store commit each.
   it("external-agent deltas are rAF-coalesced: a 50-delta burst yields ≤2 store commits", async () => {
-    useAgentRuntimeStore.setState({ runtime: "external", externalAgentId: "ext-1" })
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
     chatState.activeSessionId = "sess-1"
     executeOnExternalAgentMock.mockImplementation(
       async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
