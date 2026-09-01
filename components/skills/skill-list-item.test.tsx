@@ -7,9 +7,9 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const tauriRef = { current: false }
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => tauriRef.current,
+const hostSkillsRef = { current: false }
+jest.mock("@/lib/skills/sync", () => ({
+  canReadHostSkills: () => hostSkillsRef.current,
 }))
 
 import { fireEvent, render, screen } from "@testing-library/react"
@@ -40,7 +40,7 @@ const handlers = {
 }
 
 beforeEach(() => {
-  tauriRef.current = false
+  hostSkillsRef.current = false
   useSkillsStore.setState({ updateAvailable: {} })
   for (const fn of Object.values(handlers)) fn.mockReset()
 })
@@ -94,8 +94,8 @@ describe("SkillListItem", () => {
     expect(screen.getByText("status.disabled")).toBeInTheDocument()
   })
 
-  it("announces the current sync state in Tauri", () => {
-    tauriRef.current = true
+  it("announces the current sync state when the host serves skills", () => {
+    hostSkillsRef.current = true
     const { rerender } = render(
       <SkillListItem skill={baseSkill} selected={false} active={false} {...handlers} />
     )
@@ -237,7 +237,7 @@ describe("SkillListItem", () => {
 
     it("renders grid metadata and opens the selected skill", async () => {
       const user = userEvent.setup()
-      tauriRef.current = true
+      hostSkillsRef.current = true
       render(
         <SkillListItem
           skill={{ ...baseSkill, status: "disabled", usageCount: 4 } as Skill}

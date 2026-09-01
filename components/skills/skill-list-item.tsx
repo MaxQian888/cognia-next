@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import type { Skill } from "@cognia/agent-config-types"
 import { inferCategory, inferSource } from "@/lib/db/skills"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
-import { isTauri } from "@/lib/tauri"
+import { canReadHostSkills } from "@/lib/skills/sync"
 import { useSkillsStore } from "@/stores/skills/skills-store"
 
 /** Per-row display options, resolved from the skill panel preferences. */
@@ -151,7 +151,13 @@ export const SkillListItem = memo(function SkillListItem({
           {t("status.disabled")}
         </Badge>
       )}
-      {isTauri() && <SyncDot skill={skill} />}
+      {/*
+        The dot reports whether this skill matches the host's on-disk copy, so
+        it belongs wherever that copy is reachable. `skills_catalog_get` is
+        remote-reachable, so a browser or phone driving a paired Host has the
+        same answer a desktop does; `isTauri()` hid it from them.
+      */}
+      {canReadHostSkills() && <SyncDot skill={skill} />}
     </>
   )
 

@@ -14,6 +14,15 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
 }))
 
+// The host-skills predicates, not `isTauri()`, decide whether the native-sync
+// control is live: the commands behind it are remote-reachable, so a browser or
+// phone driving a paired Host can use it.
+const hostSkillsRef = { read: false, write: false }
+jest.mock("@/lib/skills/sync", () => ({
+  canReadHostSkills: () => hostSkillsRef.read,
+  canWriteHostSkills: () => hostSkillsRef.write,
+}))
+
 const checkAllMock = jest.fn(async () => 0)
 jest.mock("@/hooks/skills", () => ({
   useSkillSync: () => ({ busy: false, push: jest.fn(), pull: jest.fn(), pushOne: jest.fn() }),
@@ -79,6 +88,8 @@ const mockLoadBundle = loadBundle as jest.MockedFunction<typeof loadBundle>
 beforeEach(() => {
   jest.clearAllMocks()
   useSkillsStore.setState({ importStaging: null })
+  hostSkillsRef.read = false
+  hostSkillsRef.write = false
 })
 
 describe("SkillPanelToolbar", () => {
@@ -86,6 +97,26 @@ describe("SkillPanelToolbar", () => {
     render(<SkillPanelToolbar />)
     expect(screen.getByText("new")).toBeInTheDocument()
     expect(screen.getByText("import")).toBeInTheDocument()
+  })
+
+  it("offers native sync to a client whose host serves its skills directory", () => {
+    hostSkillsRef.read = true
+    hostSkillsRef.write = true
+    render(<SkillPanelToolbar />)
+
+    const sync = screen.getByTitle("syncNative")
+    expect(sync).toBeEnabled()
+  })
+
+  it("says the host cannot serve skills, not that this is not a desktop", () => {
+    render(<SkillPanelToolbar />)
+
+    // `unavailableRead` is the sentence `useSkillSync` has always shown when it
+    // actually refuses. The old title claimed "requires desktop mode", which is
+    // wrong for a phone paired to a Host that can serve them.
+    const sync = screen.getByTitle("unavailableRead")
+    expect(sync).toBeDisabled()
+    expect(screen.queryByTitle("syncNativeDesktopOnly")).not.toBeInTheDocument()
   })
 
   it("collapses export + sync into a More-actions menu trigger at narrow widths", () => {

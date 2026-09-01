@@ -44,6 +44,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { resolveSkillBundleMirrors } from "@/stores/settings/settings-store"
 import { pickAndReadBinaryFiles, pickAndReadFiles, pickDirectory } from "@/lib/files/file-bridge"
 import { isTauri } from "@/lib/tauri"
+import { canReadHostSkills, canWriteHostSkills } from "@/lib/skills/sync"
 import { loadBundle, type BundleResult } from "@/lib/skills/bundle/loader"
 import { listSkills } from "@/lib/db/skills"
 import { nameFromFilename, parseSkillMarkdown } from "@/lib/claude/skills-io"
@@ -109,6 +110,17 @@ export function SkillPanelToolbar() {
   const setImportStaging = useSkillsStore((s) => s.setImportStaging)
   const setUrlInstallOpen = useSkillsStore((s) => s.setUrlInstallOpen)
   const sync = useSkillSync()
+  /**
+   * Whether the *host* can serve its skills directory, which is not the same
+   * question as whether this shell is Tauri. `skills_scan_native`,
+   * `skills_install_native`, `skills_catalog_get` and the atomic-install family
+   * are all `transports: ["http","websocket","webrtc"]`, and `lib/claude/ipc.ts`
+   * already routes them through the transport, so a browser or phone driving a
+   * paired Host can sync that Host's `~/.claude/skills/`. Gating on `isTauri()`
+   * told those clients the feature did not exist. `useSkillSync` has always
+   * checked the real predicates before acting; only these `disabled` flags lied.
+   */
+  const hostSkillsReachable = canReadHostSkills() || canWriteHostSkills()
   const updates = useSkillUpdate()
   // Select the raw field so Zustand's referential equality holds across
   // renders — wrapping `resolveSkillBundleMirrors` in the selector creates
@@ -523,8 +535,8 @@ export function SkillPanelToolbar() {
           <Button
             size="sm"
             variant="ghost"
-            disabled={!isTauri() || busy || sync.busy}
-            title={!isTauri() ? t("syncNativeDesktopOnly") : t("syncNative")}
+            disabled={!hostSkillsReachable || busy || sync.busy}
+            title={hostSkillsReachable ? t("syncNative") : tSync("unavailableRead")}
             className="hidden md:inline-flex"
           >
             <RefreshCwIcon className="mr-1.5 size-3.5" />
@@ -608,7 +620,7 @@ export function SkillPanelToolbar() {
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => void sync.push()}
-              disabled={!isTauri() || sync.busy}
+              disabled={!canWriteHostSkills() || sync.busy}
               className="text-xs"
             >
               <RefreshCwIcon className="mr-2 size-3.5" />
@@ -616,7 +628,7 @@ export function SkillPanelToolbar() {
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => void sync.pull()}
-              disabled={!isTauri() || sync.busy}
+              disabled={!canReadHostSkills() || sync.busy}
               className="text-xs"
             >
               <RefreshCwIcon className="mr-2 size-3.5 -scale-x-100" />
