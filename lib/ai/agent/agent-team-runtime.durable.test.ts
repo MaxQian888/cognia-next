@@ -173,4 +173,40 @@ describe("runTeamLifecycle durable preflight", () => {
     expect(dispatchOnTeamComplete).not.toHaveBeenCalled()
     expect(dispatchTeamCompletedTriggers).not.toHaveBeenCalled()
   })
+
+  // `legacy` is the DEFAULT runtime version, and the terminal execution event
+  // used to be written only for `durable-v2`. A legacy run therefore left its
+  // execution row at `running` for good, which is the exact signal
+  // `watch-squad-run.ts` waits on to hand the conversation back.
+  it("settles the execution row for a legacy run, which writes no durable record", async () => {
+    prepareEnvironment.mockResolvedValue({ runtime: "test" })
+    const legacyTeam = {
+      ...durableTeam,
+      config: { ...durableTeam.config, runtimeVersion: "legacy" },
+    } as AgentTeam
+
+    const result = await runTeamLifecycle("team-1", {
+      runId: "run-legacy",
+      storeReader: {
+        getTeam: () => legacyTeam,
+        getTeammates: () => [worker],
+        getTeamTasks: () => [task],
+      },
+      storeWriter: {
+        addMessage: jest.fn(),
+        setTaskStatus: jest.fn(),
+        updateTeammate: jest.fn(),
+      },
+    })
+
+    expect(result.status).toBe("completed")
+    expect(appendExecutionRunEvent).toHaveBeenCalledWith(
+      "execution:team:run-legacy",
+      expect.objectContaining({ type: "run.completed" })
+    )
+    // No `agentTeamRuns` row exists for a legacy run, so nothing may be
+    // written to one.
+    expect(updateAgentTeamRun).not.toHaveBeenCalled()
+    expect(prepareRun).not.toHaveBeenCalled()
+  })
 })

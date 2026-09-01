@@ -1142,64 +1142,82 @@ export async function runTeamLifecycle(
       finalReason = err instanceof Error ? err.message : String(err)
       throw err
     } finally {
+      // The terminal execution-journal event is written for EVERY runtime
+      // version. It used to be nested inside the `durable-v2` work, so a
+      // legacy run's execution row stayed at `running` for good: nothing else
+      // settles it, and `watch-squad-run.ts` waits on exactly this signal to
+      // release the conversation.
+      //
+      // `legacy` is the DEFAULT (`DEFAULT_TEAM_CONFIG.runtimeVersion`), which
+      // made this the common case rather than an edge one. A Squad made with
+      // New Squad held its conversation in `streaming` forever, against
+      // ADR-0140's "the conversation holds while the Squad works", and every
+      // legacy run the manager now records sat in the cockpit as permanently
+      // running with a Stop button that could not settle it.
+      const abortMessage =
+        ac.signal.reason instanceof Error
+          ? ac.signal.reason.message
+          : String(ac.signal.reason ?? "")
+      let persistedStatus: import("@/types/agent/agent-team-runtime").AgentTeamRunStatus | undefined
       if (team.config.runtimeVersion === "durable-v2") {
-        const { getAgentTeamRun, updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
-        const persistedRun = await getAgentTeamRun(runId)
-        suppressCompletionFanout = persistedRun?.status === "needs_input"
-        const abortMessage =
-          ac.signal.reason instanceof Error
-            ? ac.signal.reason.message
-            : String(ac.signal.reason ?? "")
-        const durableStatus =
-          persistedRun?.status === "needs_input"
-            ? "needs_input"
-            : finalStatus === "cancelled" && abortMessage === "paused"
-              ? "paused"
-              : finalStatus === "cancelled" && abortMessage === "shutdown"
-                ? "terminated"
-                : finalStatus === "completed"
-                  ? "completed"
-                  : finalStatus === "cancelled"
-                    ? "cancelled"
-                    : "failed"
+        const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
+        persistedStatus = (await getAgentTeamRun(runId))?.status
+        suppressCompletionFanout = persistedStatus === "needs_input"
+      }
+      // `paused` and `needs_input` are deliberately NOT terminal: a paused
+      // Squad is still the conversation's turn and can be steered.
+      const teamRunStatus =
+        persistedStatus === "needs_input"
+          ? "needs_input"
+          : finalStatus === "cancelled" && abortMessage === "paused"
+            ? "paused"
+            : finalStatus === "cancelled" && abortMessage === "shutdown"
+              ? "terminated"
+              : finalStatus === "completed"
+                ? "completed"
+                : finalStatus === "cancelled"
+                  ? "cancelled"
+                  : "failed"
+      if (team.config.runtimeVersion === "durable-v2") {
+        const { updateAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
         await updateAgentTeamRun(runId, {
-          status: durableStatus,
+          status: teamRunStatus,
           ...(finalReason ? { recoveryReason: finalReason } : {}),
-          ...(["completed", "cancelled", "failed", "terminated"].includes(durableStatus)
+          ...(["completed", "cancelled", "failed", "terminated"].includes(teamRunStatus)
             ? { completedAt: Date.now() }
             : {}),
           updatedAt: Date.now(),
         }).catch(() => false)
-        const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
-        const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
-        const executionRunId = agentTeamExecutionRunId(runId)
-        const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
-        if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
-          const eventType =
-            durableStatus === "completed"
-              ? "run.completed"
-              : durableStatus === "failed"
-                ? "run.failed"
-                : durableStatus === "cancelled" || durableStatus === "terminated"
-                  ? "run.cancelled"
-                  : durableStatus === "paused"
-                    ? "run.paused"
-                    : "run.waiting"
-          await runEventJournal
-            .append(executionRunId, {
-              id: `execution-event:${runId}:team-terminal:${durableStatus}`,
-              ts: Date.now(),
-              type: eventType,
-              visibility: "summary",
-              payload: {
-                summary:
-                  eventType === "run.waiting"
-                    ? "Agent team run requires input"
-                    : `Agent team run ${durableStatus}`,
-              },
-            })
-            .catch(() => undefined)
-        }
+      }
+      const { getExecutionRun, runEventJournal } = await import("@/lib/db/execution-runs")
+      const { agentTeamExecutionRunId } = await import("@/lib/execution/agent-team-bridge")
+      const executionRunId = agentTeamExecutionRunId(runId)
+      const executionRun = await getExecutionRun(executionRunId).catch(() => undefined)
+      if (executionRun && !["completed", "failed", "cancelled"].includes(executionRun.status)) {
+        const eventType =
+          teamRunStatus === "completed"
+            ? "run.completed"
+            : teamRunStatus === "failed"
+              ? "run.failed"
+              : teamRunStatus === "cancelled" || teamRunStatus === "terminated"
+                ? "run.cancelled"
+                : teamRunStatus === "paused"
+                  ? "run.paused"
+                  : "run.waiting"
+        await runEventJournal
+          .append(executionRunId, {
+            id: `execution-event:${runId}:team-terminal:${teamRunStatus}`,
+            ts: Date.now(),
+            type: eventType,
+            visibility: "summary",
+            payload: {
+              summary:
+                eventType === "run.waiting"
+                  ? "Agent team run requires input"
+                  : `Agent team run ${teamRunStatus}`,
+            },
+          })
+          .catch(() => undefined)
       }
       if (!suppressCompletionFanout) {
         hooks.dispatchOnTeamComplete({

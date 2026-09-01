@@ -16,10 +16,30 @@ jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
     mockCancelRendererBackgroundRun(...(args as [string])),
 }))
 
-const mockCancelWorkflowRun = jest.fn(async (_runId: string) => undefined)
+const mockCancelWorkflowRun = jest.fn(async (_runId: string) => ({
+  cancelled: true,
+  live: true,
+  mode: "aborted" as string,
+}))
 jest.mock("@/lib/workflow/runtime/cancel-run", () => ({
   cancelWorkflowRun: (...args: unknown[]) =>
     mockCancelWorkflowRun(...(args as Parameters<typeof mockCancelWorkflowRun>)),
+}))
+
+// A legacy-runtime team run writes no `agentTeamRuns` record, so the durable
+// branch cannot see it. The live run-context registry is what names its team.
+const mockGetTeamRunContext = jest.fn((_runId: string) => undefined as unknown)
+jest.mock("@/lib/ai/agent/team/team-run-context", () => ({
+  getTeamRunContext: (...args: unknown[]) => mockGetTeamRunContext(...(args as [string])),
+}))
+
+const mockTeamPause = jest.fn(async (_teamId: string) => undefined)
+const mockTeamShutdown = jest.fn(async (_teamId: string) => undefined)
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    pause: (...args: unknown[]) => mockTeamPause(...(args as [string])),
+    shutdown: (...args: unknown[]) => mockTeamShutdown(...(args as [string])),
+  },
 }))
 
 const mockGetAgentTeamRun = jest.fn(async (_id: string) => undefined as unknown)
@@ -291,6 +311,8 @@ describe("team run control", () => {
     __resetDbForTesting()
     jest.clearAllMocks()
     mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue(undefined)
+    mockCancelWorkflowRun.mockResolvedValue({ cancelled: true, live: true, mode: "aborted" })
   })
 
   async function seedTeamRun(sourceId: string) {
@@ -361,6 +383,67 @@ describe("team run control", () => {
       actor: { remoteUserId: "operator-1" },
     })
     expect(mockControlDurableRun).toHaveBeenCalledWith("run_team_2", "pause")
+    handlers.dispose()
+  })
+
+  // `legacy` is the default runtime version, so this is the common team run,
+  // not an exotic one. It has no durable record, and its `sourceId` is a
+  // lifecycle run id rather than a workflow run id, so it used to fall to
+  // `cancelWorkflowRun`, which looked up nothing and reported success.
+  it("stops a live legacy run through the manager the Squad console uses", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue({ runId: "run_legacy_1", teamId: "team-7" })
+    await seedTeamRun("run_legacy_1")
+
+    await executeRunControlCommand({
+      runId: "execution:team:run_legacy_1",
+      action: "stop",
+      idempotencyKey: "legacy-stop",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(mockTeamShutdown).toHaveBeenCalledWith("team-7")
+    expect(mockCancelWorkflowRun).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+
+  it("pauses a live legacy run", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue({ runId: "run_legacy_2", teamId: "team-8" })
+    await seedTeamRun("run_legacy_2")
+
+    await executeRunControlCommand({
+      runId: "execution:team:run_legacy_2",
+      action: "pause",
+      idempotencyKey: "legacy-pause",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(mockTeamPause).toHaveBeenCalledWith("team-8")
+    handlers.dispose()
+  })
+
+  it("refuses the press when nothing is behind the row, rather than reporting a stop", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue(undefined)
+    mockCancelWorkflowRun.mockResolvedValue({ cancelled: false, live: false, mode: "noop" })
+    await seedTeamRun("run_stale_1")
+
+    const result = await executeRunControlCommand({
+      runId: "execution:team:run_stale_1",
+      action: "stop",
+      idempotencyKey: "stale-stop",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(false)
+    expect(result.reason).toBe("source_rejected")
     handlers.dispose()
   })
 })

@@ -176,6 +176,52 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   }
 
   /**
+   * A team run that has no `agentTeamRuns` record: either a `trigger.team`
+   * workflow run, or a run on the LEGACY runtime, which writes no durable
+   * record at all.
+   *
+   * Legacy was reaching `workflow` and dying quietly. Its `sourceId` is a
+   * lifecycle run id rather than a workflow run id, so `cancelWorkflowRun`
+   * looked up nothing and returned `noop`, which the workflow handler
+   * discards: Stop reported success and stopped nothing. `legacy` is the
+   * default runtime version, so that was the common case.
+   *
+   * The live-run context registry already maps a run id to its team, and for
+   * exactly as long as the run can be controlled at all: a legacy run keeps
+   * its abort controller in memory and does not outlive the process. Control
+   * goes through `agentTeamManager`, the same entry the Squad console uses,
+   * so there is no second control implementation here.
+   *
+   * When neither registry knows the run, the workflow cancel's own `noop` is
+   * reported instead of swallowed, so the cockpit says the engine refused
+   * rather than showing a stop that never happened.
+   */
+  const legacyOrWorkflow = async (command: RunControlCommand, sourceId: string): Promise<void> => {
+    const { getTeamRunContext } = await import("@/lib/ai/agent/team/team-run-context")
+    const live = getTeamRunContext(sourceId)
+    if (live) {
+      const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+      if (command.action === "pause") return agentTeamManager.pause(live.teamId)
+      if (command.action === "stop") return agentTeamManager.shutdown(live.teamId)
+      // `resume` is absent on purpose, and unreachable rather than merely
+      // unwanted: the context registry holds an entry only while the
+      // lifecycle is live, and pausing a legacy run exits the lifecycle. So a
+      // paused legacy run never has a `live` context to resume through.
+      // Resuming one starts a FRESH lifecycle over the remaining tasks, which
+      // is a new run with a new row, so the Squad console owns that verb.
+      //
+      // Steering is refused for the same shape of reason: it needs the
+      // durable coordinator's receipt queue, and a legacy run has nowhere to
+      // put the message.
+      throw new UnsupportedForKindError(command.action, "team")
+    }
+    if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "team")
+    const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
+    const result = await cancelWorkflowRun(sourceId, "im_control")
+    if (result.mode === "noop") throw new Error("No live run behind this team row")
+  }
+
+  /**
    * Team runs reach the execution journal by two routes with different
    * `sourceId` semantics, and only one of them is a workflow:
    *
@@ -197,7 +243,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
 
     const { getAgentTeamRun } = await import("@/lib/db/agent-team-runtime")
     const durable = await getAgentTeamRun(run.sourceId).catch(() => undefined)
-    if (!durable) return workflow(command)
+    if (!durable) return legacyOrWorkflow(command, run.sourceId)
 
     if (command.action === "steer") {
       const { steerDurableRun } = await import("@/lib/ai/agent/team/durable-control")
