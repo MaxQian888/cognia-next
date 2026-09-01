@@ -41,6 +41,7 @@ import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
+import { syncSessionState } from "./handlers/session-state"
 import { syncExecutionRuns } from "./handlers/execution-runs"
 import { syncGoals } from "./handlers/goals"
 import { syncPlans } from "./handlers/plans"
@@ -127,6 +128,9 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // unread + unpinned. It is critical for the same reason `sessions` is:
   // the list is wrong, not merely empty, without it.
   { table: "conversationOverrides", stage: "critical", run: syncConversationOverrides },
+  // Unread pointers are first-screen: the tab bar draws its badge before any
+  // conversation is opened, and a wrong zero there is the whole bug.
+  { table: "sessionState", stage: "critical", run: syncSessionState },
 
   // ── interactive ───────────────────────────────────────────────────────
   // The transcript tail. Paged, and the largest payload in the pipeline —
@@ -262,6 +266,10 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   // Terminal projections age out client-side (handlers/outbound-queue.ts);
   // the host prunes without tombstones after 14 days.
   outboundQueue: syncDomain("ttl"),
+  // `internal`: three scalars (session id, read pointer, count) and no content.
+  // Deletion rides the `sessions` tombstone rather than one of its own, so an
+  // orphan row is possible and harmless, see readSessionStateDelta.
+  sessionState: syncDomain("append-only", "internal"),
 })
 
 interface SyncState {

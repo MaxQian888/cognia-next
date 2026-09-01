@@ -2,7 +2,7 @@
   "latestVersion": 215,
   "schemaSha256": "eea32ebe3426fcd9af139973b10f9b0fb0274b1bb277331c9d7fca2a39258fe2",
   "staticTableCount": 341,
-  "companionSyncTableCount": 28,
+  "companionSyncTableCount": 29,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -22,6 +22,7 @@
     "outboundQueue",
     "plans",
     "plugins",
+    "sessionState",
     "sessions",
     "settings",
     "skills",

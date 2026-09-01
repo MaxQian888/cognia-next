@@ -82,8 +82,11 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 28 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(28)
+  it("maps all 29 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(29)
+    // The unread pointers the mobile Chat badge and Inbox dot count. They used
+    // to count `inboundLedger`, which is host-only, so both read 0 on a phone.
+    expect(COMPANION_SYNC_TABLES.has("sessionState")).toBe(true)
     // ADR-0131 inbox relay: drafts + outbound status projection are mirrored.
     expect(COMPANION_SYNC_TABLES.has("connectorDrafts")).toBe(true)
     expect(COMPANION_SYNC_TABLES.has("outboundQueue")).toBe(true)

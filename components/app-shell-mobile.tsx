@@ -86,7 +86,8 @@ import { useChatStore } from "@/stores/chat"
 import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
-import { getDb, whenSeeded } from "@/lib/db/schema"
+import { whenSeeded } from "@/lib/db/schema"
+import { loadMobileUnread } from "@/lib/inbox/unread-count"
 import { markSessionRead } from "@/lib/db/session-state"
 import { updateSession } from "@/lib/db/sessions"
 import { listCharacters } from "@/lib/db/characters"
@@ -132,7 +133,6 @@ export function AppShellMobile() {
   const pendingElicitation = useSessionPendingElicitation(activeSessionId)
 
   const loadSettings = useSettingsStore((s) => s.load)
-  const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
@@ -228,9 +228,14 @@ export function AppShellMobile() {
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
 
-  const inboxUnread = useClientLiveQuery<number>(
-    () => getDb().inboundLedger.where("receivedAt").above(lastInboxViewedAt).count(),
-    [lastInboxViewedAt],
+  // Was a count of `inboundLedger` rows newer than `lastInboxViewedAt`. That
+  // ledger is host-only and never syncs, so the dot was permanently dark on a
+  // paired device. `sessionState` does sync, and restricting it to
+  // IM/integration-bound conversations keeps this dot about the Inbox rather
+  // than about all chat (the Chat tab badge is the all-chat number).
+  const inboxUnread = useClientLiveQuery(
+    () => loadMobileUnread().then((counts) => counts.inbox),
+    [],
     0
   )
 

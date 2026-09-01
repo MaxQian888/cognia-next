@@ -132,6 +132,19 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Per-conversation Inbox overrides (pinned, archived, lastReadAt, allowComputerUse, allowGoalDriving, mode)".to_string(),
             has_tombstones: false,
         },
+        // Per-session unread pointers. The mobile Chat tab badge and the
+        // Inbox dot both counted `inboundLedger`, a host-only dedupe ledger
+        // that never syncs, so both read 0 on every paired device. This is the
+        // table the desktop's own unread badges read.
+        //
+        // No tombstones: a deleted session is tombstoned on `sessions`, and an
+        // orphaned state row counts toward nothing because every reader
+        // resolves the session before counting it.
+        SyncTableDescriptor {
+            name: "sessionState".to_string(),
+            description: "Per-session unread pointers (read-only mirror for the mobile Chat badge and Inbox dot)".to_string(),
+            has_tombstones: false,
+        },
         // Companion read-mostly views. Both have desktop sync readers
         // (`readGoalsDelta` / `readMemoriesDelta`) and TS handlers, but were
         // never added to this allowlist — so `sync_pull` rejected them with

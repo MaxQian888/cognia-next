@@ -175,6 +175,8 @@ export async function readDexieDelta(
       return readSettingsDelta(since)
     case "conversationOverrides":
       return readConversationOverridesDelta(since)
+    case "sessionState":
+      return readSessionStateDelta(since)
     case "goals":
       return readGoalsDelta(since)
     case "plans":
@@ -373,6 +375,29 @@ async function readExecutionRunsDelta(since: number): Promise<SyncDelta<Executio
     .limit(RUN_PAGE_SIZE)
     .toArray()
   return finalizeDelta("executionRuns", rows, since, rows.length === RUN_PAGE_SIZE)
+}
+
+/**
+ * Per-session unread pointers.
+ *
+ * Two shapes worth naming. The primary key is `sessionId`, not `id`, so the
+ * wire row carries an `id` alias for the generic client handler; the handler
+ * strips it again before writing. And the cursor is `updatedAt` rather than
+ * `lastReadAt`, because `bumpUnread` preserves `lastReadAt` on purpose, so a
+ * conversation going unread would otherwise never advance the watermark.
+ * Legacy rows predate `updatedAt` and fall back to `lastReadAt`, which crosses
+ * them once.
+ *
+ * No tombstones: a deleted session is already tombstoned on `sessions`, and an
+ * orphaned state row counts toward nothing, because every reader resolves the
+ * session before counting it (`aggregateGuildUnread` drops the misses).
+ */
+async function readSessionStateDelta(since: number): Promise<SyncDelta<unknown>> {
+  const all = await getDb().sessionState.toArray()
+  const rows = all
+    .map((row) => ({ ...row, id: row.sessionId, updatedAt: row.updatedAt ?? row.lastReadAt ?? 0 }))
+    .filter((row) => row.updatedAt > since)
+  return finalizeDelta("sessionState", rows as UpdatedAtRow[], since)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {

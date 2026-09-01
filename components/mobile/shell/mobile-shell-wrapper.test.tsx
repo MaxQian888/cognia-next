@@ -74,9 +74,9 @@ jest.mock("./mobile-global-search-host", () => ({
   MobileGlobalSearchHost: () => <div data-testid="mobile-global-search-host" />,
 }))
 
-const inboundUnreadRef = { value: 0 }
+const unreadRef = { value: { chat: 0, inbox: 0 } }
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => inboundUnreadRef.value,
+  useLiveQuery: () => unreadRef.value,
 }))
 
 const keyboardRef = { value: { keyboardHeight: 0, isVisible: false } }
@@ -84,13 +84,9 @@ jest.mock("@/hooks/ui/use-keyboard-insets", () => ({
   useKeyboardInsets: () => keyboardRef.value,
 }))
 
-jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    inboundLedger: {
-      where: () => ({ above: () => ({ count: () => Promise.resolve(0) }) }),
-    },
-  }),
-}))
+// `loadMobileUnread` reaches Dexie, and `useLiveQuery` is stubbed above so it
+// never actually runs. The stub only stops the real schema module loading.
+jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
 
 const wrapperStoreState: {
   settings: { lastInboxViewedAt: number } | null
@@ -118,7 +114,7 @@ describe("<MobileShellWrapper />", () => {
     platformMock.mockReset().mockReturnValue("mobile")
     compactMock.mockReset().mockReturnValue(false)
     pathnameMock.mockReset().mockReturnValue("/")
-    inboundUnreadRef.value = 0
+    unreadRef.value = { chat: 0, inbox: 0 }
     keyboardRef.value = { keyboardHeight: 0, isVisible: false }
     replaceMock.mockReset()
     wrapperStoreState.settings = { lastInboxViewedAt: 0 }
@@ -309,8 +305,10 @@ describe("<MobileShellWrapper />", () => {
     expect(screen.getByTestId("mobile-tab-badge-chat")).toHaveTextContent("3")
   })
 
-  it("merges inbound unread into the chat badge", () => {
-    inboundUnreadRef.value = 7
+  it("merges unread conversations into the chat badge", () => {
+    // From `sessionState`, which syncs. It used to count `inboundLedger`, a
+    // host-only dedupe ledger, so this badge was 0 on every paired device.
+    unreadRef.value = { chat: 7, inbox: 2 }
     render(
       <MobileShellWrapper>
         <div>x</div>

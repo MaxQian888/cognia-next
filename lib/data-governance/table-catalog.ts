@@ -477,6 +477,11 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // syncs as a status projection (`syncedFromHost: true`, no segments).
   "connectorDrafts",
   "outboundQueue",
+  // Per-session unread pointers. The mobile Chat tab and the Inbox dot both
+  // render a count the phone could not compute: the badge read `inboundLedger`,
+  // a host-only dedupe ledger, so it was 0 on every paired device. This is the
+  // table the desktop's own unread badges read.
+  "sessionState",
 ])
 
 /**
@@ -512,6 +517,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "agentTeamTasks",
   "connectorDrafts",
   "outboundQueue",
+  "sessionState",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]

@@ -17,8 +17,10 @@
  *     browser window has no OS consent surface and did not just launch an
  *     app, so giving it those alongside the layout would be a behaviour
  *     change wearing a layout change's clothes.
- *   - Computes an "Inbox unread" badge over the Chat tab from the
- *     `inboundLedger` count newer than `settings.lastInboxViewedAt`.
+ *   - Computes the Chat tab's unread badge from `sessionState`, the same
+ *     table the desktop's own unread badges read. It used to count
+ *     `inboundLedger` rows, which is a host-only dedupe ledger that never
+ *     syncs, so the badge was 0 on every paired device.
  *
  * Mounted from `app/layout.tsx` between `CompanionBootProvider` and the
  * routed children.
@@ -38,7 +40,7 @@ import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
 import { usesCompactShell } from "@/lib/shell/compact-shell"
 import { needsFullViewport } from "@/lib/shell/full-viewport-routes"
-import { getDb } from "@/lib/db/schema"
+import { EMPTY_UNREAD_COUNTS, loadMobileUnread } from "@/lib/inbox/unread-count"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
 
@@ -64,7 +66,6 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
   const nativeMobile = platform === "mobile"
   const pathname = usePathname() ?? "/"
   const router = useRouter()
-  const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
   const { resolved: resolvedTabs } = useMobileTabLayout()
   // Soft-keyboard state: while typing, the tab bar slides away and its
   // bottom reserve collapses so the composer sits directly on the keyboard
@@ -99,11 +100,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
     }
   }, [nativeMobile, settingsHydrated, resolvedTabs.defaultLanding, router])
 
-  const inboundUnread =
-    useLiveQuery<number>(
-      () => getDb().inboundLedger.where("receivedAt").above(lastInboxViewedAt).count(),
-      [lastInboxViewedAt]
-    ) ?? 0
+  const unreadCounts = useLiveQuery(loadMobileUnread, [], EMPTY_UNREAD_COUNTS)
 
   const showTabBar = useMemo(() => {
     if (!compactShell) return false
@@ -140,7 +137,7 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
 
   const mergedBadges: Partial<Record<TabId, number>> = {
     ...(badges ?? {}),
-    chat: (badges?.chat ?? 0) + inboundUnread,
+    chat: (badges?.chat ?? 0) + unreadCounts.chat,
   }
 
   // Which routes need a DEFINITE viewport height rather than the document

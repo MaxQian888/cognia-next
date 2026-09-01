@@ -74,6 +74,9 @@ describe("sync stages", () => {
       "characters",
       "sessions",
       "conversationOverrides",
+      // The tab bar draws its unread badge before any conversation is opened,
+      // so the pointers it counts belong to the first screen too.
+      "sessionState",
     ])
     // `messages` and `memories` are the two largest applies in the pipeline —
     // the transcript tail and the row-by-row DEK decrypt. Neither may gate

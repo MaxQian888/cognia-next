@@ -16,6 +16,16 @@ export interface SessionStateRow {
   sessionId: string
   lastReadAt: number
   unreadCount: number
+  /**
+   * Sync watermark. Non-indexed, so it needs no Dexie version bump.
+   *
+   * `lastReadAt` cannot serve as the cursor: `bumpUnread` deliberately
+   * preserves it, so the one event a paired device most needs to hear about,
+   * a conversation going unread, would never advance the watermark and would
+   * never cross the wire. Both writers stamp this instead. Legacy rows have no
+   * `updatedAt`, so the reader falls back to `lastReadAt` and they cross once.
+   */
+  updatedAt?: number
 }
 
 export async function getSessionState(sessionId: string): Promise<SessionStateRow | undefined> {
@@ -28,10 +38,12 @@ export async function listSessionStates(): Promise<SessionStateRow[]> {
 
 /** Mark a session as read — clears unread count and bumps the read pointer. */
 export async function markSessionRead(sessionId: string): Promise<void> {
+  const now = Date.now()
   await getDb().sessionState.put({
     sessionId,
-    lastReadAt: Date.now(),
+    lastReadAt: now,
     unreadCount: 0,
+    updatedAt: now,
   })
 }
 
@@ -44,6 +56,7 @@ export async function bumpUnread(sessionId: string): Promise<void> {
       sessionId,
       lastReadAt: cur?.lastReadAt ?? 0,
       unreadCount: (cur?.unreadCount ?? 0) + 1,
+      updatedAt: Date.now(),
     })
   })
 }
