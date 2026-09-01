@@ -8842,6 +8842,7 @@
       "revoke": "吊销",
       "revokedBody": "它不持有任何能力，且必须重新配对才能连接。",
       "revokedTitle": "该设备已被吊销",
+      "sshFilesReachIsWhole": "该授权没有目录范围限制。SFTP 路径是那台机器自己的绝对路径，符号链接也由它自己解析，因此没有可以限制的根目录。",
       "terminalReachesSsh": "该授权同时允许该设备打开本机保存的任意 SSH 主机。连接由宿主用它保存的密钥或密码发起，且这份已保存列表在所有获授权设备之间共享，无法按设备单独指定。",
       "title": "访问授权"
     },
@@ -16397,6 +16398,16 @@
         "statusWeb": "网页版",
         "stopped": "伴侣服务器已停止。",
         "title": "移动端伴侣服务器"
+      },
+      "sshFiles": {
+        "blocked": "文件传输权限未更改（{reason}）。",
+        "col": "SSH 文件传输",
+        "description": "允许该设备浏览并传输本机已保存的 SSH 主机上的文件。它以该配置的用户身份读写那些机器，没有目录范围限制，这正是在那些机器上开一个 shell 本来就能做的事。",
+        "disabledToast": "已关闭 {label} 的 SSH 文件传输。",
+        "enabledToast": "已开启 {label} 的 SSH 文件传输。",
+        "reason": "确认向 {label} 授予 SSH 文件传输权限",
+        "title": "允许 SSH 文件传输",
+        "toggleAria": "切换 {label} 的 SSH 文件传输"
       },
       "syncStatus": {
         "colActions": "操作",
