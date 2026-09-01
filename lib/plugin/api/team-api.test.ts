@@ -33,7 +33,7 @@ jest.mock("@cognia/logging", () => {
 })
 
 jest.mock("@/stores/project/project-store", () => ({
-  useProjectStore: { getState: () => ({ activeProjectId: null }) },
+  useProjectStore: { getState: () => ({ activeProjectId: null, projects: [] }) },
 }))
 
 const startSquadRun = jest.fn(async () => ({ started: true, runId: "run_team_1" }))
@@ -55,6 +55,16 @@ jest.mock("@/lib/ai/agent/agent-team", () => ({
 const getAgentTeamTemplate = jest.fn()
 jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
   getAgentTeamTemplate: (...a: unknown[]) => getAgentTeamTemplate(...(a as [])),
+}))
+
+const resolveDurable = jest.fn(async () => null as Record<string, unknown> | null)
+jest.mock("@/lib/ai/agent/team/durable-new-team", () => ({
+  resolveDurableNewTeamConfig: (...a: unknown[]) => resolveDurable(...(a as [])),
+}))
+
+const publishTemplate = jest.fn(async () => {})
+jest.mock("@/lib/agent-team/publish-template-to-platform", () => ({
+  publishSquadTemplateToPlatform: (...a: unknown[]) => publishTemplate(...(a as [])),
 }))
 
 const PLUGIN = "tracker-sync"
@@ -81,6 +91,96 @@ describe("createTeamAPI", () => {
     useAgentTeamStore.getState().reset()
     resetPermissionGuard()
     guard = getPermissionGuard()
+  })
+
+  describe("lifecycle", () => {
+    /**
+     * The half of the surface that did not exist. A plugin could add
+     * teammates, feed the board and run the thing, but the only way to obtain
+     * a Squad was `instantiateTemplate` and the only way to lose one was for a
+     * human to click Delete.
+     */
+    it("creates a Squad through createSquad, so it picks up the durable default", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      resolveDurable.mockResolvedValueOnce({ runtimeVersion: "durable-v2" })
+      const api = createTeamAPI(PLUGIN)
+      const squad = await api.createTeam({ name: "Review Crew", task: "review the diff" })
+      expect(squad.name).toBe("Review Crew")
+      expect(squad.config.runtimeVersion).toBe("durable-v2")
+      // The lead is synthesized by the store, not by the plugin.
+      expect(useAgentTeamStore.getState().teammates[squad.leadId]).toBeDefined()
+    })
+
+    it("still creates a Squad when no durable default resolves", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      resolveDurable.mockRejectedValueOnce(new Error("no workspace root"))
+      const api = createTeamAPI(PLUGIN)
+      const squad = await api.createTeam({ name: "Solo", task: "x" })
+      expect(squad.id).toBeTruthy()
+    })
+
+    it("caller config wins over the discovered durable default", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      resolveDurable.mockResolvedValueOnce({ runtimeVersion: "durable-v2" })
+      const api = createTeamAPI(PLUGIN)
+      const squad = await api.createTeam({
+        name: "Pinned",
+        task: "x",
+        config: { runtimeVersion: "legacy" },
+      })
+      expect(squad.config.runtimeVersion).toBe("legacy")
+    })
+
+    it("deleteTeam reports an unknown id instead of throwing", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      expect(await api.deleteTeam("ghost")).toBe(false)
+      expect(await api.deleteTeam(team.id)).toBe(true)
+      expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
+    })
+
+    it("duplicateTeam copies the roster and starts the copy idle", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      const copy = await api.duplicateTeam(team.id, { name: "Review Crew (web)" })
+      expect(copy).not.toBeNull()
+      expect(copy!.id).not.toBe(team.id)
+      expect(copy!.name).toBe("Review Crew (web)")
+      expect(copy!.status).toBe("idle")
+      // Repointed, not shared: a copy holding the source's lead id would let
+      // one Squad's roster edits move the other's.
+      expect(copy!.leadId).not.toBe(team.leadId)
+      expect(await api.duplicateTeam("ghost", { name: "x" })).toBeNull()
+    })
+
+    it("saveAsTemplate mirrors into the unified platform at write time", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      const template = await api.saveAsTemplate(team.id, "Review Crew blueprint")
+      expect(template).not.toBeNull()
+      expect(publishTemplate).toHaveBeenCalledWith(template)
+      expect(await api.saveAsTemplate("ghost", "x")).toBeNull()
+    })
+
+    it("a failed platform mirror does not lose the template", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      publishTemplate.mockRejectedValueOnce(new Error("catalog offline"))
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      await expect(api.saveAsTemplate(team.id, "Blueprint")).resolves.not.toBeNull()
+    })
+
+    it("takes team:write, not agent:dispatch: creating spends nothing", () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "agent:dispatch", "agent:control"])
+      const api = createTeamAPI(PLUGIN)
+      expect(() => api.createTeam({ name: "x", task: "y" })).toThrow(PermissionError)
+      expect(() => api.deleteTeam("x")).toThrow(PermissionError)
+      expect(() => api.duplicateTeam("x", { name: "y" })).toThrow(PermissionError)
+      expect(() => api.saveAsTemplate("x", "y")).toThrow(PermissionError)
+    })
   })
 
   describe("run control", () => {

@@ -73,7 +73,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.sites` | 5 | `database:read` | frontend, hybrid | internal |
 | `ctx.storage` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.subscription` | 7 | `subscription:read` | frontend, hybrid | sensitive |
-| `ctx.team` | 26 | `team:write`, `team:read`, `agent:dispatch`, `agent:control` | frontend, hybrid, python | sensitive |
+| `ctx.team` | 30 | `team:write`, `team:read`, `agent:dispatch`, `agent:control` | frontend, hybrid, python | sensitive |
 | `ctx.templates` | 11 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid | internal |
 | `ctx.terminal` | 11 | `terminal:safety`, `terminal:spawn`, `terminal:kill`, `terminal:completion`, `terminal:write` | frontend, hybrid | internal |
 | `ctx.theme` | 16 | `theme:write`, `theme:read` | frontend, hybrid | internal |
@@ -1057,6 +1057,10 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `team.updateTeamConfig` | `team:write` | high | No |
 | `team.updateTeammate` | `team:write` | high | No |
 | `team.instantiateTemplate` | `team:write` | high | No |
+| `team.createTeam` | `team:write` | high | No |
+| `team.deleteTeam` | `team:write` | high | No |
+| `team.duplicateTeam` | `team:write` | high | No |
+| `team.saveAsTemplate` | `team:write` | high | No |
 | `team.start` | `agent:dispatch` | medium | No |
 | `team.pause` | `agent:control` | medium | Yes |
 | `team.resume` | `agent:control` | medium | Yes |

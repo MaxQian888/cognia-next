@@ -14,6 +14,8 @@
 
 export type {
   PluginTeamAPI,
+  PluginTeamCreateInput,
+  PluginTeamDuplicateInput,
   PluginTeamMoveResult,
   PluginTeamRunControlResult,
   PluginTeamRunStatus,
@@ -30,6 +32,7 @@ export type {
   AgentTeamEvent,
   AgentTeammate,
   AgentTeamTask,
+  AgentTeamTemplate,
   TaskCommentAttachment,
   TeamExecutionCheckpoint,
   TeamExecutionReport,

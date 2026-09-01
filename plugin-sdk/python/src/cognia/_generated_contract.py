@@ -13900,6 +13900,62 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "team.createTeam",
+                "name": "createTeam",
+                "requiredPermissions": [
+                    "team:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "team.deleteTeam",
+                "name": "deleteTeam",
+                "requiredPermissions": [
+                    "team:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "team.duplicateTeam",
+                "name": "duplicateTeam",
+                "requiredPermissions": [
+                    "team:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "team.saveAsTemplate",
+                "name": "saveAsTemplate",
+                "requiredPermissions": [
+                    "team:write",
+                ],
+                "consentTier": "policy",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "team.start",
                 "name": "start",
                 "requiredPermissions": [

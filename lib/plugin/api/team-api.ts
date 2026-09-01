@@ -28,6 +28,13 @@
  *    plugin-started run gets the same run id convention, execution row and
  *    workspace stamp as one started from chat.
  *  - Board reads are gated by `team:read`, board writes by `team:write`.
+ *  - Lifecycle (create / delete / duplicate / save-as-template) is `team:write`
+ *    too. It was the half of the surface that did not exist: a plugin could
+ *    add teammates, feed the board and run the thing, but the only way to
+ *    obtain a Squad at all was `instantiateTemplate`, and the only way to lose
+ *    one was for a human to click Delete. `createTeam` goes through
+ *    `createSquad`, not the store action, so a plugin-made Squad lands on
+ *    durable-v2 wherever the workspace supports it.
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
@@ -44,6 +51,7 @@ import type {
   TaskCommentAttachment,
   TeamExecutionCheckpoint,
   TeamExecutionReport,
+  AgentTeamTemplate,
   TeamStatus,
   TeamTaskStatus,
 } from "@/types/agent/agent-team"
@@ -58,6 +66,33 @@ export interface PluginTeamTaskCreateInput {
   tags?: string[]
   /** Upstream task ids that must complete first. */
   dependencies?: string[]
+}
+
+/**
+ * Input for creating a Squad from scratch.
+ *
+ * Mirrors the fields the Settings library passes to `createSquad`
+ * (`components/settings/squads/squads-section.tsx`), minus the ones a plugin
+ * has no business setting: `sessionId` binds a Squad to one conversation, and
+ * `metadata` is the store's own bag.
+ */
+export interface PluginTeamCreateInput {
+  name: string
+  /** The objective the Squad is created around. */
+  task: string
+  description?: string
+  /** Display name for the auto-created lead. Falls back to "Team Lead". */
+  leadName?: string
+  leadDescription?: string
+  /** Partial config overlay. A runtime named here WINS over the durable default. */
+  config?: Partial<AgentTeamConfig>
+}
+
+/** Input for copying a Squad. `projectId` omitted means the active workspace. */
+export interface PluginTeamDuplicateInput {
+  name: string
+  /** Target workspace. `AgentTeam.projectId` is a real Dexie boundary since v215. */
+  projectId?: string
 }
 
 export interface PluginTeamMoveResult {
@@ -209,6 +244,45 @@ export interface PluginTeamAPI {
    * build is not an automation surface.
    */
   instantiateTemplate(templateId: string): Promise<AgentTeam | null>
+
+  // ------------------------------------------------------------- lifecycle
+  /**
+   * Create a Squad, roster lead included.
+   *
+   * Goes through `createSquad` (`lib/agent-team/create-squad.ts`), not the
+   * store action directly. That wrapper is async precisely because resolving
+   * the durable-v2 default needs two Dexie reads and a host preflight, and a
+   * plugin-created Squad deserves the same default a hand-created one gets.
+   * A workspace that cannot be durable still yields a Squad, on `legacy`.
+   *
+   * `team:write`, not `agent:dispatch`: creating spends nothing. {@link start}
+   * is where tokens begin.
+   */
+  createTeam(input: PluginTeamCreateInput): Promise<AgentTeam>
+  /**
+   * Delete a Squad and its roster and board.
+   *
+   * `false` for an unknown id rather than a throw, the same never-throw
+   * contract {@link moveTask} and {@link removeTeammate} use.
+   */
+  deleteTeam(teamId: string): Promise<boolean>
+  /**
+   * Copy a Squad, optionally into another workspace. The copy starts `idle`
+   * with the lead, roster and task assignees repointed at the new ids.
+   *
+   * `null` when the source id is unknown.
+   */
+  duplicateTeam(teamId: string, input: PluginTeamDuplicateInput): Promise<AgentTeam | null>
+  /**
+   * Save a Squad's shape as a reusable template, and mirror it into the
+   * unified template platform at write time (ADR-0100) rather than only at
+   * boot. `null` when the source id is unknown.
+   */
+  saveAsTemplate(
+    teamId: string,
+    name: string,
+    category?: AgentTeamTemplate["category"]
+  ): Promise<AgentTeamTemplate | null>
 
   // ------------------------------------------------- run control (dispatch)
   /**
@@ -426,6 +500,49 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
       })
     },
 
+    // lifecycle
+    createTeam: async (input) => {
+      const [{ createSquad }, { useProjectStore }] = await Promise.all([
+        import("@/lib/agent-team/create-squad"),
+        import("@/stores/project/project-store"),
+      ])
+      const projectState = useProjectStore.getState()
+      const project = projectState.projects.find((p) => p.id === projectState.activeProjectId)
+      return createSquad(
+        {
+          name: input.name,
+          task: input.task,
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.leadName ? { leadName: input.leadName } : {}),
+          ...(input.leadDescription ? { leadDescription: input.leadDescription } : {}),
+          ...(input.config ? { config: input.config } : {}),
+        },
+        { createTeam: useAgentTeamStore.getState().createTeam, project }
+      )
+    },
+    deleteTeam: async (teamId) => {
+      if (!useAgentTeamStore.getState().teams[teamId]) return false
+      useAgentTeamStore.getState().deleteTeam(teamId)
+      return true
+    },
+    duplicateTeam: async (teamId, input) =>
+      useAgentTeamStore.getState().duplicateSquad(teamId, {
+        name: input.name,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+      }),
+    saveAsTemplate: async (teamId, name, category) => {
+      const template = useAgentTeamStore.getState().saveAsTemplate(teamId, name, category)
+      if (!template) return null
+      // Same write-time mirror the Settings derive action performs, so a
+      // plugin-saved template shows up in the unified catalog immediately
+      // instead of only after the next boot projection. Non-fatal: the legacy
+      // store is still the read side.
+      const { publishSquadTemplateToPlatform } =
+        await import("@/lib/agent-team/publish-template-to-platform")
+      await publishSquadTemplateToPlatform(template).catch(() => undefined)
+      return template
+    },
+
     // run control
     start: async (teamId, options) => {
       if (!useAgentTeamStore.getState().teams[teamId]) {
@@ -476,6 +593,12 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
     removeTeammate: "team:write",
     updateTeamConfig: "team:write",
     instantiateTemplate: "team:write",
+    // Lifecycle is a board-level write, not dispatch: none of these four
+    // spends a token. `start` below is where that line is.
+    createTeam: "team:write",
+    deleteTeam: "team:write",
+    duplicateTeam: "team:write",
+    saveAsTemplate: "team:write",
     // Starting spends tokens the way `ctx.agent.runTeam` does, and takes the
     // same permission. Pause / resume / stop are execution control, which
     // `agent:control` already names.

@@ -2076,6 +2076,18 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.team.instantiateTemplate": {
     kind: "none",
   },
+  "ctx.team.createTeam": {
+    kind: "none",
+  },
+  "ctx.team.deleteTeam": {
+    kind: "none",
+  },
+  "ctx.team.duplicateTeam": {
+    kind: "none",
+  },
+  "ctx.team.saveAsTemplate": {
+    kind: "none",
+  },
   "ctx.team.start": {
     kind: "none",
   },
