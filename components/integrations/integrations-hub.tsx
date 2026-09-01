@@ -338,7 +338,14 @@ export function IntegrationsHub() {
     : []
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" data-bg-target="chat">
+    // Responsive padding and gap rather than a fixed `p-6 gap-6`. The grids
+    // below already collapse to one column under `md`, so this page did not
+    // need a phone body, only room: 24px of padding on each side of a 375px
+    // screen is 13% of the viewport spent on margin.
+    <main
+      className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-3 sm:gap-6 sm:p-6"
+      data-bg-target="chat"
+    >
       <header className="space-y-2">
         <div className="flex items-center gap-2">
           <PlugZapIcon className="size-5" />

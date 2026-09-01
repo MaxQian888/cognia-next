@@ -55,6 +55,7 @@ import {
 import type { FeatureHeaderAction } from "@/components/feature-shell/feature-page-header"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
+import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { CrashDiagnosticsWorkspace } from "@/components/logging/crash-diagnostics-workspace"
 import { IncidentDetail, IncidentWorkspace } from "@/components/logging/incident-workspace"
 import { ServiceConsoleWorkspace } from "@/components/logging/service-console-workspace"
@@ -195,6 +196,7 @@ export function DiagnosticsWorkspace() {
    * panel's mount-time URL hydration, which is the only way its filter state
    * can be seeded from outside. */
   const [logPanelKey, setLogPanelKey] = useState(0)
+  const compact = useCompactLayout()
 
   // A `?channel=` deep link wins over the persisted channel, once, at mount.
   // This writes the zustand store rather than local state, so it is a plain
@@ -400,7 +402,11 @@ export function DiagnosticsWorkspace() {
           <LogPanel
             key={logPanelKey}
             showStats
-            showTimeline
+            // The timeline is a histogram of log volume over time. At 375px it
+            // is a few pixels per bucket above the list it is meant to explain,
+            // so it costs vertical space on the screen with the least of it and
+            // reads as noise. The stats bar carries the same counts as numbers.
+            showTimeline={!compact}
             includeAgentTrace
             defaultAutoRefresh={false}
             refreshInterval={2000}

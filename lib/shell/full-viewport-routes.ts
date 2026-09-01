@@ -42,6 +42,11 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   "/twin",
   "/browser",
   "/issues",
+  // `DiagnosticsWorkspace` is `flex h-full min-h-0 min-w-0 flex-1`, and
+  // `SourceControlMobileBody` is the same shape. Both are the collapse this
+  // list exists to stop.
+  "/logs",
+  "/source-control",
   // Every `/me/*` sub-page. `SubPageShell` is `flex h-full min-h-0 flex-1
   // overflow-y-auto` with a sticky header, which is the shape that needs a
   // definite height: under `min-h-[100dvh]` the `h-full` resolves against a
