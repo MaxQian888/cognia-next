@@ -28,6 +28,9 @@ jest.mock("./use-chat-executor", () => ({
   useChatExecutor: () => executorState,
 }))
 
+const useIsMobileMock = jest.fn().mockReturnValue(false)
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => useIsMobileMock() }))
+
 const messages = {
   agentComposition: compositionMessages,
   agentMode: agentModeMessages,
@@ -51,6 +54,7 @@ describe("CompositionChip", () => {
       })
       useCustomModeStore.setState({ customModes: {} })
     })
+    useIsMobileMock.mockReset().mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -291,5 +295,35 @@ describe("CompositionChip — executor", () => {
     const chip = screen.getByTestId("composition-chip")
     expect(chip).toHaveTextContent("Squad unavailable")
     expect(chip).toHaveAttribute("data-narrowed", "true")
+  })
+})
+
+describe("CompositionChip shells", () => {
+  beforeEach(() => {
+    useIsMobileMock.mockReset().mockReturnValue(false)
+  })
+
+  it("carries the overlay tier on the combined panel", async () => {
+    renderChip({ sessionId: "s1", layout: "combined" })
+    await userEvent.click(screen.getByTestId("composition-chip"))
+    expect(screen.getByTestId("composition-panel")).toHaveAttribute("data-surface-layer", "overlay")
+  })
+
+  it("opens the combined panel as a bottom sheet on a phone", async () => {
+    useIsMobileMock.mockReturnValue(true)
+    renderChip({ sessionId: "s1", layout: "combined" })
+    await userEvent.click(screen.getByTestId("composition-chip"))
+    expect(screen.getByTestId("composition-panel")).toHaveAttribute("data-slot", "drawer-content")
+    // The executor list and the axes are both still in there.
+    expect(screen.getByTestId("executor-choice-list")).toBeInTheDocument()
+  })
+
+  it("carries the tier on the wide row's advanced panel too", async () => {
+    renderChip({ sessionId: "s1", layout: "split" })
+    await userEvent.click(screen.getByTestId("composition-advanced-trigger"))
+    expect(screen.getByTestId("composition-advanced-panel")).toHaveAttribute(
+      "data-surface-layer",
+      "overlay"
+    )
   })
 })

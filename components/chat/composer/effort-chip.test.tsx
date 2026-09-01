@@ -23,6 +23,9 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 
 jest.mock("@/hooks/use-element-width", () => ({ useElementWidth: () => 300 }))
 
+const useIsMobileMock = jest.fn().mockReturnValue(false)
+jest.mock("@/hooks/ui/use-mobile", () => ({ useIsMobile: () => useIsMobileMock() }))
+
 // Radix Popover needs these pointer primitives in jsdom.
 beforeAll(() => {
   if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
@@ -46,6 +49,7 @@ const session: ChatSession = {
 beforeEach(() => {
   mockSettings = null
   mockRuntime = "claude-sdk"
+  useIsMobileMock.mockReset().mockReturnValue(false)
 })
 
 describe("self-gating", () => {
@@ -159,5 +163,25 @@ describe("popover", () => {
     expect(chip).toBeDisabled()
     fireEvent.click(chip)
     expect(screen.queryByTestId("effort-selector-section")).toBeNull()
+  })
+})
+
+describe("EffortChip shells", () => {
+  it("carries the overlay tier on a desktop pane instead of a hand-rolled shadow", () => {
+    useIsMobileMock.mockReturnValue(false)
+    render(<EffortChip session={session} />)
+    fireEvent.click(screen.getByTestId("effort-chip"))
+    const panel = screen.getByTestId("effort-panel")
+    expect(panel).toHaveAttribute("data-surface-layer", "overlay")
+  })
+
+  it("opens a bottom sheet on a phone rather than a popover into the keyboard", () => {
+    useIsMobileMock.mockReturnValue(true)
+    render(<EffortChip session={session} />)
+    fireEvent.click(screen.getByTestId("effort-chip"))
+    const panel = screen.getByTestId("effort-panel")
+    expect(panel).toHaveAttribute("data-slot", "drawer-content")
+    // The card itself is untouched: same control, different frame.
+    expect(screen.getByTestId("responsive-picker-panel")).toBeInTheDocument()
   })
 })

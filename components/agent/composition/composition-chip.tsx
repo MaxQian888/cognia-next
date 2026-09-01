@@ -32,8 +32,14 @@
  *
  * The advanced panel is a `Popover`, not a `DropdownMenu`: the picker mounts
  * Radix `Select`s, and a menu that closes on outside-press fights nested
- * overlays — the same reason `bottom-toolbar.tsx` uses a Popover for its
+ * overlays, the same reason `bottom-toolbar.tsx` uses a Popover for its
  * overflow. The preset list has no nested overlay, so it can be a plain menu.
+ *
+ * Both panels go through `ResponsivePicker` in its `panel` shape. That buys the
+ * overlay surface tier (so a style pack's elevation ceiling reaches them like
+ * every other container) and, on a phone, a bottom sheet instead of a popover
+ * anchored to a chip at the bottom of the screen, which opened into the
+ * keyboard. `panel` rather than `list` because the body is sliders and selects.
  */
 
 import { useMemo, useState } from "react"
@@ -51,7 +57,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
 import { CompositionPicker } from "./composition-picker"
 import { usePresetCatalog } from "@/hooks/agent/use-preset-catalog"
@@ -217,8 +223,17 @@ export function CompositionChip({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
+        <ResponsivePicker
+          open={open}
+          onOpenChange={setOpen}
+          variant="panel"
+          title={t("advanced")}
+          align="start"
+          side="bottom"
+          contentClassName="w-80"
+          commandClassName="p-3"
+          testId="composition-advanced-panel"
+          trigger={
             <Button
               type="button"
               variant="ghost"
@@ -244,31 +259,39 @@ export function CompositionChip({
                 </span>
               ) : null}
             </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-80 p-3">
-            <div className="mb-3 flex items-center gap-2">
-              <SlidersHorizontal aria-hidden className="size-3.5 text-muted-foreground" />
-              <p className="text-xs font-medium">{t("advanced")}</p>
-              <span className="ml-auto truncate text-[11px] text-muted-foreground">{label}</span>
-            </div>
-            <CompositionPicker
-              presets={presets}
-              selection={selection}
-              onChange={commit}
-              developerMode={developerMode}
-              presetControl={false}
-              supportedToolPresentations={supportedToolPresentations}
-              supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
-            />
-          </PopoverContent>
-        </Popover>
+          }
+        >
+          <div className="mb-3 flex items-center gap-2">
+            <SlidersHorizontal aria-hidden className="size-3.5 text-muted-foreground" />
+            <p className="text-xs font-medium">{t("advanced")}</p>
+            <span className="ml-auto truncate text-[11px] text-muted-foreground">{label}</span>
+          </div>
+          <CompositionPicker
+            presets={presets}
+            selection={selection}
+            onChange={commit}
+            developerMode={developerMode}
+            presetControl={false}
+            supportedToolPresentations={supportedToolPresentations}
+            supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
+          />
+        </ResponsivePicker>
       </div>
     )
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <ResponsivePicker
+      open={open}
+      onOpenChange={setOpen}
+      variant="panel"
+      title={t("chip.ariaLabel", { preset: label })}
+      align="start"
+      side="top"
+      contentClassName="w-80"
+      commandClassName="p-3"
+      testId="composition-panel"
+      trigger={
         <Button
           type="button"
           variant="ghost"
@@ -283,21 +306,20 @@ export function CompositionChip({
           <span className="truncate">{label}</span>
           {narrowed ? <NarrowedDot /> : null}
         </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-80 p-3">
-        <ExecutorChoiceList executor={executor} disabled={disabled} />
-        <CompositionPicker
-          presets={presets}
-          selection={selection}
-          onChange={commit}
-          developerMode={developerMode}
-          advancedOpen={advancedOpen}
-          onAdvancedOpenChange={setAdvancedOpen}
-          supportedToolPresentations={supportedToolPresentations}
-          supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
-        />
-      </PopoverContent>
-    </Popover>
+      }
+    >
+      <ExecutorChoiceList executor={executor} disabled={disabled} />
+      <CompositionPicker
+        presets={presets}
+        selection={selection}
+        onChange={commit}
+        developerMode={developerMode}
+        advancedOpen={advancedOpen}
+        onAdvancedOpenChange={setAdvancedOpen}
+        supportedToolPresentations={supportedToolPresentations}
+        supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
+      />
+    </ResponsivePicker>
   )
 }
 

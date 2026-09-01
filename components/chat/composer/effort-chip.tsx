@@ -24,7 +24,7 @@ import { useTranslations } from "next-intl"
 import { BrainIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import { cn } from "@/lib/utils"
 import {
   clampThinkingLevel,
@@ -58,8 +58,20 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
   const ultra = isUltracodeLevel(current)
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <ResponsivePicker
+      open={open}
+      onOpenChange={setOpen}
+      // A form, not an option list: the card is sliders and rows, and cmdk
+      // would take its keystrokes.
+      variant="panel"
+      title={t("title")}
+      align="start"
+      side="top"
+      // Width matches the model popover's, so opening one after the other
+      // doesn't resize the surface under the pointer.
+      contentClassName="w-[19rem]"
+      testId="effort-panel"
+      trigger={
         <Button
           type="button"
           variant="outline"
@@ -87,12 +99,9 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
             {t(`level.${current}` as "level.off")}
           </span>
         </Button>
-      </PopoverTrigger>
-      {/* Width matches the model popover's, so opening one after the other
-          doesn't resize the surface under the pointer. */}
-      <PopoverContent align="start" side="top" className="w-[19rem] p-0">
-        <EffortSelector session={session} disabled={disabled} />
-      </PopoverContent>
-    </Popover>
+      }
+    >
+      <EffortSelector session={session} disabled={disabled} />
+    </ResponsivePicker>
   )
 }
