@@ -2,15 +2,35 @@
   "fleet": {
     "boardUnselectedDescription": "A board belongs to one Squad. Choose one from the list to see its tasks.",
     "boardUnselectedTitle": "Pick a Squad",
+    "clearFilters": "Clear filters",
     "configure": "Configure this Squad",
+    "createCta": "New Squad",
+    "defaultLeadName": "Team Lead",
     "description": "What every Squad is doing right now.",
-    "emptyDescription": "Create one in Settings, then hand a conversation to it from the composer.",
+    "emptyDescription": "Make one here, then hand a conversation to it from the composer.",
     "emptyTitle": "No Squads yet",
+    "filters": {
+      "label": "Narrow the list",
+      "all": "All",
+      "waiting": "Needs you",
+      "live": "Working"
+    },
     "inspectorLabel": "Squad detail",
     "manageAction": "Manage Squads",
     "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
+    "mobile": {
+      "configureOnDesktop": "Roster, governance and auto-compose live in Settings on a desktop."
+    },
+    "newSquadName": "New Squad",
+    "noMatchesDescription": "Widen the filter or clear the search to see the rest.",
+    "noMatchesTitle": "No Squads match",
     "openFleet": "Live host activity",
     "railLabel": "Squad list",
+    "search": "Search Squads",
+    "stats": {
+      "waiting": "Needs you",
+      "working": "Working"
+    },
     "summary": "{live, plural, =0 {none working} other {# working}} of {total, plural, =1 {1 Squad} other {# Squads}}",
     "tabs": {
       "board": "Board",

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 
 import { SquadFleetConsole } from "./squad-fleet-console"
+import type { SquadRouteState } from "@/hooks/squads/use-squad-route-state"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import type { AgentTeam, AgentTeammate, TeamStatus } from "@/types/agent/agent-team"
@@ -61,10 +62,27 @@ function seed(teams: AgentTeam[], members: AgentTeammate[] = [], waitingOn: stri
   })
 }
 
+/** The URL state as a plain object, so a story poses it without a router. */
+function route(over: Partial<SquadRouteState> = {}): SquadRouteState {
+  return {
+    selectedId: undefined,
+    tab: undefined,
+    query: "",
+    filter: "all",
+    narrowed: false,
+    setSelectedId: () => undefined,
+    setTab: () => undefined,
+    setQuery: () => undefined,
+    setFilter: () => undefined,
+    clearFilters: () => undefined,
+    ...over,
+  }
+}
+
 const meta = {
   title: "Squads/SquadFleetConsole",
   component: SquadFleetConsole,
-  args: { onSelect: () => undefined },
+  args: { route: route() },
   parameters: {
     layout: "fullscreen",
     docs: {
@@ -113,7 +131,7 @@ export const WaitingOnYou: Story = {
 
 /** The board tab, with a Squad chosen. */
 export const TaskBoard: Story = {
-  args: { selectedId: "research", tab: "board" },
+  args: { route: route({ selectedId: "research", tab: "board" }) },
   decorators: [
     (Story) => {
       seed(FLEET, MEMBERS)
@@ -124,7 +142,7 @@ export const TaskBoard: Story = {
 
 /** The board belongs to one Squad, so it asks for one first. */
 export const BoardWithoutSelection: Story = {
-  args: { tab: "board" },
+  args: { route: route({ tab: "board" }) },
   decorators: [
     (Story) => {
       seed(FLEET, MEMBERS)
@@ -135,7 +153,7 @@ export const BoardWithoutSelection: Story = {
 
 /** With one selected, the right pane opens on its runs. */
 export const SquadSelected: Story = {
-  args: { selectedId: "research" },
+  args: { route: route({ selectedId: "research" }) },
   decorators: [
     (Story) => {
       seed(FLEET, MEMBERS)

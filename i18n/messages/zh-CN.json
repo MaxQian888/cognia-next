@@ -38702,15 +38702,35 @@
     "fleet": {
       "boardUnselectedDescription": "看板属于某一个小队。从列表里选一个，看它的任务。",
       "boardUnselectedTitle": "先选一个小队",
+      "clearFilters": "清除筛选",
       "configure": "配置这个小队",
+      "createCta": "新建小队",
+      "defaultLeadName": "队长",
       "description": "每个小队此刻在做什么。",
-      "emptyDescription": "先去设置里新建一个，然后在输入框把会话交给它。",
+      "emptyDescription": "在这里新建一个，然后在输入框把会话交给它。",
       "emptyTitle": "还没有小队",
+      "filters": {
+        "label": "收窄列表",
+        "all": "全部",
+        "waiting": "等你答复",
+        "live": "运行中"
+      },
       "inspectorLabel": "小队详情",
       "manageAction": "管理小队",
       "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
+      "mobile": {
+        "configureOnDesktop": "成员、治理与自动编排在桌面端的设置里。"
+      },
+      "newSquadName": "新小队",
+      "noMatchesDescription": "放宽筛选，或清空搜索，看剩下的。",
+      "noMatchesTitle": "没有匹配的小队",
       "openFleet": "宿主实时活动",
       "railLabel": "小队列表",
+      "search": "搜索小队",
+      "stats": {
+        "waiting": "等你答复",
+        "working": "运行中"
+      },
       "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
       "tabs": {
         "board": "看板",

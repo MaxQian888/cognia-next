@@ -27,7 +27,7 @@ import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { SettingsMasterDetail } from "@/components/settings/common/settings-master-detail"
 import { AgentTeamTemplatesSection } from "@/components/settings/agent/agent-team-templates-section"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { createSquad } from "@/lib/agent-team/create-squad"
+import { useCreateSquad } from "@/hooks/squads/use-create-squad"
 import { useUIStore } from "@/stores/ui/ui-store"
 import {
   SQUAD_TAB_PARAM,
@@ -50,7 +50,6 @@ function SquadsSectionInner() {
 
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
-  const createTeam = useAgentTeamStore((s) => s.createTeam)
   const workspaceId = useProjectStore((state) => state.activeProjectId)
 
   const squads = useMemo(
@@ -92,18 +91,17 @@ function SquadsSectionInner() {
   // where a Squad comes into existence, so it belongs beside "New Squad".
   const [autoComposeOpen, setAutoComposeOpen] = useState(false)
 
-  // Through `createSquad` rather than straight into the store, so a new Squad
-  // starts on durable-v2 where the workspace supports it. The resolver that
-  // decides is async, which is why it cannot live in `createTeam` itself.
-  const activeProject = useProjectStore((state) =>
-    state.projects.find((candidate) => candidate.id === state.activeProjectId)
-  )
+  // Through `useCreateSquad`, shared with the fleet console, so a new Squad
+  // starts on durable-v2 where the workspace supports it and both surfaces
+  // resolve that default the same way. The resolver is async, which is why it
+  // cannot live in the store's synchronous `createTeam`.
+  const createSquad = useCreateSquad()
   const handleCreate = useCallback(() => {
-    void createSquad(
-      { name: t("nav.newSquadName"), task: "", leadName: t("nav.defaultLeadName") },
-      { createTeam, project: activeProject }
-    ).then((squad) => navigate(squadPanelId(squad.id)))
-  }, [activeProject, createTeam, navigate, t])
+    void createSquad({
+      name: t("nav.newSquadName"),
+      leadName: t("nav.defaultLeadName"),
+    }).then((squad) => navigate(squadPanelId(squad.id)))
+  }, [createSquad, navigate, t])
 
   // `File > New Squad` fires a create request and routes here. Without a
   // consumer the menu item would land on the library and do nothing.

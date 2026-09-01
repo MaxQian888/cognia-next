@@ -17,16 +17,26 @@ import { cn } from "@/lib/utils"
 export interface ListSkeletonProps {
   /** Number of placeholder rows. Defaults to 4. */
   rows?: number
+  /**
+   * Test id, defaulted to the Discover one so existing callers are untouched.
+   * A second consumer asserting on `discover-list-skeleton` would be a test
+   * that reads as though it were about Discover.
+   */
+  testId?: string
   className?: string
 }
 
-export function ListSkeleton({ rows = 4, className }: ListSkeletonProps) {
+export function ListSkeleton({
+  rows = 4,
+  testId = "discover-list-skeleton",
+  className,
+}: ListSkeletonProps) {
   return (
     <div
       className={cn("flex flex-col gap-2", className)}
       role="status"
       aria-busy="true"
-      data-testid="discover-list-skeleton"
+      data-testid={testId}
     >
       {Array.from({ length: rows }, (_, i) => (
         <div
