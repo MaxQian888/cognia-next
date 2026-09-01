@@ -18,10 +18,19 @@ import {
   type NavItem,
   type SettingsSectionId,
 } from "@/components/settings/settings-nav-config"
+import { compareByScore } from "../scoring"
 import { matchTitles } from "./helpers"
 import type { GlobalSearchContext, GlobalSearchItem, GlobalSearchProvider } from "../types"
 
 export const SETTINGS_PROVIDER_ID = "builtin.settings"
+
+/**
+ * How far a control sits below a section that matched exactly as well.
+ *
+ * Small on purpose: this is a tie-break, not a demotion. A control whose label
+ * genuinely matches the needle better than any section still wins.
+ */
+const CONTROL_PENALTY = 0.02
 
 interface SettingsCandidate {
   id: string
@@ -107,8 +116,10 @@ function toItem(
     meta: c.meta,
     icon: c.icon,
     keywords: c.keywords,
-    // Controls sit just below sections when both match equally well.
-    score: c.isControl ? Math.max(0, score - 0.02) : score,
+    // Controls sit just below sections when both match equally well. Applied
+    // here, which is AFTER `matchTitles` has sorted, so the caller has to
+    // re-sort. See the note in `search`.
+    score: c.isControl ? Math.max(0, score - CONTROL_PENALTY) : score,
     action: c.action,
   }
 }
@@ -117,17 +128,29 @@ export const settingsProvider: GlobalSearchProvider = {
   id: SETTINGS_PROVIDER_ID,
   kind: "settings",
   search({ query, ctx, limit }) {
-    const { hits, total, truncated } = matchTitles(settingsCandidates(ctx), query.needle, {
+    // Deliberately unlimited here, then sorted and sliced below.
+    //
+    // `matchTitles` orders and cuts by the RAW match score, while the control
+    // penalty is applied afterwards in `toItem`. Letting it cut first meant the
+    // penalty could not do either half of its job. It could not order: on an
+    // exact tie `compareByScore` falls through to `title.localeCompare`, so
+    // `settings.finder.controls.theme` beat `settings.tabs.externalServices` on
+    // the letter "f" against "t", and the array came back with a 0.924 row
+    // BELOW a 0.904 one. And it could not select: at the cut line a tied
+    // control would take the last slot from the section it was supposed to
+    // yield to. Scoring every candidate is what `matchTitles` does regardless,
+    // so nothing is spent by asking for all of them.
+    const { hits, total } = matchTitles(settingsCandidates(ctx), query.needle, {
       getTitle: (c) => c.title,
       getSecondary: (c) => c.secondary,
       getKeywords: (c) => c.keywords,
       now: ctx.now,
-      limit,
+      limit: Number.MAX_SAFE_INTEGER,
     })
-    return {
-      items: hits.map(({ row, match }) => toItem(row, match.score, match.positions)),
-      total,
-      truncated,
-    }
+    const ranked = hits
+      .map(({ row, match }) => toItem(row, match.score, match.positions))
+      .sort(compareByScore)
+    const items = ranked.slice(0, limit)
+    return { items, total, truncated: ranked.length > items.length }
   },
 }
