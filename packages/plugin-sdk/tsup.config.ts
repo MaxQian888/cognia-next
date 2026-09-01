@@ -19,6 +19,7 @@ const runtimeEntries = {
   abort: "src/api/abort.ts",
   "agent-turn": "src/api/agent-turn.ts",
   "agent-team-template": "src/api/agent-team-template.ts",
+  team: "src/api/team.ts",
   automation: "src/api/automation.ts",
   "balance-adapter": "src/api/balance-adapter.ts",
   browser: "src/api/browser.ts",

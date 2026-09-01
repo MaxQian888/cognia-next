@@ -217,7 +217,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
     "Store, update, and forget long-term memories (PII-screened; can never change working instructions)",
   "team:read": "Read your agent teams, task boards, run events, and execution reports",
   "team:write":
-    "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards (never starts runs)",
+    "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards",
   "subscription:read": "Read subscription plan and usage metrics",
   "perf:read": "Read performance dashboard snapshots and the live sample stream",
   "logs:read": "Read this app's local logs, their statistics, and transport health",

@@ -9962,7 +9962,7 @@
       "type": "PluginTeamAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.team",
@@ -10220,6 +10220,66 @@
           "consentTier": "policy",
           "risk": "high",
           "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.instantiateTemplate",
+          "name": "instantiateTemplate",
+          "requiredPermissions": ["team:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.start",
+          "name": "start",
+          "requiredPermissions": ["agent:dispatch"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.pause",
+          "name": "pause",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.resume",
+          "name": "resume",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "team.stop",
+          "name": "stop",
+          "requiredPermissions": ["agent:control"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": true,
           "cancellable": false,
           "resourceEffect": {
             "kind": "none"

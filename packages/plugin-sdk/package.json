@@ -21,6 +21,12 @@
       "require": "./dist/agent-team-template.cjs",
       "default": "./dist/agent-team-template.js"
     },
+    "./api/team": {
+      "types": "./dist/team.d.ts",
+      "import": "./dist/team.js",
+      "require": "./dist/team.cjs",
+      "default": "./dist/team.js"
+    },
     "./api/abort": {
       "types": "./dist/abort.d.ts",
       "import": "./dist/abort.js",

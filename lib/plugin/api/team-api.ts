@@ -13,11 +13,21 @@
  *  - `moveTask` is validated by the shared `canMoveTask` guard (via the
  *    store action), so a plugin can never push a transition the board UI
  *    would refuse; denials come back as `{ ok: false, reason }`.
- *  - Deliberately NO run control (`start`/`pause`/`resume`): starting a
- *    team consumes real tokens/compute — that stays a human (or Companion
- *    remote-control) decision. Plugins that need orchestration register
- *    workflow nodes / scheduler templates instead.
- *  - Gated by `team:read` (reads + subscribe) / `team:write` (mutations).
+ *  - Run control lives here, gated SEPARATELY from the board writes.
+ *    This module used to say it deliberately had none, on the grounds that
+ *    starting a team spends real tokens and so must stay a human decision.
+ *    That was never the shape of the product: `ctx.agent.runTeam` has always
+ *    started a Squad, from an existing id or from an ad-hoc config the plugin
+ *    invents, needing only `agent:dispatch`. So the strictest write here
+ *    (`addTeammate`) was gated harder than conjuring and running a whole
+ *    Squad, and the promise in this comment was one a reader could act on and
+ *    be wrong. Starting takes `agent:dispatch`, matching `ctx.agent.runTeam`,
+ *    and pause / resume / stop take `agent:control`, the permission that
+ *    already means "control agent execution". Neither is a new name.
+ *  - `start` goes through `startSquadRun`, the ADR-0140 funnel, so a
+ *    plugin-started run gets the same run id convention, execution row and
+ *    workspace stamp as one started from chat.
+ *  - Board reads are gated by `team:read`, board writes by `team:write`.
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
@@ -106,6 +116,15 @@ export interface PluginTeamRunStatus {
   report: TeamExecutionReport | null
 }
 
+/** Outcome of a plugin-initiated Squad run control call. */
+export interface PluginTeamRunControlResult {
+  ok: boolean
+  /** Present when `ok` is false: `squad_not_found`, `dispatch_error`, ... */
+  reason?: string
+  /** The run id, when starting produced one. */
+  runId?: string
+}
+
 /** Agent-Team board API exposed to plugins. */
 export interface PluginTeamAPI {
   // --------------------------------------------------------------- reads
@@ -180,12 +199,60 @@ export interface PluginTeamAPI {
    * current config via {@link getTeam} and patch client-side.
    */
   updateTeamConfig(teamId: string, config: AgentTeamConfig): Promise<void>
+  /**
+   * Turn a registered Squad template into a real Squad, with its roster and
+   * pre-seeded tasks. `null` when no template carries that id.
+   *
+   * A plugin could already CONTRIBUTE a template through the
+   * `agent-team-template` capability, and nothing could turn one into a Squad
+   * except a person clicking the library. A blueprint that only a human can
+   * build is not an automation surface.
+   */
+  instantiateTemplate(templateId: string): Promise<AgentTeam | null>
+
+  // ------------------------------------------------- run control (dispatch)
+  /**
+   * Start a run. Fire-and-forget: resolves once the run is launched, not when
+   * it settles. Progress is observed through {@link getRunStatus} /
+   * {@link listEvents} or the `onTeam*` hooks.
+   *
+   * Requires `agent:dispatch`, the same permission `ctx.agent.runTeam` takes.
+   */
+  start(teamId: string, options?: { goal?: string }): Promise<PluginTeamRunControlResult>
+  /** Pause a live run. Requires `agent:control`. */
+  pause(teamId: string): Promise<PluginTeamRunControlResult>
+  /** Resume a paused run over its not-yet-done tasks. Requires `agent:control`. */
+  resume(teamId: string): Promise<PluginTeamRunControlResult>
+  /** Stop a run for good. Requires `agent:control`. */
+  stop(teamId: string): Promise<PluginTeamRunControlResult>
 }
 
 /**
  * Create the Team API for a plugin. Reads need `team:read`; mutations need
  * `team:write` (enforced via the PermissionGuard proxy).
  */
+/**
+ * One body for pause / resume / stop. Each is a distinct manager verb but the
+ * same shape of call, and each already exists: the Companion write handlers
+ * (`lib/companion/agent-team-write-handlers.ts`) have driven these from a
+ * paired phone since ADR-0113, so nothing new is being taught to the runtime.
+ */
+async function runControl(
+  teamId: string,
+  verb: "pause" | "resume" | "shutdown"
+): Promise<PluginTeamRunControlResult> {
+  if (!useAgentTeamStore.getState().teams[teamId]) {
+    return { ok: false, reason: "squad_not_found" }
+  }
+  try {
+    const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
+    await agentTeamManager[verb](teamId)
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "dispatch_error" }
+  }
+}
+
 export function createTeamAPI(pluginId: string): PluginTeamAPI {
   const api: PluginTeamAPI = {
     // reads
@@ -342,6 +409,48 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
       }
       state.updateTeamConfig(teamId, config)
     },
+    instantiateTemplate: async (templateId) => {
+      // Dynamic so `ctx.team` does not drag the template registry and the
+      // instantiation helper into every plugin context that never asks.
+      const [{ getAgentTeamTemplate }, { instantiateAgentTeamTemplate }] = await Promise.all([
+        import("@/lib/plugin/registries/agent-team-template-registry"),
+        import("@/lib/agent-team/instantiate-template"),
+      ])
+      const template = getAgentTeamTemplate(templateId)
+      if (!template) return null
+      const state = useAgentTeamStore.getState()
+      return instantiateAgentTeamTemplate(template, {
+        createTeam: state.createTeam,
+        addTeammate: state.addTeammate,
+        createTask: state.createTask,
+      })
+    },
+
+    // run control
+    start: async (teamId, options) => {
+      if (!useAgentTeamStore.getState().teams[teamId]) {
+        return { ok: false, reason: "squad_not_found" }
+      }
+      // The ADR-0140 funnel, not `agentTeamManager.start`, so a plugin-started
+      // run gets the run id convention, the execution row and the workspace
+      // stamp. No `session`: a plugin is not a conversation, so the run is
+      // uncarded and says so on its row.
+      const { startSquadRun } = await import("@/lib/ai/agent/team/start-squad-run")
+      const result = await startSquadRun({
+        squadId: teamId,
+        goal: options?.goal ?? "",
+        origin: "api",
+        triggeredFrom: { source: "api" },
+      })
+      return {
+        ok: result.started,
+        ...(result.reason ? { reason: result.reason } : {}),
+        ...(result.runId ? { runId: result.runId } : {}),
+      }
+    },
+    pause: async (teamId) => runControl(teamId, "pause"),
+    resume: async (teamId) => runControl(teamId, "resume"),
+    stop: async (teamId) => runControl(teamId, "shutdown"),
   }
 
   return createGuardedAPI(pluginId, api, {
@@ -366,5 +475,13 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
     updateTeammate: "team:write",
     removeTeammate: "team:write",
     updateTeamConfig: "team:write",
+    instantiateTemplate: "team:write",
+    // Starting spends tokens the way `ctx.agent.runTeam` does, and takes the
+    // same permission. Pause / resume / stop are execution control, which
+    // `agent:control` already names.
+    start: "agent:dispatch",
+    pause: "agent:control",
+    resume: "agent:control",
+    stop: "agent:control",
   })
 }

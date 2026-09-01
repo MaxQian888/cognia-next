@@ -2073,6 +2073,21 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.team.updateTeammate": {
     kind: "none",
   },
+  "ctx.team.instantiateTemplate": {
+    kind: "none",
+  },
+  "ctx.team.start": {
+    kind: "none",
+  },
+  "ctx.team.pause": {
+    kind: "none",
+  },
+  "ctx.team.resume": {
+    kind: "none",
+  },
+  "ctx.team.stop": {
+    kind: "none",
+  },
   "ctx.templates.register": {
     kind: "returned-disposer",
   },

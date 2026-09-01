@@ -251,3 +251,20 @@ def test_ctx_repr_and_dir_are_useful():
     assert "7 namespaces" in repr(cognia.ctx) or "namespaces" in repr(cognia.ctx)
     assert "storage" in dir(cognia.ctx)
     assert isinstance(Ctx(), Ctx)
+
+
+def test_team_namespace_is_open_to_python():
+    """``ctx.team`` was frontend/hybrid only, so a Python plugin could START a
+    Squad through ``ctx.agent.runTeam`` and could not READ one, which inverts
+    the safety story ``lib/plugin/api/team-api.ts`` tells about itself."""
+    assert "team" in PYTHON_HOST_NAMESPACES
+
+
+def test_team_carries_reads_writes_and_run_control():
+    methods = PYTHON_HOST_NAMESPACES["team"]
+    for name in ("listTeams", "listTasks", "moveTask", "instantiateTemplate"):
+        assert name in methods, name
+    # Run control shipped with this namespace rather than staying only on
+    # ``ctx.agent``, so a plugin holding ``ctx.team`` can act on what it reads.
+    for name in ("start", "pause", "resume", "stop"):
+        assert name in methods, name

@@ -170,7 +170,16 @@ export type {
   PluginMemorySearchOptions,
   PluginMemoryStoreInput,
 } from "./memory-api"
-export type { PluginTeamAPI, PluginTeamMoveResult, PluginTeamTaskCreateInput } from "./team-api"
+export type {
+  PluginTeamAPI,
+  PluginTeamMoveResult,
+  PluginTeamRunControlResult,
+  PluginTeamRunStatus,
+  PluginTeamTaskCreateInput,
+  PluginTeamTaskPatch,
+  PluginTeamTeammateCreateInput,
+  PluginTeamTeammatePatch,
+} from "./team-api"
 export type { PluginSubscriptionAPI, PluginUsageSnapshot } from "./subscription-api"
 export type {
   PluginTerminalAPI,

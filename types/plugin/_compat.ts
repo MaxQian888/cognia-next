@@ -81,6 +81,13 @@ export interface UpdateSessionInput {
   mode?: ChatMode
   projectId?: string
   metadata?: Record<string, unknown>
+  /**
+   * The Squad this conversation is handed to (ADR-0140), or `undefined` to
+   * hand it back to the direct path. Readable all along, because `getSession`
+   * returns the stored row, but this whitelist is what `updateSession` accepts,
+   * so a plugin could see the binding and not change it.
+   */
+  squadId?: ChatSession["squadId"]
 }
 
 /**

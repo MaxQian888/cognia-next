@@ -36,6 +36,27 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ activeProjectId: null }) },
 }))
 
+const startSquadRun = jest.fn(async () => ({ started: true, runId: "run_team_1" }))
+jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+  startSquadRun: (...args: unknown[]) => startSquadRun(...(args as [])),
+}))
+
+const managerPause = jest.fn(async () => {})
+const managerResume = jest.fn(async () => {})
+const managerShutdown = jest.fn(async () => {})
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    pause: (...a: unknown[]) => managerPause(...(a as [])),
+    resume: (...a: unknown[]) => managerResume(...(a as [])),
+    shutdown: (...a: unknown[]) => managerShutdown(...(a as [])),
+  },
+}))
+
+const getAgentTeamTemplate = jest.fn()
+jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
+  getAgentTeamTemplate: (...a: unknown[]) => getAgentTeamTemplate(...(a as [])),
+}))
+
 const PLUGIN = "tracker-sync"
 
 const seed = () => {
@@ -60,6 +81,106 @@ describe("createTeamAPI", () => {
     useAgentTeamStore.getState().reset()
     resetPermissionGuard()
     guard = getPermissionGuard()
+  })
+
+  describe("run control", () => {
+    /**
+     * This module's header used to promise it deliberately had none, on the
+     * grounds that spending tokens must stay a human decision. `ctx.agent.runTeam`
+     * has always started a Squad on `agent:dispatch` alone, from an ad-hoc config
+     * it invents, so the promise was one a reader could act on and be wrong.
+     */
+    it("starts through the ADR-0140 funnel, not the manager", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "agent:dispatch"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      const result = await api.start(team.id, { goal: "ship it" })
+      expect(result).toEqual({ ok: true, runId: "run_team_1" })
+      expect(startSquadRun).toHaveBeenCalledWith(
+        expect.objectContaining({ squadId: team.id, goal: "ship it", origin: "api" })
+      )
+    })
+
+    it("takes agent:dispatch to start, matching ctx.agent.runTeam", () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      expect(() => api.start(team.id)).toThrow(PermissionError)
+    })
+
+    it("takes agent:control to pause, resume and stop", () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "agent:dispatch"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      expect(() => api.pause(team.id)).toThrow(PermissionError)
+      expect(() => api.resume(team.id)).toThrow(PermissionError)
+      expect(() => api.stop(team.id)).toThrow(PermissionError)
+    })
+
+    it("maps each control verb onto the manager", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "agent:control"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      await api.pause(team.id)
+      await api.resume(team.id)
+      await api.stop(team.id)
+      expect(managerPause).toHaveBeenCalledWith(team.id)
+      expect(managerResume).toHaveBeenCalledWith(team.id)
+      expect(managerShutdown).toHaveBeenCalledWith(team.id)
+    })
+
+    it("refuses an unknown Squad without touching the runtime", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "agent:dispatch", "agent:control"])
+      const api = createTeamAPI(PLUGIN)
+      expect(await api.start("nope")).toEqual({ ok: false, reason: "squad_not_found" })
+      expect(await api.pause("nope")).toEqual({ ok: false, reason: "squad_not_found" })
+      expect(startSquadRun).not.toHaveBeenCalled()
+      expect(managerPause).not.toHaveBeenCalled()
+    })
+
+    it("returns a failure rather than throwing when the runtime rejects", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "agent:control"])
+      const { team } = seed()
+      managerPause.mockRejectedValueOnce(new Error("no live run"))
+      const api = createTeamAPI(PLUGIN)
+      expect(await api.pause(team.id)).toEqual({ ok: false, reason: "no live run" })
+    })
+  })
+
+  describe("instantiateTemplate", () => {
+    /**
+     * A plugin could contribute a Squad blueprint through the
+     * `agent-team-template` capability and nothing could turn one into a Squad
+     * except a person clicking the library.
+     */
+    it("builds the Squad, its roster and its seeded tasks", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      getAgentTeamTemplate.mockReturnValue({
+        id: "tpl-1",
+        name: "Review Crew",
+        description: "reviews",
+        config: {},
+        teammates: [{ name: "Reviewer", description: "reads" }],
+        taskTemplates: [{ title: "Read the diff", description: "" }],
+      })
+      const api = createTeamAPI(PLUGIN)
+      const squad = await api.instantiateTemplate("tpl-1")
+      expect(squad?.name).toBe("Review Crew")
+      const state = useAgentTeamStore.getState()
+      expect(
+        Object.values(state.teammates).filter(
+          (m) => m.teamId === squad!.id && m.role === "teammate"
+        )
+      ).toHaveLength(1)
+      expect(Object.values(state.tasks).filter((t) => t.teamId === squad!.id)).toHaveLength(1)
+    })
+
+    it("answers null for an id no template carries", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      getAgentTeamTemplate.mockReturnValue(undefined)
+      const api = createTeamAPI(PLUGIN)
+      expect(await api.instantiateTemplate("nope")).toBeNull()
+    })
   })
 
   describe("permission gating", () => {

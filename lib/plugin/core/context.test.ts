@@ -2248,6 +2248,11 @@ describe("python host-call parity (ADR-0145)", () => {
         "notifications",
         "secrets",
         "storage",
+        // A Python plugin could START a Squad through `ctx.agent.runTeam`, which
+        // is python-open and needs only `agent:dispatch`, and could not READ
+        // one, because `ctx.team` listed only frontend and hybrid. That inverts
+        // the safety story `lib/plugin/api/team-api.ts` tells about itself.
+        "team",
         "ui",
         "workspace",
       ].sort()
