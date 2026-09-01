@@ -28,6 +28,27 @@ export class UnsupportedForKindError extends Error {
 }
 
 /**
+ * The action is real for this KIND, but not on the runtime this particular run
+ * uses.
+ *
+ * A Squad on `durable-v2` can be resumed and steered from the cockpit. The same
+ * Squad on `legacy` cannot: it keeps no durable receipt queue to steer into,
+ * and resuming it means starting a fresh lifecycle over the remaining tasks,
+ * which is a different run with its own row. Reporting either as
+ * {@link UnsupportedForKindError} told the user "this kind of run cannot take
+ * that action", which is false about Squads and leaves nowhere to go.
+ */
+export class UnsupportedForRuntimeError extends Error {
+  constructor(
+    readonly action: string,
+    readonly kind: string
+  ) {
+    super(`Run kind "${kind}" cannot ${action} on this runtime`)
+    this.name = "UnsupportedForRuntimeError"
+  }
+}
+
+/**
  * A steer the run kind supports but could not apply right now.
  *
  * Distinct from {@link UnsupportedForKindError} on purpose: this one means the
@@ -213,7 +234,11 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       // Steering is refused for the same shape of reason: it needs the
       // durable coordinator's receipt queue, and a legacy run has nowhere to
       // put the message.
-      throw new UnsupportedForKindError(command.action, "team")
+      //
+      // Reported against the RUNTIME rather than the kind, because a
+      // durable-v2 Squad takes both verbs. "This kind of run cannot take that
+      // action" is a false statement about Squads.
+      throw new UnsupportedForRuntimeError(command.action, "team")
     }
     if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "team")
     const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")

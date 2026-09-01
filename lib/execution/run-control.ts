@@ -62,6 +62,15 @@ export interface RunControlResult {
      */
     | "unsupported_for_kind"
     /**
+     * The action is real for this kind, but not on the runtime THIS run uses.
+     *
+     * Separate from `unsupported_for_kind` because the two need different copy:
+     * a legacy Squad cannot be resumed or steered from the cockpit, while a
+     * durable-v2 Squad can, so saying "this kind of run cannot" would be false
+     * about the kind and would send the user nowhere.
+     */
+    | "unsupported_for_runtime"
+    /**
      * The run kind CAN steer, but this run could not right now. The message is
      * intact and the caller still owns it — that is the whole point of
      * distinguishing this from a refusal.
@@ -93,6 +102,24 @@ export interface RunControlResult {
 
 const handlers = new Map<ExecutionRunKind, RunControlHandler>()
 const controlLocks = new Map<string, Promise<void>>()
+
+/**
+ * Classify a handler throw into the reason the card shows.
+ *
+ * One function rather than the same ternary at each catch site: the two sites
+ * had drifted apart before, and a refusal the user reads is exactly the place
+ * where "the other one also knows about this case" has to be true by
+ * construction. Anything unrecognised stays `source_rejected`, so a new engine
+ * error is reported as a refusal rather than mislabelled as a known one.
+ */
+function handlerRefusalReason(
+  error: unknown
+): "unsupported_for_kind" | "unsupported_for_runtime" | "source_rejected" {
+  if (!(error instanceof Error)) return "source_rejected"
+  if (error.name === "UnsupportedForKindError") return "unsupported_for_kind"
+  if (error.name === "UnsupportedForRuntimeError") return "unsupported_for_runtime"
+  return "source_rejected"
+}
 
 export function registerRunControlHandler(
   kind: ExecutionRunKind,
@@ -282,10 +309,7 @@ async function executeRetry(
   try {
     replacement = (await handler({ run, command })).runId
   } catch (error) {
-    const reason =
-      error instanceof Error && error.name === "UnsupportedForKindError"
-        ? "unsupported_for_kind"
-        : "source_rejected"
+    const reason = handlerRefusalReason(error)
     return { accepted: false, reason, currentRevision: run.currentRevision }
   }
 
@@ -430,11 +454,7 @@ async function executeRunControlCommandUnlocked(
         .catch(() => undefined)
       return { ...(await reject(command, "steer_degraded", run.currentRevision)), degradedReason }
     }
-    const reason =
-      error instanceof Error && error.name === "UnsupportedForKindError"
-        ? "unsupported_for_kind"
-        : "source_rejected"
-    return reject(command, reason, run.currentRevision)
+    return reject(command, handlerRefusalReason(error), run.currentRevision)
   }
 
   const now = options.now ?? Date.now()

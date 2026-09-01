@@ -427,6 +427,29 @@ describe("team run control", () => {
     handlers.dispose()
   })
 
+  // "This kind of run cannot take that action" is false about Squads: a
+  // durable-v2 one resumes and steers from here. What cannot is the RUNTIME,
+  // and the copy for that reason names where the verb does live.
+  it("blames the runtime, not the kind, when a legacy run cannot take a verb", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    mockGetAgentTeamRun.mockResolvedValue(undefined)
+    mockGetTeamRunContext.mockReturnValue({ runId: "run_legacy_3", teamId: "team-9" })
+    await seedTeamRun("run_legacy_3")
+
+    const result = await executeRunControlCommand({
+      runId: "execution:team:run_legacy_3",
+      action: "steer",
+      steerMessage: "try the other branch",
+      idempotencyKey: "legacy-steer",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(false)
+    expect(result.reason).toBe("unsupported_for_runtime")
+    handlers.dispose()
+  })
+
   it("refuses the press when nothing is behind the row, rather than reporting a stop", async () => {
     const handlers = installExecutionRunControlHandlers()
     mockGetAgentTeamRun.mockResolvedValue(undefined)
