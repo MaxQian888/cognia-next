@@ -1,7 +1,15 @@
 /** @jest-environment jsdom */
 
 const updateSessionMock = jest.fn(async () => undefined)
-const getSessionMock = jest.fn(async (_id: string) => undefined as unknown)
+/**
+ * Present by default. `updateSession` reads the row back before it writes,
+ * because Dexie resolves an update against a missing key instead of refusing
+ * it, so a mock that answered `undefined` would make every write in this file
+ * look like a write to a deleted conversation. Tests that care about the row's
+ * contents (the freshness block) still queue their own with
+ * `mockResolvedValueOnce`, and the one that cares about absence clears it.
+ */
+const getSessionMock = jest.fn(async (id: string) => ({ id }) as unknown)
 
 jest.mock("@/lib/db/sessions", () => ({
   createSession: jest.fn(async () => ({ id: "created" })),
@@ -69,12 +77,18 @@ const projectState: {
   projects: Array<{ id: string; roots: unknown[] }>
   linked: Array<[string, string]>
   unlinked: Array<[string, string]>
-} = { projects: [], linked: [], unlinked: [] }
+  loads: number
+} = { projects: [], linked: [], unlinked: [], loads: 0 }
 
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: {
     getState: () => ({
       projects: projectState.projects,
+      // Awaited by the move, because the real store's `persist()` no-ops until
+      // it has run and the roster half of the move would silently reach no row.
+      load: async () => {
+        projectState.loads += 1
+      },
       addSessionToProject: (projectId: string, sessionId: string) =>
         projectState.linked.push([projectId, sessionId]),
       removeSessionFromProject: (projectId: string, sessionId: string) =>
@@ -105,6 +119,7 @@ describe("plugin session store reasoning updates", () => {
     getSessionMock.mockClear()
     chatListeners.clear()
     projectState.projects = [{ id: "proj-9", roots: [] }]
+    projectState.loads = 0
     projectState.linked = []
     projectState.unlinked = []
     sessionRunning = false
@@ -126,11 +141,20 @@ describe("plugin session store reasoning updates", () => {
     })
   })
 
-  it("persists the effort and full thinking-level identity", () => {
-    useSessionStore.getState().updateSession("session-1", {
+  it("persists the effort and full thinking-level identity", async () => {
+    const write = useSessionStore.getState().updateSession("session-1", {
       effort: "xhigh",
       thinkingLevel: "ultracode",
     })
+
+    // The in-memory half is synchronous, so a subscriber re-renders in this
+    // tick. The Dexie half now waits on the existence read that stops this
+    // promise resolving for a conversation that is no longer there.
+    expect(useSessionStore.getState().sessions[0]).toMatchObject({
+      effort: "xhigh",
+      thinkingLevel: "ultracode",
+    })
+    await write
 
     expect(useSessionStore.getState().sessions[0]).toMatchObject({
       effort: "xhigh",
@@ -258,10 +282,83 @@ describe("plugin session store reasoning updates", () => {
 
     await useSessionStore.getState().updateSession("session-1", { projectId: undefined })
 
-    // Unlinking has no destination, so there is no context to rebuild.
-    expect(updateSessionMock).toHaveBeenCalledWith("session-1", { projectId: undefined })
+    // Unlinking has no destination, so there is no context to rebuild against.
+    // The old one is cleared rather than left: it names the workspace the
+    // conversation just left, and keeping it would run the next turn in that
+    // directory under a row that belongs to no workspace at all.
+    expect(updateSessionMock).toHaveBeenCalledWith("session-1", {
+      projectId: undefined,
+      executionContext: undefined,
+    })
     expect(projectState.unlinked).toEqual([["proj-1", "session-1"]])
     expect(useSessionStore.getState().sessions[0].projectId).toBeUndefined()
+  })
+
+  /**
+   * The refusals belong to the direction of travel, not to having a
+   * destination. A turn in flight holds its lease against the old workspace
+   * either way, and unlinking underneath it is the same mis-attribution a move
+   * is refused for. This branch skipped `planSessionMove` entirely, so it was
+   * the shorter way in that the routing exists to close.
+   */
+  it("refuses to unlink a conversation that is running", async () => {
+    useSessionStore.setState({
+      sessions: [{ ...useSessionStore.getState().sessions[0], projectId: "proj-1" }],
+    })
+    sessionRunning = true
+
+    await expect(
+      useSessionStore.getState().updateSession("session-1", { projectId: undefined })
+    ).rejects.toThrow(/session-running/)
+    expect(updateSessionMock).not.toHaveBeenCalled()
+    expect(projectState.unlinked).toEqual([])
+    expect(useSessionStore.getState().sessions[0].projectId).toBe("proj-1")
+  })
+
+  /** A handed-off row is read-only by contract (ADR-0103), unlink included. */
+  it("refuses to unlink a handed-off conversation", async () => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          ...useSessionStore.getState().sessions[0],
+          projectId: "proj-1",
+          handoffLock: { ticketId: "t-1" },
+        } as never,
+      ],
+    })
+
+    await expect(
+      useSessionStore.getState().updateSession("session-1", { projectId: undefined })
+    ).rejects.toThrow(/session-locked/)
+    expect(updateSessionMock).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The roster half of the move persists through the project store's own
+   * `persist()`, which is gated on `loaded` and silently writes nothing before
+   * the boot initializer has hydrated. Awaiting `load()` is what stops a
+   * resolved promise describing a column that moved and two rosters that did
+   * not.
+   */
+  it("hydrates the project store before writing either half of the move", async () => {
+    await useSessionStore.getState().updateSession("session-1", { projectId: "proj-9" })
+
+    expect(projectState.loads).toBeGreaterThan(0)
+  })
+
+  /**
+   * Dexie resolves `Table.update` against a missing key with a modified count
+   * of `0`, and the write guard short-circuits on a row it was handed as
+   * `undefined`. Nothing below this store notices, so a plugin showed its
+   * "saved" toast for a conversation the user had already deleted.
+   */
+  it("refuses a write to a conversation that is no longer there", async () => {
+    getSessionMock.mockResolvedValueOnce(undefined)
+
+    await expect(
+      useSessionStore.getState().updateSession("session-1", { thinkingLevel: "high" })
+    ).rejects.toThrow(/no longer exists/)
+    expect(updateSessionMock).not.toHaveBeenCalled()
   })
 
   it("can explicitly clear native effort for the standby tier", async () => {
@@ -382,6 +479,30 @@ describe("plugin session store reasoning updates", () => {
 
     // The second write is the one the row should reflect.
     expect(useSessionStore.getState().sessions[0].thinkingLevel).toBe("low")
+  })
+
+  /**
+   * The rollback used to restore the whole row by object identity, which a
+   * concurrent write to a DIFFERENT key defeats: it replaces the object, the
+   * identity check misses, and the failed call's value stays in the cache for
+   * good. Both halves are asserted, because a rollback that fixed the title by
+   * reverting the row wholesale would undo the tier that did land.
+   */
+  it("rolls back only the failed field, leaving a concurrent one that landed", async () => {
+    let rejectRename: (err: Error) => void = () => undefined
+    updateSessionMock.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => (rejectRename = reject)) as Promise<undefined>
+    )
+
+    const rename = useSessionStore.getState().updateSession("session-1", { title: "Renamed" })
+    await useSessionStore.getState().updateSession("session-1", { thinkingLevel: "low" })
+
+    rejectRename(new Error("content cipher locked"))
+    await expect(rename).rejects.toThrow("content cipher locked")
+
+    const row = useSessionStore.getState().sessions[0]
+    expect(row.title).toBe("Analysis")
+    expect(row.thinkingLevel).toBe("low")
   })
 })
 
@@ -575,6 +696,65 @@ describe("plugin session store freshness", () => {
     ])
 
     expect(chatListeners.size).toBe(1)
+  })
+
+  /**
+   * `dbListSessions` orders by `updatedAt` descending and the plugin API hands
+   * `store.sessions` back in array order for an unfiltered `listSessions()`.
+   * Prepending an adopted row therefore put whatever conversation the user last
+   * switched to at the head of "most recent", however old it was.
+   */
+  it("files an adopted row by recency rather than at the head", async () => {
+    chatState = { activeSessionId: "s-new" }
+    await useSessionStore.getState().load()
+    useSessionStore.setState({
+      sessions: [
+        { id: "s-recent", title: "Yesterday", updatedAt: 900 } as never,
+        { id: "s-older", title: "Last month", updatedAt: 100 } as never,
+      ],
+      activeSessionId: "s-new",
+    })
+
+    getSessionMock.mockResolvedValueOnce({ id: "s-adopted", title: "Ancient", updatedAt: 500 })
+    setActiveChatSession("s-adopted")
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual([
+      "s-recent",
+      "s-adopted",
+      "s-older",
+    ])
+  })
+
+  /**
+   * The hook behind the refresh fires on every write to the open conversation,
+   * and a `set` that changes no value still rebuilds the array, mints a new row
+   * object, and wakes every subscriber. `onSessionChange` subscribes with no
+   * selector, so it cannot filter that out for itself.
+   */
+  it("leaves the cache untouched when the re-read says nothing new", async () => {
+    chatState = { activeSessionId: "s-quiet" }
+    await useSessionStore.getState().load()
+    await flushWriteHookInstall()
+    const row = { id: "s-quiet", title: "Open", thinkingLevel: "medium" }
+    useSessionStore.setState({ sessions: [row as never], activeSessionId: "s-quiet" })
+    const before = useSessionStore.getState().sessions
+
+    let woken = 0
+    const stop = useSessionStore.subscribe(() => {
+      woken += 1
+    })
+    // A fresh structured clone, the way IndexedDB always answers, carrying
+    // exactly what the cache already holds.
+    getSessionMock.mockResolvedValueOnce({ ...row })
+    sessionHooks.updating?.({ lastMessageAt: 7 }, "s-quiet", { id: "s-quiet" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
+    stop()
+
+    expect(woken).toBe(0)
+    expect(useSessionStore.getState().sessions).toBe(before)
   })
 
   /**

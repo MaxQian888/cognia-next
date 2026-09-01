@@ -39,7 +39,12 @@ interface SessionStoreState {
   createSession: (options?: CreateSessionInput) => Session
   /**
    * Apply the patch to the in-memory row, and resolve once the Dexie write it
-   * implies has landed (or reject with why it did not, having put the row back).
+   * implies has landed (or reject with why it did not, having put back the
+   * fields it moved).
+   *
+   * "Landed" includes the row still existing: Dexie resolves an update against
+   * a missing key rather than refusing it, so a write to a conversation that
+   * has been deleted rejects here instead of resolving on nothing.
    *
    * The in-memory half stays synchronous, so a subscriber re-renders in the
    * same tick. The returned promise is the *persistence* answer, and it is
@@ -105,6 +110,54 @@ type SetState = (
 type GetState = () => SessionStoreState
 
 /**
+ * Place an adopted row where `listSessions` would have put it.
+ *
+ * `dbListSessions` orders by `updatedAt` descending and the plugin API returns
+ * `store.sessions` in array order for an unfiltered `listSessions()`, so
+ * prepending an adopted row put whatever conversation the user last switched
+ * to at the head of "most recent" regardless of how old it was.
+ */
+function insertByRecency(sessions: readonly Session[], row: Session): Session[] {
+  const at = sessions.findIndex((s) => timeOf(s.updatedAt) < timeOf(row.updatedAt))
+  const next = [...sessions]
+  next.splice(at === -1 ? next.length : at, 0, row)
+  return next
+}
+
+/** `Session` widens the timestamps to `number | Date` for plugin authors. */
+function timeOf(value: number | Date | undefined): number {
+  if (value instanceof Date) return value.getTime()
+  return value ?? 0
+}
+
+/**
+ * Does the re-read row still say what the cached one already says?
+ *
+ * Compares only the keys Dexie carries, because those are the only ones the
+ * re-read can speak to: `mode`, `metadata` and `branches` live in memory alone
+ * and are absent from `row`, so including them would report a difference on
+ * every call.
+ *
+ * Object columns are compared by value, not by reference. IndexedDB hands back
+ * a fresh structured clone on every read, so `executionContext` and its
+ * neighbours are a new object each time and a reference check would report
+ * "changed" for every session that has one, which is every session in a
+ * workspace. Being wrong in that direction costs exactly the `set` this exists
+ * to avoid, so it is not allowed to be the common case.
+ */
+function columnsMatch(cached: Session, row: Session): boolean {
+  const keys = Object.keys(row) as (keyof Session)[]
+  return keys.every((key) => {
+    const before = cached[key]
+    const after = row[key]
+    if (Object.is(before, after)) return true
+    if (typeof after !== "object" || after === null) return false
+    if (typeof before !== "object" || before === null) return false
+    return JSON.stringify(before) === JSON.stringify(after)
+  })
+}
+
+/**
  * Re-read one session from Dexie into the cache.
  *
  * `load()` runs once and every later write to a session goes around this store:
@@ -143,6 +196,16 @@ async function hydrateSession(
     // Still the active session? A fast switch away must not resurrect the row
     // it left, nor overwrite the one that replaced it.
     if (reason === "switch" && get().activeSessionId !== id) return
+    // Decided with `get`, not inside the `set` updater. Zustand builds a new
+    // state object and notifies every listener for an updater that returns
+    // `{}` just as readily as for a real change, so "nothing to say" has to
+    // mean not calling `set` at all. It is the common case: the hook behind
+    // this fires on every write to the open conversation (`lib/db/messages.ts`
+    // stamps `lastMessagePreview` / `lastMessageAt` on each message boundary),
+    // and `onSessionChange` subscribes with no selector, so it cannot filter
+    // the wake-up out for itself.
+    const cached = get().sessions.find((s) => s.id === id)
+    if (cached && columnsMatch(cached, row)) return
     set((state) => ({
       sessions: state.sessions.some((s) => s.id === id)
         ? // Merged, not replaced. `mode`, `metadata` and `branches` have no
@@ -150,7 +213,7 @@ async function hydrateSession(
           // path deliberately keeps in memory every time the user rounds back
           // through another conversation.
           state.sessions.map((s) => (s.id === id ? { ...s, ...row } : s))
-        : [row, ...state.sessions],
+        : insertByRecency(state.sessions, row),
     }))
   } catch (err) {
     // Non-fatal, same as `load()`: the cache keeps whatever it had.
@@ -204,14 +267,14 @@ async function installSessionWriteHook(set: SetState, get: GetState): Promise<vo
           } catch {
             return
           }
-          set((state) =>
-            state.sessions.some((s) => s.id === id)
-              ? {
-                  sessions: state.sessions.filter((s) => s.id !== id),
-                  activeSessionId: state.activeSessionId === id ? null : state.activeSessionId,
-                }
-              : {}
-          )
+          // Read before writing. Zustand builds a new state object and notifies
+          // every listener for a `set` of `{}` just as readily as for a real
+          // change, so the "already gone" branch has to not call it at all.
+          if (!get().sessions.some((s) => s.id === id)) return
+          set((state) => ({
+            sessions: state.sessions.filter((s) => s.id !== id),
+            activeSessionId: state.activeSessionId === id ? null : state.activeSessionId,
+          }))
         })()
       }, 0)
     }
@@ -278,6 +341,57 @@ function normalizeThinkingHalves(updates: UpdateSessionInput): UpdateSessionInpu
 }
 
 /**
+ * Refuse a write to a conversation that is no longer there.
+ *
+ * `lib/db/sessions.updateSession` cannot answer this: `Table.update` on a
+ * missing key resolves with `0`, and the write guard it calls first
+ * short-circuits on a falsy row. One `get` per plugin write is the price of the
+ * promise meaning what its docstring says it means, and plugin writes are not a
+ * hot path (the Dexie hook, which is, does not go through here).
+ */
+async function assertSessionExists(id: string): Promise<void> {
+  if (await dbGetSession(id)) return
+  throw new Error(`session ${id} no longer exists`)
+}
+
+/**
+ * Undo one failed write without stepping on a later one that succeeded.
+ *
+ * Only the keys this call actually sent to Dexie, and only where the row still
+ * holds the value this call put there. A key some other update has since moved
+ * is left where that update put it.
+ */
+function rollbackFields(
+  set: SetState,
+  id: string,
+  dbPatch: Parameters<typeof dbUpdateSession>[1],
+  applied: Session,
+  previous: Session
+): void {
+  const keys = Object.keys(dbPatch) as (keyof Session)[]
+  set((state) => ({
+    sessions: state.sessions.map((s) => {
+      if (s.id !== id) return s
+      const restored: Session = { ...s }
+      const writable = restored as Record<string, unknown>
+      let changed = false
+      for (const key of keys) {
+        if (!Object.is(restored[key], applied[key])) continue
+        writable[key as string] = previous[key]
+        changed = true
+      }
+      // `updatedAt` was stamped by this call alone, so it goes back with the
+      // fields it was stamped for, and only while nothing newer has moved it.
+      if (Object.is(restored.updatedAt, applied.updatedAt)) {
+        restored.updatedAt = previous.updatedAt
+        changed = true
+      }
+      return changed ? restored : s
+    }),
+  }))
+}
+
+/**
  * The workspace half of a plugin's `updateSession`.
  *
  * Attribution is three writes, not one. `components/chat/session-workspace-move.tsx`
@@ -305,20 +419,38 @@ async function moveSessionWorkspace(
   dbPatch: Parameters<typeof dbUpdateSession>[1]
 ): Promise<void> {
   const { useProjectStore } = await import("@/stores/project/project-store")
+  // Awaited, not assumed. `project-store`'s own `persist()` is gated on
+  // `loaded`, so a roster write issued before the boot initializer has hydrated
+  // silently reaches no row: the session's `projectId` column would name the
+  // new workspace while both rosters still described the old one. `load()`
+  // guards on its own flag, so this costs nothing once it has run.
+  await useProjectStore.getState().load()
   const store = useProjectStore.getState()
-
-  if (!targetId) {
-    // Unlinking has no destination, so there is no context to rebuild against.
-    // The column and the roster entry are the whole move.
-    await dbUpdateSession(id, dbPatch)
-    if (previous?.projectId) store.removeSessionFromProject(previous.projectId, id)
-    return
-  }
 
   const [{ planSessionMove }, { getExecutionBroker }] = await Promise.all([
     import("@/lib/chat/move-session-workspace"),
     import("@/lib/execution/broker"),
   ])
+  // The same two refusals for both directions. Unlinking has no destination to
+  // plan against, but a running turn holds its lease and a handed-off row is
+  // read-only whichever way attribution is moving, and detaching mid-turn is
+  // the very mis-attribution this function routes through the planner to
+  // prevent. `assertSessionWritable` catches only the handoff, and only as a
+  // "metadata" write.
+  if (!targetId) {
+    if (previous?.handoffLock) throw new Error("session workspace move refused: session-locked")
+    if (getExecutionBroker().hasActiveSession(id)) {
+      throw new Error("session workspace move refused: session-running")
+    }
+    // The old context named the workspace the conversation has just left, so
+    // leaving it in place would keep the next turn running in that directory
+    // under a row that belongs to no workspace at all. Cleared rather than
+    // rebuilt: there is no destination to rebuild it against.
+    await dbUpdateSession(id, { ...dbPatch, executionContext: undefined })
+    if (previous?.projectId) store.removeSessionFromProject(previous.projectId, id)
+    return
+  }
+
   const plan = planSessionMove({
     session: {
       id,
@@ -420,9 +552,13 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     if ("squadId" in patch) dbPatch.squadId = patch.squadId
     const persists = Object.keys(dbPatch).length > 0
 
-    // Held so a failed write can be undone by identity: putting the row back
-    // only when it is still the object this call produced means a later,
-    // successful update is never rolled back on top of.
+    // Held so a failed write can be undone FIELD BY FIELD. Restoring the whole
+    // row by identity looked equivalent and was not: a concurrent update to a
+    // different key replaces the object, the identity check then misses, and
+    // this call's unpersisted value stays in the cache for good. Rolling back
+    // only the keys this call moved, and only where the current row still holds
+    // what this call put there, undoes exactly this write and leaves a later
+    // one that landed alone.
     let applied: Session | undefined
     set((state) => ({
       sessions: state.sessions.map((s) => {
@@ -452,15 +588,19 @@ export const useSessionStore = create<SessionStoreState>((set, get) => ({
     }))
 
     if (!persists) return Promise.resolve()
-    const write = moving
-      ? moveSessionWorkspace(id, previous, patch.projectId, dbPatch)
-      : dbUpdateSession(id, dbPatch)
+    // Checked before the write, because Dexie will not check it for us.
+    // `db.sessions.update` on an absent key resolves with a modified count of
+    // `0` that nothing reads, and `assertSessionWritable` returns silently for
+    // a row it was handed as `undefined`. Left alone, this promise resolved for
+    // a conversation the user had already deleted, which is the "saved vs
+    // silently lost" ambiguity returning the promise at all was meant to end.
+    const write = assertSessionExists(id).then(() =>
+      moving
+        ? moveSessionWorkspace(id, previous, patch.projectId, dbPatch)
+        : dbUpdateSession(id, dbPatch)
+    )
     return write.catch((err) => {
-      if (previous) {
-        set((state) => ({
-          sessions: state.sessions.map((s) => (s === applied ? previous : s)),
-        }))
-      }
+      if (previous && applied) rollbackFields(set, id, dbPatch, applied, previous)
       throw err
     })
   },
