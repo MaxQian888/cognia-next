@@ -569,11 +569,14 @@ describe("WallpaperTab", () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      expect(screen.getByTestId("wallpaper-adjustments")).toBeDisabled()
+      const adjustments = screen.getByTestId("wallpaper-adjustments")
+      expect(adjustments).toBeDisabled()
       expect(screen.getByText("noActive")).toBeInTheDocument()
       // fieldset does not disable a Radix slider (it renders role=slider, not
-      // a form control), so the sliders must carry it themselves.
-      for (const slider of screen.getAllByRole("slider")) {
+      // a form control), so the sliders must carry it themselves. Scoped to
+      // this panel: the rotation card owns a slider of its own, gated on the
+      // rotation switch rather than on whether a wallpaper is selected.
+      for (const slider of within(adjustments).getAllByRole("slider")) {
         expect(slider).toHaveAttribute("data-disabled")
       }
     })
@@ -583,9 +586,10 @@ describe("WallpaperTab", () => {
       await act(async () => {
         render(<WallpaperTab />)
       })
-      expect(screen.getByTestId("wallpaper-adjustments")).not.toBeDisabled()
+      const adjustments = screen.getByTestId("wallpaper-adjustments")
+      expect(adjustments).not.toBeDisabled()
       expect(screen.queryByText("noActive")).not.toBeInTheDocument()
-      for (const slider of screen.getAllByRole("slider")) {
+      for (const slider of within(adjustments).getAllByRole("slider")) {
         expect(slider).not.toHaveAttribute("data-disabled")
       }
     })

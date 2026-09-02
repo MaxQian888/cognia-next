@@ -5,10 +5,14 @@
 
 export * from "./cursor"
 export * from "./style-pack"
+export * from "./wallpaper-rotation"
+export * from "./daily-wallpaper"
 import { DEFAULT_CURSOR, type CursorSettings } from "./cursor"
 // Value import; `style-pack.ts` only imports `DensityLevel` back as a type, so
 // the cycle is erased at compile time and never exists at runtime.
 import { DEFAULT_STYLE_PACK, type StylePackSettings } from "./style-pack"
+import { DEFAULT_WALLPAPER_ROTATION, type WallpaperRotationSettings } from "./wallpaper-rotation"
+import { DEFAULT_DAILY_WALLPAPER, type DailyWallpaperSettings } from "./daily-wallpaper"
 
 /**
  * How the wallpaper raster is fitted into its surface.
@@ -48,6 +52,19 @@ export interface BackgroundSettings {
   focalX?: number
   /** Vertical anchor, 0..100 (%). See {@link BackgroundSettings.focalX}. */
   focalY?: number
+  /**
+   * Carousel config: which wallpapers cycle, how often, and the transition
+   * played on each advance. Optional so settings rows written before rotation
+   * existed keep loading. Both the applier and the UI fall back to
+   * {@link DEFAULT_WALLPAPER_ROTATION}.
+   */
+  rotation?: WallpaperRotationSettings
+  /**
+   * Daily-wallpaper config. The ONLY part of the appearance subsystem that
+   * makes a network request, and disabled by default. See
+   * `./daily-wallpaper.ts` for why the shape is written the way it is.
+   */
+  daily?: DailyWallpaperSettings
 }
 
 export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
@@ -59,6 +76,8 @@ export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
   position: "cover",
   focalX: 50,
   focalY: 50,
+  rotation: DEFAULT_WALLPAPER_ROTATION,
+  daily: DEFAULT_DAILY_WALLPAPER,
 }
 
 /** Discriminated union — exactly one of these shapes per wallpaper. */

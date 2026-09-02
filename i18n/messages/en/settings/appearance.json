@@ -910,6 +910,64 @@
     "positionTile": "Tile",
     "readabilityHint": "How much of the wallpaper reaches the text in front of it.",
     "readabilityTitle": "Readability",
+    "rotation": {
+      "title": "Rotation",
+      "hint": "Cycle the background through several wallpapers instead of one.",
+      "enableAria": "Enable wallpaper rotation",
+      "needsTwo": "Add a second image or gradient wallpaper before rotation has anywhere to go.",
+      "triggerLabel": "Advance",
+      "trigger": {
+        "interval": "On a timer",
+        "daily": "Once a day",
+        "launch": "Each time the app starts"
+      },
+      "intervalLabel": "Every",
+      "intervalOption": "{minutes, plural, =1 {1 minute} other {# minutes}}",
+      "orderLabel": "Order",
+      "order": {
+        "sequential": "In order",
+        "shuffle": "Shuffle"
+      },
+      "transitionLabel": "Transition",
+      "transition": {
+        "none": "Instant",
+        "fade": "Fade",
+        "crossfade": "Crossfade",
+        "dissolve": "Dissolve",
+        "slide": "Slide",
+        "zoom": "Zoom",
+        "kenBurns": "Ken Burns"
+      },
+      "directionLabel": "Direction",
+      "direction": {
+        "left": "Leftwards",
+        "right": "Rightwards",
+        "up": "Upwards",
+        "down": "Downwards"
+      },
+      "easingLabel": "Easing",
+      "easing": {
+        "linear": "Linear",
+        "ease": "Ease",
+        "easeIn": "Ease in",
+        "easeOut": "Ease out",
+        "easeInOut": "Ease in and out"
+      },
+      "durationLabel": "Duration",
+      "durationValue": "{ms} ms",
+      "degraded": {
+        "reduced-motion": "Reduced motion is on, so wallpapers change instantly. Turn off “Respect reduced motion” below to keep the animation.",
+        "scrim": "The readability scrim needs the same layer a crossfade does, so this plays as a fade. Raise opacity above 50% to get the full transition back."
+      },
+      "playlistLabel": "In rotation",
+      "playlistUseAll": "Use all",
+      "playlistAllHint": "{count, plural, =0 {No wallpapers are eligible yet.} =1 {Every eligible wallpaper (1).} other {Every eligible wallpaper (#).}}",
+      "playlistSomeHint": "{count, plural, =0 {Nothing selected, so rotation has nowhere to go.} =1 {1 wallpaper selected.} other {# wallpapers selected.}}",
+      "pauseHiddenLabel": "Pause when hidden",
+      "pauseHiddenHint": "Hold the timer while the window is in the background.",
+      "reducedMotionLabel": "Respect reduced motion",
+      "reducedMotionHint": "Change wallpapers instantly when the system asks for less motion."
+    },
     "scope": {
       "all": {
         "desc": "Everything including sidebar",

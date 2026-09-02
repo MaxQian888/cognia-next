@@ -5,8 +5,19 @@ import { useSettingsStore } from "@/stores/settings"
 import { applyUserCss } from "@/lib/appearance/custom-css/apply"
 import { disposeUrl, resolveSourceToCss } from "@/lib/appearance/wallpaper-storage"
 import { BG_VARS, resolveBackgroundFit } from "@/lib/appearance/background-fit"
+import {
+  crossfadeToLayer,
+  fadeToImage,
+  normalizeToSingleLayer,
+  rampDissolveBlur,
+  writeTransitionTiming,
+} from "@/lib/appearance/background-layers"
+import { planTransition } from "@/lib/appearance/wallpaper-transition"
+import { prefersReducedMotion } from "@/lib/appearance/reduced-motion"
+import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotation"
 import { withBuiltinPresets } from "@/lib/appearance/presets"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
+import { useWallpaperRotation } from "@/hooks/appearance/use-wallpaper-rotation"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
 /** Body data attributes the appearance module owns. globals.css selectors key off these. */
@@ -46,7 +57,19 @@ export function BackgroundApplier(): null {
   const customCssEnabled = useSettingsStore((s) => s.customCssEnabled)
   const customCssScope = useSettingsStore((s) => s.customCssScope)
 
+  // The carousel timer. Lives here rather than in its own initializer so it
+  // shares the single mount point the background already has.
+  useWallpaperRotation()
+
   const lastUrlRef = useRef<string | null>(null)
+  // Which wallpaper is currently painted. A change in this value between two
+  // runs of the effect is what distinguishes "the user swapped wallpaper" from
+  // "the user dragged the blur slider", and only the former animates.
+  const paintedIdRef = useRef<string | null>(null)
+  // Cancels the timers a fade or dissolve leaves behind. Advancing again while
+  // one is pending must not let the old timer restore state belonging to a
+  // wallpaper two swaps ago.
+  const pendingRef = useRef<Array<() => void>>([])
 
   useEffect(() => {
     if (typeof document === "undefined") return
@@ -56,10 +79,17 @@ export function BackgroundApplier(): null {
     void applyBackground({
       background,
       wallpapers,
-      onApplied: (cssValue) => {
+      previousId: paintedIdRef.current,
+      cancelPending: () => {
+        for (const cancel of pendingRef.current) cancel()
+        pendingRef.current = []
+      },
+      registerPending: (cancel) => pendingRef.current.push(cancel),
+      onApplied: (cssValue, paintedId) => {
         // Revoke any prior Object URL we minted; only one is alive at a time.
         if (lastUrlRef.current) disposeUrl(lastUrlRef.current)
         lastUrlRef.current = cssValue
+        paintedIdRef.current = paintedId
       },
       isCancelled: () => cancelled,
     }).catch((err) => {
@@ -75,6 +105,14 @@ export function BackgroundApplier(): null {
   }, [background, wallpapers])
 
   useEffect(() => {
+    const pending = pendingRef
+    return () => {
+      for (const cancel of pending.current) cancel()
+      pending.current = []
+    }
+  }, [])
+
+  useEffect(() => {
     applyUserCss(customCss, customCssEnabled, customCssScope)
   }, [customCss, customCssEnabled, customCssScope])
 
@@ -84,12 +122,26 @@ export function BackgroundApplier(): null {
 interface ApplyArgs {
   background: BackgroundSettings
   wallpapers: Wallpaper[]
-  onApplied: (cssValue: string | null) => void
+  /** The wallpaper id currently painted, or null on first run. */
+  previousId: string | null
+  /** Drop any timers a previous fade or dissolve left pending. */
+  cancelPending: () => void
+  /** Hand a canceller back to the component so unmount can drop it. */
+  registerPending: (cancel: () => void) => void
+  onApplied: (cssValue: string | null, paintedId: string | null) => void
   isCancelled: () => boolean
 }
 
 async function applyBackground(args: ApplyArgs): Promise<void> {
-  const { background, wallpapers, onApplied, isCancelled } = args
+  const {
+    background,
+    wallpapers,
+    previousId,
+    cancelPending,
+    registerPending,
+    onApplied,
+    isCancelled,
+  } = args
   const body = document.body
 
   // The transparent desktop-pet windows (sprite overlay + click popup) load
@@ -100,28 +152,25 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   // no surface that should carry the app background.
   const role = getPetWindowRole()
   if (isSecondaryOverlayRole(role)) {
-    body.setAttribute(ATTR_ENABLED, "false")
-    body.removeAttribute(ATTR_SCOPE)
-    clearScrim(body)
-    onApplied(null)
+    disableBackground(body)
+    onApplied(null, null)
     return
   }
 
   if (!background.enabled || !background.activeId) {
-    body.setAttribute(ATTR_ENABLED, "false")
-    body.removeAttribute(ATTR_SCOPE)
-    clearScrim(body)
-    onApplied(null)
+    disableBackground(body)
+    onApplied(null, null)
     return
   }
 
   const list = withBuiltinPresets(wallpapers)
   const wallpaper = list.find((w) => w.id === background.activeId)
   if (!wallpaper) {
-    body.setAttribute(ATTR_ENABLED, "false")
-    body.removeAttribute(ATTR_SCOPE)
-    clearScrim(body)
-    onApplied(null)
+    // A deleted wallpaper that `activeId` still points at. Turning the layer
+    // off is the honest outcome, and it is also what stops a rotation from
+    // advancing onto a dead id and leaving a blank screen with no explanation.
+    disableBackground(body)
+    onApplied(null, null)
     return
   }
 
@@ -130,14 +179,33 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
     // The user changed wallpapers while we were resolving — drop our work.
     return
   }
-  body.style.setProperty(VAR_IMAGE, cssValue)
+  cancelPending()
+
+  const isImageSource = wallpaper.source.kind === "image"
+  const needsScrim = isImageSource && background.opacity < 0.5
+
+  // The scrim and the second wallpaper layer both want `::after`. Resolve that
+  // BEFORE choosing a transition, so `planTransition` is told the truth and
+  // downgrades a crossfade to a fade rather than the two silently fighting.
+  const rotation = { ...DEFAULT_WALLPAPER_ROTATION, ...(background.rotation ?? {}) }
+  const plan = planTransition({
+    rotation,
+    scrimActive: needsScrim,
+    reducedMotion: prefersReducedMotion(),
+  })
+
+  // Animate only a genuine wallpaper CHANGE. A blur-slider drag or a scope
+  // switch re-runs this effect with the same image, and fading the wallpaper
+  // out and back on every pointer move would be both ugly and expensive.
+  const isSwap = previousId !== null && previousId !== background.activeId
+  const animate = isSwap && rotation.enabled && plan.effective !== "none"
+
   body.style.setProperty(VAR_BLUR, `${background.blurPx}px`)
   body.style.setProperty(VAR_OPACITY, `${background.opacity}`)
   // Image kinds need explicit sizing/positioning; gradients and colors
   // take the same vars but ignore them — we still write the resolved fit
   // for predictability. `background-fit.ts` owns the mapping so the gallery
   // preview tile renders exactly what the live layer will.
-  const isImageSource = wallpaper.source.kind === "image"
   const fit = resolveBackgroundFit(background.position, background.focalX, background.focalY)
   body.style.setProperty(VAR_POSITION, fit.position)
   body.style.setProperty(VAR_SIZE, fit.size)
@@ -149,15 +217,41 @@ async function applyBackground(args: ApplyArgs): Promise<void> {
   // a no-op but causes confusion in devtools).
   body.setAttribute("data-bg-kind", isImageSource ? "image" : wallpaper.source.kind)
 
+  if (!animate) {
+    // Direct application. Fold any live two-layer stack back onto layer A
+    // first, otherwise writing the image to layer A while phase says "b"
+    // leaves the new wallpaper staged on a layer nobody is looking at.
+    normalizeToSingleLayer(body)
+    body.style.setProperty(VAR_IMAGE, cssValue)
+  } else if (plan.twoLayer) {
+    if (plan.effective === "dissolve") {
+      registerPending(rampDissolveBlur({ body, plan, restoreBlurPx: background.blurPx }))
+    }
+    crossfadeToLayer({ body, cssValue, plan })
+  } else {
+    registerPending(fadeToImage({ body, cssValue, plan, opacity: background.opacity }))
+  }
+
+  if (!animate) writeTransitionTiming({ body, plan: { ...plan, durationMs: 0 } })
+
   // Text-protection scrim — only image wallpapers below 0.5 opacity need
   // the bottom-up gradient. Gradients and colors have honest opacity and
   // don't merit the extra layer.
-  applyScrim(body, {
-    needsScrim: isImageSource && background.opacity < 0.5,
-    scope: background.scope,
-  })
+  applyScrim(body, { needsScrim, scope: background.scope })
 
-  onApplied(cssValue)
+  onApplied(cssValue, background.activeId)
+}
+
+/**
+ * Turn the wallpaper layer off and leave the stack in a state the next enable
+ * can build on. Folding back to a single layer matters: re-enabling while the
+ * phase still said "b" would paint into a `::after` that no longer exists.
+ */
+function disableBackground(body: HTMLElement): void {
+  body.setAttribute(ATTR_ENABLED, "false")
+  body.removeAttribute(ATTR_SCOPE)
+  clearScrim(body)
+  normalizeToSingleLayer(body)
 }
 
 /** Removes the scrim attribute from <body> and every scope target. */

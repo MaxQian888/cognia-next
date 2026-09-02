@@ -54,6 +54,10 @@ import type {
   WallpaperPosition,
   WallpaperSource,
 } from "@/types/appearance"
+import {
+  DEFAULT_WALLPAPER_ROTATION,
+  type WallpaperRotationSettings,
+} from "@/types/appearance/wallpaper-rotation"
 import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
@@ -62,6 +66,7 @@ import {
   type WallpaperTuning,
 } from "../components/wallpaper-theme-generator"
 import { GradientBuilder } from "../components/gradient-builder"
+import { WallpaperRotationCard } from "../components/wallpaper-rotation-card"
 import {
   listPluginWallpapers,
   subscribePluginWallpapers,
@@ -241,6 +246,23 @@ export function WallpaperTab() {
   const focalY = clampFocal(background.focalY)
   const focalEnabled = supportsFocalPoint(background.position)
   const activeFocalPreset = focalPresetId(focalX, focalY)
+
+  const rotation: WallpaperRotationSettings = {
+    ...DEFAULT_WALLPAPER_ROTATION,
+    ...(background.rotation ?? {}),
+  }
+  // Mirrors the applier's own rule. The card needs it because a live scrim
+  // downgrades the transition, and the user should be told that where they
+  // pick it rather than discovering it by watching.
+  const scrimActive = activeWallpaper?.kind === "image" && opacity < 0.5
+
+  // Deliberately not memoised. `rotation` is rebuilt every render from the
+  // store, so a `useCallback` over it would be re-created every render anyway,
+  // and reading the ref instead would make the ref a hook argument the React
+  // compiler then refuses to let the effect below reassign.
+  const handleRotationChange = (patch: Partial<WallpaperRotationSettings>) => {
+    void setBackground({ rotation: { ...rotation, ...patch } })
+  }
 
   const activeAnalysis = analysis?.id === activeWallpaper?.id ? (analysis?.value ?? null) : null
   const verdict = computeOpacityVerdict({
@@ -448,6 +470,21 @@ export function WallpaperTab() {
         </div>
         {busyError && <p className="text-xs text-destructive">{busyError}</p>}
       </div>
+
+      {/* 2b. Rotation. Sits between "which wallpaper" and "how does it sit",
+             because it is the question that turns the single choice above into
+             a set. Inert without an active wallpaper, same as the tuning below. */}
+      <fieldset
+        disabled={!hasActive}
+        className={cn(!hasActive && "pointer-events-none opacity-50")}
+      >
+        <WallpaperRotationCard
+          rotation={rotation}
+          gallery={gallery}
+          scrimActive={scrimActive}
+          onChange={handleRotationChange}
+        />
+      </fieldset>
 
       {/* 3. Adjustments — inert until there's something to adjust. `fieldset`
              only disables form controls, so the Radix sliders below take an

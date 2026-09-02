@@ -4,6 +4,7 @@
 import { act, render } from "@testing-library/react"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotation"
 
 // Mock the storage module so we control resolveSourceToCss output.
 jest.mock("@/lib/appearance/wallpaper-storage", () => ({
@@ -68,6 +69,9 @@ beforeEach(() => {
   document.body.removeAttribute(__INTERNALS__.ATTR_SCOPE)
   document.body.removeAttribute(__INTERNALS__.ATTR_SCRIM)
   document.body.removeAttribute("data-bg-kind")
+  document.body.removeAttribute("data-bg-phase")
+  document.body.removeAttribute("data-bg-two-layer")
+  document.body.removeAttribute("data-bg-transition")
   document.body.removeAttribute("style")
   // Clear any scope target nodes a prior test may have appended.
   document.querySelectorAll("[data-bg-target]").forEach((el) => el.remove())
@@ -452,5 +456,133 @@ describe("BackgroundApplier", () => {
       result = render(<BackgroundApplier />)
     })
     expect(result?.container.innerHTML).toBe("")
+  })
+})
+
+describe("BackgroundApplier rotation transitions", () => {
+  const rotating = (patch: Record<string, unknown> = {}) => ({
+    ...DEFAULT_BACKGROUND_SETTINGS,
+    enabled: true,
+    rotation: { ...DEFAULT_WALLPAPER_ROTATION, enabled: true, ...patch },
+  })
+
+  async function mountWith(background: BackgroundSettings, wallpapers: Wallpaper[]) {
+    settingsModule.__setStoreState({ background, wallpapers })
+    let view: ReturnType<typeof render> | undefined
+    await act(async () => {
+      view = render(<BackgroundApplier />)
+    })
+    return view!
+  }
+
+  async function swapTo(
+    view: ReturnType<typeof render>,
+    background: BackgroundSettings,
+    wallpapers: Wallpaper[]
+  ) {
+    settingsModule.__setStoreState({ background, wallpapers })
+    await act(async () => {
+      view.rerender(<BackgroundApplier />)
+    })
+  }
+
+  it("does not animate the first paint", async () => {
+    // Mounting is not a swap. Fading in from nothing on every app start would
+    // read as a slow load rather than a transition.
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1")]
+    await mountWith({ ...rotating(), activeId: "wp-1" }, wps)
+
+    expect(document.body.hasAttribute("data-bg-two-layer")).toBe(false)
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(one.png)")
+  })
+
+  it("crossfades onto the second layer when the wallpaper actually changes", async () => {
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1"), imageWp("wp-2")]
+    const view = await mountWith({ ...rotating(), activeId: "wp-1" }, wps)
+
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(two.png)")
+    await swapTo(view, { ...rotating(), activeId: "wp-2" }, wps)
+
+    expect(document.body.getAttribute("data-bg-two-layer")).toBe("true")
+    expect(document.body.getAttribute("data-bg-phase")).toBe("b")
+    expect(document.body.style.getPropertyValue("--app-bg-image-b")).toBe("url(two.png)")
+    // The outgoing image stays on layer A so it has something to fade out from.
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(one.png)")
+  })
+
+  it("does NOT animate when only a slider moved", async () => {
+    // The regression this guards: the effect re-runs on every blur/opacity
+    // change, and treating that as a swap would fade the wallpaper out and
+    // back on every pointer move of a drag.
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1")]
+    const view = await mountWith({ ...rotating(), activeId: "wp-1" }, wps)
+
+    await swapTo(view, { ...rotating(), activeId: "wp-1", blurPx: 12 }, wps)
+
+    expect(document.body.hasAttribute("data-bg-two-layer")).toBe(false)
+    expect(document.body.style.getPropertyValue("--app-bg-blur")).toBe("12px")
+  })
+
+  it("applies instantly while rotation is off, however the wallpaper changed", async () => {
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1"), imageWp("wp-2")]
+    const off = { ...DEFAULT_BACKGROUND_SETTINGS, enabled: true, activeId: "wp-1" }
+    const view = await mountWith(off, wps)
+
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(two.png)")
+    await swapTo(view, { ...off, activeId: "wp-2" }, wps)
+
+    expect(document.body.hasAttribute("data-bg-two-layer")).toBe(false)
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(two.png)")
+  })
+
+  it("keeps the scrim and drops to one layer when both want ::after", async () => {
+    // The whole reason `planTransition` takes `scrimActive`. Two-layer and the
+    // scrim contend for the same pseudo-element, and the scrim wins.
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1"), imageWp("wp-2")]
+    const dim = { ...rotating(), opacity: 0.3, scope: "all" as const }
+    const view = await mountWith({ ...dim, activeId: "wp-1" }, wps)
+
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(two.png)")
+    await swapTo(view, { ...dim, activeId: "wp-2" }, wps)
+
+    expect(document.body.getAttribute(__INTERNALS__.ATTR_SCRIM)).toBe("true")
+    expect(document.body.hasAttribute("data-bg-two-layer")).toBe(false)
+    expect(document.body.getAttribute("data-bg-transition")).toBe("fade")
+  })
+
+  it("folds a live two-layer stack back onto layer A when the background is disabled", async () => {
+    // Clearing two-layer deletes the ::after that was painting the wallpaper.
+    // Re-enabling with the phase still on "b" would paint into nothing.
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1"), imageWp("wp-2")]
+    const view = await mountWith({ ...rotating(), activeId: "wp-1" }, wps)
+
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(two.png)")
+    await swapTo(view, { ...rotating(), activeId: "wp-2" }, wps)
+    expect(document.body.getAttribute("data-bg-phase")).toBe("b")
+
+    await swapTo(view, { ...rotating(), enabled: false, activeId: "wp-2" }, wps)
+
+    expect(document.body.getAttribute("data-bg-phase")).toBe("a")
+    expect(document.body.hasAttribute("data-bg-two-layer")).toBe(false)
+    expect(document.body.style.getPropertyValue("--app-bg-image")).toBe("url(two.png)")
+  })
+
+  it("publishes the effective transition name for CSS to key off", async () => {
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(one.png)")
+    const wps = [imageWp("wp-1"), imageWp("wp-2")]
+    const conf = rotating({ transition: "kenBurns", transitionMs: 1500 })
+    const view = await mountWith({ ...conf, activeId: "wp-1" }, wps)
+
+    wallpaperStorage.resolveSourceToCss.mockResolvedValue("url(two.png)")
+    await swapTo(view, { ...conf, activeId: "wp-2" }, wps)
+
+    expect(document.body.getAttribute("data-bg-transition")).toBe("kenBurns")
+    expect(document.body.style.getPropertyValue("--app-bg-transition-duration")).toBe("1500ms")
   })
 })

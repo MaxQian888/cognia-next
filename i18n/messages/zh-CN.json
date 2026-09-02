@@ -28791,7 +28791,65 @@
           "savedOnDesktop": "这张壁纸的图片保存在桌面端的文件里。请在桌面端使用，或删除该条目来整理图库。"
         },
         "uploadHint": "把图片拖到这里或点击浏览",
-        "uploading": "上传中…"
+        "uploading": "上传中…",
+        "rotation": {
+          "title": "轮播",
+          "hint": "让背景在多张壁纸之间循环，而不是固定一张。",
+          "enableAria": "启用壁纸轮播",
+          "needsTwo": "再添加一张图片或渐变壁纸，轮播才有可切换的对象。",
+          "triggerLabel": "切换时机",
+          "trigger": {
+            "interval": "按定时器",
+            "daily": "每天一次",
+            "launch": "每次启动应用"
+          },
+          "intervalLabel": "间隔",
+          "intervalOption": "{minutes, plural, other {# 分钟}}",
+          "orderLabel": "顺序",
+          "order": {
+            "sequential": "按顺序",
+            "shuffle": "随机"
+          },
+          "transitionLabel": "切换效果",
+          "transition": {
+            "none": "立即切换",
+            "fade": "淡入淡出",
+            "crossfade": "交叉淡化",
+            "dissolve": "溶解",
+            "slide": "滑动",
+            "zoom": "缩放",
+            "kenBurns": "缓慢平移（Ken Burns）"
+          },
+          "directionLabel": "方向",
+          "direction": {
+            "left": "向左",
+            "right": "向右",
+            "up": "向上",
+            "down": "向下"
+          },
+          "easingLabel": "缓动曲线",
+          "easing": {
+            "linear": "线性",
+            "ease": "标准",
+            "easeIn": "缓入",
+            "easeOut": "缓出",
+            "easeInOut": "缓入缓出"
+          },
+          "durationLabel": "时长",
+          "durationValue": "{ms} 毫秒",
+          "degraded": {
+            "reduced-motion": "系统已开启「减少动态效果」，因此壁纸会直接切换。关闭下方的「尊重减少动态效果」即可保留动画。",
+            "scrim": "可读性遮罩与交叉淡化需要同一个图层，因此这里退化为淡入淡出。把不透明度调到 50% 以上即可恢复完整效果。"
+          },
+          "playlistLabel": "参与轮播",
+          "playlistUseAll": "全部使用",
+          "playlistAllHint": "{count, plural, =0 {目前没有符合条件的壁纸。} other {全部符合条件的壁纸（# 张）。}}",
+          "playlistSomeHint": "{count, plural, =0 {未选择任何壁纸，轮播无处可去。} other {已选择 # 张壁纸。}}",
+          "pauseHiddenLabel": "隐藏时暂停",
+          "pauseHiddenHint": "窗口切到后台时暂停计时。",
+          "reducedMotionLabel": "尊重减少动态效果",
+          "reducedMotionHint": "当系统要求减少动态效果时，直接切换壁纸。"
+        }
       }
     },
     "artifacts": {

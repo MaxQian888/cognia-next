@@ -787,13 +787,39 @@ html[data-pro-ide-active] [data-slot="resizable-handle"] {
 ------------------------------------------------------------------------- */
 :root {
   --app-bg-image: none;
+  --app-bg-image-b: none;
   --app-bg-blur: 0px;
   --app-bg-opacity: 1;
   --app-bg-position: center;
   --app-bg-size: cover;
   --app-bg-repeat: no-repeat;
+  /* Rotation transition. `duration: 0ms` is the resting value, so a wallpaper
+     applied outside a rotation advance (the user clicking a tile) still gets
+     the historical 200ms opacity settle from the base rule below and nothing
+     more. `wallpaper-transition.ts` owns writing these. */
+  --app-bg-transition-duration: 0ms;
+  --app-bg-transition-easing: linear;
+  /* Where each layer sits while hidden. Written per advance by the applier at
+     the moment each layer's role (entering or leaving) is known, which is the
+     only way a directional slide can move both layers the same way. */
+  --app-bg-transform-a: none;
+  --app-bg-transform-b: none;
+  --app-bg-ken-burns-duration: 40s;
 }
 
+/* ---------------------------------------------------------------------------
+   The two wallpaper layers.
+
+   Layer A is `::before` and layer B is `::after`, on the same elements, with
+   `[data-bg-phase]` saying which one is showing. An advance stages the next
+   image on the hidden layer and flips the attribute, and CSS does the rest.
+
+   Layer B only exists while `[data-bg-two-layer="true"]` is set, because the
+   legibility scrim wants the same `::after`. The applier guarantees the two
+   attributes are never set together: a two-layer transition requested while
+   the scrim is up is downgraded to the one-layer `fade` instead. See
+   `planTransition`.
+--------------------------------------------------------------------------- */
 body[data-bg-enabled="true"]::before {
   content: "";
   position: fixed;
@@ -806,9 +832,84 @@ body[data-bg-enabled="true"]::before {
   background-repeat: var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
   opacity: var(--app-bg-opacity);
+  transform: none;
+  will-change: opacity;
   transition:
-    opacity 200ms linear,
-    filter 200ms linear;
+    opacity max(200ms, var(--app-bg-transition-duration)) var(--app-bg-transition-easing),
+    filter max(200ms, var(--app-bg-transition-duration)) var(--app-bg-transition-easing),
+    transform var(--app-bg-transition-duration) var(--app-bg-transition-easing);
+}
+
+body[data-bg-enabled="true"][data-bg-two-layer="true"]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--app-bg-image-b);
+  background-position: var(--app-bg-position);
+  background-size: var(--app-bg-size);
+  background-repeat: var(--app-bg-repeat);
+  filter: blur(var(--app-bg-blur));
+  will-change: opacity;
+  transition:
+    opacity var(--app-bg-transition-duration) var(--app-bg-transition-easing),
+    filter var(--app-bg-transition-duration) var(--app-bg-transition-easing),
+    transform var(--app-bg-transition-duration) var(--app-bg-transition-easing);
+}
+
+/* Phase resolution, shared by the body layer and every scoped target. The
+   hidden layer takes its own transform variable, which is what makes `slide`
+   and `zoom` directional. */
+body[data-bg-two-layer="true"][data-bg-phase="a"]::before,
+body[data-bg-two-layer="true"][data-bg-phase="b"]::after,
+body[data-bg-two-layer="true"][data-bg-phase="a"] [data-bg-target]::before,
+body[data-bg-two-layer="true"][data-bg-phase="b"] [data-bg-target]::after {
+  opacity: var(--app-bg-opacity);
+  transform: none;
+}
+
+body[data-bg-two-layer="true"][data-bg-phase="b"]::before,
+body[data-bg-two-layer="true"][data-bg-phase="a"] [data-bg-target]::after {
+  opacity: 0;
+  transform: var(--app-bg-transform-a);
+}
+
+body[data-bg-two-layer="true"][data-bg-phase="a"]::after,
+body[data-bg-two-layer="true"][data-bg-phase="b"] [data-bg-target]::before {
+  opacity: 0;
+  transform: var(--app-bg-transform-b);
+}
+
+/* `arming` suppresses transitions for the single frame in which the incoming
+   layer is moved to its entry position. Without it, staging the next image
+   would animate the hidden layer from wherever it last rested. */
+body[data-bg-arming="true"]::before,
+body[data-bg-arming="true"]::after,
+body[data-bg-arming="true"] [data-bg-target]::before,
+body[data-bg-arming="true"] [data-bg-target]::after {
+  transition: none !important;
+}
+
+/* Ken Burns is the one transition with an effect BETWEEN advances: the
+   resting layer keeps drifting. It overrides `transform: none` on whichever
+   layer is currently showing. */
+@media (prefers-reduced-motion: no-preference) {
+  body[data-bg-transition="kenBurns"][data-bg-phase="a"]::before,
+  body[data-bg-transition="kenBurns"][data-bg-phase="b"]::after,
+  body[data-bg-transition="kenBurns"][data-bg-phase="a"] [data-bg-target]::before,
+  body[data-bg-transition="kenBurns"][data-bg-phase="b"] [data-bg-target]::after {
+    animation: cognia-ken-burns var(--app-bg-ken-burns-duration) ease-in-out infinite alternate;
+  }
+}
+
+@keyframes cognia-ken-burns {
+  from {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.08) translate3d(-1.5%, -1.5%, 0);
+  }
 }
 
 /* Scope narrowing: when the user picks a scope other than "all", scoped
@@ -863,6 +964,40 @@ body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target]::before {
   background-repeat: var(--app-bg-repeat);
   filter: blur(var(--app-bg-blur));
   opacity: var(--app-bg-opacity);
+  transition:
+    opacity var(--app-bg-transition-duration) var(--app-bg-transition-easing),
+    transform var(--app-bg-transition-duration) var(--app-bg-transition-easing);
+}
+
+/* Scoped layer B. Mirrors the body-level `::after` above, including the
+   `background-attachment: fixed` that keeps one continuous image across panel
+   seams rather than each panel cropping its own copy. Gated on
+   `data-bg-two-layer` so the scrim keeps sole use of `::after` whenever it is
+   the one that needs it. */
+body[data-bg-enabled="true"][data-bg-two-layer="true"][data-bg-scope="chat"]
+  [data-bg-target="chat"]::after,
+body[data-bg-enabled="true"][data-bg-two-layer="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]::after,
+body[data-bg-enabled="true"][data-bg-two-layer="true"][data-bg-scope="sidebar"]
+  [data-bg-target="sidebar"]::after,
+body[data-bg-enabled="true"][data-bg-two-layer="true"][data-bg-scope="all"] [data-bg-target]::after,
+body[data-bg-enabled="true"][data-bg-two-layer="true"][data-bg-scope="global"]
+  [data-bg-target]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  display: block;
+  background-image: var(--app-bg-image-b);
+  background-attachment: fixed;
+  background-position: var(--app-bg-position);
+  background-size: var(--app-bg-size);
+  background-repeat: var(--app-bg-repeat);
+  filter: blur(var(--app-bg-blur));
+  transition:
+    opacity var(--app-bg-transition-duration) var(--app-bg-transition-easing),
+    transform var(--app-bg-transition-duration) var(--app-bg-transition-easing);
 }
 
 /* When a wallpaper is painting under a shadcn sidebar, soften the sidebar's
