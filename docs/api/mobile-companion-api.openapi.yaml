@@ -69049,6 +69049,13 @@ components:
         - signaling
       additionalProperties: false
       properties:
+        configVersion:
+          type: integer
+          minimum: 1
+          description: >-
+            Discovery document version. Version 1 servers omit it. Every later
+            version only adds fields. Clients read what is present and never
+            branch on the number.
         deploymentMode:
           type: string
           enum:
@@ -69073,10 +69080,55 @@ components:
               type: string
             webClientId:
               type: string
+            nativeClientId:
+              type: string
+              description: The Logto "native" application id (desktop and CLI). Version 2.
             scopes:
               type: array
               items:
                 type: string
+            socialProviders:
+              type: array
+              description: >-
+                Social sign-in methods enabled at Logto, in operator order.
+                Absent or empty means the universal Logto page only. Version 2.
+              items:
+                type: object
+                required:
+                  - provider
+                  - directSignIn
+                additionalProperties: false
+                properties:
+                  provider:
+                    type: string
+                    description: The Logto connector's identity-provider name, e.g. github or feishu.
+                  directSignIn:
+                    type: string
+                    description: The direct_sign_in value for the authorize request, e.g. social:github.
+            callbackModes:
+              type: array
+              description: How an authorization callback may reach the client. Version 2.
+              items:
+                type: string
+                enum:
+                  - web-popup
+                  - native-loopback
+                  - deep-link
+        collaboration:
+          type: object
+          description: Present when the deployment enrols accounts on a collaboration server. Version 2.
+          required:
+            - serviceUrl
+            - registrationPolicy
+          additionalProperties: false
+          properties:
+            serviceUrl:
+              type: string
+              format: uri
+            registrationPolicy:
+              type: string
+              enum:
+                - bootstrap-then-invite
         signaling:
           type: object
           required:
