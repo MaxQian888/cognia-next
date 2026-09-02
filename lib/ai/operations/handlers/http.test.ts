@@ -1,6 +1,7 @@
 import { ProviderOperationFailureError } from "../failure"
 import {
   authHeaders,
+  isAzureOpenAiHost,
   joinUrl,
   providerDownload,
   providerRequest,
