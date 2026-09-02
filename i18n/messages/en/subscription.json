@@ -752,6 +752,7 @@
       "connector": "Connector",
       "embedding": "Embedding",
       "eval": "Eval",
+      "gateway": "Gateway",
       "goal": "Goal",
       "imported": "Imported",
       "memory": "Memory",

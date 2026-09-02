@@ -40003,6 +40003,7 @@
         "connector": "Connector",
         "embedding": "Embedding",
         "eval": "Eval",
+        "gateway": "Gateway",
         "goal": "Goal",
         "imported": "Imported",
         "label": "Surface",

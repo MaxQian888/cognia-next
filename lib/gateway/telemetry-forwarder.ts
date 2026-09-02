@@ -8,6 +8,7 @@
  */
 
 import { recordProviderOutcome, type ProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { recordSurfaceUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import type { GatewayRequestOutcome } from "@/types/gateway"
 
 /** Map a gateway outcome onto the chat-plane `ProviderOutcome` shape. */
@@ -37,7 +38,52 @@ export function gatewayOutcomeToProviderOutcome(o: GatewayRequestOutcome): Provi
   }
 }
 
-/** Record one gateway outcome into the telemetry stores. Best-effort. */
-export function forwardGatewayOutcome(o: GatewayRequestOutcome): void {
+/**
+ * Deterministic ledger key for one gateway outcome.
+ *
+ * The gateway emits an outcome exactly once per served request and carries no
+ * request id of its own, so the key is built from the identity it does carry
+ * plus the arrival clock. Two outcomes for the same deployment in the same
+ * millisecond would collapse into one row, which is the correct failure
+ * direction for a billing ledger: under-count a pathological tie rather than
+ * double-count every ordinary request.
+ */
+export function gatewayUsageOperationId(o: GatewayRequestOutcome, at: number): string {
+  const session = o.sessionId ?? "anon"
+  return `gw:${o.providerId}:${o.modelId}:${session}:${at}`
+}
+
+/**
+ * Record one gateway outcome into the telemetry stores AND the usage ledger.
+ *
+ * The ledger write is what keeps gateway traffic in the budget projection.
+ * Before ADR-0165 this path reached `providerCostDaily` through the telemetry
+ * sink's own rollup, which no longer exists: `sessionUsage` is the money and
+ * the rollup is derived from it, so a turn that writes no ledger row is a turn
+ * that does not exist. Failed requests bill nothing and write nothing.
+ */
+export function forwardGatewayOutcome(o: GatewayRequestOutcome, now: number = Date.now()): void {
   recordProviderOutcome(gatewayOutcomeToProviderOutcome(o))
+  if (!o.ok) return
+  const inputTokens = o.inputTokens ?? 0
+  const outputTokens = o.outputTokens ?? 0
+  if (inputTokens === 0 && outputTokens === 0) return
+  swallowUsageWrite(
+    recordSurfaceUsage({
+      surface: "gateway",
+      operationId: gatewayUsageOperationId(o, now),
+      scopeId: o.sessionId ?? o.providerId,
+      usage: {
+        inputTokens,
+        outputTokens,
+        durationMs: o.latencyMs,
+        model: o.modelId,
+        providerId: o.providerId,
+        // The gateway reports tokens the upstream returned but never a cost,
+        // so the ledger prices them locally and says so.
+        usageBasis: "provider-reported",
+      },
+      at: now,
+    })
+  )
 }

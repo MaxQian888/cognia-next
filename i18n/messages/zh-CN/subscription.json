@@ -752,6 +752,7 @@
       "connector": "连接器",
       "embedding": "向量化",
       "eval": "评测",
+      "gateway": "网关",
       "goal": "目标",
       "imported": "导入",
       "memory": "记忆",

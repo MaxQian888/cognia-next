@@ -1,9 +1,19 @@
-import { forwardGatewayOutcome, gatewayOutcomeToProviderOutcome } from "./telemetry-forwarder"
+import {
+  forwardGatewayOutcome,
+  gatewayOutcomeToProviderOutcome,
+  gatewayUsageOperationId,
+} from "./telemetry-forwarder"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { recordSurfaceUsage } from "@/lib/db/session-usage"
 import type { GatewayRequestOutcome } from "@/types/gateway"
 
 jest.mock("@/lib/claude/provider-telemetry", () => ({
   recordProviderOutcome: jest.fn(),
+}))
+
+jest.mock("@/lib/db/session-usage", () => ({
+  recordSurfaceUsage: jest.fn(async () => null),
+  swallowUsageWrite: (p: Promise<unknown>) => void p.catch(() => {}),
 }))
 
 const base: GatewayRequestOutcome = {
@@ -76,12 +86,59 @@ describe("gatewayOutcomeToProviderOutcome", () => {
   })
 })
 
+describe("gatewayUsageOperationId", () => {
+  it("is stable for the same outcome and clock", () => {
+    expect(gatewayUsageOperationId(base, 1000)).toBe(gatewayUsageOperationId(base, 1000))
+  })
+
+  it("separates sessions and providers", () => {
+    const a = gatewayUsageOperationId({ ...base, sessionId: "s1" }, 1000)
+    const b = gatewayUsageOperationId({ ...base, sessionId: "s2" }, 1000)
+    expect(a).not.toBe(b)
+  })
+
+  it("falls back to an anonymous scope when the gateway reports no session", () => {
+    expect(gatewayUsageOperationId(base, 1000)).toContain(":anon:")
+  })
+})
+
 describe("forwardGatewayOutcome", () => {
-  it("records the mapped outcome into the telemetry sink", () => {
+  beforeEach(() => {
     ;(recordProviderOutcome as jest.Mock).mockClear()
+    ;(recordSurfaceUsage as jest.Mock).mockClear()
+  })
+
+  it("records the mapped outcome into the telemetry sink", () => {
     forwardGatewayOutcome(base)
     expect(recordProviderOutcome).toHaveBeenCalledWith(
       expect.objectContaining({ providerId: "openai", tokensUsed: 15 })
     )
+  })
+
+  it("writes a canonical ledger row so gateway traffic reaches the budget", () => {
+    forwardGatewayOutcome(base, 1000)
+    expect(recordSurfaceUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: "gateway",
+        operationId: gatewayUsageOperationId(base, 1000),
+        usage: expect.objectContaining({
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "gpt-4o",
+          providerId: "openai",
+          usageBasis: "provider-reported",
+        }),
+      })
+    )
+  })
+
+  it("bills nothing for a failed request", () => {
+    forwardGatewayOutcome({ ...base, ok: false, errorMessage: "boom" })
+    expect(recordSurfaceUsage).not.toHaveBeenCalled()
+  })
+
+  it("skips a success that reported no tokens at all", () => {
+    forwardGatewayOutcome({ ...base, inputTokens: null, outputTokens: null })
+    expect(recordSurfaceUsage).not.toHaveBeenCalled()
   })
 })

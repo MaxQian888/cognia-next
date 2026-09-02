@@ -236,8 +236,27 @@ describe("recordProviderOutcome", () => {
     })
   })
 
-  describe("durable cost rollup", () => {
-    it("updates the cost mirror synchronously and writes the Dexie rollup on success", async () => {
+  describe("cost is no longer written here (ADR-0165)", () => {
+    // This sink used to increment `providerCostDaily` from its own estimate
+    // while the surface's recorder wrote `sessionUsage` separately, so the two
+    // tables disagreed by construction. `lib/usage/usage-ledger.ts` now owns
+    // both writes in one transaction. These tests pin the removal, because a
+    // reinstated increment here would silently double-count every turn.
+    it("never writes the daily rollup, even for a fully priced success", async () => {
+      recordProviderOutcome({
+        providerId: "openai",
+        ok: true,
+        latencyMs: 100,
+        estimatedCostUsd: 0.05,
+        modelId: "gpt-4o",
+        inputTokens: 10_000,
+        outputTokens: 5_000,
+      })
+      await flushAsync()
+      expect(incrementProviderCost).not.toHaveBeenCalled()
+    })
+
+    it("leaves the budget mirror to the ledger commit", async () => {
       recordProviderOutcome({
         providerId: "openai",
         ok: true,
@@ -245,44 +264,27 @@ describe("recordProviderOutcome", () => {
         estimatedCostUsd: 0.05,
         modelId: "gpt-4o",
       })
-      // Mirror update is synchronous (the engine reads it on the next send).
-      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(0.05)
       await flushAsync()
-      expect(incrementProviderCost).toHaveBeenCalledWith({
-        providerId: "openai",
-        modelId: "gpt-4o",
-        costUsd: 0.05,
-        inputTokens: undefined,
-        outputTokens: undefined,
-      })
+      // The mirror only ever moves now via `setBudgetMirrorSink`, which the
+      // ledger calls with the COMMITTED day total rather than an optimistic add.
+      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
     })
 
-    it("rolls up token volume for a zero-cost turn without touching the budget mirror", async () => {
-      // A local / free-tier model: no SDK cost, no priced estimate, but real
-      // tokens. The daily rollup (read by the settings Cost tab) still records
-      // the volume; the routing budget mirror stays untouched.
+    it("still feeds the health store's cost-per-call view", async () => {
+      // The health store is a live metric, not a ledger, so the locally
+      // estimated figure remains the right input for it.
       recordProviderOutcome({
-        providerId: "ollama",
+        providerId: "openai",
         ok: true,
-        latencyMs: 40,
-        modelId: "llama3",
-        inputTokens: 1_200,
-        outputTokens: 300,
+        latencyMs: 100,
+        modelId: "gpt-4o",
+        inputTokens: 10_000,
+        outputTokens: 5_000,
       })
-      expect(useProviderCostMirrorStore.getState().getTodaySpend("ollama")).toBe(0)
-      await flushAsync()
-      expect(incrementProviderCost).toHaveBeenCalledWith(
-        expect.objectContaining({
-          providerId: "ollama",
-          modelId: "llama3",
-          costUsd: 0,
-          inputTokens: 1_200,
-          outputTokens: 300,
-        })
-      )
+      expect(useHealthMetricsStore.getState().getMetrics("openai").totalCost).toBeGreaterThan(0)
     })
 
-    it("does not write cost on failure", async () => {
+    it("writes no rollup for a failure either", async () => {
       recordProviderOutcome({
         providerId: "openai",
         ok: false,
@@ -292,80 +294,10 @@ describe("recordProviderOutcome", () => {
         modelId: "gpt-4o",
       })
       await flushAsync()
-      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
       expect(incrementProviderCost).not.toHaveBeenCalled()
-    })
-
-    it("does not write cost without a modelId or with zero cost", async () => {
-      recordProviderOutcome({
-        providerId: "openai",
-        ok: true,
-        latencyMs: 10,
-        estimatedCostUsd: 0.05,
-      })
-      recordProviderOutcome({ providerId: "openai", ok: true, latencyMs: 10, modelId: "gpt-4o" })
-      recordProviderOutcome({
-        providerId: "openai",
-        ok: true,
-        latencyMs: 10,
-        estimatedCostUsd: 0,
-        modelId: "gpt-4o",
-      })
-      await flushAsync()
-      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
-      expect(incrementProviderCost).not.toHaveBeenCalled()
-    })
-
-    it("estimates cost from the token breakdown when the SDK reports none", async () => {
-      // Non-Anthropic turn: no estimatedCostUsd, but a priced model + tokens.
-      recordProviderOutcome({
-        providerId: "openai",
-        ok: true,
-        latencyMs: 100,
-        modelId: "gpt-4o",
-        inputTokens: 10_000,
-        outputTokens: 5_000,
-      })
-      const spend = useProviderCostMirrorStore.getState().getTodaySpend("openai")
-      expect(spend).toBeGreaterThan(0)
-      // The same estimate also reaches the health-metrics cost rollup.
-      expect(useHealthMetricsStore.getState().getMetrics("openai").totalCost).toBeCloseTo(spend)
-      await flushAsync()
-      expect(incrementProviderCost).toHaveBeenCalledWith(
-        expect.objectContaining({ providerId: "openai", modelId: "gpt-4o" })
-      )
-    })
-
-    it("prefers the SDK cost over the token estimate when both are present", async () => {
-      recordProviderOutcome({
-        providerId: "openai",
-        ok: true,
-        latencyMs: 100,
-        estimatedCostUsd: 0.5,
-        modelId: "gpt-4o",
-        inputTokens: 10_000,
-        outputTokens: 5_000,
-      })
-      // 0.5 is far above any token-estimate for these counts → SDK figure used.
-      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBeCloseTo(0.5)
-    })
-
-    it("stays unknown for a priced-less model even with tokens (volume still rolls up)", async () => {
-      recordProviderOutcome({
-        providerId: "openai",
-        ok: true,
-        latencyMs: 100,
-        modelId: "mystery-model-xyz",
-        inputTokens: 10_000,
-        outputTokens: 5_000,
-      })
-      await flushAsync()
-      // Cost is unknown → the budget mirror is untouched …
-      expect(useProviderCostMirrorStore.getState().getTodaySpend("openai")).toBe(0)
-      // … but the daily rollup still records the token volume at zero cost.
-      expect(incrementProviderCost).toHaveBeenCalledWith(
-        expect.objectContaining({ modelId: "mystery-model-xyz", costUsd: 0, inputTokens: 10_000 })
-      )
+      // The health store still books the attempt's cost, which is correct for
+      // a live metric: a failed upstream call can bill for what it consumed.
+      expect(useHealthMetricsStore.getState().getMetrics("openai").totalErrors).toBe(1)
     })
   })
 })

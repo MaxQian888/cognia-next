@@ -343,6 +343,7 @@ export const CORE_TABLE_NAMES = [
   "twins",
   "unattendedExecAudit",
   "users",
+  "usageSourceStates",
   "vscodeExtensionRuntime",
   "wasmGrantLedger",
   "wikiArticles",
@@ -649,6 +650,9 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "remoteControlRunStatus",
   "retrievalActivePointers",
   "retrievalGenerations",
+  // ADR-0165 Phase 0. Per-source scan state for the external usage index:
+  // fully rebuildable by re-running the scan, and never a source of truth.
+  "usageSourceStates",
   "users",
   "workspaceMemberships",
 ])

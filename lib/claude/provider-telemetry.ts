@@ -23,7 +23,6 @@ import {
 import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 import { useCircuitBreakerStore } from "@/stores/settings/circuit-breaker-store"
-import { useProviderCostMirrorStore } from "@/stores/settings/provider-cost-mirror-store"
 import { useRateLimitStore } from "@/stores/settings/rate-limit-store"
 import { deploymentKeyOf, DEPLOYMENT_MODEL_WILDCARD } from "@cognia/provider-types/deployment"
 import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
@@ -163,47 +162,21 @@ export function recordProviderOutcome(outcome: ProviderOutcome): void {
       }
     }
 
-    // Durable daily rollup (successful turns only). Mirror update is
-    // synchronous so the routing engine's budget check sees spend immediately;
-    // the Dexie write is fire-and-forget off the send path. Zero-cost turns
-    // (local / free-tier models) still roll up their token volume so the
-    // settings Cost tab — which reads this table — is not blank for them.
-    if (ok && modelId && (effectiveCostUsd > 0 || (inputTokens ?? 0) + (outputTokens ?? 0) > 0)) {
-      const optimistic = effectiveCostUsd > 0
-      if (optimistic) {
-        useProviderCostMirrorStore.getState().addCost(providerId, effectiveCostUsd)
-      }
-      void import("@/lib/db/provider-cost-daily")
-        .then((m) =>
-          m.incrementProviderCost({
-            providerId,
-            modelId,
-            costUsd: effectiveCostUsd,
-            inputTokens,
-            outputTokens,
-          })
-        )
-        .then((committed) => {
-          // Snap the mirror to what actually landed. Without this the optimistic
-          // add above and the durable rollup drift apart permanently whenever a
-          // write is lost, and the drift only surfaces as a budget that fires at
-          // the wrong threshold after the next boot re-hydrates from Dexie.
-          if (committed) {
-            useProviderCostMirrorStore
-              .getState()
-              .reconcileProvider(committed.providerId, committed.day, committed.providerTotalUsd)
-          } else if (optimistic) {
-            // The write was rejected as invalid — the mirror must not keep spend
-            // that will never be persisted.
-            useProviderCostMirrorStore.getState().rollbackCost(providerId, effectiveCostUsd)
-          }
-        })
-        .catch(() => {
-          if (optimistic) {
-            useProviderCostMirrorStore.getState().rollbackCost(providerId, effectiveCostUsd)
-          }
-        })
-    }
+    // ADR-0165: this sink NO LONGER writes `providerCostDaily`.
+    //
+    // It used to, from its own `estimateCostFromTotals` fallback, while
+    // `sessionUsage` was written separately by the surface's own recorder. The
+    // two therefore disagreed by construction: a retried turn overwrote one
+    // table in place and incremented the other a second time, and a turn whose
+    // SDK cost was 0 but whose tokens were priceable landed in the rollup and
+    // not in the ledger. `lib/usage/usage-ledger.ts` now owns both writes in
+    // one transaction, keyed on the row the surface already persists, so the
+    // projection is a function of the ledger rather than a parallel guess.
+    //
+    // What stays here is everything this sink is actually authoritative for:
+    // health, rate limits, the circuit breaker, deployment affinity, and the
+    // provider child span below. `effectiveCostUsd` still feeds the health
+    // store's cost-per-call view, which is a live metric and not a ledger.
   } catch {
     // Telemetry must never break a send.
   }

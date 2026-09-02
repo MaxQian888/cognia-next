@@ -395,7 +395,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 217
+export const CURRENT_SCHEMA_VERSION = 218
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -486,7 +486,7 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   workflowTriggers: "&id, workflowId, kind, enabled, [workflowId+enabled], cron, nextFireAt",
   pairedDevices: "&deviceId, lastSeenAt, revokedAt, platform",
   sessionUsage:
-    "&messageId, sessionId, [sessionId+at], at, model, characterId, surface, providerId, projectId, [projectId+at], runId",
+    "&messageId, sessionId, [sessionId+at], at, model, characterId, surface, providerId, projectId, [projectId+at], runId, sourceId, [sourceId+sourceSessionId]",
   mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
   chatDrafts: "&sessionId, updatedAt",
   pluginDexieMeta: "&pluginId, appliedAt",
@@ -543,6 +543,8 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   terminalHistory: "&id, ts, command, [projectId+command]",
   unattendedExecAudit: "&id, ts, runId",
   providerCostDaily: "&id, day, providerId, [providerId+day], updatedAt",
+  // v218 - derived, local-only scan state for the external usage index.
+  usageSourceStates: "&sourceId, status, lastScanAt",
   toolRoutes: "&id, refId, kind, enabled, pluginId",
   petConversation: "++id, at",
   loops:
@@ -1614,6 +1616,9 @@ export class CogniaDB extends Dexie {
   providerEndpointChanges!: Table<ProviderEndpointChange, string>
   // v75 — Provider cost rollups. See `lib/db/provider-cost-daily.ts`.
   providerCostDaily!: Table<ProviderCostDailyRow, string>
+  // v218 - Per-source scan state for the external usage index (ADR-0165).
+  // Derived + local-only. See `lib/db/usage-source-states.ts`.
+  usageSourceStates!: Table<import("@/lib/db/usage-source-states").UsageSourceStateRow, string>
   // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.
   toolRoutes!: Table<import("@/types/routing/tool-route").ToolRouteRecord, string>
   // v77 — Pet conversation history. See `lib/db/pet-conversation.ts`.

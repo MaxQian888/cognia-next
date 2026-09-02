@@ -31,6 +31,7 @@ const SURFACE_LABEL_KEYS: Record<UsageSurface, string> = {
   ocr: "ocr",
   tts: "tts",
   "web-search": "webSearch",
+  gateway: "gateway",
   imported: "imported",
 }
 

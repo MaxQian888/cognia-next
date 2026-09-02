@@ -14,6 +14,7 @@
 import { extractUsage, type UsageInfo } from "@/lib/claude/adapter"
 import type { SDKResultMessage } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
+import { commitUsageRow } from "@/lib/usage/usage-ledger"
 
 /**
  * Which surface produced a usage row. Lets the Subscription → Usage tab show
@@ -41,6 +42,8 @@ export type UsageSurface =
   | "ocr"
   | "tts"
   | "web-search"
+  /** Inbound traffic served through the local gateway (ADR-0165). */
+  | "gateway"
   | "imported"
 
 /** Every metered surface, for exhaustive UI filters. */
@@ -59,6 +62,7 @@ export const USAGE_SURFACES: readonly UsageSurface[] = [
   "ocr",
   "tts",
   "web-search",
+  "gateway",
   "imported",
 ]
 
@@ -86,6 +90,20 @@ export type UsageCostSource =
  * moved on; absent on `sdk` rows (the provider did the arithmetic) and on
  * legacy rows.
  */
+/**
+ * How the TOKEN figures on a row were obtained. Deliberately separate from
+ * `costSource`: a provider can report exact tokens while the money is still
+ * priced locally, and collapsing the two made "provider-reported" mean two
+ * different things depending on which field you read.
+ */
+export type UsageBasis =
+  /** Tokens came from the provider/SDK payload for this exact turn. */
+  | "provider-reported"
+  /** Tokens were derived from a transcript the provider wrote (external scan). */
+  | "derived"
+  /** Tokens were estimated locally (tokenizer or heuristic). */
+  | "estimated"
+
 export interface UsagePriceSnapshot {
   promptPer1M?: number
   completionPer1M?: number
@@ -202,16 +220,45 @@ export interface SessionUsageRow {
    * history include them and label them.
    */
   imported?: boolean
+
+  /* ── v218: ADR-0165 external usage index ───────────────────────────────── */
+  /**
+   * Which `AgentSessionSourceAdapter` produced this row. Absent means the row
+   * was observed locally by Cognia itself, which is what every legacy row is.
+   * Rows carrying a `sourceId` are ALWAYS `imported: true` as well, so the
+   * budget predicate needs no new case.
+   */
+  sourceId?: string
+  /** The upstream session id inside that source, for per-session rollups. */
+  sourceSessionId?: string
+  /**
+   * Content revision of the locator the row was parsed from. A changed
+   * revision is what lets an incremental re-scan replace exactly the rows a
+   * grown file produced without re-reading the whole corpus.
+   */
+  sourceRevision?: string
+  /** Provenance of the TOKEN figures. Absent on legacy rows. */
+  usageBasis?: UsageBasis
+  /**
+   * Version of the analyzer that last classified this row. Lets a detector
+   * bump invalidate its own derived verdicts without touching the money.
+   */
+  analysisVersion?: number
 }
 
 /**
- * Insert or replace a single row. Idempotent on `messageId` — the same id
+ * Insert or replace a single row. Idempotent on `messageId`: the same id
  * always overwrites the same row, so re-emitting a result event during
  * streaming retries doesn't double-count.
+ *
+ * Every one of the `record*Usage` helpers below funnels through here, and here
+ * funnels through `commitUsageRow` (ADR-0165), which freezes the cost and
+ * commits the `providerCostDaily` DELTA in the same transaction. That is the
+ * only reason the ledger and the budget projection can be asserted equal:
+ * there is exactly one writer, and an overwrite retracts what it replaces.
  */
 export async function upsertSessionUsage(row: SessionUsageRow): Promise<void> {
-  if (!row.messageId || !row.sessionId) return
-  await getDb().sessionUsage.put(row)
+  await commitUsageRow(row)
 }
 
 /**
@@ -330,6 +377,13 @@ export interface SurfaceUsageInput {
   attemptId?: string
   /** Marks spend that was paid elsewhere and must not blend into local totals. */
   imported?: boolean
+
+  /* ── v218 external usage index passthrough ─────────────────────────────── */
+  sourceId?: string
+  sourceSessionId?: string
+  sourceRevision?: string
+  usageBasis?: UsageBasis
+  analysisVersion?: number
 }
 
 /**
@@ -350,6 +404,11 @@ function carryFrozenFields(usage: SurfaceUsageInput): Partial<SessionUsageRow> {
   if (usage.runId !== undefined) out.runId = usage.runId
   if (usage.turnId !== undefined) out.turnId = usage.turnId
   if (usage.attemptId !== undefined) out.attemptId = usage.attemptId
+  if (usage.sourceId !== undefined) out.sourceId = usage.sourceId
+  if (usage.sourceSessionId !== undefined) out.sourceSessionId = usage.sourceSessionId
+  if (usage.sourceRevision !== undefined) out.sourceRevision = usage.sourceRevision
+  if (usage.usageBasis !== undefined) out.usageBasis = usage.usageBasis
+  if (usage.analysisVersion !== undefined) out.analysisVersion = usage.analysisVersion
   const c5 = num(usage.cacheCreation5mTokens)
   const c1h = num(usage.cacheCreation1hTokens)
   if (c5 > 0) out.cacheCreation5mTokens = c5

@@ -126,6 +126,57 @@ export interface SessionImportDetail {
   loss: SessionLossReport
 }
 
+/* ── Usage scanning (ADR-0165 Phase 0) ────────────────────────────────── */
+
+/**
+ * What one incremental usage scan is allowed to do.
+ *
+ * The bounds are the whole point. A usage scan runs on a foreground open or an
+ * explicit refresh, against corpora that can be gigabytes, on the main thread
+ * of a desktop app. Everything here exists so a scan can stop cleanly and
+ * resume, rather than block the UI or be abandoned half-written.
+ */
+export interface UsageScanQuery {
+  /** Ignore sessions whose last activity predates this instant. */
+  sinceMs?: number
+  /** Hard ceiling on rows returned in one batch. */
+  maxRows?: number
+  /** Hard ceiling on locators visited in one batch. */
+  maxSessions?: number
+  /** Cooperative cancellation. A scan MUST honour it between locators. */
+  signal?: AbortSignal
+}
+
+/** One bounded slice of a source's usage history. */
+export interface UsageScanBatch {
+  /**
+   * Rows in canonical shape, already stamped with `sourceId` /
+   * `sourceSessionId` / `imported: true`. Never partial money: a locator either
+   * contributes all of its rows or none of them.
+   */
+  rows: import("@/lib/db/session-usage").SessionUsageRow[]
+  /**
+   * Opaque resume point, or `null` when the source was read to the end. Only
+   * a `null` cursor licenses deleting rows for sessions that vanished.
+   */
+  cursor: string | null
+  /** Locators read successfully / skipped after a read or parse failure. */
+  parsed: number
+  failed: number
+  /** True when a bound (rows, sessions, or abort) ended the batch early. */
+  truncated: boolean
+  /**
+   * Coarse, non-identifying reason the batch degraded. Never a path, never an
+   * OS message: this value reaches a durable table and the tray.
+   */
+  degradedReason?: "root-missing" | "read-failed" | "aborted" | "budget"
+  /**
+   * Digest of the locator set observed (sizes and timestamps, never content).
+   * A changed fingerprint is what forbids the next scan from shortcutting.
+   */
+  fingerprint?: string
+}
+
 /**
  * A source of importable agent session histories. First-party sources
  * (claude-code / codex / opencode) are static; plugins contribute more through
@@ -182,6 +233,24 @@ export interface AgentSessionSourceAdapter {
    * remains only the backwards-compatible plugin/legacy surface.
    */
   parseGraph?(ref: SessionRef, input: SessionScanInput): Promise<ImportedSessionGraph>
+  /**
+   * OPTIONAL incremental usage scan (ADR-0165).
+   *
+   * When present it is authoritative and the generic driver in
+   * `lib/session-import/usage-scan.ts` steps aside. Implement it when a source
+   * can produce token/cost rows WITHOUT materializing `StoredMessage[]`, which
+   * is what the generic fallback has to do: a full `parseSession` per locator,
+   * then a throwaway allocation of every message just to read the usage blobs
+   * hanging off a handful of them.
+   *
+   * Contract: emit bounded batches, honour `query.signal` between locators,
+   * and return a `null` cursor ONLY when the source was read to the end.
+   */
+  scanUsage?(
+    input: SessionScanInput,
+    query: UsageScanQuery,
+    cursor?: string | null
+  ): Promise<UsageScanBatch>
   /**
    * OPTIONAL cheap summary of one file's raw content — a single pass that pulls
    * only title / count / timestamps / cwd WITHOUT building any `StoredMessage`,
