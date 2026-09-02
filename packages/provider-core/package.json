@@ -18,6 +18,10 @@
     "./core/*": {
       "cognia-source": "./src/core/*.ts",
       "default": "./src/core/*.ts"
+    },
+    "./operations/*": {
+      "cognia-source": "./src/operations/*.ts",
+      "default": "./src/operations/*.ts"
     }
   },
   "scripts": {
