@@ -87,7 +87,12 @@ export function subscribeChatTemplates(listener: ChatTemplatesListener): () => v
   }
 }
 
-function notifyChatTemplatesChanged(): void {
+/**
+ * Exported for the companion sync handler, whose rows arrive through a plain
+ * `bulkPut` rather than the writers above, so an open composer would otherwise
+ * keep offering yesterday's list until it remounted.
+ */
+export function notifyChatTemplatesChanged(): void {
   for (const listener of [...listeners]) {
     // A subscriber that throws must not take down the write that just
     // succeeded. Saving a template is the user's action, the projection is

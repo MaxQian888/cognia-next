@@ -1,5 +1,7 @@
 import { getDb } from "@/lib/db/schema"
 
+import { subscribeChatTemplates } from "@/lib/db/chat-templates"
+
 import { syncChatTemplates } from "./chat-templates"
 import { RETRIEVAL_CONTENT_PROTOCOL_VERSION } from "./base"
 
@@ -54,5 +56,32 @@ describe("chat template mobile sync", () => {
       ok: true,
       result: { table: "chatTemplates", applied: 2, nextSince: 9 },
     })
+  })
+
+  // The pull writes straight into Dexie, so nothing else would tell an open
+  // composer that its `/` menu is stale. An empty pull must stay quiet, or a
+  // phone would rebuild the menu on every idle poll.
+  it("announces applied rows to subscribers, and only applied rows", async () => {
+    const seen: number[] = []
+    const stop = subscribeChatTemplates(() => seen.push(1))
+
+    await syncChatTemplates(
+      { call: jest.fn(async () => ({ rows: [], deleted_ids: [], next_since: 1 })) } as never,
+      { since: 0 }
+    )
+    expect(seen).toHaveLength(0)
+
+    await syncChatTemplates(
+      {
+        call: jest.fn(async () => ({
+          rows: [{ id: "tpl_b", name: "Retro", body: "x", updatedAt: 2 }],
+          deleted_ids: [],
+          next_since: 2,
+        })),
+      } as never,
+      { since: 1 }
+    )
+    expect(seen).toHaveLength(1)
+    stop()
   })
 })

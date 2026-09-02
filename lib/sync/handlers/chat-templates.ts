@@ -25,13 +25,16 @@
  */
 
 import { getDb } from "@/lib/db/schema"
-import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import { notifyChatTemplatesChanged, type ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { Transport } from "@/lib/tauri/transport-types"
 import type { SyncCursor, SyncOutcome } from "../types"
 import { runSyncHandler } from "./base"
 
-export function syncChatTemplates(transport: Transport, cursor: SyncCursor): Promise<SyncOutcome> {
-  return runSyncHandler<ChatTemplateRow>(
+export async function syncChatTemplates(
+  transport: Transport,
+  cursor: SyncCursor
+): Promise<SyncOutcome> {
+  const outcome = await runSyncHandler<ChatTemplateRow>(
     {
       table: "chatTemplates",
       getTable: () => getDb().chatTemplates,
@@ -39,4 +42,8 @@ export function syncChatTemplates(transport: Transport, cursor: SyncCursor): Pro
     transport,
     cursor
   )
+  // The pull writes straight into Dexie, bypassing the table's own writers,
+  // so tell the composer and the catalog projection that the list changed.
+  if (outcome.ok && outcome.result.applied > 0) notifyChatTemplatesChanged()
+  return outcome
 }

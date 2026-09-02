@@ -177,6 +177,7 @@ import {
   createChatTemplate,
   listChatTemplates,
   recordChatTemplateUse,
+  subscribeChatTemplates,
   type ChatTemplateRow,
 } from "@/lib/db/chat-templates"
 import {
@@ -835,6 +836,10 @@ function ComposerInner(props: InnerProps) {
       cancelled = true
     }
   }, [templateEpoch])
+  // Templates also change behind this box: saved or imported in Settings,
+  // adopted from a repository, or pulled in by the companion sync on a phone.
+  // Each of those announces itself, so the `/` menu follows without a remount.
+  useEffect(() => subscribeChatTemplates(() => setTemplateEpoch((epoch) => epoch + 1)), [])
   /**
    * Load a past turn back into the box, chips and all.
    *
