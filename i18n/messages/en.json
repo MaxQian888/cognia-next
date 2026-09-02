@@ -1469,6 +1469,95 @@
     }
   },
   "account": {
+    "cloud": {
+      "advanced": {
+        "clientId": "Client id",
+        "issuer": "Issuer",
+        "missing": "Issuer, client id, resource and redirect URI are all required.",
+        "redirectUri": "Redirect URI",
+        "resource": "API resource",
+        "submit": "Sign in with this configuration",
+        "toggle": "Advanced: configure Logto manually"
+      },
+      "awaitingCode": "Finish signing in in the browser, then paste the address it landed on.",
+      "cancel": "Cancel",
+      "checking": "Checking how this deployment signs people in",
+      "choose": {
+        "description": "You belong to more than one. You can switch later from Account.",
+        "role": {
+          "admin": "Admin",
+          "guest": "Guest",
+          "member": "Member",
+          "owner": "Owner"
+        },
+        "select": "Use this organization",
+        "title": "Choose an organization",
+        "workspaces": "{count, plural, =1 {1 workspace} other {# workspaces}}"
+      },
+      "claim": {
+        "credentialLabel": "Bootstrap credential",
+        "credentialPlaceholder": "Paste the credential",
+        "description": "The operator hands the first owner a one-time credential. Everyone after joins by invitation.",
+        "missing": "Both the credential and an organization name are required.",
+        "orgNameLabel": "Organization name",
+        "orgNamePlaceholder": "Acme",
+        "submit": "Create the organization and make me its owner",
+        "title": "Claim this deployment"
+      },
+      "codePlaceholder": "Paste the callback address or code",
+      "continueOffline": "Continue offline",
+      "continueOfflineHint": "Your local data stays available. Shared workspaces and issues will not sync until you sign in.",
+      "continueWith": "Continue with {provider}",
+      "continueWithLogto": "Continue with Logto",
+      "description": "This deployment uses a shared identity provider. Sign in once and this profile is yours everywhere.",
+      "error": {
+        "callbackMalformed": "That is not a callback address or code.",
+        "generic": "Sign-in did not complete: {message}",
+        "noCollaborationService": "The deployment announces no collaboration service, so there is no organization to join.",
+        "notInvited": "The server refused: that token is not a valid invitation.",
+        "profileBoundToAnother": "This profile already belongs to {name}. Sign out there first.",
+        "reauthRequired": "The session cannot mint an organization token. Sign in again.",
+        "stateMismatch": "The callback belongs to a different sign-in attempt. Start again."
+      },
+      "invitation": {
+        "invalid": "That does not look like an invitation token.",
+        "submit": "Join",
+        "title": "I have an invitation",
+        "tokenLabel": "Invitation token",
+        "tokenPlaceholder": "Paste the token"
+      },
+      "offline": {
+        "body": "Your last session is kept. You can keep working offline and it will refresh once the provider is reachable."
+      },
+      "provider": {
+        "feishu": "Feishu",
+        "github": "GitHub",
+        "google": "Google",
+        "lark": "Lark",
+        "microsoft": "Microsoft",
+        "wechat": "WeChat"
+      },
+      "reauth": {
+        "binding-missing": "This profile is signed in, but not yet bound to a person.",
+        "expired": "Your session expired.",
+        "revoked": "Your session was signed out elsewhere."
+      },
+      "settling": "Looking up your organizations",
+      "signOut": "Sign out",
+      "signedInAs": "Signed in as {name}",
+      "signingIn": "Signing in",
+      "submitCode": "Continue",
+      "title": "Sign in to {deployment}",
+      "titleGeneric": "Sign in to your organization",
+      "unaffiliated": {
+        "description": "Redeem the invitation you were given, or claim this deployment if you are setting it up.",
+        "title": "You are signed in, but not in an organization yet"
+      },
+      "unavailable": {
+        "body": "The host at {baseUrl} did not answer with a sign-in configuration: {message}",
+        "title": "Sign-in is not available right now"
+      }
+    },
     "gate": {
       "abandonAttempt": "Stop waiting",
       "attemptsRemaining": "{count, plural, =1 {1 attempt left before a cooldown} other {# attempts left before a cooldown}}",
@@ -1539,6 +1628,49 @@
       "unlocking": "Unlocking...",
       "useRecoveryKey": "Forgot your password?"
     },
+    "identity": {
+      "current": "Current",
+      "description": "Who this profile is on the shared deployment, and which organization it works in.",
+      "loading": "Reading the cloud session",
+      "memberships": "Organizations",
+      "membershipsEmpty": "No organizations yet.",
+      "membershipsFailed": "Could not read organizations: {message}",
+      "membershipsLoading": "Loading organizations",
+      "noDeployment": "No cloud deployment is configured for this profile.",
+      "organization": "Organization",
+      "person": "Person",
+      "revocationFailed": "Signed out locally, but the identity provider could not be told.",
+      "role": "Role",
+      "roleName": {
+        "admin": "Admin",
+        "member": "Member",
+        "owner": "Owner"
+      },
+      "session": "Session",
+      "sessionExpires": "Expires {date}",
+      "sessionUnknownExpiry": "Expiry unknown",
+      "signIn": "Sign in",
+      "signOut": "Sign out",
+      "signOutDone": "Signed out.",
+      "signedOut": "This profile is not signed in to a cloud identity.",
+      "state": {
+        "active": "Active",
+        "error": "Error",
+        "offline": "Offline",
+        "reauth-required": "Needs sign-in"
+      },
+      "switch": "Switch",
+      "switchFailed": "Could not switch: {message}",
+      "switched": "Switched to {org}.",
+      "switching": "Switching",
+      "title": "Cloud identity"
+    },
+    "invite": {
+      "continue": "Continue",
+      "invalid": "That link does not carry a valid invitation token.",
+      "received": "Invitation received. Sign in to join.",
+      "title": "Invitation"
+    },
     "manage": {
       "activeAccountLabel": "Current account",
       "activeBadge": "Active",
@@ -1604,12 +1736,12 @@
       "switchPasswordPlaceholder": "Account password",
       "switchToAccount": "Switch to this account",
       "tabDanger": "Danger zone",
+      "tabIdentity": "Identity",
       "tabProfile": "Profile",
       "tabSecurity": "Security",
       "title": "Local accounts",
       "undo": "Undo",
-      "updatedAtLabel": "Updated",
-      "tabIdentity": "Identity"
+      "updatedAtLabel": "Updated"
     },
     "passwordStrength": {
       "aria": "Password strength",
@@ -1644,138 +1776,6 @@
       "operationFailed": "Local account operation failed.",
       "switchPasswordLabel": "Password",
       "switchPasswordPlaceholder": "Password"
-    },
-    "cloud": {
-      "title": "Sign in to {deployment}",
-      "titleGeneric": "Sign in to your organization",
-      "description": "This deployment uses a shared identity provider. Sign in once and this profile is yours everywhere.",
-      "checking": "Checking how this deployment signs people in",
-      "continueWith": "Continue with {provider}",
-      "provider": {
-        "github": "GitHub",
-        "feishu": "Feishu",
-        "lark": "Lark",
-        "google": "Google",
-        "microsoft": "Microsoft",
-        "wechat": "WeChat"
-      },
-      "continueWithLogto": "Continue with Logto",
-      "signingIn": "Signing in",
-      "awaitingCode": "Finish signing in in the browser, then paste the address it landed on.",
-      "codePlaceholder": "Paste the callback address or code",
-      "submitCode": "Continue",
-      "cancel": "Cancel",
-      "continueOffline": "Continue offline",
-      "continueOfflineHint": "Your local data stays available. Shared workspaces and issues will not sync until you sign in.",
-      "reauth": {
-        "expired": "Your session expired.",
-        "revoked": "Your session was signed out elsewhere.",
-        "binding-missing": "This profile is signed in, but not yet bound to a person."
-      },
-      "offline": {
-        "body": "Your last session is kept. You can keep working offline and it will refresh once the provider is reachable."
-      },
-      "unavailable": {
-        "title": "Sign-in is not available right now",
-        "body": "The host at {baseUrl} did not answer with a sign-in configuration: {message}"
-      },
-      "advanced": {
-        "toggle": "Advanced: configure Logto manually",
-        "issuer": "Issuer",
-        "clientId": "Client id",
-        "resource": "API resource",
-        "redirectUri": "Redirect URI",
-        "submit": "Sign in with this configuration",
-        "missing": "Issuer, client id, resource and redirect URI are all required."
-      },
-      "settling": "Looking up your organizations",
-      "choose": {
-        "title": "Choose an organization",
-        "description": "You belong to more than one. You can switch later from Account.",
-        "workspaces": "{count, plural, =1 {1 workspace} other {# workspaces}}",
-        "role": {
-          "owner": "Owner",
-          "admin": "Admin",
-          "member": "Member",
-          "guest": "Guest"
-        },
-        "select": "Use this organization"
-      },
-      "unaffiliated": {
-        "title": "You are signed in, but not in an organization yet",
-        "description": "Redeem the invitation you were given, or claim this deployment if you are setting it up."
-      },
-      "invitation": {
-        "title": "I have an invitation",
-        "tokenLabel": "Invitation token",
-        "tokenPlaceholder": "Paste the token",
-        "submit": "Join",
-        "invalid": "That does not look like an invitation token."
-      },
-      "claim": {
-        "title": "Claim this deployment",
-        "description": "The operator hands the first owner a one-time credential. Everyone after joins by invitation.",
-        "credentialLabel": "Bootstrap credential",
-        "credentialPlaceholder": "Paste the credential",
-        "orgNameLabel": "Organization name",
-        "orgNamePlaceholder": "Acme",
-        "submit": "Create the organization and make me its owner",
-        "missing": "Both the credential and an organization name are required."
-      },
-      "error": {
-        "generic": "Sign-in did not complete: {message}",
-        "profileBoundToAnother": "This profile already belongs to {name}. Sign out there first.",
-        "notInvited": "The server refused: that token is not a valid invitation.",
-        "reauthRequired": "The session cannot mint an organization token. Sign in again.",
-        "noCollaborationService": "The deployment announces no collaboration service, so there is no organization to join.",
-        "callbackMalformed": "That is not a callback address or code.",
-        "stateMismatch": "The callback belongs to a different sign-in attempt. Start again."
-      },
-      "signedInAs": "Signed in as {name}",
-      "signOut": "Sign out"
-    },
-    "identity": {
-      "title": "Cloud identity",
-      "description": "Who this profile is on the shared deployment, and which organization it works in.",
-      "loading": "Reading the cloud session",
-      "signedOut": "This profile is not signed in to a cloud identity.",
-      "signIn": "Sign in",
-      "person": "Person",
-      "organization": "Organization",
-      "role": "Role",
-      "session": "Session",
-      "sessionExpires": "Expires {date}",
-      "sessionUnknownExpiry": "Expiry unknown",
-      "state": {
-        "active": "Active",
-        "reauth-required": "Needs sign-in",
-        "offline": "Offline",
-        "error": "Error"
-      },
-      "memberships": "Organizations",
-      "membershipsLoading": "Loading organizations",
-      "membershipsEmpty": "No organizations yet.",
-      "membershipsFailed": "Could not read organizations: {message}",
-      "current": "Current",
-      "switch": "Switch",
-      "switching": "Switching",
-      "switched": "Switched to {org}.",
-      "switchFailed": "Could not switch: {message}",
-      "signOutDone": "Signed out.",
-      "revocationFailed": "Signed out locally, but the identity provider could not be told.",
-      "noDeployment": "No cloud deployment is configured for this profile.",
-      "signOut": "Sign out",
-      "roleName": {
-        "owner": "Owner",
-        "admin": "Admin",
-        "member": "Member"
-      }
-    },
-    "invite": {
-      "title": "Invitation",
-      "received": "Invitation received. Sign in to join.",
-      "invalid": "That link does not carry a valid invitation token.",
-      "continue": "Continue"
     }
   },
   "agentComposition": {
@@ -2718,6 +2718,8 @@
       "title": "Consensus",
       "type": "Type: {type}",
       "vote": "Vote",
+      "voteAs": "Vote as",
+      "voteAsEmpty": "This team has no members to vote as",
       "voteCount": "{count} votes"
     },
     "createFromScratch": "From scratch",
@@ -7308,19 +7310,32 @@
     "userIdPlaceholder": "usr_…"
   },
   "chatTemplatesSettings": {
+    "adopt": "Adopt into my library",
+    "adopted": "Adopted {name}.",
     "body": "Message",
     "cancel": "Cancel",
     "delete": "Delete",
     "deleted": "Deleted {name}.",
     "description": "Description",
+    "duplicate": "Duplicate",
+    "duplicated": "Duplicated {name}.",
+    "duplicatedName": "{name} (copy)",
     "edit": "Edit",
     "empty": "No saved templates yet. Write a message with parameters in it and use the bookmark control beside the composer.",
+    "exportAction": "Export .md",
     "hasSetup": "Carries a setup",
+    "importAction": "Import .md",
+    "importFailed": "That file is not a template this app can read.",
+    "importHint": "Templates travel as Markdown. An imported setup is trimmed the same way a repository template's is: it may make a conversation stricter, never looser.",
+    "imported": "Imported {name}.",
     "kindEnum": "Choice",
     "kindResource": "Reference",
     "kindString": "Text",
     "name": "Name",
     "noParameters": "none",
+    "overwriteBody": "A template file is already there. Replacing it rewrites what everyone who clones this repository gets.",
+    "overwriteConfirm": "Replace",
+    "overwriteTitle": "Replace {path}?",
     "paramDefault": "Default value",
     "paramKind": "Type",
     "paramLabel": "Label",
@@ -7331,12 +7346,19 @@
     "paramResource": "Picks from",
     "parameters": "Parameters",
     "paramsHint": "Every parameter token in the message is a parameter. Type says how it is filled in; a parameter that is not required may be sent blank.",
+    "repoHeading": "From this repository",
     "repoHint": "Templates in {path} travel with the repository — edit them there and they reach the whole team. They are only offered in workspaces you trust.",
+    "repoReadOnly": "Read-only",
     "resourceAgent": "Team member",
     "resourceFile": "Workspace file",
     "resourceSubagent": "Subagent",
     "save": "Save",
+    "saveToRepo": "Save to repository",
+    "saveToRepoFailed": "Could not write {path}.",
+    "saveToRepoNoRoot": "There is no open workspace to save into.",
+    "saveToRepoRestricted": "This workspace is not trusted, so nothing was written.",
     "saved": "Template saved.",
+    "savedToRepo": "Saved to {path}.",
     "used": "{count, plural, =0 {never used} =1 {used once} other {used # times}}"
   },
   "cliHandoff": {
@@ -10055,7 +10077,8 @@
       "piiBody": "This item may contain personal info (emails, phone numbers, keys). Remove it before sharing publicly, or share the original anyway.",
       "piiTitle": "Possible personal info detected",
       "shareOriginal": "Share anyway",
-      "shareRedacted": "Remove and continue"
+      "shareRedacted": "Remove and continue",
+      "teamTemplateUnavailable": "This squad template has no published release behind it yet, so there is nothing to share."
     },
     "shellDesktop": "desktop",
     "shellMobile": "mobile",
@@ -16070,52 +16093,6 @@
       "thinkingSection": "Thinking budget",
       "title": "Agent defaults"
     },
-    "agentTeams": {
-      "backToTeams": "Teams",
-      "board": {
-        "applied": "Applied on the desktop.",
-        "commandFailed": "Rejected: {reason}",
-        "commentPlaceholder": "Add a comment…",
-        "comments": "{count, plural, =0 {No comments} =1 {# comment} other {# comments}}",
-        "empty": "No synced board yet — pair with the desktop and run a sync.",
-        "moveTo": "Move to",
-        "offline": "Desktop unreachable — showing the last synced board.",
-        "run": {
-          "pause": "Pause",
-          "resume": "Resume",
-          "stop": "Stop"
-        },
-        "twinBound": "Twin-bound teammate"
-      },
-      "tabs": {
-        "activity": "Activity",
-        "board": "Board",
-        "members": "Members",
-        "overview": "Overview"
-      }
-    },
-    "agentTeamsSettings": {
-      "backAria": "Back to Me",
-      "categories": {
-        "analysis": "Analysis",
-        "debugging": "Debugging",
-        "development": "Development",
-        "documentation": "Documentation",
-        "general": "General",
-        "research": "Research",
-        "review": "Review",
-        "security": "Security"
-      },
-      "empty": "No agent team templates available.",
-      "intro": "Browse the agent team templates the paired desktop can launch. Live team collaboration runs on the desktop.",
-      "manageOnDesktop": "Agent teams are created, configured and run on the paired desktop. Manage templates and live collaboration there.",
-      "section": {
-        "description": "Reusable team compositions your paired desktop can launch.",
-        "title": "Team templates"
-      },
-      "teammates": "{count, plural, =1 {1 teammate} other {# teammates}}",
-      "title": "Agent teams"
-    },
     "automation": {
       "consent": {
         "biometricBlocked": "Approval not completed ({reason}).",
@@ -16185,6 +16162,10 @@
       "savedUpdate": "Character updated.",
       "saving": "Saving…",
       "systemPromptLabel": "System prompt"
+    },
+    "chatTemplates": {
+      "backAria": "Back to Me",
+      "title": "Chat templates"
     },
     "commandHistory": {
       "backAria": "Back to settings",
@@ -17003,6 +16984,7 @@
         "search": "Search",
         "servers": "Servers",
         "squads": "Squads",
+        "templates": "Templates",
         "twin": "Digital twin",
         "workflows": "Workflows"
       },
@@ -17137,6 +17119,7 @@
       "biometricUnavailable": "This device has no biometric enrolled.",
       "canvasRow": "Canvas",
       "charactersRow": "Characters",
+      "chatTemplatesRow": "Chat templates",
       "cloudAccountRow": "Cloud account",
       "commandHistoryRow": "Command history",
       "computerUse": {
@@ -17235,6 +17218,8 @@
       "helpRow": "Help & docs",
       "hooksRow": "Hooks",
       "instructionsRow": "Project instructions",
+      "issueProjectsRow": "Delivery projects",
+      "issuesRow": "Issues",
       "logsRow": "Logs",
       "mcpRow": "MCP servers",
       "memoryRow": "Memory",
@@ -17371,6 +17356,7 @@
       },
       "syncRow": "Sync status",
       "teamsRow": "Teams",
+      "templatesRow": "Template catalog",
       "terminalRow": "Terminal",
       "title": "Me",
       "todayStats": {
@@ -27693,15 +27679,44 @@
       "editorDescriptionPlaceholder": "What this team is for…",
       "editorName": "Name",
       "editorNamePlaceholder": "Research squad",
+      "exportAria": "Export {name} as a package",
+      "exportPackage": "Export package",
+      "exportUnavailable": "Publish a version before exporting a package.",
+      "fork": "Fork into a new draft",
+      "forkAria": "Fork template {name}",
+      "forkOf": "Fork of {id}",
+      "forkedToast": "Forked into the template library as {id}. Open Template Studio to edit it.",
+      "importBody": "The package is checked against its manifest and signature before anything is added. Imported templates land in the shared template library.",
+      "importConfirm": "Import",
+      "importDefinitionCount": "{count, plural, =1 {# template} other {# templates}}",
+      "importInert": "Nothing in a package runs on import. Templates are created, never executed.",
+      "importPackage": "Import package",
+      "importTitle": "Import a template package",
+      "importTrust": {
+        "built-in": "Shipped with the app",
+        "marketplace": "From the marketplace",
+        "signed-unknown": "Signed by a key this device does not know",
+        "unsigned": "Unsigned package",
+        "verified-publisher": "Signed by a publisher you trust"
+      },
+      "importedToast": "Imported {count, plural, =1 {# template} other {# templates}} into the library.",
       "missingDependencies": "{count} missing {count, plural, =1 {dependency} other {dependencies}}",
       "nameRequired": "Template name is required.",
       "newTemplate": "New template",
+      "platformAbsent": "Not in the library",
+      "platformDraft": "Draft",
+      "platformPublished": "v{version}",
       "pluginBadge": "Plugin · {plugin}",
       "pluginReadOnly": "Plugin templates are read-only — duplicate first.",
+      "publish": "Publish a version",
+      "publishAria": "Publish template {name}",
+      "publishUnavailable": "Save this template again to put it in the library first.",
+      "publishedToast": "Published \"{name}\" v{version}.",
       "removeBody": "\"{name}\" will be removed. Existing teams created from this template are unaffected.",
       "removeTitle": "Remove template?",
       "removedToast": "Removed \"{name}\".",
       "save": "Save",
+      "shareUnavailable": "Save this template again to put it in the library before sharing a link.",
       "teammateCount": "{count, plural, =0 {No teammates} =1 {# teammate} other {# teammates}}",
       "teammateEditNote": "{count, plural, =0 {No teammates yet — edit teammates from the workspace after creation.} =1 {# teammate carried over from the source template — edit them in the workspace.} other {# teammates carried over from the source template — edit them in the workspace.}}",
       "title": "Agent team templates",
@@ -31908,6 +31923,12 @@
           "importTitle": "Import characters",
           "title": "Characters"
         },
+        "chatTemplates": {
+          "body": "Saved chat templates with their parameter declarations and launch spec.",
+          "importBody": "Add or replace your saved chat templates. Usage history travels with each one.",
+          "importTitle": "Import chat templates",
+          "title": "Chat templates"
+        },
         "comingSoon": "Coming soon",
         "customModes": {
           "body": "User-defined chat modes with their tool whitelists.",
@@ -35356,6 +35377,13 @@
       }
     },
     "slashCommands": {
+      "authoring": {
+        "hostLacks": "The host you are paired with does not offer command file access.",
+        "localLacks": "This build cannot reach the command directories.",
+        "needsDesktop": "User-scope commands live in ~/.claude/commands, outside every workspace, so they can only be created or edited from the desktop app.",
+        "noHost": "Nothing is paired, so there is no filesystem to write commands to. Pair this browser with a host to author project commands.",
+        "projectNeedsWorkspace": "Open a workspace, or start a session with a working directory, to author project commands."
+      },
       "builtin": "Built-in ({count})",
       "cancel": "Cancel",
       "copiedToClipboard": "Copied `/{name} ` to clipboard.",
@@ -35381,6 +35409,7 @@
         "description": "Custom commands are markdown files written to .claude/commands/. The body is the prompt template; YAML frontmatter carries hints, allowed-tools, and an optional model override.",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Shown in the picker.",
+        "globalNotWritable": "User-scope commands need the desktop app.",
         "modelLabel": "Model override",
         "modelPlaceholder": "e.g. claude-sonnet-4-5 (optional)",
         "nameHint": "Used as the filename and the slash command — letters, digits, `_`, `-`, `.` or `/` (max 64 chars).",
@@ -35388,6 +35417,7 @@
         "namePlaceholder": "e.g. refactor",
         "previewLabel": "Preview",
         "projectNeedsCwd": "Project scope needs the active session to have a working directory set.",
+        "projectNotWritable": "Project commands need a host that can write this repository.",
         "removeTool": "Remove {tool}",
         "save": "Save",
         "savedToast": "Saved.",
@@ -35399,12 +35429,12 @@
         "scopeUserHint": "Available across every chat on this machine.",
         "titleCreate": "New custom command",
         "titleEdit": "Edit custom command",
-        "webModeBanner": "Read-only preview — saving requires the desktop build.",
-        "webModeBlocked": "Saving custom commands requires the desktop build."
+        "webModeBanner": "Read-only preview. Saving needs the desktop app, or a paired host with a workspace open.",
+        "webModeBlocked": "Saving custom commands needs the desktop app, or a paired host with a workspace open."
       },
       "emptyBuiltin": "No matches.",
       "emptyCustom": "No custom commands found in ~/.claude/commands or .claude/commands.",
-      "emptyCustomWeb": "Custom command discovery requires the desktop app.",
+      "emptyCustomWeb": "No commands are reachable from here. Pair with a host, or open the desktop app.",
       "emptyPlugin": "No plugin-contributed commands.",
       "filterPlaceholder": "Filter by name or description…",
       "newBtn": "New command",
@@ -35684,6 +35714,26 @@
       }
     },
     "squads": {
+      "derive": {
+        "cancel": "Cancel",
+        "copyDefaultName": "{name} copy",
+        "description": "Copy it into a workspace, or save its shape as a template.",
+        "duplicate": "Duplicate",
+        "duplicateBody": "The roster, per-teammate settings and task list come across. The copy starts idle with no run history.",
+        "duplicateTitle": "Duplicate this squad",
+        "duplicated": "Created {name}.",
+        "nameLabel": "Name",
+        "publishFailed": "Could not publish: {error}",
+        "publishOption": "Publish it as a version too",
+        "publishOptionHint": "Only a published version can be bundled into a package, forked, or handed to someone else. A draft stays on this machine.",
+        "saveAsTemplate": "Save as template",
+        "templateBody": "A template keeps the roster shape and squad settings. It does not keep the lead's own configuration, the task list, or anything a run produced.",
+        "templatePublished": "Published {name} v{version}.",
+        "templateSaved": "Saved {name} to your templates.",
+        "templateTitle": "Save as a template",
+        "title": "Reuse this squad",
+        "workspaceLabel": "Workspace"
+      },
       "detail": {
         "advanced": "Advanced governance",
         "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",
@@ -35715,21 +35765,16 @@
           "templates": "Templates"
         }
       },
-      "derive": {
-        "cancel": "Cancel",
-        "copyDefaultName": "{name} copy",
-        "description": "Copy it into a workspace, or save its shape as a template.",
-        "duplicate": "Duplicate",
-        "duplicateBody": "The roster, per-teammate settings and task list come across. The copy starts idle with no run history.",
-        "duplicateTitle": "Duplicate this squad",
-        "duplicated": "Created {name}.",
-        "nameLabel": "Name",
-        "saveAsTemplate": "Save as template",
-        "templateBody": "A template keeps the roster shape and squad settings. It does not keep the lead's own configuration, the task list, or anything a run produced.",
-        "templateSaved": "Saved {name} to your templates.",
-        "templateTitle": "Save as a template",
-        "title": "Reuse this squad",
-        "workspaceLabel": "Workspace"
+      "provenance": {
+        "createdFrom": "Created from {name} v{version}",
+        "createdFromDraft": "Created from {name}, an unreleased draft",
+        "description": "Squads made from a template keep a link to it, so a newer version can be taken later.",
+        "detached": "Detached. This Squad no longer follows the template.",
+        "loading": "Checking this Squad's lineage…",
+        "none": "This Squad has no template lineage. It was created directly, duplicated from another Squad, or made before lineage was recorded.",
+        "summary": "Updating replays the template's changes over this Squad. Detaching keeps the Squad and drops the link.",
+        "title": "Made from a template",
+        "updated": "Updated to v{version}."
       }
     },
     "subagents": {
@@ -36830,8 +36875,10 @@
         "chat-json": "Conversation (JSON)",
         "chat-md": "Conversation (Markdown)",
         "chat-quote": "Message card",
+        "chat-template": "Chat template",
         "chat-text": "Conversation (text)",
         "discover-item": "Discover item",
+        "template-definition": "Template release",
         "usage-card": "Usage card",
         "workflow-png": "Workflow image"
       },
@@ -36854,6 +36901,13 @@
     "passphraseHelp": "Recipients must enter this to open the link.",
     "passphraseLabel": "Extra passphrase (optional)",
     "passphrasePlaceholder": "Shared separately, never in the link",
+    "pii": {
+      "body": "This item may contain personal info (emails, phone numbers, keys). Remove it before sharing publicly, or share the original anyway.",
+      "cancel": "Cancel",
+      "shareOriginal": "Share anyway",
+      "shareRedacted": "Remove and continue",
+      "title": "Possible personal info detected"
+    },
     "quoteCard": {
       "cardTitle": "Cognia message card",
       "description": "Turn this message into a shareable card — download it as an image or publish an encrypted link.",
@@ -36884,6 +36938,14 @@
       "urlPlaceholder": "https://share.example.com"
     },
     "shareAction": "Share via link",
+    "templateShare": {
+      "piiBody": "This template may contain personal info (emails, phone numbers, keys). Its content hash covers every field, so nothing can be removed without breaking the check the recipient runs. Edit the template, or share it as it stands.",
+      "refusal": {
+        "non-portable": "This template still carries a credential field, so it cannot be published as a link.",
+        "unpublished": "Only a published release can be shared. Publish a version first.",
+        "withdrawn": "This release was deprecated or yanked, so it is not offered as a link."
+      }
+    },
     "themeGallery": {
       "label": "Style",
       "selected": "Selected",
@@ -36898,11 +36960,23 @@
     "ttlLabel": "Expires",
     "view": {
       "a2uiReadonly": "Read-only preview",
+      "addToLibrary": "Add to my library",
+      "addToLibraryBusy": "Adding…",
+      "addToLibraryDone": "Added",
+      "addToLibraryFailed": "Could not add this to your library.",
       "appInvalid": "This shared app could not be loaded.",
       "appTitle": "Shared app",
       "backupBody": "This is a cognia backup package. Download it, then import it from Settings → Data.",
       "backupTitle": "Shared backup",
       "brand": "Cognia",
+      "chatTemplate": {
+        "body": "Message",
+        "invalid": "This shared chat template could not be loaded.",
+        "label": "Chat template",
+        "params": "Parameters",
+        "required": "Required",
+        "setupNote": "The setup this template suggests was demoted before sharing: it can narrow a conversation, never widen one."
+      },
       "conversationTitle": "Shared conversation",
       "copyImage": "Copy image",
       "copyImageDone": "Copied",
@@ -36949,6 +37023,21 @@
       "previewTitle": "Preview",
       "provenance": {
         "digitalTwin": "AI-generated with a Cognia Digital Twin"
+      },
+      "templateDefinition": {
+        "domain": "Kind",
+        "hash": {
+          "checking": "Checking the content hash…",
+          "mismatch": "The content hash does not match this template's contents.",
+          "verified": "Content hash verified."
+        },
+        "inputs": "Inputs",
+        "invalid": "This shared template could not be loaded.",
+        "label": "Template",
+        "note": "Adding this installs the release as an unsigned, link-sourced template.",
+        "required": "Required",
+        "trustLabel": "Trust",
+        "version": "Version"
       },
       "unavailableBody": "It may have expired, been viewed the maximum number of times, or been revoked.",
       "unavailableTitle": "This link is no longer available",
@@ -38946,10 +39035,10 @@
       "emptyDescription": "Make one here, then hand a conversation to it from the composer.",
       "emptyTitle": "No Squads yet",
       "filters": {
-        "label": "Narrow the list",
         "all": "All",
-        "waiting": "Needs you",
-        "live": "Working"
+        "label": "Narrow the list",
+        "live": "Working",
+        "waiting": "Needs you"
       },
       "inspectorLabel": "Squad detail",
       "manageAction": "Manage Squads",
@@ -38962,10 +39051,10 @@
       "noMatchesTitle": "No Squads match",
       "openFleet": "Live host activity",
       "palette": {
-        "start": "Start {name}",
+        "meta": "Squad control",
         "pause": "Pause {name}",
         "resume": "Resume {name}",
-        "meta": "Squad control"
+        "start": "Start {name}"
       },
       "railLabel": "Squad list",
       "search": "Search Squads",
@@ -39936,6 +40025,7 @@
       "export": "Export",
       "fork": "Fork as draft",
       "import": "Import",
+      "importUrl": "Import from URL",
       "instantiate": "Create resources",
       "newDraft": "New draft",
       "openEditor": "Open editor",
@@ -39956,8 +40046,9 @@
     "description": "Search, inspect, publish, import, and instantiate reusable Cognia templates.",
     "domains": {
       "a2ui": "Mini App",
-      "agentTeam": "Agent team",
+      "agentTeam": "Squad",
       "character": "Character",
+      "chatTemplate": "Chat template",
       "customMode": "Custom mode",
       "document": "Document",
       "goal": "Goal",
@@ -39987,10 +40078,12 @@
       "confirm": "Export",
       "contents": "Contents ({count} selected)",
       "description": "A package can carry up to 256 releases. Pick everything the recipient will need.",
+      "noPublisherKey": "No publisher key on this device yet. Create one in the Packages tab to sign your exports.",
       "noReleases": "Nothing published yet.",
       "packageDescription": "Package description",
       "packageId": "Package id",
       "packageName": "Package name",
+      "signWithKey": "Sign with my publisher key",
       "title": "Export package"
     },
     "filters": {
@@ -40010,7 +40103,10 @@
       "definitionCount": "{count, plural, one {# definition} other {# definitions}}",
       "description": "Review this package before adding its inert definitions to your library.",
       "inert": "Importing does not create resources or run template content.",
-      "title": "Import template package"
+      "publisher": "Signed by {publisher}",
+      "publisherTrusted": "Publisher added to your trusted list.",
+      "title": "Import template package",
+      "trustPublisher": "Trust this publisher"
     },
     "inputKindNames": {
       "boolean": "Yes / no",
@@ -40120,6 +40216,7 @@
       }
     },
     "messages": {
+      "confined": "This template is now listed in this workspace only.",
       "deprecated": "Release deprecated.",
       "detached": "Instance detached from its template.",
       "draftCreated": "Template draft created.",
@@ -40135,6 +40232,7 @@
       "packageYanked": "Package yanked. Nothing new will be built on it.",
       "published": "Template version {version} published.",
       "rebound": "Instance rebound to its new source.",
+      "shared": "This template is now listed in every workspace.",
       "updated": "Instance updated to {version}.",
       "yanked": "Release yanked."
     },
@@ -40190,6 +40288,7 @@
     "mobile": {
       "authoringOnDesktop": "Publishing, exporting and editing a draft happen on the desktop app.",
       "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
+      "reviewUpdateOnDesktop": "Taking an upstream update happens in the desktop Studio.",
       "title": "Mobile template access"
     },
     "operations": {
@@ -40256,6 +40355,36 @@
       "title": "Publish this template",
       "unreleased": "unreleased"
     },
+    "publisherIdentity": {
+      "cancel": "Cancel",
+      "copied": "Public key copied",
+      "copyFailed": "Could not copy the public key.",
+      "copyPublicKey": "Copy public key",
+      "create": "Create a publisher key",
+      "created": "Publisher key created",
+      "ephemeral": "This key is only held for the current session on this shell, so a package signed now cannot be signed under the same identity after a reload.",
+      "hint": "Packages you export can be signed with this key. Recipients see the fingerprint and decide whether to trust it.",
+      "rotate": "Rotate key",
+      "rotateDescription": "A new key pair replaces this one. Packages already signed keep verifying for whoever has the old key, but this device can never sign under it again, and recipients will be asked about the new key.",
+      "rotateTitle": "Rotate the publisher key?",
+      "rotated": "Publisher key rotated",
+      "title": "Publisher identity"
+    },
+    "scopeControl": {
+      "blocked": {
+        "noWorkspace": "No workspace is active yet, so there is nothing to confine this to.",
+        "sharedSource": "Built-in, plugin and marketplace templates are shared by construction. Fork one to get a copy you can confine."
+      },
+      "choice": {
+        "shared": "All workspaces",
+        "workspace": "This workspace only"
+      },
+      "explain": {
+        "shared": "Every workspace lists it. A workspace can still hide it under Workspace → Capabilities.",
+        "workspace": "Only this workspace lists it. Exports and packages are unaffected."
+      },
+      "title": "Where this template lives"
+    },
     "scopes": {
       "builtin": "Built-in",
       "marketplace": "Marketplace",
@@ -40285,6 +40414,17 @@
       "unsigned": "Unsigned",
       "verified-publisher": "Verified publisher"
     },
+    "trustedPublishers": {
+      "cancel": "Cancel",
+      "empty": "No publishers trusted yet.",
+      "hint": "Keys you accepted when installing a signed package or plugin. Anything signed by these keys imports as verified.",
+      "revoke": "Untrust",
+      "revokeDescription": "Packages signed by {name} will ask again the next time one is imported.",
+      "revokeTitle": "Remove this publisher?",
+      "revoked": "Publisher removed",
+      "title": "Trusted publishers",
+      "unnamed": "Unnamed publisher"
+    },
     "updateDialog": {
       "cancel": "Cancel",
       "changes": "{count, plural, =1 {1 change} other {# changes}}",
@@ -40301,6 +40441,15 @@
       "takeUpstream": "Take theirs",
       "title": "Update this instance",
       "unresolved": "{count, plural, =1 {1 conflict still needs an answer} other {# conflicts still need an answer}}"
+    },
+    "urlImport": {
+      "cancel": "Cancel",
+      "description": "Fetch a package from a URL. It goes through the same inspection and confirmation as a file before anything is installed.",
+      "fetch": "Fetch",
+      "fetching": "Fetching…",
+      "title": "Import from URL",
+      "urlLabel": "Package URL",
+      "urlPlaceholder": "https://example.com/team.cognia-template"
     }
   },
   "terminal": {
@@ -47851,50 +48000,54 @@
       "untrustedBadge": "Untrusted"
     },
     "members": {
-      "title": "Members",
-      "empty": "Nobody else is in this workspace yet.",
-      "guest": "Guest",
-      "standingAria": "Workspace standing",
-      "roleAria": "Workspace role",
-      "role": {
-        "maintainer": "Maintainer",
-        "member": "Member",
-        "viewer": "Viewer"
-      },
-      "you": "You",
       "allRoles": "All roles",
-      "roleFilterAria": "Filter members by role",
-      "noMatches": "No member has that role.",
-      "configureCollaboration": "Set up collaboration",
-      "invite": "Invite",
+      "audit": {
+        "actor": "by {who}",
+        "empty": "No membership changes recorded yet.",
+        "failed": "Could not load the audit log.",
+        "hide": "Hide recent changes",
+        "loading": "Loading changes",
+        "roleChange": "{from} → {to}",
+        "show": "Show recent changes",
+        "title": "Membership changes"
+      },
       "cachedNote": "Cached copy of the server roster.",
-      "remove": "Remove from workspace",
-      "offboard": "Remove from organization",
-      "unavailable": {
-        "no-org": "Your sign-in is not scoped to an organization, so there is no roster to manage.",
-        "not-configured": "No collaboration server is configured for this profile.",
-        "not-permitted": "Only a maintainer of this workspace or an organization admin can manage its members.",
-        "not-signed-in": "Sign in to manage members."
+      "configureCollaboration": "Set up collaboration",
+      "empty": "Nobody else is in this workspace yet.",
+      "errors": {
+        "forbidden": "The collaboration server refused: your seat does not allow that change.",
+        "noWorkspace": "No workspace is selected.",
+        "notAvailable": "The collaboration plane is not available on this profile.",
+        "notSignedIn": "Sign in again to manage members.",
+        "server": "The collaboration server answered: {message}"
       },
-      "reason": {
-        "offboarded": "Removed from the organization in the workspace roster",
-        "removed": "Removed from the workspace roster",
-        "roleChanged": "Role changed in the workspace roster",
-        "orgRoleChanged": "Organization role changed in the workspace roster",
-        "invitationRevoked": "Revoked from the workspace roster"
+      "guest": "Guest",
+      "invitations": {
+        "createdBy": "by {who}",
+        "empty": "No invitations have been minted.",
+        "expires": "Expires {date}",
+        "failed": "Could not load invitations.",
+        "hide": "Hide invitations",
+        "loading": "Loading invitations",
+        "reload": "Reload",
+        "revoke": "Revoke",
+        "scopeOrg": "Organization, {role}",
+        "scopeWorkspace": "Workspace, {role}",
+        "show": "Show invitations",
+        "status": {
+          "expired": "Expired",
+          "pending": "Pending",
+          "redeemed": "Redeemed",
+          "revoked": "Revoked"
+        },
+        "title": "Invitations"
       },
-      "toast": {
-        "failed": "The collaboration server refused that change.",
-        "offboarded": "Removed from the organization.",
-        "removed": "Removed from the workspace.",
-        "roleChanged": "Role updated.",
-        "orgRoleChanged": "Organization role updated.",
-        "invitationRevoked": "Invitation revoked."
-      },
+      "invite": "Invite",
       "inviteDialog": {
         "cancel": "Cancel",
         "copied": "Copied",
         "copy": "Copy token",
+        "copyLink": "Copy invitation link",
         "description": "Mint a one-time invitation token. The person redeems it from their own sign-in screen.",
         "done": "Done",
         "expires": "Expires {date}",
@@ -47920,52 +48073,48 @@
           "maintainer": "Maintainer",
           "member": "Member",
           "viewer": "Viewer"
-        },
-        "copyLink": "Copy invitation link"
+        }
       },
-      "errors": {
-        "forbidden": "The collaboration server refused: your seat does not allow that change.",
-        "noWorkspace": "No workspace is selected.",
-        "notAvailable": "The collaboration plane is not available on this profile.",
-        "notSignedIn": "Sign in again to manage members.",
-        "server": "The collaboration server answered: {message}"
-      },
-      "orgRoleAria": "Organization role",
+      "noMatches": "No member has that role.",
+      "offboard": "Remove from organization",
       "orgRole": {
         "admin": "Org admin",
         "member": "Org member",
         "owner": "Org owner"
       },
-      "invitations": {
-        "title": "Invitations",
-        "show": "Show invitations",
-        "hide": "Hide invitations",
-        "reload": "Reload",
-        "loading": "Loading invitations",
-        "empty": "No invitations have been minted.",
-        "scopeOrg": "Organization, {role}",
-        "scopeWorkspace": "Workspace, {role}",
-        "createdBy": "by {who}",
-        "expires": "Expires {date}",
-        "status": {
-          "pending": "Pending",
-          "redeemed": "Redeemed",
-          "revoked": "Revoked",
-          "expired": "Expired"
-        },
-        "revoke": "Revoke",
-        "failed": "Could not load invitations."
+      "orgRoleAria": "Organization role",
+      "reason": {
+        "invitationRevoked": "Revoked from the workspace roster",
+        "offboarded": "Removed from the organization in the workspace roster",
+        "orgRoleChanged": "Organization role changed in the workspace roster",
+        "removed": "Removed from the workspace roster",
+        "roleChanged": "Role changed in the workspace roster"
       },
-      "audit": {
-        "title": "Membership changes",
-        "show": "Show recent changes",
-        "hide": "Hide recent changes",
-        "loading": "Loading changes",
-        "empty": "No membership changes recorded yet.",
-        "actor": "by {who}",
-        "roleChange": "{from} → {to}",
-        "failed": "Could not load the audit log."
-      }
+      "remove": "Remove from workspace",
+      "role": {
+        "maintainer": "Maintainer",
+        "member": "Member",
+        "viewer": "Viewer"
+      },
+      "roleAria": "Workspace role",
+      "roleFilterAria": "Filter members by role",
+      "standingAria": "Workspace standing",
+      "title": "Members",
+      "toast": {
+        "failed": "The collaboration server refused that change.",
+        "invitationRevoked": "Invitation revoked.",
+        "offboarded": "Removed from the organization.",
+        "orgRoleChanged": "Organization role updated.",
+        "removed": "Removed from the workspace.",
+        "roleChanged": "Role updated."
+      },
+      "unavailable": {
+        "no-org": "Your sign-in is not scoped to an organization, so there is no roster to manage.",
+        "not-configured": "No collaboration server is configured for this profile.",
+        "not-permitted": "Only a maintainer of this workspace or an organization admin can manage its members.",
+        "not-signed-in": "Sign in to manage members."
+      },
+      "you": "You"
     },
     "panelRoot": {
       "following": "following this conversation",

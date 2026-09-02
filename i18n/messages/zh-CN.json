@@ -1469,6 +1469,95 @@
     }
   },
   "account": {
+    "cloud": {
+      "advanced": {
+        "clientId": "客户端 ID",
+        "issuer": "Issuer",
+        "missing": "Issuer、客户端 ID、资源和回调地址都必须填写。",
+        "redirectUri": "回调地址",
+        "resource": "API 资源",
+        "submit": "用此配置登录",
+        "toggle": "高级：手动配置 Logto"
+      },
+      "awaitingCode": "在浏览器中完成登录，然后把它跳转到的地址粘贴到这里。",
+      "cancel": "取消",
+      "checking": "正在检查此部署的登录方式",
+      "choose": {
+        "description": "你属于不止一个组织。之后可以在「账户」里切换。",
+        "role": {
+          "admin": "管理员",
+          "guest": "访客",
+          "member": "成员",
+          "owner": "所有者"
+        },
+        "select": "使用这个组织",
+        "title": "选择组织",
+        "workspaces": "{count} 个工作区"
+      },
+      "claim": {
+        "credentialLabel": "引导凭据",
+        "credentialPlaceholder": "粘贴凭据",
+        "description": "运维人员会把一次性凭据交给第一位所有者。之后的每个人都通过邀请加入。",
+        "missing": "凭据和组织名称都必须填写。",
+        "orgNameLabel": "组织名称",
+        "orgNamePlaceholder": "Acme",
+        "submit": "创建组织并让我成为所有者",
+        "title": "认领此部署"
+      },
+      "codePlaceholder": "粘贴回调地址或授权码",
+      "continueOffline": "离线继续",
+      "continueOfflineHint": "本地数据仍然可用。共享工作区和事项在登录前不会同步。",
+      "continueWith": "使用 {provider} 继续",
+      "continueWithLogto": "使用 Logto 继续",
+      "description": "此部署使用共享的身份提供方。登录一次，这个配置文件在任何地方都是你的。",
+      "error": {
+        "callbackMalformed": "这不是回调地址或授权码。",
+        "generic": "登录未完成：{message}",
+        "noCollaborationService": "此部署没有声明协作服务，没有可加入的组织。",
+        "notInvited": "服务器拒绝：该令牌不是有效的邀请。",
+        "profileBoundToAnother": "此配置文件已属于 {name}。请先在那里退出。",
+        "reauthRequired": "当前会话无法签发组织令牌，请重新登录。",
+        "stateMismatch": "该回调属于另一次登录尝试，请重新开始。"
+      },
+      "invitation": {
+        "invalid": "这看起来不像邀请令牌。",
+        "submit": "加入",
+        "title": "我有邀请",
+        "tokenLabel": "邀请令牌",
+        "tokenPlaceholder": "粘贴令牌"
+      },
+      "offline": {
+        "body": "上一次的会话已保留。你可以继续离线工作，连上以后会自动刷新。"
+      },
+      "provider": {
+        "feishu": "飞书",
+        "github": "GitHub",
+        "google": "Google",
+        "lark": "Lark",
+        "microsoft": "Microsoft",
+        "wechat": "微信"
+      },
+      "reauth": {
+        "binding-missing": "此配置文件已登录，但尚未绑定到某个人。",
+        "expired": "你的会话已过期。",
+        "revoked": "你的会话已在别处退出。"
+      },
+      "settling": "正在查找你的组织",
+      "signOut": "退出登录",
+      "signedInAs": "已以 {name} 登录",
+      "signingIn": "正在登录",
+      "submitCode": "继续",
+      "title": "登录 {deployment}",
+      "titleGeneric": "登录你的组织",
+      "unaffiliated": {
+        "description": "兑换你收到的邀请；如果你正在搭建这套部署，则认领它。",
+        "title": "已登录，但还不属于任何组织"
+      },
+      "unavailable": {
+        "body": "{baseUrl} 上的宿主没有返回登录配置：{message}",
+        "title": "现在无法登录"
+      }
+    },
     "gate": {
       "abandonAttempt": "不再等待",
       "attemptsRemaining": "{count, plural, =1 {还可尝试 1 次，之后需要等待} other {还可尝试 # 次，之后需要等待}}",
@@ -1539,6 +1628,49 @@
       "unlocking": "正在解锁…",
       "useRecoveryKey": "忘记密码？"
     },
+    "identity": {
+      "current": "当前",
+      "description": "此配置文件在共享部署上是谁，以及它在哪个组织中工作。",
+      "loading": "正在读取云端会话",
+      "memberships": "组织",
+      "membershipsEmpty": "还没有加入任何组织。",
+      "membershipsFailed": "无法读取组织：{message}",
+      "membershipsLoading": "正在加载组织",
+      "noDeployment": "此配置文件没有配置云端部署。",
+      "organization": "组织",
+      "person": "人",
+      "revocationFailed": "已在本地退出，但无法通知身份提供方。",
+      "role": "角色",
+      "roleName": {
+        "admin": "管理员",
+        "member": "成员",
+        "owner": "所有者"
+      },
+      "session": "会话",
+      "sessionExpires": "{date} 过期",
+      "sessionUnknownExpiry": "过期时间未知",
+      "signIn": "登录",
+      "signOut": "退出登录",
+      "signOutDone": "已退出登录。",
+      "signedOut": "此配置文件尚未登录云端身份。",
+      "state": {
+        "active": "有效",
+        "error": "错误",
+        "offline": "离线",
+        "reauth-required": "需要登录"
+      },
+      "switch": "切换",
+      "switchFailed": "无法切换：{message}",
+      "switched": "已切换到 {org}。",
+      "switching": "正在切换",
+      "title": "云端身份"
+    },
+    "invite": {
+      "continue": "继续",
+      "invalid": "该链接没有携带有效的邀请令牌。",
+      "received": "已收到邀请。登录后即可加入。",
+      "title": "邀请"
+    },
     "manage": {
       "activeAccountLabel": "当前账户",
       "activeBadge": "当前",
@@ -1604,12 +1736,12 @@
       "switchPasswordPlaceholder": "账户密码",
       "switchToAccount": "切换到此账户",
       "tabDanger": "危险区",
+      "tabIdentity": "身份",
       "tabProfile": "资料",
       "tabSecurity": "安全",
       "title": "本地账户",
       "undo": "撤销",
-      "updatedAtLabel": "更新于",
-      "tabIdentity": "身份"
+      "updatedAtLabel": "更新于"
     },
     "passwordStrength": {
       "aria": "密码强度",
@@ -1644,138 +1776,6 @@
       "operationFailed": "本地账户操作失败。",
       "switchPasswordLabel": "密码",
       "switchPasswordPlaceholder": "密码"
-    },
-    "cloud": {
-      "title": "登录 {deployment}",
-      "titleGeneric": "登录你的组织",
-      "description": "此部署使用共享的身份提供方。登录一次，这个配置文件在任何地方都是你的。",
-      "checking": "正在检查此部署的登录方式",
-      "continueWith": "使用 {provider} 继续",
-      "provider": {
-        "github": "GitHub",
-        "feishu": "飞书",
-        "lark": "Lark",
-        "google": "Google",
-        "microsoft": "Microsoft",
-        "wechat": "微信"
-      },
-      "continueWithLogto": "使用 Logto 继续",
-      "signingIn": "正在登录",
-      "awaitingCode": "在浏览器中完成登录，然后把它跳转到的地址粘贴到这里。",
-      "codePlaceholder": "粘贴回调地址或授权码",
-      "submitCode": "继续",
-      "cancel": "取消",
-      "continueOffline": "离线继续",
-      "continueOfflineHint": "本地数据仍然可用。共享工作区和事项在登录前不会同步。",
-      "reauth": {
-        "expired": "你的会话已过期。",
-        "revoked": "你的会话已在别处退出。",
-        "binding-missing": "此配置文件已登录，但尚未绑定到某个人。"
-      },
-      "offline": {
-        "body": "上一次的会话已保留。你可以继续离线工作，连上以后会自动刷新。"
-      },
-      "unavailable": {
-        "title": "现在无法登录",
-        "body": "{baseUrl} 上的宿主没有返回登录配置：{message}"
-      },
-      "advanced": {
-        "toggle": "高级：手动配置 Logto",
-        "issuer": "Issuer",
-        "clientId": "客户端 ID",
-        "resource": "API 资源",
-        "redirectUri": "回调地址",
-        "submit": "用此配置登录",
-        "missing": "Issuer、客户端 ID、资源和回调地址都必须填写。"
-      },
-      "settling": "正在查找你的组织",
-      "choose": {
-        "title": "选择组织",
-        "description": "你属于不止一个组织。之后可以在「账户」里切换。",
-        "workspaces": "{count} 个工作区",
-        "role": {
-          "owner": "所有者",
-          "admin": "管理员",
-          "member": "成员",
-          "guest": "访客"
-        },
-        "select": "使用这个组织"
-      },
-      "unaffiliated": {
-        "title": "已登录，但还不属于任何组织",
-        "description": "兑换你收到的邀请；如果你正在搭建这套部署，则认领它。"
-      },
-      "invitation": {
-        "title": "我有邀请",
-        "tokenLabel": "邀请令牌",
-        "tokenPlaceholder": "粘贴令牌",
-        "submit": "加入",
-        "invalid": "这看起来不像邀请令牌。"
-      },
-      "claim": {
-        "title": "认领此部署",
-        "description": "运维人员会把一次性凭据交给第一位所有者。之后的每个人都通过邀请加入。",
-        "credentialLabel": "引导凭据",
-        "credentialPlaceholder": "粘贴凭据",
-        "orgNameLabel": "组织名称",
-        "orgNamePlaceholder": "Acme",
-        "submit": "创建组织并让我成为所有者",
-        "missing": "凭据和组织名称都必须填写。"
-      },
-      "error": {
-        "generic": "登录未完成：{message}",
-        "profileBoundToAnother": "此配置文件已属于 {name}。请先在那里退出。",
-        "notInvited": "服务器拒绝：该令牌不是有效的邀请。",
-        "reauthRequired": "当前会话无法签发组织令牌，请重新登录。",
-        "noCollaborationService": "此部署没有声明协作服务，没有可加入的组织。",
-        "callbackMalformed": "这不是回调地址或授权码。",
-        "stateMismatch": "该回调属于另一次登录尝试，请重新开始。"
-      },
-      "signedInAs": "已以 {name} 登录",
-      "signOut": "退出登录"
-    },
-    "identity": {
-      "title": "云端身份",
-      "description": "此配置文件在共享部署上是谁，以及它在哪个组织中工作。",
-      "loading": "正在读取云端会话",
-      "signedOut": "此配置文件尚未登录云端身份。",
-      "signIn": "登录",
-      "person": "人",
-      "organization": "组织",
-      "role": "角色",
-      "session": "会话",
-      "sessionExpires": "{date} 过期",
-      "sessionUnknownExpiry": "过期时间未知",
-      "state": {
-        "active": "有效",
-        "reauth-required": "需要登录",
-        "offline": "离线",
-        "error": "错误"
-      },
-      "memberships": "组织",
-      "membershipsLoading": "正在加载组织",
-      "membershipsEmpty": "还没有加入任何组织。",
-      "membershipsFailed": "无法读取组织：{message}",
-      "current": "当前",
-      "switch": "切换",
-      "switching": "正在切换",
-      "switched": "已切换到 {org}。",
-      "switchFailed": "无法切换：{message}",
-      "signOutDone": "已退出登录。",
-      "revocationFailed": "已在本地退出，但无法通知身份提供方。",
-      "noDeployment": "此配置文件没有配置云端部署。",
-      "signOut": "退出登录",
-      "roleName": {
-        "owner": "所有者",
-        "admin": "管理员",
-        "member": "成员"
-      }
-    },
-    "invite": {
-      "title": "邀请",
-      "received": "已收到邀请。登录后即可加入。",
-      "invalid": "该链接没有携带有效的邀请令牌。",
-      "continue": "继续"
     }
   },
   "agentComposition": {
@@ -2718,6 +2718,8 @@
       "title": "共识投票",
       "type": "类型：{type}",
       "vote": "投票",
+      "voteAs": "以谁的身份投票",
+      "voteAsEmpty": "该团队暂无可代为投票的成员",
       "voteCount": "{count} 票"
     },
     "createFromScratch": "从零创建",
@@ -7308,19 +7310,32 @@
     "userIdPlaceholder": "usr_…"
   },
   "chatTemplatesSettings": {
+    "adopt": "收进我的模板库",
+    "adopted": "已收录 {name}。",
     "body": "消息正文",
     "cancel": "取消",
     "delete": "删除",
     "deleted": "已删除 {name}。",
     "description": "描述",
+    "duplicate": "复制",
+    "duplicated": "已复制 {name}。",
+    "duplicatedName": "{name}（副本）",
     "edit": "编辑",
     "empty": "还没有保存的模板。写一条带参数的消息，然后用输入框旁边的书签按钮保存。",
+    "exportAction": "导出 .md",
     "hasSetup": "带会话配置",
+    "importAction": "导入 .md",
+    "importFailed": "这个文件不是本应用能读取的模板。",
+    "importHint": "模板以 Markdown 文件流转。导入的会话配置会按仓库模板同样的规则收紧：只能让对话更严格，不能更宽松。",
+    "imported": "已导入 {name}。",
     "kindEnum": "单选",
     "kindResource": "引用",
     "kindString": "文本",
     "name": "名称",
     "noParameters": "无",
+    "overwriteBody": "该模板文件已存在。覆盖后，所有克隆这个仓库的人拿到的都是新内容。",
+    "overwriteConfirm": "覆盖",
+    "overwriteTitle": "覆盖 {path}？",
     "paramDefault": "默认值",
     "paramKind": "类型",
     "paramLabel": "名称",
@@ -7331,12 +7346,19 @@
     "paramResource": "选择来源",
     "parameters": "参数",
     "paramsHint": "消息里的每个参数标记都是一个参数。类型决定怎么填；非必填的参数可以留空发送。",
+    "repoHeading": "来自当前仓库",
     "repoHint": "放在 {path} 里的模板随仓库走——在那里编辑，整个团队都能用到。只在你信任的工作区里才会出现。",
+    "repoReadOnly": "只读",
     "resourceAgent": "团队成员",
     "resourceFile": "工作区文件",
     "resourceSubagent": "子智能体",
     "save": "保存",
+    "saveToRepo": "保存到仓库",
+    "saveToRepoFailed": "无法写入 {path}。",
+    "saveToRepoNoRoot": "当前没有打开的工作区可供保存。",
+    "saveToRepoRestricted": "当前工作区未被信任，未写入任何内容。",
     "saved": "模板已保存。",
+    "savedToRepo": "已保存到 {path}。",
     "used": "{count, plural, =0 {未使用过} =1 {用过 1 次} other {用过 # 次}}"
   },
   "cliHandoff": {
@@ -10055,7 +10077,8 @@
       "piiBody": "该条目可能包含个人信息（邮箱、电话、密钥）。公开分享前请先移除，或仍按原文分享。",
       "piiTitle": "检测到可能的个人信息",
       "shareOriginal": "仍按原文分享",
-      "shareRedacted": "移除后继续"
+      "shareRedacted": "移除后继续",
+      "teamTemplateUnavailable": "这个小队模板背后还没有已发布的版本，因此无可分享。"
     },
     "shellDesktop": "桌面",
     "shellMobile": "移动",
@@ -16070,52 +16093,6 @@
       "thinkingSection": "思考预算",
       "title": "Agent 默认设置"
     },
-    "agentTeams": {
-      "backToTeams": "团队",
-      "board": {
-        "applied": "已在桌面端应用。",
-        "commandFailed": "被拒绝：{reason}",
-        "commentPlaceholder": "添加评论……",
-        "comments": "{count, plural, =0 {暂无评论} other {# 条评论}}",
-        "empty": "尚无已同步的看板——请与桌面端配对并完成一次同步。",
-        "moveTo": "移动到",
-        "offline": "桌面端不可达——正在显示最后同步的看板。",
-        "run": {
-          "pause": "暂停",
-          "resume": "恢复",
-          "stop": "停止"
-        },
-        "twinBound": "绑定数字员工的成员"
-      },
-      "tabs": {
-        "activity": "动态",
-        "board": "看板",
-        "members": "成员",
-        "overview": "概览"
-      }
-    },
-    "agentTeamsSettings": {
-      "backAria": "返回我的",
-      "categories": {
-        "analysis": "分析",
-        "debugging": "调试",
-        "development": "开发",
-        "documentation": "文档",
-        "general": "通用",
-        "research": "研究",
-        "review": "评审",
-        "security": "安全"
-      },
-      "empty": "暂无智能体团队模板。",
-      "intro": "浏览已配对桌面端可启动的智能体团队模板。实时团队协作在桌面端运行。",
-      "manageOnDesktop": "智能体团队在已配对的桌面端创建、配置和运行。请在桌面端管理模板和实时协作。",
-      "section": {
-        "description": "已配对桌面端可启动的可复用团队组合。",
-        "title": "团队模板"
-      },
-      "teammates": "{count, plural, =1 {1 个成员} other {# 个成员}}",
-      "title": "智能体团队"
-    },
     "automation": {
       "consent": {
         "biometricBlocked": "批准未完成（{reason}）。",
@@ -16185,6 +16162,10 @@
       "savedUpdate": "角色已更新。",
       "saving": "保存中…",
       "systemPromptLabel": "系统提示词"
+    },
+    "chatTemplates": {
+      "backAria": "返回“我的”",
+      "title": "会话模板"
     },
     "commandHistory": {
       "backAria": "返回设置",
@@ -17003,6 +16984,7 @@
         "search": "搜索",
         "servers": "服务器",
         "squads": "小队",
+        "templates": "模板",
         "twin": "数字分身",
         "workflows": "工作流"
       },
@@ -17137,6 +17119,7 @@
       "biometricUnavailable": "本设备未注册生物识别。",
       "canvasRow": "画布",
       "charactersRow": "角色",
+      "chatTemplatesRow": "对话模板",
       "cloudAccountRow": "云账号",
       "commandHistoryRow": "命令历史",
       "computerUse": {
@@ -17235,6 +17218,8 @@
       "helpRow": "帮助与文档",
       "hooksRow": "钩子",
       "instructionsRow": "项目指令",
+      "issueProjectsRow": "交付项目",
+      "issuesRow": "问题",
       "logsRow": "日志",
       "mcpRow": "MCP 服务器",
       "memoryRow": "记忆",
@@ -17371,6 +17356,7 @@
       },
       "syncRow": "同步状态",
       "teamsRow": "团队",
+      "templatesRow": "模板库",
       "terminalRow": "终端",
       "title": "我",
       "todayStats": {
@@ -27693,15 +27679,44 @@
       "editorDescriptionPlaceholder": "说明该团队适用场景…",
       "editorName": "名称",
       "editorNamePlaceholder": "研究小组",
+      "exportAria": "将 {name} 导出为安装包",
+      "exportPackage": "导出安装包",
+      "exportUnavailable": "请先发布一个版本，然后才能导出安装包。",
+      "fork": "复刻为新的草稿",
+      "forkAria": "复刻模板 {name}",
+      "forkOf": "复刻自 {id}",
+      "forkedToast": "已复刻到模板库，id 为 {id}；可在模板工作室中编辑。",
+      "importBody": "安装包会先按清单和签名校验，通过后才会写入。导入的模板会进入共享模板库。",
+      "importConfirm": "导入",
+      "importDefinitionCount": "{count, plural, =1 {# 个模板} other {# 个模板}}",
+      "importInert": "导入不会运行安装包中的任何内容，模板只会被创建，不会被执行。",
+      "importPackage": "导入安装包",
+      "importTitle": "导入模板安装包",
+      "importTrust": {
+        "built-in": "随应用内置",
+        "marketplace": "来自市场",
+        "signed-unknown": "由本机不认识的密钥签名",
+        "unsigned": "未签名的安装包",
+        "verified-publisher": "由你信任的发布者签名"
+      },
+      "importedToast": "已导入 {count, plural, =1 {# 个模板} other {# 个模板}} 到模板库。",
       "missingDependencies": "{count} 个依赖未满足",
       "nameRequired": "模板名称不能为空。",
       "newTemplate": "新建模板",
+      "platformAbsent": "尚未进入模板库",
+      "platformDraft": "草稿",
+      "platformPublished": "v{version}",
       "pluginBadge": "插件 · {plugin}",
       "pluginReadOnly": "插件模板只读 — 请先复制。",
+      "publish": "发布一个版本",
+      "publishAria": "发布模板 {name}",
+      "publishUnavailable": "请先重新保存该模板，让它进入模板库。",
+      "publishedToast": "已发布“{name}” v{version}。",
       "removeBody": "「{name}」将被删除。已经从该模板创建的团队不受影响。",
       "removeTitle": "删除模板？",
       "removedToast": "已删除「{name}」。",
       "save": "保存",
+      "shareUnavailable": "请先重新保存该模板，让它进入模板库，然后才能分享链接。",
       "teammateCount": "{count, plural, =0 {暂无队友} other {# 个队友}}",
       "teammateEditNote": "{count, plural, =0 {尚无队友 — 创建后可在工作区中编辑队友。} other {从源模板继承了 # 个队友 — 可在工作区中继续编辑。}}",
       "title": "代理团队模板",
@@ -31908,6 +31923,12 @@
           "importTitle": "导入角色",
           "title": "角色"
         },
+        "chatTemplates": {
+          "body": "已保存的对话模板，含参数声明与启动配置。",
+          "importBody": "添加或替换已保存的对话模板，使用记录会一并导入。",
+          "importTitle": "导入对话模板",
+          "title": "对话模板"
+        },
         "comingSoon": "即将上线",
         "customModes": {
           "body": "用户自定义的聊天模式与工具白名单。",
@@ -35356,6 +35377,13 @@
       }
     },
     "slashCommands": {
+      "authoring": {
+        "hostLacks": "当前配对的主机不提供命令文件访问能力。",
+        "localLacks": "当前构建无法访问命令目录。",
+        "needsDesktop": "用户级命令位于 ~/.claude/commands，在所有工作区之外，因此只能在桌面端新建或编辑。",
+        "noHost": "尚未配对任何主机，没有可写入的文件系统。先配对一台主机，才能编写项目级命令。",
+        "projectNeedsWorkspace": "先打开一个工作区，或让当前会话具备工作目录，才能编写项目级命令。"
+      },
       "builtin": "内置 ({count})",
       "cancel": "取消",
       "copiedToClipboard": "已复制 `/{name} ` 到剪贴板。",
@@ -35381,6 +35409,7 @@
         "description": "自定义命令以 markdown 文件形式写入 .claude/commands/。正文是 prompt 模板，YAML frontmatter 用于声明 description / argument-hint / allowed-tools / 可选的 model。",
         "descriptionLabel": "描述",
         "descriptionPlaceholder": "在命令选择器中显示的说明。",
+        "globalNotWritable": "用户级命令需要桌面端。",
         "modelLabel": "模型覆盖",
         "modelPlaceholder": "例如 claude-sonnet-4-5（可选）",
         "nameHint": "同时作为文件名与 slash 命令——只能包含字母、数字、`_`、`-`、`.` 或 `/`（最长 64）。",
@@ -35388,6 +35417,7 @@
         "namePlaceholder": "例如 refactor",
         "previewLabel": "预览",
         "projectNeedsCwd": "项目级命令需要当前会话已设置工作目录。",
+        "projectNotWritable": "项目级命令需要一台能写入该仓库的主机。",
         "removeTool": "移除 {tool}",
         "save": "保存",
         "savedToast": "已保存。",
@@ -35399,12 +35429,12 @@
         "scopeUserHint": "本机所有会话都可使用。",
         "titleCreate": "新建自定义命令",
         "titleEdit": "编辑自定义命令",
-        "webModeBanner": "只读预览——保存需要桌面端版本。",
-        "webModeBlocked": "保存自定义命令需要桌面端版本。"
+        "webModeBanner": "只读预览。保存需要桌面端，或已配对且打开工作区的主机。",
+        "webModeBlocked": "保存自定义命令需要桌面端，或已配对且打开工作区的主机。"
       },
       "emptyBuiltin": "没有匹配。",
       "emptyCustom": "在 ~/.claude/commands 或 .claude/commands 下未发现自定义命令。",
-      "emptyCustomWeb": "自定义命令扫描仅在桌面端可用。",
+      "emptyCustomWeb": "当前环境访问不到任何命令。请先配对一台主机，或使用桌面端。",
       "emptyPlugin": "暂无插件贡献的命令。",
       "filterPlaceholder": "按名称或描述筛选…",
       "newBtn": "新建命令",
@@ -35684,6 +35714,26 @@
       }
     },
     "squads": {
+      "derive": {
+        "cancel": "取消",
+        "copyDefaultName": "{name} 副本",
+        "description": "复制到某个工作区，或把它的编制存为模板。",
+        "duplicate": "复制",
+        "duplicateBody": "成员名单、各成员配置与任务列表都会带过去。副本从空闲开始，不带运行历史。",
+        "duplicateTitle": "复制这个小队",
+        "duplicated": "已创建 {name}。",
+        "nameLabel": "名称",
+        "publishFailed": "发布失败：{error}",
+        "publishOption": "同时发布为一个版本",
+        "publishOptionHint": "只有已发布的版本才能打包、被复刻或分享给他人；草稿仅保存在本机。",
+        "saveAsTemplate": "存为模板",
+        "templateBody": "模板保留成员编制与小队设置，不保留队长自身的配置、任务列表，以及运行产生的任何内容。",
+        "templatePublished": "已发布 {name} v{version}。",
+        "templateSaved": "已把 {name} 存入模板。",
+        "templateTitle": "存为模板",
+        "title": "复用这个小队",
+        "workspaceLabel": "工作区"
+      },
       "detail": {
         "advanced": "高级治理",
         "dangerDescription": "绑定到它的会话会回退为单个 Agent。已产生的运行记录会保留。",
@@ -35715,21 +35765,16 @@
           "templates": "模板"
         }
       },
-      "derive": {
-        "cancel": "取消",
-        "copyDefaultName": "{name} 副本",
-        "description": "复制到某个工作区，或把它的编制存为模板。",
-        "duplicate": "复制",
-        "duplicateBody": "成员名单、各成员配置与任务列表都会带过去。副本从空闲开始，不带运行历史。",
-        "duplicateTitle": "复制这个小队",
-        "duplicated": "已创建 {name}。",
-        "nameLabel": "名称",
-        "saveAsTemplate": "存为模板",
-        "templateBody": "模板保留成员编制与小队设置，不保留队长自身的配置、任务列表，以及运行产生的任何内容。",
-        "templateSaved": "已把 {name} 存入模板。",
-        "templateTitle": "存为模板",
-        "title": "复用这个小队",
-        "workspaceLabel": "工作区"
+      "provenance": {
+        "createdFrom": "由 {name} v{version} 创建",
+        "createdFromDraft": "由 {name}（未发布草稿）创建",
+        "description": "由模板创建的小队会保留与模板的关联，之后可以升级到新版本。",
+        "detached": "已断开关联，该小队不再跟随模板。",
+        "loading": "正在检查该小队的来源…",
+        "none": "该小队没有模板来源记录：它是直接创建的、从其他小队复制而来，或创建于记录来源之前。",
+        "summary": "升级会把模板的改动重放到该小队；断开关联会保留小队并移除链接。",
+        "title": "来自模板",
+        "updated": "已升级到 v{version}。"
       }
     },
     "subagents": {
@@ -36830,8 +36875,10 @@
         "chat-json": "对话（JSON）",
         "chat-md": "对话（Markdown）",
         "chat-quote": "消息卡片",
+        "chat-template": "对话模板",
         "chat-text": "对话（文本）",
         "discover-item": "发现条目",
+        "template-definition": "模板发布版本",
         "usage-card": "使用量卡片",
         "workflow-png": "工作流图片"
       },
@@ -36854,6 +36901,13 @@
     "passphraseHelp": "对方需输入此口令才能打开链接。",
     "passphraseLabel": "额外口令（可选）",
     "passphrasePlaceholder": "单独告知对方，不会出现在链接里",
+    "pii": {
+      "body": "此内容可能包含个人信息（邮箱、电话、密钥）。可以先移除再公开分享，或直接分享原内容。",
+      "cancel": "取消",
+      "shareOriginal": "仍然分享",
+      "shareRedacted": "移除后继续",
+      "title": "发现可能的个人信息"
+    },
     "quoteCard": {
       "cardTitle": "Cognia 消息卡片",
       "description": "把这条消息生成可分享卡片，可下载为图片或发布加密链接。",
@@ -36884,6 +36938,14 @@
       "urlPlaceholder": "https://share.example.com"
     },
     "shareAction": "生成分享链接",
+    "templateShare": {
+      "piiBody": "此模板可能包含个人信息（邮箱、电话、密钥）。内容哈希覆盖了每一个字段，任何删减都会让接收方的校验失败。请先修改模板，或按现状分享。",
+      "refusal": {
+        "non-portable": "此模板仍携带凭据字段，因此不能发布为链接。",
+        "unpublished": "只有已发布的版本可以分享。请先发布一个版本。",
+        "withdrawn": "该版本已被弃用或撤回，因此不提供链接分享。"
+      }
+    },
     "themeGallery": {
       "label": "样式",
       "selected": "已选择",
@@ -36898,11 +36960,23 @@
     "ttlLabel": "有效期",
     "view": {
       "a2uiReadonly": "只读预览",
+      "addToLibrary": "加入我的库",
+      "addToLibraryBusy": "正在加入…",
+      "addToLibraryDone": "已加入",
+      "addToLibraryFailed": "无法加入到你的库。",
       "appInvalid": "无法加载此分享的应用。",
       "appTitle": "分享的应用",
       "backupBody": "这是一个 cognia 备份包。下载后从「设置 → 数据」导入。",
       "backupTitle": "分享的备份",
       "brand": "Cognia",
+      "chatTemplate": {
+        "body": "消息内容",
+        "invalid": "无法加载这个共享的对话模板。",
+        "label": "对话模板",
+        "params": "参数",
+        "required": "必填",
+        "setupNote": "模板建议的会话配置在分享前已被降级：它只能收紧一次对话，不能放宽。"
+      },
       "conversationTitle": "分享的对话",
       "copyImage": "复制图片",
       "copyImageDone": "已复制",
@@ -36949,6 +37023,21 @@
       "previewTitle": "预览",
       "provenance": {
         "digitalTwin": "由 Cognia 数字分身生成的 AI 内容"
+      },
+      "templateDefinition": {
+        "domain": "类型",
+        "hash": {
+          "checking": "正在校验内容哈希…",
+          "mismatch": "内容哈希与模板内容不一致。",
+          "verified": "内容哈希校验通过。"
+        },
+        "inputs": "输入项",
+        "invalid": "无法加载这个共享的模板。",
+        "label": "模板",
+        "note": "加入后会作为来自链接的未签名模板安装。",
+        "required": "必填",
+        "trustLabel": "信任级别",
+        "version": "版本"
       },
       "unavailableBody": "它可能已过期、达到最大查看次数，或已被撤销。",
       "unavailableTitle": "该链接已不可用",
@@ -38946,10 +39035,10 @@
       "emptyDescription": "在这里新建一个，然后在输入框把会话交给它。",
       "emptyTitle": "还没有小队",
       "filters": {
-        "label": "收窄列表",
         "all": "全部",
-        "waiting": "等你答复",
-        "live": "运行中"
+        "label": "收窄列表",
+        "live": "运行中",
+        "waiting": "等你答复"
       },
       "inspectorLabel": "小队详情",
       "manageAction": "管理小队",
@@ -38962,10 +39051,10 @@
       "noMatchesTitle": "没有匹配的小队",
       "openFleet": "宿主实时活动",
       "palette": {
-        "start": "启动 {name}",
+        "meta": "小队控制",
         "pause": "暂停 {name}",
         "resume": "恢复 {name}",
-        "meta": "小队控制"
+        "start": "启动 {name}"
       },
       "railLabel": "小队列表",
       "search": "搜索小队",
@@ -39936,6 +40025,7 @@
       "export": "导出",
       "fork": "另存为草稿",
       "import": "导入",
+      "importUrl": "从链接导入",
       "instantiate": "创建资源",
       "newDraft": "新建草稿",
       "openEditor": "打开编辑器",
@@ -39956,8 +40046,9 @@
     "description": "搜索、检查、发布、导入并实例化可复用的 Cognia 模板。",
     "domains": {
       "a2ui": "Mini App",
-      "agentTeam": "Agent 团队",
+      "agentTeam": "小队",
       "character": "角色",
+      "chatTemplate": "会话模板",
       "customMode": "自定义模式",
       "document": "文档",
       "goal": "目标",
@@ -39987,10 +40078,12 @@
       "confirm": "导出",
       "contents": "内容（已选 {count} 项）",
       "description": "一个包最多可以携带 256 个发行版。把接收方需要的都选上。",
+      "noPublisherKey": "此设备还没有发布者密钥。可在「包」标签页创建一个，用于给导出的包签名。",
       "noReleases": "尚未发布任何内容。",
       "packageDescription": "包描述",
       "packageId": "包 ID",
       "packageName": "包名称",
+      "signWithKey": "使用我的发布者密钥签名",
       "title": "导出包"
     },
     "filters": {
@@ -40010,7 +40103,10 @@
       "definitionCount": "{count} 个定义",
       "description": "将惰性定义加入模板库前，请先检查该模板包。",
       "inert": "导入不会创建资源，也不会运行模板内容。",
-      "title": "导入模板包"
+      "publisher": "由 {publisher} 签名",
+      "publisherTrusted": "已将该发布者加入信任列表。",
+      "title": "导入模板包",
+      "trustPublisher": "信任该发布者"
     },
     "inputKindNames": {
       "boolean": "是 / 否",
@@ -40120,6 +40216,7 @@
       }
     },
     "messages": {
+      "confined": "该模板现在只在本工作区列出。",
       "deprecated": "该版本已弃用。",
       "detached": "实例已与模板脱钩。",
       "draftCreated": "模板草稿已创建。",
@@ -40135,6 +40232,7 @@
       "packageYanked": "包已撤回，不会再基于它创建新内容。",
       "published": "模板版本 {version} 已发布。",
       "rebound": "实例已重新绑定到新的来源。",
+      "shared": "该模板现在在所有工作区列出。",
       "updated": "实例已更新到 {version}。",
       "yanked": "该版本已撤回。"
     },
@@ -40190,6 +40288,7 @@
     "mobile": {
       "authoringOnDesktop": "发布、导出与草稿编辑在桌面端进行。",
       "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
+      "reviewUpdateOnDesktop": "合并上游更新需要在桌面端的模板工作台完成。",
       "title": "移动端模板访问"
     },
     "operations": {
@@ -40256,6 +40355,36 @@
       "title": "发布该模板",
       "unreleased": "尚未发布"
     },
+    "publisherIdentity": {
+      "cancel": "取消",
+      "copied": "已复制公钥",
+      "copyFailed": "无法复制公钥。",
+      "copyPublicKey": "复制公钥",
+      "create": "创建发布者密钥",
+      "created": "已创建发布者密钥",
+      "ephemeral": "在当前环境下这个密钥只保存在本次会话中，刷新之后就无法再用同一身份签名。",
+      "hint": "导出的包可以用这个密钥签名。接收方会看到指纹，并自行决定是否信任。",
+      "rotate": "轮换密钥",
+      "rotateDescription": "新的密钥对会替换当前这一对。已签名的包对持有旧公钥的人仍然可以验证，但本设备再也无法用旧密钥签名，接收方也会被重新询问是否信任新密钥。",
+      "rotateTitle": "要轮换发布者密钥吗？",
+      "rotated": "已轮换发布者密钥",
+      "title": "发布者身份"
+    },
+    "scopeControl": {
+      "blocked": {
+        "noWorkspace": "当前还没有激活的工作区，无法限定归属。",
+        "sharedSource": "内置、插件与市场模板天然对所有工作区共享。复刻一份，副本才可以被限定。"
+      },
+      "choice": {
+        "shared": "所有工作区",
+        "workspace": "仅本工作区"
+      },
+      "explain": {
+        "shared": "所有工作区都会列出它。工作区仍可在「工作区 → 能力」中将其隐藏。",
+        "workspace": "只有本工作区会列出它。导出与打包不受影响。"
+      },
+      "title": "该模板归属于哪里"
+    },
     "scopes": {
       "builtin": "内置",
       "marketplace": "市场",
@@ -40285,6 +40414,17 @@
       "unsigned": "未签名",
       "verified-publisher": "已验证发布者"
     },
+    "trustedPublishers": {
+      "cancel": "取消",
+      "empty": "尚未信任任何发布者。",
+      "hint": "安装已签名的包或插件时你接受过的密钥。由这些密钥签名的内容会以「已验证」导入。",
+      "revoke": "取消信任",
+      "revokeDescription": "下次导入由 {name} 签名的包时会重新询问。",
+      "revokeTitle": "要移除该发布者吗？",
+      "revoked": "已移除该发布者",
+      "title": "受信任的发布者",
+      "unnamed": "未命名发布者"
+    },
     "updateDialog": {
       "cancel": "取消",
       "changes": "{count} 处变更",
@@ -40301,6 +40441,15 @@
       "takeUpstream": "采用上游",
       "title": "更新该实例",
       "unresolved": "还有 {count} 处冲突未裁决"
+    },
+    "urlImport": {
+      "cancel": "取消",
+      "description": "从链接获取一个模板包。它会与本地文件走同一套检查与确认流程，之后才会安装。",
+      "fetch": "获取",
+      "fetching": "获取中…",
+      "title": "从链接导入",
+      "urlLabel": "包链接",
+      "urlPlaceholder": "https://example.com/team.cognia-template"
     }
   },
   "terminal": {
@@ -47851,50 +48000,54 @@
       "untrustedBadge": "未信任"
     },
     "members": {
-      "title": "成员",
-      "empty": "这个工作区还没有其他人。",
-      "guest": "访客",
-      "standingAria": "工作区身份",
-      "roleAria": "工作区角色",
-      "role": {
-        "maintainer": "维护者",
-        "member": "成员",
-        "viewer": "只读"
-      },
-      "you": "你",
       "allRoles": "全部角色",
-      "roleFilterAria": "按角色筛选成员",
-      "noMatches": "没有该角色的成员。",
-      "configureCollaboration": "设置协作",
-      "invite": "邀请",
+      "audit": {
+        "actor": "操作者 {who}",
+        "empty": "尚未记录任何成员变更。",
+        "failed": "无法加载审计日志。",
+        "hide": "隐藏最近变更",
+        "loading": "正在加载变更",
+        "roleChange": "{from} → {to}",
+        "show": "显示最近变更",
+        "title": "成员变更"
+      },
       "cachedNote": "服务端名册的本地缓存。",
-      "remove": "移出工作区",
-      "offboard": "移出组织",
-      "unavailable": {
-        "no-org": "当前登录未绑定组织，没有可管理的名册。",
-        "not-configured": "此档案尚未配置协作服务器。",
-        "not-permitted": "只有本工作区的维护者或组织管理员可以管理成员。",
-        "not-signed-in": "登录后才能管理成员。"
+      "configureCollaboration": "设置协作",
+      "empty": "这个工作区还没有其他人。",
+      "errors": {
+        "forbidden": "协作服务器拒绝了这次更改：你当前的席位没有这个权限。",
+        "noWorkspace": "没有选中的工作区。",
+        "notAvailable": "此配置文件上没有可用的协作平面。",
+        "notSignedIn": "请重新登录后再管理成员。",
+        "server": "协作服务器返回：{message}"
       },
-      "reason": {
-        "offboarded": "在工作区名册中移出组织",
-        "removed": "在工作区名册中移出工作区",
-        "roleChanged": "在工作区名册中更改角色",
-        "orgRoleChanged": "在工作区成员列表中更改了组织角色",
-        "invitationRevoked": "在工作区成员列表中撤销"
+      "guest": "访客",
+      "invitations": {
+        "createdBy": "由 {who} 创建",
+        "empty": "还没有创建过邀请。",
+        "expires": "{date} 过期",
+        "failed": "无法加载邀请。",
+        "hide": "隐藏邀请",
+        "loading": "正在加载邀请",
+        "reload": "重新加载",
+        "revoke": "撤销",
+        "scopeOrg": "组织，{role}",
+        "scopeWorkspace": "工作区，{role}",
+        "show": "显示邀请",
+        "status": {
+          "expired": "已过期",
+          "pending": "待接受",
+          "redeemed": "已接受",
+          "revoked": "已撤销"
+        },
+        "title": "邀请"
       },
-      "toast": {
-        "failed": "协作服务器拒绝了这次更改。",
-        "offboarded": "已移出组织。",
-        "removed": "已移出工作区。",
-        "roleChanged": "角色已更新。",
-        "orgRoleChanged": "组织角色已更新。",
-        "invitationRevoked": "邀请已撤销。"
-      },
+      "invite": "邀请",
       "inviteDialog": {
         "cancel": "取消",
         "copied": "已复制",
         "copy": "复制令牌",
+        "copyLink": "复制邀请链接",
         "description": "生成一次性邀请令牌，对方在自己的登录界面兑换。",
         "done": "完成",
         "expires": "有效期至 {date}",
@@ -47920,52 +48073,48 @@
           "maintainer": "维护者",
           "member": "成员",
           "viewer": "只读"
-        },
-        "copyLink": "复制邀请链接"
+        }
       },
-      "errors": {
-        "forbidden": "协作服务器拒绝了这次更改：你当前的席位没有这个权限。",
-        "noWorkspace": "没有选中的工作区。",
-        "notAvailable": "此配置文件上没有可用的协作平面。",
-        "notSignedIn": "请重新登录后再管理成员。",
-        "server": "协作服务器返回：{message}"
-      },
-      "orgRoleAria": "组织角色",
+      "noMatches": "没有该角色的成员。",
+      "offboard": "移出组织",
       "orgRole": {
         "admin": "组织管理员",
         "member": "组织成员",
         "owner": "组织所有者"
       },
-      "invitations": {
-        "title": "邀请",
-        "show": "显示邀请",
-        "hide": "隐藏邀请",
-        "reload": "重新加载",
-        "loading": "正在加载邀请",
-        "empty": "还没有创建过邀请。",
-        "scopeOrg": "组织，{role}",
-        "scopeWorkspace": "工作区，{role}",
-        "createdBy": "由 {who} 创建",
-        "expires": "{date} 过期",
-        "status": {
-          "pending": "待接受",
-          "redeemed": "已接受",
-          "revoked": "已撤销",
-          "expired": "已过期"
-        },
-        "revoke": "撤销",
-        "failed": "无法加载邀请。"
+      "orgRoleAria": "组织角色",
+      "reason": {
+        "invitationRevoked": "在工作区成员列表中撤销",
+        "offboarded": "在工作区名册中移出组织",
+        "orgRoleChanged": "在工作区成员列表中更改了组织角色",
+        "removed": "在工作区名册中移出工作区",
+        "roleChanged": "在工作区名册中更改角色"
       },
-      "audit": {
-        "title": "成员变更",
-        "show": "显示最近变更",
-        "hide": "隐藏最近变更",
-        "loading": "正在加载变更",
-        "empty": "尚未记录任何成员变更。",
-        "actor": "操作者 {who}",
-        "roleChange": "{from} → {to}",
-        "failed": "无法加载审计日志。"
-      }
+      "remove": "移出工作区",
+      "role": {
+        "maintainer": "维护者",
+        "member": "成员",
+        "viewer": "只读"
+      },
+      "roleAria": "工作区角色",
+      "roleFilterAria": "按角色筛选成员",
+      "standingAria": "工作区身份",
+      "title": "成员",
+      "toast": {
+        "failed": "协作服务器拒绝了这次更改。",
+        "invitationRevoked": "邀请已撤销。",
+        "offboarded": "已移出组织。",
+        "orgRoleChanged": "组织角色已更新。",
+        "removed": "已移出工作区。",
+        "roleChanged": "角色已更新。"
+      },
+      "unavailable": {
+        "no-org": "当前登录未绑定组织，没有可管理的名册。",
+        "not-configured": "此档案尚未配置协作服务器。",
+        "not-permitted": "只有本工作区的维护者或组织管理员可以管理成员。",
+        "not-signed-in": "登录后才能管理成员。"
+      },
+      "you": "你"
     },
     "panelRoot": {
       "following": "跟随当前会话",
