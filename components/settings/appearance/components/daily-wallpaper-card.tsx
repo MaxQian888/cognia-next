@@ -116,7 +116,10 @@ export function DailyWallpaperCard({ daily, onChange, onFetchNow }: DailyWallpap
               onChange({ providerId: value as DailyWallpaperSettings["providerId"] })
             }
           >
-            <SelectTrigger className={responsiveSelectClass} data-testid="daily-provider">
+            {/* Full width rather than the shared `sm:w-64`: the longest option
+                here is "NASA Astronomy Picture of the Day", which that width
+                clips mid-phrase. */}
+            <SelectTrigger className="w-full" data-testid="daily-provider">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
