@@ -53,6 +53,13 @@ Logto requires **PostgreSQL 14+** and **Redis**; both are on the `logto` profile
    cognia tenant. When a client passes `organization_id` together with the
    `resource`, the token's `aud` stays the resource indicator and Logto adds an
    `organization_id` claim — which `oidc_device_context` maps to `account_id`.
+5. **Connectors → Social connectors** (unified sign-in, ADR-0149): add GitHub
+   and Feishu (and any other provider you want on the sign-in screen), then
+   enable each one under **Sign-in experience → Sign-up and sign-in**. The
+   connector **target** (`github`, `feishu`) is what
+   `COGNIA_LOGTO_SOCIAL_PROVIDERS` lists and what the client passes as
+   `direct_sign_in`, so a provider missing here is simply absent from the
+   sign-in screen.
 
 ## 3. ⚠️ Issuer-consistency footgun (read before step 4)
 
@@ -84,6 +91,8 @@ COGNIA_LOGTO_AUDIENCE=https://brain.example.com/api   # the API resource identif
 COGNIA_LOGTO_WEB_CLIENT_ID=<Logto SPA App ID>          # returned by /api/auth/config
 COGNIA_LOGTO_REQUIRED_SCOPES=brain:rpc                # optional baseline scope
 # COGNIA_LOGTO_JWKS_TTL_SECS=600                       # optional (default 600)
+COGNIA_LOGTO_NATIVE_CLIENT_ID=<Logto native App ID>    # desktop + CLI PKCE
+COGNIA_LOGTO_SOCIAL_PROVIDERS=github,feishu           # connector targets to offer
 ```
 
 Then restart with both profiles:
@@ -115,7 +124,54 @@ const session = await loginToLogto(config, { openUrl, waitForCode })
 // session.accessToken is submitted only while registering the P-256 device.
 ```
 
-## 6. Verify end-to-end
+## 6. Wire the collaboration server (`collab-server`, unified sign-in)
+
+The account plane (ADR-0149) lets the first person claim an empty deployment,
+lets everyone else join through an invitation, and mirrors organizations and
+memberships into Logto so tokens carry the right `organization_id`.
+
+1. **Applications → Create → Machine-to-machine**: name it `cognia-collab` and
+   under **Permissions** grant it the **Logto Management API** resource with the
+   `all` scope. Note the App ID and App Secret.
+2. **Organization template → Roles**: make sure the roles named by
+   `COLLAB_LOGTO_OWNER_ROLE` and `COLLAB_LOGTO_MEMBER_ROLE` exist (defaults
+   `owner` and `member`). The server assigns them when it mirrors a membership.
+3. Mint the one-time bootstrap credential and keep only its hash in `.env`:
+
+   ```bash
+   CRED=$(openssl rand -base64 32)
+   printf %s "$CRED" | sha256sum   # COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256
+   echo "$CRED"                     # hand this to the first owner, out of band
+   ```
+
+4. In `.env`:
+
+   ```dotenv
+   COLLAB_ACCOUNT_BOOTSTRAP_ENABLED=true
+   COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256=<hex from above>
+   COLLAB_LOGTO_ENDPOINT=https://auth.example.com   # == LOGTO_ENDPOINT, not /oidc
+   COLLAB_LOGTO_M2M_CLIENT_ID=<M2M App ID>
+   COLLAB_LOGTO_M2M_CLIENT_SECRET=<M2M App Secret>
+   ```
+
+5. Restart with all three profiles:
+
+   ```bash
+   docker compose --profile server --profile logto --profile collab up -d --wait
+   ```
+
+**Callback modes.** The web app redirects to `<web origin>/logto/callback` (the
+SPA app). The CLI listens on a loopback port. The desktop app sends the system
+browser to the deep link `cognia://logto/callback` and asks the person to paste
+the address it lands on. All three URIs must be registered on the matching
+Logto application or Logto refuses the authorization request.
+
+**Rotation.** The bootstrap credential is consumed by the first successful
+claim. After that, set `COLLAB_ACCOUNT_BOOTSTRAP_ENABLED=false` or mint a new
+credential and replace the hash. Rotating the M2M secret is a restart with the
+new value. Nothing else caches it.
+
+## 7. Verify end-to-end
 
 ```bash
 # Public discovery exposes the exact browser PKCE configuration:

@@ -144,6 +144,20 @@ spec:
                   name: cognia-config
                   key: logtoJwksTtlSecs
                   optional: true
+            # Unified sign-in (ADR-0149): native App ID for desktop + CLI PKCE,
+            # and the Logto connector targets /api/auth/config announces.
+            - name: COGNIA_LOGTO_NATIVE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoNativeClientId
+                  optional: true
+            - name: COGNIA_LOGTO_SOCIAL_PROVIDERS
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoSocialProviders
+                  optional: true
             - name: COGNIA_SIGNALING_URL
               valueFrom:
                 configMapKeyRef:

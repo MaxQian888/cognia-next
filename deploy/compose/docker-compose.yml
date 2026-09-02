@@ -92,6 +92,18 @@ services:
       COLLAB_OIDC_ISSUER: ${COLLAB_OIDC_ISSUER:-}
       COLLAB_OIDC_AUDIENCE: ${COLLAB_OIDC_AUDIENCE:-}
       COLLAB_OIDC_TENANT_CLAIM: ${COLLAB_OIDC_TENANT_CLAIM:-organization_id}
+      # Account plane (ADR-0149 unified sign-in). The bootstrap credential
+      # claims an empty deployment once. Store only its SHA-256 here and hand
+      # the clear value to the first owner out of band. The M2M application
+      # lets the server mirror organizations and memberships into Logto.
+      COLLAB_ACCOUNT_BOOTSTRAP_ENABLED: ${COLLAB_ACCOUNT_BOOTSTRAP_ENABLED:-false}
+      COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256: ${COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256:-}
+      COLLAB_LOGTO_ENDPOINT: ${COLLAB_LOGTO_ENDPOINT:-${LOGTO_ENDPOINT:-}}
+      COLLAB_LOGTO_M2M_CLIENT_ID: ${COLLAB_LOGTO_M2M_CLIENT_ID:-}
+      COLLAB_LOGTO_M2M_CLIENT_SECRET: ${COLLAB_LOGTO_M2M_CLIENT_SECRET:-}
+      COLLAB_LOGTO_MANAGEMENT_RESOURCE: ${COLLAB_LOGTO_MANAGEMENT_RESOURCE:-https://default.logto.app/api}
+      COLLAB_LOGTO_OWNER_ROLE: ${COLLAB_LOGTO_OWNER_ROLE:-owner}
+      COLLAB_LOGTO_MEMBER_ROLE: ${COLLAB_LOGTO_MEMBER_ROLE:-member}
     ports:
       - "8080:8080"
     healthcheck:
@@ -165,6 +177,11 @@ services:
       COGNIA_LOGTO_WEB_CLIENT_ID: ${COGNIA_LOGTO_WEB_CLIENT_ID:-}
       COGNIA_LOGTO_REQUIRED_SCOPES: ${COGNIA_LOGTO_REQUIRED_SCOPES:-}
       COGNIA_LOGTO_JWKS_TTL_SECS: ${COGNIA_LOGTO_JWKS_TTL_SECS:-}
+      # Unified sign-in (ADR-0149). The native App ID is what the desktop and
+      # the CLI use for PKCE. The social providers are the Logto connector
+      # targets /api/auth/config announces, e.g. `github,feishu`.
+      COGNIA_LOGTO_NATIVE_CLIENT_ID: ${COGNIA_LOGTO_NATIVE_CLIENT_ID:-}
+      COGNIA_LOGTO_SOCIAL_PROVIDERS: ${COGNIA_LOGTO_SOCIAL_PROVIDERS:-}
       # ── Lark / Feishu entry surfaces (ADR-0091) — OFF unless PUBLIC_BASE is
       # set. It is the origin Feishu redirects back to, so it must match the
       # 重定向 URL registered in the developer console

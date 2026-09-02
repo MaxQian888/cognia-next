@@ -298,6 +298,7 @@ ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜�
 ```
 
 - **Compose 套件** —— `deploy/compose/`，用 profile 承载阶段阶梯（`server`、`tls` Caddy/ACME 前门、`observability` Prometheus、`logto` 自托管 OIDC IdP），另有把外部 agent 拆到独立 runner 容器的 T2 override。入口见 [`deploy/compose/README.md`](https://github.com/MaxQian888/cognia-next/blob/master/deploy/compose/README.md)。
+- **统一登录** —— Logto 以社交连接器承接 GitHub 与飞书，协作服务器用一次性 bootstrap 凭据认领空部署，并通过 M2M 应用把成员关系镜像到 Logto。步骤、回调模式与凭据轮换见 `deploy/compose/LOGTO.md`（ADR-0149）。
 - **Kubernetes** —— `deploy/k8s/` kustomize 树，1 租户 = 1 namespace；kind 冒烟与生产注意事项（gVisor RuntimeClass、必填 `publicUrl`、按租户接 Logto）见 `deploy/k8s/README.md`。
 - **冒烟** —— `scripts/smoke/compose-smoke.mjs` 按 tier（`services` / `server` / `tls`）驱动运行中的栈；`compose-e2e.yml` 在每个触及套件的 PR 上跑它。
 - 完整架构与隔离/拓扑阶梯：ADR-0059（英文版：`docs/content/docs/en/adr/0059-cloud-deployment-headless-brain.md`）。

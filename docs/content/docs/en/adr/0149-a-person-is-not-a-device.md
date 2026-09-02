@@ -613,3 +613,30 @@ production clients disable entry and mutation unless
 or write shared sessions, while all private local sessions continue to work.
 The complete decision record is
 `docs/plans/2026-08-29-server-authoritative-shared-ai-chat.md`.
+
+## Implementation update — unified sign-in (2026-09-02)
+
+Logto is the only cloud identity broker. GitHub and Feishu are Logto social
+connectors that the gateway announces through `GET /api/auth/config` (v2 adds
+`nativeClientId`, `socialProviders` and the deployment mode) and that the
+client opens with `direct_sign_in`, so the app never holds a provider secret.
+The LocalProfile stays the offline boundary. The cloud session is a
+`CloudSessionState` union layered on top of it, and every screen keeps a
+"work offline" exit.
+
+Registration is bootstrap-then-invite. The collaboration server owns
+`POST /v1/account/bootstrap` (one-time credential, only its hash in
+`COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256`), `GET /v1/account/memberships`
+and `POST /v1/invitations/accept`. Provisioning is a Postgres saga
+(`identity_provisioning_operations`) that mirrors the organization and its
+memberships into Logto through a server-side M2M application, so a half-done
+step is resumable rather than a second organization. Server ids are canonical
+and the client reconciles its local rows to them after every sign-in.
+
+The frontend has one flow (`lib/identity/cloud-sign-in-flow.ts` behind
+`CloudSignInGate`): discover the deployment, sign in, look up memberships, then
+adopt the single organization, offer a chooser, or fall through to invitation
+redemption and the bootstrap claim. Invitation links land on `/invite` and are
+redeemed after sign-in. The desktop sends the system browser to the registered
+`cognia://logto/callback` deep link, the CLI to its loopback port and the web
+app to `/logto/callback`. Deployment wiring lives in `deploy/compose/LOGTO.md`.

@@ -297,6 +297,7 @@ ghcr.io/maxqian888/cognia-runner        # T2 per-agent runner image
 ```
 
 - **Compose suite** — `deploy/compose/` with profiles for the phase ladder (`server`, `tls` Caddy/ACME front door, `observability` Prometheus, `logto` self-hosted OIDC IdP) and a T2 override that moves external agents into per-agent runner containers. Start at [`deploy/compose/README.md`](https://github.com/MaxQian888/cognia-next/blob/master/deploy/compose/README.md).
+- **Unified sign-in** — Logto brokers GitHub and Feishu as social connectors, and the collaboration server claims an empty deployment with a one-time bootstrap credential and mirrors memberships into Logto through an M2M app. Steps, the callback modes and credential rotation are in `deploy/compose/LOGTO.md` (ADR-0149).
 - **Kubernetes** — `deploy/k8s/` kustomize tree, one tenant = one namespace; see `deploy/k8s/README.md` for the kind smoke and production notes (gVisor runtime class, mandatory `publicUrl`, per-tenant Logto wiring).
 - **Smoke** — `scripts/smoke/compose-smoke.mjs` drives a running stack in tiers (`services` / `server` / `tls`); `compose-e2e.yml` runs it in CI on every PR touching the suite.
 - Full architecture and the isolation/topology ladder: [ADR-0059](../adr/0059-cloud-deployment-headless-brain).

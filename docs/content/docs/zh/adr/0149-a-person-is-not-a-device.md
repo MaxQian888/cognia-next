@@ -494,3 +494,24 @@ Agent 仍由发起客户端执行。服务端只签发一个绑定设备、用�
 `NEXT_PUBLIC_SHARED_CHAT_ENABLED=true` 时，生产客户端才开放入口和写入。低于协议 v2 的
 客户端不能打开或写入共享会话，但全部私有本地会话继续工作。完整决策记录见
 `docs/plans/2026-08-29-server-authoritative-shared-ai-chat.md`。
+
+## 实施更新——统一登录（2026-09-02）
+
+Logto 是唯一的云端身份中介。GitHub 与飞书是 Logto 的社交连接器：网关通过
+`GET /api/auth/config` 公布它们（v2 新增 `nativeClientId`、`socialProviders`
+与部署模式），客户端用 `direct_sign_in` 直接打开，应用本身从不持有任何提供方密钥。
+LocalProfile 仍是离线边界。云端会话是叠在它之上的 `CloudSessionState` 联合类型，
+每个界面都保留「离线继续」的出口。
+
+注册模型是「先 bootstrap、后邀请」。协作服务器拥有 `POST /v1/account/bootstrap`
+（一次性凭据，`.env` 只存其 SHA-256，即 `COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256`）、
+`GET /v1/account/memberships` 与 `POST /v1/invitations/accept`。供给是一条 Postgres
+saga（`identity_provisioning_operations`），通过服务端 M2M 应用把组织与成员关系镜像到
+Logto，因此做到一半的步骤可以续跑，而不会产生第二个组织。服务端 id 是权威的，
+客户端在每次登录后把本地行对齐到它们。
+
+前端只有一条流程（`lib/identity/cloud-sign-in-flow.ts`，由 `CloudSignInGate` 承载）：
+发现部署、登录、查成员关系，然后采用唯一组织、给出选择器，或者落到兑换邀请与
+bootstrap 认领。邀请链接落在 `/invite`，登录后兑换。桌面端把系统浏览器送到已注册的
+`cognia://logto/callback` 深链，CLI 送到本机回环端口，Web 端送到 `/logto/callback`。
+部署接线见 `deploy/compose/LOGTO.md`。
