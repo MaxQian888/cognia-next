@@ -10,9 +10,10 @@
  *     executor resolves (provider, then protocol, then any).
  *
  * `PENDING_OPERATIONS` is the ratchet: operations the matrix already
- * answers for but no batch has bound yet. It may only shrink. An operation
- * listed here that gains a handler fails the suite until it is removed, so
- * the list cannot go stale in either direction.
+ * answers for but no batch has bound yet. It may only shrink, and since
+ * Batch 16 it is empty: every served cell of every built-in provider has a
+ * handler. An operation added here later fails the suite once it gains a
+ * handler, so the list cannot go stale in either direction.
  */
 import { PROVIDER_OPERATION_IDS, type ProviderOperationId } from "@cognia/provider-types"
 import {
@@ -26,11 +27,7 @@ import { getProviderOperationDescriptor } from "./manifest"
 import { ProviderOperationHandlerRegistry } from "./registry"
 
 /** Operations the matrix claims for at least one built-in but no handler serves yet. */
-export const PENDING_OPERATIONS: ReadonlySet<ProviderOperationId> = new Set<ProviderOperationId>(
-  PROVIDER_OPERATION_IDS.filter(
-    (id) => id === "images.edit" || id === "translation.create" || id === "realtime.connect"
-  )
-)
+export const PENDING_OPERATIONS: ReadonlySet<ProviderOperationId> = new Set<ProviderOperationId>()
 
 const SERVED = new Set(["native", "translated", "derived"])
 

@@ -17,11 +17,14 @@ import { DISCOVERY_HANDLERS } from "./discovery"
 import { FILES_HANDLERS } from "./files"
 import { FINE_TUNING_HANDLERS } from "./fine-tuning"
 import { HEALTH_HANDLERS } from "./health"
+import { IMAGE_EDIT_HANDLERS } from "./image-edit"
 import { LANGUAGE_HANDLERS } from "./language"
 import { MEDIA_HANDLERS } from "./media"
 import { MODERATION_HANDLERS } from "./moderation"
+import { REALTIME_HANDLERS } from "./realtime"
 import { RETRIEVAL_HANDLERS } from "./retrieval"
 import { TOKENS_HANDLERS } from "./tokens"
+import { TRANSLATION_HANDLERS } from "./translation"
 import { VECTOR_STORES_HANDLERS } from "./vector-stores"
 import { VIDEO_JOBS_HANDLERS } from "./video-jobs"
 
@@ -42,6 +45,9 @@ export const BUILT_IN_PROVIDER_OPERATION_HANDLERS: readonly ProviderOperationHan
     ...BATCHES_HANDLERS,
     ...FINE_TUNING_HANDLERS,
     ...VIDEO_JOBS_HANDLERS,
+    ...IMAGE_EDIT_HANDLERS,
+    ...TRANSLATION_HANDLERS,
+    ...REALTIME_HANDLERS,
   ] as ProviderOperationHandlerRegistration[]
 
 const registered = new WeakSet<ProviderOperationHandlerRegistry>()

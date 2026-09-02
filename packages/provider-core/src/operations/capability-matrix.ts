@@ -265,7 +265,8 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     images: true,
     speech: true,
     transcription: true,
-    translation: true,
+    // Workers AI translates text, not speech, and this host wires no text translation.
+    translation: false,
   },
   cohere: { embeddings: true, rerank: true, fineTuning: true },
   deepinfra: { embeddings: true, rerank: true, images: true, speech: true, transcription: true },
