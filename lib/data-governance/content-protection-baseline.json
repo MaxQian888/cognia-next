@@ -60,7 +60,7 @@
   "chatResultIndexState": "metadata-only",
   "chatSearchState": "metadata-only",
   "chatSearchText": "metadata-only",
-  "chatTemplates": "metadata-only",
+  "chatTemplates": "encrypted-content",
   "chatTranscriptIndexState": "metadata-only",
   "chatTurnSummaries": "metadata-only",
   "codeAdoptionTurns": "metadata-only",

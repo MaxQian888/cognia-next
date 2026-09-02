@@ -241,6 +241,12 @@
       "importTitle": "导入角色",
       "title": "角色"
     },
+    "chatTemplates": {
+      "body": "已保存的对话模板，含参数声明与启动配置。",
+      "importBody": "添加或替换已保存的对话模板，使用记录会一并导入。",
+      "importTitle": "导入对话模板",
+      "title": "对话模板"
+    },
     "comingSoon": "即将上线",
     "customModes": {
       "body": "用户自定义的聊天模式与工具白名单。",

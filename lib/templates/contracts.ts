@@ -19,6 +19,11 @@ export const TEMPLATE_CATALOG_ONLY_DOMAINS = [
   "prompt",
   "subscription",
   "document",
+  // Saved chat templates (`lib/db/chat-templates.ts`). Catalog-only for the
+  // same reason `prompt` is: the table owns them, the Studio only has to be
+  // able to FIND one. Instantiating a chat template means putting text in a
+  // composer, which is not something the template runtime can do.
+  "chatTemplate",
 ] as const
 
 export type TemplateDomain =

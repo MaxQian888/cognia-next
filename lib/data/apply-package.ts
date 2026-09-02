@@ -19,6 +19,7 @@ import type {
   Team,
 } from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
@@ -174,6 +175,7 @@ export async function applyBackupPackage(
       db.memoryAuditEvents,
       db.retrievalProfiles,
       db.retrievalEncryptedContent,
+      db.chatTemplates,
       db.templateDefinitions,
       db.templatePackages,
       db.templateInstances,
@@ -238,6 +240,20 @@ export async function applyBackupPackage(
         opts,
         summary,
         idPrefix: "team",
+      })
+      // Keyed on `id` like every ordinary collection, and with no built-in
+      // concept to respect: a chat template is always something the user
+      // wrote. "duplicate" therefore does the useful thing here and mints a
+      // fresh id, so importing a colleague's export next to your own keeps
+      // both copies instead of silently picking one.
+      await applyCollection<ChatTemplateRow>({
+        rows: env.chatTemplates,
+        table: db.chatTemplates,
+        kind: "chatTemplates",
+        opts,
+        summary,
+        idPrefix: "tpl",
+        respectBuiltIn: false,
       })
       await applyKeyedCollection<TemplateDefinitionRow>({
         rows: env.templateDefinitions,

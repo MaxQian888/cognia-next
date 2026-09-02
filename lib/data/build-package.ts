@@ -102,6 +102,7 @@ export async function buildBackupPackage(
     pluginPermissions,
     pluginReviews,
     pluginAnalytics,
+    chatTemplates,
     templateDefinitions,
     templatePackages,
     templateInstances,
@@ -145,6 +146,7 @@ export async function buildBackupPackage(
     readTable(db.pluginPermissions),
     readTable(db.pluginReviews),
     readTable(db.pluginAnalytics),
+    readTable(db.chatTemplates),
     readTable(db.templateDefinitions),
     readTable(db.templatePackages),
     readTable(db.templateInstances),
@@ -223,6 +225,9 @@ export async function buildBackupPackage(
     pluginPermissions: pluginPermissions.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginReviews: pluginReviews.filter((row) => keptPluginIds.has(row.pluginId)),
     pluginAnalytics: pluginAnalytics.filter((row) => keptPluginIds.has(row.pluginId)),
+    // No built-in concept, so `includeBuiltIns` is a no-op here: every row is
+    // something the user typed.
+    chatTemplates,
     templateDefinitions,
     templatePackages,
     templateInstances,
@@ -269,6 +274,7 @@ export async function buildBackupPackage(
       "memoryJobs",
       "memoryAuditEvents",
       "retrievalProfileDeks",
+      "chatTemplates",
       "templateDefinitions",
       "templatePackages",
       "templateInstances",

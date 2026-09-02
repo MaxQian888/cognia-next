@@ -7,6 +7,7 @@ import {
   getChatTemplate,
   listChatTemplates,
   recordChatTemplateUse,
+  subscribeChatTemplates,
   updateChatTemplate,
 } from "./chat-templates"
 
@@ -151,5 +152,55 @@ describe("deleteChatTemplate", () => {
     await deleteChatTemplate(row.id)
 
     await expect(getChatTemplate(row.id)).resolves.toBeUndefined()
+  })
+})
+
+describe("subscribeChatTemplates", () => {
+  it("fires for every write that changes what the table contains", async () => {
+    const seen: string[] = []
+    const stop = subscribeChatTemplates(() => seen.push("changed"))
+
+    const row = await createChatTemplate({ name: "Review", body: "review {{module}}" })
+    await updateChatTemplate(row.id, { body: "review {{module}} now" })
+    await deleteChatTemplate(row.id)
+
+    expect(seen).toHaveLength(3)
+    stop()
+  })
+
+  /**
+   * The one write that changes nothing anybody projects, and it fires on every
+   * send. Rebuilding the catalog projection once per message for a counter it
+   * does not carry is work nobody asked for.
+   */
+  it("stays silent for a use, which only moves counters", async () => {
+    const row = await createChatTemplate({ name: "Review", body: "review {{module}}" })
+    const seen: string[] = []
+    const stop = subscribeChatTemplates(() => seen.push("changed"))
+
+    await recordChatTemplateUse(row.id, { module: { kind: "text", value: "auth" } })
+
+    expect(seen).toEqual([])
+    stop()
+  })
+
+  it("does not let a broken subscriber take down the save that fired it", async () => {
+    const stop = subscribeChatTemplates(() => {
+      throw new Error("projection is on fire")
+    })
+
+    await expect(createChatTemplate({ name: "Review", body: "x" })).resolves.toMatchObject({
+      name: "Review",
+    })
+    stop()
+  })
+
+  it("stops after unsubscribing", async () => {
+    const seen: string[] = []
+    subscribeChatTemplates(() => seen.push("changed"))()
+
+    await createChatTemplate({ name: "Review", body: "x" })
+
+    expect(seen).toEqual([])
   })
 })

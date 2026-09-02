@@ -82,8 +82,13 @@ describe("DataTableCatalog", () => {
     })
   })
 
-  it("maps all 37 companion tables and makes governed other tables discoverable", () => {
-    expect(COMPANION_SYNC_TABLES.size).toBe(37)
+  it("maps all 38 companion tables and makes governed other tables discoverable", () => {
+    expect(COMPANION_SYNC_TABLES.size).toBe(38)
+    // Saved chat templates. The mobile composer's `/` menu reads the local
+    // Dexie, so before this the phone offered nothing there.
+    expect(COMPANION_SYNC_TABLES.has("chatTemplates")).toBe(true)
+    expect(policyForTable("chatTemplates")?.syncPolicy.mode).toBe("companion-readonly")
+    expect(policyForTable("chatTemplates")?.contentProtection).toBe("encrypted-content")
     // The unread pointers the mobile Chat badge and Inbox dot count. They used
     // to count `inboundLedger`, which is host-only, so both read 0 on a phone.
     expect(COMPANION_SYNC_TABLES.has("sessionState")).toBe(true)

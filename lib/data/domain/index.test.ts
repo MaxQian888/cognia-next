@@ -38,6 +38,7 @@ describe("DOMAIN_TRANSFERS", () => {
         "a2ui",
         "canvas",
         "characters",
+        "chatTemplates",
         "mcpServers",
         "plugins",
         "promptPresets",

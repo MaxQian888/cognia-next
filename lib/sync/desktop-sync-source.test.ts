@@ -305,6 +305,56 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(30)
   })
 
+  it("returns chatTemplates whose updatedAt > since and ignores usage-only writes", async () => {
+    const db = getDb()
+    // Cleared here rather than in the shared beforeEach: this is the only
+    // suite that touches the table.
+    await db.chatTemplates.clear()
+    await db.chatTemplates.bulkPut([
+      {
+        id: "tpl_old",
+        name: "Old",
+        body: "a",
+        revision: 1,
+        usageCount: 0,
+        createdAt: 0,
+        updatedAt: 3,
+      } as never,
+      {
+        id: "tpl_new",
+        name: "New",
+        body: "b",
+        revision: 1,
+        usageCount: 0,
+        createdAt: 0,
+        updatedAt: 30,
+      } as never,
+    ])
+
+    const delta = await readDexieDelta("chatTemplates", 10)
+    expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["tpl_new"])
+    expect(delta.next_since).toBe(30)
+
+    // `recordChatTemplateUse` rewrites the row without touching `updatedAt`.
+    // That is what keeps a per-send counter off the wire, so a pull at the
+    // settled cursor has to stay empty afterwards.
+    await db.chatTemplates.put({
+      id: "tpl_new",
+      name: "New",
+      body: "b",
+      revision: 1,
+      usageCount: 7,
+      lastUsedAt: 900,
+      createdAt: 0,
+      updatedAt: 30,
+    } as never)
+    await expect(readDexieDelta("chatTemplates", 30)).resolves.toMatchObject({
+      rows: [],
+      deleted_ids: [],
+      next_since: 30,
+    })
+  })
+
   it("emits the settings singleton on first pull and re-emits after a change", async () => {
     const db = getDb()
     await db.settings.put({ id: "singleton", theme: "dark", updatedAt: 100 } as never)

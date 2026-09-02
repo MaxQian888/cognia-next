@@ -11,6 +11,7 @@ import type {
   SystemPromptPreset,
   Team,
 } from "@cognia/agent-config-types"
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
@@ -32,6 +33,7 @@ export type DomainKey =
   | "skills"
   | "mcpServers"
   | "promptPresets"
+  | "chatTemplates"
   | "characters"
   | "teams"
   | "settingsTheme"
@@ -151,6 +153,13 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     return {
       promptPresets: all.filter((p) => p.isBuiltIn !== true),
     }
+  }),
+  makeSpec("chatTemplates", "chatTemplates", async () => {
+    const db = getDb()
+    // Everything, unfiltered: there are no built-in chat templates, and the
+    // usage counters travel with the row because they are what orders the `/`
+    // menu on the far side.
+    return { chatTemplates: (await db.chatTemplates.toArray()) as ChatTemplateRow[] }
   }),
   makeSpec("characters", "characters", async () => {
     const db = getDb()

@@ -40,6 +40,7 @@ import { syncAgentTeamBoard } from "./handlers/agent-team-board"
 import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
 import { syncAppSettings } from "./handlers/app-settings"
 import { syncCharacters } from "./handlers/characters"
+import { syncChatTemplates } from "./handlers/chat-templates"
 import { syncConversationOverrides } from "./handlers/conversation-overrides"
 import { syncSessionState } from "./handlers/session-state"
 import { syncExecutionRuns } from "./handlers/execution-runs"
@@ -211,6 +212,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // mirror (desktop → phone) powering the mobile `/me/command-history` browse
   // /search viewer; the phone has no shell, so it never writes back.
   { table: "terminalHistory", stage: "background", run: syncTerminalHistory },
+  // Saved chat templates. Background, alongside the template platform it sits
+  // next to: the `/` menu that offers them is reachable the moment the
+  // composer paints, but an empty menu is the state the phone was already in,
+  // so this waits its turn behind the surfaces that block on their data.
+  { table: "chatTemplates", stage: "background", run: syncChatTemplates },
   { table: "templateDefinitions", stage: "background", run: syncTemplateDefinitions },
   { table: "templatePackages", stage: "background", run: syncTemplatePackages },
   { table: "templateInstances", stage: "background", run: syncTemplateInstances },
@@ -300,6 +306,10 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   mcpServers: syncDomain("tombstone"),
   terminalHistory: syncDomain("ttl", "confidential", "opaque"),
   agentTeamBoard: syncDomain("tombstone"),
+  // Deleting a template is user intent and has to reach the phone, or the `/`
+  // menu keeps offering text the user removed. `recordChatTemplateUse` is the
+  // one write left out of the cursor: counters, no content.
+  chatTemplates: syncDomain("tombstone"),
   templateDefinitions: syncDomain("tombstone"),
   templatePackages: syncDomain("tombstone"),
   templateInstances: syncDomain("tombstone"),

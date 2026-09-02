@@ -262,6 +262,14 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Immutable Single-Agent task attempts (read-only mirror)".to_string(),
             has_tombstones: false,
         },
+        // Saved chat templates. The mobile composer's `/` menu reads this table
+        // straight out of the local Dexie, so before it synced a paired phone
+        // simply offered nothing there.
+        SyncTableDescriptor {
+            name: "chatTemplates".to_string(),
+            description: "Saved chat templates offered by the composer's `/` menu (read-only mirror; a template created on the client stays local)".to_string(),
+            has_tombstones: true,
+        },
         SyncTableDescriptor {
             name: "templateDefinitions".to_string(),
             description: "Portable template definitions (read-only mobile catalog projection)".to_string(),
@@ -327,6 +335,7 @@ mod tests {
         assert!(r.contains("agentTeamBoard"));
         assert!(r.contains("agentTasks"));
         assert!(r.contains("agentTaskAttempts"));
+        assert!(r.contains("chatTemplates"));
         assert!(r.contains("templateDefinitions"));
         assert!(r.contains("templatePackages"));
         assert!(r.contains("templateInstances"));

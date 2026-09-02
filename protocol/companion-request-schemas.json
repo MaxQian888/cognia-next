@@ -10121,6 +10121,7 @@
             "agentTeamBoard",
             "agentTasks",
             "agentTaskAttempts",
+            "chatTemplates",
             "templateDefinitions",
             "templatePackages",
             "templateInstances",

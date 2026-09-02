@@ -2,7 +2,7 @@
   "latestVersion": 217,
   "schemaSha256": "9dde3263a433872978b9f4610379d4fd2a3a881371c23af546d0a1e9ecd27520",
   "staticTableCount": 343,
-  "companionSyncTableCount": 37,
+  "companionSyncTableCount": 38,
   "companionSyncTables": [
     "adapterInstances",
     "agentTaskAttempts",
@@ -12,6 +12,7 @@
     "agentTeammates",
     "agentTeams",
     "characters",
+    "chatTemplates",
     "connectorDrafts",
     "conversationOverrides",
     "executionRuns",

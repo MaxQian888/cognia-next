@@ -205,6 +205,8 @@ export async function readDexieDelta(
       return readAgentTasksDelta(since)
     case "agentTaskAttempts":
       return readAgentTaskAttemptsDelta(since)
+    case "chatTemplates":
+      return readChatTemplatesDelta(since)
     case "templateDefinitions":
       return readTemplateDefinitionsDelta(since)
     case "templatePackages":
@@ -278,6 +280,21 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
 async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().workflows.where("updatedAt").above(since).toArray()
   return finalizeDelta("workflows", rows as UpdatedAtRow[], since)
+}
+
+/**
+ * Saved chat templates.
+ *
+ * `updatedAt` is indexed and stamped by `createChatTemplate` and
+ * `updateChatTemplate`, so this is a plain range read. `recordChatTemplateUse`
+ * writes the row without touching it, which is deliberate: the usage counters
+ * fire on every send and change nothing the phone renders, so they stay out of
+ * the cursor rather than pushing the whole row across the wire per message.
+ * Deletions ride the shared tombstone fold in `finalizeDelta`.
+ */
+async function readChatTemplatesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().chatTemplates.where("updatedAt").above(since).toArray()
+  return finalizeDelta("chatTemplates", rows, since)
 }
 
 async function readTemplateDefinitionsDelta(since: number): Promise<SyncDelta<unknown>> {

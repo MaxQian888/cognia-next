@@ -241,6 +241,12 @@
       "importTitle": "Import characters",
       "title": "Characters"
     },
+    "chatTemplates": {
+      "body": "Saved chat templates with their parameter declarations and launch spec.",
+      "importBody": "Add or replace your saved chat templates. Usage history travels with each one.",
+      "importTitle": "Import chat templates",
+      "title": "Chat templates"
+    },
     "comingSoon": "Coming soon",
     "customModes": {
       "body": "User-defined chat modes with their tool whitelists.",

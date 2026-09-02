@@ -81,6 +81,7 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   agentTeamBoard: "agentTeamBoard",
   agentTasks: "agentTasks",
   agentTaskAttempts: "agentTaskAttempts",
+  chatTemplates: "chatTemplates",
   templateDefinitions: "templateDefinitions",
   templatePackages: "templatePackages",
   templateInstances: "templateInstances",

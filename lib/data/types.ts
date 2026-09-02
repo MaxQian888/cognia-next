@@ -31,6 +31,7 @@ import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/t
 import type { Memory } from "@/types/memory/memory"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { ProfilesExport } from "@cognia/provider-types/profile-migration"
@@ -116,6 +117,15 @@ export interface BackupPayloadV3 {
   a2uiApps?: A2UIAppRow[]
   a2uiTemplates?: A2UITemplateRow[]
   a2uiEventHistory?: A2UIEventHistoryRow[]
+  /**
+   * Saved chat templates (schema v217). Account-wide authored prose plus its
+   * `{{parameter}}` declarations and launch spec, so it travels with the
+   * account the same way `promptPresets` does. Usage counters ride along
+   * rather than being stripped: they are what orders the `/` menu, and a
+   * restored account whose list came back in an arbitrary order is a worse
+   * answer than one carrying a number nobody reads directly.
+   */
+  chatTemplates?: ChatTemplateRow[]
   /** Unified portable template data. Device bindings and migration rollback snapshots stay local. */
   templateDefinitions?: TemplateDefinitionRow[]
   templatePackages?: TemplatePackageRow[]

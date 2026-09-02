@@ -432,6 +432,10 @@ export const PORTABLE_BACKUP_BINDINGS = {
   pluginPermissions: "pluginPermissions",
   pluginReviews: "pluginReviews",
   pluginAnalytics: "pluginAnalytics",
+  // Saved chat templates. Authored prose with `{{parameter}}` declarations and
+  // a launch spec: the same class of thing as `promptPresets`, and portable
+  // for the same reason. A phrase you wrote is yours, not this machine's.
+  chatTemplates: "chatTemplates",
   templateDefinitions: "templateDefinitions",
   templatePackages: "templatePackages",
   templateInstances: "templateInstances",
@@ -466,6 +470,10 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   "agentTeamBoard",
   "agentTasks",
   "agentTaskAttempts",
+  // Saved chat templates. The `/` menu on a phone read a table nothing ever
+  // filled, so a template saved on the desktop was simply not offered there,
+  // on the surface a thin client spends all of its time in.
+  "chatTemplates",
   "templateDefinitions",
   "templatePackages",
   "templateInstances",
@@ -539,6 +547,7 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "agentTeamBoard",
   "agentTasks",
   "agentTaskAttempts",
+  "chatTemplates",
   "templateDefinitions",
   "templatePackages",
   "templateInstances",
@@ -741,6 +750,10 @@ const USER_CONTENT_TABLES = new Set<CoreTableName>([
   "chatDrafts",
   "messages",
   "promptPresets",
+  // A chat template is a message body the user wrote, plus the parameter
+  // declarations and launch spec that go with it. Prose, not metadata, so it
+  // is classified with `promptPresets` rather than with the counter tables.
+  "chatTemplates",
   "artifacts",
   "artifactVersions",
   "canvasComments",

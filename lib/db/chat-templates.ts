@@ -6,15 +6,21 @@
 // belong to a repository travel IN the repository (ADR-0147's declared-workspace
 // file), which is a different source entirely.
 //
-// Device-local for now: this table has no `lib/sync` handler, so a template
-// saved here does not follow the account to another device. Nothing depends on
-// it doing so — a template that is missing simply is not offered — but it is a
-// real limit, not an oversight.
+// Follows the account, on both of the routes an account has. Live, it is a
+// companion sync table (`lib/sync/handlers/chat-templates.ts`, host-authored
+// and read-only on the client, cursored on `updatedAt`), so a template saved on
+// the desktop shows up in the phone composer's `/` menu. Cold, it rides the
+// portable backup and its own Domain transfer row (`PORTABLE_BACKUP_BINDINGS`,
+// `lib/data/domain/index.ts`), so it survives a move to a new machine.
+//
+// One direction only: a template created on a paired client stays on that
+// client. Writing back needs a mutating RPC, which this table does not have.
 
 import { getDb } from "./schema"
 import { deriveParams, templateSlug, type ChatTemplateParam } from "@/lib/chat/template/template"
 import type { ChatTemplateParamValue } from "@/lib/chat/template/binding"
 import type { ChatTemplateLaunchSpec } from "@/lib/chat/template/launch-spec"
+import { recordTombstones } from "@/lib/sync/tombstones"
 
 export interface ChatTemplateRow {
   id: string
@@ -56,6 +62,42 @@ export interface ChatTemplateRow {
   lastUsedAt?: number
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * Called after a write that changed what this table CONTAINS.
+ *
+ * One consumer today: the template platform projects this table into its
+ * read-only catalog (`lib/templates/catalog-only-adapters.ts`), and that
+ * projection was otherwise built once at boot, so a template saved from the
+ * composer stayed invisible in the Studio until the next launch.
+ *
+ * A callback registry rather than a direct import of the catalog, because the
+ * catalog already imports this module: `lib/db` is the lower layer and must not
+ * learn about `lib/templates` to stay that way.
+ */
+type ChatTemplatesListener = () => void
+
+const listeners = new Set<ChatTemplatesListener>()
+
+export function subscribeChatTemplates(listener: ChatTemplatesListener): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function notifyChatTemplatesChanged(): void {
+  for (const listener of [...listeners]) {
+    // A subscriber that throws must not take down the write that just
+    // succeeded. Saving a template is the user's action, the projection is
+    // bookkeeping.
+    try {
+      listener()
+    } catch {
+      // Deliberately swallowed, see above.
+    }
+  }
 }
 
 /** What a caller supplies to create one. Declarations are derived when absent. */
@@ -103,6 +145,7 @@ export async function createChatTemplate(draft: ChatTemplateDraft): Promise<Chat
     updatedAt: now,
   }
   await getDb().chatTemplates.put(row)
+  notifyChatTemplatesChanged()
   return row
 }
 
@@ -135,6 +178,7 @@ export async function updateChatTemplate(
     updatedAt: Date.now(),
   }
   await db.chatTemplates.put(next)
+  notifyChatTemplatesChanged()
   return next
 }
 
@@ -143,6 +187,11 @@ export async function updateChatTemplate(
  *
  * Best-effort by design: losing the "last used" counters must never take down
  * the send that just succeeded, so callers fire this without awaiting it.
+ *
+ * Deliberately silent: this is the one write that changes no part of the
+ * template anybody projects, and it fires on every send. Notifying here would
+ * rebuild the catalog projection once per message for a counter it does not
+ * carry.
  */
 export async function recordChatTemplateUse(
   id: string,
@@ -161,4 +210,9 @@ export async function recordChatTemplateUse(
 
 export async function deleteChatTemplate(id: string): Promise<void> {
   await getDb().chatTemplates.delete(id)
+  // The companion sync learns about deletions only through the tombstone
+  // table (`finalizeDelta` folds it into the pull), so a template removed
+  // here would otherwise stay offered on every paired phone.
+  await recordTombstones("chatTemplates", [id])
+  notifyChatTemplatesChanged()
 }

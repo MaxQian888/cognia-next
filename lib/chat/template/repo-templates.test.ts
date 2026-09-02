@@ -2,7 +2,9 @@ import {
   demoteRepoLaunchSpec,
   parseRepoTemplate,
   repoTemplateId,
+  repoTemplatePath,
   repoTemplateRevision,
+  serializeChatTemplate,
 } from "./repo-templates"
 
 describe("demoteRepoLaunchSpec", () => {
@@ -170,5 +172,90 @@ describe("repoTemplateId", () => {
     expect(repoTemplateId(".cognia/templates/review.md")).toBe("repo:review")
     expect(repoTemplateId(".cognia/templates/review.mdx")).toBe("repo:review")
     expect(repoTemplateId(".cognia\\templates\\review.md")).toBe("repo:review")
+  })
+})
+
+describe("serializeChatTemplate", () => {
+  const template = {
+    name: "Review a PR",
+    description: "How we ask for a review here",
+    body: "Please review {{module}} on {{branch}}.",
+    params: [
+      { id: "module", label: "Which module", required: true, kind: "string" as const },
+      {
+        id: "branch",
+        label: "Branch",
+        description: "defaults to the current one",
+        required: false,
+        kind: "enum" as const,
+        options: ["main", "dev"],
+      },
+    ],
+  }
+
+  it("round-trips through the parser that reads the same directory", () => {
+    const parsed = parseRepoTemplate(
+      ".cognia/templates/review-a-pr.md",
+      serializeChatTemplate(template)
+    )
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.name).toBe("Review a PR")
+    expect(parsed?.description).toBe("How we ask for a review here")
+    expect(parsed?.body).toBe("Please review {{module}} on {{branch}}.")
+    expect(parsed?.params).toEqual(template.params)
+  })
+
+  it("is a fixed point: serialize, parse, serialize gives the same file", () => {
+    const once = serializeChatTemplate(template)
+    const parsed = parseRepoTemplate(".cognia/templates/review-a-pr.md", once)
+    expect(serializeChatTemplate(parsed!)).toBe(once)
+  })
+
+  it("writes the setup under the key the parser reads", () => {
+    const text = serializeChatTemplate({
+      ...template,
+      launchSpec: { model: "claude", permissionMode: "plan" },
+    })
+
+    expect(text).toContain("launch:")
+    expect(parseRepoTemplate(".cognia/templates/review-a-pr.md", text)?.launchSpec).toEqual({
+      model: "claude",
+      permissionMode: "plan",
+    })
+  })
+
+  /**
+   * The export is written undemoted, and the READER is what takes capability
+   * away. Otherwise a template would be trimmed on the way out and trimmed
+   * again on the way in, and the user's own setup would erode one export at a
+   * time.
+   */
+  it("keeps a setup the reader will later refuse, and lets the reader refuse it", () => {
+    const text = serializeChatTemplate({
+      ...template,
+      launchSpec: { allowedTools: ["Bash"], permissionMode: "bypassPermissions" },
+    })
+
+    expect(text).toContain("Bash")
+    const parsed = parseRepoTemplate(".cognia/templates/review-a-pr.md", text)
+    expect(parsed?.launchSpec).toBeUndefined()
+  })
+
+  it("omits frontmatter a template does not have", () => {
+    const text = serializeChatTemplate({ name: "Plain", body: "hello", params: [] })
+
+    expect(text).not.toContain("params:")
+    expect(text).not.toContain("description:")
+    expect(text).not.toContain("launch:")
+    expect(parseRepoTemplate(".cognia/templates/plain.md", text)?.body).toBe("hello")
+  })
+})
+
+describe("repoTemplatePath", () => {
+  it("uses the same slug the local table keys its ids on", () => {
+    expect(repoTemplatePath("Review a PR")).toBe(".cognia/templates/review-a-pr.md")
+    // Whatever the name, the file lands somewhere the reader will find it.
+    expect(repoTemplateId(repoTemplatePath("Review a PR"))).toBe("repo:review-a-pr")
   })
 })

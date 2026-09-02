@@ -42,22 +42,13 @@ const DEFAULT_DEPS: RepoChatTemplateDeps = {
     const { readWorkspaceFile } = await import("@/lib/files/workspace-fs")
     return readWorkspaceFile(root, relPath, maxBytes)
   },
+  // Shared with the WRITE path (`lib/chat/template/repo-template-write.ts`) on
+  // purpose. Reading a checkout and putting a file into one are two questions
+  // that must never get different answers about the same directory.
   isRestricted: async (root) => {
-    const [{ isWorkspaceRestricted }, { useSettingsStore }, { isTauri }] = await Promise.all([
-      import("@/lib/workspace/trust-gate"),
-      import("@/stores/settings"),
-      import("@/lib/tauri"),
-    ])
-    // A single-root stand-in for the directory the templates are actually being
-    // read from. Asking about the ACTIVE project instead would answer about a
-    // different checkout whenever the session overrides its working directory.
-    return isWorkspaceRestricted(
-      { roots: [{ id: root, path: root, isPrimary: true }] },
-      {
-        enabled: useSettingsStore.getState().settings?.workspaceTrust?.enabled !== false,
-        onWeb: !isTauri(),
-      }
-    )
+    const { isRepoTemplateWorkspaceRestricted } =
+      await import("@/lib/chat/template/repo-template-write")
+    return isRepoTemplateWorkspaceRestricted(root)
   },
 }
 
