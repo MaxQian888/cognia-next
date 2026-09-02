@@ -347,7 +347,7 @@
     "prebuild": "pnpm run workflow-app:embed:build && node scripts/build/build-browser-builtin-plugins.mjs && node scripts/build/stage-bundled-plugins.mjs && node scripts/build/download-cubism-core.mjs && node scripts/build/copy-monaco-assets.mjs && node scripts/build/build-artifact-runtime.mjs && node scripts/build/copy-ocr-assets.mjs && node scripts/build/copy-codegraph-grammars.mjs && node scripts/build/build-vscode-ext-host-sidecar.mjs && node scripts/build/build-webclone-sidecar.mjs && node scripts/build/build-mcp-sidecar.mjs && node scripts/build/build-builtin-skills.mjs && node scripts/build/build-support-docs.mjs",
     "precli:build": "pnpm run cli:native-hosts:build",
     "precli:build:binary": "pnpm run cli:release:prepare",
-    "precli:dev": "pnpm run cli:native-hosts:build",
+    "precli:dev": "node scripts/build/ensure-native-hosts.mjs",
     "prestorybook": "node scripts/build/clean-stale-webpack-cache.mjs",
     "pretest:e2e:tauri": "pnpm exec tauri build --debug"
   },

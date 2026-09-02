@@ -110,7 +110,27 @@ function logv(message) {
   process.stderr.write(`[sidecar:verbose] ${message}\n`)
 }
 
+/**
+ * Observers of every outbound frame. Only the smoke run registers one, so
+ * the hot path pays a size check. Exported for the co-located test.
+ */
+export const emitObservers = new Set()
+
+/** Test seam for the observer fan-out. Production callers use `emit`. */
+export function emitForTests(payload) {
+  emit(payload)
+}
+
 function emit(payload) {
+  if (emitObservers.size > 0) {
+    for (const observe of emitObservers) {
+      try {
+        observe(payload)
+      } catch {
+        // An observer must never break the wire.
+      }
+    }
+  }
   try {
     process.stdout.write(JSON.stringify(payload) + "\n")
   } catch (err) {
@@ -899,19 +919,115 @@ function handleClose(msg) {
 
 // ---- Main read loop -------------------------------------------------------
 
+/** The credential variables the SDK accepts. One of them must be set. */
+export const SMOKE_CREDENTIAL_ENV = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+]
+
+export const SMOKE_DEFAULT_TIMEOUT_MS = 60_000
+
+/** Names of the missing credential variables, or null when one is present. */
+export function smokeCredentialGap(env = process.env) {
+  const present = SMOKE_CREDENTIAL_ENV.some(
+    (name) => typeof env[name] === "string" && env[name] !== ""
+  )
+  return present ? null : SMOKE_CREDENTIAL_ENV
+}
+
+/**
+ * Fold one outbound frame into the smoke state. Assistant text is any text
+ * block on an `assistant` SDK message. An error is an error frame, a session
+ * that ended with an error, or an SDK result flagged `is_error`.
+ */
+export function smokeObserveFrame(state, payload) {
+  if (!payload || typeof payload !== "object") return state
+  if (payload.type === "event") {
+    const event = payload.event
+    if (event?.type === "assistant") {
+      const blocks = event.message?.content ?? []
+      if (
+        blocks.some(
+          (block) =>
+            block?.type === "text" && typeof block.text === "string" && block.text.length > 0
+        )
+      ) {
+        state.sawAssistantText = true
+      }
+    } else if (event?.type === "result" && event.is_error) {
+      state.sawError = true
+      state.errorReason ??= `result ${event.subtype ?? "error"}`
+    }
+  } else if (payload.type === "error") {
+    state.sawError = true
+    state.errorReason ??= payload.error ?? payload.message ?? "error frame"
+  } else if (payload.type === "session_ended" && payload.error) {
+    state.sawError = true
+    state.errorReason ??= String(payload.error)
+  }
+  return state
+}
+
+/**
+ * Exit code for a smoke run. `0` only when assistant text arrived and no
+ * error did. `1` for an error frame, `3` for the wall-clock deadline, and
+ * `1` again for a session that ended silently with nothing to show.
+ */
+export function smokeOutcome(state) {
+  if (state.sawError) return { code: 1, reason: `error frame: ${state.errorReason ?? "unknown"}` }
+  if (state.timedOut) return { code: 3, reason: `no assistant text within ${state.timeoutMs}ms` }
+  if (state.sawAssistantText) return { code: 0, reason: "assistant text received" }
+  return { code: 1, reason: "session ended without assistant text or an error frame" }
+}
+
 export async function smoke() {
   // Quick round-trip test invoked with `node claude-host.mjs --smoke`.
-  // Requires the SDK to be authenticated (env ANTHROPIC_API_KEY etc.).
-  console.error("[sidecar smoke] starting…")
+  //
+  // Honest by construction. It used to exit 0 unconditionally once the
+  // session map emptied, so an invalid key, a 401, or an SDK that never
+  // answered all reported success. Now: no credential is exit 2 naming the
+  // variables, an error frame is exit 1, the deadline is exit 3, and 0 needs
+  // assistant text with no error.
+  const gap = smokeCredentialGap()
+  if (gap) {
+    console.error(`[sidecar smoke] no credential: set one of ${gap.join(", ")}`)
+    process.exit(2)
+  }
+  const timeoutMs = Number(process.env.COGNIA_SMOKE_TIMEOUT_MS) || SMOKE_DEFAULT_TIMEOUT_MS
+  const state = {
+    sawAssistantText: false,
+    sawError: false,
+    errorReason: null,
+    timedOut: false,
+    timeoutMs,
+  }
+  const observer = (payload) => smokeObserveFrame(state, payload)
+  emitObservers.add(observer)
+  console.error(`[sidecar smoke] starting… (deadline ${timeoutMs}ms)`)
+  const deadline = Date.now() + timeoutMs
   const s = startSession("smoke-1", "Reply with the single word PONG.")
-  // Wait until the session ends.
-  while (sessions.has("smoke-1")) {
+  if (!s) {
+    state.sawError = true
+    state.errorReason = "startSession returned null"
+  }
+  while (sessions.has("smoke-1") && !state.sawError) {
+    if (Date.now() >= deadline) {
+      state.timedOut = true
+      try {
+        routeClose(sessions, { type: "close", sessionId: "smoke-1" }, log)
+      } catch {
+        // Best effort; the deadline already decided the outcome.
+      }
+      break
+    }
     await new Promise((r) => setTimeout(r, 200))
   }
-  console.error("[sidecar smoke] done")
-  void s
+  emitObservers.delete(observer)
+  const outcome = smokeOutcome(state)
+  console.error(`[sidecar smoke] ${outcome.code === 0 ? "ok" : "FAILED"}: ${outcome.reason}`)
   await shutdownHostTelemetry()
-  process.exit(0)
+  process.exit(outcome.code)
 }
 
 /**

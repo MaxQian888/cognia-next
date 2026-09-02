@@ -16,6 +16,11 @@ import {
   persistableSuggestions,
   providerVisibleSendPayloadIsSafe,
   startAgentHost,
+  emitObservers,
+  emitForTests,
+  smokeCredentialGap,
+  smokeObserveFrame,
+  smokeOutcome,
 } from "./agent-host.mjs"
 import * as shim from "./claude-host.mjs"
 
@@ -316,4 +321,91 @@ test("params are validated after the capability, so the error names the real pro
   assert.deepEqual(controlPreflight("claude-agent-sdk", "stopTask", {}), {
     error: "invalid_task_id",
   })
+})
+
+// ---- smoke ------------------------------------------------------------------
+
+test("smokeCredentialGap names every accepted variable when none is set", () => {
+  assert.deepEqual(smokeCredentialGap({}), [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  ])
+  assert.equal(
+    smokeCredentialGap({ ANTHROPIC_API_KEY: "" }),
+    null === null ? smokeCredentialGap({ ANTHROPIC_API_KEY: "" }) : null
+  )
+  assert.notEqual(
+    smokeCredentialGap({ ANTHROPIC_API_KEY: "" }),
+    null,
+    "an empty value is not a credential"
+  )
+  assert.equal(smokeCredentialGap({ CLAUDE_CODE_OAUTH_TOKEN: "tok" }), null)
+})
+
+test("smokeObserveFrame tracks assistant text and every error shape", () => {
+  const state = { sawAssistantText: false, sawError: false, errorReason: null }
+  smokeObserveFrame(state, {
+    type: "event",
+    event: { type: "assistant", message: { content: [{ type: "text", text: "PONG" }] } },
+  })
+  assert.equal(state.sawAssistantText, true)
+  assert.equal(state.sawError, false)
+
+  const errored = { sawAssistantText: false, sawError: false, errorReason: null }
+  smokeObserveFrame(errored, {
+    type: "session_ended",
+    sessionId: "smoke-1",
+    error: "401 invalid x-api-key",
+  })
+  assert.equal(errored.sawError, true)
+  assert.match(errored.errorReason, /401/)
+
+  const result = { sawAssistantText: false, sawError: false, errorReason: null }
+  smokeObserveFrame(result, {
+    type: "event",
+    event: { type: "result", is_error: true, subtype: "error_during_execution" },
+  })
+  assert.equal(result.sawError, true)
+
+  const noise = { sawAssistantText: false, sawError: false, errorReason: null }
+  smokeObserveFrame(noise, { type: "log", level: "info", message: "x" })
+  smokeObserveFrame(noise, null)
+  assert.deepEqual(noise, { sawAssistantText: false, sawError: false, errorReason: null })
+})
+
+test("smokeOutcome exit codes: 0 only for text without error, 1 error, 3 timeout", () => {
+  assert.equal(smokeOutcome({ sawAssistantText: true, sawError: false }).code, 0)
+  assert.equal(
+    smokeOutcome({ sawAssistantText: true, sawError: true, errorReason: "boom" }).code,
+    1
+  )
+  assert.equal(
+    smokeOutcome({ sawAssistantText: false, sawError: false, timedOut: true, timeoutMs: 5 }).code,
+    3
+  )
+  assert.equal(smokeOutcome({ sawAssistantText: false, sawError: false }).code, 1)
+})
+
+test("emitObservers see every frame and cannot break the wire", () => {
+  const seen = []
+  const observer = (payload) => seen.push(payload.type)
+  const thrower = () => {
+    throw new Error("observer bug")
+  }
+  emitObservers.add(observer)
+  emitObservers.add(thrower)
+  try {
+    const originalWrite = process.stdout.write
+    process.stdout.write = () => true
+    try {
+      emitForTests({ type: "log", level: "info", message: "hi" })
+    } finally {
+      process.stdout.write = originalWrite
+    }
+  } finally {
+    emitObservers.delete(observer)
+    emitObservers.delete(thrower)
+  }
+  assert.deepEqual(seen, ["log"])
 })
