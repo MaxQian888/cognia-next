@@ -53,6 +53,7 @@
   "removeTitle": "删除模板？",
   "removedToast": "已删除「{name}」。",
   "save": "保存",
+  "shareUnavailable": "请先重新保存该模板，让它进入模板库，然后才能分享链接。",
   "teammateCount": "{count, plural, =0 {暂无队友} other {# 个队友}}",
   "teammateEditNote": "{count, plural, =0 {尚无队友 — 创建后可在工作区中编辑队友。} other {从源模板继承了 # 个队友 — 可在工作区中继续编辑。}}",
   "title": "代理团队模板",

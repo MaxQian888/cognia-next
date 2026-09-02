@@ -18,9 +18,10 @@
  * store writer directly, so no Squad in the app had lineage at all.
  *
  * A user row also carries what the platform knows about it (draft, published
- * version, forked from) and the three actions that only exist there: Publish,
- * which is what turns a private draft into something packageable, Export, and
- * Fork. Plugin rows stay read-only, because the overlay registry is their
+ * version, forked from) and the four actions that only exist there: Publish,
+ * which is what turns a private draft into something packageable, Export, Fork,
+ * and Share, which hands the published release over as a link instead of a
+ * file. Plugin rows stay read-only, because the overlay registry is their
  * source of truth and this panel is not it.
  *
  * Import is deliberately the platform's import, not the store's. The store had
@@ -36,6 +37,7 @@ import {
   CopyIcon,
   DownloadIcon,
   GitForkIcon,
+  Link2Icon,
   PencilIcon,
   PlayIcon,
   PlusIcon,
@@ -88,7 +90,11 @@ import {
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
 import { publishSquadTemplateToPlatform } from "@/lib/agent-team/publish-template-to-platform"
 import { applySquadTemplate } from "@/lib/agent-team/apply-squad-template"
-import type { SquadTemplatePlatformStatus } from "@/lib/agent-team/squad-template-platform"
+import {
+  squadTemplateShareDefinition,
+  type SquadTemplatePlatformStatus,
+} from "@/lib/agent-team/squad-template-platform"
+import { TemplateDefinitionShareButton } from "@/components/share/template-definition-share-button"
 import {
   useSquadTemplatePlatformStatuses,
   type SquadTemplateStatusRow,
@@ -129,6 +135,9 @@ export interface AgentTeamTemplatesSectionProps {
 export function AgentTeamTemplatesSection({ runtime }: AgentTeamTemplatesSectionProps = {}) {
   const t = useTranslations("settings.agentTeams")
   const tCommon = useTranslations("common")
+  // The share control speaks the app-wide share vocabulary, so its label and
+  // its refusals read the same here as in Discover and the Studio.
+  const tShare = useTranslations("share")
   const router = useRouter()
   const platform = usePlatform()
   const templatePlatform: TemplatePlatform =
@@ -467,6 +476,7 @@ export function AgentTeamTemplatesSection({ runtime }: AgentTeamTemplatesSection
               onDuplicate={() => handleDuplicate(tpl)}
               onDelete={() => handleDelete(tpl)}
               tCommon={tCommon}
+              tShare={tShare}
               t={t}
             />
           )
@@ -589,6 +599,8 @@ interface RowProps {
   onDelete: () => void
   t: ReturnType<typeof useTranslations>
   tCommon: ReturnType<typeof useTranslations>
+  /** The `share` namespace, so the link action reads like every other one. */
+  tShare: ReturnType<typeof useTranslations>
 }
 
 function TemplateRow({
@@ -609,6 +621,7 @@ function TemplateRow({
   onDelete,
   t,
   tCommon,
+  tShare,
 }: RowProps) {
   // Plugin-sourced templates are read-only (the source of truth lives in
   // the overlay registry). They can still be "used" (instantiates a team)
@@ -622,6 +635,9 @@ function TemplateRow({
   // that contributed it.
   const owned = !template.isBuiltIn && !isPluginSource
   const published = platformStatus?.state === "published"
+  // The release a link would carry, or the draft, which the share button turns
+  // into "publish a version first" rather than into a missing control.
+  const shareDefinition = platformStatus ? squadTemplateShareDefinition(platformStatus) : undefined
   if (editing) {
     return (
       <TemplateEditor
@@ -800,6 +816,33 @@ function TemplateRow({
               >
                 <GitForkIcon className="size-3.5" />
               </Button>
+              {/* A link is the third way a squad template leaves this machine,
+                  after a package and a fork, and the only one that needs no
+                  file. Same component the Studio inspector and Discover use, so
+                  a recipient gets the same hash-verifiable envelope from all
+                  three. */}
+              <div
+                className="flex flex-col items-end"
+                data-testid={`share-${template.id}`}
+                data-state={platformStatus?.state ?? "unknown"}
+              >
+                {shareDefinition ? (
+                  <TemplateDefinitionShareButton definition={shareDefinition} size="sm" />
+                ) : (
+                  <>
+                    <Button type="button" variant="outline" size="sm" disabled>
+                      <Link2Icon className="size-4" />
+                      {tShare("shareAction")}
+                    </Button>
+                    <p
+                      className="mt-1 text-xs text-muted-foreground"
+                      data-testid={`share-unavailable-${template.id}`}
+                    >
+                      {t("shareUnavailable")}
+                    </p>
+                  </>
+                )}
+              </div>
             </>
           ) : null}
           <AlertDialog>

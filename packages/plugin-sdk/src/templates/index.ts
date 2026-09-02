@@ -534,9 +534,12 @@ export interface PluginTemplatesAPI {
   /**
    * Import package bytes into the library, recorded with `source: "plugin"`.
    *
-   * The per-definition `provenance.pluginId` comes from the package itself, so
-   * it names whoever AUTHORED those definitions. Which plugin performed the
-   * import is recorded on the consent request the user answers, not on the row.
+   * The installed releases are stamped with THIS plugin as
+   * `provenance.pluginId`, replacing whoever authored the package, so the
+   * library-write checks let this plugin publish, deprecate or delete what it
+   * imported. The author is still readable from the package manifest and its
+   * signature, and the content hash is unaffected because provenance is not
+   * part of it.
    */
   importPackage(bytes: Uint8Array): Promise<{
     fingerprint: string

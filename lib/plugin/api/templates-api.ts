@@ -301,12 +301,17 @@ export function createTemplatesAPI(
       // this package entered the library because a plugin asked, not because
       // the user opened a file. `confirmed` is the consent just obtained above.
       //
-      // Per-definition `provenance.pluginId` is written by
-      // `lib/templates/service.ts:importPackage` from the package's OWN
-      // definitions, so it names the plugin that AUTHORED the package, not the
-      // one that imported it. Which plugin asked is recorded on the consent
-      // request, not on the row.
-      return deps.service.importPackage(bytes, { source: "plugin", confirmed: true })
+      // `importedBy` re-stamps `provenance.pluginId` on the installed releases
+      // with the IMPORTER. Left to the package's own definitions that field
+      // names the AUTHOR, and `assertPluginOwnsLibraryEntry` then refused this
+      // plugin every `publish` / `deprecate` / `deleteDraft` on the rows it had
+      // just installed under the user's own consent. Provenance is outside the
+      // content hash, so the package still verifies byte for byte.
+      return deps.service.importPackage(bytes, {
+        source: "plugin",
+        confirmed: true,
+        importedBy: { pluginId },
+      })
     },
 
     async preflight(input) {

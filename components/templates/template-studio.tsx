@@ -53,6 +53,7 @@ import type {
 import type { TemplateDerivation } from "@/lib/templates/repository"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { makeTemplateDraftId } from "@/lib/templates/draft-id"
+import { downloadTemplatePackage, templatePackageFilename } from "@/lib/templates/download-package"
 import { createPublisherSigner, publisherFingerprint } from "@/lib/templates/publisher-identity"
 import { trustPublisher } from "@/lib/db/trusted-publishers"
 import { TemplateDefinitionShareButton } from "@/components/share/template-definition-share-button"
@@ -176,22 +177,6 @@ function defaultPayload(domain: TemplateDomain, name: string, teamLeadName: stri
     default:
       return {}
   }
-}
-
-function downloadPackage(bytes: Uint8Array, filename: string): void {
-  const blob = new Blob([bytes as BlobPart], { type: "application/zip" })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement("a")
-  anchor.href = url
-  anchor.download = filename
-  // In the document, and revoked on the next task rather than synchronously:
-  // some browsers ignore a click on a detached anchor, and revoking before the
-  // download has been handed off cancels it.
-  anchor.style.display = "none"
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 export function TemplateStudio() {
@@ -667,7 +652,7 @@ export function TemplateStudio() {
     })
     setExportOrigin(undefined)
     if (signer) setPublisherKeyNonce((value) => value + 1)
-    downloadPackage(exported.bytes, `${request.id}-${request.version}.cognia-template`)
+    downloadTemplatePackage(exported.bytes, templatePackageFilename(request.id, request.version))
   }
 
   const verifyPackage = async (key: string) => {
@@ -696,9 +681,9 @@ export function TemplateStudio() {
 
   const reexportPackage = async (key: string) => {
     const exported = await runtime.service.reexportPackage(key)
-    downloadPackage(
+    downloadTemplatePackage(
       exported.bytes,
-      `${exported.manifest.id}-${exported.manifest.version}.cognia-template`
+      templatePackageFilename(exported.manifest.id, exported.manifest.version)
     )
   }
 

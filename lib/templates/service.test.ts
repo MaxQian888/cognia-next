@@ -2,7 +2,11 @@ import JSZip from "jszip"
 import { generateKeyPairSync, sign } from "node:crypto"
 
 import { TemplateCatalog } from "./catalog"
-import { createTemplateDefinition, TEMPLATE_API_VERSION } from "./contracts"
+import {
+  createTemplateDefinition,
+  verifyTemplateDefinitionHash,
+  TEMPLATE_API_VERSION,
+} from "./contracts"
 import {
   exportTemplatePackage,
   templatePackageSignaturePayload,
@@ -426,6 +430,58 @@ describe("TemplateService package maintenance", () => {
     const filed = await plain.repository.getRelease("skill.marketplace", "1.0.0")
     expect(filed?.provenance.source).toBe("file")
     expect(filed?.provenance.sourceUrl).toBeUndefined()
+  })
+
+  it("stamps the IMPORTING plugin on a plugin import, leaving the content hash alone", async () => {
+    const authored = await createTemplateDefinition({
+      id: "skill.authored",
+      domain: "skill",
+      status: "published",
+      revision: 1,
+      version: "1.0.0",
+      metadata: { name: "Authored skill" },
+      payload: { content: "authored" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop", "web", "mobile"] },
+      provenance: { source: "plugin", pluginId: "author.plugin", trust: "unsigned" },
+    })
+    const packaged = await exportTemplatePackage({
+      id: "com.example.authored",
+      version: "1.0.0",
+      name: "Authored package",
+      entrypoints: [authored.id],
+      definitions: [authored],
+    })
+
+    const { repository, service } = makeService()
+    await service.importPackage(packaged.bytes, {
+      source: "plugin",
+      confirmed: true,
+      importedBy: { pluginId: "importer.plugin" },
+    })
+
+    const release = await repository.getRelease("skill.authored", "1.0.0")
+    // The importer owns what it installed, so the library-write checks in
+    // `lib/plugin/api/templates-api.ts` let it publish/deprecate/delete it.
+    expect(release?.provenance).toMatchObject({ source: "plugin", pluginId: "importer.plugin" })
+    expect((await repository.listPackages())[0].pluginId).toBe("importer.plugin")
+    // Provenance is outside the hash, so the bytes still verify as shipped.
+    expect(release?.contentHash).toBe(authored.contentHash)
+    expect(await verifyTemplateDefinitionHash(release!)).toBe(true)
+
+    // Any other source keeps the author's stamp, even if a caller passes one.
+    const filed = makeService()
+    await filed.service.importPackage(packaged.bytes, {
+      source: "file",
+      confirmed: true,
+      importedBy: { pluginId: "importer.plugin" },
+    })
+    expect(
+      (await filed.repository.getRelease("skill.authored", "1.0.0"))?.provenance.pluginId
+    ).toBe("author.plugin")
+    expect((await filed.repository.listPackages())[0].pluginId).toBeUndefined()
   })
 
   it("re-resolves publisher trust and confirms each release still hashes to its claim", async () => {

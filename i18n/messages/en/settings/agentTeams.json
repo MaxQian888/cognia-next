@@ -53,6 +53,7 @@
   "removeTitle": "Remove template?",
   "removedToast": "Removed \"{name}\".",
   "save": "Save",
+  "shareUnavailable": "Save this template again to put it in the library before sharing a link.",
   "teammateCount": "{count, plural, =0 {No teammates} =1 {# teammate} other {# teammates}}",
   "teammateEditNote": "{count, plural, =0 {No teammates yet — edit teammates from the workspace after creation.} =1 {# teammate carried over from the source template — edit them in the workspace.} other {# teammates carried over from the source template — edit them in the workspace.}}",
   "title": "Agent team templates",

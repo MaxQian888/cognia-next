@@ -583,7 +583,7 @@ describe("PluginTemplatesAPI library writes", () => {
     expect(forked.provenance.pluginId).toBe("demo.plugin")
   })
 
-  it('imports a package as source "plugin" with the consent already given', async () => {
+  it('imports a package as source "plugin", naming itself as the importer', async () => {
     const catalog = new TemplateCatalog()
     const inspected = {
       fingerprint: "f",
@@ -598,9 +598,13 @@ describe("PluginTemplatesAPI library writes", () => {
 
     await expect(api.importPackage(bytes)).resolves.toBe(inspected)
 
+    // `importedBy` is what lets the importer publish/deprecate/delete the rows
+    // it just installed: without it the releases keep the AUTHOR's pluginId and
+    // `assertPluginOwnsLibraryEntry` refuses the importer every write.
     expect(service.importPackage).toHaveBeenCalledWith(bytes, {
       source: "plugin",
       confirmed: true,
+      importedBy: { pluginId: "demo.plugin" },
     })
     expect(confirm).toHaveBeenCalledWith(
       expect.objectContaining({ action: "import-package", pluginId: "demo.plugin" })

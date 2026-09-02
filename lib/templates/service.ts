@@ -839,6 +839,17 @@ export class TemplateService {
    * link, which is the one thing that makes a link-sourced release auditable
    * afterwards. Absent for a file the user picked off disk, where there is no
    * address to record.
+   *
+   * `importedBy` is the plugin that ASKED for the import, and it only means
+   * anything alongside `source: "plugin"`. Without it every imported release
+   * kept the `provenance.pluginId` its author put in the package, so a plugin
+   * that imported somebody else's bytes could not then publish, deprecate or
+   * delete what it had just installed: the ownership check in
+   * `lib/plugin/api/templates-api.ts` reads that same field and saw the author.
+   * Overwriting it is safe for the package's integrity, because
+   * `hashableDefinition` in `contracts.ts` hashes id/version/metadata/payload/
+   * inputs/dependencies/capabilities/compatibility and never provenance, so the
+   * content hash the manifest checksum pins is untouched.
    */
   async importPackage(
     bytes: Uint8Array,
@@ -846,12 +857,14 @@ export class TemplateService {
       source: "file" | "link" | "plugin" | "marketplace"
       confirmed: boolean
       sourceUrl?: string
+      importedBy?: { pluginId: string }
     }
   ): Promise<InspectedTemplatePackage> {
     const inspected = await inspectTemplatePackage(bytes)
     if (!input.confirmed) throw new Error("Template package import requires explicit confirmation")
     const importedAt = this.now()
     const trust = await this.resolvePackageTrust(inspected.manifest.signature?.publicKey)
+    const importerPluginId = input.source === "plugin" ? input.importedBy?.pluginId : undefined
     const storedPackage = {
       key: `${inspected.manifest.id}@${inspected.manifest.version}`,
       manifest: inspected.manifest,
@@ -859,6 +872,7 @@ export class TemplateService {
       trust,
       importedAt,
       source: input.source,
+      ...(importerPluginId ? { pluginId: importerPluginId } : {}),
     } as const
     const definitions = await Promise.all(
       inspected.definitions.map((definition) =>
@@ -870,6 +884,7 @@ export class TemplateService {
             source: input.source === "marketplace" ? "marketplace" : input.source,
             packageId: inspected.manifest.id,
             ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+            ...(importerPluginId ? { pluginId: importerPluginId } : {}),
             trust,
             signatureFingerprint: inspected.fingerprint,
           },

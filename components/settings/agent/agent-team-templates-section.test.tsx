@@ -419,6 +419,46 @@ describe("AgentTeamTemplatesSection platform actions", () => {
     expect(screen.queryByTestId(`publish-${builtIn.id}`)).not.toBeInTheDocument()
     expect(screen.queryByTestId(`export-${builtIn.id}`)).not.toBeInTheDocument()
     expect(screen.queryByTestId(`fork-${builtIn.id}`)).not.toBeInTheDocument()
+    // A built-in is a per-boot overlay, so there is no release of the user's to
+    // hand anyone: no share control at all, rather than a disabled one.
+    expect(screen.queryByTestId(`share-${builtIn.id}`)).not.toBeInTheDocument()
+  })
+
+  it("shares the published release as a link", async () => {
+    const release = await agentTeamDefinition({ id: "legacy.agentTeam.user-1", version: "1.0.0" })
+    const { runtime } = makeRuntime({ releases: { "legacy.agentTeam.user-1": [release] } })
+    render(<AgentTeamTemplatesSection runtime={runtime} />)
+
+    const share = await screen.findByTestId(`share-${userTpl.id}`)
+    expect(share).toHaveAttribute("data-state", "published")
+    expect(within(share).getByTestId("template-share-button")).not.toBeDisabled()
+    expect(within(share).queryByTestId("template-share-refusal")).not.toBeInTheDocument()
+  })
+
+  it("disables the share link on a draft-only row and says why", async () => {
+    const { runtime } = makeRuntime({
+      drafts: { "legacy.agentTeam.user-1": { id: "legacy.agentTeam.user-1", revision: 1 } },
+    })
+    render(<AgentTeamTemplatesSection runtime={runtime} />)
+
+    const share = await screen.findByTestId(`share-${userTpl.id}`)
+    expect(share).toHaveAttribute("data-state", "draft")
+    const button = within(share).getByTestId("template-share-button")
+    expect(button).toBeDisabled()
+    // The refusal comes from the share layer itself, so a draft reads the same
+    // here as it does in the Studio inspector and in Discover.
+    expect(button).toHaveAttribute("data-refusal", "unpublished")
+    expect(within(share).getByTestId("template-share-refusal")).toBeInTheDocument()
+  })
+
+  it("explains an absent row rather than offering a link to nothing", async () => {
+    const { runtime } = makeRuntime()
+    render(<AgentTeamTemplatesSection runtime={runtime} />)
+
+    const share = await screen.findByTestId(`share-${userTpl.id}`)
+    expect(share).toHaveAttribute("data-state", "absent")
+    expect(within(share).getByRole("button")).toBeDisabled()
+    expect(within(share).getByTestId(`share-unavailable-${userTpl.id}`)).toBeInTheDocument()
   })
 })
 
