@@ -1656,6 +1656,14 @@
       "permission": "subscription:read"
     },
     {
+      "id": "provider.operation-adapter",
+      "kind": "runtime",
+      "stability": "stable",
+      "status": "implemented",
+      "introducedIn": "0.5.0",
+      "permission": "ai:chat"
+    },
+    {
       "id": "connectors.im-rate-source",
       "kind": "runtime",
       "stability": "stable",

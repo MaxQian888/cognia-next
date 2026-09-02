@@ -1,5 +1,7 @@
 import { statfs } from "node:fs/promises"
 import path from "node:path"
+
+import { freeBytesAt } from "../util/disk"
 import {
   runProjectPreflight,
   type EvalEnvironmentCompatibility,
@@ -53,13 +55,10 @@ export async function checkCliEvalPreflight(
     })),
   }
   const required = requiredBytes(resolvedProject)
-  let availableBytes: number | undefined
-  try {
-    const filesystem = await dependencies.statfs(path.dirname(path.resolve(projectPath)))
-    availableBytes = Number(filesystem.bavail) * Number(filesystem.bsize)
-  } catch {
-    availableBytes = undefined
-  }
+  const availableBytes = await freeBytesAt(
+    path.dirname(path.resolve(projectPath)),
+    dependencies.statfs
+  )
   const environmentCompatibility: EvalEnvironmentCompatibility = {
     checkedAt: dependencies.now(),
     runtimeByVariant: Object.fromEntries(

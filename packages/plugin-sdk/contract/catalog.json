@@ -441,6 +441,13 @@
       "minimumHostVersion": "0.1.0"
     },
     {
+      "id": "provider-operation-adapter",
+      "support": "supported",
+      "manifestFields": ["providerOperationAdapters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
       "id": "im-rate-source",
       "support": "supported",
       "manifestFields": ["imRateSources"],
@@ -1125,6 +1132,11 @@
     {
       "field": "limitsSources",
       "capabilities": ["limits-source"],
+      "execution": "host"
+    },
+    {
+      "field": "providerOperationAdapters",
+      "capabilities": ["provider-operation-adapter"],
       "execution": "host"
     },
     {

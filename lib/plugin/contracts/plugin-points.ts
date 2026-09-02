@@ -1014,6 +1014,7 @@ export const CANONICAL_RUNTIME_POINTS = [
   "connectors.adapter",
   "subscription.balance-adapter",
   "subscription.limits-source",
+  "provider.operation-adapter",
   "connectors.im-rate-source",
   "chat.compaction-strategy",
   "quick-action",
@@ -1088,6 +1089,8 @@ export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
     "lib/plugin/registries/balance-adapter-registry.ts:registerBalanceAdapter",
   "subscription.limits-source":
     "lib/plugin/registries/limits-source-registry.ts:registerLimitsSource",
+  "provider.operation-adapter":
+    "lib/plugin/registries/provider-operation-adapter-registry.ts:registerProviderOperationAdapter",
   "connectors.im-rate-source":
     "lib/plugin/registries/im-rate-source-registry.ts:registerImRateSource",
   "chat.compaction-strategy":
@@ -1158,6 +1161,7 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "connectors.adapter": "connectors:read",
   "subscription.balance-adapter": "subscription:read",
   "subscription.limits-source": "subscription:read",
+  "provider.operation-adapter": "ai:chat",
   "connectors.im-rate-source": "connectors:read",
   "chat.compaction-strategy": "agent:control",
   "quick-action": "extension:ui",

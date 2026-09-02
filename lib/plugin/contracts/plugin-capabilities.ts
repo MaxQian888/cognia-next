@@ -1054,6 +1054,34 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     ],
   },
   {
+    // ADR-0163. Plugins declaring this capability serve one provider operation
+    // (any of the fifty contract ids) for a provider, a wire protocol, or every
+    // provider. The manifest carries a `providerOperationAdapters` array; the
+    // registry binds each handler into the operation handler registry with
+    // `support: "plugin"`, so `capabilities.read` shows it as a plugin cell and
+    // the executor dispatches to it like a built-in.
+    id: "provider-operation-adapter",
+    support: "supported",
+    manifestFields: ["providerOperationAdapters"],
+    runtimeBinding:
+      "OVERLAY_REGISTRY_CAPABILITIES['provider-operation-adapter'] → registerProviderOperationAdapter → providerOperationHandlerRegistry (support: plugin) → executor + capabilities.read",
+    hostBindings: [
+      "lib/plugin/registries/provider-operation-adapter-registry.ts",
+      "lib/ai/operations/registry.ts",
+      "lib/ai/operations/handlers/plugin-projection.ts",
+    ],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-provider-operation-adapter.ts"],
+    // No Python authoring helper: the adapter is a JavaScript handler, so a
+    // pure-Python plugin cannot own it (the same standing as balance-adapter).
+    pythonSdk: ["plugin-sdk/python/src/cognia/types.py"],
+    docs: "docs/content/docs/en/adr/0163-provider-operation-contract.md",
+    requiredTests: [
+      "lib/plugin/registries/provider-operation-adapter-registry.test.ts",
+      "lib/ai/operations/handlers/plugin-projection.test.ts",
+      "lib/plugin/contracts/capability-bridge-map.test.ts",
+    ],
+  },
+  {
     // Per-conversation IM send gate (plugin⇄IM extensibility). The manifest
     // carries an `imRateSources` array; the connector runtime's ai-run branch
     // calls `evaluateImRate`, which lists the plugin overlay and returns the

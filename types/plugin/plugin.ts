@@ -214,6 +214,7 @@ export type PluginCapability =
   | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
   | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
   | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
+  | "provider-operation-adapter" // Serves one provider operation (ADR-0163) for a provider, a protocol, or everyone
   | "im-rate-source" // Contributes a per-conversation IM send gate (connector runtime ai-run branch)
   | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
   | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
@@ -904,6 +905,15 @@ export interface PluginManifest {
    * by `resolveLimitsSources` ahead of the built-in sources.
    */
   limitsSources?: import("./plugin-limits-source").PluginLimitsSourceDef[]
+
+  /**
+   * Provider operation adapters contributed by this plugin
+   * (`provider-operation-adapter` capability, ADR-0163). Each serves one
+   * contract operation for a provider, a wire protocol, or every provider.
+   * Registered into `provider-operation-adapter-registry` on enable, which
+   * binds the handler into the operation registry with `support: "plugin"`.
+   */
+  providerOperationAdapters?: import("./plugin-provider-operation-adapter").PluginProviderOperationAdapterDef[]
 
   /**
    * Per-conversation IM send gates contributed by this plugin

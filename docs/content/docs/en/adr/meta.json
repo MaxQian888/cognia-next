@@ -161,6 +161,7 @@
     "0159-selection-action-platform",
     "0160-docker-machines-are-real-machines",
     "0161-agent-identity-runtime-and-host",
-    "0162-sftp-is-shell-equivalent"
+    "0162-sftp-is-shell-equivalent",
+    "0163-provider-operation-contract"
   ]
 }

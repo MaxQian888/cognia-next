@@ -40,6 +40,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
         "shared-memory-adapter",
         "balance-adapter",
         "limits-source",
+        "provider-operation-adapter",
         "im-rate-source",
         "compaction-strategy",
         "workflow-template",
@@ -54,7 +55,7 @@ describe("OVERLAY_REGISTRY_CAPABILITIES (PR-D)", () => {
     // Lock the count too — a silent growth here would mean the
     // contributions block in PluginManager picked up new behaviour
     // that may need cross-checking against bespoke branches.
-    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(19)
+    expect(OVERLAY_REGISTRY_CAPABILITY_KEYS).toHaveLength(20)
   })
 
   describe.each(OVERLAY_REGISTRY_CAPABILITY_KEYS)("%s", (key) => {

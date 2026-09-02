@@ -60,6 +60,10 @@ interface ContributionManifestShape {
   scheduledTasks?: Array<{ name?: string }>
   characterPacks?: Array<{ id?: string; name?: string }>
   subagents?: Array<{ id?: string; name?: string }>
+  // A template package is keyed by its own manifest, not by a flat `id`: the
+  // contribution IS a package envelope (`PluginTemplatePackageContribution`),
+  // and the definitions inside it are addressed through that manifest.
+  templatePackages?: Array<{ manifest?: { id?: string; name?: string } }>
   agentTeamTemplates?: Array<{ id?: string; name?: string }>
   sharedMemoryAdapters?: Array<{ id?: string; name?: string }>
   balanceAdapters?: Array<{ id?: string; name?: string; key?: string }>
@@ -176,6 +180,13 @@ export function getContributionsForCapability(
       return compact(asArray(m.characterPacks).map((s) => entry(s.id, s.name)))
     case "subagent":
       return compact(asArray(m.subagents).map((s) => entry(s.id, s.name)))
+    case "template-package":
+      // One entry per PACKAGE, which is what the manifest field holds and what
+      // the library's "N templates" chip is counting. The definitions a package
+      // carries are its contents, not separate contributions.
+      return compact(
+        asArray(m.templatePackages).map((s) => entry(s.manifest?.id, s.manifest?.name))
+      )
     case "agent-team-template":
       return compact(asArray(m.agentTeamTemplates).map((s) => entry(s.id, s.name)))
     case "shared-memory-adapter":
@@ -184,6 +195,10 @@ export function getContributionsForCapability(
       return compact(asArray(m.balanceAdapters).map((s) => entry(s.id, s.name ?? s.key)))
     case "limits-source":
       return compact(asArray(m.limitsSources).map((s) => entry(s.id, s.name ?? s.key)))
+    case "provider-operation-adapter":
+      return compact(
+        asArray(m.providerOperationAdapters).map((s) => entry(s.id, s.name ?? s.operationId))
+      )
     case "compaction-strategy":
       return compact(asArray(m.compactionStrategies).map((s) => entry(s.id, s.label)))
     case "workflow-template":

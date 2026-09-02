@@ -41,6 +41,7 @@ JS_RUNTIME_ONLY: dict[str, str] = {
     "tray-item": "carries an onClick() function (PluginTrayItemInput)",
     "balance-adapter": "runtime adapter object with fetch methods",
     "limits-source": "runtime adapter object with fetch methods",
+    "provider-operation-adapter": "carries an async handler() the host executor dispatches to",
     "im-rate-source": "runtime adapter object with fetch methods",
     "shared-memory-adapter": "runtime object with write/read/listChanges methods",
 }

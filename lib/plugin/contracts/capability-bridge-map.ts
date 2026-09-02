@@ -44,6 +44,7 @@ import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pac
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
 import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
 import type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
+import type { PluginProviderOperationAdapterDef } from "@/types/plugin/plugin-provider-operation-adapter"
 import type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
 import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
@@ -89,6 +90,10 @@ import {
   registerLimitsSource,
   unregisterLimitsSourcesByPlugin,
 } from "@/lib/plugin/registries/limits-source-registry"
+import {
+  registerProviderOperationAdapter,
+  unregisterProviderOperationAdaptersByPlugin,
+} from "@/lib/plugin/registries/provider-operation-adapter-registry"
 import {
   registerImRateSource,
   unregisterImRateSourcesByPlugin,
@@ -378,6 +383,17 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerLimitsSource(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterLimitsSourcesByPlugin,
+  }),
+  "provider-operation-adapter": defineOverlayCapability<PluginProviderOperationAdapterDef>({
+    // Plugin serves one provider operation (ADR-0163). Registered verbatim
+    // under its `id`; the registry also binds the handler into the operation
+    // handler registry with `support: "plugin"`, so the capability matrix
+    // shows the cell and the executor dispatches to it. Both drop on disable.
+    manifestField: "providerOperationAdapters",
+    registerEntry: (def, ctx) => {
+      registerProviderOperationAdapter(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterProviderOperationAdaptersByPlugin,
   }),
   "im-rate-source": defineOverlayCapability<PluginImRateSourceDef>({
     // Plugin contributes a per-conversation IM send gate. Registered verbatim

@@ -39,6 +39,7 @@ import {
   type CrashLogFs,
 } from "./crash-log-discovery"
 import { snapshotRenderDiagnostics } from "./render-diagnostics"
+import { buildDiskReport, type DiskReportDeps } from "./disk-report"
 
 export interface DoctorFacts {
   version: string
@@ -166,6 +167,9 @@ export interface DoctorReportDeps extends DoctorDeps {
   sessionId?: string
   /** Injected in tests; defaults to the live tool-host registry. */
   readParity?: typeof buildCogniaParityReport
+  /** Read-only filesystem facade for the disk report (tests). */
+  diskFs?: DiskReportDeps["fsx"]
+  statfs?: DiskReportDeps["statfs"]
 }
 
 /**
@@ -254,6 +258,18 @@ export function collectDoctorReport(deps: DoctorReportDeps): DoctorReport {
 
 export async function runDoctor(deps: DoctorReportDeps): Promise<void> {
   const report = collectDoctorReport(deps)
+  // Read-only: the report names the commands that would reclaim space and
+  // runs none of them. A failing walk leaves the section out, never the panel.
+  try {
+    report.disk = await buildDiskReport({
+      home: deps.home,
+      repoRoot: deps.config.cwd,
+      ...(deps.diskFs ? { fsx: deps.diskFs } : {}),
+      ...(deps.statfs ? { statfs: deps.statfs } : {}),
+    })
+  } catch {
+    report.disk = undefined
+  }
   if (report.agentBackend !== "builtin") {
     // CLI v1 deliberately leaves desktop hook state and ACP terminal methods
     // inactive. Keep the diagnostic report explicit so dormant compatibility

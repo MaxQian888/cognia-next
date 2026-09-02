@@ -486,6 +486,12 @@ export interface DoctorReport {
   }
   /** Cognia parity on an external backend; absent on the built-in agent. */
   cogniaParity?: CogniaParityReport
+  /** Read-only disk footprint (free space plus the CLI's own directories). */
+  disk?: {
+    checkedAt: number
+    freeBytes?: number
+    entries: Array<{ label: string; path: string; bytes?: number; reclaim?: string }>
+  }
 }
 
 /** A row in the generic {@link Overlay} `select` list. */

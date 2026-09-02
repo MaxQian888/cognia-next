@@ -10,6 +10,7 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
+import { formatBytes } from "../../../util/disk"
 import { formatBytes } from "../../runtime/crash-log-discovery"
 import type { CrashReportItem, DoctorReport } from "../../state/types"
 
@@ -188,6 +189,32 @@ export function DoctorPanel({
           >{`${storeStatus.icon} ${report.dbSnapshotPath}`}</Text>
         </Text>
       </Box>
+
+      {report.disk ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color={theme.muted}>
+            Disk
+          </Text>
+          <Text>
+            <Text color={theme.muted}>{"Free space".padEnd(13)}</Text>
+            {formatBytes(report.disk.freeBytes)}
+          </Text>
+          {report.disk.entries.map((entry) => (
+            <Text key={entry.path}>
+              <Text color={theme.muted}>{entry.label.padEnd(13)}</Text>
+              {`${entry.bytes === undefined ? "absent" : formatBytes(entry.bytes)}  ${entry.path}`}
+            </Text>
+          ))}
+          {report.disk.entries.some((entry) => entry.reclaim && (entry.bytes ?? 0) > 0) ? (
+            <Text color={theme.muted}>{"To reclaim (nothing is deleted by /doctor):"}</Text>
+          ) : null}
+          {report.disk.entries
+            .filter((entry) => entry.reclaim && (entry.bytes ?? 0) > 0)
+            .map((entry) => (
+              <Text key={`reclaim-${entry.path}`}>{`  ${entry.reclaim}`}</Text>
+            ))}
+        </Box>
+      ) : null}
 
       {/* Cognia parity — what this backend can actually call. Only external
           backends have anything to say here; the built-in agent IS Cognia. */}

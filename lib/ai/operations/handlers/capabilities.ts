@@ -13,6 +13,7 @@ import { detectHostSurfaces } from "../host-surfaces"
 import { listProviderOperationDescriptors } from "../manifest"
 import { providerOperationPersistence } from "../persistence"
 import type { ProviderOperationHandlerRegistration } from "../registry"
+import { projectPluginCells } from "./plugin-projection"
 
 export interface CapabilitiesReadInput {
   deploymentRef?: string
@@ -31,6 +32,11 @@ export const capabilitiesReadHandler: ProviderOperationHandlerRegistration<
       deploymentRef: request.input?.deploymentRef ?? request.deploymentRef,
       descriptors: listProviderOperationDescriptors(),
       hostSurfaces: detectHostSurfaces(),
+      pluginCells: projectPluginCells({
+        providerId: provider.providerId,
+        protocol: provider.protocol,
+        baseURL: provider.baseURL,
+      }),
       contract: provider.isCustomProvider
         ? {
             id: provider.providerId,

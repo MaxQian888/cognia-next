@@ -192,6 +192,7 @@ VALID_CAPABILITIES = (
     "shared-memory-adapter",
     "balance-adapter",
     "limits-source",
+    "provider-operation-adapter",
     "im-rate-source",
     "compaction-strategy",
     "workflow-template",
@@ -337,6 +338,9 @@ CAPABILITY_FIELDS = {
     "limits-source": [
         "limitsSources",
     ],
+    "provider-operation-adapter": [
+        "providerOperationAdapters",
+    ],
     "im-rate-source": [
         "imRateSources",
     ],
@@ -448,6 +452,7 @@ CAPABILITY_SUPPORT = {
     "shared-memory-adapter": "supported",
     "balance-adapter": "supported",
     "limits-source": "supported",
+    "provider-operation-adapter": "supported",
     "im-rate-source": "supported",
     "compaction-strategy": "supported",
     "workflow-template": "supported",
@@ -519,6 +524,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "shared-memory-adapter": "0.1.0",
     "balance-adapter": "0.1.0",
     "limits-source": "0.1.0",
+    "provider-operation-adapter": "0.1.0",
     "im-rate-source": "0.1.0",
     "compaction-strategy": "0.1.0",
     "workflow-template": "0.1.0",
@@ -590,6 +596,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "shared-memory-adapter": "0.1.0",
     "balance-adapter": "0.1.0",
     "limits-source": "0.1.0",
+    "provider-operation-adapter": "0.1.0",
     "im-rate-source": "0.1.0",
     "compaction-strategy": "0.1.0",
     "workflow-template": "0.1.0",
@@ -891,6 +898,13 @@ MANIFEST_CONTRIBUTIONS = [
         "field": "limitsSources",
         "capabilities": [
             "limits-source",
+        ],
+        "execution": "host",
+    },
+    {
+        "field": "providerOperationAdapters",
+        "capabilities": [
+            "provider-operation-adapter",
         ],
         "execution": "host",
     },
@@ -3094,6 +3108,14 @@ PLUGIN_POINT_CONTRACTS = [
         "status": "implemented",
         "introducedIn": "0.5.0",
         "permission": "subscription:read",
+    },
+    {
+        "id": "provider.operation-adapter",
+        "kind": "runtime",
+        "stability": "stable",
+        "status": "implemented",
+        "introducedIn": "0.5.0",
+        "permission": "ai:chat",
     },
     {
         "id": "connectors.im-rate-source",
