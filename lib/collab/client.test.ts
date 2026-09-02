@@ -3,6 +3,7 @@ import {
   CollabConflictError,
   CollabError,
   SHARED_CHAT_PROTOCOL_VERSION,
+  encodeReasonHeader,
 } from "./client"
 
 const ORG = "org_acme00000000000000000"
@@ -493,5 +494,121 @@ describe("the account control plane (plain access token, no grant)", () => {
     })
     await expect(client.accountMemberships()).rejects.toMatchObject({ status: 401 })
     expect(calls).toEqual([])
+  })
+})
+
+describe("membership administration (grant routes)", () => {
+  function client(fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {
+    return new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+      now: () => 0,
+    })
+  }
+
+  it("mints an invitation with a POST body and hands back the one-time token", async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = []
+    const issued = {
+      id: "inv_1",
+      orgId: ORG,
+      workspaceId: "proj_1",
+      workspaceRole: "member",
+      createdBy: ADA,
+      expiresAt: 999,
+      createdAt: 1,
+      token: "one-time",
+    }
+    const fetchImpl = async (url: string, init?: RequestInit) => {
+      seen.push({ url, init })
+      if (url.endsWith("/grants")) {
+        return jsonResponse({ grant: "g", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+      }
+      return jsonResponse(issued, 201)
+    }
+    const input = {
+      workspaceId: "proj_1",
+      workspaceRole: "member" as const,
+      reason: "onboarding",
+      expiresInDays: 1,
+    }
+    const result = await client(fetchImpl).createInvitation(ORG, input)
+    expect(result.token).toBe("one-time")
+    const [, create] = seen
+    expect(create!.url).toBe(`https://collab.test/v1/orgs/${ORG}/invitations`)
+    expect(create!.init?.method).toBe("POST")
+    expect(JSON.parse(String(create!.init?.body))).toEqual(input)
+  })
+
+  it("lists invitations from the org route, with no token in the rows", async () => {
+    const { calls, fetchImpl } = harness({
+      issues: [{ id: "inv_1", orgId: ORG, createdBy: ADA, expiresAt: 9, createdAt: 1 }],
+    })
+    const rows = await client(fetchImpl).listInvitations(ORG)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).not.toHaveProperty("token")
+    expect(calls[1]!.url).toBe(`https://collab.test/v1/orgs/${ORG}/invitations`)
+    expect(calls[1]!.init?.method).toBeUndefined()
+  })
+
+  it("puts the reason in the header for deletes and in the body for role changes", async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = []
+    const fetchImpl = async (url: string, init?: RequestInit) => {
+      seen.push({ url, init })
+      if (url.endsWith("/grants")) {
+        return jsonResponse({ grant: "g", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+      }
+      return new Response(null, { status: 204 })
+    }
+    const c = client(fetchImpl)
+    await c.setWorkspaceMember(ORG, "proj_1", "usr_cleo", { role: "maintainer", reason: "lead" })
+    await c.removeWorkspaceMember(ORG, "proj_1", "usr_cleo", "left the team")
+    await c.setOrgMemberRole(ORG, "usr_cleo", { role: "admin", reason: "promoted" })
+    await c.offboardOrgMember(ORG, "usr_cleo", "离职")
+
+    const [, set, remove, patch, offboard] = seen
+    expect(set!.url).toBe(`https://collab.test/v1/orgs/${ORG}/workspaces/proj_1/members/usr_cleo`)
+    expect(set!.init?.method).toBe("POST")
+    expect(JSON.parse(String(set!.init?.body))).toEqual({ role: "maintainer", reason: "lead" })
+    expect(remove!.init?.method).toBe("DELETE")
+    expect((remove!.init?.headers as Record<string, string>)["x-cognia-reason"]).toBe(
+      "left the team"
+    )
+    expect(patch!.init?.method).toBe("PATCH")
+    expect(JSON.parse(String(patch!.init?.body))).toEqual({ role: "admin", reason: "promoted" })
+    // A reason in another script cannot ride a header as it is. RFC 8187 form.
+    expect((offboard!.init?.headers as Record<string, string>)["x-cognia-reason"]).toBe(
+      "UTF-8''%E7%A6%BB%E8%81%8C"
+    )
+  })
+
+  it("clamps the audit limit to what the server accepts", async () => {
+    const { calls, fetchImpl } = harness()
+    const c = client(fetchImpl)
+    await c.listAuthorizationAudit(ORG, 9_999)
+    await c.listAuthorizationAudit(ORG, 0)
+    await c.listAuthorizationAudit(ORG)
+    expect(calls.slice(1).map((call) => call.url.split("limit=")[1])).toEqual(["500", "1", "100"])
+  })
+
+  it("does not send an empty reason header", async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = []
+    const fetchImpl = async (url: string, init?: RequestInit) => {
+      seen.push({ url, init })
+      if (url.endsWith("/grants")) {
+        return jsonResponse({ grant: "g", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+      }
+      return jsonResponse({ id: "inv_1", orgId: ORG, createdBy: ADA, expiresAt: 1, createdAt: 1 })
+    }
+    await client(fetchImpl).revokeInvitation(ORG, "inv_1", "   ")
+    expect(seen[1]!.init?.headers).not.toHaveProperty("x-cognia-reason")
+  })
+})
+
+describe("encodeReasonHeader", () => {
+  it("leaves visible ASCII alone and encodes everything else", () => {
+    expect(encodeReasonHeader("  plain reason ")).toBe("plain reason")
+    expect(encodeReasonHeader("Café")).toBe("UTF-8''Caf%C3%A9")
+    expect(encodeReasonHeader("line\nbreak")).toBe("UTF-8''line%0Abreak")
   })
 })

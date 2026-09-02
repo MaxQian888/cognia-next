@@ -1,7 +1,13 @@
 /** @jest-environment jsdom */
 
 import "fake-indexeddb/auto"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { toast } from "sonner"
+
+import { CollabError } from "@/lib/collab/client"
+
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => {
@@ -12,7 +18,8 @@ jest.mock("next-intl", () => ({
 }))
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { replaceWorkspaceRoster } from "@/lib/db/identity"
+import { putOrgMembership, replaceWorkspaceRoster } from "@/lib/db/identity"
+import type { CurrentCollabContext } from "@/lib/collab/runtime-client"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { WorkspaceMembers, initialsFor } from "./workspace-members"
@@ -120,10 +127,182 @@ describe("WorkspaceMembers", () => {
       now: 1,
     })
 
-    render(<WorkspaceMembers workspaceId={WORKSPACE} />)
+    render(
+      <WorkspaceMembers
+        workspaceId={WORKSPACE}
+        adminDeps={{ resolveContext: async () => null, registry: { get: async () => null } }}
+      />
+    )
     const invite = await screen.findByTestId("workspace-members-invite")
+    await waitFor(() => expect(invite).toHaveAttribute("data-unavailable", "true"))
     expect(invite).toBeDisabled()
-    expect(invite).toHaveAttribute("title", "inviteUnavailable")
+    expect(invite).toHaveAttribute("title", "unavailable.not-signed-in")
+    expect(screen.getByTestId("workspace-members-invite-reason")).toHaveTextContent(
+      "unavailable.not-signed-in"
+    )
+    // A plain member on a configured plane is refused with a different reason.
+    expect(screen.queryByTestId("workspace-member-role-usr_ada")).not.toBeInTheDocument()
+  })
+
+  function managerDeps(client: Record<string, jest.Mock>, refresh = jest.fn(async () => null)) {
+    const context: CurrentCollabContext = {
+      localAccountId: getActiveAccountId(),
+      orgId: ORG,
+      userId: "usr_ada",
+      client: client as unknown as CurrentCollabContext["client"],
+    }
+    return {
+      resolveContext: async () => context,
+      registry: { get: async () => ({ userId: "usr_ada", orgId: ORG }) as never },
+      refresh,
+    }
+  }
+
+  /**
+   * The controls belong to a maintainer. They never appear on the reader's
+   * own row, and offboarding is an org power that needs an org seat to take.
+   */
+  it("gives a maintainer role, remove and offboard controls on everybody but themselves", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "admin", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+        { userId: "usr_gus", displayName: "Gus", role: "viewer", orgMember: false },
+      ],
+      now: 1,
+    })
+    const client = {
+      removeWorkspaceMember: jest.fn(async () => undefined),
+      offboardOrgMember: jest.fn(async () => undefined),
+      setWorkspaceMember: jest.fn(async () => undefined),
+    }
+    const refresh = jest.fn(async () => null)
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps(client, refresh)} />)
+
+    expect(await screen.findByTestId("workspace-member-role-usr_cleo")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-member-role-usr_ada")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-member-offboard-usr_cleo")).toBeInTheDocument()
+    // A guest holds no org seat, so there is nothing to offboard them from.
+    expect(screen.queryByTestId("workspace-member-offboard-usr_gus")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workspace-member-remove-usr_gus")).toBeInTheDocument()
+    const invite = screen.getByTestId("workspace-members-invite")
+    await waitFor(() => expect(invite).not.toBeDisabled())
+
+    fireEvent.click(screen.getByTestId("workspace-member-remove-usr_cleo"))
+    await waitFor(() =>
+      expect(client.removeWorkspaceMember).toHaveBeenCalledWith(
+        ORG,
+        WORKSPACE,
+        "usr_cleo",
+        "reason.removed"
+      )
+    )
+    expect(refresh).toHaveBeenCalledWith(getActiveAccountId())
+
+    fireEvent.click(screen.getByTestId("workspace-member-offboard-usr_cleo"))
+    await waitFor(() =>
+      expect(client.offboardOrgMember).toHaveBeenCalledWith(ORG, "usr_cleo", "reason.offboarded")
+    )
+    expect(toast.success).toHaveBeenCalledWith("toast.offboarded")
+
+    // The live sections and the dialog are mounted for a manager.
+    expect(screen.getByTestId("workspace-invitations")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-membership-audit")).toBeInTheDocument()
+    fireEvent.click(invite)
+    expect(await screen.findByTestId("workspace-invite-dialog")).toBeInTheDocument()
+  })
+
+  it("changes a workspace seat and an org role through their selects", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "owner", now: 1 })
+    await putOrgMembership({ orgId: ORG, userId: "usr_cleo", role: "member", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+      ],
+      now: 1,
+    })
+    const client = {
+      setWorkspaceMember: jest.fn(async () => undefined),
+      setOrgMemberRole: jest.fn(async () => undefined),
+    }
+    const user = userEvent.setup()
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps(client)} />)
+
+    await user.click(await screen.findByTestId("workspace-member-role-usr_cleo"))
+    await user.click(await screen.findByRole("option", { name: "role.viewer" }))
+    await waitFor(() =>
+      expect(client.setWorkspaceMember).toHaveBeenCalledWith(ORG, WORKSPACE, "usr_cleo", {
+        role: "viewer",
+        reason: "reason.roleChanged",
+      })
+    )
+
+    const orgRole = await screen.findByTestId("workspace-member-org-role-usr_cleo")
+    expect(orgRole).toHaveTextContent("orgRole.member")
+    await user.click(orgRole)
+    await user.click(await screen.findByRole("option", { name: "orgRole.admin" }))
+    await waitFor(() =>
+      expect(client.setOrgMemberRole).toHaveBeenCalledWith(ORG, "usr_cleo", {
+        role: "admin",
+        reason: "reason.orgRoleChanged",
+      })
+    )
+    expect(toast.success).toHaveBeenCalledWith("toast.orgRoleChanged")
+  })
+
+  /**
+   * The refusal the server gives is the useful fact. It reaches the toast as
+   * the description under a translated headline, read from the thrown error,
+   * never from a state value captured before the click.
+   */
+  it("shows the server's refusal in the toast", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "admin", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+      ],
+      now: 1,
+    })
+    const client = {
+      removeWorkspaceMember: jest.fn(async () => {
+        throw new CollabError(409, "owners cannot be removed")
+      }),
+    }
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps(client)} />)
+    fireEvent.click(await screen.findByTestId("workspace-member-remove-usr_cleo"))
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("toast.failed", {
+        description: "errors.server",
+      })
+    )
+  })
+
+  it("refuses a plain member with the permission reason and no controls", async () => {
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "member", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "member", orgMember: true },
+        { userId: "usr_cleo", displayName: "Cleo", role: "member", orgMember: true },
+      ],
+      now: 1,
+    })
+    render(<WorkspaceMembers workspaceId={WORKSPACE} adminDeps={managerDeps({})} />)
+    await screen.findByTestId("workspace-member-usr_cleo")
+    const invite = screen.getByTestId("workspace-members-invite")
+    await waitFor(() => expect(invite).toHaveAttribute("title", "unavailable.not-permitted"))
+    expect(screen.queryByTestId("workspace-member-role-usr_cleo")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-member-remove-usr_cleo")).not.toBeInTheDocument()
   })
 
   /** A small roster does not need a filter, and a long one is unscannable without. */

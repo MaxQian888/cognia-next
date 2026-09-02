@@ -25,24 +25,27 @@
  * so promoting somebody into the org needs no second write here and cannot be
  * forgotten.
  *
- * # Why there is no invite, no role picker and no remove
+ * # Where the controls get their power
  *
- * The collaboration server publishes no workspace-member write API. Its write
- * surface is session-scoped (`putSessionMember`, `createSessionInvite`), and
- * `lib/db/workspace-membership-producers.test.ts` pins that exactly one
- * production writer touches these rows: `lib/collab/sync.ts`, pulling from the
- * server. A second writer here would break that guard and invent local
- * membership the server never agreed to. The controls are therefore rendered
- * disabled with the reason attached rather than omitted, because hiding them
- * collapses "not built", "not permitted" and "not available on this device"
- * into one silence.
+ * The collaboration server publishes invitation, role and offboarding routes,
+ * and `lib/collab/membership-admin.ts` calls them. None of that writes a
+ * membership row locally: every write is followed by a refresh, and
+ * `lib/db/workspace-membership-producers.test.ts` still pins `lib/collab/sync.ts`
+ * as the only writer. So the roster stays a mirror, and the controls are
+ * requests to the authority that owns it.
+ *
+ * The controls are rendered disabled with the reason attached, rather than
+ * omitted, when the plane is not configured, nobody is signed in, or this
+ * person may not manage the workspace: hiding them collapses "not built",
+ * "not permitted" and "not available on this device" into one silence.
  */
 
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
-import { UserPlusIcon, UsersIcon } from "lucide-react"
+import { UserMinusIcon, UserPlusIcon, UserXIcon, UsersIcon } from "lucide-react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { toast } from "sonner"
 
 import { CollabRefreshStaleBadge } from "@/components/issues/collab-refresh-stale-badge"
 import { ConsoleSection } from "@/components/surface/console-section"
@@ -55,11 +58,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { getActiveAccountId } from "@/lib/accounts/active-account-id"
-import { listWorkspaceRoster, type WorkspaceRosterEntry } from "@/lib/db/identity"
-import { UserBindingRegistry } from "@/lib/identity/user-binding"
-import { WORKSPACE_ROLES } from "@/types/identity"
+import { listOrgMembers, listWorkspaceRoster, type WorkspaceRosterEntry } from "@/lib/db/identity"
+import { ORG_ROLES, WORKSPACE_ROLES, type OrgRole, type WorkspaceRole } from "@/types/identity"
 import { cn } from "@/lib/utils"
+import {
+  membershipFailureMessage,
+  toMembershipAdminFailure,
+  useMembershipAdmin,
+  type UseMembershipAdminDeps,
+} from "@/hooks/workspace/use-membership-admin"
+
+import { WorkspaceInviteDialog } from "./workspace-invite-dialog"
+import { WorkspaceInvitations } from "./workspace-invitations"
+import { WorkspaceMembershipAudit } from "./workspace-membership-audit"
 
 /** Above this the flat list stops being scannable and the role filter appears. */
 const FILTER_THRESHOLD = 8
@@ -82,9 +93,20 @@ export function initialsFor(entry: WorkspaceRosterEntry): string {
   return source.slice(0, 2).toUpperCase()
 }
 
-export function WorkspaceMembers({ workspaceId }: { workspaceId: string | null }) {
+export interface WorkspaceMembersProps {
+  workspaceId: string | null
+  /** Test seam for the admin hook. Production passes nothing. */
+  adminDeps?: UseMembershipAdminDeps
+}
+
+export function WorkspaceMembers({ workspaceId, adminDeps }: WorkspaceMembersProps) {
   const t = useTranslations("workspace.members")
   const [roleFilter, setRoleFilter] = useState<string>("all")
+  const [inviteOpen, setInviteOpen] = useState(false)
+  /** Bumped after every server write, so the live sections below re-read. */
+  const [writes, setWrites] = useState(0)
+  const admin = useMembershipAdmin(workspaceId, adminDeps)
+  const orgId = admin.context?.orgId ?? null
 
   const rosterQuery = useLiveQuery<WorkspaceRosterEntry[]>(
     () =>
@@ -97,19 +119,25 @@ export function WorkspaceMembers({ workspaceId }: { workspaceId: string | null }
   // the filter below recompute forever, which the hook lint catches.
   const roster = useMemo(() => rosterQuery ?? [], [rosterQuery])
 
+  // Org roles per person, for the org-role control. The roster entry carries
+  // the workspace seat and the guest flag, not the org standing.
+  const orgRolesQuery = useLiveQuery<Record<string, OrgRole>>(async () => {
+    if (typeof window === "undefined" || !orgId) return {}
+    const rows = await listOrgMembers(orgId)
+    return Object.fromEntries(rows.map((row) => [row.userId, row.role]))
+  }, [orgId])
+  const orgRoles = useMemo(() => orgRolesQuery ?? {}, [orgRolesQuery])
+
   /**
    * Which of these people is the reader.
    *
    * The binding is the profile-to-person link the sign-in writes, so it answers
    * "who am I on this device" without a network call. A roster that does not
    * mark you makes you scan for your own name, which is the first thing anyone
-   * looks for.
+   * looks for. Legacy aliases count: a row still under an id this profile was
+   * reconciled away from is still this person.
    */
-  const selfUserId = useLiveQuery<string | null>(async () => {
-    if (typeof window === "undefined") return null
-    const binding = await new UserBindingRegistry().get(getActiveAccountId())
-    return binding?.userId ?? null
-  }, [])
+  const selfUserIds = admin.selfUserIds
 
   const filtered = useMemo(
     () =>
@@ -122,6 +150,58 @@ export function WorkspaceMembers({ workspaceId }: { workspaceId: string | null }
   if (!workspaceId) return null
 
   const showFilter = roster.length > FILTER_THRESHOLD
+  const inviteDisabledReason =
+    admin.status === "loading"
+      ? null
+      : admin.status === "unavailable"
+        ? t(`unavailable.${admin.reason ?? "not-configured"}`)
+        : admin.canManageWorkspace
+          ? null
+          : t("unavailable.not-permitted")
+
+  // The hook reports failures as codes. The words are chosen here, in the
+  // reader's locale, and the server's own sentence rides along as detail.
+  const explain = (cause: unknown): string => {
+    const { key, values } = membershipFailureMessage(toMembershipAdminFailure(cause))
+    return t(key, values)
+  }
+  const wrote = () => setWrites((value) => value + 1)
+  const changeRole = async (userId: string, role: WorkspaceRole) => {
+    try {
+      await admin.changeWorkspaceRole({ userId, role, reason: t("reason.roleChanged") })
+      toast.success(t("toast.roleChanged"))
+      wrote()
+    } catch (cause) {
+      toast.error(t("toast.failed"), { description: explain(cause) })
+    }
+  }
+  const changeOrgRole = async (userId: string, role: OrgRole) => {
+    try {
+      await admin.changeOrgRole({ userId, role, reason: t("reason.orgRoleChanged") })
+      toast.success(t("toast.orgRoleChanged"))
+      wrote()
+    } catch (cause) {
+      toast.error(t("toast.failed"), { description: explain(cause) })
+    }
+  }
+  const remove = async (userId: string) => {
+    try {
+      await admin.removeFromWorkspace({ userId, reason: t("reason.removed") })
+      toast.success(t("toast.removed"))
+      wrote()
+    } catch (cause) {
+      toast.error(t("toast.failed"), { description: explain(cause) })
+    }
+  }
+  const offboard = async (userId: string) => {
+    try {
+      await admin.offboardFromOrg({ userId, reason: t("reason.offboarded") })
+      toast.success(t("toast.offboarded"))
+      wrote()
+    } catch (cause) {
+      toast.error(t("toast.failed"), { description: explain(cause) })
+    }
+  }
 
   return (
     <ConsoleSection
@@ -179,7 +259,8 @@ export function WorkspaceMembers({ workspaceId }: { workspaceId: string | null }
         ) : (
           <ul className="flex flex-col gap-1">
             {filtered.map((entry) => {
-              const isSelf = selfUserId !== null && entry.membership.userId === selfUserId
+              const isSelf = selfUserIds.includes(entry.membership.userId)
+              const manageable = admin.canManageWorkspace && !isSelf
               return (
                 <li
                   key={entry.membership.id}
@@ -221,9 +302,88 @@ export function WorkspaceMembers({ workspaceId }: { workspaceId: string | null }
                       {t("guest")}
                     </Badge>
                   ) : null}
-                  <Badge variant="outline" aria-label={t("roleAria")}>
-                    {t(`role.${entry.membership.role}`)}
-                  </Badge>
+                  {manageable ? (
+                    <Select
+                      value={entry.membership.role}
+                      onValueChange={(value) =>
+                        void changeRole(entry.membership.userId, value as WorkspaceRole)
+                      }
+                      disabled={admin.busy}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="h-6 w-28 text-[11px]"
+                        aria-label={t("roleAria")}
+                        data-testid={`workspace-member-role-${entry.membership.userId}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WORKSPACE_ROLES.map((role) => (
+                          <SelectItem key={role} value={role}>
+                            {t(`role.${role}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Badge variant="outline" aria-label={t("roleAria")}>
+                      {t(`role.${entry.membership.role}`)}
+                    </Badge>
+                  )}
+                  {manageable && admin.canManageOrg && !entry.guest ? (
+                    <Select
+                      value={orgRoles[entry.membership.userId] ?? "member"}
+                      onValueChange={(value) =>
+                        void changeOrgRole(entry.membership.userId, value as OrgRole)
+                      }
+                      disabled={admin.busy}
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="h-6 w-28 text-[11px]"
+                        aria-label={t("orgRoleAria")}
+                        data-testid={`workspace-member-org-role-${entry.membership.userId}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ORG_ROLES.map((role) => (
+                          <SelectItem key={role} value={role}>
+                            {t(`orgRole.${role}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  {manageable ? (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6"
+                      disabled={admin.busy}
+                      title={t("remove")}
+                      aria-label={t("remove")}
+                      onClick={() => void remove(entry.membership.userId)}
+                      data-testid={`workspace-member-remove-${entry.membership.userId}`}
+                    >
+                      <UserMinusIcon aria-hidden className="size-3.5" />
+                    </Button>
+                  ) : null}
+                  {manageable && admin.canManageOrg && !entry.guest ? (
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="size-6 text-destructive"
+                      disabled={admin.busy}
+                      title={t("offboard")}
+                      aria-label={t("offboard")}
+                      onClick={() => void offboard(entry.membership.userId)}
+                      data-testid={`workspace-member-offboard-${entry.membership.userId}`}
+                    >
+                      <UserXIcon aria-hidden className="size-3.5" />
+                    </Button>
+                  ) : null}
                 </li>
               )
             })}
@@ -232,27 +392,44 @@ export function WorkspaceMembers({ workspaceId }: { workspaceId: string | null }
 
         <div className="flex items-center gap-2 border-t pt-2">
           {/*
-            Present and refused, not absent. See the file header: the server has
-            no workspace-member write API, and exactly one production writer is
-            allowed to touch these rows.
+            Present and refused, not absent. See the file header: the reason
+            the button is off is the useful fact, so it rides on the button.
           */}
           <Button
             size="sm"
             variant="ghost"
             className="-ml-2 h-7 text-xs"
-            disabled
-            title={t("inviteUnavailable")}
-            data-unavailable="true"
+            disabled={inviteDisabledReason !== null || admin.status === "loading"}
+            title={inviteDisabledReason ?? undefined}
+            data-unavailable={inviteDisabledReason !== null ? "true" : undefined}
+            onClick={() => setInviteOpen(true)}
             data-testid="workspace-members-invite"
           >
             <UserPlusIcon aria-hidden className="size-3.5" />
             {t("invite")}
           </Button>
-          <p className="min-w-0 flex-1 text-right text-[11px] text-muted-foreground">
-            {t("cachedNote")}
-          </p>
+          {inviteDisabledReason ? (
+            <p
+              className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
+              data-testid="workspace-members-invite-reason"
+            >
+              {inviteDisabledReason}
+            </p>
+          ) : (
+            <p className="min-w-0 flex-1 text-right text-[11px] text-muted-foreground">
+              {t("cachedNote")}
+            </p>
+          )}
         </div>
+        <WorkspaceInvitations admin={admin} reloadKey={writes} />
+        <WorkspaceMembershipAudit admin={admin} reloadKey={writes} />
       </div>
+      <WorkspaceInviteDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        admin={admin}
+        onIssued={wrote}
+      />
     </ConsoleSection>
   )
 }

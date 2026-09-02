@@ -329,6 +329,85 @@ export interface AcceptedCollabInvitation {
 const GRANT_REFRESH_MARGIN_MS = 30_000
 export const SHARED_CHAT_PROTOCOL_VERSION = "2"
 
+// ── Membership administration (ADR-0149 section 4) ─────────────────────────
+
+export interface CollabInvitation {
+  id: string
+  orgId: string
+  workspaceId?: string
+  orgRole?: OrgRole
+  workspaceRole?: WorkspaceRole
+  createdBy: string
+  expiresAt: number
+  redeemedAt?: number
+  redeemedBy?: string
+  revokedAt?: number
+  createdAt: number
+}
+
+/** The create answer. `token` is returned exactly once and never stored. */
+export interface IssuedCollabInvitation extends CollabInvitation {
+  token: string
+}
+
+export interface CreateCollabInvitationInput {
+  orgRole?: OrgRole
+  workspaceId?: string
+  workspaceRole?: WorkspaceRole
+  /** The server defaults to 7. */
+  expiresInDays?: number
+  reason: string
+}
+
+/**
+ * One row of the org's membership audit. Not the session audit
+ * (`AuthorizationAuditEvent`): that one records allow/deny decisions on a
+ * shared chat, this one records who changed whose standing and why.
+ */
+export interface CollabMembershipAuditEvent {
+  id: string
+  orgId: string
+  workspaceId?: string
+  actorUserId: string
+  targetUserId?: string
+  invitationId?: string
+  /** e.g. `invitation.created`, `org.member.role`, `workspace.member.removed`. */
+  action: string
+  oldRole?: string
+  newRole?: string
+  reason: string
+  requestId: string
+  grantId?: string
+  createdAt: number
+}
+
+export interface SetCollabOrgMemberRoleInput {
+  role: OrgRole
+  reason: string
+}
+
+export interface SetCollabWorkspaceMemberInput {
+  role: WorkspaceRole
+  reason: string
+}
+
+/**
+ * `x-cognia-reason` travels as a header, and header values are ASCII. A reason
+ * written in another script goes RFC 8187 style, `UTF-8''` plus percent
+ * encoding, which the server decodes before the audit row is written. A plain
+ * ASCII reason is sent as it is, so the common case stays readable on the wire.
+ */
+export function encodeReasonHeader(reason: string): string {
+  const trimmed = reason.trim()
+  // Visible ASCII only. Anything else would make `fetch` refuse the header.
+  return /^[ -~]*$/.test(trimmed) ? trimmed : `UTF-8''${encodeURIComponent(trimmed)}`
+}
+
+function reasonHeaders(reason?: string): Record<string, string> {
+  const value = reason?.trim()
+  return value ? { "x-cognia-reason": encodeReasonHeader(value) } : {}
+}
+
 export class CollabClient {
   private readonly baseUrl: string
   private readonly accessToken: () => Promise<string | null>
@@ -439,6 +518,104 @@ export class CollabClient {
     return this.json<CollabWorkspaceMember[]>(
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/members`
+    )
+  }
+
+  // ── Membership administration ──────────────────────────────────────────
+  //
+  // Every one of these mutates rows the local projection mirrors. The caller
+  // (`lib/collab/membership-admin.ts`) follows each with a refresh, and
+  // nothing here writes locally.
+
+  /** Mint a one-time invitation. The token in the answer is shown once. */
+  async createInvitation(
+    orgId: string,
+    input: CreateCollabInvitationInput
+  ): Promise<IssuedCollabInvitation> {
+    return this.json<IssuedCollabInvitation>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/invitations`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  /**
+   * The org's invitations, newest first. Owners and admins see all of them,
+   * anybody else the ones they minted. The server narrows, not the client.
+   */
+  async listInvitations(orgId: string): Promise<CollabInvitation[]> {
+    return this.json<CollabInvitation[]>(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/invitations`)
+  }
+
+  async revokeInvitation(
+    orgId: string,
+    invitationId: string,
+    reason?: string
+  ): Promise<CollabInvitation> {
+    return this.json<CollabInvitation>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/invitations/${encodeURIComponent(invitationId)}`,
+      { method: "DELETE", headers: reasonHeaders(reason) }
+    )
+  }
+
+  /** Change somebody's org role. Owners and admins only, decided by the server. */
+  async setOrgMemberRole(
+    orgId: string,
+    userId: string,
+    input: SetCollabOrgMemberRoleInput
+  ): Promise<void> {
+    await this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  /**
+   * Remove every standing the person holds in the org: membership, workspace
+   * seats, and the invitations they minted. One server transaction.
+   */
+  async offboardOrgMember(orgId: string, userId: string, reason?: string): Promise<void> {
+    await this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE", headers: reasonHeaders(reason) }
+    )
+  }
+
+  /** Seat somebody in a workspace, or change the seat they hold. */
+  async setWorkspaceMember(
+    orgId: string,
+    workspaceId: string,
+    userId: string,
+    input: SetCollabWorkspaceMemberInput
+  ): Promise<void> {
+    await this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async removeWorkspaceMember(
+    orgId: string,
+    workspaceId: string,
+    userId: string,
+    reason?: string
+  ): Promise<void> {
+    await this.json<unknown>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE", headers: reasonHeaders(reason) }
+    )
+  }
+
+  /** The org's authorization audit, newest first. Org management only. */
+  async listAuthorizationAudit(orgId: string, limit = 100): Promise<CollabMembershipAuditEvent[]> {
+    return this.json<CollabMembershipAuditEvent[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/audit-events?limit=${Math.max(1, Math.min(limit, 500))}`
     )
   }
 

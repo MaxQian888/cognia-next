@@ -165,7 +165,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/orgs/{org_id}/memberships/me", get(my_memberships))
         .route(
             "/v1/orgs/{org_id}/invitations",
-            axum::routing::post(create_invitation),
+            get(list_invitations).post(create_invitation),
         )
         .route(
             "/v1/orgs/{org_id}/invitations/accept",
@@ -902,6 +902,30 @@ async fn create_invitation(
         StatusCode::CREATED,
         Json(CreatedInvitation { invitation, token }),
     ))
+}
+
+/// The org's invitations, newest first.
+///
+/// An owner or admin sees every one. Anybody else with a grant sees the ones
+/// they minted themselves: a maintainer who handed out a workspace token
+/// must be able to find it again and pull it back, and nothing else.
+async fn list_invitations(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Invitation>>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let manages_org = state
+        .store
+        .membership(&org_id, claims.user_id.as_str(), None)
+        .await?
+        .org_role
+        .is_some_and(|role| matches!(role, OrgRole::Owner | OrgRole::Admin));
+    let mut invitations = state.store.list_invitations(&org_id).await?;
+    if !manages_org {
+        invitations.retain(|invitation| invitation.created_by == claims.user_id.as_str());
+    }
+    Ok(Json(invitations))
 }
 
 async fn get_invitation(
@@ -2323,9 +2347,37 @@ fn header_reason(headers: &HeaderMap, fallback: &str) -> String {
     headers
         .get("x-cognia-reason")
         .and_then(|value| value.to_str().ok())
+        .map(decode_reason_header)
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or(fallback)
-        .to_owned()
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+/// Header values are ASCII. A reason written in another script arrives RFC
+/// 8187 style, `UTF-8''` followed by percent encoding, and is decoded here so
+/// the audit row holds what the person typed. Anything else is taken as is,
+/// and a malformed escape keeps its literal bytes rather than failing the
+/// request over a log line.
+fn decode_reason_header(raw: &str) -> String {
+    let Some(encoded) = raw.strip_prefix("UTF-8''") else {
+        return raw.to_owned();
+    };
+    let mut bytes = Vec::with_capacity(encoded.len());
+    let mut rest = encoded.as_bytes();
+    while let Some((&first, tail)) = rest.split_first() {
+        if first == b'%' && tail.len() >= 2 {
+            if let Some(byte) = std::str::from_utf8(&tail[..2])
+                .ok()
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+            {
+                bytes.push(byte);
+                rest = &tail[2..];
+                continue;
+            }
+        }
+        bytes.push(first);
+        rest = tail;
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| raw.to_owned())
 }
 
 fn authorization_context(
@@ -3804,6 +3856,80 @@ mod tests {
     /// A plain token: no organization claim, an explicit subject.
     fn subject_token(subject: &str) -> String {
         format!("Bearer -:collab:read@{subject}")
+    }
+
+    #[test]
+    fn a_reason_header_written_in_another_script_is_decoded() {
+        assert_eq!(decode_reason_header("plain ascii"), "plain ascii");
+        assert_eq!(
+            decode_reason_header("UTF-8''%E5%9B%A0%E4%B8%BA%20%E7%A6%BB%E8%81%8C"),
+            "因为 离职"
+        );
+        // A broken escape is kept, not turned into a refusal. A trailing
+        // percent sign has nothing to decode and is kept the same way.
+        assert_eq!(decode_reason_header("UTF-8''50%25%zz"), "50%%zz");
+        assert_eq!(decode_reason_header("UTF-8''ab%"), "ab%");
+        // Bytes that do not form UTF-8 fall back to the raw header value.
+        assert_eq!(decode_reason_header("UTF-8''%FF"), "UTF-8''%FF");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-cognia-reason",
+            "UTF-8''%E7%A6%BB%E8%81%8C".parse().unwrap(),
+        );
+        assert_eq!(header_reason(&headers, "fallback"), "离职");
+        assert_eq!(header_reason(&HeaderMap::new(), "fallback"), "fallback");
+        // Whitespace after decoding is as empty as whitespace before it.
+        let mut blank = HeaderMap::new();
+        blank.insert("x-cognia-reason", "UTF-8''%20%20".parse().unwrap());
+        assert_eq!(header_reason(&blank, "fallback"), "fallback");
+    }
+
+    #[tokio::test]
+    async fn an_org_manager_lists_every_invitation_and_a_maintainer_only_their_own() {
+        let store = seeded();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        store.add_workspace_member(ORG, "proj-1", bob().as_str(), WorkspaceRole::Maintainer);
+
+        let (status, _) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": "member", "reason": "hire" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, bobs) = call(
+            app(store.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&bob()),
+                serde_json::json!({ "workspaceId": "proj-1", "workspaceRole": "viewer", "reason": "review" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{bobs}");
+
+        let (status, all) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/invitations"), &token_for(&ada())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(all.as_array().map(Vec::len), Some(2));
+        // The clear token never comes back on a list.
+        assert!(all[0].get("token").is_none());
+
+        let (status, mine) = call(
+            app(store.clone()),
+            get(&format!("/v1/orgs/{ORG}/invitations"), &token_for(&bob())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(mine.as_array().map(Vec::len), Some(1));
+        assert_eq!(mine[0]["createdBy"], bob().as_str());
+        assert_eq!(mine[0]["id"], bobs["id"]);
     }
 
     fn subject_ref(subject: &str) -> SubjectRef {

@@ -632,6 +632,11 @@ pub trait Store: Send + Sync {
         invitation_id: &str,
     ) -> Result<Option<Invitation>, StoreError>;
 
+    /// Every invitation the org has minted, newest first, capped. Redeemed
+    /// and revoked ones included: the list is the org's record, and the
+    /// caller decides what "outstanding" means for its surface.
+    async fn list_invitations(&self, org_id: &str) -> Result<Vec<Invitation>, StoreError>;
+
     async fn revoke_invitation(
         &self,
         org_id: &str,
@@ -1211,6 +1216,26 @@ impl Store for InMemoryStore {
             .map(|(_, invitation)| invitation)
             .filter(|invitation| invitation.org_id == org_id)
             .cloned())
+    }
+
+    async fn list_invitations(&self, org_id: &str) -> Result<Vec<Invitation>, StoreError> {
+        let mut rows: Vec<Invitation> = self
+            .tables
+            .read()
+            .invitations
+            .values()
+            .map(|(_, invitation)| invitation)
+            .filter(|invitation| invitation.org_id == org_id)
+            .cloned()
+            .collect();
+        rows.sort_by(|left, right| {
+            right
+                .created_at
+                .cmp(&left.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        rows.truncate(INVITATION_LIST_CAP);
+        Ok(rows)
     }
 
     async fn revoke_invitation(
@@ -2707,6 +2732,10 @@ async fn replace_run_artifacts(
 const INVITATION_COLUMNS: &str = "id, org_id, workspace_id, org_role, workspace_role, \
     created_by, expires_at, redeemed_at, redeemed_by, revoked_at, created_at";
 
+/// An org's invitation list is a record, not a feed: the cap keeps a busy
+/// org's history from turning one GET into a table scan.
+pub const INVITATION_LIST_CAP: usize = 200;
+
 fn invitation_from_row(row: &tokio_postgres::Row) -> Result<Invitation, StoreError> {
     let org_role = row
         .get::<_, Option<String>>("org_role")
@@ -3073,6 +3102,25 @@ impl Store for PgStore {
             .as_ref()
             .map(invitation_from_row)
             .transpose()
+    }
+
+    async fn list_invitations(&self, org_id: &str) -> Result<Vec<Invitation>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let cap = i64::try_from(INVITATION_LIST_CAP).unwrap_or(i64::MAX);
+        transaction
+            .query(
+                &format!(
+                    "SELECT {INVITATION_COLUMNS} FROM organization_invitations \
+                     WHERE org_id = $1 ORDER BY created_at DESC, id ASC LIMIT $2"
+                ),
+                &[&org_id, &cap],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .iter()
+            .map(invitation_from_row)
+            .collect()
     }
 
     async fn revoke_invitation(
