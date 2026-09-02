@@ -328,6 +328,7 @@ function resolveOne(
       reason: `Provider "${providerId}" is not configured.`,
       nextAction: "open_provider_settings",
       attemptedProviderIds: [providerId],
+      code: "no_candidates",
     }
   }
 
@@ -341,6 +342,7 @@ function resolveOne(
       reason: `Provider "${providerId}" is disabled.`,
       nextAction: "enable_provider",
       attemptedProviderIds: [providerId],
+      code: "provider_disabled",
     }
   }
 
@@ -405,6 +407,7 @@ function resolveOne(
       reason: `Provider "${providerId}" is missing both an API key and a base URL.`,
       nextAction: "add_api_key",
       attemptedProviderIds: [providerId],
+      code: "missing_credential",
     }
   }
 
@@ -465,6 +468,7 @@ export function resolveFeatureProvider(
 
   let lastReason = "No candidate providers were available."
   let lastNextAction: ResolutionFailureNextAction | undefined = "open_provider_settings"
+  let lastCode: UnresolvedProvider["code"] = "no_candidates"
 
   for (const providerId of ordered) {
     attempted.push(providerId)
@@ -472,12 +476,27 @@ export function resolveFeatureProvider(
     if (args.routeProfile === "general-text" && catalogEntry?.supportsChat === false) {
       lastReason = `Provider "${providerId}" does not support chat completions.`
       lastNextAction = "open_provider_settings"
+      lastCode = "no_candidates"
       continue
     }
     const resolution = resolveOne(providerId, snapshot)
-    if (resolution.kind === "resolved") return resolution
+    if (resolution.kind === "resolved") {
+      // The ledger fields. Declared on the type since the resolver was
+      // written and never assigned (a three-axis dormancy: typed, read by
+      // nobody, pinned by nothing). The operation executor's audit trail
+      // needs them, so they are filled here, once, for every caller.
+      return {
+        ...resolution,
+        featureId: args.featureId,
+        routeProfile: args.routeProfile,
+        ...(args.executionMode ? { executionMode: args.executionMode } : {}),
+        attemptedProviderIds: [...attempted],
+        fallbackProviderIds: ordered.filter((id) => id !== providerId),
+      }
+    }
     lastReason = resolution.reason
     lastNextAction = resolution.nextAction
+    lastCode = resolution.code ?? "no_candidates"
   }
 
   return {
@@ -485,6 +504,10 @@ export function resolveFeatureProvider(
     reason: lastReason,
     nextAction: lastNextAction,
     attemptedProviderIds: attempted,
+    featureId: args.featureId,
+    routeProfile: args.routeProfile,
+    code: lastCode,
+    ...(attempted.length > 0 ? { providerId: attempted[attempted.length - 1] } : {}),
   }
 }
 

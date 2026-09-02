@@ -14,7 +14,7 @@
  * Usage: pnpm provider-ops:check
  */
 
-import { readFileSync, realpathSync } from "node:fs"
+import { readFileSync, readdirSync, realpathSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -121,6 +121,71 @@ export function extractFrozenIds(source) {
   return [...match[1].matchAll(/"([a-z0-9.-]+)"/g)].map((m) => m[1])
 }
 
+/**
+ * Handler registrations parsed from source: every `operationId: "<id>"` in
+ * `lib/ai/operations/handlers/*.ts` (tests excluded). Static on purpose, the
+ * handlers import app modules Node cannot load here. The dynamic direction
+ * (every served matrix cell has a handler) is `lib/ai/operations/
+ * contract-parity.test.ts`.
+ */
+export function extractHandlerOperationIds(source) {
+  return [...source.matchAll(/operationId:\s*"([a-z0-9.-]+)"/g)].map((m) => m[1])
+}
+
+/**
+ * Bidirectional handler ↔ descriptor check, the static half. Mirrors
+ * `compareCommandSets` in the companion manifest gate.
+ *
+ * @param {{ operations: Array<{ id: string }> }} manifest
+ * @param {Map<string, string[]>} handlersByFile file → operation ids it binds
+ */
+export function compareOperationSets(manifest, handlersByFile) {
+  const errors = []
+  const ids = new Set(manifest.operations.map((op) => op.id))
+  for (const [file, operationIds] of handlersByFile) {
+    for (const id of operationIds) {
+      if (!ids.has(id)) errors.push(`${file}: handler with no descriptor: ${id}`)
+    }
+  }
+  return errors
+}
+
+const AI_IMPORT = /(?:^|\n)\s*import\s+[^;'"]*?from\s*["'](?:ai|@ai-sdk\/[^"']+)["']/g
+export const AI_SDK_THROAT = "lib/ai/operations/handlers/ai-sdk-surface.ts"
+
+/**
+ * Exactly one file under lib/ai/operations may import the AI SDK. The PII
+ * boundary gate is import-shaped, so a second importer is a second
+ * allowlist entry, which is how that gate goes hollow.
+ */
+export function checkAiSdkThroat(sourcesByFile) {
+  const errors = []
+  for (const [file, source] of sourcesByFile) {
+    if (file === AI_SDK_THROAT) continue
+    if (AI_IMPORT.test(source)) {
+      errors.push(`${file}: imports the AI SDK; only ${AI_SDK_THROAT} may`)
+    }
+    AI_IMPORT.lastIndex = 0
+  }
+  return errors
+}
+
+function listOperationSources(root = repoRoot) {
+  const dir = resolve(root, "lib/ai/operations")
+  const out = new Map()
+  const walk = (relative) => {
+    for (const entry of readdirSync(resolve(dir, relative), { withFileTypes: true })) {
+      const rel = relative ? `${relative}/${entry.name}` : entry.name
+      if (entry.isDirectory()) walk(rel)
+      else if (/\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name)) {
+        out.set(`lib/ai/operations/${rel}`, readFileSync(resolve(dir, rel), "utf8"))
+      }
+    }
+  }
+  walk("")
+  return out
+}
+
 export function loadManifest(root = repoRoot) {
   return JSON.parse(readFileSync(resolve(root, "protocol/provider-operations.json"), "utf8"))
 }
@@ -135,17 +200,29 @@ function main() {
     resolve(repoRoot, "packages/provider-types/src/provider-operations.ts"),
     "utf8"
   )
-  const errors = validateManifest(manifest, {
-    schemaExports: extractNamedExports(schemaSource),
-    frozenIds: extractFrozenIds(typesSource),
-  })
+  const sources = listOperationSources()
+  const handlersByFile = new Map(
+    [...sources]
+      .filter(([file]) => file.startsWith("lib/ai/operations/handlers/"))
+      .map(([file, source]) => [file, extractHandlerOperationIds(source)])
+  )
+  const errors = [
+    ...validateManifest(manifest, {
+      schemaExports: extractNamedExports(schemaSource),
+      frozenIds: extractFrozenIds(typesSource),
+    }),
+    ...compareOperationSets(manifest, handlersByFile),
+    ...checkAiSdkThroat(sources),
+  ]
   if (errors.length > 0) {
     console.error(`[provider-operation-manifest] ${errors.length} issue(s):`)
     for (const error of errors) console.error(`  - ${error}`)
     return 1
   }
+  const bound = new Set([...handlersByFile.values()].flat())
   console.log(
-    `[provider-operation-manifest] OK: ${manifest.operations.length} descriptors, every schema named.`
+    `[provider-operation-manifest] OK: ${manifest.operations.length} descriptors, every schema named, ` +
+      `${bound.size} operation(s) bound by handlers, one AI SDK throat.`
   )
   return 0
 }

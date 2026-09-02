@@ -1007,3 +1007,81 @@ describe("provider client fetch/headers seam (standalone BYOK)", () => {
     expect(lastSettings()?.headers).toEqual({ "x-test": "1" })
   })
 })
+
+describe("resolveFeatureProvider — ledger fields", () => {
+  const snap: ProviderSettingsSnapshot = {
+    defaultProvider: "openai",
+    providers: {
+      openai: { enabled: true, apiKey: "sk-openai", defaultModel: "gpt-4o-mini" },
+      nokey: { enabled: true },
+      off: { enabled: false, apiKey: "x" },
+    },
+    customProviders: [],
+  }
+
+  it("stamps featureId, routeProfile, executionMode and the attempt ledger on a resolution", () => {
+    const r = resolveFeatureProvider(
+      {
+        featureId: "embeddings.create",
+        routeProfile: "embedding",
+        selectionMode: "explicit-provider",
+        providerId: "openai",
+        fallbackMode: "ordered",
+        fallbackProviderOrder: ["nokey"],
+        executionMode: "direct-model",
+      },
+      snap
+    )
+    expect(r).toMatchObject({
+      kind: "resolved",
+      providerId: "openai",
+      featureId: "embeddings.create",
+      routeProfile: "embedding",
+      executionMode: "direct-model",
+      attemptedProviderIds: ["openai"],
+      fallbackProviderIds: ["nokey"],
+    })
+  })
+
+  it("stamps the machine-readable code on an unresolved result", () => {
+    const missing = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "nokey",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect(missing).toMatchObject({
+      kind: "unresolved",
+      code: "missing_credential",
+      featureId: "f",
+      routeProfile: "general-text",
+      providerId: "nokey",
+    })
+    const disabled = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "explicit-provider",
+        providerId: "off",
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect(disabled).toMatchObject({ kind: "unresolved", code: "provider_disabled" })
+    const nothing = resolveFeatureProvider(
+      {
+        featureId: "f",
+        routeProfile: "general-text",
+        selectionMode: "supported-providers",
+        supportedProviders: [],
+        fallbackMode: "none",
+      },
+      snap
+    )
+    expect(nothing).toMatchObject({ kind: "unresolved", code: "no_candidates" })
+  })
+})

@@ -19,6 +19,9 @@ export const SCANNED_PATHS = [
   "crates/cognia-gateway/src",
   "lib/ai/agent/execution",
   "lib/gateway",
+  // ADR-0163: the provider operation dispatcher resolves handlers by
+  // provider id, protocol, then any. Never by a vendor-name branch.
+  "lib/ai/operations",
 ]
 
 /**

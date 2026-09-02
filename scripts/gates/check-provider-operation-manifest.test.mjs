@@ -2,7 +2,11 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  AI_SDK_THROAT,
+  checkAiSdkThroat,
+  compareOperationSets,
   extractFrozenIds,
+  extractHandlerOperationIds,
   extractNamedExports,
   loadManifest,
   validateManifest,
@@ -97,4 +101,34 @@ test("the checked-in manifest validates", () => {
   assert.equal(manifest.schemaVersion, 1)
   assert.deepEqual(validateManifest(manifest), [])
   assert(manifest.operations.length >= 47)
+})
+
+test("handlers must bind described operations", () => {
+  const manifest = { operations: [{ id: "models.list" }] }
+  assert.deepEqual(
+    compareOperationSets(manifest, new Map([["lib/ai/operations/handlers/a.ts", ["models.list"]]])),
+    []
+  )
+  assert.deepEqual(
+    compareOperationSets(
+      manifest,
+      new Map([["lib/ai/operations/handlers/a.ts", ["models.list", "models.summon"]]])
+    ),
+    ["lib/ai/operations/handlers/a.ts: handler with no descriptor: models.summon"]
+  )
+  assert.deepEqual(
+    extractHandlerOperationIds('foo({ operationId: "files.upload" })\nbar({operationId:"x.y"})'),
+    ["files.upload", "x.y"]
+  )
+})
+
+test("only the AI SDK throat may import ai or @ai-sdk", () => {
+  const sources = new Map([
+    [AI_SDK_THROAT, 'import { embed } from "ai"'],
+    ["lib/ai/operations/handlers/language.ts", 'import { x } from "./ai-sdk-surface"'],
+    ["lib/ai/operations/handlers/rogue.ts", 'import { createOpenAI } from "@ai-sdk/openai"'],
+  ])
+  const errors = checkAiSdkThroat(sources)
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /rogue\.ts: imports the AI SDK/)
 })

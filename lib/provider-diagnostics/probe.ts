@@ -79,7 +79,12 @@ function buildProbeRequest(input: ProviderProbeInput): ProbeRequest {
   return { url: input.baseURL, init: { method: "GET", headers }, verifiesCapability: false }
 }
 
-function failureForStatus(status: number): ProviderDiagnosticFailure {
+/**
+ * The one HTTP-status → diagnostic-failure table. Exported so the provider
+ * operation executor (`lib/ai/operations/failure.ts`) reuses it instead of
+ * keeping a second copy.
+ */
+export function failureForStatus(status: number): ProviderDiagnosticFailure {
   if (status === 401 || status === 403) {
     return {
       code: status === 401 ? "authentication" : "permission",
@@ -128,7 +133,7 @@ function failureForStatus(status: number): ProviderDiagnosticFailure {
   }
 }
 
-function transportFailure(error: unknown): ProviderDiagnosticFailure {
+export function transportFailure(error: unknown): ProviderDiagnosticFailure {
   const message = error instanceof Error ? error.message : String(error)
   return {
     code: /abort|timeout/i.test(message) ? "timeout" : "network",
