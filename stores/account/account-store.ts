@@ -24,7 +24,14 @@ import {
   verifyPassword,
 } from "@/lib/accounts/password-client"
 import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
-import { verifyQuickUnlock, type QuickUnlockOutcome } from "@/lib/accounts/quick-unlock/client"
+import {
+  clearQuickUnlockDeviceMaterial,
+  enrollQuickUnlock,
+  removeQuickUnlock,
+  verifyQuickUnlock,
+  type QuickUnlockOutcome,
+} from "@/lib/accounts/quick-unlock/client"
+import { withLockoutCleared } from "@/lib/accounts/quick-unlock/types"
 import type { QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
 import { AccountUnlockError, asUnlockError } from "@/lib/accounts/account-unlock-error"
 import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
@@ -122,6 +129,28 @@ export interface AccountStoreState {
     method: QuickUnlockMethod,
     canonicalSecret: string
   ) => Promise<QuickUnlockOutcome>
+  /** Add a quick-unlock method. Requires the account password. */
+  enrollQuickUnlockMethod: (args: {
+    accountId: string
+    method: QuickUnlockMethod
+    canonicalSecret: string
+    password: string
+    verifier?: Record<string, unknown>
+  }) => Promise<void>
+  /** Remove one method. The password and every other method are untouched. */
+  removeQuickUnlockMethod: (accountId: string, method: QuickUnlockMethod) => Promise<void>
+  /**
+   * Re-enable a method disabled by the attempt cap.
+   *
+   * Requires the password, because proving it is exactly what earns the reset.
+   * There is no lock-screen path to this, which is what keeps the cap a cap
+   * rather than a speed bump.
+   */
+  clearQuickUnlockLockout: (
+    accountId: string,
+    method: QuickUnlockMethod,
+    password: string
+  ) => Promise<void>
   /**
    * Redeem the Browser Vault recovery key and rotate the password in one step.
    * Browser runtimes only — the desktop host mints no recovery key, so there is
@@ -553,6 +582,70 @@ export function createAccountStore(
           throw setFailure(asUnlockError(error))
         }
         return outcome
+      },
+
+      enrollQuickUnlockMethod: async ({
+        accountId,
+        method,
+        canonicalSecret,
+        password,
+        verifier,
+      }) => {
+        set({ error: null })
+        const account = await findAccount(accountId)
+        const enrollment = await enrollQuickUnlock({
+          accountId: account.id,
+          method,
+          canonicalSecret,
+          password,
+          passwordVerifier: account.passwordVerifier,
+        })
+        // A passkey carries its credential id, which the enrolling caller
+        // obtained from the authenticator and this layer never sees.
+        const merged = verifier
+          ? { ...enrollment, verifier: { ...enrollment.verifier, ...verifier } }
+          : enrollment
+        const others = (account.quickUnlock ?? []).filter((entry) => entry.method !== method)
+        const stored = await dependencies.registry.updateQuickUnlock(account.id, [
+          ...others,
+          merged,
+        ])
+        set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
+      },
+
+      removeQuickUnlockMethod: async (accountId, method) => {
+        set({ error: null })
+        const account = await findAccount(accountId)
+        await removeQuickUnlock(account.id, method)
+        const remaining = (account.quickUnlock ?? []).filter((entry) => entry.method !== method)
+        const stored = await dependencies.registry.updateQuickUnlock(account.id, remaining)
+        set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
+        // The device material is per account, so it only goes once the last
+        // method does. Dropping it early would break the others.
+        if (remaining.length === 0) {
+          await clearQuickUnlockDeviceMaterial(account.id).catch(() => {})
+        }
+      },
+
+      clearQuickUnlockLockout: async (accountId, method, password) => {
+        set({ error: null })
+        const account = await findAccount(accountId)
+        // Proving the password is what earns the reset. Without this check the
+        // attempt cap would be trivially resettable from the same screen an
+        // attacker already reached.
+        const ok = shouldUseBrowserVault()
+          ? await verifyBrowserVaultPassword(account.id, password)
+          : await verifyPassword(password, account.passwordVerifier)
+        if (!ok) {
+          throw setFailure(
+            new AccountUnlockError("invalid-password", "Invalid local account password.")
+          )
+        }
+        const next = (account.quickUnlock ?? []).map((entry) =>
+          entry.method === method ? withLockoutCleared(entry) : entry
+        )
+        const stored = await dependencies.registry.updateQuickUnlock(account.id, next)
+        set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
       },
 
       unlockAccountWithRecoveryKey: async (accountId, recoveryKey, newPassword) => {

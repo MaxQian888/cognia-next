@@ -189,7 +189,50 @@
       "backspace": "Delete last digit",
       "submit": "Unlock"
     },
-    "usePassword": "Use password instead"
+    "usePassword": "Use password instead",
+    "settings": {
+      "title": "Quick unlock",
+      "description": "Add a faster way to unlock this account on this device. Your password still works, and is the only one that can recover the account.",
+      "none": "No quick unlock is set up on this device.",
+      "active": "Ready",
+      "lockedOut": "Disabled after too many attempts",
+      "reenable": "Re-enable",
+      "remove": "Remove {method}",
+      "add": "Add {method}",
+      "replace": "Replace {method}",
+      "cancel": "Cancel",
+      "continue": "Continue",
+      "confirm": "Confirm",
+      "passwordLabel": "Account password",
+      "passwordHint": "Required to add, replace or re-enable a method. Adding one creates a new way into this account.",
+      "pinEnter": "Choose a PIN.",
+      "pinConfirm": "Enter the same PIN again.",
+      "pinMismatch": "Those did not match. Start again.",
+      "patternDraw": "Draw a pattern.",
+      "patternConfirm": "Draw the same pattern again.",
+      "patternMismatch": "Those did not match. Start again.",
+      "passkeyPrompt": "Your device will ask you to confirm.",
+      "passkeyAction": "Create passkey",
+      "enrollFailed": "Could not set that up. Check your password and try again.",
+      "passkeyFailure": {
+        "unsupported": "This device cannot use passkeys.",
+        "no-prf": "This authenticator cannot derive an unlock key, so it will not work here. Try another passkey.",
+        "cancelled": "Cancelled.",
+        "no-credential": "No passkey was created.",
+        "failed": "The passkey could not be created. Try again."
+      }
+    },
+    "policy": {
+      "pin-too-short": "That PIN is too short.",
+      "pin-too-long": "That PIN is too long.",
+      "pin-not-numeric": "A PIN can only contain digits.",
+      "pin-too-simple": "That PIN is too easy to guess. Avoid repeats and runs like 123456.",
+      "pattern-too-short": "That pattern is too short.",
+      "pattern-too-long": "That pattern is too long.",
+      "pattern-repeats-node": "A pattern cannot reuse a point.",
+      "pattern-out-of-range": "That pattern is not valid.",
+      "pattern-too-simple": "That pattern is too easy to guess. Avoid straight lines and the outline of the square."
+    }
   },
   "runtimeTarget": {
     "active": "Active",

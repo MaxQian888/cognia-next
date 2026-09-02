@@ -189,7 +189,50 @@
       "backspace": "删除最后一位",
       "submit": "解锁"
     },
-    "usePassword": "改用密码"
+    "usePassword": "改用密码",
+    "settings": {
+      "title": "快速解锁",
+      "description": "在本设备上添加更快的解锁方式。密码依然可用，并且只有密码能找回账户。",
+      "none": "本设备尚未设置快速解锁。",
+      "active": "可用",
+      "lockedOut": "尝试次数过多，已停用",
+      "reenable": "重新启用",
+      "remove": "移除{method}",
+      "add": "添加{method}",
+      "replace": "更换{method}",
+      "cancel": "取消",
+      "continue": "继续",
+      "confirm": "确认",
+      "passwordLabel": "账户密码",
+      "passwordHint": "添加、更换或重新启用时需要验证。添加一种方式等于为本账户新增一个入口。",
+      "pinEnter": "设置一个 PIN 码。",
+      "pinConfirm": "再次输入相同的 PIN 码。",
+      "pinMismatch": "两次输入不一致，请重新开始。",
+      "patternDraw": "绘制一个图案。",
+      "patternConfirm": "再次绘制相同的图案。",
+      "patternMismatch": "两次绘制不一致，请重新开始。",
+      "passkeyPrompt": "设备将要求你确认。",
+      "passkeyAction": "创建通行密钥",
+      "enrollFailed": "设置失败。请检查密码后重试。",
+      "passkeyFailure": {
+        "unsupported": "此设备不支持通行密钥。",
+        "no-prf": "该身份验证器无法派生解锁密钥，因此在这里不可用。请换一个通行密钥。",
+        "cancelled": "已取消。",
+        "no-credential": "未创建通行密钥。",
+        "failed": "通行密钥创建失败，请重试。"
+      }
+    },
+    "policy": {
+      "pin-too-short": "PIN 码太短。",
+      "pin-too-long": "PIN 码太长。",
+      "pin-not-numeric": "PIN 码只能包含数字。",
+      "pin-too-simple": "这个 PIN 码太容易猜到。避免重复数字和 123456 这类连续数字。",
+      "pattern-too-short": "图案太短。",
+      "pattern-too-long": "图案太长。",
+      "pattern-repeats-node": "图案不能重复经过同一个点。",
+      "pattern-out-of-range": "该图案无效。",
+      "pattern-too-simple": "这个图案太容易猜到。避免直线和沿正方形边缘的走法。"
+    }
   },
   "runtimeTarget": {
     "active": "当前",

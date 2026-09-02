@@ -22,6 +22,7 @@ import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import { useAccountStore } from "@/stores/account/account-store"
 
 import { PasswordStrengthMeter } from "../password-strength-meter"
+import { QuickUnlockSettings } from "../quick-unlock/quick-unlock-settings"
 
 export interface AccountSecurityTabProps {
   account: LocalAccountRecord
@@ -32,6 +33,9 @@ export function AccountSecurityTab({ account }: AccountSecurityTabProps) {
   const changePassword = useAccountStore((state) => state.changePassword)
   const lock = useAccountStore((state) => state.lock)
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
+  const enrollQuickUnlockMethod = useAccountStore((state) => state.enrollQuickUnlockMethod)
+  const removeQuickUnlockMethod = useAccountStore((state) => state.removeQuickUnlockMethod)
+  const clearQuickUnlockLockout = useAccountStore((state) => state.clearQuickUnlockLockout)
   const [current, setCurrent] = useState("")
   const [next, setNext] = useState("")
   const [confirm, setConfirm] = useState("")
@@ -118,6 +122,17 @@ export function AccountSecurityTab({ account }: AccountSecurityTabProps) {
           {t("changePassword")}
         </Button>
       </form>
+
+      <Separator />
+
+      {/* Quick unlock sits between the password and the session controls,
+          because it is a way IN rather than a way to end a session. */}
+      <QuickUnlockSettings
+        account={account}
+        onEnroll={enrollQuickUnlockMethod}
+        onRemove={removeQuickUnlockMethod}
+        onClearLockout={clearQuickUnlockLockout}
+      />
 
       <Separator />
 
