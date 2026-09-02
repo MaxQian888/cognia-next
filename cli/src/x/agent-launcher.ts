@@ -10,6 +10,7 @@
 import { spawn, type SpawnOptions } from "node:child_process"
 import { constants as osConstants } from "node:os"
 
+import { writeTemporaryCodexHome, type TemporaryCodexHome } from "./codex-config"
 import type { SupportedAgent } from "./detect-cli"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -35,6 +36,18 @@ export interface AgentLaunchConfig {
   bypass?: boolean
   /** Resume a previous session by id. */
   resume?: string
+  /**
+   * Frozen family bindings from the route ticket (`sonnet` / `haiku` /
+   * `opus` → concrete model). Exported to Claude Code as its
+   * `ANTHROPIC_DEFAULT_*_MODEL` variables so its background turns ask for
+   * models the gateway ticket actually binds.
+   */
+  modelBindings?: Record<string, string>
+  /**
+   * Codex only. Write a temporary `CODEX_HOME` instead of relying on `-c`
+   * overrides (see `codex-config.ts`). Off unless the user asks.
+   */
+  codexHomeFallback?: boolean
 }
 
 export interface AgentLaunchDeps {
@@ -81,12 +94,34 @@ interface AgentEnvConfig {
   args: string[]
 }
 
+/** Claude Code's family selectors and the env variable that overrides each. */
+const CLAUDE_FAMILY_ENV: Array<[family: string, variable: string]> = [
+  ["sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"],
+  ["haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+  ["opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
+]
+
 function buildClaudeConfig(config: AgentLaunchConfig): AgentEnvConfig {
   const env: Record<string, string> = {
     ANTHROPIC_BASE_URL: config.gatewayBaseUrl,
+    // Both wire forms: `ANTHROPIC_AUTH_TOKEN` is the variable Claude Code
+    // documents for a gateway (sent as `Authorization: Bearer`), and
+    // `ANTHROPIC_API_KEY` is sent as `x-api-key`. The gateway's
+    // `supplied_token` accepts either, so whichever the installed version
+    // prefers, the credential arrives.
+    ANTHROPIC_AUTH_TOKEN: config.gatewayApiKey,
     ANTHROPIC_API_KEY: config.gatewayApiKey,
     // Suppress Claude Code's own update checker (we manage the lifecycle)
     CLAUDE_CODE_DISABLE_UPDATE_CHECK: "1",
+  }
+  // Background turns (haiku) and any family selector resolve through the
+  // same bindings the route ticket froze (route_planner::default_model_bindings),
+  // so the first background turn of a session cannot ask for an unbound model.
+  if (config.model || config.modelBindings) {
+    for (const [family, variable] of CLAUDE_FAMILY_ENV) {
+      const bound = config.modelBindings?.[family] ?? config.model
+      if (bound) env[variable] = bound
+    }
   }
 
   const args: string[] = []
@@ -106,13 +141,45 @@ function buildClaudeConfig(config: AgentLaunchConfig): AgentEnvConfig {
   return { env, command: config.binaryPath ?? "claude", args }
 }
 
+/** The `-c` overrides that point Codex at the gateway as a named provider. */
+export function codexProviderOverrides(gatewayBaseUrl: string): string[] {
+  const base = `${gatewayBaseUrl.replace(/\/$/, "")}/v1`
+  return [
+    "-c",
+    "model_provider=cognia",
+    "-c",
+    'model_providers.cognia.name="Cognia gateway"',
+    "-c",
+    `model_providers.cognia.base_url="${base}"`,
+    "-c",
+    "model_providers.cognia.env_key=COGNIA_GATEWAY_KEY",
+    // `wire_api = "chat"`, NOT `"responses"`: the gateway's Responses
+    // translation (crates/cognia-gateway/src/translate/responses.rs) refuses
+    // `stream: true` and any non-null `tools`, and Codex sends both on every
+    // turn. Chat Completions is the wire that actually works end to end.
+    // Do not "fix" this back to responses without changing that translator.
+    "-c",
+    "model_providers.cognia.wire_api=chat",
+  ]
+}
+
 function buildCodexConfig(config: AgentLaunchConfig): AgentEnvConfig {
   const env: Record<string, string> = {
-    OPENAI_BASE_URL: config.gatewayBaseUrl,
-    OPENAI_API_KEY: config.gatewayApiKey,
+    // The provider override names this variable as its `env_key`, so the
+    // credential reaches Codex through it. `OPENAI_API_KEY` is deliberately
+    // NOT set: with a named provider Codex would ignore it, and an agent
+    // subprocess has no business holding anything under that name.
+    COGNIA_GATEWAY_KEY: config.gatewayApiKey,
+    OPENAI_BASE_URL: `${config.gatewayBaseUrl.replace(/\/$/, "")}/v1`,
   }
 
   const args: string[] = []
+  if (!config.codexHomeFallback) {
+    // Provider selection through argv rather than environment alone: Codex
+    // reads `OPENAI_BASE_URL` only for its built-in openai provider and
+    // silently keeps its default `wire_api` there.
+    args.push(...codexProviderOverrides(config.gatewayBaseUrl))
+  }
   if (config.model) {
     args.push("--model", config.model)
   }
@@ -150,6 +217,17 @@ export async function launchAgent(
   const agentConfig =
     config.agent === "claude" ? buildClaudeConfig(config) : buildCodexConfig(config)
 
+  // Codex home fallback: a temporary CODEX_HOME carrying the same provider
+  // config, for an installed Codex that refuses `-c` dotted overrides.
+  let codexHome: TemporaryCodexHome | undefined
+  if (config.agent === "codex" && config.codexHomeFallback) {
+    codexHome = writeTemporaryCodexHome({
+      gatewayBaseUrl: config.gatewayBaseUrl,
+      model: config.model,
+    })
+    agentConfig.env.CODEX_HOME = codexHome.dir
+  }
+
   const mergedEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ...agentConfig.env,
@@ -161,17 +239,27 @@ export async function launchAgent(
     stdio: "inherit",
   }
 
-  if (deps.spawnAgent) {
-    return deps.spawnAgent(agentConfig.command, agentConfig.args, options)
-  }
+  try {
+    if (deps.spawnAgent) {
+      return await deps.spawnAgent(agentConfig.command, agentConfig.args, options)
+    }
 
-  const bunRuntime =
-    deps.bunRuntime === undefined ? defaultBunRuntime() : (deps.bunRuntime ?? undefined)
-  if (bunRuntime) {
-    return spawnAndWaitBun(agentConfig.command, agentConfig.args, mergedEnv, config.cwd, bunRuntime)
-  }
+    const bunRuntime =
+      deps.bunRuntime === undefined ? defaultBunRuntime() : (deps.bunRuntime ?? undefined)
+    if (bunRuntime) {
+      return await spawnAndWaitBun(
+        agentConfig.command,
+        agentConfig.args,
+        mergedEnv,
+        config.cwd,
+        bunRuntime
+      )
+    }
 
-  return spawnAndWait(agentConfig.command, agentConfig.args, options)
+    return await spawnAndWait(agentConfig.command, agentConfig.args, options)
+  } finally {
+    codexHome?.cleanup()
+  }
 }
 
 async function spawnAndWaitBun(

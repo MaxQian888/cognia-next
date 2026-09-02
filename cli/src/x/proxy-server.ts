@@ -31,6 +31,8 @@ export interface ProxyConfig {
   openaiApiKey?: string
   /** When true, log each proxied request to stderr for debugging. */
   verbose?: boolean
+  /** Injectable fetch for the `/v1/models` upstream listing (tests). */
+  fetch?: typeof fetch
 }
 
 export interface ProxyServer {
@@ -48,7 +50,9 @@ export interface ProxyServer {
 // Constants
 // ────────────────────────────────────────────────────────────────────────────
 
-const ANTHROPIC_PATHS = new Set(["/v1/messages"])
+// `count_tokens` too: Claude Code sizes its context window with it before
+// every turn, and a 404 there reads as a dead base URL.
+const ANTHROPIC_PATHS = new Set(["/v1/messages", "/v1/messages/count_tokens"])
 const OPENAI_PATHS = new Set(["/v1/chat/completions", "/v1/responses"])
 
 /** Maximum request body size: 16 MiB (matching the Rust gateway). */
@@ -60,15 +64,69 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 /** Graceful shutdown drain timeout: 5 seconds. */
 const SHUTDOWN_DRAIN_MS = 5_000
 
-/** Default models returned by /v1/models when not proxying to gateway. */
-const DEFAULT_MODEL_IDS = [
-  "claude-sonnet-4-20250514",
-  "claude-opus-4-20250514",
-  "claude-haiku-4-20250414",
-  "o3",
-  "o4-mini",
-  "gpt-4.1",
-]
+/** One upstream's `/v1/models` answer, normalized to the OpenAI list shape. */
+interface ModelRow {
+  id: string
+  object: "model"
+  created: number
+  owned_by: string
+}
+
+/**
+ * `/v1/models` is answered from the UPSTREAMS this proxy is configured for,
+ * never from a hard-coded list: a list that names models the configured key
+ * cannot reach only teaches the agent to request them. Each configured
+ * upstream is asked; a failed one is skipped and reported in `errors`.
+ */
+async function listUpstreamModels(
+  config: ProxyConfig,
+  anthropicBase: string,
+  openaiBase: string,
+  fetchImpl: typeof fetch
+): Promise<{ data: ModelRow[]; errors: string[] }> {
+  const data: ModelRow[] = []
+  const errors: string[] = []
+  const sources: Array<{ url: string; headers: Record<string, string>; ownedBy: string }> = []
+  if (config.anthropicApiKey) {
+    sources.push({
+      url: `${anthropicBase}/v1/models`,
+      headers: { "x-api-key": config.anthropicApiKey, "anthropic-version": "2023-06-01" },
+      ownedBy: "anthropic",
+    })
+  }
+  if (config.openaiApiKey) {
+    sources.push({
+      url: `${openaiBase}/v1/models`,
+      headers: { authorization: `Bearer ${config.openaiApiKey}` },
+      ownedBy: "openai",
+    })
+  }
+  for (const source of sources) {
+    try {
+      const res = await fetchImpl(source.url, { headers: source.headers })
+      if (!res.ok) {
+        errors.push(`${source.ownedBy}: HTTP ${res.status}`)
+        continue
+      }
+      const body = (await res.json()) as {
+        data?: Array<{ id?: string; created?: number; created_at?: string; owned_by?: string }>
+      }
+      for (const row of body.data ?? []) {
+        if (!row.id) continue
+        data.push({
+          id: row.id,
+          object: "model",
+          created:
+            row.created ?? (row.created_at ? Math.floor(Date.parse(row.created_at) / 1000) : 0),
+          owned_by: row.owned_by ?? source.ownedBy,
+        })
+      }
+    } catch (error) {
+      errors.push(`${source.ownedBy}: ${(error as Error).message}`)
+    }
+  }
+  return { data, errors }
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Implementation
@@ -103,19 +161,27 @@ export async function startProxyServer(config: ProxyConfig): Promise<ProxyServer
       return
     }
 
-    // Models list — return default models for Claude Code compatibility
+    // Models list — proxied from the configured upstreams.
     if (req.method === "GET" && pathname === "/v1/models") {
-      res.writeHead(200, { "content-type": "application/json" })
-      res.end(
-        JSON.stringify({
-          object: "list",
-          data: DEFAULT_MODEL_IDS.map((id) => ({
-            id,
-            object: "model",
-            created: 1700000000,
-            owned_by: id.startsWith("claude") ? "anthropic" : "openai",
-          })),
-        })
+      void listUpstreamModels(config, anthropicBase, openaiBase, config.fetch ?? fetch).then(
+        ({ data, errors }) => {
+          if (data.length === 0 && errors.length > 0) {
+            res.writeHead(502, { "content-type": "application/json" })
+            res.end(
+              JSON.stringify({
+                error: {
+                  message: `no upstream answered /v1/models: ${errors.join("; ")}`,
+                  type: "upstream_error",
+                },
+              })
+            )
+            return
+          }
+          res.writeHead(200, { "content-type": "application/json" })
+          res.end(
+            JSON.stringify({ object: "list", data, ...(errors.length ? { warnings: errors } : {}) })
+          )
+        }
       )
       return
     }

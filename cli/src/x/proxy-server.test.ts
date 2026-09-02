@@ -199,16 +199,77 @@ describe("proxy-server", () => {
     expect(proxy.apiKey).toMatch(/^cgx-[a-f0-9]{32}$/)
   })
 
-  it("returns populated /v1/models list", async () => {
-    proxy = await startProxyServer({})
+  it("answers /v1/models from the configured upstreams, never a hard-coded list", async () => {
+    const asked: string[] = []
+    proxy = await startProxyServer({
+      anthropicBaseUrl: "http://anthropic.test",
+      openaiBaseUrl: "http://openai.test",
+      anthropicApiKey: "sk-ant",
+      openaiApiKey: "sk-oai",
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        asked.push(`${String(url)} ${JSON.stringify(init?.headers)}`)
+        if (String(url).startsWith("http://anthropic.test")) {
+          return new Response(
+            JSON.stringify({ data: [{ id: "claude-opus-5", created_at: "2026-01-01T00:00:00Z" }] }),
+            { status: 200 }
+          )
+        }
+        return new Response(
+          JSON.stringify({ data: [{ id: "gpt-5", created: 7, owned_by: "openai" }] }),
+          {
+            status: 200,
+          }
+        )
+      }) as typeof fetch,
+    })
     const res = await httpRequest(`${proxy.baseUrl}/v1/models`)
     expect(res.status).toBe(200)
-    const json = JSON.parse(res.body)
-    expect(json.object).toBe("list")
-    expect(json.data.length).toBeGreaterThan(0)
-    expect(json.data[0].object).toBe("model")
-    expect(json.data.some((m: { id: string }) => m.id.includes("claude"))).toBe(true)
-    expect(json.data.some((m: { id: string }) => m.id === "o3")).toBe(true)
+    const body = JSON.parse(res.body)
+    expect(body.data.map((m: { id: string }) => m.id)).toEqual(["claude-opus-5", "gpt-5"])
+    expect(body.data[0].owned_by).toBe("anthropic")
+    expect(asked[0]).toContain("anthropic.test/v1/models")
+    expect(asked[0]).toContain("sk-ant")
+    expect(asked[1]).toContain("Bearer sk-oai")
+  })
+
+  it("answers 502 when no upstream can list models", async () => {
+    proxy = await startProxyServer({
+      anthropicApiKey: "sk-ant",
+      fetch: (async () => new Response("nope", { status: 401 })) as typeof fetch,
+    })
+    const res = await httpRequest(`${proxy.baseUrl}/v1/models`)
+    expect(res.status).toBe(502)
+    expect(JSON.parse(res.body).error.message).toContain("anthropic: HTTP 401")
+  })
+
+  it("forwards /v1/messages/count_tokens to the anthropic upstream", async () => {
+    let seenPath = ""
+    const upstream = http.createServer((req, res) => {
+      seenPath = req.url ?? ""
+      req.resume()
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" })
+        res.end(JSON.stringify({ input_tokens: 42 }))
+      })
+    })
+    await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r))
+    const upstreamPort = (upstream.address() as { port: number }).port
+    try {
+      proxy = await startProxyServer({
+        anthropicBaseUrl: `http://127.0.0.1:${upstreamPort}`,
+        anthropicApiKey: "sk-ant-real-key",
+      })
+      const res = await httpRequest(`${proxy.baseUrl}/v1/messages/count_tokens`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": proxy.apiKey },
+        body: JSON.stringify({ model: "m", messages: [] }),
+      })
+      expect(res.status).toBe(200)
+      expect(JSON.parse(res.body).input_tokens).toBe(42)
+      expect(seenPath).toBe("/v1/messages/count_tokens")
+    } finally {
+      upstream.close()
+    }
   })
 
   it("returns 413 when request body exceeds 16 MiB", async () => {

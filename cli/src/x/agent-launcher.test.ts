@@ -3,7 +3,7 @@
  */
 
 import type { SpawnOptions } from "node:child_process"
-import { buildAgentConfig, launchAgent } from "./agent-launcher"
+import { buildAgentConfig, codexProviderOverrides, launchAgent } from "./agent-launcher"
 
 describe("buildAgentConfig", () => {
   it("builds claude config with correct env and args", () => {
@@ -15,13 +15,32 @@ describe("buildAgentConfig", () => {
       cwd: "/tmp",
     })
     expect(config.command).toBe("claude")
+    expect(config.args).toEqual(["--model", "claude-sonnet-4-20250514"])
     expect(config.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:54321")
+    // Both wire forms so either Claude Code version presents the credential.
     expect(config.env.ANTHROPIC_API_KEY).toBe("cgx-test")
-    expect(config.args).toContain("--model")
-    expect(config.args).toContain("claude-sonnet-4-20250514")
+    expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe("cgx-test")
+    // Without bindings every family selector falls back to the chosen model.
+    expect(config.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("claude-sonnet-4-20250514")
+    expect(config.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("claude-sonnet-4-20250514")
+    expect(config.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-sonnet-4-20250514")
   })
 
-  it("builds codex config with correct env and args", () => {
+  it("exports the ticket's family bindings to claude", () => {
+    const config = buildAgentConfig({
+      agent: "claude",
+      model: "claude-opus-5",
+      modelBindings: { primary: "claude-opus-5", haiku: "claude-haiku-4-5-20251001" },
+      gatewayBaseUrl: "http://127.0.0.1:54321",
+      gatewayApiKey: "sk-cognia-rt-1",
+      cwd: "/tmp",
+    })
+    expect(config.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("claude-haiku-4-5-20251001")
+    expect(config.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("claude-opus-5")
+    expect(config.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-opus-5")
+  })
+
+  it("builds codex config with provider overrides on argv and the chat wire", () => {
     const config = buildAgentConfig({
       agent: "codex",
       model: "o3",
@@ -30,10 +49,27 @@ describe("buildAgentConfig", () => {
       cwd: "/tmp",
     })
     expect(config.command).toBe("codex")
-    expect(config.env.OPENAI_BASE_URL).toBe("http://127.0.0.1:54321")
-    expect(config.env.OPENAI_API_KEY).toBe("cgx-test")
-    expect(config.args).toContain("--model")
-    expect(config.args).toContain("o3")
+    expect(config.env.COGNIA_GATEWAY_KEY).toBe("cgx-test")
+    expect(config.env.OPENAI_BASE_URL).toBe("http://127.0.0.1:54321/v1")
+    expect(config.env.OPENAI_API_KEY).toBeUndefined()
+    expect(config.args).toEqual([
+      ...codexProviderOverrides("http://127.0.0.1:54321"),
+      "--model",
+      "o3",
+    ])
+    expect(config.args.join(" ")).toContain("model_providers.cognia.wire_api=chat")
+    expect(config.args.join(" ")).not.toContain("responses")
+  })
+
+  it("omits the argv overrides when the codex home fallback is requested", () => {
+    const config = buildAgentConfig({
+      agent: "codex",
+      gatewayBaseUrl: "http://127.0.0.1:54321",
+      gatewayApiKey: "cgx-test",
+      cwd: "/tmp",
+      codexHomeFallback: true,
+    })
+    expect(config.args).toEqual([])
   })
 
   it("adds bypass flag for claude (--dangerously-skip-permissions)", () => {
@@ -176,7 +212,7 @@ describe("launchAgent", () => {
     expect(exitCode).toBe(0)
     expect(calls).toEqual([
       {
-        command: ["/opt/homebrew/bin/codex"],
+        command: ["/opt/homebrew/bin/codex", ...codexProviderOverrides("http://localhost")],
         options: expect.objectContaining({
           cwd: "/workspace",
           stdin: "inherit",

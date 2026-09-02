@@ -3,7 +3,8 @@
  */
 
 import { parseArgv } from "./args"
-import { xCommand } from "./x-command"
+import { executionFingerprintFor, ticketRequestFor, xCommand } from "./x-command"
+import { GatewayCredentialError } from "../x/gateway-connect"
 import type { ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
@@ -91,7 +92,7 @@ describe("xCommand", () => {
         baseUrl: "http://127.0.0.1:47823",
         apiKey: "gw-key",
         shutdown: async () => {},
-        mode: "desktop-gateway" as const,
+        mode: "desktop-gateway-key" as const,
       }),
       launch: async (cfg) => {
         launchConfig = cfg
@@ -410,5 +411,93 @@ describe("xCommand", () => {
     })
 
     expect(launchConfig!.binaryPath).toBe("/opt/custom/bin/claude")
+  })
+
+  it("hands the gateway a ticket request and exports the ticket's bindings to the agent", async () => {
+    const { sink, lines, errors } = createOutput()
+    const args = parseArgv(["x", "claude", "--model", "claude-opus-5"])
+    let launchConfig: Parameters<typeof import("../x/agent-launcher").launchAgent>[0] | undefined
+    let connectDeps: Parameters<typeof import("../x/gateway-connect").connectGateway>[1] | undefined
+    const code = await xCommand(args, {
+      out: sink,
+      detect: async () => ({ installed: true, path: "/usr/bin/claude", version: "1.0.0" }),
+      loadConfig: () => ({ ...MOCK_CONFIG, providers: {} }),
+      connect: async (_proxyConfig, deps) => {
+        connectDeps = deps
+        return {
+          baseUrl: "http://127.0.0.1:47823",
+          apiKey: "sk-cognia-rt-1",
+          shutdown: async () => {},
+          mode: "desktop-gateway-ticket" as const,
+          modelBindings: { haiku: "claude-haiku-4-5-20251001" },
+          ticketId: "rt_1",
+        }
+      },
+      launch: async (cfg) => {
+        launchConfig = cfg
+        return 0
+      },
+      persistModel: () => {},
+    })
+    expect(code).toBe(0)
+    expect(connectDeps?.ticketRequest).toMatchObject({
+      model: "claude-opus-5",
+      routePolicy: "gateway-required",
+      executionFingerprint: executionFingerprintFor("claude", "claude-opus-5", "/workspace"),
+    })
+    expect(launchConfig?.gatewayApiKey).toBe("sk-cognia-rt-1")
+    expect(launchConfig?.modelBindings).toEqual({ haiku: "claude-haiku-4-5-20251001" })
+    expect(lines.join("")).toContain("cognia gateway (route ticket)")
+    // No upstream-key warning in ticket mode: the gateway never needs one.
+    expect(errors.join("")).not.toContain("No API key found")
+  })
+
+  it("prints the fix and exits 1 when no gateway credential can be obtained", async () => {
+    const { sink, errors } = createOutput()
+    const args = parseArgv(["x", "codex", "--model", "o3"])
+    const code = await xCommand(args, {
+      out: sink,
+      detect: async () => ({ installed: true, path: "/usr/bin/codex" }),
+      loadConfig: () => MOCK_CONFIG,
+      connect: async () => {
+        throw new GatewayCredentialError("http://127.0.0.1:47823", "bridge: desktop not running")
+      },
+      launch: async () => 0,
+    })
+    expect(code).toBe(1)
+    expect(errors.join("")).toContain("desktop not running")
+    expect(errors.join("")).toContain("COGNIA_GATEWAY_KEY")
+  })
+
+  it("warns about a missing upstream key only on the proxy path", async () => {
+    const { sink, errors } = createOutput()
+    const args = parseArgv(["x", "claude", "--model", "m"])
+    await xCommand(args, {
+      out: sink,
+      detect: async () => ({ installed: true, path: "/usr/bin/claude" }),
+      loadConfig: () => ({ ...MOCK_CONFIG, providers: {} }),
+      connect: async () => ({
+        baseUrl: "http://127.0.0.1:1",
+        apiKey: "cgx",
+        shutdown: async () => {},
+        mode: "node-proxy" as const,
+      }),
+      launch: async () => 0,
+      persistModel: () => {},
+    })
+    expect(errors.join("")).toContain("No API key found for Anthropic")
+  })
+
+  it("derives a stable fingerprint and a unique session id per launch", () => {
+    expect(executionFingerprintFor("claude", "m", "/w")).toBe(
+      executionFingerprintFor("claude", "m", "/w")
+    )
+    expect(executionFingerprintFor("claude", "m", "/w")).not.toBe(
+      executionFingerprintFor("codex", "m", "/w")
+    )
+    const a = ticketRequestFor("claude", "m", "/w")
+    const b = ticketRequestFor("claude", "m", "/w")
+    expect(a.sessionId).not.toBe(b.sessionId)
+    expect(a.executionFingerprint).toBe(b.executionFingerprint)
   })
 })

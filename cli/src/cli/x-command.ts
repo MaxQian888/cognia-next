@@ -10,6 +10,7 @@
  *   cognia-agent x codex  [--model m] [--bypass] [--resume id] [--verbose] [-- <passthrough>]
  */
 
+import { createHash, randomBytes } from "node:crypto"
 import os from "node:os"
 import { boolFlag, stringFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
@@ -18,8 +19,15 @@ import { setAgentBackendModel } from "../config/mutate"
 import { resolveHome } from "../config/load"
 import { detectAgentCli, type SupportedAgent } from "../x/detect-cli"
 import { selectModel } from "../x/model-selector"
-import { connectGateway, type GatewayConnection } from "../x/gateway-connect"
+import {
+  GatewayCredentialError,
+  RemoteGatewayRefusedError,
+  connectGateway,
+  type GatewayConnection,
+} from "../x/gateway-connect"
 import { launchAgent } from "../x/agent-launcher"
+import { codexHomeFallbackRequested } from "../x/codex-config"
+import type { TicketMintRequest } from "../x/mint-ticket"
 import type { ProxyConfig } from "../x/proxy-server"
 import type { ResolvedConfig } from "../config/schema"
 
@@ -50,15 +58,47 @@ Supported agents:
   codex     Launch OpenAI Codex CLI (openai/codex)
 
 Flags:
-  --model, -m       Select the model (skip interactive picker)
-  --bypass, -y      Enable auto-approve mode (skip permission prompts)
-  --resume <id>     Resume a previous session
-  --verbose         Log proxy requests for debugging
-  --                Everything after this is passed directly to the agent CLI
+  --model, -m               Select the model (skip interactive picker)
+  --bypass, -y              Enable auto-approve mode (skip permission prompts)
+  --resume <id>             Resume a previous session
+  --verbose                 Log proxy requests for debugging
+  --allow-remote-gateway    Accept a non-loopback COGNIA_GATEWAY_URL
+  --codex-home-fallback     Codex only: write a temporary CODEX_HOME instead of
+                            passing -c provider overrides (for a Codex that
+                            refuses dotted -c keys). Off unless asked.
+  --                        Everything after this is passed directly to the agent CLI
 
-The agent's API calls are routed through cognia's gateway (if running) or a
-local proxy, using your configured provider credentials.
+Environment:
+  COGNIA_GATEWAY_URL   Gateway listener (default http://127.0.0.1:47823)
+  COGNIA_GATEWAY_KEY   A gateway API key. Without it a route ticket is minted
+                       for this launch from the running Cognia desktop.
+
+The agent's API calls are routed through cognia's gateway when it is running,
+authenticated with a route ticket minted for this launch (or your gateway
+key). Only when no gateway is running does a local proxy start with your own
+provider credentials.
 `
+
+/** A stable identity for this launch, for the route ticket's frozen spec. */
+export function executionFingerprintFor(agent: string, model: string, cwd: string): string {
+  const digest = createHash("sha256").update(`x|${agent}|${model}|${cwd}`).digest("hex")
+  return `aexf1-${digest.slice(0, 24)}`
+}
+
+export function ticketRequestFor(agent: string, model: string, cwd: string): TicketMintRequest {
+  return {
+    model,
+    sessionId: `x-${agent}-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`,
+    executionFingerprint: executionFingerprintFor(agent, model, cwd),
+    routePolicy: "gateway-required",
+  }
+}
+
+const MODE_LABELS: Record<GatewayConnection["mode"], string> = {
+  "desktop-gateway-ticket": "cognia gateway (route ticket)",
+  "desktop-gateway-key": "cognia gateway (API key)",
+  "node-proxy": "local proxy",
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Command
@@ -132,33 +172,40 @@ export async function xCommand(args: ParsedArgs, deps: XCommandDeps = {}): Promi
 
   out.write(`\x1b[36m→\x1b[0m Model: ${model}\n`)
 
-  // Resolve credentials for the proxy
+  // Connect to gateway. The upstream provider keys are only materialized if
+  // the local proxy actually starts: the gateway path never sees them.
   const verbose = boolFlag(args, "verbose")
-  const proxyConfig = buildProxyConfig(agent, config, verbose)
-
-  // Early credential warning
-  const requiredKey = agent === "claude" ? proxyConfig.anthropicApiKey : proxyConfig.openaiApiKey
-  const providerName = agent === "claude" ? "Anthropic" : "OpenAI"
-  if (!requiredKey) {
-    out.error(
-      `\x1b[33m⚠\x1b[0m No API key found for ${providerName}. ` +
-        `The agent will receive authentication errors.\n` +
-        `  Set ${agent === "claude" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} or configure a provider in ~/.cognia/config.json\n`
-    )
-  }
-
-  // Connect to gateway
   const connect = deps.connect ?? connectGateway
   let gateway: GatewayConnection
   try {
-    gateway = await connect(proxyConfig)
+    gateway = await connect(() => buildProxyConfig(agent, config, verbose), {
+      ticketRequest: ticketRequestFor(agent, model, config.cwd),
+      allowRemoteGateway: boolFlag(args, "allow-remote-gateway"),
+    })
   } catch (err) {
+    if (err instanceof GatewayCredentialError || err instanceof RemoteGatewayRefusedError) {
+      out.error(`\x1b[31m✗\x1b[0m ${err.message}\n`)
+      return 1
+    }
     out.error(`Failed to start proxy: ${(err as Error).message}\n`)
     return 1
   }
 
-  const modeLabel = gateway.mode === "desktop-gateway" ? "cognia gateway" : "local proxy"
-  out.write(`\x1b[36m→\x1b[0m Connected via ${modeLabel} (${gateway.baseUrl})\n`)
+  if (gateway.mode === "node-proxy") {
+    // Only the proxy uses upstream keys, so only here is a missing one a problem.
+    const proxyConfig = buildProxyConfig(agent, config, verbose)
+    const requiredKey = agent === "claude" ? proxyConfig.anthropicApiKey : proxyConfig.openaiApiKey
+    const providerName = agent === "claude" ? "Anthropic" : "OpenAI"
+    if (!requiredKey) {
+      out.error(
+        `\x1b[33m⚠\x1b[0m No API key found for ${providerName}. ` +
+          `The agent will receive authentication errors.\n` +
+          `  Set ${agent === "claude" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} or configure a provider in ~/.cognia/config.json\n`
+      )
+    }
+  }
+
+  out.write(`\x1b[36m→\x1b[0m Connected via ${MODE_LABELS[gateway.mode]} (${gateway.baseUrl})\n`)
   out.write(`\x1b[36m→\x1b[0m Launching ${agent}...\n\n`)
 
   // Launch agent
@@ -178,6 +225,8 @@ export async function xCommand(args: ParsedArgs, deps: XCommandDeps = {}): Promi
         boolFlag(args, "yes"),
       resume: stringFlag(args, "resume"),
       passthrough: extractPassthrough(args),
+      ...(gateway.modelBindings ? { modelBindings: gateway.modelBindings } : {}),
+      codexHomeFallback: codexHomeFallbackRequested(boolFlag(args, "codex-home-fallback")),
     })
   } catch (err) {
     out.error(`\n\x1b[31m✗\x1b[0m ${agent} failed to start: ${(err as Error).message}\n`)
