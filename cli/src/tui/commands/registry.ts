@@ -24,6 +24,7 @@ import { aboutLine, buildToolsCatalogDocument } from "./builtins"
 import { buildCommandHelpDocument } from "./command-help"
 import { settingsSections } from "../runtime/settings-sections"
 import { collectProviderOptions } from "./provider-options"
+import { rt } from "./runtime-handler"
 import { statusbarCommand } from "./statusbar-command"
 import { mascotCommand } from "./mascot-command"
 import { themeCommand } from "./theme-command"
@@ -90,6 +91,30 @@ export const CORE_COMMANDS: CommandDescriptor[] = [
       kind: "openOverlay",
       overlay: { kind: "provider", options: collectProviderOptions(ctx.config), index: 0 },
     }),
+    // The operation plane (ADR-0163): the same modules `cognia-agent provider`
+    // runs, so the panel and the terminal cannot answer differently.
+    subcommands: [
+      {
+        name: "usage",
+        description: "local spend per provider and model: usage [provider]",
+        handler: rt("provider", "usage"),
+      },
+      {
+        name: "inspect",
+        description: "one provider's models and operation profile: inspect [provider]",
+        handler: rt("provider", "inspect"),
+      },
+      {
+        name: "capabilities",
+        description: "operation profile per configured provider: capabilities [provider]",
+        handler: rt("provider", "capabilities"),
+      },
+      {
+        name: "probe",
+        description: "one real request per provider (billable): probe [model]",
+        handler: rt("provider", "probe"),
+      },
+    ],
   },
   {
     name: "model",

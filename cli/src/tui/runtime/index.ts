@@ -84,6 +84,7 @@ import { runInit } from "./init-controller"
 import { permissionsClear, permissionsList, permissionsRemove } from "./permissions-controller"
 import { runStatus } from "./status-controller"
 import { runLimits } from "./limits-controller"
+import { runProvider } from "./provider-controller"
 import { runAgentStats } from "./agent-stats-controller"
 import { runContextReport } from "./context-controller"
 import { tasksList, tasksPause, tasksResume, tasksShow } from "./tasks-controller"
@@ -217,6 +218,7 @@ export interface RuntimeImpl {
   permissionsRemove: typeof permissionsRemove
   runStatus: typeof runStatus
   runLimits: typeof runLimits
+  runProvider: typeof runProvider
   runAgentStats: typeof runAgentStats
   runContextReport: typeof runContextReport
   tasksList: typeof tasksList
@@ -317,6 +319,7 @@ const REAL: RuntimeImpl = {
   permissionsRemove,
   runStatus,
   runLimits,
+  runProvider,
   runAgentStats,
   runContextReport,
   tasksList,
@@ -574,6 +577,18 @@ export async function runRuntimeRequest(
       return impl.runLimits({
         dispatch,
         config,
+        usageHistory: deps.usageHistory,
+        toolStats: deps.toolStats,
+        rateLimits: deps.rateLimits,
+      })
+    case "provider":
+      return impl.runProvider({
+        dispatch,
+        config,
+        home: deps.home,
+        action: req.action,
+        ...(arg ? { arg } : {}),
+        ...(signal ? { signal } : {}),
         usageHistory: deps.usageHistory,
         toolStats: deps.toolStats,
         rateLimits: deps.rateLimits,

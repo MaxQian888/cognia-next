@@ -39,6 +39,13 @@ const facts: DoctorFacts = {
   dbSnapshotExists: true,
   dbSnapshotPath: "/home/.cognia/db.json",
   agentBackend: "builtin",
+  providerOperations: {
+    contractVersion: 1,
+    operations: 50,
+    served: 38,
+    unsupported: 10,
+    unknown: 2,
+  },
 }
 
 describe("buildDoctorReport", () => {
@@ -48,6 +55,7 @@ describe("buildDoctorReport", () => {
     expect(r).toContain("Model:        claude-opus-4-8 ✓")
     expect(r).toContain("Credentialed: anthropic, deepseek")
     expect(r).toContain("Local store:  ✓ /home/.cognia/db.json")
+    expect(r).toContain("Provider ops: 38 served / 10 unsupported / 2 unknown (contract v1)")
   })
 
   it("flags an invalid model and missing store", () => {
@@ -116,6 +124,24 @@ describe("collectDoctorReport", () => {
   it("marks a model outside the catalog as invalid", () => {
     const report = collect({ provider: "anthropic", model: "made-up-model" })
     expect(report.modelValid).toBe(false)
+  })
+
+  it("carries the active provider's operation profile from the pure matrix", () => {
+    const report = collect({ provider: "anthropic", model: "claude-opus-4-8" })
+    const ops = report.providerOperations!
+    expect(ops.contractVersion).toBe(1)
+    expect(ops.operations).toBe(50)
+    expect(ops.served + ops.unsupported + ops.unknown).toBe(50)
+    expect(ops.served).toBeGreaterThan(20)
+    // A self-hosted id gets the contract its protocol implies rather than
+    // an empty profile.
+    const custom = collect({
+      provider: "my-vllm",
+      providers: { "my-vllm": { protocol: "openai", baseURL: "http://10.0.0.5:8000/v1" } },
+    })
+    const c = custom.providerOperations!
+    expect(c.served + c.unsupported + c.unknown).toBe(50)
+    expect(c.served).toBeGreaterThan(0)
   })
 })
 

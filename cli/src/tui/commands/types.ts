@@ -244,6 +244,7 @@ export interface RuntimeRequest {
     | "commit"
     | "pr"
     | "stack"
+    | "provider"
   /** Verb within the feature, e.g. "start" | "run" | "list" | "pause". */
   action: string
   /** Free-form argument payload (an id, an objective, etc.). */

@@ -16,11 +16,13 @@ describe("COGNIA_COMMANDS", () => {
   it("registers the runtime commands", () => {
     expect(COGNIA_COMMANDS.map((c) => c.name).sort()).toEqual([
       "agents",
+      "balance",
       "council",
       "goal",
       "limits",
       "loop",
       "memory",
+      "models",
       "orchestrate",
       "plan",
       "remember",
@@ -33,7 +35,9 @@ describe("COGNIA_COMMANDS", () => {
 
   it("keeps the cognia cluster in the cognia category (status/limits are system cmds)", () => {
     for (const c of COGNIA_COMMANDS) {
-      const expected = c.name === "status" || c.name === "limits" ? "system" : "cognia"
+      const expected = ["status", "limits", "models", "balance"].includes(c.name)
+        ? "system"
+        : "cognia"
       expect(c.category).toBe(expected)
     }
   })
@@ -42,6 +46,17 @@ describe("COGNIA_COMMANDS", () => {
     expect(cmd("limits").handler!(ctx(""))).toEqual({
       kind: "runtime",
       runtime: { feature: "limits", action: "show" },
+    })
+  })
+
+  it("maps /models and /balance to provider runtime requests", () => {
+    expect(cmd("models").handler!(ctx(""))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "provider", action: "models" },
+    })
+    expect(cmd("balance").handler!(ctx(""))).toEqual({
+      kind: "runtime",
+      runtime: { feature: "provider", action: "balance" },
     })
   })
 

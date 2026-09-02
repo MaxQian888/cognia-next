@@ -147,6 +147,12 @@ export function DoctorPanel({
           <Text color={theme.muted}>{"Credentialed".padEnd(13)}</Text>
           {report.credentialedProviders.length ? report.credentialedProviders.join(", ") : "none"}
         </Text>
+        {report.providerOperations ? (
+          <Text>
+            <Text color={theme.muted}>{"Operations".padEnd(13)}</Text>
+            {`${report.providerOperations.served} served · ${report.providerOperations.unsupported} unsupported · ${report.providerOperations.unknown} unknown (contract v${report.providerOperations.contractVersion}, /provider inspect)`}
+          </Text>
+        ) : null}
       </Box>
 
       {report.tuiRenderer ? (

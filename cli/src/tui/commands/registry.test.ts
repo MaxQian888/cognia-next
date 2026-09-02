@@ -134,6 +134,33 @@ describe("command registry", () => {
     expect(effect).toMatchObject({ kind: "openOverlay", overlay: { kind: "settings", section: 0 } })
   })
 
+  it("/provider keeps the switcher at the root and routes the operation verbs to the runtime", () => {
+    const provider = getCommand("provider")
+    const root = provider?.handler?.({
+      state: {},
+      config: {
+        provider: "anthropic",
+        permissionMode: "default",
+        builtinTools: {},
+        providers: {},
+        cwd: "/w",
+      },
+      version: "0",
+      args: "",
+    } as never)
+    expect(root).toMatchObject({ kind: "openOverlay", overlay: { kind: "provider" } })
+    const verbs = Object.fromEntries((provider?.subcommands ?? []).map((s) => [s.name, s]))
+    expect(Object.keys(verbs).sort()).toEqual(["capabilities", "inspect", "probe", "usage"])
+    expect(verbs.inspect!.handler!({ args: " openai " } as never)).toEqual({
+      kind: "runtime",
+      runtime: { feature: "provider", action: "inspect", arg: "openai" },
+    })
+    expect(verbs.usage!.handler!({ args: "" } as never)).toEqual({
+      kind: "runtime",
+      runtime: { feature: "provider", action: "usage" },
+    })
+  })
+
   it("/transcript opens every cell in the full-content pager", () => {
     const effect = getCommand("transcript")?.handler?.({
       state: {

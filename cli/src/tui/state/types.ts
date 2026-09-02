@@ -460,6 +460,14 @@ export interface DoctorReport {
   cwd: string
   dbSnapshotExists: boolean
   dbSnapshotPath: string
+  /** The active provider's operation-profile histogram (ADR-0163). */
+  providerOperations?: {
+    contractVersion: number
+    operations: number
+    served: number
+    unsupported: number
+    unknown: number
+  }
   crashReportsDir: string | null
   logsDir: string | null
   crashReportCount: number

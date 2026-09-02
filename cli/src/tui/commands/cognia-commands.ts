@@ -249,6 +249,18 @@ export const COGNIA_COMMANDS: CommandDescriptor[] = [
     handler: rt("status", "show"),
   },
   {
+    name: "models",
+    description: "list this provider's models (catalog + live inventory) and switch",
+    category: "system",
+    handler: rt("provider", "models"),
+  },
+  {
+    name: "balance",
+    description: "show credit balances across configured providers",
+    category: "system",
+    handler: rt("provider", "balance"),
+  },
+  {
     name: "limits",
     aliases: ["usage-limits", "subscription"],
     description: "show subscription limits + usage across all configured providers",
