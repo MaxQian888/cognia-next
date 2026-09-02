@@ -438,8 +438,13 @@ describe("argument helpers", () => {
   })
 
   it("rejects anything else", () => {
-    expect(() => parseBackendArgument("postgres")).toThrow(/--to must be one of/)
-    expect(() => parseBackendArgument(undefined)).toThrow(/--to must be one of/)
+    expect(() => parseBackendArgument("postgres")).toThrow(/--to must be journal or sqlite/)
+    expect(() => parseBackendArgument(undefined)).toThrow(/--to must be journal or sqlite/)
+    // The documented spellings resolve to the ids the manifest uses.
+    expect(parseBackendArgument("journal")).toBe("journal-v4")
+    expect(parseBackendArgument("sqlite")).toBe("sqlite-v5")
+    expect(parseBackendArgument("snapshot")).toBe("snapshot-v3")
+    expect(parseBackendArgument("sqlite-v5")).toBe("sqlite-v5")
   })
 
   it("names the first generation", () => {

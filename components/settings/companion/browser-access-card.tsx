@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { isTauri, transport } from "@/lib/tauri"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
+import { transport } from "@/lib/tauri"
 
 /**
  * Mirrors Rust `companion_api::commands::BrowserAccessSummary`.
@@ -66,6 +67,9 @@ export function BrowserAccessCard({
   save = defaultSave,
 }: BrowserAccessCardProps) {
   const t = useTranslations("mobile.companion.browserAccess")
+  // The loopback listener and its allowlist live in the desktop process.
+  const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
+  const desktopShell = shellReach.available
   const [summary, setSummary] = useState<BrowserAccessSummary | null>(null)
   const [origin, setOrigin] = useState("")
   // Two error channels on purpose. A load failure is ours to name (there is no
@@ -77,7 +81,7 @@ export function BrowserAccessCard({
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (!isTauri()) return
+    if (!desktopShell) return
     let cancelled = false
     void load()
       .then((next) => {
@@ -92,7 +96,7 @@ export function BrowserAccessCard({
     // `t` is deliberately absent: next-intl hands back a fresh function on some
     // renders, and depending on it re-ran this effect after every save — which
     // reloaded the old config straight over the one that had just been written.
-  }, [load])
+  }, [desktopShell, load])
 
   const apply = useCallback(
     async (next: { enabled: boolean; allowedOrigins: string[]; port: number }) => {
@@ -112,7 +116,25 @@ export function BrowserAccessCard({
     [save]
   )
 
-  if (!isTauri() || !summary) return null
+  if (!desktopShell) {
+    // Rendered with the reason, never hidden. A phone or a browser tab has
+    // nothing to configure here and should be told so, not shown a gap.
+    return (
+      <Card data-testid="browser-access-card" data-reach={shellReach.block ?? "unavailable"}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <GlobeIcon className="size-4" aria-hidden="true" />
+            {t("title")}
+          </CardTitle>
+          <CardDescription>{t("description")}</CardDescription>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground">
+          <p data-testid="browser-access-desktop-only">{t("desktopOnly")}</p>
+        </CardContent>
+      </Card>
+    )
+  }
+  if (!summary) return null
 
   const { enabled, allowedOrigins, port, boundPort, suggestedOrigins, browserBaseUrl } = summary
   const listening = boundPort !== null

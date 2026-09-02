@@ -473,14 +473,22 @@ export async function applySettings(
   isCurrent: () => boolean = () => true
 ): Promise<void> {
   const enabled = settings.webrtcEnabled ?? true
-  const targetConfig = loadCompanionConfig()
-  const signalingUrl = targetConfig?.signalingUrl ?? settings.signalingUrl ?? DEFAULT_SIGNALING_URL
-  const ice = targetConfig?.iceServers ?? settings.iceServers ?? DEFAULT_STUN
-  const turn = settings.turnServers ?? []
   if (!enabled) {
     tx.disableWebRtcTier()
     return
   }
+  const targetConfig = loadCompanionConfig()
+  if (!targetConfig) {
+    // The controller can mount before the async credential-book hydration
+    // completes. Starting a tier in that window can only warn "not paired";
+    // there is no rendezvous identity to negotiate with yet. The config-change
+    // notification re-installs the controller once hydration/pairing succeeds.
+    tx.disableWebRtcTier()
+    return
+  }
+  const signalingUrl = targetConfig.signalingUrl ?? settings.signalingUrl ?? DEFAULT_SIGNALING_URL
+  const ice = targetConfig.iceServers ?? settings.iceServers ?? DEFAULT_STUN
+  const turn = settings.turnServers ?? []
   // ADR-0021 LAN-first: when already reaching the desktop over a connected
   // LAN, the WebRTC tier is not needed ("consulted only when LAN is
   // unavailable"). Tear it down to save mobile battery + signaling quota;

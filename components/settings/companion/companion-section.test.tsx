@@ -631,6 +631,71 @@ describe("CompanionSection", () => {
     expect(screen.queryByTestId("tunnel-token-configured")).toBeNull()
   })
 
+  /**
+   * The saved boot preference and the live status disagree exactly when the
+   * boot restore failed. The switch used to read "off" over a preference that
+   * said "on", which is a silent failure of the one thing the preference is
+   * for.
+   */
+  it("says when the saved preference asked for mDNS but nothing is running", async () => {
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_mdns_status") return false
+      if (name === "companion_reachability_get")
+        return { serverEnabled: false, port: 27890, bindLoopbackOnly: true, mdnsEnabled: true }
+      return undefined as unknown as never
+    })
+    render(<CompanionSection />)
+    expect(await screen.findByTestId("mdns-autostart-failed")).toBeInTheDocument()
+    expect(screen.queryByTestId("server-autostart-failed")).not.toBeInTheDocument()
+  })
+
+  it("says when the saved preference asked for the server but it is stopped", async () => {
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_mdns_status") return false
+      if (name === "companion_reachability_get")
+        return { serverEnabled: true, port: 27890, bindLoopbackOnly: true, mdnsEnabled: false }
+      return undefined as unknown as never
+    })
+    render(<CompanionSection />)
+    expect(await screen.findByTestId("server-autostart-failed")).toBeInTheDocument()
+    expect(screen.queryByTestId("mdns-autostart-failed")).not.toBeInTheDocument()
+  })
+
+  it("stays quiet when the saved preference and the live status agree", async () => {
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_mdns_status") return false
+      if (name === "companion_reachability_get")
+        return { serverEnabled: false, port: 27890, bindLoopbackOnly: true, mdnsEnabled: false }
+      return undefined as unknown as never
+    })
+    render(<CompanionSection />)
+    await screen.findByLabelText(/Enable mDNS broadcast/i)
+    expect(screen.queryByTestId("mdns-autostart-failed")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("server-autostart-failed")).not.toBeInTheDocument()
+  })
+
+  /** `companion_tls_paths` existed for this view and nothing ever called it. */
+  it("shows where the TLS certificate lives", async () => {
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_tls_paths")
+        return {
+          certPemPath: "/data/cognia/companion/cert.pem",
+          keyPemPath: "/data/cognia/companion/key.pem",
+          fingerprintSha256: "sha256:abc",
+        }
+      return undefined as unknown as never
+    })
+    render(<CompanionSection />)
+    const paths = await screen.findByTestId("server-tls-paths")
+    expect(paths).toHaveTextContent("/data/cognia/companion/cert.pem")
+    expect(paths).toHaveTextContent("sha256:abc")
+    expect(paths).not.toHaveTextContent("key.pem")
+  })
+
   it("starts and stops mDNS broadcasting with the TLS fingerprint", async () => {
     const user = userEvent.setup()
     let running = false

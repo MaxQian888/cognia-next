@@ -150,8 +150,28 @@ function settings(patch: Partial<AppSettings> = {}): AppSettings {
   } as AppSettings
 }
 
+async function pairCompanion(): Promise<void> {
+  await saveCompanionConfig({
+    baseUrl: "https://headless.example",
+    devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "device-private" },
+    deviceKeyThumbprint: "device-thumbprint",
+    deviceId: "browser-1",
+    serverVersion: "1",
+  } as CompanionConfig)
+}
+
 describe("applySettings", () => {
+  it("does not start WebRTC before the companion config is hydrated", async () => {
+    const tx = new FakeTransport()
+
+    await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
+
+    expect(tx.enableCalls).toEqual([])
+    expect(tx.disableCount).toBe(1)
+  })
+
   it("calls enableWebRtcTier with the configured signaling URL and merged ICE/TURN list", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     await applySettings(
       tx as unknown as Tx,
@@ -171,6 +191,7 @@ describe("applySettings", () => {
   })
 
   it("falls back to defaults when no signaling URL or ICE servers are set", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
     expect(tx.enableCalls.length).toBe(1)
@@ -189,6 +210,7 @@ describe("applySettings", () => {
   })
 
   it("treats undefined webrtcEnabled as opt-in default", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     await applySettings(tx as unknown as Tx, settings())
     expect(tx.enableCalls.length).toBe(1)
@@ -196,6 +218,7 @@ describe("applySettings", () => {
   })
 
   it("tears down the tier (LAN-first) when already on a connected LAN", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     tx.onLan = true
     await applySettings(tx as unknown as Tx, settings({ webrtcEnabled: true }))
@@ -204,6 +227,7 @@ describe("applySettings", () => {
   })
 
   it("merges injected provider-provisioned ICE servers after static ICE/TURN", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     await applySettings(
       tx as unknown as Tx,
@@ -266,6 +290,7 @@ describe("installCompanionSignalingController — TURN provisioner", () => {
   // file header), so these exercise the provisioner via a network trigger,
   // which runs `reupgrade()` → `manageProvisioner` like production.
   it("starts a provisioner when turnProvider.kind !== 'none', merges its servers, and stops it on uninstall", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     const stop = jest.fn()
     let netHandler: (s: NetworkStatus) => void = () => {}
@@ -347,6 +372,7 @@ describe("installCompanionSignalingController", () => {
     // This is the gap the host-neutral split closed: a browser companion used
     // to get an immediate no-op, so it never refreshed the channel inventory,
     // never re-probed on reconnect and never had a WebRTC tier at all.
+    await pairCompanion()
     const tx = new FakeTransport()
     const refreshEndpoints = jest.fn(async () => undefined)
     let netHandler: (s: NetworkStatus) => void = () => {}
@@ -405,6 +431,7 @@ describe("installCompanionSignalingController", () => {
   })
 
   it("re-upgrades the WebRTC tier on network reconnect and app resume, throttled", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     let netHandler: (s: NetworkStatus) => void = () => {}
     let resumeHandler: () => void = () => {}
@@ -590,6 +617,7 @@ describe("installCompanionSignalingController — LAN re-resolution", () => {
 
 describe("installCompanionSignalingController — resilience", () => {
   it("re-pushes ICE servers when the provisioner rotates credentials", async () => {
+    await pairCompanion()
     const tx = new FakeTransport()
     let onRefresh: ((iceServers: RTCIceServer[]) => void) | null = null
     let servers: RTCIceServer[] = [{ urls: "turn:first" }]
@@ -629,6 +657,7 @@ describe("installCompanionSignalingController — resilience", () => {
   })
 
   it("logs and survives a failed re-push after credential rotation", async () => {
+    await pairCompanion()
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     const tx = new FakeTransport()
     let onRefresh: ((iceServers: RTCIceServer[]) => void) | null = null
@@ -700,6 +729,7 @@ describe("installCompanionSignalingController — resilience", () => {
     // The liveQuery observer is the production entry point: a transport that
     // fails negotiation there must be logged, not left as an unhandled
     // rejection that kills the subscription.
+    await pairCompanion()
     const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
     const tx = new FakeTransport()
     tx.enableError = new Error("negotiation exploded")

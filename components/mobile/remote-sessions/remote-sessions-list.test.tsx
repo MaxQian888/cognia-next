@@ -1,32 +1,43 @@
-import { act, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { RemoteSessionsList } from "./remote-sessions-list"
 
-const listSessionsMock = jest.fn()
-jest.mock("@/lib/claude/ipc", () => ({
-  listSessions: (...a: unknown[]) => listSessionsMock(...a),
+interface QueryState {
+  data: Array<{ id: string; title?: string }> | null
+  lastSyncedAt: number | null
+  error: string | null
+}
+
+const queryState: QueryState = { data: null, lastSyncedAt: null, error: null }
+const useDexieFirstQueryMock = jest.fn((_opts: unknown) => queryState)
+jest.mock("@/hooks/data/use-dexie-first-query", () => ({
+  useDexieFirstQuery: (opts: unknown) => useDexieFirstQueryMock(opts),
 }))
 
-const hydrateCompanionConfigMock = jest.fn()
-jest.mock("@/lib/tauri/transport-companion", () => ({
-  hydrateCompanionConfig: () => hydrateCompanionConfigMock(),
+jest.mock("@/lib/db/schema", () => ({
+  getDb: () => ({
+    sessions: {
+      orderBy: () => ({
+        reverse: () => ({ limit: () => ({ toArray: async () => [] }) }),
+      }),
+    },
+  }),
 }))
 
 beforeEach(() => {
-  listSessionsMock.mockReset()
-  hydrateCompanionConfigMock.mockReset().mockResolvedValue(null)
+  queryState.data = null
+  queryState.lastSyncedAt = null
+  queryState.error = null
+  useDexieFirstQueryMock.mockClear()
 })
 
 describe("<RemoteSessionsList />", () => {
   it("renders a row per session and fires onSelect on click", async () => {
-    listSessionsMock.mockResolvedValue({
-      rows: [
-        { id: "s1", title: "Build feature" },
-        { id: "s2", title: "Fix bug" },
-      ],
-      total: 2,
-    })
+    queryState.data = [
+      { id: "s1", title: "Build feature" },
+      { id: "s2", title: "Fix bug" },
+    ]
     const onSelect = jest.fn()
     const user = userEvent.setup()
     render(<RemoteSessionsList onSelect={onSelect} />)
@@ -37,33 +48,34 @@ describe("<RemoteSessionsList />", () => {
     expect(onSelect).toHaveBeenCalledWith("s1")
   })
 
-  it("shows the empty state when there are no sessions", async () => {
-    listSessionsMock.mockResolvedValue({ rows: [], total: 0 })
+  it("shows the empty state when there are no sessions", () => {
+    queryState.data = []
     render(<RemoteSessionsList onSelect={jest.fn()} />)
-    expect(await screen.findByTestId("remote-sessions-empty")).toBeInTheDocument()
+    expect(screen.getByTestId("remote-sessions-empty")).toBeInTheDocument()
   })
 
-  it("surfaces a load error", async () => {
-    listSessionsMock.mockRejectedValue(new Error("offline"))
+  it("shows the loading state until the live query answers", () => {
     render(<RemoteSessionsList onSelect={jest.fn()} />)
-    expect(await screen.findByTestId("remote-sessions-error")).toHaveTextContent(/offline/)
+    expect(screen.getByTestId("remote-sessions-loading")).toBeInTheDocument()
   })
 
-  it("waits for persisted companion config hydration before listing sessions", async () => {
-    let finishHydration: (() => void) | undefined
-    hydrateCompanionConfigMock.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishHydration = resolve
-        })
+  /**
+   * The rows are local. A failed background pull must not replace them with
+   * an error string, which is what the RPC-in-an-effect version did offline.
+   */
+  it("keeps the synced rows on screen and reports a failed pull beside them", () => {
+    queryState.data = [{ id: "s1", title: "Build feature" }]
+    queryState.error = "offline"
+    render(<RemoteSessionsList onSelect={jest.fn()} />)
+    expect(screen.getByTestId("remote-session-row-s1")).toBeInTheDocument()
+    expect(screen.getByTestId("remote-sessions-error")).toHaveTextContent(/offline/)
+  })
+
+  it("reads the synced sessions table so the list paints from the local mirror", () => {
+    queryState.data = []
+    render(<RemoteSessionsList onSelect={jest.fn()} />)
+    expect(useDexieFirstQueryMock).toHaveBeenCalledWith(
+      expect.objectContaining({ table: "sessions" })
     )
-    listSessionsMock.mockResolvedValue({ rows: [], total: 0 })
-
-    render(<RemoteSessionsList onSelect={jest.fn()} />)
-    expect(listSessionsMock).not.toHaveBeenCalled()
-
-    await act(async () => finishHydration?.())
-    expect(await screen.findByTestId("remote-sessions-empty")).toBeInTheDocument()
-    expect(listSessionsMock).toHaveBeenCalledWith({ limit: 50, offset: 0 })
   })
 })

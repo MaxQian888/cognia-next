@@ -29,6 +29,7 @@ import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useDeviceRows } from "@/hooks/devices/use-device-rows"
 import { hasHostRuntime } from "@/lib/platform/capabilities"
+import { standaloneDevicesRequiresHost } from "@/lib/runtime/surface-contract"
 import { isTauri } from "@/lib/platform/detect"
 import { remoteHostRef } from "@/lib/devices/build-device-rows"
 import type { RemoteHost } from "@/stores/remote-host/remote-host-store"
@@ -76,7 +77,10 @@ export function DeviceConsole() {
    * phone or a browser the button therefore delivered a settings empty state.
    * It is in-place now, so only pairing still navigates.
    */
-  const pairHref = isTauri() ? "/settings?section=companion" : "/pair"
+  // The web/mobile remedy is the surface contract's, so the alert and the
+  // contract cannot disagree about where standalone leads. The desktop has no
+  // `/pair` of its own; its way out is the Companion settings section.
+  const pairHref = isTauri() ? "/settings?section=companion" : standaloneDevicesRequiresHost.remedy
 
   /**
    * `?addHost=1&baseUrl=…` is how `/servers` and the palette hand a host over.
@@ -209,7 +213,11 @@ export function DeviceConsole() {
     >
       <div className="flex h-full min-h-0 flex-col">
         {standalone ? (
-          <Alert className="m-3 mb-0" data-testid="devices-requires-host">
+          <Alert
+            className="m-3 mb-0"
+            data-testid="devices-requires-host"
+            data-reason={standaloneDevicesRequiresHost.reason}
+          >
             <AlertTitle>{t("standaloneTitle")}</AlertTitle>
             <AlertDescription className="space-y-2">
               <span className="block">{t("standaloneBody")}</span>

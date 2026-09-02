@@ -205,6 +205,26 @@ describe("useDraftApproval", () => {
     )
   })
 
+  it("reject queues under its own label, not the approve label", async () => {
+    const draft = makeDraft()
+    const { result } = renderHook(() =>
+      useDraftApproval(draft, { label: "Approve draft", rejectLabel: "Reject draft" })
+    )
+    await act(async () => {
+      await result.current.reject()
+    })
+    expect(mockReject).toHaveBeenCalledWith(draft, { label: "Reject draft" })
+  })
+
+  it("reject falls back to the shared label when no reject label is given", async () => {
+    const draft = makeDraft()
+    const { result } = renderHook(() => useDraftApproval(draft, { label: "Reply to Ada" }))
+    await act(async () => {
+      await result.current.reject()
+    })
+    expect(mockReject).toHaveBeenCalledWith(draft, { label: "Reply to Ada" })
+  })
+
   it("reject sets busy true→false across the call", async () => {
     const draft = makeDraft()
     let resolveReject: (() => void) | undefined

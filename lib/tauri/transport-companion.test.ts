@@ -1663,6 +1663,111 @@ describe("subscribe() — subscribe control frames", () => {
     expect(transport.subscriptionDiagnostics().lastError).toBe("subscribe_error")
   })
 
+  it("waits for the ack that names its own channel, not for somebody else's", async () => {
+    // A caller that subscribes and immediately starts the work it wants to
+    // watch races its own subscription, which is the whole reason this
+    // handshake exists. An unrelated ack must not release it.
+    transport = new CompanionTransport()
+    transport.subscribe("workflow:trigger", jest.fn())
+    transport.subscribe("claude://message", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+
+    let settled = false
+    const waiting = transport.whenSubscribed(["claude://message"]).then(() => {
+      settled = true
+    })
+    ws.triggerMessage(JSON.stringify({ type: "subscribed", channels: ["workflow:trigger"] }))
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    ws.triggerMessage(
+      JSON.stringify({ type: "subscribed", channels: ["workflow:trigger", "claude://message"] })
+    )
+    await waiting
+    expect(settled).toBe(true)
+  })
+
+  it("does not answer from a previous socket's acknowledgement after a re-subscribe", async () => {
+    // The Pi version probe subscribes, reads, and unsubscribes in its
+    // `finally`. The second probe has to be acknowledged on its own add frame,
+    // or it spawns the process before the host has re-registered the channel
+    // and reads an empty stream.
+    transport = new CompanionTransport()
+    const stop = transport.subscribe("external-agent://stdout", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    ws.triggerMessage(JSON.stringify({ type: "subscribed", channels: ["external-agent://stdout"] }))
+    await transport.whenSubscribed(["external-agent://stdout"])
+
+    stop()
+    transport.subscribe("external-agent://stdout", jest.fn())
+    let settled = false
+    const waiting = transport.whenSubscribed(["external-agent://stdout"]).then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    ws.triggerMessage(JSON.stringify({ type: "subscribed", channels: ["external-agent://stdout"] }))
+    await waiting
+    expect(settled).toBe(true)
+  })
+
+  it("does not answer from the acknowledgement of a socket that has since dropped", async () => {
+    // An acknowledgement belongs to the socket it arrived on. If the socket
+    // drops, the caller is in the reconnect backoff with nothing subscribed,
+    // and answering from the old ack lets it spawn the process over the HTTP
+    // plane, which is still up, and read an empty stream.
+    transport = new CompanionTransport()
+    transport.subscribe("external-agent://stdout", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    ws.triggerMessage(JSON.stringify({ type: "subscribed", channels: ["external-agent://stdout"] }))
+    await transport.whenSubscribed(["external-agent://stdout"])
+
+    ws.triggerClose()
+
+    let settled = false
+    const waiting = transport.whenSubscribed(["external-agent://stdout"]).then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    // It is genuinely parked, not merely slow: a fresh acknowledgement is what
+    // releases it, which is what the reconnect's re-sent add frame delivers.
+    ws.triggerMessage(JSON.stringify({ type: "subscribed", channels: ["external-agent://stdout"] }))
+    await waiting
+    expect(settled).toBe(true)
+  })
+
+  it("releases a waiter whose channel the host refused, rather than hanging it", async () => {
+    transport = new CompanionTransport()
+    transport.subscribe("bogus:*", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    const waiting = transport.whenSubscribed(["bogus:*"])
+    ws.triggerMessage(
+      JSON.stringify({
+        type: "subscribed",
+        channels: [],
+        rejected: [{ channel: "bogus:*", reason: "unknown_channel" }],
+      })
+    )
+    await expect(waiting).resolves.toBeUndefined()
+  })
+
+  it("releases every waiter when the host refuses the frame outright", async () => {
+    transport = new CompanionTransport()
+    transport.subscribe("workflow:trigger", jest.fn())
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    const waiting = transport.whenSubscribed(["workflow:trigger"])
+    ws.triggerMessage(JSON.stringify({ type: "subscribe_error", message: "bad frame" }))
+    await expect(waiting).resolves.toBeUndefined()
+  })
+
   it("tolerates a socket that throws on send", () => {
     transport = new CompanionTransport()
     transport.subscribe("workflow:trigger", jest.fn())

@@ -85,6 +85,8 @@ export function PairFailurePanel({
     got: failure.payloadVersion ?? 0,
     origin: failure.origin ?? "",
     host: failure.baseUrl ?? "",
+    expected: (failure.expectedFingerprint ?? "").slice(0, 12),
+    reported: (failure.reportedFingerprint ?? "").slice(0, 12),
   }
   const remedyValues = {
     origin: failure.origin ?? "",

@@ -202,7 +202,9 @@ export function MobilePairedServersSheet({ open, onOpenChange }: MobilePairedSer
                     >
                       <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
                         <span className="flex items-center gap-1 truncate text-sm font-semibold">
-                          {entry.label}
+                          {pendingHostId === entry.hostId
+                            ? t("switchingTo", { name: entry.label })
+                            : entry.label}
                           {entry.active ? <CheckIcon className="size-3 text-primary" aria-label={t("active")} /> : null}
                         </span>
                         <span className="truncate text-[10px] text-muted-foreground">{entry.detail}</span>

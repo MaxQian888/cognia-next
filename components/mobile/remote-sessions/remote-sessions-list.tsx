@@ -1,60 +1,48 @@
 "use client"
 
 /**
- * Remote Session Control — mobile session picker.
+ * Remote Session Control: mobile session picker.
  *
- * Lists the host's chat sessions (via the `session_list` RPC through
- * `lib/claude/ipc.ts:listSessions`) so the operator can open one for live
- * viewing + control. Tapping a row calls `onSelect` with its id; the parent
- * route swaps in `<RemoteSessionDetail>`.
+ * Lists the host's chat sessions so the operator can open one for live
+ * viewing and control. Tapping a row calls `onSelect` with its id and the
+ * parent route swaps in `<RemoteSessionDetail>`.
+ *
+ * Reads the synced `sessions` table through `useDexieFirstQuery` rather than
+ * calling `session_list` over RPC. `sessions` is a critical-stage synced table
+ * (`lib/sync/companion-sync.ts`), so the rows are already on the device and
+ * the list paints offline, after a cold deep link, and while the Host is
+ * reconnecting. The old RPC-in-an-effect version was the exact pattern the
+ * hook replaced, and off the network it showed nothing but an error string.
+ * A failed background pull is reported as a line under the list instead of
+ * replacing it.
  */
 
-import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Card, CardContent } from "@/components/ui/card"
-import { listSessions } from "@/lib/claude/ipc"
-import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
+import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
+import { getDb } from "@/lib/db/schema"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 export interface RemoteSessionsListProps {
   onSelect: (sessionId: string) => void
 }
 
+/** Newest sessions first, one screen's worth. */
+export const REMOTE_SESSIONS_LIST_LIMIT = 50
+
 export function RemoteSessionsList({ onSelect }: RemoteSessionsListProps) {
   const t = useTranslations("mobile.remoteSessions.list")
-  const [sessions, setSessions] = useState<ChatSession[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const query = useDexieFirstQuery<ChatSession[] | null>({
+    query: () =>
+      getDb().sessions.orderBy("updatedAt").reverse().limit(REMOTE_SESSIONS_LIST_LIMIT).toArray(),
+    deps: [],
+    initial: null,
+    table: "sessions",
+  })
+  const sessions = query.data
 
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        // The mobile boot provider hydrates the transport cache asynchronously
-        // while route children are already mounted. Await the same idempotent
-        // boundary here so a cold deep link cannot issue session_list against
-        // an empty cache and get stuck in a false "not paired" error state.
-        await hydrateCompanionConfig()
-        const page = await listSessions({ limit: 50, offset: 0 })
-        if (!cancelled) setSessions(page.rows)
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  if (error) {
-    return (
-      <p className="p-4 text-xs text-destructive" data-testid="remote-sessions-error">
-        {t("error", { reason: error })}
-      </p>
-    )
-  }
-
-  if (sessions === null) {
+  if (sessions === null || sessions === undefined) {
     return (
       <p className="p-4 text-xs text-muted-foreground" data-testid="remote-sessions-loading">
         {t("loading")}
@@ -64,9 +52,16 @@ export function RemoteSessionsList({ onSelect }: RemoteSessionsListProps) {
 
   if (sessions.length === 0) {
     return (
-      <p className="p-4 text-xs text-muted-foreground" data-testid="remote-sessions-empty">
-        {t("empty")}
-      </p>
+      <div className="space-y-2">
+        <p className="p-4 text-xs text-muted-foreground" data-testid="remote-sessions-empty">
+          {t("empty")}
+        </p>
+        {query.error ? (
+          <p className="px-4 text-xs text-destructive" data-testid="remote-sessions-error">
+            {t("error", { reason: query.error })}
+          </p>
+        ) : null}
+      </div>
     )
   }
 
@@ -93,6 +88,11 @@ export function RemoteSessionsList({ onSelect }: RemoteSessionsListProps) {
           </CardContent>
         </Card>
       ))}
+      {query.error ? (
+        <p className="text-xs text-destructive" data-testid="remote-sessions-error">
+          {t("error", { reason: query.error })}
+        </p>
+      ) : null}
     </div>
   )
 }

@@ -49,7 +49,9 @@ import { useTapConnect } from "./use-tap-connect"
 
 function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
+  const tWorkflow = useTranslations("mobile.workflow")
   const tConnection = useTranslations("workflows.editor.connection")
+  const portrait = usePortraitOrientation()
   const [mode, setMode] = useState<MobileCanvasMode>("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -236,6 +238,20 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           orientationLocked={orientationLocked}
           onInit={setRf}
         />
+        {/* The graph reads badly in a 360-px portrait column. With the lock
+            released the OS follows the device, so a phone held upright gets
+            the narrow view. This says so, once, and tapping it re-locks. The
+            copy existed since the lock shipped and was rendered by nothing. */}
+        {!orientationLocked && portrait ? (
+          <button
+            type="button"
+            onClick={() => setOrientationLocked(true)}
+            className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-pill border bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur"
+            data-testid="mobile-editor-landscape-hint"
+          >
+            {tWorkflow("landscapeHint")}
+          </button>
+        ) : null}
         {/* The desktop selection toolbar, in its touch layout. Duplicating its
             duplicate / group / align / distribute / delete / extract handlers
             for the phone would have been six more places to keep in step. */}
@@ -400,4 +416,22 @@ export function MobileWorkflowEditor({ workflow }: MobileWorkflowEditorProps) {
       </EditorStoreProvider>
     </ReactFlowProvider>
   )
+}
+
+/**
+ * Whether the device is currently held upright. `matchMedia` is the only
+ * signal a web view gets for this, and it is live: the OS rotating the app
+ * after the lock is released flips it without a re-mount.
+ */
+function usePortraitOrientation(): boolean {
+  const [portrait, setPortrait] = useState(false)
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const query = window.matchMedia("(orientation: portrait)")
+    const update = () => setPortrait(query.matches)
+    update()
+    query.addEventListener("change", update)
+    return () => query.removeEventListener("change", update)
+  }, [])
+  return portrait
 }

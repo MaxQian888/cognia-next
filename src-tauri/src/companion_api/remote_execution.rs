@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use axum::http::StatusCode;
 use parking_lot::Mutex;
@@ -869,7 +869,26 @@ struct RegistryState {
     latest: HashMap<String, RemoteExecutionContext>,
     pending: HashSet<String>,
     consumed: HashSet<String>,
+    /// Response ids raised under a remote context, per session, oldest first.
+    ///
+    /// Separate from `pending` / `consumed` because the two answer different
+    /// questions. Those are keyed by the context's `request_id`, so they are
+    /// generation-bound: a new send retires them, which is right, because a
+    /// retired context must not still satisfy single-use. Whether a request
+    /// *was* remote-scoped is not generation-bound at all. The request outlives
+    /// the turn that raised it, and it stays the origin device's to answer for
+    /// as long as it is answerable.
+    ///
+    /// Bounded per session, because nothing removes a session from this
+    /// registry and a long session can raise many requests.
+    scoped: HashMap<String, VecDeque<String>>,
 }
+
+/// How many remote-scoped response ids to remember per session.
+///
+/// Only ever read on the approval path that omits a context, so a linear scan
+/// of at most this many ids is cheaper than a second index.
+const SCOPED_RESPONSES_PER_SESSION: usize = 512;
 
 #[derive(Debug, Default)]
 pub struct RemoteExecutionRegistry {
@@ -899,6 +918,11 @@ impl RemoteExecutionRegistry {
             expires_at: now_ms.saturating_add(CONTEXT_TTL_MS),
         };
         state.latest.insert(session_id.to_string(), context.clone());
+        // Retire the previous generation's keys. `scoped` is deliberately not
+        // touched: it records which requests belong to a remote origin, and a
+        // request raised by an earlier turn is still that turn's to answer.
+        // Clearing it here is what let a later send erase the scope and hand
+        // the request to any device holding a control grant.
         state
             .consumed
             .retain(|key| !key.starts_with(&format!("{session_id}:")));
@@ -924,6 +948,13 @@ impl RemoteExecutionRegistry {
             return Err("REMOTE_RESPONSE_STALE");
         }
         state.pending.insert(pending_key(context, response_id));
+        let scoped = state.scoped.entry(context.session_id.clone()).or_default();
+        if !scoped.iter().any(|id| id == response_id) {
+            if scoped.len() >= SCOPED_RESPONSES_PER_SESSION {
+                scoped.pop_front();
+            }
+            scoped.push_back(response_id.to_string());
+        }
         Ok(())
     }
 
@@ -980,6 +1011,30 @@ impl RemoteExecutionRegistry {
             state.pending.remove(&pending_key);
         }
         Ok(())
+    }
+}
+
+impl RemoteExecutionRegistry {
+    /// Whether `response_id` (a permission `requestId`, a plugin `toolUseId`,
+    /// …) on `session_id` was issued under a remote execution context — i.e.
+    /// the turn that raised it was sent by a paired device, and only that
+    /// device may answer it.
+    ///
+    /// A request that was never registered here came from a turn the host
+    /// started itself (desktop composer, IM connector, scheduler, brain-driven
+    /// HostState intent). Those carry no context, so the approval arms cannot
+    /// demand one; they fall back to the caller's remote-control grant
+    /// instead. This read is what stops a caller from *omitting* the context
+    /// to sidestep the scope check on a remote-originated request, so it reads
+    /// the per-session record rather than the generation-bound keys: a request
+    /// stays scoped after it was consumed, and after a later send on the same
+    /// session has retired the context that raised it.
+    pub fn is_remote_scoped(&self, session_id: &str, response_id: &str) -> bool {
+        let state = self.state.lock();
+        state
+            .scoped
+            .get(session_id)
+            .is_some_and(|ids| ids.iter().any(|id| id == response_id))
     }
 }
 
@@ -1157,6 +1212,26 @@ mod tests {
             .unwrap()
             .push("process.spawn".to_string());
         assert!(authorize_capability(&request, descriptor).is_ok());
+    }
+
+    #[test]
+    fn agent_control_grant_authorizes_the_external_agent_process_plane() {
+        for command in [
+            "spawn_external_agent",
+            "send_to_external_agent",
+            "kill_external_agent",
+        ] {
+            let mut request = execution_request("device", Some(vec!["process.spawn".into()]));
+            request.command = command.to_string();
+            let descriptor = super::super::command_manifest::descriptor(command)
+                .unwrap_or_else(|| panic!("{command} must be a registered command"));
+
+            assert!(authorize_capability(&request, descriptor).is_ok());
+            assert!(
+                authorize_approval(&request, descriptor).is_ok(),
+                "{command} must not require a second policy after Agent Control was granted"
+            );
+        }
     }
 
     #[test]
@@ -2057,6 +2132,81 @@ mod tests {
         assert_eq!(
             registry.validate(&context, "device-a", "session-a", 100 + CONTEXT_TTL_MS + 1),
             Err("REMOTE_PROXY_DISCONNECTED")
+        );
+    }
+
+    #[test]
+    fn remote_scoped_read_tracks_pending_and_consumed_requests() {
+        let registry = RemoteExecutionRegistry::default();
+        assert!(!registry.is_remote_scoped("session-a", "req-1"));
+
+        let context = registry.register("host-a", "device-a", "session-a", 100);
+        assert!(!registry.is_remote_scoped("session-a", "req-1"));
+
+        registry
+            .register_pending(&context, "req-1")
+            .expect("pending registers");
+        assert!(registry.is_remote_scoped("session-a", "req-1"));
+        assert!(!registry.is_remote_scoped("session-b", "req-1"));
+        assert!(!registry.is_remote_scoped("session-a", "req-2"));
+
+        registry
+            .validate_and_consume(&context, "device-a", "session-a", "req-1", 150)
+            .expect("consume succeeds");
+        // Consumed stays scoped: a second answer without a context must not
+        // be admitted on the grant path either.
+        assert!(registry.is_remote_scoped("session-a", "req-1"));
+    }
+
+    #[test]
+    fn a_later_send_does_not_unscope_an_earlier_request() {
+        // `register` retires the previous generation's keys, which is right for
+        // single-use. It must not also retire the fact that the request came
+        // from a remote origin: the approval arm reads that to refuse a device
+        // answering without a context, and every ordinary turn calls `register`
+        // again. Erasing it here handed a phone's pending approval to any
+        // device holding a control grant, repeatedly, since that path consumes
+        // nothing.
+        let registry = RemoteExecutionRegistry::default();
+        let first = registry.register("host-a", "device-a", "session-a", 100);
+        registry
+            .register_pending(&first, "req-1")
+            .expect("pending registers");
+        assert!(registry.is_remote_scoped("session-a", "req-1"));
+
+        // The same session sends again: a new generation, and the old context
+        // is now stale for validation.
+        let second = registry.register("host-a", "device-a", "session-a", 200);
+        assert_ne!(first.request_id, second.request_id);
+        assert!(registry.is_remote_scoped("session-a", "req-1"));
+        assert_eq!(
+            registry.validate_and_consume(&first, "device-a", "session-a", "req-1", 250),
+            Err("REMOTE_RESPONSE_STALE"),
+            "a retired context still cannot answer"
+        );
+
+        // Requests the session never raised remain unscoped, so a
+        // host-originated approval still falls back to the control grant.
+        assert!(!registry.is_remote_scoped("session-a", "req-2"));
+        assert!(!registry.is_remote_scoped("session-b", "req-1"));
+    }
+
+    #[test]
+    fn the_scoped_record_is_bounded_per_session() {
+        // Nothing removes a session from this registry, so the record of which
+        // requests were remote-scoped has to have a ceiling of its own.
+        let registry = RemoteExecutionRegistry::default();
+        let context = registry.register("host-a", "device-a", "session-a", 100);
+        for index in 0..(SCOPED_RESPONSES_PER_SESSION + 10) {
+            registry
+                .register_pending(&context, &format!("req-{index}"))
+                .expect("pending registers");
+        }
+        let newest = format!("req-{}", SCOPED_RESPONSES_PER_SESSION + 9);
+        assert!(registry.is_remote_scoped("session-a", &newest));
+        assert!(
+            !registry.is_remote_scoped("session-a", "req-0"),
+            "the oldest ids are evicted rather than growing without bound"
         );
     }
 }

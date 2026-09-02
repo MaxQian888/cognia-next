@@ -382,12 +382,14 @@ fn apply_lifecycle(
 
 /// Rebuild the deny-list cache from the security store.
 ///
-/// Kept under its original name because the renderer calls it at boot, but it
-/// no longer takes the renderer's word for what is revoked. It used to seed
-/// from the Dexie `pairedDevices` mirror, which is empty under a real local
-/// account — so every restart silently un-revoked every device. The argument is
-/// accepted and ignored rather than removed so an older renderer bundle cannot
-/// fail the call; the store is the only input.
+/// No renderer in this tree calls it any more: server start seeds the deny
+/// list from the store on its own (`CompanionServerState::start`), which is
+/// the only correct input. It used to seed from the renderer's Dexie
+/// `pairedDevices` mirror, which is empty under a real local account, so every
+/// restart silently un-revoked every device. The command survives under its
+/// original name so an older renderer bundle that still calls it at boot does
+/// not fail the call. The argument is accepted and ignored for the same reason.
+/// Calling it is harmless and redundant, never required.
 #[tauri::command]
 pub async fn companion_seed_deny_list(
     #[allow(unused_variables)] device_ids: Vec<String>,
@@ -760,36 +762,12 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
         register_tauri_event(app, Arc::clone(&bus), channel);
     }
     // Phase B4 — push fan-out for events worth notifying about while the
-    // phone is offline (WS not subscribed).
-    register_push_trigger(app, "claude://message-added");
-    // Remote Session Control — a watched host session needs a tool-use
-    // approval decision; notify a backgrounded watcher so it doesn't wait
-    // out the renderer-side backstop. Emitted by
-    // `lib/companion/needs-input-notifier.ts`.
-    register_push_trigger(app, NEEDS_INPUT_CHANNEL);
-    // ADR-0061 P2 — terminal workflow runs (failed always; succeeded /
-    // cancelled only when a paired device triggered the run — policy lives
-    // in `companion-run-events.ts`). Payload carries ids + status only.
-    register_push_trigger(app, "workflow://run-terminal");
-    // ADR-0061 P2 — a workflow is blocked on a human approval; wake
-    // backgrounded devices. Ids only (transits APNs/FCM) — the phone
-    // fetches the request text via `workflow_approval_list` on open.
-    register_push_trigger(app, "workflow://approval-pending");
-    // ADR-0061 P3 — a remote step is waiting on a device. Ids only; the
-    // request params ride the WS frame the device receives on open.
-    register_push_trigger(app, "workflow://step-pending");
-    // Host computer-use is blocked on a HITL consent decision. Without this
-    // the prompt reached foreground devices only, so a backgrounded phone
-    // never saw it and the broker fail-closed on timeout — i.e. remote
-    // supervision silently didn't work whenever the screen was off.
-    // The payload is sanitized down to ids by `push_data_for_channel`.
-    register_push_trigger(app, AUTOMATION_CONSENT_CHANNEL);
-    // ADR-0131 cross-shell inbox relay — an inbound IM message landed on this
-    // host. Without a push a paired phone only learns about it when it next
-    // comes to the foreground, which is exactly the case the relay exists to
-    // fix (bot on the desktop, operator on the phone). Payload is ids + the
-    // `/inbox/c?key=…` deep link; message text never rides the push.
-    register_push_trigger(app, CONNECTOR_MESSAGE_ADDED_CHANNEL);
+    // phone is offline (WS not subscribed). The per-channel rationale lives
+    // on `PUSH_TRIGGER_CHANNELS`; every entry is ids + deep link only, the
+    // payload sanitizer (`push_data_for_channel`) enforces it.
+    for channel in PUSH_TRIGGER_CHANNELS.iter().copied() {
+        register_push_trigger(app, channel);
+    }
 }
 
 /// Channel announcing an inbound IM message (ADR-0131). Named because the
@@ -914,51 +892,98 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
     app.listen(channel, move |event| {
         let raw = event.payload().to_string();
         let app2 = app_clone.clone();
-        let channel_name = channel.to_string();
         tauri::async_runtime::spawn(async move {
             // Probe Tauri-managed state for the registry; absent in tests.
             let Some(state) = app2.try_state::<super::CompanionServerState>() else {
                 return;
             };
             let registry = std::sync::Arc::clone(&state.push_tokens);
-            let dispatchers = super::push_dispatchers();
-
-            let raw_data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
-                .ok()
-                .and_then(|v: serde_json::Value| v.as_object().cloned())
-                .unwrap_or_default();
-            // Body is derived from the *raw* payload (it needs the action and
-            // process name); `data` is the sanitized projection that actually
-            // transits the push provider.
-            let payload = super::push::PushPayload {
-                title: Some("cognia".into()),
-                body: Some(push_body_for_channel(&channel_name, &raw_data)),
-                data: push_data_for_channel(&channel_name, &raw_data),
-            };
-
-            // A channel may name the devices the event is for. `Some(vec![])`
-            // and `None` are different answers: the first means "the Host
-            // computed the audience and it is empty", the second means "this
-            // event is account-wide". Only the second broadcasts.
-            let targets = push_targets_for(&channel_name, &raw_data);
-
-            for provider in [
-                super::push::PushProvider::Fcm,
-                super::push::PushProvider::Apns,
-            ] {
-                if let Some(d) = dispatchers.for_provider(provider) {
-                    let _ = registry
-                        .broadcast_to_offline_targets(
-                            provider,
-                            &payload,
-                            d.as_ref(),
-                            targets.as_deref(),
-                        )
-                        .await;
-                }
-            }
+            fan_out_push(registry, super::push_dispatchers(), channel, &raw).await;
         });
     });
+}
+
+/// Every channel a backgrounded phone is woken for. The desktop registers one
+/// Tauri listener per entry (`register_default_event_channels`); the headless
+/// server subscribes to its event bus once and filters on this list
+/// (`bin/cognia-server.rs`). One table, so the two hosts cannot drift on which
+/// events are push-worthy.
+pub const PUSH_TRIGGER_CHANNELS: &[&str] = &[
+    "claude://message-added",
+    // Remote Session Control — a watched host session needs a tool-use
+    // approval decision; notify a backgrounded watcher so it doesn't wait
+    // out the renderer-side backstop. Emitted by
+    // `lib/companion/needs-input-notifier.ts`.
+    NEEDS_INPUT_CHANNEL,
+    // ADR-0061 P2 — terminal workflow runs (failed always; succeeded /
+    // cancelled only when a paired device triggered the run — policy lives
+    // in `companion-run-events.ts`). Payload carries ids + status only.
+    "workflow://run-terminal",
+    // ADR-0061 P2 — a workflow is blocked on a human approval; wake
+    // backgrounded devices. Ids only (transits APNs/FCM) — the phone
+    // fetches the request text via `workflow_approval_list` on open.
+    "workflow://approval-pending",
+    // ADR-0061 P3 — a remote step is waiting on a device. Ids only; the
+    // request params ride the WS frame the device receives on open.
+    "workflow://step-pending",
+    // Host computer-use is blocked on a HITL consent decision. Without this
+    // the prompt reached foreground devices only, so a backgrounded phone
+    // never saw it and the broker fail-closed on timeout — i.e. remote
+    // supervision silently didn't work whenever the screen was off.
+    // The payload is sanitized down to ids by `push_data_for_channel`.
+    AUTOMATION_CONSENT_CHANNEL,
+    // ADR-0131 cross-shell inbox relay — an inbound IM message landed on this
+    // host. Without a push a paired phone only learns about it when it next
+    // comes to the foreground, which is exactly the case the relay exists to
+    // fix (bot on the desktop, operator on the phone). Payload is ids + the
+    // `/inbox/c?key=…` deep link; message text never rides the push.
+    CONNECTOR_MESSAGE_ADDED_CHANNEL,
+];
+
+/// Turn one event on a push-worthy channel into provider pushes for the
+/// devices that are not currently listening on a live stream.
+///
+/// Host-neutral: the desktop calls it from a Tauri listener, the headless
+/// server from an event-bus subscriber. Before this was factored out the body
+/// lived inside the Tauri listener only, so a cloud Host with push credentials
+/// installed (`push_creds::reinstall_persisted_dispatchers`) never sent a
+/// single push — every "approval needed" and "message arrived" alert reached
+/// foreground WebSocket subscribers and nobody else.
+pub async fn fan_out_push(
+    registry: std::sync::Arc<super::push::PushTokenRegistry>,
+    dispatchers: std::sync::Arc<super::push::DispatcherSet>,
+    channel: &str,
+    raw: &str,
+) {
+    let raw_data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw)
+        .ok()
+        .and_then(|v: serde_json::Value| v.as_object().cloned())
+        .unwrap_or_default();
+    // Body is derived from the *raw* payload (it needs the action and
+    // process name); `data` is the sanitized projection that actually
+    // transits the push provider.
+    let payload = super::push::PushPayload {
+        title: Some("cognia".into()),
+        body: Some(push_body_for_channel(channel, &raw_data)),
+        data: push_data_for_channel(channel, &raw_data),
+    };
+
+    // A channel may name the devices the event is for. `Some(vec![])`
+    // and `None` are different answers: the first means "the Host
+    // computed the audience and it is empty", the second means "this
+    // event is account-wide". Only the second broadcasts.
+    let targets = push_targets_for(channel, &raw_data);
+
+    for provider in [
+        super::push::PushProvider::Fcm,
+        super::push::PushProvider::Apns,
+    ] {
+        if let Some(d) = dispatchers.for_provider(provider) {
+            let _ = registry
+                .broadcast_to_offline_targets(provider, &payload, d.as_ref(), targets.as_deref())
+                .await;
+        }
+    }
 }
 
 /// The channel this Host emits when a watched session is blocked on a human

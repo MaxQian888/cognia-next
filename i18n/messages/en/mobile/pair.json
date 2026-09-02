@@ -94,6 +94,7 @@
     "title": {
       "activate_failed": "Paired, but the Host didn't come online",
       "clipboard_unavailable": "Clipboard unavailable",
+      "fingerprint_mismatch": "Host identity mismatch",
       "http": "The Host rejected the pairing request",
       "insecure_transport": "Connection would be unencrypted",
       "offline": "This device is offline",

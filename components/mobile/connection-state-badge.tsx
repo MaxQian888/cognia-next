@@ -26,6 +26,7 @@ import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import { isMobile } from "@/lib/capacitor/_shared"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
+import { transportTierTone } from "@/lib/companion/transport-tier-visuals"
 import type { ConnectionState, TransportTier } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
 
@@ -57,13 +58,6 @@ export const CONNECTION_STATE_META: Record<ConnectionState, { labelKey: string; 
   },
 }
 
-const TIER_DOT_CLASS: Record<TransportTier, string> = {
-  "rtc-direct": "text-emerald-500",
-  "rtc-relay": "text-amber-500",
-  "ws-lan": "text-sky-500",
-  "ws-tunnel": "text-violet-500",
-  offline: "text-zinc-500",
-}
 
 /**
  * Connection-state pill with a dropdown affordance (Wave 4 / ADR-0026).
@@ -231,7 +225,7 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
                 <span
                   className={cn(
                     "inline-flex items-center gap-1 font-mono text-[10px] uppercase",
-                    TIER_DOT_CLASS[tier]
+                    transportTierTone(tier).text
                   )}
                   data-testid={`connection-tier-${tier}`}
                 >

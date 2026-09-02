@@ -172,17 +172,9 @@ pub(super) async fn dispatch(
             let message: Option<String> = optional(&args, "message")?;
             let updated_input: Option<Value> =
                 optional_aliased(&args, "updated_input", "updatedInput")?;
-            let context: super::super::remote_execution::RemoteExecutionContext =
-                required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
-            super::super::remote_execution::global()
-                .validate_and_consume(
-                    &context,
-                    device_id,
-                    &session_id,
-                    &request_id,
-                    unix_time_ms(),
-                )
-                .map_err(remote_context_error)?;
+            let context: Option<super::super::remote_execution::RemoteExecutionContext> =
+                optional_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
+            authorize_approval(context.as_ref(), device_id, scope, &session_id, &request_id)?;
             claude_commands::claude_approve_impl(
                 &host.sidecar_state(),
                 session_id,
@@ -205,17 +197,9 @@ pub(super) async fn dispatch(
                 optional_aliased(&args, "updated_input", "updatedInput")?;
             let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
             let interrupt: Option<bool> = optional(&args, "interrupt")?;
-            let context: super::super::remote_execution::RemoteExecutionContext =
-                required_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
-            super::super::remote_execution::global()
-                .validate_and_consume(
-                    &context,
-                    device_id,
-                    &session_id,
-                    &request_id,
-                    unix_time_ms(),
-                )
-                .map_err(remote_context_error)?;
+            let context: Option<super::super::remote_execution::RemoteExecutionContext> =
+                optional_aliased(&args, "remote_execution_context", "remoteExecutionContext")?;
+            authorize_approval(context.as_ref(), device_id, scope, &session_id, &request_id)?;
             claude_commands::claude_approve_impl_with_id(
                 &host.sidecar_state(),
                 session_id,
@@ -512,6 +496,57 @@ pub(super) async fn dispatch(
 /// host-generic send the desktop uses. `command_id` is the caller's idempotency
 /// key — present only on the canonical `agent_send`, because nothing that calls
 /// the deprecated alias stamps one.
+/// Decide whether `device_id` may answer permission `request_id` on
+/// `session_id`.
+///
+/// Two authorities, chosen by where the turn came from:
+///
+/// * **Remote-originated** — the turn was sent by a paired device through
+///   `agent_send` / `claude_send`, so `send_arm` minted a
+///   [`RemoteExecutionContext`] and the sidecar echoed it on the
+///   `permission_request` frame. The frame was targeted at the origin device
+///   only, and only that device may answer, with the context: generation,
+///   expiry and single-use are all checked by `validate_and_consume`.
+/// * **Host-originated** — the desktop composer, an IM connector, the
+///   scheduler or a brain-driven HostState intent started the turn. No
+///   context exists, the frame was broadcast, and `claude-chat-events.ts`
+///   routes the prompt to the device holding a *control* attachment on the
+///   session with the words "the remote … will resolve it via
+///   `claude_approve`". That route answered `400 missing
+///   remote_execution_context` for every such call, so a phone could only
+///   ever approve turns it had itself sent. Here the authority is the
+///   remote-control grant (`workspace.write`, what a control attachment is
+///   gated on) or the service scope (the brain answering on the host's own
+///   behalf).
+///
+/// Omitting the context is not a way around the first rule: a request the
+/// registry knows as remote-scoped is refused on this path outright.
+///
+/// [`RemoteExecutionContext`]: super::super::remote_execution::RemoteExecutionContext
+fn authorize_approval(
+    context: Option<&super::super::remote_execution::RemoteExecutionContext>,
+    device_id: &str,
+    scope: Option<&str>,
+    session_id: &str,
+    request_id: &str,
+) -> Result<(), (StatusCode, Json<RpcError>)> {
+    let registry = super::super::remote_execution::global();
+    if let Some(context) = context {
+        return registry
+            .validate_and_consume(context, device_id, session_id, request_id, unix_time_ms())
+            .map_err(remote_context_error);
+    }
+    if registry.is_remote_scoped(session_id, request_id) {
+        return Err(remote_context_error("REMOTE_SCOPE_DENIED"));
+    }
+    if scope == Some("service") || super::device_can_control(device_id) {
+        return Ok(());
+    }
+    Err(RpcError::forbidden(
+        "answering a host-originated approval requires remote-control authorization",
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn send_arm(
     state: &SharedState,
@@ -615,5 +650,44 @@ mod tests {
         assert!(!COMMANDS.is_empty());
         let unique: std::collections::HashSet<_> = COMMANDS.iter().copied().collect();
         assert_eq!(unique.len(), COMMANDS.len());
+    }
+
+    /// Host-originated turns carry no context: the brain answering on the
+    /// host's behalf (service scope) is admitted without one.
+    #[test]
+    fn approval_without_context_admits_the_service_scope() {
+        let session = format!("session-{}", uuid::Uuid::new_v4());
+        assert!(authorize_approval(None, "brain", Some("service"), &session, "req-1").is_ok());
+    }
+
+    /// Omitting the context on a request the registry knows as
+    /// remote-scoped is refused outright — the grant path is not a way
+    /// around the origin-device binding, even for the service scope.
+    #[test]
+    fn approval_without_context_refuses_a_remote_scoped_request() {
+        let session = format!("session-{}", uuid::Uuid::new_v4());
+        let registry = super::super::super::remote_execution::global();
+        let context = registry.register("host", "phone-a", &session, unix_time_ms());
+        registry
+            .register_pending(&context, "req-1")
+            .expect("pending registers");
+
+        let err = authorize_approval(None, "phone-b", Some("service"), &session, "req-1")
+            .expect_err("remote-scoped request must refuse the grant path");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(err.1 .0.code, "REMOTE_SCOPE_DENIED");
+
+        // The origin device, with its context, is still the one that answers.
+        assert!(authorize_approval(Some(&context), "phone-a", None, &session, "req-1").is_ok());
+    }
+
+    /// A paired device with no remote-control grant (no security store row in
+    /// tests) may not answer a host-originated approval.
+    #[test]
+    fn approval_without_context_requires_remote_control() {
+        let session = format!("session-{}", uuid::Uuid::new_v4());
+        let err = authorize_approval(None, "phone-observer", None, &session, "req-1")
+            .expect_err("observer must not approve");
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
     }
 }

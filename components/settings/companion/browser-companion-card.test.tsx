@@ -7,6 +7,12 @@ jest.mock("next-intl", () => ({
 }))
 
 let tauri = true
+jest.mock("@/hooks/platform/use-surface-reach", () => ({
+  useSurfaceReach: () =>
+    tauri
+      ? { available: true, remedy: null }
+      : { available: false, block: "needs-desktop-shell", remedy: null },
+}))
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
   transport: { call: jest.fn() },
@@ -44,10 +50,20 @@ beforeEach(() => {
 })
 
 describe("BrowserCompanionCard", () => {
-  it("renders nothing off Tauri", () => {
+  /**
+   * A phone or a browser tab cannot mint an enrolment code, and used to be
+   * shown nothing, which reads as "this build has no such feature". It is
+   * told where the feature lives instead.
+   */
+  it("explains, off the desktop shell, that enrolment lives in the desktop app", () => {
     tauri = false
-    const { container } = renderCard()
-    expect(container).toBeEmptyDOMElement()
+    renderCard()
+    expect(screen.getByTestId("browser-companion-card")).toHaveAttribute(
+      "data-reach",
+      "needs-desktop-shell"
+    )
+    expect(screen.getByTestId("browser-companion-desktop-only")).toBeInTheDocument()
+    expect(screen.queryByTestId("browser-companion-needs-listener")).not.toBeInTheDocument()
   })
 
   it("explains, rather than hides, that browser access is off", async () => {

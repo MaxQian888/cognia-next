@@ -10,13 +10,12 @@
     "toggleAria": "切换 {label} 的运行 Agent 权限"
   },
   "browserAccess": {
-    "title": "浏览器访问",
     "description": "浏览器无法验证本机的自签名证书，所以常用的 HTTPS 端口在标签页里根本连不上。这里打开的是一个明文 http://127.0.0.1 监听器——浏览器无需证书就信任的唯一地址。它只在本机，不会离开这台电脑。",
+    "desktopOnly": "浏览器访问在桌面端配置。请在桌面应用的设置里开启监听并添加允许的来源。",
     "enable": "启用浏览器访问",
     "listening": "正在监听 {url}",
-    "notListening": "未监听",
-    "restartRequired": "重启 Companion 服务后生效。",
     "loadFailed": "无法读取浏览器访问设置。",
+    "notListening": "未监听",
     "origins": {
       "title": "允许的浏览器来源",
       "description": "只有这些完全一致的来源可以访问本机，其余一律拒绝——包括同一地址的不同端口。",
@@ -25,7 +24,9 @@
       "placeholder": "http://localhost:3000",
       "revoke": "移除 {origin}",
       "suggested": "建议："
-    }
+    },
+    "restartRequired": "重启 Companion 服务后生效。",
+    "title": "浏览器访问"
   },
   "channels": {
     "blocked": {
@@ -131,6 +132,7 @@
     }
   },
   "mdns": {
+    "autostartFailed": "上次已开启广播，但现在没有运行。请关闭再开启，或查看桌面日志了解启动失败原因。",
     "description": "在局域网广播 _cognia._tcp，手机不用扫码也能找到桌面。",
     "enableLabel": "启用 mDNS 广播",
     "onlyDesktop": "LAN 广播仅在桌面运行时可用。",
@@ -283,8 +285,11 @@
     "title": "解除配对"
   },
   "server": {
+    "autostartFailed": "上次已开启服务器，但现在没有运行。请关闭再开启，或查看桌面日志了解启动失败原因。",
     "bindMode": "绑定模式",
     "bindModePlaceholderLan": "<本机 LAN 地址>",
+    "certificateFile": "证书文件",
+    "certificateFingerprint": "证书指纹（SHA-256）",
     "desktopOnly": "伴侣服务器运行在桌面端进程中——请切换到 Tauri 桌面版进行管理。",
     "desktopOnlyError": "伴侣服务器仅在桌面端可用。",
     "enableLabel": "启用伴侣服务器",
@@ -317,17 +322,22 @@
     "tableLabels": {
       "adapterInstances": "连接器",
       "characters": "角色",
+      "connectorCallbackBindings": "连接器回调绑定",
       "connectorDrafts": "连接器草稿",
+      "connectorHeartbeats": "连接器心跳",
       "conversationOverrides": "会话覆盖",
+      "executionRunBindings": "运行投递绑定",
       "goals": "目标",
       "memories": "记忆",
       "messages": "消息",
       "outboundQueue": "出站投递状态",
+      "platformIdentities": "联系人",
       "plugins": "插件",
       "sessions": "会话",
       "settings": "应用设置",
       "skills": "技能",
       "twinProfile": "数字孪生",
+      "workflowDeployments": "工作流部署",
       "workflowRuns": "工作流运行",
       "workflows": "工作流"
     },
@@ -434,31 +444,32 @@
     "openWorkspace": "打开工作区"
   },
   "browserCompanion": {
-    "title": "浏览器伴侣",
-    "description": "把 Cognia 浏览器扩展与这台电脑配对。配对之后，你在浏览器里捕获的页面会在这里开启一个新任务——不捕获就什么都不读。",
-    "requiresListener": "浏览器访问尚未开启，配对码没有可连接的对象。请先在上方开启，并重启 Companion 服务。",
-    "generate": "生成配对码",
-    "regenerate": "重新生成配对码",
-    "generating": "生成中…",
-    "generateFailed": "配对码创建失败。",
     "codeLabel": "把它粘贴到扩展的侧边栏",
-    "copy": "复制配对码",
     "copied": "已复制",
+    "copy": "复制配对码",
     "copyFailed": "复制失败。请手动选中并复制。",
-    "expiresIn": "{minutes} 分钟后过期",
+    "description": "把 Cognia 浏览器扩展与这台电脑配对。配对之后，你在浏览器里捕获的页面会在这里开启一个新任务——不捕获就什么都不读。",
+    "desktopOnly": "扩展登记码由桌面应用签发，扩展连接的监听器也在那里。请在桌面端设置里配对浏览器。",
     "expired": "配对码已过期，请重新生成。",
-    "singleUse": "仅可使用一次。扩展兑换后即刻作废，本身不携带任何凭据。",
-    "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入上方列表。扩展会在连接页面显示该来源。",
-    "pairedTitle": "已配对的浏览器",
-    "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
-    "openDevices": "打开设备控制台",
-    "historyTitle": "已记录的提交",
+    "expiresIn": "{minutes} 分钟后过期",
+    "generate": "生成配对码",
+    "generateFailed": "配对码创建失败。",
+    "generating": "生成中…",
+    "historyClear": "清除提交记录",
+    "historyClearFailed": "无法清除提交记录。",
+    "historyCleared": "已清除",
+    "historyClearing": "正在清除…",
     "historyCount": "{count, plural, =0 {还没有记录} other {# 条提交记录}}",
     "historyHint": "每条提交只留一小段旁注——页面标题、来源站点、是否还在运行。不含正文和你的指令：那些在它开出的会话里，你可以在那里阅读和删除。",
-    "historyClear": "清除提交记录",
-    "historyClearing": "正在清除…",
-    "historyCleared": "已清除",
-    "historyClearFailed": "无法清除提交记录。"
+    "historyTitle": "已记录的提交",
+    "openDevices": "打开设备控制台",
+    "originHint": "安装扩展后，把它的 chrome-extension:// 来源加入上方列表。扩展会在连接页面显示该来源。",
+    "pairedHint": "已配对的浏览器会出现在设备控制台，可在那里撤销。",
+    "pairedTitle": "已配对的浏览器",
+    "regenerate": "重新生成配对码",
+    "requiresListener": "浏览器访问尚未开启，配对码没有可连接的对象。请先在上方开启，并重启 Companion 服务。",
+    "singleUse": "仅可使用一次。扩展兑换后即刻作废，本身不携带任何凭据。",
+    "title": "浏览器伴侣"
   },
   "workspaceRoots": {
     "description": "该主机允许已连接客户端打开的目录，其余一律拒绝。",

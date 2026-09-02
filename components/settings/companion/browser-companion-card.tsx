@@ -9,7 +9,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { clearBrowserSubmissions, summarizeBrowserSubmissions } from "@/lib/db/browser-submissions"
-import { isTauri, transport } from "@/lib/tauri"
+import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
+import { transport } from "@/lib/tauri"
 
 /** Mirrors Rust `companion_api::commands::BrowserEnrollmentIssue`. */
 export interface BrowserEnrollmentIssue {
@@ -72,6 +73,10 @@ export function BrowserCompanionCard({
   clearHistory = clearBrowserSubmissions,
 }: BrowserCompanionCardProps = {}) {
   const t = useTranslations("mobile.companion.browserCompanion")
+  // The listener and the enrolment code both live in the desktop process. A
+  // browser tab or a phone is told so below; it is not shown a blank.
+  const shellReach = useSurfaceReach({ capability: "webview", requirement: "desktop-shell" })
+  const desktopShell = shellReach.available
   const [listening, setListening] = useState<boolean | null>(null)
   const [issue, setIssue] = useState<BrowserEnrollmentIssue | null>(null)
   const [busy, setBusy] = useState(false)
@@ -82,7 +87,7 @@ export function BrowserCompanionCard({
   const [cleared, setCleared] = useState(false)
 
   useEffect(() => {
-    if (!isTauri()) return
+    if (!desktopShell) return
     let cancelled = false
     void loadListener()
       .then((summary) => {
@@ -94,10 +99,10 @@ export function BrowserCompanionCard({
     return () => {
       cancelled = true
     }
-  }, [loadListener])
+  }, [desktopShell, loadListener])
 
   useEffect(() => {
-    if (!isTauri()) return
+    if (!desktopShell) return
     let cancelled = false
     void loadHistory()
       .then((summary) => {
@@ -110,7 +115,7 @@ export function BrowserCompanionCard({
     return () => {
       cancelled = true
     }
-  }, [loadHistory])
+  }, [desktopShell, loadHistory])
 
   /**
    * Forget every recorded submission, one device at a time.
@@ -156,7 +161,25 @@ export function BrowserCompanionCard({
     }
   }, [createEnrollment])
 
-  if (!isTauri()) return null
+  if (!desktopShell) {
+    // Rendered with the reason, never hidden: a missing card reads as "this
+    // build does not have the feature", which is a different answer from
+    // "open the desktop app".
+    return (
+      <Card data-testid="browser-companion-card" data-reach={shellReach.block ?? "unavailable"}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <PuzzleIcon className="size-4" aria-hidden="true" />
+            {t("title")}
+          </CardTitle>
+          <CardDescription>{t("description")}</CardDescription>
+        </CardHeader>
+        <CardContent className="text-xs text-muted-foreground">
+          <p data-testid="browser-companion-desktop-only">{t("desktopOnly")}</p>
+        </CardContent>
+      </Card>
+    )
+  }
 
   const code = issue
     ? encodeBrowserEnrollmentPayload({

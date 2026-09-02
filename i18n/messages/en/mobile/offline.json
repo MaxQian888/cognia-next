@@ -1,4 +1,5 @@
 {
+  "bannerHostOffline": "Host unreachable — sends will queue until it is back.",
   "bannerOffline": "Offline — sends will queue and retry automatically.",
   "bannerReconnecting": "Reconnecting…",
   "notifBody": "{count} messages waiting. Will retry when online.",

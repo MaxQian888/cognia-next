@@ -21,6 +21,7 @@ import { SshConfigImportDialog } from "./ssh-config-import-dialog"
 import { SshForwardingEditor } from "./ssh-forwarding-editor"
 import { syncTerminalHostProfiles } from "@/lib/terminal/host-profiles"
 import { clearSshCredential, saveSshCredential } from "@/lib/terminal/ssh-credentials"
+import { forgetSshProbe } from "@/lib/devices/ssh-probe-store"
 import { nextSshHostId, type SshAuthMethod, type SshHostProfile } from "@/lib/terminal/ssh-profiles"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -100,6 +101,10 @@ export function SshHosts() {
     try {
       if (profile.credentialRef) await clearSshCredential(profile.credentialRef)
       await persistHosts(hosts.filter((host) => host.id !== profile.id))
+      // `nextSshHostId` reuses `ssh-N`, so without this the next host added
+      // inherits the removed one's cached reachability answer in `/devices`
+      // for the probe TTL.
+      forgetSshProbe(profile.id)
       setSecrets((current) => {
         const next = { ...current }
         delete next[profile.id]

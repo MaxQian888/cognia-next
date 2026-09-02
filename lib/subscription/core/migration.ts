@@ -22,7 +22,7 @@
 
 import { toast } from "sonner"
 
-import { hasHostRuntime } from "@/lib/platform/capabilities"
+import { isTauri } from "@/lib/platform/detect"
 import type { MigrationOutcome } from "@/types/subscription"
 import { subscriptionInit } from "./transport"
 
@@ -42,15 +42,13 @@ export interface SubscriptionInitResult {
 }
 
 /**
- * Whether a host capable of serving `subscription_*` commands exists. Every
- * profile except a standalone browser has one, including the headless brain,
- * which the previous `isTauri() || isCapacitor() || hasWebCompanionTarget()`
- * spelling excluded even though it serves those commands itself. Same
- * predicate the transport picker uses to choose a real transport over
- * `WebStubTransport`.
+ * Whether this renderer has the local IPC transport that owns subscription
+ * migration. `subscription_init` is a `target: "client"` command, so a web or
+ * Capacitor companion cannot delegate it to a paired Host even when that Host
+ * runs other execution-plane work on the client's behalf.
  */
 function hasSubscriptionHost(): boolean {
-  return hasHostRuntime()
+  return isTauri()
 }
 
 /**

@@ -12,27 +12,20 @@ import {
   syncEventStreams,
 } from "./device-presence-registry"
 
-const mockIsTauri = jest.fn(() => true)
-jest.mock("@/lib/platform/detect", () => ({
-  isTauri: () => mockIsTauri(),
-}))
-
 // `mock`-prefixed so the hoisted `jest.mock` factory may reference it, and
 // explicitly typed rather than a spread — a `unknown[]` rest argument does not
 // satisfy the mock's tuple signature (TS2556).
 const mockEmit = jest.fn(async (_channel: string, _payload: unknown) => undefined)
-jest.mock(
-  "@tauri-apps/api/event",
-  () => ({
-    emit: (channel: string, payload: unknown) => mockEmit(channel, payload),
-  }),
-  { virtual: true }
-)
+// The notifier is host-neutral: it hands the frame to the shared host event
+// publisher, which is a Tauri emit on the desktop and the bridge route on the
+// headless brain. What is asserted here is the topic and the audience.
+jest.mock("@/lib/companion/host-event-publisher", () => ({
+  publishHostEvent: (channel: string, payload: unknown) => mockEmit(channel, payload),
+}))
 
 beforeEach(() => {
   __resetDevicePresenceForTests()
   mockEmit.mockClear()
-  mockIsTauri.mockReturnValue(true)
 })
 
 afterEach(() => {
@@ -122,12 +115,18 @@ describe("notifyRemoteNeedsInput", () => {
     expect(mockEmit).not.toHaveBeenCalled()
   })
 
-  it("is a no-op off Tauri", async () => {
+  /**
+   * The regression this replaced: the emit was a bare `@tauri-apps/api/event`
+   * import behind `isTauri()`, so the headless brain — where a backgrounded
+   * phone most needs the alert — never published at all.
+   */
+  it("publishes through the host event publisher, never a Tauri-only import", async () => {
     attachController("s-1", "dev-a")
     setDeviceAttention("dev-a", "background", Date.now())
-    mockIsTauri.mockReturnValue(false)
 
     await notifyRemoteNeedsInput({ sessionId: "s-1", requestId: "req-1" })
-    expect(mockEmit).not.toHaveBeenCalled()
+
+    expect(mockEmit).toHaveBeenCalledTimes(1)
+    expect(mockEmit.mock.calls[0]?.[0]).toBe(NEEDS_INPUT_CHANNEL)
   })
 })

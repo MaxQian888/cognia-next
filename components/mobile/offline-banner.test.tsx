@@ -18,6 +18,18 @@ jest.mock("@/hooks/use-network-status", () => ({
   useNetworkStatus: () => useNetworkStatusMock(),
 }))
 
+type TestRuntime = {
+  target: { kind: "companion" | "standalone" } | null
+  connectionState: "online" | "connecting" | "offline"
+}
+const useRuntimeSnapshotMock = jest.fn<TestRuntime, []>(() => ({
+  target: { kind: "companion" },
+  connectionState: "online",
+}))
+jest.mock("@/hooks/use-runtime-snapshot", () => ({
+  useRuntimeSnapshot: () => useRuntimeSnapshotMock(),
+}))
+
 interface TestQueueSummary {
   pending: number
   failed: number
@@ -85,6 +97,9 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValue({ loading: false, status: { connected: true, connectionType: "wifi" } })
   getQueueSummaryMock.mockReset().mockResolvedValue(EMPTY_SUMMARY)
+  useRuntimeSnapshotMock
+    .mockReset()
+    .mockReturnValue({ target: { kind: "companion" }, connectionState: "online" })
 })
 
 describe("<OfflineBanner />", () => {
@@ -158,6 +173,63 @@ describe("<OfflineBanner />", () => {
     render(<OfflineBanner />)
     await screen.findByTestId("offline-banner")
     expect(screen.getByText("1 need attention")).toBeInTheDocument()
+  })
+
+  /**
+   * The phone's Wi-Fi is up while the Host is asleep or redeploying. The
+   * banner used to read only the device network, so this state — the one a
+   * paired device hits most — showed nothing at all.
+   */
+  it("shows the host-unreachable copy when the network is up but the Host is offline", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "offline",
+    })
+    render(<OfflineBanner />)
+    const banner = await screen.findByTestId("offline-banner")
+    expect(banner).toHaveAttribute("data-offline", "true")
+    expect(banner).toHaveAttribute("data-host-offline", "true")
+  })
+
+  it("shows the reconnecting copy while the transport is re-dialling the Host", async () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "connecting",
+    })
+    render(<OfflineBanner />)
+    const banner = await screen.findByTestId("offline-banner")
+    expect(banner).toHaveAttribute("data-offline", "false")
+    expect(banner).toHaveAttribute("data-reconnecting", "true")
+    expect(banner).toHaveTextContent("Reconnecting")
+  })
+
+  /**
+   * A standalone tab has no Host to be disconnected from, and the empty
+   * runtime snapshot reports `offline` by construction — reading it there
+   * would pin a permanent "unreachable" banner over every narrow browser.
+   */
+  it("ignores the Host connection state on a standalone target", () => {
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "standalone" },
+      connectionState: "offline",
+    })
+    render(<OfflineBanner />)
+    expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument()
+  })
+
+  it("prefers the device-offline copy when both the network and the Host are down", async () => {
+    useNetworkStatusMock.mockReturnValue({
+      loading: false,
+      status: { connected: false, connectionType: "none" },
+    })
+    useRuntimeSnapshotMock.mockReturnValue({
+      target: { kind: "companion" },
+      connectionState: "offline",
+    })
+    render(<OfflineBanner />)
+    const banner = await screen.findByTestId("offline-banner")
+    expect(banner).toHaveAttribute("data-offline", "true")
+    expect(banner).toHaveAttribute("data-host-offline", "false")
   })
 
   it("hides when network is up and queue is empty", async () => {

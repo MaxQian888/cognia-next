@@ -7,6 +7,12 @@ jest.mock("next-intl", () => ({
 }))
 
 let tauri = true
+jest.mock("@/hooks/platform/use-surface-reach", () => ({
+  useSurfaceReach: () =>
+    tauri
+      ? { available: true, remedy: null }
+      : { available: false, block: "needs-desktop-shell", remedy: null },
+}))
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => tauri,
   transport: { call: jest.fn() },
@@ -33,11 +39,16 @@ beforeEach(() => {
   tauri = true
 })
 
-it("renders nothing off the desktop shell, where there is no listener to configure", async () => {
+it("explains, off the desktop shell, that the listener is configured in the desktop app", async () => {
   tauri = false
   const load = jest.fn()
-  const { container } = render(<BrowserAccessCard load={load} save={jest.fn()} />)
-  expect(container).toBeEmptyDOMElement()
+  render(<BrowserAccessCard load={load} save={jest.fn()} />)
+  expect(screen.getByTestId("browser-access-card")).toHaveAttribute(
+    "data-reach",
+    "needs-desktop-shell"
+  )
+  expect(screen.getByTestId("browser-access-desktop-only")).toBeInTheDocument()
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument()
   expect(load).not.toHaveBeenCalled()
 })
 

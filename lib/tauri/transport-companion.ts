@@ -458,6 +458,24 @@ export class CompanionTransport implements Transport {
   private lastRejectedChannels: string[] = []
   /** Last `subscribe_error` message from the host, if any (diagnostics). */
   private lastSubscribeError: string | null = null
+  /**
+   * Channels the host has acknowledged on the CURRENT socket.
+   *
+   * Cleared on every open, because a subscription is a property of the socket
+   * it was sent on and a reconnect starts again from the catalog defaults.
+   */
+  private acknowledgedChannels: Set<string> = new Set()
+  /**
+   * Callers parked in {@link whenSubscribed}, each with the channels it is
+   * waiting on.
+   *
+   * The channels are carried rather than forgotten because an acknowledgement
+   * answers for the channels it names and no others. Waking every waiter on
+   * any ack resolved a caller waiting on `external-agent://stdout` with the
+   * ack for somebody else's channel, which is the same "told it worked, then
+   * nothing arrives" failure the whole handshake exists to remove.
+   */
+  private subscribeWaiters: Set<{ channels: readonly string[]; done: () => void }> = new Set()
 
   // ── Connection state observable ────────────────────────────────────────────
   private connectionState: ConnectionState = "offline"
@@ -800,6 +818,11 @@ export class CompanionTransport implements Transport {
         set.delete(handler as Handler)
         if (set.size === 0) {
           this.channelHandlers.delete(event)
+          // The acknowledgement went with it. A later re-subscribe has to be
+          // acknowledged again on its own `add` frame, and leaving the stale
+          // entry made `whenSubscribed` answer instantly for a channel the
+          // host had just been told to drop.
+          this.acknowledgedChannels.delete(event)
           this.sendSubscribeFrame("remove", [event])
         }
       }
@@ -826,6 +849,53 @@ export class CompanionTransport implements Transport {
       this.ws.send(JSON.stringify({ type: "subscribe", mode, channels }))
     } catch {
       // A send failure surfaces through onclose → reconnect → onopen re-send.
+    }
+  }
+
+  /**
+   * Resolve once the host has answered for every named channel.
+   *
+   * `subscribe()` is synchronous, and its control frame is a no-op while the
+   * socket is still opening, so awaiting the call proves nothing about whether
+   * the host will deliver. That is invisible for a `default_on` channel, which
+   * arrives regardless, and fatal for one that is not: a caller that subscribes
+   * and immediately starts the work it wants to watch (spawn a process, read
+   * its output) races its own subscription and sees an empty stream.
+   *
+   * Resolves rather than rejects on timeout. The caller's own deadline is the
+   * one that should decide what a silent host means.
+   */
+  async whenSubscribed(channels: readonly string[], timeoutMs = 5_000): Promise<void> {
+    const pending = channels.filter((channel) => !this.acknowledgedChannels.has(channel))
+    if (pending.length === 0) return
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const waiter = {
+        channels: pending,
+        done: () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          this.subscribeWaiters.delete(waiter)
+          resolve()
+        },
+      }
+      const timer = setTimeout(waiter.done, timeoutMs)
+      this.subscribeWaiters.add(waiter)
+    })
+  }
+
+  /**
+   * Wake the waiters whose channels are all answered now.
+   *
+   * Called after every acknowledgement. A waiter on a channel the frame did
+   * not name stays parked, which is the point: it is still waiting for a
+   * different answer, and its own timeout is what decides how long a silent
+   * host gets.
+   */
+  private releaseSatisfiedSubscribeWaiters(): void {
+    for (const waiter of [...this.subscribeWaiters]) {
+      if (waiter.channels.every((channel) => this.acknowledgedChannels.has(channel))) waiter.done()
     }
   }
 
@@ -1047,6 +1117,9 @@ export class CompanionTransport implements Transport {
       // reconnect — we drive the re-open ourselves against the new baseUrl.
       const ws = this.ws
       this.ws = null
+      // The stale-reference guard above means `onclose` will not clear the
+      // acknowledgements for us, so this path has to do it itself.
+      this.forgetSocketAcknowledgements()
       try {
         ws.close()
       } catch {
@@ -1460,6 +1533,8 @@ export class CompanionTransport implements Transport {
 
     ws.onopen = () => {
       if (this.ws !== ws) return // stale reference
+      // A new socket carries none of the old one's subscriptions.
+      this.acknowledgedChannels.clear()
       this.wsState = "connected"
       this.wsReconnectAttempt = 0
       this.setPlaneHealth({ events: "replaying" })
@@ -1482,6 +1557,7 @@ export class CompanionTransport implements Transport {
     ws.onclose = () => {
       if (this.ws !== ws) return
       this.ws = null
+      this.forgetSocketAcknowledgements()
       this.wsState = "reconnecting"
       if (!this.wsDestroyed && this.channelHandlers.size > 0) {
         this.setPlaneHealth({ events: "connecting" })
@@ -1526,15 +1602,40 @@ export class CompanionTransport implements Transport {
       // surfaced for diagnostics; nothing else to do — delivery of accepted
       // channels starts with the next event frame.
       const rejected = frame["rejected"]
-      if (Array.isArray(rejected) && rejected.length > 0) {
-        this.lastRejectedChannels = rejected
-          .map((r) => (r && typeof r === "object" ? (r as { channel?: string }).channel : null))
-          .filter((c): c is string => typeof c === "string")
+      const rejectedChannels = Array.isArray(rejected)
+        ? rejected
+            .map((r) => (r && typeof r === "object" ? (r as { channel?: string }).channel : null))
+            .filter((c): c is string => typeof c === "string")
+        : []
+      if (rejectedChannels.length > 0) {
+        this.lastRejectedChannels = rejectedChannels
       }
       if (type === "subscribe_error") {
         this.lastSubscribeError =
           typeof frame["message"] === "string" ? (frame["message"] as string) : "subscribe_error"
+        // The host refused to act on the frame at all, so nothing it did not
+        // already hold will ever be answered. Releasing every waiter turns
+        // that into an immediate failure the caller can see rather than a
+        // five-second stall on its way to the same place.
+        for (const waiter of [...this.subscribeWaiters]) waiter.done()
+        return
       }
+      // Only what this frame actually named. `channels` is the resulting
+      // subscription state and `rejected` is the set the host refused, and
+      // between them they answer for exactly those channels. Marking every
+      // registered channel instead resolved a waiter with somebody else's
+      // acknowledgement, before its own `add` frame had been processed. A
+      // refused channel counts as answered: the caller learns nothing will
+      // arrive from `subscriptionDiagnostics`, and parking it forever would
+      // turn a rejection into a hang.
+      const accepted = frame["channels"]
+      if (Array.isArray(accepted)) {
+        for (const channel of accepted) {
+          if (typeof channel === "string") this.acknowledgedChannels.add(channel)
+        }
+      }
+      for (const channel of rejectedChannels) this.acknowledgedChannels.add(channel)
+      this.releaseSatisfiedSubscribeWaiters()
       return
     }
 
@@ -1610,6 +1711,7 @@ export class CompanionTransport implements Transport {
         if (this.ws) {
           const ws = this.ws
           this.ws = null
+          this.forgetSocketAcknowledgements()
           ws.close()
         }
         if (!this.wsDestroyed && this.channelHandlers.size > 0) {
@@ -1662,6 +1764,25 @@ export class CompanionTransport implements Transport {
     }, WS_CLOSE_GRACE_MS)
   }
 
+  /**
+   * Forget which channels the host had acknowledged.
+   *
+   * An acknowledgement is a property of the socket it arrived on, so it has to
+   * die with that socket. Clearing only in `onopen` is not enough: between the
+   * drop and the re-open there is a backoff window, as long as 30s, in which
+   * the set still names channels nothing is subscribed to, and
+   * {@link whenSubscribed} reads exactly that set. A caller that subscribes and
+   * then waits would be told it is subscribed while there is no socket at all,
+   * which is the race the handshake exists to close.
+   *
+   * Parked waiters are deliberately left alone. They carry their own timeout,
+   * and the re-open re-sends their `add` frames, so the honest outcome for them
+   * is to keep waiting for an acknowledgement on the new socket.
+   */
+  private forgetSocketAcknowledgements(): void {
+    this.acknowledgedChannels.clear()
+  }
+
   private closeWebSocket(): void {
     if (this.wsReconnectTimer !== null) {
       clearTimeout(this.wsReconnectTimer)
@@ -1670,6 +1791,7 @@ export class CompanionTransport implements Transport {
     if (this.ws) {
       const ws = this.ws
       this.ws = null
+      this.forgetSocketAcknowledgements()
       ws.close()
     }
     this.wsState = "idle"

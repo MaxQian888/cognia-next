@@ -12,6 +12,8 @@ import {
   diagnosePayloadFailure,
   diagnoseTransport,
   formatPairDiagnostics,
+  fingerprintMismatchFailure,
+  normalizeFingerprint,
   pairFailureBodyKey,
   type PairFailure,
   type PairFailureKind,
@@ -474,5 +476,33 @@ describe("message-catalogue coverage", () => {
       KINDS.map((kind) => [kind, true])
     ) as Record<PairFailureKind, true>
     expect(Object.keys(covered)).toHaveLength(KINDS.length)
+  })
+})
+
+describe("fingerprint pinning", () => {
+  it("compares fingerprints as bytes, ignoring colons and case", () => {
+    expect(normalizeFingerprint("AB:CD:EF")).toBe("abcdef")
+    expect(normalizeFingerprint("abcdef")).toBe(normalizeFingerprint("AB:CD:EF"))
+    expect(normalizeFingerprint("ab cd")).toBe("abcd")
+  })
+
+  /**
+   * Built only after the Host redeemed the invitation, so the invitation is
+   * gone and a retry cannot help. The client must say so and must not persist.
+   */
+  it("builds a spent, non-retryable failure carrying both fingerprints", () => {
+    const failure = fingerprintMismatchFailure({
+      baseUrl: "https://host:27890",
+      expectedFingerprint: "aa:bb",
+      reportedFingerprint: "cc:dd",
+    })
+    expect(failure.kind).toBe("fingerprint_mismatch")
+    expect(failure.stage).toBe("register")
+    expect(failure.retryable).toBe(false)
+    expect(failure.invitationSpent).toBe(true)
+    expect(failure.expectedFingerprint).toBe("aa:bb")
+    expect(failure.reportedFingerprint).toBe("cc:dd")
+    expect(failure.remedies[0]).toBe("freshInvitation")
+    expect(pairFailureBodyKey(failure)).toBe("fingerprintMismatch")
   })
 })

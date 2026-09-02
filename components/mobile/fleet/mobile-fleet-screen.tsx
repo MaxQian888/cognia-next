@@ -50,7 +50,7 @@ export function MobileFleetScreen() {
 
   return (
     <div className="flex h-full flex-col" data-testid="mobile-fleet-screen">
-      <header className="flex items-center justify-between border-b px-3 py-2">
+      <header className="safe-area-pt flex items-center justify-between border-b px-3 py-2">
         <h1 className="text-sm font-semibold">{t("title")}</h1>
         {summary.total > 0 ? (
           <span className="text-[11px] text-muted-foreground" data-testid="mobile-fleet-summary">

@@ -94,6 +94,7 @@
     "title": {
       "activate_failed": "配对已完成，但 Host 未能上线",
       "clipboard_unavailable": "无法读取剪贴板",
+      "fingerprint_mismatch": "主机身份不匹配",
       "http": "Host 拒绝了本次配对请求",
       "insecure_transport": "连接将以明文传输",
       "offline": "本设备已离线",

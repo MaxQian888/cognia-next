@@ -200,7 +200,7 @@ export function TemplatesMobileBody() {
       data-bg-target="chat"
       data-testid="templates-mobile-body"
     >
-      <div className="flex shrink-0 items-center gap-2 p-3">
+      <div className="safe-area-pt flex shrink-0 items-center gap-2 p-3">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input

@@ -18,6 +18,14 @@
  *
  * The queue count is read through a Dexie live query, so newly enqueued and
  * drained rows update the banner reactively rather than on a polling timer.
+ *
+ * On a paired device the network being up says nothing about the Host: the
+ * phone's Wi-Fi is fine while the desktop sleeps or the cloud Host redeploys.
+ * The runtime snapshot's `connectionState` is the Host-side answer, so the
+ * banner reads it too — "reconnecting" while the transport is re-dialling,
+ * and the offline copy once it has given up — but only for a companion
+ * target: a standalone tab has no Host to be disconnected from, and the
+ * empty snapshot reports `offline` by construction.
  */
 
 import { useTranslations } from "next-intl"
@@ -26,6 +34,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { useClientLiveQuery } from "@/hooks/data"
 import { useNetworkStatus } from "@/hooks/use-network-status"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { getQueueSummary, inFlight, needsAttention } from "@/lib/queue/outbound-queue"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
@@ -39,6 +48,7 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   const t = useTranslations("mobile.offline")
   const compact = useCompactLayout()
   const { status, loading } = useNetworkStatus()
+  const runtime = useRuntimeSnapshot()
   // `getQueueSummary` reads the `mobileOutboundQueue` table, so wrapping it in
   // a live query makes the banner react to enqueue/drain writes instead of
   // re-counting on a fixed 15s interval. The banner only mounts inside the
@@ -55,22 +65,28 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   if (!compact) return null
   if (loading) return null
 
-  const offline = !status.connected
+  const hostState = runtime.target?.kind === "companion" ? runtime.connectionState : "online"
+  const hostOffline = status.connected && hostState === "offline"
+  const offline = !status.connected || hostOffline
+  const reconnecting = !offline && hostState === "connecting"
   const pendingCount = queue?.inFlight ?? 0
   // Rows the Host refused, ran out of retries on, or that lost a race. Nothing
   // will move them on its own, and they used to be reported by no surface at
   // all — a refused action looked exactly like one that had gone through.
   const stuckCount = queue?.stuck ?? 0
-  const visible = offline || pendingCount > 0 || stuckCount > 0
+  const visible = offline || reconnecting || pendingCount > 0 || stuckCount > 0
 
   return (
     <AnimatePresence initial={false}>
       {visible ? (
         <BannerBody
           offline={offline}
+          hostOffline={hostOffline}
+          reconnecting={reconnecting}
           pending={pendingCount}
           stuck={stuckCount}
-          messageOffline={t("bannerOffline")}
+          messageOffline={hostOffline ? t("bannerHostOffline") : t("bannerOffline")}
+          messageReconnecting={t("bannerReconnecting")}
           messageQueue={
             stuckCount > 0
               ? t("queueNeedsAttention", { count: stuckCount })
@@ -85,18 +101,25 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
 
 interface BannerBodyProps {
   offline: boolean
+  /** The device network is up but the paired Host is not answering. */
+  hostOffline: boolean
+  reconnecting: boolean
   pending: number
   stuck: number
   messageOffline: string
+  messageReconnecting: string
   messageQueue: string
   className?: string
 }
 
 function BannerBody({
   offline,
+  hostOffline,
+  reconnecting,
   pending,
   stuck,
   messageOffline,
+  messageReconnecting,
   messageQueue,
   className,
 }: BannerBodyProps) {
@@ -107,6 +130,8 @@ function BannerBody({
       aria-live="polite"
       data-testid="offline-banner"
       data-offline={offline ? "true" : "false"}
+      data-host-offline={hostOffline ? "true" : "false"}
+      data-reconnecting={reconnecting ? "true" : "false"}
       data-stuck={stuck > 0 ? "true" : "false"}
       initial={reduce ? false : { opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -125,6 +150,8 @@ function BannerBody({
     >
       {offline ? (
         <CloudOffIcon className="size-3.5" aria-hidden="true" />
+      ) : reconnecting ? (
+        <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
       ) : stuck > 0 ? (
         // Not a spinner: nothing is retrying these, and an animation that says
         // "working on it" is the wrong thing to show for work that has stopped.
@@ -132,7 +159,9 @@ function BannerBody({
       ) : (
         <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
       )}
-      <span className="flex-1">{offline ? messageOffline : messageQueue}</span>
+      <span className="flex-1">
+        {offline ? messageOffline : reconnecting ? messageReconnecting : messageQueue}
+      </span>
       {/* `pending` is included in the queue message via t("queuePending"); kept
        *  as a separate prop so this component is trivial to render-test. */}
       <span className="sr-only">{pending}</span>

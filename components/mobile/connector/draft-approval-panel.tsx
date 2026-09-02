@@ -53,6 +53,7 @@ interface RowProps {
   approveLabel: string
   rejectLabel: string
   queueLabelApprove: string
+  queueLabelReject: string
 }
 
 function DraftApprovalRow({
@@ -60,12 +61,16 @@ function DraftApprovalRow({
   approveLabel,
   rejectLabel,
   queueLabelApprove,
+  queueLabelReject,
 }: RowProps) {
   // ADR-0131: the phone used to hand-roll its own `mobileOutboundQueue` rows
   // here. The hook now routes through `lib/connectors/inbox-writes`, which
   // enqueues the same RPCs under a draft-derived idempotency key AND flips
   // the local mirror — so a retried approval can never send twice.
-  const { approve, reject } = useDraftApproval(row, { label: queueLabelApprove })
+  const { approve, reject } = useDraftApproval(row, {
+    label: queueLabelApprove,
+    rejectLabel: queueLabelReject,
+  })
 
   return (
     <SwipeRow
@@ -173,6 +178,7 @@ export function DraftApprovalPanel({ className }: DraftApprovalPanelProps) {
                 approveLabel={t("approve")}
                 rejectLabel={t("reject")}
                 queueLabelApprove={t("queueLabelApprove")}
+                queueLabelReject={t("queueLabelReject")}
               />
             </motion.li>
           ))}

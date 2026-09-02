@@ -1,4 +1,5 @@
 {
+  "bannerHostOffline": "无法连接主机 — 发送将进入队列，等待主机恢复。",
   "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",
   "bannerReconnecting": "正在重连…",
   "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",

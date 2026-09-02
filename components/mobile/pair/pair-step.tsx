@@ -71,6 +71,8 @@ import {
   diagnosePairFailure,
   diagnosePayloadFailure,
   diagnoseTransport,
+  fingerprintMismatchFailure,
+  normalizeFingerprint,
   type PairFailure,
 } from "./pair-failure"
 import { PairFailurePanel } from "./pair-failure-panel"
@@ -95,6 +97,14 @@ export interface PairStepProps {
    */
   autoSubmit?: boolean
   webMode?: boolean
+  /**
+   * Host signing-key fingerprint the pair link pinned (`/pair?fingerprint=`
+   * from the scan sheet or a `cognia://` deep link). When set, a Host that
+   * presents a different key is refused after redemption and nothing is
+   * persisted. Parsed by `pair-onboarding-client.tsx` for a long time and
+   * dropped on the floor: the check existed only as three dead strings.
+   */
+  expectedFingerprint?: string
   persistPairing?: (config: CompanionConfig) => Promise<void>
   /**
    * Whether this client can store a device key at all, right now.
@@ -172,6 +182,7 @@ export function PairStep({
   autoScan = false,
   autoSubmit = false,
   webMode = false,
+  expectedFingerprint,
   persistPairing = saveCompanionConfig,
   isCredentialStoreReady = defaultCredentialStoreReady,
   onRequestUnlock = defaultRequestUnlock,
@@ -261,6 +272,23 @@ export function PairStep({
         })
         return
       }
+      // A pinned link means pinned: a Host that reports no fingerprint at all
+      // is as refused as one that reports the wrong one.
+      const reportedFingerprint = result.config.serverFingerprint ?? ""
+      if (
+        expectedFingerprint &&
+        normalizeFingerprint(expectedFingerprint) !== normalizeFingerprint(reportedFingerprint)
+      ) {
+        setPhase({
+          kind: "error",
+          failure: fingerprintMismatchFailure({
+            baseUrl: result.config.baseUrl,
+            expectedFingerprint,
+            reportedFingerprint,
+          }),
+        })
+        return
+      }
       try {
         await persistPairing(result.config)
       } catch (error) {
@@ -296,6 +324,7 @@ export function PairStep({
     },
     [
       acceptPayload,
+      expectedFingerprint,
       isCredentialStoreReady,
       onPaired,
       onRequestUnlock,
@@ -509,6 +538,15 @@ export function PairStep({
           </InvitationCard>
         ) : (
           <div className="flex flex-col gap-1.5">
+            {webMode ? (
+              // The browser form has no scan button and no discover step to
+              // introduce it, so it says what it is. Both strings existed for
+              // the web shell and were rendered by nothing.
+              <div className="mb-1" data-testid="pair-web-form-heading">
+                <p className="text-sm font-medium">{t("web.formCardTitle")}</p>
+                <p className="text-xs text-muted-foreground">{t("web.formCardDescription")}</p>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="pair-payload">{t("tokenLabel")}</Label>
               <div className="flex items-center gap-1">

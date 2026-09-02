@@ -1,3 +1,4 @@
+import { standaloneDevicesRequiresHost } from "@/lib/runtime/surface-contract"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -202,7 +203,13 @@ describe("DeviceConsole", () => {
     platform = { tauri: false, capacitor: false, webCompanion: false }
     rows = [LOCAL]
     renderConsole()
-    expect(screen.getByTestId("devices-requires-host")).toBeInTheDocument()
+    const alert = screen.getByTestId("devices-requires-host")
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("data-reason", standaloneDevicesRequiresHost.reason)
+    expect(screen.getByRole("link", { name: /pair/i })).toHaveAttribute(
+      "href",
+      standaloneDevicesRequiresHost.remedy
+    )
     expect(screen.getByRole("link", { name: /Pair with a host/ })).toHaveAttribute("href", "/pair")
   })
 

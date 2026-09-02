@@ -68,6 +68,13 @@ export type PairFailureKind =
   | "vault_locked"
   | "persist_failed"
   | "activate_failed"
+  /**
+   * The Host answered with a signing key other than the one the invitation
+   * link pinned. The pairing itself succeeded on the Host side, so the
+   * invitation is spent, but this client refuses to persist a key it was
+   * told not to trust.
+   */
+  | "fingerprint_mismatch"
   | "scan_failed"
   | "clipboard_unavailable"
   | "unknown"
@@ -129,6 +136,10 @@ export interface PairFailure {
   origin?: string
   /** Loopback browser-access URL to suggest instead of an untrusted LAN one. */
   loopbackUrl?: string
+  /** Fingerprint the pair link pinned (`fingerprint_mismatch` only). */
+  expectedFingerprint?: string
+  /** Fingerprint the Host actually presented (`fingerprint_mismatch` only). */
+  reportedFingerprint?: string
 }
 
 export interface PairFailureContext {
@@ -147,6 +158,37 @@ export interface PairFailureContext {
   online?: boolean
   /** Defaults to `window.location.origin`. */
   origin?: string
+}
+
+/**
+ * Fingerprints as they appear in QR payloads, deep links and `serverFingerprint`
+ * (hex with or without colons, any case) compared as bytes, not text.
+ */
+export function normalizeFingerprint(value: string): string {
+  return value.replace(/[^0-9a-f]/gi, "").toLowerCase()
+}
+
+/**
+ * The Host presented a different signing key than the one the pair link
+ * pinned. Built after `registerPairPayload` succeeded, so the invitation is
+ * spent and only a fresh one helps; the client must not persist the config.
+ */
+export function fingerprintMismatchFailure(input: {
+  baseUrl?: string
+  expectedFingerprint: string
+  reportedFingerprint: string
+}): PairFailure {
+  return {
+    stage: "register",
+    kind: "fingerprint_mismatch",
+    detail: `expected ${input.expectedFingerprint}, got ${input.reportedFingerprint}`,
+    baseUrl: input.baseUrl,
+    expectedFingerprint: input.expectedFingerprint,
+    reportedFingerprint: input.reportedFingerprint,
+    remedies: ["freshInvitation", "checkHostLogs"],
+    retryable: false,
+    invitationSpent: true,
+  }
 }
 
 /** Classify one caught pairing error into something the UI can act on. */
@@ -444,6 +486,8 @@ export function pairFailureBodyKey(failure: PairFailure): string {
       return "failure.body.vaultLocked"
     case "persist_failed":
       return "persistenceError"
+    case "fingerprint_mismatch":
+      return "fingerprintMismatch"
     case "activate_failed":
       return "failure.body.activateFailed"
     case "scan_failed":

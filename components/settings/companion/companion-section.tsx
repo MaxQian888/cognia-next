@@ -29,7 +29,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { isTauri, transport } from "@/lib/tauri"
-import { patchReachabilityPrefs } from "@/lib/connectivity/reachability-prefs"
+import { startBroadcast, stopBroadcast, type TauriInvoker } from "@/lib/connectivity/mdns-discovery"
+import {
+  loadReachabilityPrefs,
+  patchReachabilityPrefs,
+} from "@/lib/connectivity/reachability-prefs"
+import { saveNamedTunnelConfig } from "@/lib/connectivity/tunnel-resolver"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { listPairedDevices } from "@/lib/db/paired-devices"
@@ -168,20 +173,21 @@ async function stopServer(): Promise<void> {
  * that a verified unlock establishes, which is why the caller still refuses to
  * generate a QR while the account is locked.
  */
+/**
+ * The `lib/connectivity` wrappers take an invoker so they stay testable off
+ * Tauri. Handing them the companion transport keeps this section on the same
+ * routed call every other control here uses, instead of the second copy of
+ * each `companion_mdns_*` / `companion_tunnel_*` call that used to live here.
+ */
+const transportInvoker = async (): Promise<TauriInvoker> => ({
+  // Arity matters to the transport spies: `call(name, undefined)` is not
+  // `call(name)`, so an argument-less command is forwarded argument-less.
+  invoke: <T = unknown,>(cmd: string, args?: Record<string, unknown>) =>
+    args === undefined ? transport.call<T>(cmd) : transport.call<T>(cmd, args),
+})
+
 async function createOwnerInvitation(): Promise<OwnerInvitationIssue> {
   return transport.call<OwnerInvitationIssue>("companion_create_owner_invitation")
-}
-
-async function startMdnsBroadcast(args: {
-  port: number
-  appVersion: string
-  tlsFingerprint: string
-}): Promise<string> {
-  return transport.call<string>("companion_mdns_start", args)
-}
-
-async function stopMdnsBroadcast(): Promise<void> {
-  await transport.call<void>("companion_mdns_stop")
 }
 
 async function getMdnsStatus(): Promise<boolean> {
@@ -211,10 +217,6 @@ async function getTunnelConfig(): Promise<{
   return transport.call<{ mode: "quick" | "named"; hostname?: string; hasToken: boolean }>(
     "companion_tunnel_get_config"
   )
-}
-
-async function saveNamedConfig(token: string, hostname: string): Promise<void> {
-  return transport.call<void>("companion_tunnel_save_named_config", { token, hostname })
 }
 
 async function setTunnelMode(mode: "quick" | "named"): Promise<void> {
@@ -427,7 +429,12 @@ function TunnelCard() {
     if (!desktop || !hostnameInput.trim() || !tokenInput.trim()) return
     setSaving(true)
     try {
-      await saveNamedConfig(tokenInput.trim(), hostnameInput.trim())
+      const saved = await saveNamedTunnelConfig(
+        tokenInput.trim(),
+        hostnameInput.trim(),
+        transportInvoker
+      )
+      if (saved.kind === "error") throw new Error(saved.message)
       const next = await getTunnelConfig()
       setConfig(next)
       // The token is a write-only secret — never read back into the field.
@@ -597,6 +604,11 @@ function MdnsCard() {
   const desktop = isTauri()
   const [running, setRunning] = useState(false)
   const [busy, setBusy] = useState(false)
+  // The saved boot preference, read separately from the live status. The
+  // switch shows what is running; this is what was asked for. They disagree
+  // exactly when the boot restore failed, and that used to be invisible: the
+  // switch simply read "off" over a preference that said "on".
+  const [wanted, setWanted] = useState<boolean | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -605,10 +617,18 @@ function MdnsCard() {
         if (!cancelled) setRunning(s)
       })
       .catch(() => {})
+    if (desktop) {
+      void loadReachabilityPrefs()
+        .then((prefs) => {
+          if (!cancelled) setWanted(prefs.mdnsEnabled)
+        })
+        .catch(() => {})
+    }
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [desktop])
+  const autostartFailed = wanted === true && !running && !busy
 
   const onToggle = useCallback(
     async (enabled: boolean) => {
@@ -622,16 +642,23 @@ function MdnsCard() {
           const fingerprint = await transport
             .call<string>("companion_get_tls_fingerprint")
             .catch(() => "")
-          await startMdnsBroadcast({
-            port: DEFAULT_PORT,
-            appVersion: APP_VERSION,
-            tlsFingerprint: fingerprint,
-          })
+          const started = await startBroadcast(
+            {
+              port: DEFAULT_PORT,
+              appVersion: APP_VERSION,
+              tlsFingerprint: fingerprint,
+            },
+            transportInvoker
+          )
+          if (started.kind === "error") throw new Error(started.message)
+          if (started.kind === "unsupported") throw new Error(t("onlyDesktop"))
           setRunning(true)
+          setWanted(true)
           toast.success(t("started"))
         } else {
-          await stopMdnsBroadcast()
+          await stopBroadcast(transportInvoker)
           setRunning(false)
+          setWanted(false)
           toast.success(t("stopped"))
         }
         // Remember the choice so the boot restore re-advertises. Without this
@@ -661,6 +688,18 @@ function MdnsCard() {
         </CardTitle>
         <CardDescription className="text-xs">{t("description")}</CardDescription>
       </CardHeader>
+      {autostartFailed ? (
+        <CardContent className="pt-0">
+          <p
+            role="status"
+            className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid="mdns-autostart-failed"
+          >
+            <ShieldAlertIcon className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{t("autostartFailed")}</span>
+          </p>
+        </CardContent>
+      ) : null}
     </Card>
   )
 }
@@ -682,6 +721,33 @@ function ServerStatusCard() {
   // the toggle-on path knows what to start with.
   const [desiredBind, setDesiredBind] = useState<BindMode>("loopback")
   const [busy, setBusy] = useState(false)
+  // The saved boot preference, next to the live status. The switch shows what
+  // is running, this is what was asked for, and the two disagree exactly when
+  // the boot restore failed. That case used to be a switch reading "off".
+  const [wanted, setWanted] = useState<boolean | null>(null)
+  // Where the TLS material lives. A user installing the CA on a phone, or
+  // rotating the cert, needs the path. The command that answers it existed
+  // and nothing called it.
+  const [tlsPaths, setTlsPaths] = useState<CompanionTlsPaths | null>(null)
+
+  useEffect(() => {
+    if (!desktop) return
+    let cancelled = false
+    void loadReachabilityPrefs()
+      .then((prefs) => {
+        if (!cancelled) setWanted(prefs.serverEnabled)
+      })
+      .catch(() => {})
+    void transport
+      .call<CompanionTlsPaths>("companion_tls_paths")
+      .then((paths) => {
+        if (!cancelled && paths && typeof paths.certPemPath === "string") setTlsPaths(paths)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [desktop])
 
   // Live status — refresh every 3 s while mounted, plus an immediate fetch
   // on mount so the initial UI doesn't flicker through "stopped" when the
@@ -725,6 +791,7 @@ function ServerStatusCard() {
             bindMode: desiredBind,
             boundPort: port,
           })
+          setWanted(true)
           toast.success(t("started", { port }))
           // This switch is the user's intent surface for "be reachable", so it
           // is one of the few places allowed to write the boot preference —
@@ -738,6 +805,7 @@ function ServerStatusCard() {
         } else {
           await stopServer()
           setStatus({ running: false, bindMode: "none", boundPort: null })
+          setWanted(false)
           toast.success(t("stopped"))
           await patchReachabilityPrefs({ serverEnabled: false })
         }
@@ -776,6 +844,7 @@ function ServerStatusCard() {
   )
 
   const lanWarning = status.running && status.bindMode === "lan"
+  const autostartFailed = wanted === true && !status.running && !busy
 
   return (
     <Card>
@@ -841,10 +910,43 @@ function ServerStatusCard() {
             <span>{t("httpsWarning")}</span>
           </div>
         )}
+        {autostartFailed && (
+          <p
+            role="status"
+            className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300"
+            data-testid="server-autostart-failed"
+          >
+            <ShieldAlertIcon className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{t("autostartFailed")}</span>
+          </p>
+        )}
+        {tlsPaths && (
+          <dl className="space-y-1 text-xs text-muted-foreground" data-testid="server-tls-paths">
+            <div className="flex flex-col gap-0.5">
+              <dt>{t("certificateFile")}</dt>
+              <dd className="break-all font-mono text-[11px] text-foreground/80">
+                {tlsPaths.certPemPath}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt>{t("certificateFingerprint")}</dt>
+              <dd className="break-all font-mono text-[11px] text-foreground/80">
+                {tlsPaths.fingerprintSha256}
+              </dd>
+            </div>
+          </dl>
+        )}
         {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
       </CardContent>
     </Card>
   )
+}
+
+/** Mirror of the Rust `CompanionTlsPaths` (`companion_api/commands.rs`). */
+interface CompanionTlsPaths {
+  certPemPath: string
+  keyPemPath: string
+  fingerprintSha256: string
 }
 
 function StatusBadge({

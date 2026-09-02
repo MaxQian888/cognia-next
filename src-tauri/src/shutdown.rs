@@ -27,6 +27,11 @@
 /// convention for "terminated by Ctrl+C".
 const SIGINT_EXIT_CODE: i32 = 130;
 
+/// The exit code a forced (second-signal) shutdown reports. Public so the
+/// headless binary's escape hatch exits with the same convention as the
+/// desktop's.
+pub const SIGNAL_EXIT_CODE: i32 = SIGINT_EXIT_CODE;
+
 /// Spawn the shutdown-signal listener. Best-effort — a failure to hook the
 /// signals is logged and leaves the kernel default in place (Ctrl+C still
 /// kills the process, just without graceful teardown), so the app keeps
@@ -56,8 +61,13 @@ pub fn install(app: tauri::AppHandle) {
 /// the default "terminate" disposition — so the signal is delivered here
 /// rather than killing the process. On a hook failure the future parks
 /// forever (the caller degrades to the kernel default on the *next* signal).
-#[cfg(all(desktop, unix))]
-async fn wait_for_signal() {
+///
+/// Shared with the headless `cognia-server` binary, which has no Tauri event
+/// loop to route through but the same obligation: a `SIGTERM` from systemd,
+/// Docker or `kill <pid>` must drain the companion listeners and reap the
+/// brain / sidecar children exactly like Ctrl-C does.
+#[cfg(unix)]
+pub async fn wait_for_signal() {
     use tokio::signal::unix::{signal, SignalKind};
 
     let mut interrupt = match signal(SignalKind::interrupt()) {
@@ -81,15 +91,15 @@ async fn wait_for_signal() {
     }
 }
 
-#[cfg(all(desktop, not(unix)))]
-async fn wait_for_signal() {
+#[cfg(not(unix))]
+pub async fn wait_for_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         log::warn!("failed to hook Ctrl+C: {error}");
         std::future::pending().await
     }
 }
 
-#[cfg(all(test, desktop, unix))]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::time::Duration;
@@ -134,6 +144,27 @@ mod tests {
                 .expect("wait_for_signal must resolve on each SIGINT");
             raiser.await.expect("raiser task panicked");
         }
+    }
+
+    /// `SIGTERM` — what systemd, Docker and `kill <pid>` send — must resolve
+    /// the same helper. The headless server relies on this: without the hook
+    /// the kernel default hard-kills it mid-drain.
+    #[tokio::test]
+    async fn wait_for_signal_resolves_on_sigterm() {
+        let raiser = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            // SAFETY: raising a signal at our own process is always sound.
+            #[allow(unsafe_code)]
+            unsafe {
+                libc::raise(libc::SIGTERM);
+            }
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), wait_for_signal())
+            .await
+            .expect("wait_for_signal must resolve after SIGTERM");
+
+        raiser.await.expect("raiser task panicked");
     }
 
     #[test]

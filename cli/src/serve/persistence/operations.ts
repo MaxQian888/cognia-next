@@ -518,12 +518,31 @@ export function finalizeDurability(
   }
 }
 
-/** Shared by the CLI: parse a `--to` backend argument. */
+/**
+ * The documented spellings of a `--to` backend argument, mapped onto ids.
+ * `journal` / `sqlite` are what the help text and the docs say. The ids are
+ * accepted too so a script that pasted one from a manifest still works.
+ */
+const BACKEND_ARGUMENT_ALIASES: Readonly<Record<string, DurabilityBackendId>> = Object.freeze({
+  journal: "journal-v4",
+  sqlite: "sqlite-v5",
+  snapshot: "snapshot-v3",
+})
+
+/**
+ * Shared by the CLI: parse a `--to` backend argument.
+ *
+ * One parser, one accepted set. `durability-command.ts` used to carry its own
+ * copy that accepted the aliases while this one accepted only the ids, so the
+ * two disagreed about what `--to` meant and this one had no caller at all.
+ */
 export function parseBackendArgument(value: string | undefined): DurabilityBackendId {
+  const aliased = value === undefined ? undefined : BACKEND_ARGUMENT_ALIASES[value]
+  if (aliased) return aliased
   if (!isDurabilityBackendId(value)) {
     throw new DurabilityFault(
       "manifest-corrupt",
-      `--to must be one of journal-v4, sqlite-v5, snapshot-v3 (got ${String(value)})`
+      `--to must be journal or sqlite (or a backend id: journal-v4, sqlite-v5, snapshot-v3; got ${String(value ?? "nothing")})`
     )
   }
   return value

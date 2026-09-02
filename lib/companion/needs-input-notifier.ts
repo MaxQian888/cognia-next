@@ -27,12 +27,17 @@
  * The field is consumed by the trigger for routing and stripped before the
  * payload transits the provider.
  *
- * Lazy Tauri import so the web/mobile bundle stays decoupled; failures are
- * swallowed (the approval is still pending and recoverable when the device
+ * **It is host-neutral.** The emit goes through `publishHostEvent`, which is
+ * a Tauri `emit` on the desktop and the `companion_event_publish` bridge
+ * route on the headless brain (`ws_bridge.rs` allowlists this topic). It used
+ * to import `@tauri-apps/api/event` behind an `isTauri()` guard, so a phone
+ * attached to a cloud Host never got the "approval needed" alert — the one
+ * place a backgrounded device most needs it. Failures are swallowed by the
+ * publisher (the approval is still pending and recoverable when the device
  * reopens its `/ws/events` stream).
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { publishHostEvent } from "@/lib/companion/host-event-publisher"
 import { approvalPushTargets } from "@/lib/companion/remote-attach-registry"
 
 export const NEEDS_INPUT_CHANNEL = "companion://needs-input"
@@ -71,18 +76,9 @@ export function buildNeedsInputEmit(
 }
 
 export async function notifyRemoteNeedsInput(payload: NeedsInputPayload): Promise<void> {
-  if (!isTauri()) return
   const targetDeviceIds = approvalPushTargets(payload.sessionId)
   // Every attached controller is already foreground on a live stream, so the
   // frame is on screen and a native alert would duplicate it.
   if (targetDeviceIds.length === 0) return
-  try {
-    const moduleId = "@tauri-apps/api/event"
-    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-      emit: (event: string, payload: unknown) => Promise<void>
-    }
-    await mod.emit(NEEDS_INPUT_CHANNEL, buildNeedsInputEmit(payload, targetDeviceIds))
-  } catch {
-    // Tauri unavailable or transport hiccup — best effort.
-  }
+  await publishHostEvent(NEEDS_INPUT_CHANNEL, buildNeedsInputEmit(payload, targetDeviceIds))
 }

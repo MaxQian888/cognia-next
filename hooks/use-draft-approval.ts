@@ -26,6 +26,12 @@ export interface UseDraftApprovalOptions {
   onComplete?: () => void
   /** Human label for the offline-queue UI on the relayed route. */
   label?: string
+  /**
+   * Label for a queued *reject*. Falls back to `label`, which is how every
+   * rejected draft used to read "Approve connector draft" in the phone's
+   * offline queue — the hook had one label for two opposite actions.
+   */
+  rejectLabel?: string
 }
 
 export interface UseDraftApprovalResult {
@@ -78,7 +84,7 @@ export function useDraftApproval(
       if (opts.beforeReject) {
         await opts.beforeReject({ draft })
       }
-      await rejectInboxDraft(draft, { label: opts.label })
+      await rejectInboxDraft(draft, { label: opts.rejectLabel ?? opts.label })
       opts.onComplete?.()
     } finally {
       setBusy(false)

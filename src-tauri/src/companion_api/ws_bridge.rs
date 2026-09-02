@@ -898,7 +898,10 @@ fn media_response_from_payload(
     // would mean allocating the very thing the cap exists to refuse, and
     // base64 never shrinks its input.
     if encoded.len() > super::desktop_messages_bridge::MAX_MEDIA_BYTES * 4 / 3 + 4 {
-        return Err(format!("media body too large ({} encoded bytes)", encoded.len()));
+        return Err(format!(
+            "media body too large ({} encoded bytes)",
+            encoded.len()
+        ));
     }
     let bytes = STANDARD
         .decode(encoded)
@@ -910,7 +913,10 @@ fn media_response_from_payload(
             .get("mediaType")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        payload.get("etag").and_then(Value::as_str).map(str::to_owned),
+        payload
+            .get("etag")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         payload
             .get("error")
             .and_then(Value::as_str)
@@ -952,14 +958,12 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
         // frame set is JSON text only (see the `Message::Binary` arm above,
         // which ignores binary), and a payload capped at 10 MB inflates to
         // ~13.4 MB against a 64 MB frame ceiling.
-        "companion_media_response" => {
-            match media_response_from_payload(payload) {
-                Ok(response) => state.desktop_messages_bridge.resolve_media(response),
-                Err(error) => {
-                    log::warn!("companion-api ws-bridge: bad media respond payload: {error}")
-                }
+        "companion_media_response" => match media_response_from_payload(payload) {
+            Ok(response) => state.desktop_messages_bridge.resolve_media(response),
+            Err(error) => {
+                log::warn!("companion-api ws-bridge: bad media respond payload: {error}")
             }
-        }
+        },
         "companion_host_state_publish" => {
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();
@@ -1000,6 +1004,12 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
                 // cannot spawn one; this is the only way that turn reaches the
                 // client that asked for it.
                 "external-agent://session-event",
+                // A watched session is blocked on a tool-use approval and the
+                // brain has named the devices holding a control attachment
+                // (`lib/companion/needs-input-notifier.ts`). Ids + deep link
+                // only; the push sanitizer strips the audience before it
+                // transits a provider.
+                "companion://needs-input",
             ];
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();
@@ -1348,7 +1358,10 @@ mod tests {
             .split_once("fn route_respond(")
             .expect("route_respond exists")
             .1;
-        let body = routing.split_once("\n}").expect("route_respond has a body").0;
+        let body = routing
+            .split_once("\n}")
+            .expect("route_respond has a body")
+            .0;
 
         let raw = include_str!("../../../cli/src/serve/fixtures/bridge-frames.json");
         let fixture: Value = serde_json::from_str(raw).expect("fixture parses");
@@ -1363,7 +1376,9 @@ mod tests {
             if frame["type"].as_str() != Some("respond") {
                 continue;
             }
-            let command = frame["command"].as_str().expect("respond frames name a command");
+            let command = frame["command"]
+                .as_str()
+                .expect("respond frames name a command");
             scanned += 1;
             if !body.contains(&format!("\"{command}\"")) {
                 unrouted.push(command.to_string());

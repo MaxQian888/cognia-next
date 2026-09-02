@@ -90,6 +90,52 @@ it("registers, persists, and reports a valid pairing", async () => {
   expect(onPaired).toHaveBeenCalledWith(config)
 })
 
+/**
+ * `/pair?fingerprint=` pinned a Host key for a long time and the value was
+ * parsed and dropped. A Host that redeems the invitation but presents a
+ * different signing key is refused after redemption, nothing is persisted,
+ * and the invitation is reported spent.
+ */
+it("refuses a Host whose fingerprint differs from the pinned one and persists nothing", async () => {
+  const onPaired = jest.fn()
+  register.mockResolvedValue({
+    kind: "ok",
+    config: { ...config, serverFingerprint: "cd".repeat(32) },
+  })
+  render(
+    <PairStep
+      isCredentialStoreReady={readyStore}
+      prefilledPairPayload={payload}
+      expectedFingerprint={"ab".repeat(32)}
+      onPaired={onPaired}
+    />
+  )
+  await userEvent.click(screen.getByTestId("pair-submit"))
+  await waitFor(() => expect(register).toHaveBeenCalledWith(payload))
+  const panel = await screen.findByTestId("pair-error")
+  expect(panel).toHaveAttribute("data-kind", "fingerprint_mismatch")
+  expect(save).not.toHaveBeenCalled()
+  expect(onPaired).not.toHaveBeenCalled()
+})
+
+it("accepts a pinned fingerprint that matches regardless of colons and case", async () => {
+  const onPaired = jest.fn()
+  register.mockResolvedValue({
+    kind: "ok",
+    config: { ...config, serverFingerprint: "ab".repeat(32) },
+  })
+  render(
+    <PairStep
+      isCredentialStoreReady={readyStore}
+      prefilledPairPayload={payload}
+      expectedFingerprint={"AB:".repeat(31) + "AB"}
+      onPaired={onPaired}
+    />
+  )
+  await userEvent.click(screen.getByTestId("pair-submit"))
+  await waitFor(() => expect(onPaired).toHaveBeenCalled())
+})
+
 it("uses the caller's activation transaction when adding another Host", async () => {
   const persistPairing = jest.fn().mockResolvedValue(undefined)
   register.mockResolvedValue({ kind: "ok", config })

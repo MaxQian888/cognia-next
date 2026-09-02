@@ -24,6 +24,7 @@ import { durabilityRoot } from "../serve/persistence/backend"
 import {
   finalizeDurability,
   migrateDurability,
+  parseBackendArgument,
   recoverDurability,
   rollbackDurability,
   verifyDurability,
@@ -61,26 +62,6 @@ export interface DurabilityDeps {
 
 const RECOVERY_SOURCES: RecoverySource[] = ["auto", "snapshot", "journal", "sqlite"]
 
-/** `--to journal` / `--to sqlite` are the documented spellings; ids also work. */
-function resolveTargetBackend(value: string | undefined): DurabilityBackendId {
-  switch (value) {
-    case "journal":
-    case "journal-v4":
-      return "journal-v4"
-    case "sqlite":
-    case "sqlite-v5":
-      return "sqlite-v5"
-    case "snapshot":
-    case "snapshot-v3":
-      return "snapshot-v3"
-    default:
-      throw new DurabilityFault(
-        "manifest-corrupt",
-        `--to must be journal or sqlite (got ${String(value ?? "nothing")})`
-      )
-  }
-}
-
 export async function durabilityCommand(args: ParsedArgs, deps: DurabilityDeps): Promise<number> {
   const { out } = deps
   const env = deps.env ?? process.env
@@ -108,7 +89,7 @@ export async function durabilityCommand(args: ParsedArgs, deps: DurabilityDeps):
       case "migrate":
         return await runMigrate(
           root,
-          resolveTargetBackend(stringFlag(args, "to")),
+          parseBackendArgument(stringFlag(args, "to")),
           out,
           json,
           now,

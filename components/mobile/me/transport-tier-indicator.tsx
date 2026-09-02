@@ -15,15 +15,9 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { isCapacitor, transport } from "@/lib/tauri"
+import { transportTierTone } from "@/lib/companion/transport-tier-visuals"
 import type { TransportTier } from "@/lib/tauri/transport-companion"
 
-const TIER_COLOR: Record<TransportTier, string> = {
-  "rtc-direct": "fill-emerald-500 text-emerald-500",
-  "rtc-relay": "fill-emerald-500 text-emerald-500",
-  "ws-lan": "fill-sky-500 text-sky-500",
-  "ws-tunnel": "fill-amber-500 text-amber-500",
-  offline: "fill-muted-foreground text-muted-foreground",
-}
 
 const TIER_KEY: Record<TransportTier, string> = {
   "rtc-direct": "rtcDirect",
@@ -99,7 +93,7 @@ export function TransportTierIndicator(): React.JSX.Element | null {
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium">{t("transportTier")}</span>
         <span className="flex items-center gap-1.5">
-          <CircleIcon aria-hidden="true" className={cn("size-2 shrink-0", TIER_COLOR[tier])} />
+          <CircleIcon aria-hidden="true" className={cn("size-2 shrink-0", transportTierTone(tier).dot)} />
           <span className="text-xs">{tt(key)}</span>
         </span>
       </div>

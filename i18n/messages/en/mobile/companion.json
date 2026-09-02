@@ -10,13 +10,12 @@
     "toggleAria": "Toggle agent control for {label}"
   },
   "browserAccess": {
-    "title": "Browser access",
     "description": "A browser can't verify this computer's self-signed certificate, so the usual HTTPS port is unreachable from a tab. This opens a plain http://127.0.0.1 listener — the one address a browser trusts without a certificate. It stays on this machine and never leaves it.",
+    "desktopOnly": "Browser access is configured in the desktop app. Open Settings there to turn the listener on and allowlist origins.",
     "enable": "Enable browser access",
     "listening": "Listening on {url}",
-    "notListening": "Not listening",
-    "restartRequired": "Restart the Companion server to apply.",
     "loadFailed": "Browser access settings could not be read.",
+    "notListening": "Not listening",
     "origins": {
       "title": "Allowed browser origins",
       "description": "Only these exact origins may reach this computer. Anything else is refused — including the same address on a different port.",
@@ -25,7 +24,9 @@
       "placeholder": "http://localhost:3000",
       "revoke": "Remove {origin}",
       "suggested": "Suggested:"
-    }
+    },
+    "restartRequired": "Restart the Companion server to apply.",
+    "title": "Browser access"
   },
   "channels": {
     "blocked": {
@@ -131,6 +132,7 @@
     }
   },
   "mdns": {
+    "autostartFailed": "Broadcast was enabled last time but is not running. Turn it off and on again, or check the desktop log for why the start failed.",
     "description": "Broadcast _cognia._tcp on the LAN so phones find this desktop without QR scan.",
     "enableLabel": "Enable mDNS broadcast",
     "onlyDesktop": "LAN broadcast is desktop-only.",
@@ -283,8 +285,11 @@
     "title": "Revoke pairing"
   },
   "server": {
+    "autostartFailed": "The server was enabled last time but is not running. Turn it off and on again, or check the desktop log for why the start failed.",
     "bindMode": "Bind mode",
     "bindModePlaceholderLan": "'<your-LAN-IP>'",
+    "certificateFile": "Certificate file",
+    "certificateFingerprint": "Certificate fingerprint (SHA-256)",
     "desktopOnly": "Companion server runs in the desktop process — switch to the Tauri build to manage it.",
     "desktopOnlyError": "Companion server is desktop-only.",
     "enableLabel": "Enable companion server",
@@ -317,17 +322,22 @@
     "tableLabels": {
       "adapterInstances": "Connectors",
       "characters": "Characters",
+      "connectorCallbackBindings": "Connector callback bindings",
       "connectorDrafts": "Connector drafts",
+      "connectorHeartbeats": "Connector heartbeats",
       "conversationOverrides": "Conversation overrides",
+      "executionRunBindings": "Run delivery bindings",
       "goals": "Goals",
       "memories": "Memories",
       "messages": "Messages",
       "outboundQueue": "Outbound delivery status",
+      "platformIdentities": "Contacts",
       "plugins": "Plugins",
       "sessions": "Sessions",
       "settings": "App settings",
       "skills": "Skills",
       "twinProfile": "Twin profile",
+      "workflowDeployments": "Workflow deployments",
       "workflowRuns": "Workflow runs",
       "workflows": "Workflows"
     },
@@ -434,31 +444,32 @@
     "openWorkspace": "Open workspace"
   },
   "browserCompanion": {
-    "title": "Browser Companion",
-    "description": "Pair the Cognia browser extension with this computer. Once paired, a page you capture in your browser starts a new task here — nothing is read until you capture it.",
-    "requiresListener": "Browser access is off, so a pairing code would have nothing to connect to. Turn it on above and restart the Companion server first.",
-    "generate": "Generate pairing code",
-    "regenerate": "Generate a new code",
-    "generating": "Generating…",
-    "generateFailed": "The pairing code could not be created.",
     "codeLabel": "Paste this into the extension's side panel",
-    "copy": "Copy code",
     "copied": "Copied",
+    "copy": "Copy code",
     "copyFailed": "The code could not be copied. Select it and copy it by hand.",
-    "expiresIn": "Expires in {minutes} min",
+    "description": "Pair the Cognia browser extension with this computer. Once paired, a page you capture in your browser starts a new task here — nothing is read until you capture it.",
+    "desktopOnly": "Extension enrolment codes are minted by the desktop app, which owns the listener the extension talks to. Open Settings there to pair a browser.",
     "expired": "This code has expired. Generate a new one.",
-    "singleUse": "One use only. It is spent the moment an extension redeems it, and it carries no credential on its own.",
-    "originHint": "After installing the extension, add its chrome-extension:// origin to the list above. The extension shows it on its connection screen.",
-    "pairedTitle": "Paired browsers",
-    "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
-    "openDevices": "Open device console",
-    "historyTitle": "Recorded submissions",
+    "expiresIn": "Expires in {minutes} min",
+    "generate": "Generate pairing code",
+    "generateFailed": "The pairing code could not be created.",
+    "generating": "Generating…",
+    "historyClear": "Clear recorded submissions",
+    "historyClearFailed": "The recorded submissions could not be cleared.",
+    "historyCleared": "Cleared",
+    "historyClearing": "Clearing…",
     "historyCount": "{count, plural, =0 {Nothing recorded yet} other {# recorded submissions}}",
     "historyHint": "A short note per submission — the page title, the site it came from and whether it is still running. Never the page text or your instruction: those live in the conversation it started, where you can read and delete them.",
-    "historyClear": "Clear recorded submissions",
-    "historyClearing": "Clearing…",
-    "historyCleared": "Cleared",
-    "historyClearFailed": "The recorded submissions could not be cleared."
+    "historyTitle": "Recorded submissions",
+    "openDevices": "Open device console",
+    "originHint": "After installing the extension, add its chrome-extension:// origin to the list above. The extension shows it on its connection screen.",
+    "pairedHint": "Paired browsers appear in the device console, where you can revoke one.",
+    "pairedTitle": "Paired browsers",
+    "regenerate": "Generate a new code",
+    "requiresListener": "Browser access is off, so a pairing code would have nothing to connect to. Turn it on above and restart the Companion server first.",
+    "singleUse": "One use only. It is spent the moment an extension redeems it, and it carries no credential on its own.",
+    "title": "Browser Companion"
   },
   "workspaceRoots": {
     "description": "Folders this Host lets a connected client open. Everything else is refused.",

@@ -56,13 +56,19 @@ export function HeadlessInvitationHelp() {
   const t = useTranslations("mobile.pair.web")
   const [mode, setMode] = useState<HeadlessPairMode>("development")
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
 
   const onCopyCommand = useCallback(async () => {
     try {
       await writeClipboardText(HEADLESS_PAIR_COMMANDS[mode])
       setCopied(true)
+      setCopyFailed(false)
     } catch {
+      // A browser without clipboard-write permission fails here. Saying so
+      // beats a tick that never appears: the command is still on screen to
+      // select and copy by hand, which is what the sentence says.
       setCopied(false)
+      setCopyFailed(true)
     }
   }, [mode])
 
@@ -135,6 +141,16 @@ export function HeadlessInvitationHelp() {
         </Button>
       </Surface>
 
+      {copyFailed ? (
+        <p
+          role="alert"
+          className="mt-2 text-[11px] leading-relaxed text-destructive"
+          data-testid="pair-copy-command-failed"
+        >
+          {t("clipboardWriteFailed")}
+        </p>
+      ) : null}
+
       <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
         {mode === "development"
           ? t("developmentCommandHint", { port: DEFAULT_BROWSER_ACCESS_PORT })
@@ -149,7 +165,11 @@ export function HeadlessInvitationHelp() {
         data-testid="pair-web-storage-notice"
       >
         <InfoIcon className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-        <span>{t("storageNotice")}</span>
+        <span>
+          <span className="font-medium text-foreground">{t("storageNoticeTitle")}</span>
+          {" "}
+          {t("storageNotice")}
+        </span>
       </p>
     </Surface>
   )

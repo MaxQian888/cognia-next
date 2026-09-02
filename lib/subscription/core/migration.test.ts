@@ -135,15 +135,14 @@ describe("subscriptionInitOnce", () => {
   it.each([
     ["capacitor", () => mockIsCapacitor.mockReturnValue(true)],
     ["a paired web companion", () => mockHasWebCompanion.mockReturnValue(true)],
-  ])("still runs when the host is %s", async (_label, enableHost) => {
+  ])("skips the client-local migration on %s", async (_label, enableHost) => {
     mockIsTauri.mockReturnValue(false)
     enableHost()
-    mockedInit.mockResolvedValueOnce([{ kind: "no-legacy-data", provider: "anthropic" }])
 
     const result = await subscriptionInitOnce({ storage: new MemoryStorage() })
 
-    expect(result.skipped).toBeUndefined()
-    expect(mockedInit).toHaveBeenCalledTimes(1)
+    expect(result.skipped).toBe(true)
+    expect(mockedInit).not.toHaveBeenCalled()
   })
 
   it("swallows transport errors and returns the message", async () => {

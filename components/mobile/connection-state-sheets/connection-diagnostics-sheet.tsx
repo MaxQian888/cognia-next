@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
 import type { SyncableTable } from "@/lib/sync/types"
 import { transport } from "@/lib/tauri"
+import { transportTierTone } from "@/lib/companion/transport-tier-visuals"
 import type { TransportTier } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
 import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
@@ -66,13 +67,6 @@ const SYNC_TABLES: readonly SyncableTable[] = [
   "settings",
 ]
 
-const TIER_TONES: Record<TransportTier, string> = {
-  "rtc-direct": "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  "rtc-relay": "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  "ws-lan": "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300",
-  "ws-tunnel": "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300",
-  offline: "border-zinc-500/40 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-}
 
 export function ConnectionDiagnosticsSheet({
   open,
@@ -186,7 +180,7 @@ export function ConnectionDiagnosticsSheet({
                 role="status"
                 className={cn(
                   "gap-1.5 border px-2 py-0.5 font-mono text-[10px] uppercase",
-                  TIER_TONES[tier]
+                  transportTierTone(tier).chip
                 )}
                 data-testid={`diagnostics-tier-${tier}`}
               >
