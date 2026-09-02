@@ -520,6 +520,20 @@ export const COMPANION_SYNC_TABLES = new Set<CoreTableName>([
   // reports a terminal state.
   "issueEvents",
   "issueRuns",
+  // The Inbox sidebar's host-only quintet. Every one of these is read by a
+  // surface the thin client already mounts (health badge, contact drawer,
+  // callback inspector, override form, delegation chips) and none had a
+  // handler, so each rendered against an empty mirror. Cursors differ per
+  // table and are documented on the readers in `desktop-sync-source.ts`:
+  // heartbeats page on `at` and age out client-side; identities and run
+  // bindings cursor on a non-indexed `updatedAt` scan (an index would cost a
+  // schema reset); callback bindings on max(createdAt, consumedAt) and expire
+  // client-side; deployments on their indexed `updatedAt`.
+  "connectorHeartbeats",
+  "platformIdentities",
+  "connectorCallbackBindings",
+  "workflowDeployments",
+  "executionRunBindings",
 ])
 
 /**
@@ -565,6 +579,11 @@ export const COMPANION_SYNC_PROTOCOL_TABLE_NAMES = [
   "labels",
   "issueEvents",
   "issueRuns",
+  "connectorHeartbeats",
+  "platformIdentities",
+  "connectorCallbackBindings",
+  "workflowDeployments",
+  "executionRunBindings",
 ] as const
 
 export type CompanionSyncProtocolTableName = (typeof COMPANION_SYNC_PROTOCOL_TABLE_NAMES)[number]
@@ -1251,6 +1270,19 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // content by any reading, and it is here rather than in the name pattern
   // because no spelling of "transfer" says "this holds a file".
   sftpTransfers: "encrypted-content",
+  // The contact directory behind every IM conversation: `displayName`,
+  // `avatarUrl`, `remoteUserId`, and `mergedSnapshots`, which keeps a lossless
+  // copy of every identity absorbed by a merge. "identities" says nothing
+  // content-ish to the heuristic, so it would ride to a paired phone in the
+  // clear next to `connectorDrafts`, which is ciphertext for the same
+  // conversation.
+  platformIdentities: "encrypted-content",
+  // `payload` is free-form and holds what a deferred action will replay: a
+  // built-in skill's `{skillId, args}`, or a platform's own carryover such as
+  // a Slack `viewPayload`. `actorScope` and `allowedActions` say who may fire
+  // it. The name matches none of the content-ish spellings, and this row now
+  // crosses to companions.
+  connectorCallbackBindings: "encrypted-content",
 }
 
 /**

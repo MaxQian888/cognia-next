@@ -97,6 +97,38 @@ describe("platform-identities", () => {
     expect(secondaryRow).toBeUndefined()
   })
 
+  it("mergeIdentities tombstones the absorbed row and stamps the survivor as changed", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "primary_user" })
+    const secondary = await upsertIdentity({ ...baseInput(), remoteUserId: "secondary_user" })
+    const before = (await getDb().platformIdentities.get(primary.id))!.updatedAt!
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    const result = await mergeIdentities(primary.id, secondary.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    // `lastSeenAt` is a sighting, not a change stamp: the survivor keeps its
+    // newer sighting, so only `updatedAt` can carry the merge across sync.
+    expect(result.primary.updatedAt).toBeGreaterThan(before)
+    expect(await getDb().syncTombstones.get(["platformIdentities", secondary.id])).toMatchObject({
+      table: "platformIdentities",
+      id: secondary.id,
+    })
+  })
+
+  it("unmergeIdentity stamps both the survivor and the restored row as changed", async () => {
+    const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "primary_user" })
+    const secondary = await upsertIdentity({ ...baseInput(), remoteUserId: "secondary_user" })
+    await mergeIdentities(primary.id, secondary.id)
+    const merged = (await getDb().platformIdentities.get(primary.id))!
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    const result = await unmergeIdentity(primary.id, secondary.id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(result.reason)
+    expect(result.primary.updatedAt).toBeGreaterThan(merged.updatedAt!)
+    expect(result.restored.updatedAt).toBe(result.primary.updatedAt)
+    // The restored contact was not sighted just now.
+    expect(result.restored.lastSeenAt).toBe(secondary.lastSeenAt)
+  })
+
   it("mergeIdentities appends to existing mergedFromIds", async () => {
     const primary = await upsertIdentity({ ...baseInput(), remoteUserId: "primary_user" })
     const sec1 = await upsertIdentity({ ...baseInput(), remoteUserId: "sec1" })

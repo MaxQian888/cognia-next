@@ -33,6 +33,8 @@ jest.mock("@/stores/project/project-store", () => ({
 
 import {
   __resetInstalledForTests,
+  HEARTBEAT_FIRST_SYNC_WINDOW_MS,
+  HEARTBEAT_PAGE_SIZE,
   installDesktopSyncSource,
   readDexieDelta,
 } from "./desktop-sync-source"
@@ -64,6 +66,11 @@ describe("readDexieDelta", () => {
     await db.executionRuns.clear()
     await db.memories.clear()
     await db.syncTombstones.clear()
+    await db.connectorHeartbeats.clear()
+    await db.platformIdentities.clear()
+    await db.connectorCallbackBindings.clear()
+    await db.workflowDeployments.clear()
+    await db.executionRunBindings.clear()
     ;(tauriListen as jest.Mock).mockReset()
     ;(tauriInvoke as jest.Mock).mockReset()
   })
@@ -677,6 +684,157 @@ describe("readDexieDelta", () => {
     expect(delta.next_since).toBe(60)
     expect(delta.deleted_ids).toEqual([])
     expect(delta.has_more).toBe(false)
+  })
+
+  describe("the Inbox sidebar's host-only tables", () => {
+    const beat = (id: string, at: number) => ({
+      id,
+      adapterId: "tg-1",
+      kind: "adapter.heartbeat" as const,
+      at,
+      fields: { state: "healthy" },
+    })
+
+    it("pages connectorHeartbeats on `at` and floors a cold pull to the recent window", async () => {
+      const now = 10_000_000_000
+      const nowSpy = jest.spyOn(Date, "now").mockReturnValue(now)
+      try {
+        await getDb().connectorHeartbeats.bulkPut([
+          beat("stale", now - HEARTBEAT_FIRST_SYNC_WINDOW_MS - 1),
+          beat("recent", now - 1_000),
+          beat("newest", now - 10),
+        ])
+        const cold = await readDexieDelta("connectorHeartbeats", 0)
+        expect(cold.rows.map((r) => (r as { id: string }).id)).toEqual(["recent", "newest"])
+        expect(cold.next_since).toBe(now - 10)
+        expect(cold.has_more).toBe(false)
+
+        // Incremental pulls use the real cursor, never the floor.
+        const warm = await readDexieDelta("connectorHeartbeats", now - 1_000)
+        expect(warm.rows.map((r) => (r as { id: string }).id)).toEqual(["newest"])
+      } finally {
+        nowSpy.mockRestore()
+      }
+    })
+
+    it("signals has_more when a heartbeat page fills to capacity", async () => {
+      const now = 10_000_000_000
+      const nowSpy = jest.spyOn(Date, "now").mockReturnValue(now)
+      try {
+        await getDb().connectorHeartbeats.bulkPut(
+          Array.from({ length: HEARTBEAT_PAGE_SIZE + 1 }, (_, i) => beat(`h${i}`, now - 2_000 + i))
+        )
+        const first = await readDexieDelta("connectorHeartbeats", 0)
+        expect(first.rows).toHaveLength(HEARTBEAT_PAGE_SIZE)
+        expect(first.has_more).toBe(true)
+        const second = await readDexieDelta("connectorHeartbeats", first.next_since)
+        expect(second.rows).toHaveLength(1)
+        expect(second.has_more).toBe(false)
+      } finally {
+        nowSpy.mockRestore()
+      }
+    })
+
+    it("cursors platformIdentities on updatedAt, falling back to lastSeenAt for legacy rows", async () => {
+      await getDb().platformIdentities.bulkPut([
+        {
+          id: "legacy",
+          platform: "telegram",
+          adapterId: "tg-1",
+          remoteUserId: "u1",
+          lastSeenAt: 5,
+        },
+        // A merge rewrote this tree without a sighting: lastSeenAt is old, updatedAt is new.
+        {
+          id: "merged",
+          platform: "telegram",
+          adapterId: "tg-1",
+          remoteUserId: "u2",
+          lastSeenAt: 3,
+          updatedAt: 20,
+        },
+        {
+          id: "quiet",
+          platform: "telegram",
+          adapterId: "tg-1",
+          remoteUserId: "u3",
+          lastSeenAt: 8,
+          updatedAt: 8,
+        },
+      ] as never[])
+      const delta = await readDexieDelta("platformIdentities", 8)
+      expect(delta.rows.map((r) => (r as { id: string }).id).sort()).toEqual(["merged"])
+      expect(delta.next_since).toBe(20)
+      const cold = await readDexieDelta("platformIdentities", 0)
+      expect(cold.rows.map((r) => (r as { id: string }).id).sort()).toEqual([
+        "legacy",
+        "merged",
+        "quiet",
+      ])
+    })
+
+    it("cursors connectorCallbackBindings on the later of createdAt and consumedAt, skipping expired rows", async () => {
+      const now = 10_000_000_000
+      const nowSpy = jest.spyOn(Date, "now").mockReturnValue(now)
+      try {
+        const base = {
+          adapterId: "tg-1",
+          kind: "callback_query" as const,
+          surfaceId: "s",
+          expiresAt: now + 1_000,
+        }
+        await getDb().connectorCallbackBindings.bulkPut([
+          { ...base, id: "tg-1:old", actionId: "old", createdAt: 10 },
+          { ...base, id: "tg-1:consumed", actionId: "consumed", createdAt: 10, consumedAt: 50 },
+          { ...base, id: "tg-1:new", actionId: "new", createdAt: 60 },
+          { ...base, id: "tg-1:dead", actionId: "dead", createdAt: 70, expiresAt: now - 1 },
+        ])
+        const delta = await readDexieDelta("connectorCallbackBindings", 40)
+        expect(delta.rows.map((r) => (r as { actionId: string }).actionId).sort()).toEqual([
+          "consumed",
+          "new",
+        ])
+        expect(delta.next_since).toBe(60)
+      } finally {
+        nowSpy.mockRestore()
+      }
+    })
+
+    it("reads workflowDeployments past the cursor on their indexed updatedAt", async () => {
+      const row = (id: string, updatedAt: number) => ({
+        id,
+        accountId: "a",
+        workflowId: `wf-${id}`,
+        environment: "production",
+        versionId: "v1",
+        revision: 1,
+        status: "active",
+        createdAt: 1,
+        updatedAt,
+      })
+      await getDb().workflowDeployments.bulkPut([row("d-old", 5), row("d-new", 15)] as never[])
+      const delta = await readDexieDelta("workflowDeployments", 5)
+      expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["d-new"])
+      expect(delta.next_since).toBe(15)
+    })
+
+    it("reads executionRunBindings past the cursor on updatedAt", async () => {
+      const row = (id: string, updatedAt: number) => ({
+        id,
+        runId: `run-${id}`,
+        adapterId: "tg-1",
+        conversationKey: "telegram:tg-1:chat",
+        status: "active",
+        deliveryMode: "native",
+        lastProjectedRevision: 0,
+        createdAt: 1,
+        updatedAt,
+      })
+      await getDb().executionRunBindings.bulkPut([row("b-old", 5), row("b-new", 15)] as never[])
+      const delta = await readDexieDelta("executionRunBindings", 5)
+      expect(delta.rows.map((r) => (r as { id: string }).id)).toEqual(["b-new"])
+      expect(delta.next_since).toBe(15)
+    })
   })
 
   it("emits settings with Date.now cursor when the singleton has no updatedAt", async () => {

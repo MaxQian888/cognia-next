@@ -54,6 +54,11 @@ import { syncSessions } from "./handlers/sessions"
 import { syncSkills } from "./handlers/skills"
 import { syncConnectorDrafts } from "./handlers/connector-drafts"
 import { syncOutboundQueue } from "./handlers/outbound-queue"
+import { syncConnectorHeartbeats } from "./handlers/connector-heartbeats"
+import { syncPlatformIdentities } from "./handlers/platform-identities"
+import { syncConnectorCallbackBindings } from "./handlers/connector-callback-bindings"
+import { syncWorkflowDeployments } from "./handlers/workflow-deployments"
+import { syncExecutionRunBindings } from "./handlers/execution-run-bindings"
 import { syncTerminalHistory } from "./handlers/terminal-history"
 import { syncTwins, syncTwinDrafts } from "./handlers/twins"
 import {
@@ -175,6 +180,13 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   // switcher and every issue read resolve against it, so it has to land
   // before the surfaces that filter on it, not alongside the settings pages.
   { table: "projects", stage: "interactive", run: syncProjects },
+  // The Inbox sidebar's host-only tables. The delegation chips on every
+  // conversation row and the connection-loss banner are visible the moment
+  // the Inbox paints, so their tables are wanted within seconds; the contact
+  // drawer, the callback inspector and the override form open on demand and
+  // fill in behind them (background, below).
+  { table: "executionRunBindings", stage: "interactive", run: syncExecutionRunBindings },
+  { table: "connectorHeartbeats", stage: "interactive", run: syncConnectorHeartbeats },
 
   // ── background ────────────────────────────────────────────────────────
   { table: "skills", stage: "background", run: syncSkills },
@@ -201,6 +213,11 @@ const DEFAULT_HANDLERS: RegisteredHandler[] = [
   { table: "issueRuns", stage: "background", run: syncIssueRuns },
   { table: "plugins", stage: "background", run: syncPlugins },
   { table: "adapterInstances", stage: "background", run: syncAdapterInstances },
+  // After the adapters they hang off: a contact, a binding or a deployment
+  // keyed by an adapter that has not arrived is a row with nothing to attach to.
+  { table: "platformIdentities", stage: "background", run: syncPlatformIdentities },
+  { table: "connectorCallbackBindings", stage: "background", run: syncConnectorCallbackBindings },
+  { table: "workflowDeployments", stage: "background", run: syncWorkflowDeployments },
   // Long-term memory. Decrypts row by row against the profile DEK, so it is
   // the most CPU-expensive apply in the pipeline — last, and interruptible.
   { table: "memories", stage: "background", run: syncMemories },
@@ -324,6 +341,18 @@ export const COMPANION_SYNC_DOMAINS: Readonly<
   // Deletion rides the `sessions` tombstone rather than one of its own, so an
   // orphan row is possible and harmless, see readSessionStateDelta.
   sessionState: syncDomain("append-only", "internal"),
+  // Heartbeats are appended on `at`, pruned by the host after 48 h without
+  // tombstones and aged out client-side on the same window.
+  connectorHeartbeats: syncDomain("ttl", "internal", "opaque"),
+  // A merge deletes the absorbed contact and tombstones it.
+  platformIdentities: syncDomain("tombstone"),
+  // Cursored on max(createdAt, consumedAt); rows expire on their own
+  // `expiresAt`, client-side too, and the host never tombstones them.
+  connectorCallbackBindings: syncDomain("ttl", "confidential", "opaque"),
+  // Disabled in place, never deleted. `internal`: ids, environments, revisions.
+  workflowDeployments: syncDomain("append-only", "internal"),
+  // Settled in place, never deleted.
+  executionRunBindings: syncDomain("append-only"),
 })
 
 interface SyncState {

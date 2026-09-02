@@ -313,6 +313,35 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Connector outbound delivery status projection (no message payload; host-owned, never dispatched by the client)".to_string(),
             has_tombstones: false,
         },
+        // The Inbox sidebar's host-only tables. Each is read by a surface the
+        // thin client mounts, and none had a sync path, so every one of them
+        // rendered against an empty mirror. Cursors are per table (see the
+        // readers in `lib/sync/desktop-sync-source.ts`).
+        SyncTableDescriptor {
+            name: "connectorHeartbeats".to_string(),
+            description: "Adapter heartbeat snapshots (paged on `at`; the host prunes after 48 h without tombstones and the client ages them out on the same window)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "platformIdentities".to_string(),
+            description: "Contact directory for the Inbox profile drawer (cursored on updatedAt, falling back to lastSeenAt; a merge tombstones the absorbed row)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "connectorCallbackBindings".to_string(),
+            description: "Interactive-surface callback bindings (cursored on max(createdAt, consumedAt); expire client-side, never dispatched by the client)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "workflowDeployments".to_string(),
+            description: "Published workflow deployments per environment (read-only mirror for the Inbox override form; cursored on updatedAt)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "executionRunBindings".to_string(),
+            description: "Run-to-conversation delivery bindings behind the Inbox delegation chips (cursored on updatedAt; controls travel back as run RPCs)".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -344,6 +373,11 @@ mod tests {
         assert!(r.contains("agentTeamTasks"));
         assert!(r.contains("connectorDrafts"));
         assert!(r.contains("outboundQueue"));
+        assert!(r.contains("connectorHeartbeats"));
+        assert!(r.contains("platformIdentities"));
+        assert!(r.contains("connectorCallbackBindings"));
+        assert!(r.contains("workflowDeployments"));
+        assert!(r.contains("executionRunBindings"));
         // No literal total. This was `24` and went stale the moment a table was
         // legitimately added — the same rot `command_manifest.rs` records: a
         // hardcoded inventory count goes red on every correct addition, and a

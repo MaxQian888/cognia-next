@@ -102,6 +102,11 @@ export const SYNC_TABLE_SOURCES: Readonly<Record<SyncableTable, string>> = Objec
   labels: "labels",
   issueEvents: "issueEvents",
   issueRuns: "issueRuns",
+  connectorHeartbeats: "connectorHeartbeats",
+  platformIdentities: "platformIdentities",
+  connectorCallbackBindings: "connectorCallbackBindings",
+  workflowDeployments: "workflowDeployments",
+  executionRunBindings: "executionRunBindings",
 })
 
 /** The Dexie surface this module needs — narrowed so tests can hand it a stub. */

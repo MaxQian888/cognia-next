@@ -568,6 +568,15 @@ export interface PlatformIdentityRow extends PlatformIdentity {
   /** Last time we observed this identity; helps cleanup. */
   lastSeenAt: number
   /**
+   * Last time any writer changed the row (companion-sync cursor). `lastSeenAt`
+   * is an observation stamp, so a merge or unmerge that rewrites the tree
+   * without a sighting leaves it untouched, and a paired client would keep the
+   * old tree forever. Non-indexed on purpose: the directory is scanned whole by
+   * `upsertIdentity` already, and an index would cost a schema reset. Rows
+   * written before this field existed fall back to `lastSeenAt`.
+   */
+  updatedAt?: number
+  /**
    * Lossless merge history (CRM, schema v83 — non-indexed blob, no migration).
    * Each `mergeIdentities` call snapshots the absorbed secondary row here so
    * `unmergeIdentity` can restore it exactly. Parallel to `mergedFromIds`

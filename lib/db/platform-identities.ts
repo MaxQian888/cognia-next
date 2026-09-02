@@ -9,6 +9,8 @@
 import Dexie from "dexie"
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import { recordTombstones } from "@/lib/sync/tombstones"
+
 import type { PlatformIdentityRow } from "./connector-types"
 import { getDb } from "./schema"
 
@@ -127,7 +129,7 @@ export async function upsertIdentity(input: UpsertIdentityInput): Promise<Platfo
         lastSeenAt: now,
       }))
       if (!nested.matched) continue
-      const primary = { ...nested.identity, lastSeenAt: now }
+      const primary = { ...nested.identity, lastSeenAt: now, updatedAt: now }
       await db.platformIdentities.put(primary)
       return primary
     }
@@ -141,6 +143,7 @@ export async function upsertIdentity(input: UpsertIdentityInput): Promise<Platfo
       avatarUrl: input.avatarUrl,
       mergedFromIds: [],
       lastSeenAt: now,
+      updatedAt: now,
     }
     await db.platformIdentities.add(row)
     return row
@@ -154,7 +157,10 @@ export async function mergeIdentities(
 ): Promise<IdentityMergeResult> {
   if (primaryId === secondaryId) return { ok: false, reason: "same_identity" }
   const db = getDb()
-  return db.transaction("rw", db.platformIdentities, async () => {
+  // `syncTombstones` is in scope so the absorbed row's tombstone commits with
+  // the delete. Outside the scope Dexie rejects the write and
+  // `recordTombstones` swallows it, and the merge would never reach a client.
+  return db.transaction("rw", db.platformIdentities, db.syncTombstones, async () => {
     const rows = await db.platformIdentities.toArray()
     const primary = rows.find((row) => row.id === primaryId)
     const secondary = rows.find((row) => row.id === secondaryId)
@@ -182,14 +188,19 @@ export async function mergeIdentities(
     }
 
     const absorbedIds = flattenIdentityTree(secondary).map((identity) => identity.id)
+    const now = Date.now()
     const merged: PlatformIdentityRow = {
       ...primary,
       mergedFromIds: [...new Set([...(primary.mergedFromIds ?? []), ...absorbedIds])],
       mergedSnapshots: [...(primary.mergedSnapshots ?? []), secondary],
       lastSeenAt: Math.max(primary.lastSeenAt, secondary.lastSeenAt),
+      updatedAt: now,
     }
     await db.platformIdentities.put(merged)
     await db.platformIdentities.delete(secondaryId)
+    // The absorbed row is the one genuine deletion this directory performs;
+    // without the tombstone a paired client would list the contact twice.
+    await recordTombstones("platformIdentities", [secondaryId], now)
     return { ok: true, primary: merged }
   })
 }
@@ -220,16 +231,21 @@ export async function unmergeIdentity(
     )
     if (conflict) return { ok: false, reason: "identity_conflict" }
 
+    const now = Date.now()
     const updated: PlatformIdentityRow = {
       ...primary,
       mergedFromIds: (primary.mergedFromIds ?? []).filter((id) => !restoredIds.has(id)),
       mergedSnapshots: (primary.mergedSnapshots ?? []).filter(
         (identity) => identity.id !== secondaryId
       ),
+      updatedAt: now,
     }
+    // The restored row keeps its own `lastSeenAt` (nobody saw it just now) but
+    // is stamped as changed so it crosses to a paired client again.
+    const restored: PlatformIdentityRow = { ...snapshot, updatedAt: now }
     await db.platformIdentities.put(updated)
-    await db.platformIdentities.add(snapshot)
-    return { ok: true, primary: updated, restored: snapshot }
+    await db.platformIdentities.add(restored)
+    return { ok: true, primary: updated, restored }
   })
 }
 

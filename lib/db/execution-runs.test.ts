@@ -258,6 +258,33 @@ describe("execution run journal", () => {
     })
   })
 
+  it("stamps updatedAt on a binding patch that omits it, so the sync cursor moves", async () => {
+    await createExecutionRunBinding({
+      id: "binding-stamp",
+      runId: "run-1",
+      adapterId: "lark-1",
+      conversationKey: "lark:lark-1:chat-1",
+      status: "active",
+      deliveryMode: "native",
+      lastProjectedRevision: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(4_242)
+    try {
+      await updateExecutionRunBinding("binding-stamp", { status: "finished" })
+    } finally {
+      nowSpy.mockRestore()
+    }
+    expect(await getExecutionRunBinding("binding-stamp")).toMatchObject({
+      status: "finished",
+      updatedAt: 4_242,
+    })
+    // An explicit stamp is kept as given.
+    await updateExecutionRunBinding("binding-stamp", { status: "disabled", updatedAt: 9 })
+    expect((await getExecutionRunBinding("binding-stamp"))?.updatedAt).toBe(9)
+  })
+
   it("puts and lists bindings without duplicating their durable identity", async () => {
     const binding = {
       id: "binding-put",

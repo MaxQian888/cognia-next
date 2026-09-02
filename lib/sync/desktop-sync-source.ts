@@ -27,7 +27,15 @@ import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { ExecutionRun } from "@/types/execution/run"
 import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
-import type { ConnectorDraftRow, OutboundJobRow } from "@/lib/db/connector-types"
+import type {
+  ConnectorDraftRow,
+  ConnectorHeartbeatRow,
+  OutboundJobRow,
+  PlatformIdentityRow,
+} from "@/lib/db/connector-types"
+import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
+import type { WorkflowDeployment } from "@/types/workflow/deployment"
+import type { ExecutionRunBinding } from "@/types/execution/run"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "@/lib/db/schema"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
@@ -223,6 +231,16 @@ export async function readDexieDelta(
       return readConnectorDraftsDelta(since)
     case "outboundQueue":
       return readOutboundQueueDelta(since)
+    case "connectorHeartbeats":
+      return readConnectorHeartbeatsDelta(since)
+    case "platformIdentities":
+      return readPlatformIdentitiesDelta(since)
+    case "connectorCallbackBindings":
+      return readConnectorCallbackBindingsDelta(since)
+    case "workflowDeployments":
+      return readWorkflowDeploymentsDelta(since)
+    case "executionRunBindings":
+      return readExecutionRunBindingsDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -656,6 +674,126 @@ async function readOutboundQueueDelta(
   // row this host does not own.
   const owned = rows.filter((row) => row.syncedFromHost !== true)
   return finalizeDelta("outboundQueue", owned.map(projectOutboundJobRow), since)
+}
+
+// ── The Inbox sidebar's host-only tables ─────────────────────────────────
+//
+// Five tables the Inbox reads that a thin client could only ever see empty.
+// Each carries a different notion of "changed", so each cursor is its own:
+// none of them has an indexed `updatedAt` except deployments, and adding an
+// index means a schema reset for every existing database, which a mirror is
+// not worth. The two scans below are bounded the same way the tables are.
+
+/** Heartbeats a cold client pulls: the newest hour, then incremental. */
+export const HEARTBEAT_FIRST_SYNC_WINDOW_MS = 60 * 60 * 1000
+export const HEARTBEAT_PAGE_SIZE = 500
+
+/**
+ * Adapter heartbeat snapshots — append-only, cursored on the indexed `at`.
+ *
+ * A running adapter writes one every 30 s, so a first pull is floored to the
+ * last hour (the health badge and the connection-loss banner only need the
+ * newest snapshot per adapter) and paged by `at` so a busy host streams in
+ * bounded slices. The host prunes after 48 h without tombstones; the client
+ * handler ages its mirror out on the same window.
+ */
+async function readConnectorHeartbeatsDelta(
+  since: number
+): Promise<SyncDelta<ConnectorHeartbeatRow>> {
+  const floor = since === 0 ? Math.max(0, Date.now() - HEARTBEAT_FIRST_SYNC_WINDOW_MS) : since
+  const rows = await getDb()
+    .connectorHeartbeats.where("at")
+    .above(floor)
+    .limit(HEARTBEAT_PAGE_SIZE)
+    .toArray()
+  return finalizeDelta(
+    "connectorHeartbeats",
+    rows,
+    since,
+    rows.length === HEARTBEAT_PAGE_SIZE,
+    (row) => row.at
+  )
+}
+
+/** When an identity row last changed: the writer stamp, or the sighting for legacy rows. */
+export function identityChangedAt(row: Pick<PlatformIdentityRow, "updatedAt" | "lastSeenAt">) {
+  return Number(row.updatedAt ?? row.lastSeenAt ?? 0)
+}
+
+/**
+ * The contact directory behind the Inbox profile drawer.
+ *
+ * Cursored on `updatedAt` (non-indexed, stamped by every writer in
+ * `lib/db/platform-identities.ts`) with `lastSeenAt` as the pre-field
+ * fallback. `lastSeenAt` alone is not a cursor: a merge that absorbs a
+ * contact keeps the primary's newer sighting, so the rewritten tree would
+ * never re-cross. A whole-table scan is what `upsertIdentity` already does
+ * on every inbound message, so the reader costs nothing new. Merges delete
+ * the absorbed row through a tombstone.
+ */
+async function readPlatformIdentitiesDelta(since: number): Promise<SyncDelta<PlatformIdentityRow>> {
+  const rows = await getDb()
+    .platformIdentities.filter((row) => identityChangedAt(row) > since)
+    .toArray()
+  return finalizeDelta("platformIdentities", rows, since, false, identityChangedAt)
+}
+
+/** When a callback binding last changed: written, or consumed. */
+export function bindingActivityAt(
+  row: Pick<ConnectorCallbackBindingRow, "createdAt" | "consumedAt">
+): number {
+  return Math.max(Number(row.createdAt ?? 0), Number(row.consumedAt ?? 0))
+}
+
+/**
+ * Interactive-surface callback bindings.
+ *
+ * A row is written once (`createdAt`, indexed) and touched once more when a
+ * consume-once kind fires (`consumedAt`, not indexed), so the cursor is the
+ * later of the two and the read is the same bounded scan the daily cleanup
+ * performs. Rows already expired at read time are skipped: the client would
+ * only sweep them again. Deletions are TTL-driven and not tombstoned; the
+ * client handler expires its mirror on the row's own `expiresAt`.
+ */
+async function readConnectorCallbackBindingsDelta(
+  since: number
+): Promise<SyncDelta<ConnectorCallbackBindingRow>> {
+  const now = Date.now()
+  const rows = await getDb()
+    .connectorCallbackBindings.filter(
+      (row) =>
+        bindingActivityAt(row) > since && !(row.expiresAt !== undefined && row.expiresAt < now)
+    )
+    .toArray()
+  return finalizeDelta("connectorCallbackBindings", rows, since, false, bindingActivityAt)
+}
+
+/**
+ * Published deployments, one per workflow × environment. Every writer in
+ * `publication-lifecycle.ts` stamps the indexed `updatedAt`, and a deployment
+ * is disabled in place rather than deleted, so this is a plain range read.
+ */
+async function readWorkflowDeploymentsDelta(since: number): Promise<SyncDelta<WorkflowDeployment>> {
+  const rows = await getDb().workflowDeployments.where("updatedAt").above(since).toArray()
+  return finalizeDelta("workflowDeployments", rows, since)
+}
+
+/**
+ * Run-to-conversation delivery bindings behind the delegation chips.
+ *
+ * `updatedAt` is required on the row and stamped by every writer
+ * (`updateExecutionRunBinding` fills it in when a patch omits it), but it is
+ * not indexed, so this scans. One row exists per run a conversation
+ * delegated, which bounds the table by run history, not by traffic. Never
+ * deleted, so no tombstones.
+ */
+async function readExecutionRunBindingsDelta(
+  since: number
+): Promise<SyncDelta<ExecutionRunBinding>> {
+  const rows = await getDb()
+    .executionRunBindings.filter((row) => Number(row.updatedAt ?? row.createdAt ?? 0) > since)
+    .toArray()
+  return finalizeDelta("executionRunBindings", rows, since)
 }
 
 async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {

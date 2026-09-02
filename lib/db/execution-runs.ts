@@ -148,7 +148,13 @@ export async function updateExecutionRunBinding(
   bindingId: string,
   patch: Partial<ExecutionRunBinding>
 ): Promise<void> {
-  await getDb().executionRunBindings.update(bindingId, patch)
+  // `updatedAt` is the companion-sync cursor for this table
+  // (`readExecutionRunBindingsDelta`); a patch that leaves it alone would
+  // change the row without ever re-sending it.
+  await getDb().executionRunBindings.update(bindingId, {
+    ...patch,
+    updatedAt: patch.updatedAt ?? Date.now(),
+  })
 }
 
 export async function listExecutionRunEvents(runId: string): Promise<RunEvent[]> {
