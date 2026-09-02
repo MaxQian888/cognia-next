@@ -11,9 +11,11 @@ import {
   type ProviderOperationHandlerRegistry,
 } from "../registry"
 import { ACCOUNT_HANDLERS } from "./account"
+import { BATCHES_HANDLERS } from "./batches"
 import { capabilitiesReadHandler } from "./capabilities"
 import { DISCOVERY_HANDLERS } from "./discovery"
 import { FILES_HANDLERS } from "./files"
+import { FINE_TUNING_HANDLERS } from "./fine-tuning"
 import { HEALTH_HANDLERS } from "./health"
 import { LANGUAGE_HANDLERS } from "./language"
 import { MEDIA_HANDLERS } from "./media"
@@ -21,6 +23,7 @@ import { MODERATION_HANDLERS } from "./moderation"
 import { RETRIEVAL_HANDLERS } from "./retrieval"
 import { TOKENS_HANDLERS } from "./tokens"
 import { VECTOR_STORES_HANDLERS } from "./vector-stores"
+import { VIDEO_JOBS_HANDLERS } from "./video-jobs"
 
 /** Every built-in handler, in registration order. Extended batch by batch. */
 export const BUILT_IN_PROVIDER_OPERATION_HANDLERS: readonly ProviderOperationHandlerRegistration[] =
@@ -36,6 +39,9 @@ export const BUILT_IN_PROVIDER_OPERATION_HANDLERS: readonly ProviderOperationHan
     ...ACCOUNT_HANDLERS,
     ...FILES_HANDLERS,
     ...VECTOR_STORES_HANDLERS,
+    ...BATCHES_HANDLERS,
+    ...FINE_TUNING_HANDLERS,
+    ...VIDEO_JOBS_HANDLERS,
   ] as ProviderOperationHandlerRegistration[]
 
 const registered = new WeakSet<ProviderOperationHandlerRegistry>()

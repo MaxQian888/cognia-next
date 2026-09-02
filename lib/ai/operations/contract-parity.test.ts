@@ -28,13 +28,7 @@ import { ProviderOperationHandlerRegistry } from "./registry"
 /** Operations the matrix claims for at least one built-in but no handler serves yet. */
 export const PENDING_OPERATIONS: ReadonlySet<ProviderOperationId> = new Set<ProviderOperationId>(
   PROVIDER_OPERATION_IDS.filter(
-    (id) =>
-      id === "images.edit" ||
-      id === "translation.create" ||
-      id === "realtime.connect" ||
-      (id.startsWith("videos.") && id !== "videos.generate") ||
-      id.startsWith("batches.") ||
-      id.startsWith("fine-tuning.")
+    (id) => id === "images.edit" || id === "translation.create" || id === "realtime.connect"
   )
 )
 

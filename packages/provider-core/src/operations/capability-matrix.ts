@@ -440,6 +440,8 @@ function when(fact: boolean, yes: StaticSupport, reason: string): StaticSupport 
 
 interface StaticSupportInput {
   id: ProviderOperationId
+  /** Built-in provider id, when known. Custom deployments pass none. */
+  providerId?: string
   facts: ProviderSurfaceFacts
   protocol: ApiProtocol
   chat: boolean
@@ -447,10 +449,52 @@ interface StaticSupportInput {
   name: string
 }
 
+/**
+ * Surfaces a vendor really offers but this host has no wire for. Naming the
+ * gap here keeps the cell an honest `unsupported` with the true reason,
+ * instead of pretending the vendor lacks the API. Keyed by operation
+ * prefix so a whole family reads one entry.
+ */
+export const HOST_GAPS: Record<string, Partial<Record<"batches" | "fine-tuning", string>>> = {
+  bedrock: {
+    batches: "Bedrock model invocation jobs need SigV4-signed AWS APIs this host does not wire",
+    "fine-tuning": "Bedrock customization jobs need SigV4-signed AWS APIs this host does not wire",
+  },
+  fireworks: {
+    batches: "Fireworks batch inference jobs use an account-scoped API this host does not wire",
+    "fine-tuning": "Fireworks fine-tuning jobs use an account-scoped API this host does not wire",
+  },
+  doubao: {
+    batches: "Volcengine Ark batch inference jobs use a console API this host does not wire",
+  },
+  volcengine: {
+    batches: "Volcengine Ark batch inference jobs use a console API this host does not wire",
+  },
+  cohere: {
+    "fine-tuning": "Cohere fine-tuning uses its own finetuned-models API this host does not wire",
+  },
+  replicate: {
+    "fine-tuning": "Replicate trainings use a model-version API this host does not wire",
+  },
+  google: { "fine-tuning": "Gemini tuned models use a tuning API this host does not wire" },
+}
+
+function hostGap(providerId: string | undefined, id: ProviderOperationId): string | undefined {
+  if (!providerId) return undefined
+  const family = id.startsWith("batches.")
+    ? "batches"
+    : id.startsWith("fine-tuning.")
+      ? "fine-tuning"
+      : undefined
+  return family ? HOST_GAPS[providerId]?.[family] : undefined
+}
+
 /** The one place a provider × operation static answer is decided. */
 export function staticOperationSupport(input: StaticSupportInput): StaticSupport {
   const { id, facts, protocol, chat, toolCapable, name } = input
   const noChat = `${name} exposes no chat endpoint`
+  const gap = hostGap(input.providerId, id)
+  if (gap) return NO(gap)
   switch (id) {
     // discovery: always answerable
     case "models.list":
@@ -706,6 +750,7 @@ export function buildProviderOperationProfile(
       }
       const verdict = staticOperationSupport({
         id,
+        providerId: entry.id,
         facts,
         protocol: entry.protocol,
         chat,

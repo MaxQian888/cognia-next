@@ -59,6 +59,7 @@ export function authHeaders(
 }
 
 export function joinUrl(baseURL: string, path: string): string {
+  if (!path) return baseURL
   return `${baseURL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
 }
 
