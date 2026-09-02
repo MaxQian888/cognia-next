@@ -1801,6 +1801,7 @@
           "workflow": "工作流"
         },
         "unavailable": {
+          "companionShell": "只能在运行 Agent 的宿主上使用，配对设备不可用",
           "notImplemented": "尚未实现",
           "viaMention": "用 @ 提及子代理",
           "viaSlashCommand": "用 /workflow 命令"
@@ -1848,6 +1849,22 @@
       "title": "本轮将以此运行"
     },
     "title": "模式",
+    "verification": {
+      "failed": "复核未能运行",
+      "noPoints": "Reviewer 没有提出具体问题。",
+      "openSession": "打开 Reviewer 会话",
+      "points": "发现",
+      "running": "独立 Reviewer 正在复核这条回复",
+      "sessionMissing": "本机没有该 Reviewer 会话。",
+      "title": "独立复核",
+      "verdict": {
+        "fail": "未通过",
+        "pass": "通过",
+        "unsure": "不确定"
+      },
+      "withDiff": "已对照工作区改动复核",
+      "withoutDiff": "仅对照回复内容复核"
+    },
     "warnings": {
       "authority-capped-by-ceiling": "权限已降为 {applied}：子 Agent 不能超过父 Agent。",
       "authority-capped-by-preset": "权限已降为 {applied}：{preset} 预置不允许 {requested}。",
@@ -2204,6 +2221,8 @@
     "label": "代理运行时",
     "lastCheckFailed": "上次检查失败 — 可能无法启动。",
     "needsAuth": "需要登录 — 请在“管理代理”中连接。",
+    "noMatches": "没有匹配的运行时。",
+    "searchPlaceholder": "筛选运行时",
     "tooltip": "当前代理运行时：Cognia 自带运行时，或某个外部代理"
   },
   "agentStatus": {
@@ -4285,6 +4304,29 @@
       "windowTitlesHint": "使用 * 作为通配符的 Glob 模式（例如 *Excel* 或 *记事本*）。"
     }
   },
+  "board": {
+    "addToColumn": "在「{column}」中新建",
+    "collapseColumn": "折叠{column}",
+    "dnd": {
+      "cancelled": "已取消拖动，{item} 仍在{column}。",
+      "denied": "该位置不接受 {item}。",
+      "dropped": "{item} 已放入{column}。",
+      "instructions": "按空格键拾起卡片，用方向键在列之间移动，空格键放下，Esc 取消。按回车键则是打开卡片。",
+      "over": "{item} 将放入{column}。",
+      "pickedUp": "已从{column}拾起 {item}。"
+    },
+    "emptyColumn": "这里还没有内容",
+    "expandColumn": "展开{column}",
+    "originIssue": {
+      "label": "来自 {identifier}",
+      "open": "在议题中打开 {identifier}"
+    },
+    "squadRun": {
+      "label": "小队：{name}",
+      "open": "打开 {name} 的小队看板",
+      "unknownSquad": "小队"
+    }
+  },
   "browser": {
     "actions": {
       "back": "后退",
@@ -5554,6 +5596,12 @@
         "userLabel": "用户 memory"
       },
       "modelPicker": {
+        "agentModelSwitchFailed": "该 agent 拒绝了这个模型：{reason}",
+        "agentModelsGroup": "Agent 提供的模型",
+        "agentModelsLoading": "正在询问 {agent} 有哪些模型。",
+        "agentNoModels": "{agent} 没有报告自己的模型。下面这些是在 Cognia 中配置的模型。",
+        "agentNoSession": "{agent} 已连接但没有打开任何会话，它的模型会在第一轮对话时出现。",
+        "agentNotConnected": "{agent} 尚未连接，因此还列不出它自己的模型。",
         "autoBadge": "自动",
         "autoBadgeHint": "已开启自动路由——每条提示按难度选择模型档位。",
         "autoEnableHint": "选择后为当前对话启用可靠性优先路由",
@@ -9802,15 +9850,16 @@
       "completeSetupThenRetry": "完成该智能体的配置，然后重试连接。",
       "contactAdministrator": "该限制由部署此 Codex 的人设定，请联系他们放宽。",
       "createNewSession": "当恢复和分叉不可用时，请新建一个会话。",
+      "grantAgentControlOnTheHost": "如果已配对 Host，请在该 Host 上为这台设备授予 Agent Control。",
       "inspectHealthEndpoint": "检查智能体的健康检查接口和日志。",
       "reconnectAndRetry": "重新连接后再试。",
       "resaveConfiguration": "重新保存该智能体的配置。",
       "resumeWithSessionIdOrAllowNew": "用已有的 session id 恢复，或允许创建新会话。",
       "retryAfterReconnect": "重新连接后重试。",
       "selectLocalSurface": "选择一个可本地执行的入口以直接连接。",
+      "startOnAProcessCapableRuntime": "在能启动进程的地方运行这个 agent：桌面端应用，或一台已配对的 Host。",
       "switchToAcp": "将该智能体的协议切换为 ACP。",
       "useAllowedSandboxOrApproval": "改用此 Codex 受管配置允许的沙盒模式或审批策略。",
-      "useDesktopRuntime": "请以桌面端应用运行 Cognia——stdio 传输需要它。",
       "useOfficialWorkflow": "请使用该产品自身的官方流程。",
       "useSupportedOperations": "请仅使用该端点支持的操作。"
     },
@@ -11330,6 +11379,18 @@
     "commands": "命令",
     "commandsDescription": "此外部代理提供的斜杠命令",
     "commandsTooltip": "查看可用的代理命令",
+    "credential": {
+      "checking": "正在检查登录……",
+      "none": "未登录",
+      "partial": "{ready}/{total} 已登录",
+      "ready": "已登录",
+      "unreadable": "登录状态无法确认"
+    },
+    "detectionInstalled": "已安装",
+    "detectionInstalledWithVersion": "已安装 v{version}",
+    "detectionMissing": "未找到",
+    "detectionNotLocal": "远程运行时",
+    "detectionPackageRunner": "启动时下载",
     "disabled": "外部代理已禁用",
     "elicitation": {
       "decline": "拒绝",
@@ -11344,6 +11405,17 @@
     },
     "executionPlan": "执行计划",
     "externalAgents": "外部代理",
+    "failure": {
+      "causes": "它包裹的原因",
+      "connect": "无法连接",
+      "copied": "报告已复制",
+      "copy": "复制报告",
+      "disconnect": "无法断开",
+      "execute": "运行失败",
+      "retry": "重试",
+      "retrying": "正在重试",
+      "session": "会话操作失败"
+    },
     "hostConfigs": {
       "count": "{count, plural, =0 {暂无配置} other {# 个配置}}",
       "deleteLabel": "删除 {name}",
@@ -11397,6 +11469,15 @@
       "customProtocolComingSoon": "自定义协议（即将支持）",
       "defaultModel": "默认模型",
       "defaultModelHint": "可选。每轮对话默认使用的 \"provider/model\" 标识（如 anthropic/claude-sonnet-4-5），可被单轮覆盖。",
+      "detectionRetry": "重新检测",
+      "detectionRunning": "正在检测这台机器……",
+      "detectionUnavailable": {
+        "failed": "已向 Host 询问，但没有得到回应。",
+        "manifestMissing": "已配对的 Host 尚未报告完它支持的能力。",
+        "noHost": "这里没有可以列出已安装 agent 的运行时。",
+        "notGranted": "这台设备无权向该 Host 询问它安装了什么。",
+        "unsupported": "已配对的 Host 不提供已安装 agent 的列表。"
+      },
       "diagnostics": {
         "adapter": "适配器：{name}",
         "authMethods": "认证方式：{methods}",
@@ -11461,9 +11542,15 @@
       "noResumableSessions": "暂无可恢复的会话。",
       "noteLabel": "提示",
       "officialDocs": "官方文档",
-      "opencodeDesktopRuntimeWarning": "自动启动 OpenCode 服务器需要 Cognia 桌面运行时。Web 预览模式下请配置服务器地址以连接。",
+      "opencodeAutoSpawnNeedsAProcess": "自动启动 OpenCode 服务器需要启动一个本地进程。",
       "otherOfficialSurfaces": "其他官方接入面",
       "pluginProtocolContributed": "由插件提供",
+      "processPlaneWarning": {
+        "manifestMissing": "已配对的 Host 还没报完自己支持什么。连接完成后这条提示会自动消失。",
+        "noHost": "当前没有能启动进程的地方：请以桌面端应用打开 Cognia，或配对一台 Host 并选中它。",
+        "notGranted": "已配对的 Host 可以启动，但这台设备还没有在它上面获得 Agent Control 授权。",
+        "unsupported": "已配对的 Host 不为它的设备启动 agent 进程。"
+      },
       "protocolViaTransport": "{protocol}（{transport}）",
       "quickStartPreset": "快速预设",
       "refresh": "刷新",
@@ -11480,7 +11567,7 @@
       "serverPort": "服务器端口",
       "serverUsername": "服务器用户名",
       "sessions": "会话",
-      "stdioDesktopRuntimeWarning": "stdio 传输需要 Cognia 桌面运行时。Web 预览模式下无法启动该代理。",
+      "stdioNeedsAProcess": "stdio 需要启动一个本地进程。",
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
       "transportStdioLocal": "stdio（本地）",
@@ -11771,11 +11858,19 @@
           "oauth": "OAuth"
         },
         "configureHint": "缺失的提供方需要在 Pi 自身中配置——Cognia 无法代你登录。",
+        "evidenceListing": "已列出",
+        "evidenceListingTitle": "Pi 的 auth check 不认识这个提供方（由扩展注册），但 Pi 列出了它的模型，而这只会在凭证可用时发生。",
         "listingUnreadable": "读不到 Pi 的模型列表，因此无从检查。这与你的凭证是否有效无关。",
+        "modelsSummary": "{providers} 个提供方，共 {count} 个模型",
         "noProviders": "Pi 报告没有任何可用模型。请先在 Pi 中登录一个提供方，再发送提示词。",
         "notConnected": "连接该智能体后，可查看 Pi 能通过认证的提供方。",
         "readOnlyNote": "Cognia 只向 Pi 询问状态，从不读取、刷新或保存你的 Pi 凭证。",
         "refresh": "重新检查凭证",
+        "signIn": "通过 Pi 登录",
+        "signInFailed": "无法在终端中打开 Pi：{reason}",
+        "signInHint": "在终端中打开 Pi，在里面运行 /login 加提供方名称。Cognia 不会接触凭证。",
+        "signInNeedsTerminal": "登录需要集成终端，而当前宿主无法使用它。",
+        "signInOpened": "Pi 已在终端中打开。运行 /login 加提供方名称完成登录后，再重新检查。",
         "status": {
           "invalid": "无效",
           "not_ready": "未登录",
@@ -16208,6 +16303,7 @@
       },
       "browserAccess": {
         "description": "浏览器无法验证本机的自签名证书，所以常用的 HTTPS 端口在标签页里根本连不上。这里打开的是一个明文 http://127.0.0.1 监听器——浏览器无需证书就信任的唯一地址。它只在本机，不会离开这台电脑。",
+        "desktopOnly": "浏览器访问在桌面端配置。请在桌面应用的设置里开启监听并添加允许的来源。",
         "enable": "启用浏览器访问",
         "listening": "正在监听 {url}",
         "loadFailed": "无法读取浏览器访问设置。",
@@ -16230,6 +16326,7 @@
         "copy": "复制配对码",
         "copyFailed": "复制失败。请手动选中并复制。",
         "description": "把 Cognia 浏览器扩展与这台电脑配对。配对之后，你在浏览器里捕获的页面会在这里开启一个新任务——不捕获就什么都不读。",
+        "desktopOnly": "扩展登记码由桌面应用签发，扩展连接的监听器也在那里。请在桌面端设置里配对浏览器。",
         "expired": "配对码已过期，请重新生成。",
         "expiresIn": "{minutes} 分钟后过期",
         "generate": "生成配对码",
@@ -16372,6 +16469,7 @@
         }
       },
       "mdns": {
+        "autostartFailed": "上次已开启广播，但现在没有运行。请关闭再开启，或查看桌面日志了解启动失败原因。",
         "description": "在局域网广播 _cognia._tcp，手机不用扫码也能找到桌面。",
         "enableLabel": "启用 mDNS 广播",
         "onlyDesktop": "LAN 广播仅在桌面运行时可用。",
@@ -16524,8 +16622,11 @@
         "title": "解除配对"
       },
       "server": {
+        "autostartFailed": "上次已开启服务器，但现在没有运行。请关闭再开启，或查看桌面日志了解启动失败原因。",
         "bindMode": "绑定模式",
         "bindModePlaceholderLan": "<本机 LAN 地址>",
+        "certificateFile": "证书文件",
+        "certificateFingerprint": "证书指纹（SHA-256）",
         "desktopOnly": "伴侣服务器运行在桌面端进程中——请切换到 Tauri 桌面版进行管理。",
         "desktopOnlyError": "伴侣服务器仅在桌面端可用。",
         "enableLabel": "启用伴侣服务器",
@@ -16568,17 +16669,22 @@
         "tableLabels": {
           "adapterInstances": "连接器",
           "characters": "角色",
+          "connectorCallbackBindings": "连接器回调绑定",
           "connectorDrafts": "连接器草稿",
+          "connectorHeartbeats": "连接器心跳",
           "conversationOverrides": "会话覆盖",
+          "executionRunBindings": "运行投递绑定",
           "goals": "目标",
           "memories": "记忆",
           "messages": "消息",
           "outboundQueue": "出站投递状态",
+          "platformIdentities": "联系人",
           "plugins": "插件",
           "sessions": "会话",
           "settings": "应用设置",
           "skills": "技能",
           "twinProfile": "数字孪生",
+          "workflowDeployments": "工作流部署",
           "workflowRuns": "工作流运行",
           "workflows": "工作流"
         },
@@ -17551,6 +17657,7 @@
       }
     },
     "offline": {
+      "bannerHostOffline": "无法连接主机 — 发送将进入队列，等待主机恢复。",
       "bannerOffline": "离线中 — 仍可浏览，发送将进入队列。",
       "bannerReconnecting": "正在重连…",
       "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",
@@ -17656,6 +17763,7 @@
         "title": {
           "activate_failed": "配对已完成，但 Host 未能上线",
           "clipboard_unavailable": "无法读取剪贴板",
+          "fingerprint_mismatch": "主机身份不匹配",
           "http": "Host 拒绝了本次配对请求",
           "insecure_transport": "连接将以明文传输",
           "offline": "本设备已离线",
@@ -31793,6 +31901,46 @@
           "title": "自动备份计划",
           "webOnlyNote": "定时写入仅在桌面应用中可用。浏览器模式下仍会显示提醒横幅。"
         },
+        "shareScan": {
+          "body": "链接会原样携带这些值。备份从不做脱敏，因为脱敏后的备份无法如实恢复。请先核对列表，再确认继续。",
+          "cancel": "取消",
+          "clean": "分享前已扫描个人信息：未发现。",
+          "confirm": "我了解此链接会携带上面列出的个人信息。",
+          "continue": "继续分享",
+          "domainRow": "{hits} 个值",
+          "domains": {
+            "artifacts": "Artifact 与画布",
+            "connectors": "MCP 服务器与连接器",
+            "library": "技能、角色、团队与模板",
+            "memories": "记忆",
+            "plugins": "插件",
+            "retrieval": "检索配置",
+            "sessions": "会话",
+            "settings": "设置与应用状态",
+            "twin": "数字分身"
+          },
+          "encrypted": "此备份已加密，分享前无法扫描个人信息。接收方需要口令或密钥才能恢复。",
+          "keyUnavailable": "当前运行环境没有可用的加密密钥。请改用口令或明文再分享。",
+          "kindCount": "{kind} × {count}",
+          "kinds": {
+            "API_KEY": "API 密钥",
+            "BANK_CARD": "银行卡",
+            "CN_ID": "身份证",
+            "DRIVER_LICENSE": "驾驶证",
+            "EMAIL": "邮箱",
+            "IP_ADDR": "IP 地址",
+            "JWT": "JWT",
+            "NAME": "姓名",
+            "PASSPORT": "护照",
+            "PEM_KEY": "私钥",
+            "PHONE": "电话",
+            "SSN": "SSN"
+          },
+          "prepareFailed": "无法准备用于分享的备份。",
+          "preparing": "正在准备备份…",
+          "title": "此备份中发现个人信息",
+          "total": "共 {total} 个个人信息值，分布在 {domains} 个区域"
+        },
         "showPassphrase": "显示密码短语",
         "unlockButton": "解锁并预览",
         "wrongPassphrase": "密码短语不正确，请再核对。"
@@ -32452,6 +32600,7 @@
       "terminal": "集成终端面板 — 默认 shell、字体、回滚行数，以及按项目覆盖。",
       "tools": "内置 shell、文件系统、git、进程与环境工具 — 全局开关、风险等级与「始终允许」管理。",
       "usageCost": "支出上限与本机链路调试会话",
+      "webhooks": "配置出站 Webhook、端点订阅、HMAC 签名、投递重试与日志。",
       "workflows": "面向角色、团队、技能、孪生与连接器的 n8n 风格可视化编排。可通过定时、Webhook、平台消息或手动触发。",
       "workspaceTrust": "在智能体于文件夹内执行命令前先信任它。未受信任的工作区以受限模式运行。"
     },
@@ -36098,6 +36247,7 @@
       "terminal": "终端",
       "tools": "内置工具",
       "usageCost": "用量与成本",
+      "webhooks": "Webhooks",
       "workflows": "工作流",
       "workspaceTrust": "工作区信任"
     },
@@ -40989,6 +41139,8 @@
     "spawnTaskToolTitle": "派生任务",
     "teamCollabToolDesc": "让队友在团队运行期间协作——给同伴发消息、共享黑板、发起或参与共识投票、委派子任务。仅对 Agent 团队会话生效。",
     "teamCollabToolTitle": "团队协作工具",
+    "templateToolsDesc": "允许 Agent 浏览你的模板目录、已保存的会话模板与小队，并实例化模板或把小队存为模板。每次写入都会先征求你的同意，与插件使用的同一个确认提示。",
+    "templateToolsTitle": "模板与小队工具",
     "terminalRepl": "交互式 REPL",
     "terminalReplDesc": "Agent 私有的持久化 PTY 会话，由 node-pty 懒加载。适合需要跨多次写入保持状态的 REPL（python / sql / claude-code）。与 dock 中继路径正交 —— REPL 对用户不可见。",
     "title": "内置工具",

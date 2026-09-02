@@ -1801,6 +1801,7 @@
           "workflow": "Workflow"
         },
         "unavailable": {
+          "companionShell": "Runs on the host that owns the agent, not from a paired device",
           "notImplemented": "Not built yet",
           "viaMention": "Reach it with @mention",
           "viaSlashCommand": "Reach it with /workflow"
@@ -1848,6 +1849,22 @@
       "title": "This turn will run as"
     },
     "title": "Mode",
+    "verification": {
+      "failed": "Verification could not run",
+      "noPoints": "The reviewer raised no specific points.",
+      "openSession": "Open reviewer session",
+      "points": "Findings",
+      "running": "An independent reviewer is checking this reply",
+      "sessionMissing": "The reviewer session is not on this device.",
+      "title": "Independent review",
+      "verdict": {
+        "fail": "Did not pass",
+        "pass": "Passed",
+        "unsure": "Unsure"
+      },
+      "withDiff": "Checked against the working-tree diff",
+      "withoutDiff": "Checked against the reply only"
+    },
     "warnings": {
       "authority-capped-by-ceiling": "Permission lowered to {applied}: a subagent cannot exceed its parent.",
       "authority-capped-by-preset": "Permission lowered to {applied}: the {preset} preset does not allow {requested}.",
@@ -2204,6 +2221,8 @@
     "label": "Agent runtime",
     "lastCheckFailed": "Last check failed — it may not start.",
     "needsAuth": "Needs sign-in — connect it under Manage agents.",
+    "noMatches": "No runtime matches that.",
+    "searchPlaceholder": "Filter runtimes",
     "tooltip": "Active agent runtime: Cognia's own runtime or an external agent"
   },
   "agentStatus": {
@@ -4285,6 +4304,29 @@
       "windowTitlesHint": "Glob patterns using * as wildcard (e.g. *Excel* or Untitled - Notepad)."
     }
   },
+  "board": {
+    "addToColumn": "Add to {column}",
+    "collapseColumn": "Collapse {column}",
+    "dnd": {
+      "cancelled": "Drag cancelled. {item} stayed in {column}.",
+      "denied": "That target will not accept {item}.",
+      "dropped": "{item} landed in {column}.",
+      "instructions": "Press Space to pick up a card. Use the arrow keys to move it between columns, Space to drop it, and Escape to cancel. Press Enter to open a card instead.",
+      "over": "{item} will land in {column}.",
+      "pickedUp": "Picked up {item} from {column}."
+    },
+    "emptyColumn": "Nothing here",
+    "expandColumn": "Expand {column}",
+    "originIssue": {
+      "label": "From {identifier}",
+      "open": "Open issue {identifier} in Issues"
+    },
+    "squadRun": {
+      "label": "Squad: {name}",
+      "open": "Open the squad board for {name}",
+      "unknownSquad": "Squad"
+    }
+  },
   "browser": {
     "actions": {
       "back": "Back",
@@ -5554,6 +5596,12 @@
         "userLabel": "User memory"
       },
       "modelPicker": {
+        "agentModelSwitchFailed": "The agent refused that model: {reason}",
+        "agentModelsGroup": "Agent models",
+        "agentModelsLoading": "Asking {agent} which models it has.",
+        "agentNoModels": "{agent} reported no models of its own. The models below are the ones configured in Cognia.",
+        "agentNoSession": "{agent} is connected with nothing open, so its models arrive with the first turn.",
+        "agentNotConnected": "{agent} is not connected, so its own models are not listed yet.",
         "autoBadge": "Auto",
         "autoBadgeHint": "Auto routing is on — each prompt picks a model tier by difficulty.",
         "autoEnableHint": "Select to enable reliability-first routing for this conversation",
@@ -9802,15 +9850,16 @@
       "completeSetupThenRetry": "Finish this agent's setup, then retry the connection.",
       "contactAdministrator": "The limit is set by whoever deployed this Codex; ask them to widen it.",
       "createNewSession": "Start a new session when resume and fork aren't available.",
+      "grantAgentControlOnTheHost": "If a Host is paired, grant this device Agent Control on it.",
       "inspectHealthEndpoint": "Check the agent's health endpoint and logs.",
       "reconnectAndRetry": "Reconnect, then retry.",
       "resaveConfiguration": "Save the agent's configuration again.",
       "resumeWithSessionIdOrAllowNew": "Resume with an existing session id, or allow a new session to be created.",
       "retryAfterReconnect": "Retry after reconnecting.",
       "selectLocalSurface": "Pick a locally executable surface to connect to directly.",
+      "startOnAProcessCapableRuntime": "Run this agent where a process can start: the desktop app, or a paired Host.",
       "switchToAcp": "Switch the agent's protocol to ACP.",
       "useAllowedSandboxOrApproval": "Choose a sandbox mode or approval policy this Codex's managed configuration permits.",
-      "useDesktopRuntime": "Run Cognia as the desktop app — stdio transport needs it.",
       "useOfficialWorkflow": "Use this product's own official workflow for this surface.",
       "useSupportedOperations": "Stick to the operations this endpoint supports."
     },
@@ -11330,6 +11379,18 @@
     "commands": "Commands",
     "commandsDescription": "Slash commands provided by this external agent",
     "commandsTooltip": "View available agent commands",
+    "credential": {
+      "checking": "Checking sign-in...",
+      "none": "Not signed in",
+      "partial": "{ready}/{total} signed in",
+      "ready": "Signed in",
+      "unreadable": "Sign-in unknown"
+    },
+    "detectionInstalled": "Installed",
+    "detectionInstalledWithVersion": "Installed v{version}",
+    "detectionMissing": "Not found",
+    "detectionNotLocal": "Remote runtime",
+    "detectionPackageRunner": "Fetched on launch",
     "disabled": "External Agents Disabled",
     "elicitation": {
       "decline": "Decline",
@@ -11344,6 +11405,17 @@
     },
     "executionPlan": "Execution Plan",
     "externalAgents": "External Agents",
+    "failure": {
+      "causes": "What it was wrapping",
+      "connect": "Could not connect",
+      "copied": "Report copied",
+      "copy": "Copy the report",
+      "disconnect": "Could not disconnect",
+      "execute": "The run failed",
+      "retry": "Try again",
+      "retrying": "Trying again",
+      "session": "The session action failed"
+    },
     "hostConfigs": {
       "count": "{count, plural, =0 {No configurations} other {# configurations}}",
       "deleteLabel": "Delete {name}",
@@ -11397,6 +11469,15 @@
       "customProtocolComingSoon": "Custom (coming soon)",
       "defaultModel": "Default model",
       "defaultModelHint": "Optional. \"provider/model\" id used for every turn unless overridden (e.g. anthropic/claude-sonnet-4-5).",
+      "detectionRetry": "Check again",
+      "detectionRunning": "Checking this machine...",
+      "detectionUnavailable": {
+        "failed": "The Host was asked and did not answer.",
+        "manifestMissing": "The paired Host has not finished reporting what it supports.",
+        "noHost": "Nothing here can list installed agents.",
+        "notGranted": "This device may not ask the Host what it has installed.",
+        "unsupported": "The paired Host does not list installed agents."
+      },
       "diagnostics": {
         "adapter": "Adapter: {name}",
         "authMethods": "Auth methods: {methods}",
@@ -11461,9 +11542,15 @@
       "noResumableSessions": "No resumable sessions yet.",
       "noteLabel": "Note",
       "officialDocs": "Official docs",
-      "opencodeDesktopRuntimeWarning": "Auto-spawning an OpenCode server requires the Cognia desktop runtime. Configure a server endpoint to connect from the web preview.",
+      "opencodeAutoSpawnNeedsAProcess": "Auto-spawning an OpenCode server starts a local process.",
       "otherOfficialSurfaces": "Other official surfaces",
       "pluginProtocolContributed": "Contributed by a plugin",
+      "processPlaneWarning": {
+        "manifestMissing": "The paired Host has not finished reporting what it supports. This should clear once it connects.",
+        "noHost": "Nothing here can start one: open Cognia as the desktop app, or pair a Host and select it.",
+        "notGranted": "The paired Host can, but this device has not been granted Agent Control on it.",
+        "unsupported": "The paired Host does not start agent processes for its devices."
+      },
       "protocolViaTransport": "{protocol} via {transport}",
       "quickStartPreset": "Quick-start preset",
       "refresh": "Refresh",
@@ -11480,7 +11567,7 @@
       "serverPort": "Server port",
       "serverUsername": "Server username",
       "sessions": "Sessions",
-      "stdioDesktopRuntimeWarning": "Stdio transport requires the Cognia desktop runtime. The agent will not be able to launch from the web preview.",
+      "stdioNeedsAProcess": "Stdio starts a local process.",
       "transportHttp": "HTTP",
       "transportSse": "Server-Sent Events",
       "transportStdioLocal": "stdio (local)",
@@ -11771,11 +11858,19 @@
           "oauth": "OAuth"
         },
         "configureHint": "Configure the missing providers in Pi itself — Cognia cannot sign in on your behalf.",
+        "evidenceListing": "Listed",
+        "evidenceListingTitle": "Pi's auth check does not know this provider (it is registered by an extension), but Pi lists its models, which it only does once credentials resolve.",
         "listingUnreadable": "Could not read Pi's model list, so there is nothing to check. This says nothing about your credentials.",
+        "modelsSummary": "{count} models across {providers} providers",
         "noProviders": "Pi reports no usable model. Sign in to a provider in Pi before sending a prompt.",
         "notConnected": "Connect the agent to check which providers Pi can authenticate.",
         "readOnlyNote": "Cognia asks Pi for a status only. It never reads, refreshes or stores your Pi credentials.",
         "refresh": "Re-check credentials",
+        "signIn": "Sign in via Pi",
+        "signInFailed": "Could not open Pi in the terminal: {reason}",
+        "signInHint": "Opens Pi in the terminal. Run /login followed by the provider name there. Cognia never sees the credential.",
+        "signInNeedsTerminal": "Signing in needs the integrated terminal, which this host cannot reach.",
+        "signInOpened": "Pi is open in the terminal. Run /login followed by the provider name, then re-check.",
         "status": {
           "invalid": "Invalid",
           "not_ready": "Not signed in",
@@ -16208,6 +16303,7 @@
       },
       "browserAccess": {
         "description": "A browser can't verify this computer's self-signed certificate, so the usual HTTPS port is unreachable from a tab. This opens a plain http://127.0.0.1 listener — the one address a browser trusts without a certificate. It stays on this machine and never leaves it.",
+        "desktopOnly": "Browser access is configured in the desktop app. Open Settings there to turn the listener on and allowlist origins.",
         "enable": "Enable browser access",
         "listening": "Listening on {url}",
         "loadFailed": "Browser access settings could not be read.",
@@ -16230,6 +16326,7 @@
         "copy": "Copy code",
         "copyFailed": "The code could not be copied. Select it and copy it by hand.",
         "description": "Pair the Cognia browser extension with this computer. Once paired, a page you capture in your browser starts a new task here — nothing is read until you capture it.",
+        "desktopOnly": "Extension enrolment codes are minted by the desktop app, which owns the listener the extension talks to. Open Settings there to pair a browser.",
         "expired": "This code has expired. Generate a new one.",
         "expiresIn": "Expires in {minutes} min",
         "generate": "Generate pairing code",
@@ -16372,6 +16469,7 @@
         }
       },
       "mdns": {
+        "autostartFailed": "Broadcast was enabled last time but is not running. Turn it off and on again, or check the desktop log for why the start failed.",
         "description": "Broadcast _cognia._tcp on the LAN so phones find this desktop without QR scan.",
         "enableLabel": "Enable mDNS broadcast",
         "onlyDesktop": "LAN broadcast is desktop-only.",
@@ -16524,8 +16622,11 @@
         "title": "Revoke pairing"
       },
       "server": {
+        "autostartFailed": "The server was enabled last time but is not running. Turn it off and on again, or check the desktop log for why the start failed.",
         "bindMode": "Bind mode",
         "bindModePlaceholderLan": "'<your-LAN-IP>'",
+        "certificateFile": "Certificate file",
+        "certificateFingerprint": "Certificate fingerprint (SHA-256)",
         "desktopOnly": "Companion server runs in the desktop process — switch to the Tauri build to manage it.",
         "desktopOnlyError": "Companion server is desktop-only.",
         "enableLabel": "Enable companion server",
@@ -16568,17 +16669,22 @@
         "tableLabels": {
           "adapterInstances": "Connectors",
           "characters": "Characters",
+          "connectorCallbackBindings": "Connector callback bindings",
           "connectorDrafts": "Connector drafts",
+          "connectorHeartbeats": "Connector heartbeats",
           "conversationOverrides": "Conversation overrides",
+          "executionRunBindings": "Run delivery bindings",
           "goals": "Goals",
           "memories": "Memories",
           "messages": "Messages",
           "outboundQueue": "Outbound delivery status",
+          "platformIdentities": "Contacts",
           "plugins": "Plugins",
           "sessions": "Sessions",
           "settings": "App settings",
           "skills": "Skills",
           "twinProfile": "Twin profile",
+          "workflowDeployments": "Workflow deployments",
           "workflowRuns": "Workflow runs",
           "workflows": "Workflows"
         },
@@ -17551,6 +17657,7 @@
       }
     },
     "offline": {
+      "bannerHostOffline": "Host unreachable — sends will queue until it is back.",
       "bannerOffline": "Offline — sends will queue and retry automatically.",
       "bannerReconnecting": "Reconnecting…",
       "notifBody": "{count} messages waiting. Will retry when online.",
@@ -17656,6 +17763,7 @@
         "title": {
           "activate_failed": "Paired, but the Host didn't come online",
           "clipboard_unavailable": "Clipboard unavailable",
+          "fingerprint_mismatch": "Host identity mismatch",
           "http": "The Host rejected the pairing request",
           "insecure_transport": "Connection would be unencrypted",
           "offline": "This device is offline",
@@ -31793,6 +31901,46 @@
           "title": "Auto-backup schedule",
           "webOnlyNote": "Scheduled writes require the desktop app. In the browser you'll still see the reminder banner."
         },
+        "shareScan": {
+          "body": "The link would carry these values exactly as they are. Backups are never redacted, because a redacted backup does not restore faithfully. Review the list, then confirm to continue.",
+          "cancel": "Cancel",
+          "clean": "Scanned for personal info before sharing: nothing found.",
+          "confirm": "I understand this link will carry the personal information listed above.",
+          "continue": "Continue to share",
+          "domainRow": "{hits, plural, =1 {1 value} other {# values}}",
+          "domains": {
+            "artifacts": "Artifacts and canvases",
+            "connectors": "MCP servers and connectors",
+            "library": "Skills, characters, teams and templates",
+            "memories": "Memories",
+            "plugins": "Plugins",
+            "retrieval": "Retrieval profiles",
+            "sessions": "Conversations",
+            "settings": "Settings and app state",
+            "twin": "Digital twin"
+          },
+          "encrypted": "This backup is encrypted, so it cannot be scanned for personal info before sharing. The recipient needs the passphrase or key to restore it.",
+          "keyUnavailable": "Encryption key unavailable on this runtime. Choose a passphrase or plaintext to share.",
+          "kindCount": "{kind} × {count}",
+          "kinds": {
+            "API_KEY": "API key",
+            "BANK_CARD": "Bank card",
+            "CN_ID": "National ID",
+            "DRIVER_LICENSE": "Driver license",
+            "EMAIL": "Email",
+            "IP_ADDR": "IP address",
+            "JWT": "JWT",
+            "NAME": "Name",
+            "PASSPORT": "Passport",
+            "PEM_KEY": "Private key",
+            "PHONE": "Phone",
+            "SSN": "SSN"
+          },
+          "prepareFailed": "Could not prepare the backup for sharing.",
+          "preparing": "Preparing backup…",
+          "title": "Personal info found in this backup",
+          "total": "{total, plural, =1 {1 personal value} other {# personal values}} across {domains, plural, =1 {1 area} other {# areas}}"
+        },
         "showPassphrase": "Show passphrase",
         "unlockButton": "Unlock & preview",
         "wrongPassphrase": "That passphrase didn't work — double-check and try again."
@@ -32452,6 +32600,7 @@
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
       "usageCost": "Spending limits and the local trace debug session",
+      "webhooks": "Outbound webhooks, endpoint subscriptions, HMAC signing, delivery retries, and logs.",
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
       "workspaceTrust": "Trust folders before agents run commands in them. Untrusted workspaces run in Restricted Mode."
     },
@@ -36098,6 +36247,7 @@
       "terminal": "Terminal",
       "tools": "Tools",
       "usageCost": "Usage & cost",
+      "webhooks": "Webhooks",
       "workflows": "Workflows",
       "workspaceTrust": "Workspace Trust"
     },
@@ -40989,6 +41139,8 @@
     "spawnTaskToolTitle": "Spawn task",
     "teamCollabToolDesc": "Let teammates collaborate during a team run — message peers, share the blackboard, open or vote in a consensus, and delegate sub-tasks. Only applies to Agent Team sessions.",
     "teamCollabToolTitle": "Team collaboration tools",
+    "templateToolsDesc": "Let the agent browse your template catalog, saved chat templates and Squads, and instantiate a template or save a Squad as one. Every write asks you first, in the same consent prompt plugins use.",
+    "templateToolsTitle": "Template and Squad tools",
     "terminalRepl": "Interactive REPL",
     "terminalReplDesc": "Agent-private persistent PTY sessions backed by node-pty (lazy loaded). Use for stateful REPLs (python / sql / claude-code) where the agent needs to hold state across multiple writes. Orthogonal to the dock-relay path — REPL is invisible to the user.",
     "title": "Built-in tools",
