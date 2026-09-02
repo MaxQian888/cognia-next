@@ -51,6 +51,7 @@ import {
   DEFAULT_TRACE_DEBUG_DURATION_MS,
   type TraceDebugSessionSnapshot,
 } from "@/lib/observability/debug-session"
+import { UsageFindingsCard } from "@/components/settings/usage-optimizer/usage-findings-card"
 
 /** Minutes offered for a debug session. Bounded by the module's own ceiling. */
 const DEBUG_DURATIONS_MINUTES = [15, 30, 60] as const
@@ -236,6 +237,11 @@ export function UsageCostSection() {
           </p>
         </CardContent>
       </Card>
+
+      {/* ADR-0165: the local analyzer's read on this spend. It lives beside
+          the budget controls because both answer "is this bill reasonable",
+          one by setting a ceiling and one by explaining where the money went. */}
+      <UsageFindingsCard />
     </div>
   )
 }

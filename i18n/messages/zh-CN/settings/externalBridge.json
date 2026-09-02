@@ -135,6 +135,7 @@
     "runtime:plugins": "暴露已安装插件的列表与元数据。",
     "runtime:skills": "⚠ 暴露已安装的 Skills 内容。",
     "runtime:twins": "⚠ 暴露孪生档案。已执行 PII 脱敏，但启用前请审核。",
+    "usage:read": "允许外部 Agent 读取你的花费、会话效率指标与本地优化建议。只读：无法修改任何设置或应用修复，会话 ID 会做假名化处理。默认关闭。",
     "wiki:cognia": "Cognia 公开代码 Wiki — 安全可暴露。",
     "wiki:user-repo": "用户仓库 Wiki。Phase 3 — Phase 1 暂不可用。",
     "workflow:run": "⚠ 列出并运行当前生效的不可变工作流部署、读取持久事件并可取消运行。默认关闭。"
@@ -151,6 +152,7 @@
       "plugin": "插件",
       "rag": "检索",
       "runtime": "运行时",
+      "usage": "用量",
       "wiki": "Wiki",
       "workflow": "工作流"
     },

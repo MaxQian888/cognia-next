@@ -1,0 +1,20 @@
+{
+  "findings": {
+    "cacheColdStarts": {
+      "title": "提示缓存没有发挥作用",
+      "body": "只有 {ratePct}% 的提示 Token 命中缓存，健康水平约为 {targetPct}%。保持会话连续、系统提示稳定，供应商才能复用你已经付过费的内容。"
+    },
+    "retrySpend": {
+      "title": "重试占据了可观的花费",
+      "body": "本区间 {sharePct}% 的花费用在了被后续尝试取代的回合上，涉及 {logicalTurns} 个逻辑回合。该数字来自账本实测，不是估算。"
+    },
+    "runawaySession": {
+      "title": "单个任务占据了大部分花费",
+      "body": "一个包含 {turns} 轮的工作单元占了 {sharePct}% 的花费。这往往正是值得做的任务，但无论如何都值得知道。"
+    },
+    "unpricedSpend": {
+      "title": "部分花费没有价格数据",
+      "body": "{sharePct}% 的回合使用了 {models} 个没有已知价格的模型，因此显示的 {knownCostUsd} 只是下限，而非全部账单。"
+    }
+  }
+}

@@ -67,6 +67,7 @@ import {
   memoryForget,
 } from "../handlers/memory"
 import { spawnTask } from "../handlers/spawn-task"
+import { optimizationFindings, sessionHealth, usageQuery } from "../handlers/usage"
 import {
   proxiedWorkflowMcpHost,
   type WorkflowMcpDeploymentDescriptor,
@@ -132,6 +133,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerConnectorTools(server, opts.settingsGetter)
   registerInboundTools(server, opts.settingsGetter)
   registerMemoryTools(server, opts.settingsGetter)
+  registerUsageTools(server, opts.settingsGetter)
   registerWorkflowLifecycleTools(
     server,
     opts.settingsGetter,
@@ -1364,6 +1366,108 @@ function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter)
             url: args.url,
             source: args.source,
           }),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// usage_query / session_health / optimization_findings
+// (the user's own spend, ADR-0165)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read-only spend tools behind `usage:read` (default OFF).
+ *
+ * Every one is `readOnlyHint` and `idempotentHint`: they cannot change a
+ * setting, cannot apply a fix, and return the same answer for the same window.
+ * Session and run ids come back pseudonymized, and the settings key behind an
+ * optimization fix is deliberately withheld, so an external agent can discuss
+ * the user's spend without learning what they are working on or how to change
+ * their configuration.
+ */
+function registerUsageTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const periodSchema = z
+    .enum(["today", "7d", "30d", "month", "90d"])
+    .describe("Window to summarize")
+
+  server.registerTool(
+    "usage_query",
+    {
+      title: "Query Cognia usage and spend",
+      description:
+        "Token and USD totals for a window, split by provider and model. Cost is reported only for turns whose price is known, with unpriced turns counted separately. Default OFF; gate via Settings → External Bridge → usage:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        period: periodSchema.optional(),
+        scope: z
+          .enum(["cognia", "all-tools"])
+          .optional()
+          .describe("Cognia's own spend, or every indexed coding tool"),
+        providerId: z.string().optional().describe("Restrict to one provider id"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "usage_query",
+        scope: "usage:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "usage_query"),
+        body: () =>
+          usageQuery({ period: args.period, scope: args.scope, providerId: args.providerId }),
+      })
+  )
+
+  server.registerTool(
+    "session_health",
+    {
+      title: "Analyze one Cognia session's efficiency",
+      description:
+        "Work-unit metrics for one session: retries, one-shot rate, cache efficiency, delegation, and what its changes cost per edited file. Metrics with no supporting evidence are reported as null with a named gap. Default OFF; gate via Settings → External Bridge → usage:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Session id to analyze"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "session_health",
+        scope: "usage:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "session_health"),
+        body: () => sessionHealth({ sessionId: args.sessionId }),
+      })
+  )
+
+  server.registerTool(
+    "optimization_findings",
+    {
+      title: "List Cognia's spend-efficiency findings",
+      description:
+        "What the local detectors currently think about the user's spend, each with its evidence counts and whether the impact was measured or estimated. Read-only: the settings change behind a fix is withheld and applying stays a decision the user makes in Cognia. Default OFF; gate via Settings → External Bridge → usage:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        period: periodSchema.optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "optimization_findings",
+        scope: "usage:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "optimization_findings"),
+        body: () => optimizationFindings({ period: args.period }),
       })
   )
 }

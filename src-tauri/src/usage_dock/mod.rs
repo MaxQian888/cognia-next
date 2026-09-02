@@ -679,3 +679,90 @@ pub async fn usage_dock_capabilities(app: AppHandle) -> UsageDockCapabilities {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Live window operations cannot run under `tauri::test::mock_app()` on this
+    // project's toolchains, so what is testable here is the CONFIG contract:
+    // its defaults, and that a file written by an older or newer build still
+    // deserializes. The placement math has its own suite in `placement.rs`,
+    // and the runtime behaviour is covered by `tauri-smoke` per platform.
+
+    #[test]
+    fn the_default_config_is_a_centred_right_edge_rail() {
+        let cfg = UsageDockConfig::default();
+        assert_eq!(cfg.edge, DockEdge::Right);
+        assert_eq!(cfg.offset, 0.5);
+        assert_eq!(cfg.scale, 1.0);
+        assert!(cfg.monitor.is_none());
+        assert!(!cfg.hide_on_fullscreen);
+    }
+
+    #[test]
+    fn the_config_carries_no_visibility_flag() {
+        // Visibility has exactly one source of truth, the renderer's
+        // `enabled` preference. A second copy here would drift the first time
+        // one of the two writes failed.
+        let json = serde_json::to_string(&UsageDockConfig::default()).unwrap();
+        assert!(
+            !json.contains("\"open\""),
+            "config must not persist visibility: {json}"
+        );
+    }
+
+    #[test]
+    fn an_empty_config_file_reads_as_the_defaults() {
+        let parsed: UsageDockConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(parsed, UsageDockConfig::default());
+    }
+
+    #[test]
+    fn a_config_written_by_a_newer_build_still_loads() {
+        // `#[serde(default)]` plus ignored unknown fields is what keeps a
+        // downgrade from bricking the dock on an unreadable preference file.
+        let parsed: UsageDockConfig =
+            serde_json::from_str(r#"{"edge":"left","somethingNew":42}"#).unwrap();
+        assert_eq!(parsed.edge, DockEdge::Left);
+        assert_eq!(parsed.scale, 1.0);
+    }
+
+    #[test]
+    fn the_config_round_trips_through_json() {
+        let cfg = UsageDockConfig {
+            edge: DockEdge::Bottom,
+            monitor: Some("Built-in".into()),
+            offset: 0.25,
+            floating_x: 10.0,
+            floating_y: 20.0,
+            scale: 0.8,
+            hide_on_fullscreen: true,
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert_eq!(serde_json::from_str::<UsageDockConfig>(&json).unwrap(), cfg);
+    }
+
+    #[test]
+    fn the_edge_vocabulary_serializes_camel_case_for_the_renderer() {
+        assert_eq!(
+            serde_json::to_string(&DockEdge::Floating).unwrap(),
+            "\"floating\""
+        );
+        assert_eq!(
+            serde_json::from_str::<DockEdge>("\"bottom\"").unwrap(),
+            DockEdge::Bottom
+        );
+    }
+
+    #[test]
+    fn the_window_label_matches_the_renderer_route() {
+        // `lib/pet/window-role.ts` and `app/usage-dock/` both key off this.
+        assert_eq!(USAGE_DOCK_LABEL, "usage-dock");
+    }
+
+    #[test]
+    fn the_default_rail_footprint_is_a_thin_strip() {
+        assert!(DEFAULT_DOCK_WIDTH < DEFAULT_DOCK_HEIGHT);
+    }
+}

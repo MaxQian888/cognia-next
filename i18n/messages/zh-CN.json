@@ -32966,6 +32966,7 @@
         "runtime:plugins": "暴露已安装插件的列表与元数据。",
         "runtime:skills": "⚠ 暴露已安装的 Skills 内容。",
         "runtime:twins": "⚠ 暴露孪生档案。已执行 PII 脱敏，但启用前请审核。",
+        "usage:read": "允许外部 Agent 读取你的花费、会话效率指标与本地优化建议。只读：无法修改任何设置或应用修复，会话 ID 会做假名化处理。默认关闭。",
         "wiki:cognia": "Cognia 公开代码 Wiki — 安全可暴露。",
         "wiki:user-repo": "用户仓库 Wiki。Phase 3 — Phase 1 暂不可用。",
         "workflow:run": "⚠ 列出并运行当前生效的不可变工作流部署、读取持久事件并可取消运行。默认关闭。"
@@ -32982,6 +32983,7 @@
           "plugin": "插件",
           "rag": "检索",
           "runtime": "运行时",
+          "usage": "用量",
           "wiki": "Wiki",
           "workflow": "工作流"
         },
@@ -36944,6 +36946,26 @@
       "scale": "尺寸",
       "startExpanded": "默认展开",
       "title": "用量边栏"
+    },
+    "usageOptimizer": {
+      "basis": {
+        "estimated": "估算",
+        "measured": "实测"
+      },
+      "description": "本地分析器在你的花费中看到的问题。全程不调用模型，数据不出本机。",
+      "empty": "该区间内没有明显问题。",
+      "evidence": "{units} 个会话共 {turns} 轮，{days} 天",
+      "evidenceUnpriced": "{count, plural, other {# 轮无价格}}",
+      "loading": "分析中…",
+      "period": "分析区间",
+      "periods": {
+        "calendarMonth": "本月",
+        "month30": "近 30 天",
+        "quarter": "近 90 天",
+        "week": "近 7 天"
+      },
+      "saving": "最多 {amount}",
+      "title": "效率洞察"
     },
     "workflow": {
       "fanout": {
@@ -42169,6 +42191,26 @@
     "openFull": "查看完整用量",
     "row": "{provider}：{amount}",
     "title": "用量边栏"
+  },
+  "usageOptimizer": {
+    "findings": {
+      "cacheColdStarts": {
+        "body": "只有 {ratePct}% 的提示 Token 命中缓存，健康水平约为 {targetPct}%。保持会话连续、系统提示稳定，供应商才能复用你已经付过费的内容。",
+        "title": "提示缓存没有发挥作用"
+      },
+      "retrySpend": {
+        "body": "本区间 {sharePct}% 的花费用在了被后续尝试取代的回合上，涉及 {logicalTurns} 个逻辑回合。该数字来自账本实测，不是估算。",
+        "title": "重试占据了可观的花费"
+      },
+      "runawaySession": {
+        "body": "一个包含 {turns} 轮的工作单元占了 {sharePct}% 的花费。这往往正是值得做的任务，但无论如何都值得知道。",
+        "title": "单个任务占据了大部分花费"
+      },
+      "unpricedSpend": {
+        "body": "{sharePct}% 的回合使用了 {models} 个没有已知价格的模型，因此显示的 {knownCostUsd} 只是下限，而非全部账单。",
+        "title": "部分花费没有价格数据"
+      }
+    }
   },
   "webSearchToggle": {
     "searchFailed": "联网搜索失败：{message}",

@@ -1,0 +1,20 @@
+{
+  "basis": {
+    "measured": "实测",
+    "estimated": "估算"
+  },
+  "description": "本地分析器在你的花费中看到的问题。全程不调用模型，数据不出本机。",
+  "empty": "该区间内没有明显问题。",
+  "evidence": "{units} 个会话共 {turns} 轮，{days} 天",
+  "evidenceUnpriced": "{count, plural, other {# 轮无价格}}",
+  "loading": "分析中…",
+  "period": "分析区间",
+  "periods": {
+    "week": "近 7 天",
+    "month30": "近 30 天",
+    "calendarMonth": "本月",
+    "quarter": "近 90 天"
+  },
+  "saving": "最多 {amount}",
+  "title": "效率洞察"
+}

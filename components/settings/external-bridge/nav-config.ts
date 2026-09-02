@@ -12,6 +12,7 @@ import {
   BookOpenIcon,
   BotIcon,
   BrainIcon,
+  GaugeIcon,
   InboxIcon,
   KeyRoundIcon,
   MonitorIcon,
@@ -94,6 +95,7 @@ export type ScopeGroupId =
   | "inbound"
   | "memory"
   | "workflow"
+  | "usage"
 
 export interface ScopeGroup {
   id: ScopeGroupId
@@ -112,6 +114,7 @@ const GROUP_ICONS: Record<ScopeGroupId, LucideIcon> = {
   inbound: WebhookIcon,
   memory: BrainIcon,
   workflow: WorkflowIcon,
+  usage: GaugeIcon,
 }
 
 const GROUP_ORDER: ScopeGroupId[] = [
@@ -125,6 +128,7 @@ const GROUP_ORDER: ScopeGroupId[] = [
   "plugin",
   "mcp",
   "inbound",
+  "usage",
 ]
 
 /**

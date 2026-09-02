@@ -78,6 +78,12 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   workflow_status: "workflow:run",
   workflow_events: "workflow:run",
   workflow_cancel: "workflow:run",
+  // ADR-0165 usage tools. Read-only, one scope, default OFF. Grouped rather
+  // than split because all three answer the same question at different
+  // resolutions and none of them writes anything.
+  usage_query: "usage:read",
+  session_health: "usage:read",
+  optimization_findings: "usage:read",
 }
 
 /**

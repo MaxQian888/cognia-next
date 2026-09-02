@@ -115,6 +115,17 @@ export type BridgeScope =
    * Bridge MCP lifecycle and dynamically typed tools. Default OFF.
    */
   | "workflow:run"
+  /**
+   * Read the user's own spend and efficiency findings (`usage_query` /
+   * `session_health` / `optimization_findings`). Read-only and default OFF.
+   *
+   * Its own scope rather than a corner of `runtime:*` because what it exposes
+   * is different in kind: how much someone spent, on which models, and where
+   * an analyzer thinks they are wasting money. Project and session ids are
+   * pseudonymized on the way out, so an external agent sees the shape of the
+   * spend without learning what the user is working on.
+   */
+  | "usage:read"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -137,6 +148,7 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "memory:read",
   "memory:write",
   "workflow:run",
+  "usage:read",
 ] as const
 
 export const WORKFLOW_MCP_LIFECYCLE_TOOL_NAMES = [

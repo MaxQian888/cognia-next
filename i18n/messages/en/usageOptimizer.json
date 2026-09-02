@@ -1,0 +1,20 @@
+{
+  "findings": {
+    "cacheColdStarts": {
+      "title": "Prompt caching is not paying off",
+      "body": "Only {ratePct}% of your prompt tokens were served from cache, against a healthy {targetPct}%. Long-lived sessions and stable system prompts are what let a provider reuse work you already paid for."
+    },
+    "retrySpend": {
+      "title": "Retries are a real share of the bill",
+      "body": "{sharePct}% of this window's spend went on attempts that were superseded, across {logicalTurns} turns. This is measured from the ledger, not estimated."
+    },
+    "runawaySession": {
+      "title": "One task dominated the window",
+      "body": "A single work unit of {turns} turns accounted for {sharePct}% of the spend. Often that is the task that was worth doing, and worth knowing about either way."
+    },
+    "unpricedSpend": {
+      "title": "Part of this window has no price",
+      "body": "{sharePct}% of turns ran on {models} model(s) with no known rate, so the {knownCostUsd} shown is a floor rather than the whole bill."
+    }
+  }
+}

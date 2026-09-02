@@ -32966,6 +32966,7 @@
         "runtime:plugins": "Exposes the list and metadata of installed plugins.",
         "runtime:skills": "⚠ Exposes your installed skills' content.",
         "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
+        "usage:read": "Lets external agents read your own spend, session efficiency metrics, and the local optimizer's findings. Read-only: it cannot change a setting or apply a fix, and session ids are pseudonymized. Default OFF.",
         "wiki:cognia": "Public Cognia code wiki — safe to expose.",
         "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
         "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF."
@@ -32982,6 +32983,7 @@
           "plugin": "Plugins",
           "rag": "Retrieval",
           "runtime": "Runtime",
+          "usage": "Usage",
           "wiki": "Wiki",
           "workflow": "Workflows"
         },
@@ -36944,6 +36946,26 @@
       "scale": "Size",
       "startExpanded": "Start expanded",
       "title": "Capacity Dock"
+    },
+    "usageOptimizer": {
+      "basis": {
+        "estimated": "Estimated",
+        "measured": "Measured"
+      },
+      "description": "What the local analyzer sees in your own spend. Nothing here asks a model, and nothing leaves this machine.",
+      "empty": "Nothing stands out in this window.",
+      "evidence": "{turns} turns across {units} sessions, {days} days",
+      "evidenceUnpriced": "{count, plural, other {# unpriced}}",
+      "loading": "Analyzing…",
+      "period": "Analysis window",
+      "periods": {
+        "calendarMonth": "This month",
+        "month30": "Last 30 days",
+        "quarter": "Last 90 days",
+        "week": "Last 7 days"
+      },
+      "saving": "up to {amount}",
+      "title": "Efficiency findings"
     },
     "workflow": {
       "fanout": {
@@ -42169,6 +42191,26 @@
     "openFull": "Open full usage",
     "row": "{provider}: {amount}",
     "title": "Capacity Dock"
+  },
+  "usageOptimizer": {
+    "findings": {
+      "cacheColdStarts": {
+        "body": "Only {ratePct}% of your prompt tokens were served from cache, against a healthy {targetPct}%. Long-lived sessions and stable system prompts are what let a provider reuse work you already paid for.",
+        "title": "Prompt caching is not paying off"
+      },
+      "retrySpend": {
+        "body": "{sharePct}% of this window's spend went on attempts that were superseded, across {logicalTurns} turns. This is measured from the ledger, not estimated.",
+        "title": "Retries are a real share of the bill"
+      },
+      "runawaySession": {
+        "body": "A single work unit of {turns} turns accounted for {sharePct}% of the spend. Often that is the task that was worth doing, and worth knowing about either way.",
+        "title": "One task dominated the window"
+      },
+      "unpricedSpend": {
+        "body": "{sharePct}% of turns ran on {models} model(s) with no known rate, so the {knownCostUsd} shown is a floor rather than the whole bill.",
+        "title": "Part of this window has no price"
+      }
+    }
   },
   "webSearchToggle": {
     "searchFailed": "Web search failed: {message}",

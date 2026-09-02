@@ -1,0 +1,20 @@
+{
+  "basis": {
+    "measured": "Measured",
+    "estimated": "Estimated"
+  },
+  "description": "What the local analyzer sees in your own spend. Nothing here asks a model, and nothing leaves this machine.",
+  "empty": "Nothing stands out in this window.",
+  "evidence": "{turns} turns across {units} sessions, {days} days",
+  "evidenceUnpriced": "{count, plural, other {# unpriced}}",
+  "loading": "Analyzing…",
+  "period": "Analysis window",
+  "periods": {
+    "week": "Last 7 days",
+    "month30": "Last 30 days",
+    "calendarMonth": "This month",
+    "quarter": "Last 90 days"
+  },
+  "saving": "up to {amount}",
+  "title": "Efficiency findings"
+}

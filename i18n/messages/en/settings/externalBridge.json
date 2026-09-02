@@ -135,6 +135,7 @@
     "runtime:plugins": "Exposes the list and metadata of installed plugins.",
     "runtime:skills": "⚠ Exposes your installed skills' content.",
     "runtime:twins": "⚠ Exposes Twin profiles. PII redaction has run, but review before enabling.",
+    "usage:read": "Lets external agents read your own spend, session efficiency metrics, and the local optimizer's findings. Read-only: it cannot change a setting or apply a fix, and session ids are pseudonymized. Default OFF.",
     "wiki:cognia": "Public Cognia code wiki — safe to expose.",
     "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
     "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF."
@@ -151,6 +152,7 @@
       "plugin": "Plugins",
       "rag": "Retrieval",
       "runtime": "Runtime",
+      "usage": "Usage",
       "wiki": "Wiki",
       "workflow": "Workflows"
     },
