@@ -78,7 +78,7 @@ jobs:
       # risk duplicate/missing suites, so only coverage-merge saves the unified
       # history after it has downloaded every shard result.
       - name: Restore Jest suite timing history
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: .cache/jest/timings.json
           key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
@@ -171,7 +171,7 @@ jobs:
 
       - name: Save Jest suite timing history
         if: needs.test.result == 'success'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: .cache/jest/timings.json
           key: ${{ runner.os }}-jest-timings-${{ hashFiles('pnpm-lock.yaml', 'jest.config.ts', 'scripts/test/jest-timing-sequencer.cjs') }}-${{ github.run_id }}
