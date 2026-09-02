@@ -161,3 +161,24 @@ describe("buildConvDetail", () => {
     expect(report.assessments).toHaveLength(7)
   })
 })
+
+describe("sourceOfSessionId across both namespaces", () => {
+  it("reads the older importer prefix", () => {
+    expect(sourceOfSessionId("import:claude-code:abc")).toBe("claude-code")
+  })
+
+  it("reads the external usage index prefix", () => {
+    // Without this the scanned sessions roll up under "unknown" here while
+    // the app attributes them correctly, and the two surfaces disagree.
+    expect(sourceOfSessionId("ext:codex:abc")).toBe("codex")
+  })
+
+  it("handles a namespaced id with no trailing segment", () => {
+    expect(sourceOfSessionId("ext:codex")).toBe("codex")
+  })
+
+  it("calls a local session unknown rather than inventing a source", () => {
+    expect(sourceOfSessionId("chat-1")).toBe("unknown")
+    expect(sourceOfSessionId("ext:")).toBe("unknown")
+  })
+})

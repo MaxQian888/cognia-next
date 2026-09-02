@@ -308,4 +308,29 @@ describe("account handlers", () => {
       failure: { code: "schema" },
     })
   })
+
+  it("excludes another agent's imported spend from what this install spent", async () => {
+    // Since the external usage index shipped, `sessionUsage` also holds turns
+    // another coding agent paid for, stamped with the provider ITS transcript
+    // named. This operation feeds the CLI's `provider usage`, which is the
+    // number a person checks against their own invoice.
+    usageRows.push(
+      { providerId: "deepseek-anthropic", at: 50, model: "a", inputTokens: 1, outputTokens: 2 },
+      {
+        providerId: "deepseek-anthropic",
+        at: 50,
+        model: "a",
+        inputTokens: 999,
+        outputTokens: 999,
+        imported: true,
+        sourceId: "codex",
+      }
+    )
+    const output = await usageLocalReadHandler.handler(
+      ctx("usage.local.read", { from: 0, to: 100 })
+    )
+    const rows = usageLocalReadOutput.parse(output).rows
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ inputTokens: 1, outputTokens: 2 })
+  })
 })

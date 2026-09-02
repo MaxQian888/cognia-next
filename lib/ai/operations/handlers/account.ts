@@ -462,7 +462,13 @@ export const usageLocalReadHandler: ProviderOperationHandlerRegistration<
     const ledger = await getDb()
       .sessionUsage.where("providerId")
       .equals(providerId)
-      .and((row) => row.at >= window.from && row.at < window.to)
+      // IMPORTED rows are excluded (ADR-0165). Since the external usage index
+      // shipped, `sessionUsage` also holds turns another coding agent paid
+      // for, stamped with the provider ITS transcript named. This operation is
+      // documented as "what this install spent", and it is what the CLI's
+      // `provider usage` prints, so blending in another tool's bill would
+      // silently inflate the one number a person checks against their invoice.
+      .and((row) => row.at >= window.from && row.at < window.to && row.imported !== true)
       .toArray()
     // Every row carries the provider that served it, so attribution is exact.
     return {

@@ -39,6 +39,13 @@ import {
   type ProviderTransportResolution,
 } from "../provider/transport"
 import { formatUsageRow, readProviderUsage, type ReadUsageDeps } from "../provider/usage"
+import {
+  applyFilters,
+  formatSourceDiagnostic,
+  parseScope,
+  USAGE_CLI_SCOPES,
+  type SourceDiagnostic,
+} from "../provider/usage-filters"
 import { boolFlag, numberFlag, stringFlag, type ParsedArgs } from "./args"
 import { realOutput, type OutputSink } from "./output"
 
@@ -58,7 +65,8 @@ export const PROVIDER_HELP = `cognia-agent provider — the provider operation p
   provider models       [--provider id] [--refresh]        model inventory (catalog + upstream)
   provider balance      --live [--provider id]             credit balance meters
   provider limits       --live [--provider id]             usage window meters
-  provider usage        [--provider id] [--days n]         local spend per provider and model
+  provider usage        [--provider id] [--days n] [--scope s] [--source id] [--model m]
+                                                            local spend per provider and model
   provider probe        --live --yes [--provider id] [--model m]
                                                             one minimal request per provider
 
@@ -67,7 +75,11 @@ Flags:
   --operation <id>      capabilities: only this operation's cell
   --refresh             models: bypass the cached inventory and ask upstream
   --days <n>            usage: window length (default 7)
-  --model <id>          probe: the model to route (gateway probe needs it)
+  --scope <s>           usage: cognia (default) | all-tools. all-tools folds in
+                        what your other coding agents cost, shown separately
+  --source <id>         usage: restrict all-tools to one external agent
+  --model <id>          usage: substring match on the model id
+                        probe: the model to route (gateway probe needs it)
   --transport <t>       auto (default) | bridge | rpc | local
   --live                required for balance, limits and probe: these read the
                         account upstream and may be billed
@@ -91,6 +103,15 @@ export interface ProviderCommandDeps {
   ensureDb?: ReadUsageDeps["ensureDb"]
   fsx?: ReadUsageDeps["fsx"]
   modelCatalog?: ReadUsageDeps["modelCatalog"]
+  /**
+   * External-agent scan diagnostics for `provider usage`.
+   *
+   * Injected rather than imported, because the CLI must not drag the whole
+   * session-import registry into every invocation just to print a summary the
+   * common case does not ask for. Absent means the section is omitted, which
+   * is the correct rendering for a host that never scanned anything.
+   */
+  usageSources?: () => Promise<SourceDiagnostic[]>
 }
 
 type LimitsLoader = NonNullable<Parameters<typeof readProviderLimits>[0]["loadLimits"]>
@@ -287,6 +308,24 @@ export async function providerCommand(
         out.error(`--days must be a positive number\n`)
         return 2
       }
+      const scope = parseScope(stringFlag(args, "scope"))
+      if (!scope) {
+        out.error(`--scope must be one of: ${USAGE_CLI_SCOPES.join(", ")}\n`)
+        return 2
+      }
+      const sourceFilter = stringFlag(args, "source")
+      if (sourceFilter && scope !== "all-tools") {
+        // Naming a source while scoped to this app would silently return
+        // nothing, which reads as "that agent has no spend" rather than
+        // "you asked the wrong scope".
+        out.error(`--source requires --scope all-tools\n`)
+        return 2
+      }
+      const filters = {
+        scope,
+        ...(sourceFilter ? { sourceId: sourceFilter } : {}),
+        ...(stringFlag(args, "model") ? { model: stringFlag(args, "model") as string } : {}),
+      }
       const home = resolveHome(deps.env ?? process.env, os.homedir())
       const to = now()
       const report = await readProviderUsage({
@@ -301,29 +340,44 @@ export async function providerCommand(
         ...(deps.fsx ? { fsx: deps.fsx } : {}),
         ...(deps.modelCatalog ? { modelCatalog: deps.modelCatalog } : {}),
       })
+      // Filters are applied to the REPORT, not inside the reader, so the
+      // `--json` payload and the printed table are the same rows and cannot
+      // disagree about what a filter meant.
+      const filtered = {
+        ...report,
+        ledger: { ...report.ledger, rows: applyFilters(report.ledger.rows, filters) },
+        sessions: { ...report.sessions, rows: applyFilters(report.sessions.rows, filters) },
+      }
+      const sources: SourceDiagnostic[] = deps.usageSources ? await deps.usageSources() : []
+
       if (json) {
-        out.json({ verb, transport: transport.kind, ...report })
+        out.json({ verb, transport: transport.kind, scope, ...filtered, sources })
         return 0
       }
+      const report2 = filtered
       out.write(
-        `Usage ${new Date(report.from).toISOString().slice(0, 10)} to ${new Date(report.to).toISOString().slice(0, 10)}\n`
+        `Usage ${new Date(report2.from).toISOString().slice(0, 10)} to ${new Date(report2.to).toISOString().slice(0, 10)} (${scope})\n`
       )
       out.write(`\nRecorded ledger (exact attribution)\n`)
-      if (report.ledger.unavailable) {
-        out.write(`  local database unavailable: ${report.ledger.unavailable}\n`)
-      } else if (report.ledger.rows.length === 0) {
+      if (report2.ledger.unavailable) {
+        out.write(`  local database unavailable: ${report2.ledger.unavailable}\n`)
+      } else if (report2.ledger.rows.length === 0) {
         out.write(`  (no rows)\n`)
       }
-      for (const row of report.ledger.rows) out.write(`  ${formatUsageRow(row)}\n`)
-      for (const failure of report.ledger.failures) {
+      for (const row of report2.ledger.rows) out.write(`  ${formatUsageRow(row)}\n`)
+      for (const failure of report2.ledger.failures) {
         out.write(`  ${failure.providerId}: ${failure.failure.failure.message}\n`)
       }
       out.write(
-        `\nCLI sessions (${report.sessions.scanned} in window, ${report.sessions.withoutUsage} without usage)\n`
+        `\nCLI sessions (${report2.sessions.scanned} in window, ${report2.sessions.withoutUsage} without usage)\n`
       )
-      if (report.sessions.rows.length === 0) out.write(`  (no rows)\n`)
-      for (const row of report.sessions.rows) out.write(`  ${formatUsageRow(row)}\n`)
-      if (report.sessions.catalogAttributed + report.sessions.approximate > 0) {
+      if (report2.sessions.rows.length === 0) out.write(`  (no rows)\n`)
+      for (const row of report2.sessions.rows) out.write(`  ${formatUsageRow(row)}\n`)
+      if (sources.length > 0) {
+        out.write(`\nExternal agents\n`)
+        for (const source of sources) out.write(`${formatSourceDiagnostic(source)}\n`)
+      }
+      if (report2.sessions.catalogAttributed + report2.sessions.approximate > 0) {
         out.write(
           `\n  c = provider attributed from the model catalog, ~ = approximate (alias shared by several providers, or unknown)\n`
         )

@@ -82,10 +82,17 @@ export interface AgentStatsOverview {
   notes: string[]
 }
 
-/** Extract the source id from an `import:<source>:<rest>` session id. */
+/**
+ * Extract the source id from a namespaced session id.
+ *
+ * Two prefixes, both meaning "another agent paid for this". `import:` is what
+ * the one-off importer wrote. `ext:` is what the external usage index writes
+ * (ADR-0165), and it must be recognized here or every scanned session rolls
+ * up under "unknown" while the app attributes it correctly.
+ */
 export function sourceOfSessionId(id: string): string {
-  const m = /^import:([^:]+):/.exec(id)
-  return m ? m[1] : "unknown"
+  const m = /^(?:import|ext):([^:]+)(?::|$)/.exec(id)
+  return m && m[1].length > 0 ? m[1] : "unknown"
 }
 
 function dayKey(ms: number): string {
