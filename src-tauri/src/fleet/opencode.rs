@@ -369,8 +369,7 @@ fn classify(plugin_dir: &Path) -> OpencodeStatus {
         // contract is calling a URL this build no longer serves, so it reads as
         // Stale and the settings row offers a one-click reinstall.
         Ok(contents)
-            if contents.contains(MANAGED_MARKER)
-                && contents.contains(OPENCODE_PLUGIN_CONTRACT) =>
+            if contents.contains(MANAGED_MARKER) && contents.contains(OPENCODE_PLUGIN_CONTRACT) =>
         {
             OpencodeStatus::Installed
         }
@@ -469,7 +468,10 @@ mod tests {
         // The stamp `classify` reads. Without it in the emitted source, every
         // freshly written plugin would immediately read back as Stale.
         assert!(src.contains(OPENCODE_PLUGIN_CONTRACT));
-        assert!(!src.contains("/api/v1/"), "runtime paths on this listener are unversioned");
+        assert!(
+            !src.contains("/api/v1/"),
+            "runtime paths on this listener are unversioned"
+        );
         assert!(src.contains("settleCommand"));
         assert!(src.contains("createOpencodeClient as createV2Client"));
         assert!(src.contains("client.session.promptAsync"));

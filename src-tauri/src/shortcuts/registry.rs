@@ -757,7 +757,10 @@ mod tests {
         };
         assert_eq!(lookup("selection.copy"), Some("alt+shift+x"));
         assert_eq!(lookup("selection.ask"), Some("alt+shift+4"));
-        assert_eq!(lookup("selection.action:plug-a:rewrite"), Some("alt+shift+r"));
+        assert_eq!(
+            lookup("selection.action:plug-a:rewrite"),
+            Some("alt+shift+r")
+        );
         // One entry per id: a reserved chord replaces the default rather than
         // racing it through a second bind call.
         assert_eq!(bindings.len(), 3);
@@ -768,7 +771,8 @@ mod tests {
         // The user moved `selection.explain` onto `selection.copy`'s default
         // chord. Only one id can hold it, so the order decides, and the order
         // must be the user's choice every single time.
-        let reserved = HashMap::from([("selection.explain".to_string(), "alt+shift+1".to_string())]);
+        let reserved =
+            HashMap::from([("selection.explain".to_string(), "alt+shift+1".to_string())]);
         let defaults = &[
             ("selection.copy", "alt+shift+1"),
             ("selection.explain", "alt+shift+2"),

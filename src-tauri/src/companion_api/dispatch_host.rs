@@ -105,11 +105,7 @@ impl DispatchHost {
     /// root against the active project and the instance map is not
     /// device-scoped, so there is nothing left to check. The headless host
     /// additionally records which devices may drive an instance.
-    pub async fn ide_canonical_root(
-        &self,
-        root: &str,
-        device_id: &str,
-    ) -> Result<String, String> {
+    pub async fn ide_canonical_root(&self, root: &str, device_id: &str) -> Result<String, String> {
         match self {
             Self::Tauri(_) => Ok(root.to_string()),
             Self::Headless(services) => {

@@ -361,7 +361,11 @@ impl RemoteCodeServerState {
     /// `status` returns a stopped status for a device that is not on the list,
     /// so the same non-answer is used here rather than confirming the instance
     /// exists.
-    pub async fn authorize_agent_root(&self, root: &str, device_id: &str) -> Result<String, String> {
+    pub async fn authorize_agent_root(
+        &self,
+        root: &str,
+        device_id: &str,
+    ) -> Result<String, String> {
         let canonical = canonicalize_workspace(root)?;
         let mut instances = self.instances.lock().await;
         let Some(instance) = instances.get_mut(&canonical) else {
@@ -1274,7 +1278,8 @@ mod tests {
         assert_eq!(status.port, None);
         assert_eq!(status.relay_path.as_deref(), Some("/ide/relay/relay-1/"));
 
-        let disclosed = running_status(IdeProfile::Managed, "relay-1").with_loopback_port(Some(41234));
+        let disclosed =
+            running_status(IdeProfile::Managed, "relay-1").with_loopback_port(Some(41234));
         assert_eq!(disclosed.port, Some(41234));
         // The relay stays: a same-machine browser prefers the port, but the
         // desktop app on that host still reaches the workbench the usual way.
@@ -1297,7 +1302,12 @@ mod tests {
         let state = RemoteCodeServerState::new(dir.path().to_path_buf());
         // Nothing has ever run here, so there is no port to hand out and the
         // answer must be "none" rather than a canonicalization error.
-        assert_eq!(state.loopback_port(dir.path().to_str().unwrap(), "dev-1").await, None);
+        assert_eq!(
+            state
+                .loopback_port(dir.path().to_str().unwrap(), "dev-1")
+                .await,
+            None
+        );
     }
 
     use super::*;

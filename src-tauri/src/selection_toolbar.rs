@@ -3530,7 +3530,10 @@ mod tests {
         // is what keeps the overlay from offering a Replace button whose only
         // outcome is a refusal.
         assert!(!selection_replacement_rollout_enabled());
-        assert_eq!(replacement_capability(true), SelectionReplaceCapability::None);
+        assert_eq!(
+            replacement_capability(true),
+            SelectionReplaceCapability::None
+        );
         assert_eq!(
             replacement_capability(false),
             SelectionReplaceCapability::None

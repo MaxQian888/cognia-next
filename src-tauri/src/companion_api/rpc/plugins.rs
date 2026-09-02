@@ -879,8 +879,9 @@ pub(super) async fn dispatch(
             } else {
                 status
             };
-            serde_json::to_value(status)
-                .map_err(|error| RpcError::internal(format!("serialize code-server status: {error}")))
+            serde_json::to_value(status).map_err(|error| {
+                RpcError::internal(format!("serialize code-server status: {error}"))
+            })
         }
         "codeserver_stop" => {
             let root = authorize_workspace_root(host, required(&args, "root")?)?;

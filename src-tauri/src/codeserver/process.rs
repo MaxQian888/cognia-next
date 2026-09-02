@@ -940,7 +940,11 @@ fn code_server_args(
 
 /// Build a second code-server CLI invocation that talks to the already-running
 /// instance through the session socket derived from the shared user-data dir.
-pub(super) fn open_file_args(user_data_dir: &Path, extensions_dir: &Path, target: &str) -> Vec<String> {
+pub(super) fn open_file_args(
+    user_data_dir: &Path,
+    extensions_dir: &Path,
+    target: &str,
+) -> Vec<String> {
     vec![
         "--user-data-dir".to_string(),
         user_data_dir.to_string_lossy().into_owned(),

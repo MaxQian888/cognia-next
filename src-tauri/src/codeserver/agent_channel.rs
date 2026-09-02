@@ -1056,14 +1056,24 @@ pub mod verbs {
             .await
     }
 
-    pub async fn notify(canonical: &str, message: &str, kind: Option<&str>) -> Result<Value, String> {
+    pub async fn notify(
+        canonical: &str,
+        message: &str,
+        kind: Option<&str>,
+    ) -> Result<Value, String> {
         global()
-            .send(canonical, "notify", json!({ "message": message, "kind": kind }))
+            .send(
+                canonical,
+                "notify",
+                json!({ "message": message, "kind": kind }),
+            )
             .await
     }
 
     pub async fn workspace_snapshot(canonical: &str, snapshot: Value) -> Result<Value, String> {
-        global().send(canonical, "workspaceSnapshot", snapshot).await
+        global()
+            .send(canonical, "workspaceSnapshot", snapshot)
+            .await
     }
 }
 
