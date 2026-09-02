@@ -20,6 +20,9 @@ jest.mock("@/components/desktop/desktop-app-shell", () => ({
   DesktopAppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
+jest.mock("@/components/account/cloud-sign-in-gate", () => ({
+  CloudSignInGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
 jest.mock("@/components/account/account-gate", () => ({
   AccountGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))

@@ -23,6 +23,7 @@ import { useAccountSwitch } from "./use-account-switch"
 import { AccountProfileTab } from "./account-profile-tab"
 import { AccountSecurityTab } from "./account-security-tab"
 import { AccountDangerTab } from "./account-danger-tab"
+import { AccountIdentityTab } from "./account-identity-tab"
 
 export interface AccountDetailProps {
   account: LocalAccountRecord | null
@@ -156,6 +157,9 @@ export function AccountDetail({
           <TabsTrigger value="security" data-testid="account-tab-security">
             {t("tabSecurity")}
           </TabsTrigger>
+          <TabsTrigger value="identity" data-testid="account-tab-identity">
+            {t("tabIdentity")}
+          </TabsTrigger>
           <TabsTrigger value="danger" data-testid="account-tab-danger">
             {t("tabDanger")}
           </TabsTrigger>
@@ -165,6 +169,9 @@ export function AccountDetail({
         </TabsContent>
         <TabsContent value="security" className="mt-4">
           <AccountSecurityTab key={account.id} account={account} />
+        </TabsContent>
+        <TabsContent value="identity" className="mt-4">
+          <AccountIdentityTab key={account.id} account={account} />
         </TabsContent>
         <TabsContent value="danger" className="mt-4">
           <AccountDangerTab

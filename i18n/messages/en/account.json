@@ -138,7 +138,8 @@
     "tabSecurity": "Security",
     "title": "Local accounts",
     "undo": "Undo",
-    "updatedAtLabel": "Updated"
+    "updatedAtLabel": "Updated",
+    "tabIdentity": "Identity"
   },
   "passwordStrength": {
     "aria": "Password strength",
@@ -173,5 +174,137 @@
     "operationFailed": "Local account operation failed.",
     "switchPasswordLabel": "Password",
     "switchPasswordPlaceholder": "Password"
+  },
+  "cloud": {
+    "title": "Sign in to {deployment}",
+    "titleGeneric": "Sign in to your organization",
+    "description": "This deployment uses a shared identity provider. Sign in once and this profile is yours everywhere.",
+    "checking": "Checking how this deployment signs people in",
+    "continueWith": "Continue with {provider}",
+    "provider": {
+      "github": "GitHub",
+      "feishu": "Feishu",
+      "lark": "Lark",
+      "google": "Google",
+      "microsoft": "Microsoft",
+      "wechat": "WeChat"
+    },
+    "continueWithLogto": "Continue with Logto",
+    "signingIn": "Signing in",
+    "awaitingCode": "Finish signing in in the browser, then paste the address it landed on.",
+    "codePlaceholder": "Paste the callback address or code",
+    "submitCode": "Continue",
+    "cancel": "Cancel",
+    "continueOffline": "Continue offline",
+    "continueOfflineHint": "Your local data stays available. Shared workspaces and issues will not sync until you sign in.",
+    "reauth": {
+      "expired": "Your session expired.",
+      "revoked": "Your session was signed out elsewhere.",
+      "binding-missing": "This profile is signed in, but not yet bound to a person."
+    },
+    "offline": {
+      "body": "Your last session is kept. You can keep working offline and it will refresh once the provider is reachable."
+    },
+    "unavailable": {
+      "title": "Sign-in is not available right now",
+      "body": "The host at {baseUrl} did not answer with a sign-in configuration: {message}"
+    },
+    "advanced": {
+      "toggle": "Advanced: configure Logto manually",
+      "issuer": "Issuer",
+      "clientId": "Client id",
+      "resource": "API resource",
+      "redirectUri": "Redirect URI",
+      "submit": "Sign in with this configuration",
+      "missing": "Issuer, client id, resource and redirect URI are all required."
+    },
+    "settling": "Looking up your organizations",
+    "choose": {
+      "title": "Choose an organization",
+      "description": "You belong to more than one. You can switch later from Account.",
+      "workspaces": "{count, plural, =1 {1 workspace} other {# workspaces}}",
+      "role": {
+        "owner": "Owner",
+        "admin": "Admin",
+        "member": "Member",
+        "guest": "Guest"
+      },
+      "select": "Use this organization"
+    },
+    "unaffiliated": {
+      "title": "You are signed in, but not in an organization yet",
+      "description": "Redeem the invitation you were given, or claim this deployment if you are setting it up."
+    },
+    "invitation": {
+      "title": "I have an invitation",
+      "tokenLabel": "Invitation token",
+      "tokenPlaceholder": "Paste the token",
+      "submit": "Join",
+      "invalid": "That does not look like an invitation token."
+    },
+    "claim": {
+      "title": "Claim this deployment",
+      "description": "The operator hands the first owner a one-time credential. Everyone after joins by invitation.",
+      "credentialLabel": "Bootstrap credential",
+      "credentialPlaceholder": "Paste the credential",
+      "orgNameLabel": "Organization name",
+      "orgNamePlaceholder": "Acme",
+      "submit": "Create the organization and make me its owner",
+      "missing": "Both the credential and an organization name are required."
+    },
+    "error": {
+      "generic": "Sign-in did not complete: {message}",
+      "profileBoundToAnother": "This profile already belongs to {name}. Sign out there first.",
+      "notInvited": "The server refused: that token is not a valid invitation.",
+      "reauthRequired": "The session cannot mint an organization token. Sign in again.",
+      "noCollaborationService": "The deployment announces no collaboration service, so there is no organization to join.",
+      "callbackMalformed": "That is not a callback address or code.",
+      "stateMismatch": "The callback belongs to a different sign-in attempt. Start again."
+    },
+    "signedInAs": "Signed in as {name}",
+    "signOut": "Sign out"
+  },
+  "identity": {
+    "title": "Cloud identity",
+    "description": "Who this profile is on the shared deployment, and which organization it works in.",
+    "loading": "Reading the cloud session",
+    "signedOut": "This profile is not signed in to a cloud identity.",
+    "signIn": "Sign in",
+    "person": "Person",
+    "organization": "Organization",
+    "role": "Role",
+    "session": "Session",
+    "sessionExpires": "Expires {date}",
+    "sessionUnknownExpiry": "Expiry unknown",
+    "state": {
+      "active": "Active",
+      "reauth-required": "Needs sign-in",
+      "offline": "Offline",
+      "error": "Error"
+    },
+    "memberships": "Organizations",
+    "membershipsLoading": "Loading organizations",
+    "membershipsEmpty": "No organizations yet.",
+    "membershipsFailed": "Could not read organizations: {message}",
+    "current": "Current",
+    "switch": "Switch",
+    "switching": "Switching",
+    "switched": "Switched to {org}.",
+    "switchFailed": "Could not switch: {message}",
+    "signOutDone": "Signed out.",
+    "revocationFailed": "Signed out locally, but the identity provider could not be told.",
+    "noDeployment": "No cloud deployment is configured for this profile.",
+    "signOut": "Sign out",
+    "roleName": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member"
+    }
+  },
+  "invite": {
+    "title": "Invitation",
+    "received": "Invitation received. Sign in to join.",
+    "invalid": "That link does not carry a valid invitation token.",
+    "continue": "Continue"
   }
 }

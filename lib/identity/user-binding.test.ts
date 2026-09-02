@@ -204,3 +204,34 @@ describe("reconcileUserId (server-assigned canonical id)", () => {
     ).rejects.toMatchObject({ code: "not-bound" })
   })
 })
+
+describe("setOrgId (server-assigned org id)", () => {
+  it("moves the binding to the server's org and leaves the person alone", async () => {
+    const { registry } = await freshRegistry("set-org-id")
+    await registry.bind({
+      localAccountId: "acct_a",
+      userId: "usr_ada00000000000000000000",
+      logtoSubject: "sub",
+      logtoIssuer: "https://logto.test/oidc",
+      orgId: "org_derived0000000000000000",
+      now: 10,
+    })
+    const row = await registry.setOrgId("acct_a", "org_server00000000000000000", 20)
+    expect(row.orgId).toBe("org_server00000000000000000")
+    expect(row.userId).toBe("usr_ada00000000000000000000")
+    expect(row.updatedAt).toBe(20)
+    // Idempotent: the same org again is not a write.
+    const again = await registry.setOrgId("acct_a", "org_server00000000000000000", 30)
+    expect(again.updatedAt).toBe(20)
+  })
+
+  it("refuses a value that is not an org id, and an unbound profile", async () => {
+    const { registry } = await freshRegistry("set-org-id-refuses")
+    await expect(registry.setOrgId("acct_a", "not-an-org")).rejects.toMatchObject({
+      code: "invalid-org-id",
+    })
+    await expect(registry.setOrgId("acct_a", "org_server00000000000000000")).rejects.toMatchObject({
+      code: "not-bound",
+    })
+  })
+})

@@ -158,6 +158,34 @@ export class UserBindingRegistry {
   }
 
   /**
+   * Point the binding at the organization the server knows this profile in.
+   *
+   * The first sign-in derives an org id from the Logto organization, the same
+   * way it derives a user id. The collaboration server assigns its own, and
+   * every route is keyed on that one, so once the server has answered the
+   * binding follows it. Idempotent.
+   */
+  async setOrgId(localAccountId: string, orgId: string, now = Date.now()): Promise<UserBindingRow> {
+    if (!isOrgId(orgId)) {
+      throw new UserBindingError("invalid-org-id", `"${orgId}" is not an org id.`)
+    }
+    let result: UserBindingRow | undefined
+    await this.db.transaction("rw", this.db.userBindings, async () => {
+      const existing = await this.db.userBindings.get(localAccountId)
+      if (!existing) {
+        throw new UserBindingError("not-bound", `Profile ${localAccountId} is not bound.`)
+      }
+      if (existing.orgId === orgId) {
+        result = existing
+        return
+      }
+      result = { ...existing, orgId, updatedAt: now }
+      await this.db.userBindings.put(result)
+    })
+    return result as UserBindingRow
+  }
+
+  /**
    * Move the binding to the server-assigned id, remembering the old one.
    *
    * Not a takeover: the person is the same, only the id the server chose for

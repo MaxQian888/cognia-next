@@ -72,7 +72,9 @@ pub const ENV_LOGTO_NATIVE_CLIENT_ID: &str = "COGNIA_LOGTO_NATIVE_CLIENT_ID";
 /// Each becomes a `direct_sign_in=social:<name>` button on the client.
 pub const ENV_LOGTO_SOCIAL_PROVIDERS: &str = "COGNIA_LOGTO_SOCIAL_PROVIDERS";
 /// Base URL of the `cognia-collab-server` this deployment enrols accounts on.
-pub const ENV_COLLAB_SERVICE_URL: &str = "COGNIA_COLLAB_SERVICE_URL";
+/// The same variable the brain's read-only collaboration client already takes,
+/// so one deployment names its plane once.
+pub const ENV_COLLAB_SERVICE_URL: &str = "COGNIA_COLLAB_URL";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

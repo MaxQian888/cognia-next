@@ -138,7 +138,8 @@
     "tabSecurity": "安全",
     "title": "本地账户",
     "undo": "撤销",
-    "updatedAtLabel": "更新于"
+    "updatedAtLabel": "更新于",
+    "tabIdentity": "身份"
   },
   "passwordStrength": {
     "aria": "密码强度",
@@ -173,5 +174,137 @@
     "operationFailed": "本地账户操作失败。",
     "switchPasswordLabel": "密码",
     "switchPasswordPlaceholder": "密码"
+  },
+  "cloud": {
+    "title": "登录 {deployment}",
+    "titleGeneric": "登录你的组织",
+    "description": "此部署使用共享的身份提供方。登录一次，这个配置文件在任何地方都是你的。",
+    "checking": "正在检查此部署的登录方式",
+    "continueWith": "使用 {provider} 继续",
+    "provider": {
+      "github": "GitHub",
+      "feishu": "飞书",
+      "lark": "Lark",
+      "google": "Google",
+      "microsoft": "Microsoft",
+      "wechat": "微信"
+    },
+    "continueWithLogto": "使用 Logto 继续",
+    "signingIn": "正在登录",
+    "awaitingCode": "在浏览器中完成登录，然后把它跳转到的地址粘贴到这里。",
+    "codePlaceholder": "粘贴回调地址或授权码",
+    "submitCode": "继续",
+    "cancel": "取消",
+    "continueOffline": "离线继续",
+    "continueOfflineHint": "本地数据仍然可用。共享工作区和事项在登录前不会同步。",
+    "reauth": {
+      "expired": "你的会话已过期。",
+      "revoked": "你的会话已在别处退出。",
+      "binding-missing": "此配置文件已登录，但尚未绑定到某个人。"
+    },
+    "offline": {
+      "body": "上一次的会话已保留。你可以继续离线工作，连上以后会自动刷新。"
+    },
+    "unavailable": {
+      "title": "现在无法登录",
+      "body": "{baseUrl} 上的宿主没有返回登录配置：{message}"
+    },
+    "advanced": {
+      "toggle": "高级：手动配置 Logto",
+      "issuer": "Issuer",
+      "clientId": "客户端 ID",
+      "resource": "API 资源",
+      "redirectUri": "回调地址",
+      "submit": "用此配置登录",
+      "missing": "Issuer、客户端 ID、资源和回调地址都必须填写。"
+    },
+    "settling": "正在查找你的组织",
+    "choose": {
+      "title": "选择组织",
+      "description": "你属于不止一个组织。之后可以在「账户」里切换。",
+      "workspaces": "{count} 个工作区",
+      "role": {
+        "owner": "所有者",
+        "admin": "管理员",
+        "member": "成员",
+        "guest": "访客"
+      },
+      "select": "使用这个组织"
+    },
+    "unaffiliated": {
+      "title": "已登录，但还不属于任何组织",
+      "description": "兑换你收到的邀请；如果你正在搭建这套部署，则认领它。"
+    },
+    "invitation": {
+      "title": "我有邀请",
+      "tokenLabel": "邀请令牌",
+      "tokenPlaceholder": "粘贴令牌",
+      "submit": "加入",
+      "invalid": "这看起来不像邀请令牌。"
+    },
+    "claim": {
+      "title": "认领此部署",
+      "description": "运维人员会把一次性凭据交给第一位所有者。之后的每个人都通过邀请加入。",
+      "credentialLabel": "引导凭据",
+      "credentialPlaceholder": "粘贴凭据",
+      "orgNameLabel": "组织名称",
+      "orgNamePlaceholder": "Acme",
+      "submit": "创建组织并让我成为所有者",
+      "missing": "凭据和组织名称都必须填写。"
+    },
+    "error": {
+      "generic": "登录未完成：{message}",
+      "profileBoundToAnother": "此配置文件已属于 {name}。请先在那里退出。",
+      "notInvited": "服务器拒绝：该令牌不是有效的邀请。",
+      "reauthRequired": "当前会话无法签发组织令牌，请重新登录。",
+      "noCollaborationService": "此部署没有声明协作服务，没有可加入的组织。",
+      "callbackMalformed": "这不是回调地址或授权码。",
+      "stateMismatch": "该回调属于另一次登录尝试，请重新开始。"
+    },
+    "signedInAs": "已以 {name} 登录",
+    "signOut": "退出登录"
+  },
+  "identity": {
+    "title": "云端身份",
+    "description": "此配置文件在共享部署上是谁，以及它在哪个组织中工作。",
+    "loading": "正在读取云端会话",
+    "signedOut": "此配置文件尚未登录云端身份。",
+    "signIn": "登录",
+    "person": "人",
+    "organization": "组织",
+    "role": "角色",
+    "session": "会话",
+    "sessionExpires": "{date} 过期",
+    "sessionUnknownExpiry": "过期时间未知",
+    "state": {
+      "active": "有效",
+      "reauth-required": "需要登录",
+      "offline": "离线",
+      "error": "错误"
+    },
+    "memberships": "组织",
+    "membershipsLoading": "正在加载组织",
+    "membershipsEmpty": "还没有加入任何组织。",
+    "membershipsFailed": "无法读取组织：{message}",
+    "current": "当前",
+    "switch": "切换",
+    "switching": "正在切换",
+    "switched": "已切换到 {org}。",
+    "switchFailed": "无法切换：{message}",
+    "signOutDone": "已退出登录。",
+    "revocationFailed": "已在本地退出，但无法通知身份提供方。",
+    "noDeployment": "此配置文件没有配置云端部署。",
+    "signOut": "退出登录",
+    "roleName": {
+      "owner": "所有者",
+      "admin": "管理员",
+      "member": "成员"
+    }
+  },
+  "invite": {
+    "title": "邀请",
+    "received": "已收到邀请。登录后即可加入。",
+    "invalid": "该链接没有携带有效的邀请令牌。",
+    "continue": "继续"
   }
 }
