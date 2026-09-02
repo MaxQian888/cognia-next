@@ -6,7 +6,11 @@ import {
   getActiveCatalogSnapshot,
   getCatalogState,
   getConnectionInventory,
+  getOperationSnapshot,
+  listOperationSnapshots,
+  operationSnapshotId,
   putConnectionInventory,
+  putOperationSnapshots,
   stageCatalogRevision,
 } from "./provider-catalog"
 import { getDb } from "./schema"
@@ -143,5 +147,109 @@ describe("connection inventory", () => {
       checkedAt: 1_775_000_000_000,
       availableUpstreamIds: ["gpt-test"],
     })
+  })
+
+  it("keeps the listing, its provenance and the account it was taken under", async () => {
+    await putConnectionInventory({
+      id: "deployment:openai-main",
+      deploymentRef: "openai-main",
+      providerRef: "openai",
+      status: "healthy",
+      checkedAt: 10,
+      availableUpstreamIds: ["gpt-test"],
+      accountRef: "fnv-abc",
+      models: [{ id: "gpt-test", name: "GPT Test", contextLength: 8_000 }],
+      source: "remote-discovered",
+      freshness: "fresh",
+      expiresAt: 3_610,
+    })
+    expect(await getConnectionInventory("openai-main")).toMatchObject({
+      accountRef: "fnv-abc",
+      models: [{ id: "gpt-test", contextLength: 8_000 }],
+      source: "remote-discovered",
+      freshness: "fresh",
+      expiresAt: 3_610,
+    })
+  })
+})
+
+describe("operation snapshots", () => {
+  const cell = (operationId: "models.list" | "embeddings.create") => ({
+    operationId,
+    support: "native" as const,
+    availability: "ready" as const,
+  })
+
+  it("keys a snapshot by deployment, account and operation, never by provider alone", async () => {
+    expect(
+      operationSnapshotId({ deploymentRef: "d", accountRef: "a", operationId: "models.list" })
+    ).toBe("d#a#models.list")
+    await putOperationSnapshots({
+      providerId: "openai",
+      deploymentRef: "openai-main",
+      accountRef: "acct-1",
+      cells: [cell("models.list")],
+      computedAt: 5,
+    })
+    await putOperationSnapshots({
+      providerId: "openai",
+      deploymentRef: "openai-main",
+      accountRef: "acct-2",
+      cells: [cell("models.list"), cell("embeddings.create")],
+      computedAt: 6,
+    })
+    expect(
+      await getOperationSnapshot({
+        deploymentRef: "openai-main",
+        accountRef: "acct-1",
+        operationId: "models.list",
+      })
+    ).toMatchObject({ providerId: "openai", computedAt: 5 })
+    expect(
+      (await listOperationSnapshots({ providerId: "openai" })).map((row) => row.id).sort()
+    ).toEqual([
+      "openai-main#acct-1#models.list",
+      "openai-main#acct-2#embeddings.create",
+      "openai-main#acct-2#models.list",
+    ])
+  })
+
+  it("replaces one account's cells wholesale and leaves the other account alone", async () => {
+    await putOperationSnapshots({
+      providerId: "openai",
+      deploymentRef: "openai-main",
+      accountRef: "acct-1",
+      cells: [cell("models.list"), cell("embeddings.create")],
+      computedAt: 1,
+    })
+    await putOperationSnapshots({
+      providerId: "openai",
+      deploymentRef: "openai-main",
+      accountRef: "acct-2",
+      cells: [cell("models.list")],
+      computedAt: 1,
+    })
+    await putOperationSnapshots({
+      providerId: "openai",
+      deploymentRef: "openai-main",
+      accountRef: "acct-1",
+      cells: [cell("models.list")],
+      computedAt: 2,
+    })
+    const rows = await listOperationSnapshots({
+      providerId: "openai",
+      deploymentRef: "openai-main",
+    })
+    expect(rows.map((row) => row.id).sort()).toEqual([
+      "openai-main#acct-1#models.list",
+      "openai-main#acct-2#models.list",
+    ])
+    expect(
+      await getOperationSnapshot({
+        deploymentRef: "openai-main",
+        accountRef: "acct-1",
+        operationId: "models.list",
+      })
+    ).toMatchObject({ computedAt: 2 })
   })
 })

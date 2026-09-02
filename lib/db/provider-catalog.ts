@@ -8,6 +8,13 @@ import {
   type ProviderDefinition,
   type ProviderOffering,
 } from "@cognia/provider-types/model-catalog"
+import type {
+  ProviderModelCandidate,
+  ProviderModelFreshness,
+  ProviderModelSource,
+  ProviderOperationCell,
+  ProviderOperationId,
+} from "@cognia/provider-types"
 import {
   InMemoryCatalogRepository,
   type CatalogProviderFilter,
@@ -37,6 +44,11 @@ export interface ProviderCatalogStateRow {
   stagedRevisionIds: string[]
 }
 
+/**
+ * What one deployment × account can reach right now (ADR-0163). Keyed by
+ * deployment AND account: a key rotation or an organisation switch changes
+ * what is listed, so rows are never aggregated per provider.
+ */
 export interface ProviderConnectionInventoryRow {
   id: string
   deploymentRef: string
@@ -45,6 +57,34 @@ export interface ProviderConnectionInventoryRow {
   checkedAt: number
   availableUpstreamIds: string[]
   normalizedError?: string
+  /** Account the listing was taken under (credential affinity, never the key). */
+  accountRef?: string
+  /** The full listing, when a `models.list` produced one. */
+  models?: ProviderModelCandidate[]
+  source?: ProviderModelSource
+  freshness?: ProviderModelFreshness
+  /** After this instant the listing is stale and a caller should re-list. */
+  expiresAt?: number
+}
+
+/** One operation cell of one deployment × account, as last computed. */
+export interface ProviderOperationSnapshotRow {
+  id: string
+  providerId: string
+  deploymentRef: string
+  accountRef: string
+  operationId: ProviderOperationId
+  cell: ProviderOperationCell
+  computedAt: number
+  expiresAt?: number
+}
+
+export function operationSnapshotId(input: {
+  deploymentRef: string
+  accountRef: string
+  operationId: string
+}): string {
+  return `${input.deploymentRef}#${input.accountRef}#${input.operationId}`
 }
 
 const CATALOG_STATE_ID = "singleton" as const
@@ -213,6 +253,60 @@ export function getConnectionInventory(
   deploymentRef: string
 ): Promise<ProviderConnectionInventoryRow | undefined> {
   return getDb().providerConnectionInventory.where("deploymentRef").equals(deploymentRef).first()
+}
+
+/** Replace the snapshot rows of one deployment × account with `cells`. */
+export async function putOperationSnapshots(input: {
+  providerId: string
+  deploymentRef: string
+  accountRef: string
+  cells: readonly ProviderOperationCell[]
+  computedAt: number
+  expiresAt?: number
+}): Promise<void> {
+  const rows: ProviderOperationSnapshotRow[] = input.cells.map((cell) => ({
+    id: operationSnapshotId({
+      deploymentRef: input.deploymentRef,
+      accountRef: input.accountRef,
+      operationId: cell.operationId,
+    }),
+    providerId: input.providerId,
+    deploymentRef: input.deploymentRef,
+    accountRef: input.accountRef,
+    operationId: cell.operationId,
+    cell,
+    computedAt: input.computedAt,
+    ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+  }))
+  const db = getDb()
+  await db.transaction("rw", db.providerOperationSnapshots, async () => {
+    await db.providerOperationSnapshots
+      .where("deploymentRef")
+      .equals(input.deploymentRef)
+      .and((row) => row.accountRef === input.accountRef)
+      .delete()
+    await db.providerOperationSnapshots.bulkPut(rows)
+  })
+}
+
+export function getOperationSnapshot(input: {
+  deploymentRef: string
+  accountRef: string
+  operationId: string
+}): Promise<ProviderOperationSnapshotRow | undefined> {
+  return getDb().providerOperationSnapshots.get(operationSnapshotId(input))
+}
+
+/** Every snapshot of a provider, optionally narrowed to one deployment. */
+export function listOperationSnapshots(input: {
+  providerId: string
+  deploymentRef?: string
+}): Promise<ProviderOperationSnapshotRow[]> {
+  const db = getDb()
+  const query = input.deploymentRef
+    ? db.providerOperationSnapshots.where("deploymentRef").equals(input.deploymentRef)
+    : db.providerOperationSnapshots.where("providerId").equals(input.providerId)
+  return query.and((row) => row.providerId === input.providerId).toArray()
 }
 
 /** Browser/Tauri persistence adapter for the shared synchronous read model. */

@@ -1,4 +1,11 @@
 /** @jest-environment node */
+jest.mock("../persistence", () => ({
+  providerOperationPersistence: { writeSnapshots: jest.fn(async () => undefined) },
+}))
+const persistence = jest.requireMock("../persistence") as {
+  providerOperationPersistence: { writeSnapshots: jest.Mock }
+}
+
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { getProviderOperationDescriptor } from "../manifest"
@@ -39,6 +46,25 @@ describe("capabilities.read handler", () => {
     // one that needs the renderer is not.
     const files = profile.cells.find((c) => c.operationId === "files.upload")
     expect(files?.availability).toBe("ready")
+  })
+
+  it("caches the cells per deployment and account without exposing the key", async () => {
+    await capabilitiesReadHandler.handler({
+      descriptor: getProviderOperationDescriptor("capabilities.read")!,
+      provider: provider(),
+      settings: { defaultProvider: "openai", providers: {}, customProviders: [] },
+      request: {
+        operationId: "capabilities.read",
+        scopes: ["provider:read"],
+        surface: "sidecar",
+        deploymentRef: "openai-main",
+        input: {},
+      },
+    })
+    const write = persistence.providerOperationPersistence.writeSnapshots.mock.calls.at(-1)?.[0]
+    expect(write).toMatchObject({ providerId: "openai", deploymentRef: "openai-main" })
+    expect(write.accountRef).not.toContain("sk-test")
+    expect(write.cells.length).toBeGreaterThan(0)
   })
 
   it("treats a custom provider by protocol with vendor surfaces unknown", async () => {

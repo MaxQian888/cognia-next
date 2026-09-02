@@ -25,7 +25,9 @@ import { getCatalogModelsForProvider } from "@cognia/provider-core/providers/mod
 import { discoverBedrockModelsViaSidecar } from "@/lib/claude/feature-call"
 import type { ProviderSettingsSnapshot, ResolvedProvider } from "@/lib/ai/provider-consumption"
 
+import { credentialAffinityOf } from "../credential-affinity"
 import { ProviderOperationFailureError } from "../failure"
+import { providerOperationPersistence, type ProviderOperationPersistence } from "../persistence"
 import type {
   ProviderOperationHandlerRegistration,
   ProviderOperationProviderMatch,
@@ -33,16 +35,23 @@ import type {
 import { providerRequest } from "./http"
 
 export interface ModelsListInput {
-  /** Skip the live vendor listing and answer from the catalog alone. */
+  /**
+   * `true` forces a live vendor listing, `false` answers from the catalog
+   * alone, and absent uses the stored listing of this deployment × account
+   * while it is fresh.
+   */
   remote?: boolean
 }
 
 export interface ModelsListOutput {
   models: DiscoveredProviderModel[]
-  /** Whether the vendor's live listing contributed. */
-  source: "remote" | "catalog"
+  /** Where the vendor layer came from: a live call, the stored listing, or nothing. */
+  source: "remote" | "cached" | "catalog"
   remoteLastFetchedAt?: number
 }
+
+/** How long a stored listing answers before a live call is made again. */
+export const INVENTORY_TTL_MS = 60 * 60 * 1000
 
 type RemoteLister = (
   provider: ResolvedProvider,
@@ -192,14 +201,69 @@ function curatedModelsOf(
 export async function listProviderModels(input: {
   provider: ResolvedProvider
   settings: ProviderSettingsSnapshot
+  deploymentRef?: string
   remote?: boolean
   signal?: AbortSignal
   now?: number
+  persistence?: ProviderOperationPersistence
 }): Promise<ModelsListOutput> {
   const { provider, settings } = input
+  const persistence = input.persistence ?? providerOperationPersistence
+  const now = input.now ?? Date.now()
+  const deploymentRef = input.deploymentRef ?? provider.providerId
+  const accountRef = credentialAffinityOf(provider.apiKey)
   const lister = input.remote === false ? undefined : remoteListerFor(provider)
-  const remoteModels = lister ? await lister(provider, input.signal) : undefined
-  const remoteLastFetchedAt = remoteModels ? (input.now ?? Date.now()) : undefined
+
+  let remoteModels: ProviderModelCandidate[] | undefined
+  let source: ModelsListOutput["source"] = "catalog"
+  let remoteLastFetchedAt: number | undefined
+  if (lister && input.remote === undefined) {
+    // A listing taken under another account is never reused: a key rotation
+    // or an organisation switch changes what the vendor lists.
+    const stored = await persistence.readInventory(deploymentRef)
+    if (
+      stored?.models &&
+      stored.accountRef === accountRef &&
+      stored.expiresAt !== undefined &&
+      stored.expiresAt > now
+    ) {
+      remoteModels = stored.models
+      remoteLastFetchedAt = stored.checkedAt
+      source = "cached"
+    }
+  }
+  if (lister && !remoteModels) {
+    try {
+      remoteModels = await lister(provider, input.signal)
+    } catch (error) {
+      await persistence.writeInventory({
+        id: `deployment:${deploymentRef}`,
+        deploymentRef,
+        providerRef: provider.providerId,
+        status: "unavailable",
+        checkedAt: now,
+        availableUpstreamIds: [],
+        accountRef,
+        normalizedError: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+    remoteLastFetchedAt = now
+    source = "remote"
+    await persistence.writeInventory({
+      id: `deployment:${deploymentRef}`,
+      deploymentRef,
+      providerRef: provider.providerId,
+      status: "healthy",
+      checkedAt: now,
+      availableUpstreamIds: remoteModels.map((model) => model.id),
+      accountRef,
+      models: remoteModels,
+      source: "remote-discovered",
+      freshness: "fresh",
+      expiresAt: now + INVENTORY_TTL_MS,
+    })
+  }
   const snapshot = buildProviderModelDiscoverySnapshot({
     providerId: provider.providerId,
     catalogModels: catalogModelsOf(provider.providerId),
@@ -210,7 +274,7 @@ export async function listProviderModels(input: {
   })
   return {
     models: snapshot.models,
-    source: remoteModels ? "remote" : "catalog",
+    source,
     ...(remoteLastFetchedAt !== undefined ? { remoteLastFetchedAt } : {}),
   }
 }
@@ -224,7 +288,13 @@ function modelsListHandler(
     providerMatch,
     support,
     handler: ({ provider, settings, request, signal }) =>
-      listProviderModels({ provider, settings, remote: request.input?.remote, signal }),
+      listProviderModels({
+        provider,
+        settings,
+        deploymentRef: request.deploymentRef,
+        remote: request.input?.remote,
+        signal,
+      }),
   }
 }
 
@@ -249,6 +319,7 @@ export const modelsGetHandler: ProviderOperationHandlerRegistration<
     const listed = await listProviderModels({
       provider,
       settings,
+      deploymentRef: request.deploymentRef,
       remote: request.input.remote,
       signal,
     })

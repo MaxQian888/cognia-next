@@ -247,6 +247,7 @@ import type {
   ProviderCatalogRevisionRow,
   ProviderCatalogStateRow,
   ProviderConnectionInventoryRow,
+  ProviderOperationSnapshotRow,
 } from "./provider-catalog"
 import type { OpenRouterCatalogRow } from "./openrouter-catalog"
 import type { SessionStateRow } from "./session-state"
@@ -394,7 +395,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 216
+export const CURRENT_SCHEMA_VERSION = 217
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -655,6 +656,9 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   providerCatalogState: "&id",
   providerConnectionInventory:
     "&id, &deploymentRef, providerRef, status, checkedAt, *availableUpstreamIds",
+  // v217: operation cells per deployment × account (ADR-0163). Rebuildable.
+  providerOperationSnapshots:
+    "&id, providerId, deploymentRef, operationId, computedAt, [providerId+operationId]",
   evalProjects: "&id, mode, updatedAt, createdAt",
   evalExperiments: "&id, projectId, state, [projectId+createdAt], updatedAt",
   evalTasks:
@@ -1074,6 +1078,7 @@ export class CogniaDB extends Dexie {
   providerCatalogAliases!: Table<ProviderCatalogAliasRow, [string, string]>
   providerCatalogState!: Table<ProviderCatalogStateRow, "singleton">
   providerConnectionInventory!: Table<ProviderConnectionInventoryRow, string>
+  providerOperationSnapshots!: Table<ProviderOperationSnapshotRow, string>
   // v121 — Provider Profile Store (ADR-0090 Phase 1). See `lib/db/provider-profiles.ts`.
   providerProfiles!: Table<ProviderProfile, string>
   deploymentProfiles!: Table<DeploymentProfile, string>
@@ -1682,6 +1687,7 @@ export type {
   ProviderCatalogRevisionRow,
   ProviderCatalogStateRow,
   ProviderConnectionInventoryRow,
+  ProviderOperationSnapshotRow,
 } from "./provider-catalog"
 export type { OpenRouterCatalogRow } from "./openrouter-catalog"
 export type { SessionStateRow } from "./session-state"

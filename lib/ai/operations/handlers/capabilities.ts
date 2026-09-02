@@ -8,8 +8,10 @@
 import type { ProviderOperationProfile } from "@cognia/provider-types"
 import { buildProviderOperationProfile } from "@cognia/provider-core/operations/capability-matrix"
 
+import { credentialAffinityOf } from "../credential-affinity"
 import { detectHostSurfaces } from "../host-surfaces"
 import { listProviderOperationDescriptors } from "../manifest"
+import { providerOperationPersistence } from "../persistence"
 import type { ProviderOperationHandlerRegistration } from "../registry"
 
 export interface CapabilitiesReadInput {
@@ -24,7 +26,7 @@ export const capabilitiesReadHandler: ProviderOperationHandlerRegistration<
   providerMatch: { kind: "any" },
   support: "derived",
   async handler({ provider, request }) {
-    return buildProviderOperationProfile({
+    const profile = buildProviderOperationProfile({
       providerId: provider.providerId,
       deploymentRef: request.input?.deploymentRef ?? request.deploymentRef,
       descriptors: listProviderOperationDescriptors(),
@@ -42,5 +44,15 @@ export const capabilitiesReadHandler: ProviderOperationHandlerRegistration<
           }
         : undefined,
     })
+    // The cells are cached per deployment × account so the console and the
+    // CLI can read the last answer without recomputing. Best-effort.
+    await providerOperationPersistence.writeSnapshots({
+      providerId: provider.providerId,
+      deploymentRef: request.input?.deploymentRef ?? request.deploymentRef ?? provider.providerId,
+      accountRef: credentialAffinityOf(provider.apiKey),
+      cells: profile.cells,
+      computedAt: profile.computedAt,
+    })
+    return profile
   },
 }

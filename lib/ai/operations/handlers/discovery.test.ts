@@ -17,6 +17,18 @@ const featureCall = jest.requireMock("@/lib/claude/feature-call") as {
   discoverBedrockModelsViaSidecar: jest.Mock
 }
 jest.mock("./http", () => ({ providerRequest: jest.fn() }))
+jest.mock("../persistence", () => ({
+  providerOperationPersistence: {
+    readInventory: jest.fn(async () => undefined),
+    writeInventory: jest.fn(async () => undefined),
+    writeSnapshots: jest.fn(async () => undefined),
+  },
+}))
+const persistence = (
+  jest.requireMock("../persistence") as {
+    providerOperationPersistence: { readInventory: jest.Mock; writeInventory: jest.Mock }
+  }
+).providerOperationPersistence
 const http = jest.requireMock("./http") as { providerRequest: jest.Mock }
 
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
@@ -153,6 +165,71 @@ describe("models.list", () => {
       undefined
     )
     expect(bedrock.models.find((model) => model.id === "b1")?.supportsVision).toBe(true)
+  })
+
+  it("reuses a fresh stored listing only under the same account, and records a failed listing", async () => {
+    const provider = resolved("groq", "openai")
+    const stored = {
+      id: "deployment:groq-main",
+      deploymentRef: "groq-main",
+      providerRef: "groq",
+      status: "healthy" as const,
+      checkedAt: 100,
+      availableUpstreamIds: ["stored-1"],
+      accountRef: "other-account",
+      models: [{ id: "stored-1" }],
+      source: "remote-discovered" as const,
+      freshness: "fresh" as const,
+      expiresAt: 1_000,
+    }
+    persistence.readInventory.mockResolvedValueOnce(stored)
+    discovery.discoverOpenAICompatibleModels.mockResolvedValueOnce([{ id: "live-1" }])
+    const refetched = await listProviderModels({
+      provider,
+      settings,
+      deploymentRef: "groq-main",
+      now: 500,
+    })
+    expect(refetched.source).toBe("remote")
+    expect(persistence.writeInventory).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: "deployment:groq-main",
+        status: "healthy",
+        availableUpstreamIds: ["live-1"],
+        expiresAt: 500 + 60 * 60 * 1000,
+      })
+    )
+    const written = persistence.writeInventory.mock.calls.at(-1)?.[0]
+    expect(written.accountRef).not.toBe("other-account")
+
+    persistence.readInventory.mockResolvedValueOnce({ ...stored, accountRef: written.accountRef })
+    const cached = await listProviderModels({
+      provider,
+      settings,
+      deploymentRef: "groq-main",
+      now: 500,
+    })
+    expect(cached.source).toBe("cached")
+    expect(cached.remoteLastFetchedAt).toBe(100)
+    expect(cached.models.map((model) => model.id)).toContain("stored-1")
+    expect(discovery.discoverOpenAICompatibleModels).toHaveBeenCalledTimes(1)
+
+    persistence.readInventory.mockResolvedValueOnce({
+      ...stored,
+      accountRef: written.accountRef,
+      expiresAt: 400,
+    })
+    discovery.discoverOpenAICompatibleModels.mockRejectedValueOnce(new Error("upstream down"))
+    await expect(
+      listProviderModels({ provider, settings, deploymentRef: "groq-main", now: 500 })
+    ).rejects.toThrow("upstream down")
+    expect(persistence.writeInventory).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: "unavailable",
+        normalizedError: "upstream down",
+        availableUpstreamIds: [],
+      })
+    )
   })
 
   it("merges a custom provider's curated models and answers models.get from the same listing", async () => {

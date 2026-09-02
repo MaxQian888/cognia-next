@@ -234,6 +234,50 @@ describe("getDb", () => {
     await Dexie.delete(name)
   })
 
+  schemaIt("v217 adds the operation snapshot table without touching the inventory", async () => {
+    const name = `cognia-provider-ops-v217-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(216).stores({
+      providerConnectionInventory:
+        "&id, &deploymentRef, providerRef, status, checkedAt, *availableUpstreamIds",
+    })
+    await legacy.open()
+    await legacy.table("providerConnectionInventory").put({
+      id: "deployment:openai-main",
+      deploymentRef: "openai-main",
+      providerRef: "openai",
+      status: "healthy",
+      checkedAt: 1,
+      availableUpstreamIds: ["gpt-test"],
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(217)
+
+    // Snapshots are read per provider and per deployment, and one cell is
+    // looked up by provider + operation across deployments.
+    expect(upgraded.providerOperationSnapshots.schema.primKey.name).toBe("id")
+    expect(upgraded.providerOperationSnapshots.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "providerId",
+        "deploymentRef",
+        "operationId",
+        "computedAt",
+        "[providerId+operationId]",
+      ])
+    )
+
+    // The inventory row survives, its new optional columns need no index.
+    expect(await upgraded.providerConnectionInventory.get("deployment:openai-main")).toMatchObject({
+      deploymentRef: "openai-main",
+      availableUpstreamIds: ["gpt-test"],
+    })
+    expect(await upgraded.providerOperationSnapshots.count()).toBe(0)
+    upgraded.close()
+  })
+
   schemaIt("v212 adds the backfill run table and the session keyset index", async () => {
     const name = `cognia-project-mining-v212-${Date.now()}`
     const legacy = new Dexie(name)
