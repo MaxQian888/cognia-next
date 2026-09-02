@@ -47718,24 +47718,120 @@
       "untrustedBadge": "未信任"
     },
     "members": {
-      "allRoles": "全部角色",
-      "cachedNote": "服务端名册的本地缓存。",
-      "configureCollaboration": "设置协作",
+      "title": "成员",
       "empty": "这个工作区还没有其他人。",
       "guest": "访客",
-      "invite": "邀请",
-      "inviteUnavailable": "成员关系由协作服务端管理。本应用只镜像名册，不写入。",
-      "noMatches": "没有该角色的成员。",
+      "standingAria": "工作区身份",
+      "roleAria": "工作区角色",
       "role": {
         "maintainer": "维护者",
         "member": "成员",
         "viewer": "只读"
       },
-      "roleAria": "工作区角色",
+      "you": "你",
+      "allRoles": "全部角色",
       "roleFilterAria": "按角色筛选成员",
-      "standingAria": "工作区身份",
-      "title": "成员",
-      "you": "你"
+      "noMatches": "没有该角色的成员。",
+      "configureCollaboration": "设置协作",
+      "invite": "邀请",
+      "cachedNote": "服务端名册的本地缓存。",
+      "remove": "移出工作区",
+      "offboard": "移出组织",
+      "unavailable": {
+        "no-org": "当前登录未绑定组织，没有可管理的名册。",
+        "not-configured": "此档案尚未配置协作服务器。",
+        "not-permitted": "只有本工作区的维护者或组织管理员可以管理成员。",
+        "not-signed-in": "登录后才能管理成员。"
+      },
+      "reason": {
+        "offboarded": "在工作区名册中移出组织",
+        "removed": "在工作区名册中移出工作区",
+        "roleChanged": "在工作区名册中更改角色",
+        "orgRoleChanged": "在工作区成员列表中更改了组织角色",
+        "invitationRevoked": "在工作区成员列表中撤销"
+      },
+      "toast": {
+        "failed": "协作服务器拒绝了这次更改。",
+        "offboarded": "已移出组织。",
+        "removed": "已移出工作区。",
+        "roleChanged": "角色已更新。",
+        "orgRoleChanged": "组织角色已更新。",
+        "invitationRevoked": "邀请已撤销。"
+      },
+      "inviteDialog": {
+        "cancel": "取消",
+        "copied": "已复制",
+        "copy": "复制令牌",
+        "description": "生成一次性邀请令牌，对方在自己的登录界面兑换。",
+        "done": "完成",
+        "expires": "有效期至 {date}",
+        "expiryDays": "{days} 天",
+        "expiryLabel": "有效期",
+        "issuedHint": "通过你信任的渠道把令牌交给对方。令牌只显示一次，不会保存在本地。",
+        "orgRole": {
+          "admin": "管理员",
+          "member": "成员",
+          "owner": "所有者"
+        },
+        "reasonHint": "会记入组织审计日志。",
+        "reasonLabel": "原因",
+        "reasonPlaceholder": "这个人为什么加入",
+        "reasonRequired": "请填写原因，它会记入审计日志。",
+        "roleLabel": "角色",
+        "scopeLabel": "邀请到",
+        "scopeOrg": "整个组织",
+        "scopeWorkspace": "仅此工作区",
+        "submit": "生成邀请",
+        "title": "邀请成员",
+        "workspaceRole": {
+          "maintainer": "维护者",
+          "member": "成员",
+          "viewer": "只读"
+        }
+      },
+      "errors": {
+        "forbidden": "协作服务器拒绝了这次更改：你当前的席位没有这个权限。",
+        "noWorkspace": "没有选中的工作区。",
+        "notAvailable": "此配置文件上没有可用的协作平面。",
+        "notSignedIn": "请重新登录后再管理成员。",
+        "server": "协作服务器返回：{message}"
+      },
+      "orgRoleAria": "组织角色",
+      "orgRole": {
+        "admin": "组织管理员",
+        "member": "组织成员",
+        "owner": "组织所有者"
+      },
+      "invitations": {
+        "title": "邀请",
+        "show": "显示邀请",
+        "hide": "隐藏邀请",
+        "reload": "重新加载",
+        "loading": "正在加载邀请",
+        "empty": "还没有创建过邀请。",
+        "scopeOrg": "组织，{role}",
+        "scopeWorkspace": "工作区，{role}",
+        "createdBy": "由 {who} 创建",
+        "expires": "{date} 过期",
+        "status": {
+          "pending": "待接受",
+          "redeemed": "已接受",
+          "revoked": "已撤销",
+          "expired": "已过期"
+        },
+        "revoke": "撤销",
+        "failed": "无法加载邀请。"
+      },
+      "audit": {
+        "title": "成员变更",
+        "show": "显示最近变更",
+        "hide": "隐藏最近变更",
+        "loading": "正在加载变更",
+        "empty": "尚未记录任何成员变更。",
+        "actor": "操作者 {who}",
+        "roleChange": "{from} → {to}",
+        "failed": "无法加载审计日志。"
+      }
     },
     "panelRoot": {
       "following": "跟随当前会话",

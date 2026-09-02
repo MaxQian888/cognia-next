@@ -47718,24 +47718,120 @@
       "untrustedBadge": "Untrusted"
     },
     "members": {
-      "allRoles": "All roles",
-      "cachedNote": "Cached copy of the server roster.",
-      "configureCollaboration": "Set up collaboration",
+      "title": "Members",
       "empty": "Nobody else is in this workspace yet.",
       "guest": "Guest",
-      "invite": "Invite",
-      "inviteUnavailable": "Membership is managed by the collaboration server. This app mirrors the roster and does not write to it.",
-      "noMatches": "No member has that role.",
+      "standingAria": "Workspace standing",
+      "roleAria": "Workspace role",
       "role": {
         "maintainer": "Maintainer",
         "member": "Member",
         "viewer": "Viewer"
       },
-      "roleAria": "Workspace role",
+      "you": "You",
+      "allRoles": "All roles",
       "roleFilterAria": "Filter members by role",
-      "standingAria": "Workspace standing",
-      "title": "Members",
-      "you": "You"
+      "noMatches": "No member has that role.",
+      "configureCollaboration": "Set up collaboration",
+      "invite": "Invite",
+      "cachedNote": "Cached copy of the server roster.",
+      "remove": "Remove from workspace",
+      "offboard": "Remove from organization",
+      "unavailable": {
+        "no-org": "Your sign-in is not scoped to an organization, so there is no roster to manage.",
+        "not-configured": "No collaboration server is configured for this profile.",
+        "not-permitted": "Only a maintainer of this workspace or an organization admin can manage its members.",
+        "not-signed-in": "Sign in to manage members."
+      },
+      "reason": {
+        "offboarded": "Removed from the organization in the workspace roster",
+        "removed": "Removed from the workspace roster",
+        "roleChanged": "Role changed in the workspace roster",
+        "orgRoleChanged": "Organization role changed in the workspace roster",
+        "invitationRevoked": "Revoked from the workspace roster"
+      },
+      "toast": {
+        "failed": "The collaboration server refused that change.",
+        "offboarded": "Removed from the organization.",
+        "removed": "Removed from the workspace.",
+        "roleChanged": "Role updated.",
+        "orgRoleChanged": "Organization role updated.",
+        "invitationRevoked": "Invitation revoked."
+      },
+      "inviteDialog": {
+        "cancel": "Cancel",
+        "copied": "Copied",
+        "copy": "Copy token",
+        "description": "Mint a one-time invitation token. The person redeems it from their own sign-in screen.",
+        "done": "Done",
+        "expires": "Expires {date}",
+        "expiryDays": "{days, plural, =1 {1 day} other {# days}}",
+        "expiryLabel": "Valid for",
+        "issuedHint": "Share this token with the person over a channel you trust. It is shown once and not stored here.",
+        "orgRole": {
+          "admin": "Admin",
+          "member": "Member",
+          "owner": "Owner"
+        },
+        "reasonHint": "Recorded in the organization's audit log.",
+        "reasonLabel": "Reason",
+        "reasonPlaceholder": "Why this person is joining",
+        "reasonRequired": "Give a reason. It goes into the audit log.",
+        "roleLabel": "Role",
+        "scopeLabel": "Invite to",
+        "scopeOrg": "The whole organization",
+        "scopeWorkspace": "This workspace only",
+        "submit": "Create invitation",
+        "title": "Invite someone",
+        "workspaceRole": {
+          "maintainer": "Maintainer",
+          "member": "Member",
+          "viewer": "Viewer"
+        }
+      },
+      "errors": {
+        "forbidden": "The collaboration server refused: your seat does not allow that change.",
+        "noWorkspace": "No workspace is selected.",
+        "notAvailable": "The collaboration plane is not available on this profile.",
+        "notSignedIn": "Sign in again to manage members.",
+        "server": "The collaboration server answered: {message}"
+      },
+      "orgRoleAria": "Organization role",
+      "orgRole": {
+        "admin": "Org admin",
+        "member": "Org member",
+        "owner": "Org owner"
+      },
+      "invitations": {
+        "title": "Invitations",
+        "show": "Show invitations",
+        "hide": "Hide invitations",
+        "reload": "Reload",
+        "loading": "Loading invitations",
+        "empty": "No invitations have been minted.",
+        "scopeOrg": "Organization, {role}",
+        "scopeWorkspace": "Workspace, {role}",
+        "createdBy": "by {who}",
+        "expires": "Expires {date}",
+        "status": {
+          "pending": "Pending",
+          "redeemed": "Redeemed",
+          "revoked": "Revoked",
+          "expired": "Expired"
+        },
+        "revoke": "Revoke",
+        "failed": "Could not load invitations."
+      },
+      "audit": {
+        "title": "Membership changes",
+        "show": "Show recent changes",
+        "hide": "Hide recent changes",
+        "loading": "Loading changes",
+        "empty": "No membership changes recorded yet.",
+        "actor": "by {who}",
+        "roleChange": "{from} → {to}",
+        "failed": "Could not load the audit log."
+      }
     },
     "panelRoot": {
       "following": "following this conversation",
