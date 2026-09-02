@@ -140,10 +140,14 @@ describe("mintSessionRouteTicket", () => {
         executionFingerprint: "fp_1",
         routePolicy: "gateway-preferred",
         candidates: [{ deploymentId: "dep_anthropic", modelId: "claude-opus-5" }],
+        model: "claude-opus-5",
         credentialAffinity: "session-sticky",
         allowAuthFailover: false,
       })
     )
+    // Bindings are Rust's job (`default_model_bindings`); passing any here
+    // would create a second implementation of the family mapping.
+    expect(mintMock.mock.calls[0]![0]).not.toHaveProperty("modelBindings")
     expect(buildSnapshotMock).toHaveBeenCalledWith(
       expect.objectContaining({
         routingConfig: { strategy: "difficulty", maxFallbackAttempts: 2 },

@@ -24,7 +24,8 @@ use std::time::{Duration, Instant};
 use crate::host::GatewayHost;
 use crate::lease::CredentialLeaseMap;
 use crate::route_ticket::{
-    RouteTicket, RouteTicketRegistry, TicketAffinity, TicketReject, TICKET_SECRET_PREFIX,
+    RouteTicket, RouteTicketRegistry, TicketAffinity, TicketOperation, TicketReject,
+    TICKET_SECRET_PREFIX,
 };
 use axum::{
     body::Body,
@@ -179,6 +180,9 @@ pub trait RequestObserver: Send + Sync + 'static {
 /// request log.
 #[derive(Clone)]
 struct ReqCtx {
+    /// Per-request id; the key every ticket reservation is settled or
+    /// released under.
+    request_id: String,
     route: String,
     remote_ip: String,
     key_id: Option<String>,
@@ -340,6 +344,7 @@ pub async fn spawn_server(
     // A ~60s flush bounds crash-loss of quota accounting to one interval. Tied
     // to the same shutdown signal so it exits with the listener.
     let flush_keys = keys_for_flush;
+    let flush_tickets = Arc::clone(&probe_state.tickets);
     let mut flush_rx = tx.subscribe();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -348,6 +353,9 @@ pub async fn spawn_server(
             tokio::select! {
                 _ = interval.tick() => {
                     let _ = api_keys::save_keys(&flush_keys.read());
+                    // Ticket budget counters ride the same cadence: never a
+                    // disk write per request.
+                    let _ = flush_tickets.flush();
                 }
                 _ = flush_rx.changed() => break,
             }
@@ -616,6 +624,39 @@ fn clean_inbound_headers(headers: &HeaderMap) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The ticket operation a protected route performs. `None` for anything a
+/// ticket can never reach, which the middleware turns into a 403 rather than
+/// guessing a scope.
+fn ticket_operation_for_route(route: &str) -> Option<TicketOperation> {
+    match route {
+        "/v1/models" => Some(TicketOperation::Models),
+        "/v1/chat/completions" | "/v1/messages" => Some(TicketOperation::Chat),
+        "/v1/messages/count_tokens" => Some(TicketOperation::CountTokens),
+        "/v1/embeddings" => Some(TicketOperation::Embeddings),
+        "/v1/responses" => Some(TicketOperation::Responses),
+        _ => None,
+    }
+}
+
+/// Tokens a request may consume, for a ticket with a token ceiling: the
+/// estimated prompt plus the client's own `max_tokens`. Refined to the real
+/// usage at settlement. The body is buffered once and handed back intact.
+async fn estimate_request_hold(
+    request: axum::extract::Request,
+) -> Result<(axum::extract::Request, u64), ()> {
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, BODY_LIMIT_BYTES)
+        .await
+        .map_err(|_| ())?;
+    let hold = serde_json::from_slice::<Value>(&bytes)
+        .map(|v| estimate_input_tokens(&v).saturating_add(v["max_tokens"].as_u64().unwrap_or(0)))
+        .unwrap_or(0);
+    Ok((
+        axum::extract::Request::from_parts(parts, Body::from(bytes)),
+        hold,
+    ))
+}
+
 async fn middleware(
     State(state): State<AppState>,
     ConnectInfo(connect_info): ConnectInfo<SocketAddr>,
@@ -625,6 +666,7 @@ async fn middleware(
 ) -> Response {
     let route = request.uri().path().to_string();
     let remote_ip = connect_info.ip();
+    let request_id = uuid::Uuid::new_v4().to_string();
 
     let reject = |status: StatusCode, message: &str, key_id: Option<String>| -> Response {
         state.on_request.on_call(&route, status, remote_ip);
@@ -692,18 +734,70 @@ async fn middleware(
     // prefix and NEVER fall through into the ordinary key path — an expired,
     // revoked, or unknown ticket is a hard 401 (fail closed).
     if supplied.starts_with(TICKET_SECRET_PREFIX) {
-        let ticket = match state.tickets.validate(supplied, now_ms) {
+        // Operation scope: a route the ticket vocabulary cannot name is closed
+        // to every ticket, and `/v1/embeddings` + `/v1/responses` are closed
+        // to the default (chat) scope, before any secret work.
+        let Some(op) = ticket_operation_for_route(&route) else {
+            return reject(
+                StatusCode::FORBIDDEN,
+                "route tickets cannot be used on this route",
+                None,
+            );
+        };
+        // Hold an estimate only when the ticket meters tokens; buffering the
+        // body for an unmetered ticket would be pure overhead.
+        let mut est_tokens = 0u64;
+        if op.consumes_tokens() && state.tickets.secret_has_token_budget(supplied) {
+            match estimate_request_hold(request).await {
+                Ok((buffered, hold)) => {
+                    request = buffered;
+                    est_tokens = hold;
+                }
+                Err(()) => {
+                    return reject(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "request body too large",
+                        None,
+                    )
+                }
+            }
+        }
+        let ticket = match state
+            .tickets
+            .validate_and_reserve(supplied, now_ms, op, &request_id, est_tokens)
+        {
             Ok(ticket) => ticket,
             Err(kind) => {
-                let message = match kind {
-                    TicketReject::Expired => "route ticket expired",
-                    TicketReject::Revoked => "route ticket revoked",
-                    TicketReject::Unknown => "unknown route ticket",
+                let (status, message) = match kind {
+                    TicketReject::Expired => (StatusCode::UNAUTHORIZED, "route ticket expired"),
+                    TicketReject::Revoked => (StatusCode::UNAUTHORIZED, "route ticket revoked"),
+                    TicketReject::Unknown => (StatusCode::UNAUTHORIZED, "unknown route ticket"),
+                    TicketReject::OperationNotAllowed => (
+                        StatusCode::FORBIDDEN,
+                        "route ticket is not scoped for this operation",
+                    ),
+                    TicketReject::BudgetExhausted => (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "insufficient_quota: route ticket budget exhausted",
+                    ),
                 };
-                return reject(StatusCode::UNAUTHORIZED, message, None);
+                return reject(status, message, None);
             }
         };
+        // Per-ticket rate limit (only when the ticket sets one), then global.
+        // A rate-limited request was never served: hand the slot back.
+        if let Some(limit) = ticket.budget.as_ref().and_then(|b| b.max_requests_per_min) {
+            if !state.key_rate_limiter.try_acquire(&ticket.ticket_id, limit) {
+                state.tickets.release_reservation(&request_id);
+                return reject(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "per-ticket rate limit exceeded",
+                    None,
+                );
+            }
+        }
         if !state.rate_limiter.try_acquire() {
+            state.tickets.release_reservation(&request_id);
             return reject(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded", None);
         }
         let user_agent = headers
@@ -712,6 +806,7 @@ async fn middleware(
             .unwrap_or("")
             .to_string();
         request.extensions_mut().insert(ReqCtx {
+            request_id: request_id.clone(),
             route: route.clone(),
             remote_ip: remote_ip.to_string(),
             key_id: None,
@@ -721,6 +816,14 @@ async fn middleware(
             inbound_headers: clean_inbound_headers(&headers),
         });
         let response = next.run(request).await;
+        // Settlement: a served metered call settles itself in `log_success`
+        // (streams do so at stream end). A call that consumes nothing settles
+        // here at zero; a failed call releases its slot.
+        if !response.status().is_success() {
+            state.tickets.release_reservation(&request_id);
+        } else if !op.consumes_tokens() {
+            state.tickets.settle_reservation(&request_id, 0);
+        }
         state
             .on_request
             .on_call(&route, response.status(), remote_ip);
@@ -785,6 +888,7 @@ async fn middleware(
         .unwrap_or("")
         .to_string();
     request.extensions_mut().insert(ReqCtx {
+        request_id,
         route: route.clone(),
         remote_ip: remote_ip.to_string(),
         key_id: Some(key_id),
@@ -896,7 +1000,16 @@ async fn anthropic_messages(
 /// A ticket's frozen candidates joined against the live snapshot by
 /// deployment id. A candidate whose deployment vanished is skipped. Shared by
 /// every ticket-authenticated handler so the walk cannot drift per route.
-fn ticket_base_candidates(snapshot: &RoutingSnapshot, ticket: &RouteTicket) -> Vec<Candidate> {
+///
+/// `resolved` is the model the ticket's frozen bindings mapped the request's
+/// selector to. When the candidate's provider lists it, the request goes to
+/// that model (a `haiku` background turn reaches the provider's haiku-class
+/// model); otherwise the candidate's own frozen model serves.
+fn ticket_base_candidates(
+    snapshot: &RoutingSnapshot,
+    ticket: &RouteTicket,
+    resolved: Option<&str>,
+) -> Vec<Candidate> {
     ticket
         .candidates
         .iter()
@@ -904,9 +1017,15 @@ fn ticket_base_candidates(snapshot: &RoutingSnapshot, ticket: &RouteTicket) -> V
             snapshot
                 .provider_by_deployment(&tc.deployment_id)
                 .or_else(|| snapshot.provider(&tc.deployment_id))
-                .map(|p| Candidate {
-                    provider: p.clone(),
-                    model_id: tc.model_id.clone(),
+                .map(|p| {
+                    let model_id = match resolved {
+                        Some(model) if p.models.iter().any(|m| m == model) => model.to_string(),
+                        _ => tc.model_id.clone(),
+                    };
+                    Candidate {
+                        provider: p.clone(),
+                        model_id,
+                    }
                 })
         })
         .collect()
@@ -964,8 +1083,10 @@ async fn anthropic_count_tokens(
             return resp;
         }
     }
+    let mut resolved: Option<String> = None;
     if let Some(t) = &ticket {
-        if t.resolve_model(&model).is_none() {
+        resolved = t.resolve_model(&model);
+        if resolved.is_none() {
             return logged_error(
                 &state,
                 &ctx,
@@ -990,7 +1111,7 @@ async fn anthropic_count_tokens(
     // Same walk as chat, but NOT expanded across key pools: a token count
     // needs one credential, never a rotation slot.
     let candidates = match &ticket {
-        Some(t) => ticket_base_candidates(&snapshot, t),
+        Some(t) => ticket_base_candidates(&snapshot, t, resolved.as_deref()),
         None => route_candidates(&state, &snapshot, &cfg, &model, &body, &session_id).await,
     };
     let anthropic = candidates
@@ -2174,8 +2295,10 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
     // Frozen selector mapping (ADR-0090 Phase 2): a ticket request whose model
     // selector is not bound fails closed BEFORE any upstream work — never a
     // live-alias substitution.
+    let mut resolved: Option<String> = None;
     if let Some(t) = &ticket {
-        if t.resolve_model(&model).is_none() {
+        resolved = t.resolve_model(&model);
+        if resolved.is_none() {
             return logged_error(
                 &state,
                 &ctx,
@@ -2220,7 +2343,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         // snapshot by deployment id. A global alias update cannot change this
         // set; a candidate whose deployment vanished is skipped, and zero
         // servable candidates is a 503 (gateway-generated — legitimate here).
-        let base = ticket_base_candidates(&snapshot, t);
+        let base = ticket_base_candidates(&snapshot, t, resolved.as_deref());
         if base.is_empty() {
             return logged_error(
                 &state,
@@ -3149,6 +3272,13 @@ fn log_success(
             let _ = api_keys::add_quota_usage(&mut state.keys.write(), key_id, consumed);
         }
     }
+    // A ticket request settles its reservation at the real usage (streams
+    // reach here at stream end). Idempotent by request id.
+    if ctx.ticket.is_some() {
+        state
+            .tickets
+            .settle_reservation(&ctx.request_id, consumed.max(0) as u64);
+    }
     // Record the upstream account's success for rotation + per-account usage.
     record_key_success(&state.key_rotation, candidate);
 }
@@ -3221,6 +3351,7 @@ mod tests {
 
     fn ctx() -> ReqCtx {
         ReqCtx {
+            request_id: "req-test".into(),
             route: "/v1/chat/completions".into(),
             remote_ip: "127.0.0.1".into(),
             key_id: Some("k1".into()),

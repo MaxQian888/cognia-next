@@ -7,9 +7,22 @@
 //!   live snapshot); a later alias/settings change never alters them;
 //! - the secret (`sk-cognia-rt-…`) lives in memory only — restarts require a
 //!   re-mint, which must present the SAME frozen spec (no widening);
-//! - metadata (everything but the secret) is persisted for audit/revocation.
+//! - metadata (everything but the secret) is persisted for audit/revocation;
+//! - a ticket names the OPERATIONS it may perform and an optional BUDGET.
+//!   Both default deny-safe when absent from a persisted v1 record.
+//!
+//! Budget accounting is atomic: [`RouteTicketRegistry::validate_and_reserve`]
+//! checks the secret, expiry, revocation, operation scope and budget, and
+//! records the reservation, all under ONE lock. A copy of the ticket handed
+//! to the request context is never the accounting record, so concurrent
+//! requests cannot both pass a `max_requests = 1` gate. Settlement and
+//! release are keyed by request id and idempotent.
+//!
+//! There is deliberately NO `risk_ceiling` field. The management plane is not
+//! served by this listener, so every operation a ticket can name belongs to
+//! the same risk tier; a ceiling would be a synonym for `operations`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -32,6 +45,63 @@ pub enum TicketAffinity {
     SessionSticky,
     StickyWithFailover,
     PerRequest,
+}
+
+/// Inference-plane operations a ticket may perform. Management operations are
+/// not reachable through the gateway listener at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TicketOperation {
+    Chat,
+    CountTokens,
+    Models,
+    Embeddings,
+    Responses,
+}
+
+impl TicketOperation {
+    /// Whether a successful call draws tokens against the ticket budget.
+    /// Listing models and counting tokens consume nothing.
+    pub fn consumes_tokens(self) -> bool {
+        matches!(self, Self::Chat | Self::Embeddings | Self::Responses)
+    }
+}
+
+/// The operations a persisted record gets when it predates the field: what
+/// the sidecar's existing Claude Code path needs, and nothing more. Neither
+/// `embeddings` nor `responses` is granted by default.
+pub fn default_ticket_operations() -> Vec<TicketOperation> {
+    vec![
+        TicketOperation::Chat,
+        TicketOperation::CountTokens,
+        TicketOperation::Models,
+    ]
+}
+
+/// Optional consumption ceiling. `spent_*` are registry-owned counters and
+/// are reset at mint; only the `max_*` members of a mint request are honoured.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TicketBudget {
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub spent_tokens: u64,
+    #[serde(default)]
+    pub max_requests: Option<u64>,
+    #[serde(default)]
+    pub spent_requests: u64,
+    /// Per-ticket fixed-window limit; enforced by the server's keyed limiter.
+    #[serde(default)]
+    pub max_requests_per_min: Option<u32>,
+}
+
+/// One in-flight hold against a ticket budget. Transient: never persisted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TicketReservation {
+    pub ticket_id: String,
+    pub request_id: String,
+    pub tokens_held: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -59,9 +129,20 @@ pub struct RouteTicket {
     pub profile_version: Option<u64>,
     #[serde(default)]
     pub revoked: bool,
+    /// Operation scope. Absent on v1 records ⇒ [`default_ticket_operations`].
+    #[serde(default = "default_ticket_operations")]
+    pub operations: Vec<TicketOperation>,
+    /// Consumption ceiling. Absent ⇒ unmetered (the pre-existing behaviour).
+    #[serde(default)]
+    pub budget: Option<TicketBudget>,
 }
 
 impl RouteTicket {
+    /// Whether this ticket may perform `op`.
+    pub fn allows(&self, op: TicketOperation) -> bool {
+        self.operations.contains(&op)
+    }
+
     /// Map an inbound model selector through the frozen bindings. Exact
     /// binding first; then a candidate whose model matches verbatim; else
     /// None (the request fails closed — never a live-alias substitution).
@@ -115,6 +196,18 @@ pub struct MintRequest {
     /// Ticket lifetime; clamped to [60s, 24h].
     #[serde(default)]
     pub ttl_ms: Option<i64>,
+    /// The model the execution will ask for. When `candidates` is empty they
+    /// are derived from it, and when `model_bindings` is empty the family
+    /// selectors (`primary`, `sonnet`, `haiku`, `opus`) are bound from it, so
+    /// a caller only has to know the model it wants.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Absent ⇒ [`default_ticket_operations`].
+    #[serde(default)]
+    pub operations: Option<Vec<TicketOperation>>,
+    /// Absent ⇒ unmetered. Only `max_*` are read; `spent_*` start at zero.
+    #[serde(default)]
+    pub budget: Option<TicketBudget>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -139,6 +232,10 @@ pub enum TicketReject {
     Unknown,
     Expired,
     Revoked,
+    /// The ticket is valid but not scoped for the requested operation (403).
+    OperationNotAllowed,
+    /// The ticket is valid but its request or token budget is spent (429).
+    BudgetExhausted,
 }
 
 /// Metadata persistence port — everything except secrets.
@@ -192,8 +289,19 @@ struct TicketRecord {
     secret: Option<String>,
 }
 
+/// Everything the accounting needs, behind ONE lock.
+#[derive(Default)]
+struct Inner {
+    records: Vec<TicketRecord>,
+    /// request id → hold. Removed on settle or release.
+    reservations: HashMap<String, TicketReservation>,
+    /// Budget counters changed since the last persist. Flushed on the
+    /// server's periodic key flush and on stop, never per request.
+    dirty: bool,
+}
+
 pub struct RouteTicketRegistry {
-    records: Mutex<Vec<TicketRecord>>,
+    inner: Mutex<Inner>,
     store: Mutex<std::sync::Arc<dyn TicketMetaStore>>,
 }
 
@@ -213,7 +321,10 @@ impl RouteTicketRegistry {
             })
             .collect();
         Self {
-            records: Mutex::new(records),
+            inner: Mutex::new(Inner {
+                records,
+                ..Inner::default()
+            }),
             store: Mutex::new(store),
         }
     }
@@ -224,20 +335,33 @@ impl RouteTicketRegistry {
     /// re-minted) and the combined set is persisted to the new store.
     pub fn attach_store(&self, store: std::sync::Arc<dyn TicketMetaStore>) {
         let loaded = store.load().unwrap_or_default();
-        let mut records = self.records.lock();
+        let mut inner = self.inner.lock();
         for ticket in loaded {
-            if !records
+            if !inner
+                .records
                 .iter()
                 .any(|r| r.ticket.ticket_id == ticket.ticket_id)
             {
-                records.push(TicketRecord {
+                inner.records.push(TicketRecord {
                     ticket,
                     secret: None,
                 });
             }
         }
         *self.store.lock() = store;
-        let _ = self.persist(&records);
+        let _ = self.persist(&inner.records);
+    }
+
+    /// Persist budget counters if any changed since the last write. Cheap
+    /// when clean; call it from a periodic flush and from shutdown.
+    pub fn flush(&self) -> Result<(), TicketError> {
+        let mut inner = self.inner.lock();
+        if !inner.dirty {
+            return Ok(());
+        }
+        self.persist(&inner.records)?;
+        inner.dirty = false;
+        Ok(())
     }
 
     fn persist(&self, records: &[TicketRecord]) -> Result<(), TicketError> {
@@ -257,10 +381,38 @@ impl RouteTicketRegistry {
         snapshot: Option<&RoutingSnapshot>,
         now_ms: i64,
     ) -> Result<MintedTicket, TicketError> {
+        let snapshot = snapshot.ok_or(TicketError::NoSnapshot)?;
+        let mut request = request;
+        if request.candidates.is_empty() {
+            if let Some(model) = request.model.as_deref() {
+                request.candidates = crate::route_planner::candidates_for_model(snapshot, model);
+            }
+        }
         if request.candidates.is_empty() {
             return Err(TicketError::NoCandidates);
         }
-        let snapshot = snapshot.ok_or(TicketError::NoSnapshot)?;
+        if request.model_bindings.is_empty() {
+            let model = request
+                .model
+                .clone()
+                .unwrap_or_else(|| request.candidates[0].model_id.clone());
+            request.model_bindings = crate::route_planner::bindings_for_candidates(
+                snapshot,
+                &request.candidates,
+                &model,
+            );
+        }
+        let operations = request
+            .operations
+            .clone()
+            .unwrap_or_else(default_ticket_operations);
+        let budget = request.budget.clone().map(|b| TicketBudget {
+            max_tokens: b.max_tokens,
+            max_requests: b.max_requests,
+            max_requests_per_min: b.max_requests_per_min,
+            spent_tokens: 0,
+            spent_requests: 0,
+        });
         for candidate in &request.candidates {
             let provider = snapshot
                 .provider_by_deployment(&candidate.deployment_id)
@@ -276,8 +428,9 @@ impl RouteTicketRegistry {
             }
         }
 
-        let mut records = self.records.lock();
-        if let Some(prior) = records
+        let mut inner = self.inner.lock();
+        if let Some(prior) = inner
+            .records
             .iter()
             .filter(|r| r.ticket.execution_fingerprint == request.execution_fingerprint)
             .max_by_key(|r| r.ticket.issued_at_ms)
@@ -308,6 +461,21 @@ impl RouteTicketRegistry {
                     detail: "model bindings differ from the original ticket".into(),
                 });
             }
+            if let Some(op) = operations
+                .iter()
+                .find(|op| !prior.ticket.operations.contains(op))
+            {
+                return Err(TicketError::WidenedRemint {
+                    fingerprint: request.execution_fingerprint.clone(),
+                    detail: format!("operation {op:?} was not in the original ticket"),
+                });
+            }
+            if budget_widened(prior.ticket.budget.as_ref(), budget.as_ref()) {
+                return Err(TicketError::WidenedRemint {
+                    fingerprint: request.execution_fingerprint.clone(),
+                    detail: "budget exceeds the original ticket".into(),
+                });
+            }
         }
 
         let ttl = request
@@ -335,20 +503,20 @@ impl RouteTicketRegistry {
             expires_at_ms: now_ms + ttl,
             profile_version: snapshot.profile_version,
             revoked: false,
+            operations,
+            budget,
         };
-        records.push(TicketRecord {
+        inner.records.push(TicketRecord {
             ticket: ticket.clone(),
             secret: Some(secret.clone()),
         });
-        self.persist(&records)?;
+        self.persist(&inner.records)?;
         Ok(MintedTicket { ticket, secret })
     }
 
-    /// Constant-time secret validation. Expired/revoked/unknown all fail
-    /// closed with a typed reason (the middleware maps every reason to 401 —
-    /// no fallthrough into the ordinary key path).
-    pub fn validate(&self, supplied: &str, now_ms: i64) -> Result<RouteTicket, TicketReject> {
-        let records = self.records.lock();
+    /// Index of the record whose secret matches `supplied`, constant-time
+    /// over every in-memory secret. Caller holds the lock.
+    fn match_secret(records: &[TicketRecord], supplied: &str) -> Option<usize> {
         let supplied_bytes = supplied.as_bytes();
         let mut matched: Option<usize> = None;
         for (index, record) in records.iter().enumerate() {
@@ -360,10 +528,144 @@ impl RouteTicketRegistry {
                 matched = Some(index);
             }
         }
-        let Some(index) = matched else {
-            return Err(TicketReject::Unknown);
+        matched
+    }
+
+    /// Whether the secret names a live ticket with a token ceiling. The
+    /// middleware uses this to decide whether buffering the body for an
+    /// estimate is worth it; it grants nothing.
+    pub fn secret_has_token_budget(&self, supplied: &str) -> bool {
+        let inner = self.inner.lock();
+        Self::match_secret(&inner.records, supplied).is_some_and(|index| {
+            inner.records[index]
+                .ticket
+                .budget
+                .as_ref()
+                .is_some_and(|b| b.max_tokens.is_some())
+        })
+    }
+
+    /// The gate the middleware uses. Secret, expiry, revocation, operation
+    /// scope, budget check and reservation happen under one lock, so N
+    /// concurrent requests against `max_requests = 1` admit exactly one.
+    /// `est_tokens` is held against `max_tokens` until settled or released.
+    pub fn validate_and_reserve(
+        &self,
+        supplied: &str,
+        now_ms: i64,
+        op: TicketOperation,
+        request_id: &str,
+        est_tokens: u64,
+    ) -> Result<RouteTicket, TicketReject> {
+        let mut inner = self.inner.lock();
+        let index = Self::match_secret(&inner.records, supplied).ok_or(TicketReject::Unknown)?;
+        let ticket_id = inner.records[index].ticket.ticket_id.clone();
+        {
+            let ticket = &inner.records[index].ticket;
+            if ticket.revoked {
+                return Err(TicketReject::Revoked);
+            }
+            if now_ms >= ticket.expires_at_ms {
+                return Err(TicketReject::Expired);
+            }
+            if !ticket.allows(op) {
+                return Err(TicketReject::OperationNotAllowed);
+            }
+        }
+        let held: u64 = inner
+            .reservations
+            .values()
+            .filter(|r| r.ticket_id == ticket_id)
+            .map(|r| r.tokens_held)
+            .sum();
+        let Inner {
+            records,
+            reservations,
+            dirty,
+        } = &mut *inner;
+        if let Some(budget) = records[index].ticket.budget.as_mut() {
+            if let Some(max) = budget.max_requests {
+                if budget.spent_requests >= max {
+                    return Err(TicketReject::BudgetExhausted);
+                }
+            }
+            if let Some(max) = budget.max_tokens {
+                if budget
+                    .spent_tokens
+                    .saturating_add(held)
+                    .saturating_add(est_tokens)
+                    > max
+                {
+                    return Err(TicketReject::BudgetExhausted);
+                }
+            }
+            budget.spent_requests += 1;
+            *dirty = true;
+        }
+        reservations.insert(
+            request_id.to_string(),
+            TicketReservation {
+                ticket_id,
+                request_id: request_id.to_string(),
+                tokens_held: est_tokens,
+            },
+        );
+        Ok(records[index].ticket.clone())
+    }
+
+    /// Replace a hold with the tokens actually consumed. Idempotent: a
+    /// request id with no open reservation is a no-op.
+    pub fn settle_reservation(&self, request_id: &str, actual_tokens: u64) {
+        let mut inner = self.inner.lock();
+        let Some(reservation) = inner.reservations.remove(request_id) else {
+            return;
         };
-        let ticket = &records[index].ticket;
+        if let Some(record) = inner
+            .records
+            .iter_mut()
+            .find(|r| r.ticket.ticket_id == reservation.ticket_id)
+        {
+            if let Some(budget) = record.ticket.budget.as_mut() {
+                budget.spent_tokens = budget.spent_tokens.saturating_add(actual_tokens);
+                inner.dirty = true;
+            }
+        }
+    }
+
+    /// Drop a hold for a request that was never served (gateway rejection or
+    /// upstream failure); the request slot is handed back. Idempotent.
+    pub fn release_reservation(&self, request_id: &str) {
+        let mut inner = self.inner.lock();
+        let Some(reservation) = inner.reservations.remove(request_id) else {
+            return;
+        };
+        if let Some(record) = inner
+            .records
+            .iter_mut()
+            .find(|r| r.ticket.ticket_id == reservation.ticket_id)
+        {
+            if let Some(budget) = record.ticket.budget.as_mut() {
+                budget.spent_requests = budget.spent_requests.saturating_sub(1);
+                inner.dirty = true;
+            }
+        }
+    }
+
+    /// Open reservations (tests and diagnostics).
+    pub fn open_reservations(&self) -> Vec<TicketReservation> {
+        self.inner.lock().reservations.values().cloned().collect()
+    }
+
+    /// Constant-time secret validation. Expired/revoked/unknown all fail
+    /// closed with a typed reason (the middleware maps every reason to 401 —
+    /// no fallthrough into the ordinary key path).
+    ///
+    /// Read-only: it reserves nothing, so the request middleware must use
+    /// [`Self::validate_and_reserve`] instead.
+    pub fn validate(&self, supplied: &str, now_ms: i64) -> Result<RouteTicket, TicketReject> {
+        let inner = self.inner.lock();
+        let index = Self::match_secret(&inner.records, supplied).ok_or(TicketReject::Unknown)?;
+        let ticket = &inner.records[index].ticket;
         if ticket.revoked {
             return Err(TicketReject::Revoked);
         }
@@ -374,9 +676,9 @@ impl RouteTicketRegistry {
     }
 
     pub fn revoke(&self, ticket_id: &str) -> bool {
-        let mut records = self.records.lock();
+        let mut inner = self.inner.lock();
         let mut hit = false;
-        for record in records.iter_mut() {
+        for record in inner.records.iter_mut() {
             if record.ticket.ticket_id == ticket_id {
                 record.ticket.revoked = true;
                 record.secret = None;
@@ -384,15 +686,15 @@ impl RouteTicketRegistry {
             }
         }
         if hit {
-            let _ = self.persist(&records);
+            let _ = self.persist(&inner.records);
         }
         hit
     }
 
     pub fn revoke_session(&self, session_id: &str) -> usize {
-        let mut records = self.records.lock();
+        let mut inner = self.inner.lock();
         let mut count = 0;
-        for record in records.iter_mut() {
+        for record in inner.records.iter_mut() {
             if record.ticket.session_id == session_id && !record.ticket.revoked {
                 record.ticket.revoked = true;
                 record.secret = None;
@@ -400,39 +702,76 @@ impl RouteTicketRegistry {
             }
         }
         if count > 0 {
-            let _ = self.persist(&records);
+            let _ = self.persist(&inner.records);
         }
         count
     }
 
-    /// Drop expired records entirely (their audit value has a horizon).
+    /// Drop expired records entirely (their audit value has a horizon). Open
+    /// reservations of a dropped ticket go with it.
     pub fn sweep_expired(&self, now_ms: i64) -> usize {
-        let mut records = self.records.lock();
-        let before = records.len();
-        records.retain(|r| now_ms < r.ticket.expires_at_ms);
-        let dropped = before - records.len();
+        let mut inner = self.inner.lock();
+        let before = inner.records.len();
+        inner.records.retain(|r| now_ms < r.ticket.expires_at_ms);
+        let dropped = before - inner.records.len();
         if dropped > 0 {
-            let _ = self.persist(&records);
+            let live: std::collections::HashSet<String> = inner
+                .records
+                .iter()
+                .map(|r| r.ticket.ticket_id.clone())
+                .collect();
+            inner
+                .reservations
+                .retain(|_, reservation| live.contains(&reservation.ticket_id));
+            let _ = self.persist(&inner.records);
         }
         dropped
     }
 
     /// Redacted listing (no secrets are stored, so this is just the metadata).
     pub fn list(&self) -> Vec<RouteTicket> {
-        self.records
+        self.inner
             .lock()
+            .records
             .iter()
             .map(|r| r.ticket.clone())
             .collect()
     }
 
     pub fn active_count(&self, now_ms: i64) -> usize {
-        self.records
+        self.inner
             .lock()
+            .records
             .iter()
             .filter(|r| !r.ticket.revoked && now_ms < r.ticket.expires_at_ms)
             .count()
     }
+}
+
+/// Whether `next` grants more than `prior` on any ceiling. A missing prior
+/// ceiling is unlimited, so nothing can widen it; a missing next ceiling
+/// against a bounded prior is a widening.
+fn budget_widened(prior: Option<&TicketBudget>, next: Option<&TicketBudget>) -> bool {
+    fn cap_widened(prior: Option<u64>, next: Option<u64>) -> bool {
+        match (prior, next) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some(p), Some(n)) => n > p,
+        }
+    }
+    let Some(prior) = prior else {
+        return false;
+    };
+    let (next_tokens, next_requests, next_rpm) = match next {
+        Some(n) => (n.max_tokens, n.max_requests, n.max_requests_per_min),
+        None => (None, None, None),
+    };
+    cap_widened(prior.max_tokens, next_tokens)
+        || cap_widened(prior.max_requests, next_requests)
+        || cap_widened(
+            prior.max_requests_per_min.map(u64::from),
+            next_rpm.map(u64::from),
+        )
 }
 
 #[cfg(test)]
@@ -610,6 +949,223 @@ mod tests {
         );
         // Unmapped selector fails closed.
         assert_eq!(ticket.resolve_model("gpt-4o"), None);
+    }
+
+    #[test]
+    fn v1_record_deserializes_with_deny_safe_defaults() {
+        // A record persisted before `operations` / `budget` existed.
+        let raw = serde_json::json!([{
+            "ticketId": "rt_v1", "routePinId": "pin_v1",
+            "executionFingerprint": "aexf1-v1", "sessionId": "s1",
+            "candidates": [{ "deploymentId": "dep-primary", "modelId": "model-alpha" }],
+            "modelBindings": { "primary": "model-alpha" },
+            "credentialAffinity": "session-sticky", "routePolicy": "gateway-required",
+            "issuedAtMs": 1, "expiresAtMs": 2
+        }]);
+        let tickets: Vec<RouteTicket> = serde_json::from_value(raw).unwrap();
+        let ticket = &tickets[0];
+        assert_eq!(ticket.operations, default_ticket_operations());
+        assert!(ticket.allows(TicketOperation::Chat));
+        assert!(ticket.allows(TicketOperation::CountTokens));
+        assert!(ticket.allows(TicketOperation::Models));
+        assert!(!ticket.allows(TicketOperation::Embeddings));
+        assert!(!ticket.allows(TicketOperation::Responses));
+        assert!(ticket.budget.is_none(), "absent budget is unmetered");
+    }
+
+    #[test]
+    fn widened_operations_and_budget_are_refused_on_remint() {
+        let store = std::sync::Arc::new(InMemoryTicketMetaStore::default());
+        let reg = RouteTicketRegistry::new(std::sync::Arc::clone(&store) as _);
+        let mut first = mint_request();
+        first.budget = Some(TicketBudget {
+            max_tokens: Some(1_000),
+            max_requests: Some(10),
+            ..TicketBudget::default()
+        });
+        reg.mint(first, Some(&snapshot()), 0).unwrap();
+        let reg2 = RouteTicketRegistry::new(store as _);
+
+        let mut wider_ops = mint_request();
+        wider_ops.operations = Some(vec![TicketOperation::Chat, TicketOperation::Embeddings]);
+        wider_ops.budget = Some(TicketBudget {
+            max_tokens: Some(1_000),
+            max_requests: Some(10),
+            ..TicketBudget::default()
+        });
+        assert!(matches!(
+            reg2.mint(wider_ops, Some(&snapshot()), 10),
+            Err(TicketError::WidenedRemint { .. })
+        ));
+
+        let mut wider_budget = mint_request();
+        wider_budget.budget = Some(TicketBudget {
+            max_tokens: Some(2_000),
+            max_requests: Some(10),
+            ..TicketBudget::default()
+        });
+        assert!(matches!(
+            reg2.mint(wider_budget, Some(&snapshot()), 20),
+            Err(TicketError::WidenedRemint { .. })
+        ));
+
+        // Dropping the ceiling entirely is also a widening.
+        let mut unbounded = mint_request();
+        unbounded.budget = None;
+        assert!(matches!(
+            reg2.mint(unbounded, Some(&snapshot()), 30),
+            Err(TicketError::WidenedRemint { .. })
+        ));
+
+        // Narrower on every axis is fine.
+        let mut narrower = mint_request();
+        narrower.operations = Some(vec![TicketOperation::Chat]);
+        narrower.budget = Some(TicketBudget {
+            max_tokens: Some(500),
+            max_requests: Some(5),
+            ..TicketBudget::default()
+        });
+        assert!(reg2.mint(narrower, Some(&snapshot()), 40).is_ok());
+    }
+
+    #[test]
+    fn concurrent_reservations_admit_exactly_max_requests() {
+        let reg = std::sync::Arc::new(registry());
+        let mut request = mint_request();
+        request.budget = Some(TicketBudget {
+            max_requests: Some(1),
+            ..TicketBudget::default()
+        });
+        let minted = reg.mint(request, Some(&snapshot()), 0).unwrap();
+        let secret = std::sync::Arc::new(minted.secret);
+
+        let n = 16;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(n));
+        let handles: Vec<_> = (0..n)
+            .map(|i| {
+                let reg = std::sync::Arc::clone(&reg);
+                let secret = std::sync::Arc::clone(&secret);
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    reg.validate_and_reserve(&secret, 1, TicketOperation::Chat, &format!("req-{i}"), 0)
+                        .is_ok()
+                })
+            })
+            .collect();
+        let admitted = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|admitted| *admitted)
+            .count();
+        assert_eq!(admitted, 1, "exactly one request may pass a max_requests=1 gate");
+        assert_eq!(reg.open_reservations().len(), 1);
+    }
+
+    #[test]
+    fn ticket_scoped_to_chat_cannot_call_embeddings() {
+        let reg = registry();
+        let mut request = mint_request();
+        request.operations = Some(vec![TicketOperation::Chat]);
+        let minted = reg.mint(request, Some(&snapshot()), 0).unwrap();
+        assert_eq!(
+            reg.validate_and_reserve(&minted.secret, 1, TicketOperation::Embeddings, "r1", 0),
+            Err(TicketReject::OperationNotAllowed)
+        );
+        assert_eq!(
+            reg.validate_and_reserve(&minted.secret, 1, TicketOperation::Responses, "r2", 0),
+            Err(TicketReject::OperationNotAllowed)
+        );
+        assert!(reg
+            .validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "r3", 0)
+            .is_ok());
+        assert_eq!(reg.open_reservations().len(), 1, "refused calls hold nothing");
+    }
+
+    #[test]
+    fn token_budget_holds_estimates_until_settled_or_released() {
+        let reg = registry();
+        let mut request = mint_request();
+        request.budget = Some(TicketBudget {
+            max_tokens: Some(100),
+            ..TicketBudget::default()
+        });
+        let minted = reg.mint(request, Some(&snapshot()), 0).unwrap();
+        assert!(reg.secret_has_token_budget(&minted.secret));
+
+        assert!(reg
+            .validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "a", 60)
+            .is_ok());
+        // 60 held + 60 requested > 100 ⇒ refused while the hold is open.
+        assert_eq!(
+            reg.validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "b", 60),
+            Err(TicketReject::BudgetExhausted)
+        );
+        // Settling at the real (smaller) usage frees room.
+        reg.settle_reservation("a", 30);
+        reg.settle_reservation("a", 30); // idempotent
+        assert!(reg
+            .validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "b", 60)
+            .is_ok());
+        // Releasing hands the slot back without charging tokens.
+        reg.release_reservation("b");
+        reg.release_reservation("b"); // idempotent
+        let budget = reg.list()[0].budget.clone().unwrap();
+        assert_eq!(budget.spent_tokens, 30);
+        assert_eq!(budget.spent_requests, 1);
+        assert!(reg.open_reservations().is_empty());
+
+        // Counters reach the store only on flush, never per request.
+        let store = std::sync::Arc::new(InMemoryTicketMetaStore::default());
+        reg.attach_store(std::sync::Arc::clone(&store) as _);
+        reg.validate_and_reserve(&minted.secret, 1, TicketOperation::Chat, "c", 0)
+            .unwrap();
+        reg.settle_reservation("c", 5);
+        assert_eq!(store.load().unwrap()[0].budget.as_ref().unwrap().spent_tokens, 30);
+        reg.flush().unwrap();
+        assert_eq!(store.load().unwrap()[0].budget.as_ref().unwrap().spent_tokens, 35);
+    }
+
+    #[test]
+    fn haiku_selector_resolves_through_default_bindings() {
+        let snapshot: RoutingSnapshot = serde_json::from_value(serde_json::json!({
+            "aliases": [],
+            "providers": [
+                { "id": "dep-primary", "protocol": "anthropic", "baseUrl": "https://a.example",
+                  "apiKey": "sk-up-1", "enabled": true,
+                  "models": ["claude-opus-5", "claude-haiku-4-5-20251001"],
+                  "deploymentId": "dep-primary" }
+            ],
+            "generatedAtMs": 1, "profileVersion": 1, "authority": "renderer",
+        }))
+        .unwrap();
+        let reg = registry();
+        // Only the model is known; candidates and bindings are derived.
+        let request: MintRequest = serde_json::from_value(serde_json::json!({
+            "sessionId": "s1",
+            "executionFingerprint": "aexf1-haiku",
+            "candidates": [],
+            "model": "claude-opus-5",
+            "credentialAffinity": "session-sticky",
+            "routePolicy": "gateway-required",
+        }))
+        .unwrap();
+        let minted = reg.mint(request, Some(&snapshot), 0).unwrap();
+        let ticket = minted.ticket;
+        assert_eq!(ticket.candidates.len(), 1);
+        assert_eq!(ticket.model_bindings["primary"], "claude-opus-5");
+        assert_eq!(ticket.model_bindings["haiku"], "claude-haiku-4-5-20251001");
+        // Claude Code's first background turn asks for a haiku model.
+        assert_eq!(
+            ticket.resolve_model("claude-haiku-4-5-20251001").as_deref(),
+            Some("claude-haiku-4-5-20251001")
+        );
+        // A family with no dedicated model falls back to the primary.
+        assert_eq!(ticket.model_bindings["sonnet"], "claude-opus-5");
+        assert_eq!(
+            ticket.resolve_model("claude-sonnet-5").as_deref(),
+            Some("claude-opus-5")
+        );
     }
 
     #[test]

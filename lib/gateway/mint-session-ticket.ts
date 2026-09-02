@@ -120,6 +120,11 @@ export async function mintSessionRouteTicket(
       ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
       executionFingerprint: input.executionFingerprint,
       candidates,
+      // No `modelBindings` on purpose: Rust's `default_model_bindings` binds
+      // `primary` and the sonnet/haiku/opus family selectors from `model`, so
+      // there is exactly one implementation of that mapping. Claude Code's
+      // first background (haiku) turn used to 400 because nothing bound it.
+      model: input.model,
       // More than one candidate means failover is possible, so the ticket must
       // permit moving off the first credential; a single candidate stays stuck
       // to its own.

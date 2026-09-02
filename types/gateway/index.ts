@@ -320,6 +320,21 @@ export interface GatewayPushSnapshotResult {
   reason?: string | null
 }
 
+/** Inference-plane operations a route ticket may perform. */
+export type GatewayTicketOperation = "chat" | "count-tokens" | "models" | "embeddings" | "responses"
+
+/**
+ * Optional consumption ceiling on a route ticket. `spent*` are registry-owned
+ * counters (reset at mint); a mint request only sets the `max*` members.
+ */
+export interface GatewayTicketBudget {
+  maxTokens?: number | null
+  spentTokens?: number
+  maxRequests?: number | null
+  spentRequests?: number
+  maxRequestsPerMin?: number | null
+}
+
 /** Route-ticket metadata (never the secret) — ADR-0090 Phase 2 §3.4. */
 export interface GatewayRouteTicket {
   ticketId: string
@@ -336,6 +351,10 @@ export interface GatewayRouteTicket {
   expiresAtMs: number
   profileVersion?: number | null
   revoked?: boolean
+  /** Absent on records minted before scoping existed ⇒ chat + count-tokens + models. */
+  operations?: GatewayTicketOperation[]
+  /** Absent ⇒ unmetered. */
+  budget?: GatewayTicketBudget | null
 }
 
 /** Mint request for a route ticket (frozen spec projection). */
@@ -343,12 +362,24 @@ export interface GatewayMintRouteTicketRequest {
   sessionId: string
   parentSessionId?: string
   executionFingerprint: string
+  /** May be empty when `model` is given: Rust derives the candidates from it. */
   candidates: Array<{ deploymentId: string; modelId: string }>
+  /**
+   * Omit to let Rust bind `primary` and the `sonnet` / `haiku` / `opus`
+   * family selectors from `model` (`route_planner::default_model_bindings`).
+   * Without bindings Claude Code's first background haiku turn fails closed.
+   */
   modelBindings?: Record<string, string>
+  /** The model the execution will ask for. */
+  model?: string
   credentialAffinity: "session-sticky" | "sticky-with-failover" | "per-request"
   allowAuthFailover?: boolean
   routePolicy: string
   ttlMs?: number
+  /** Omit for the deny-safe default scope (chat, count-tokens, models). */
+  operations?: GatewayTicketOperation[]
+  /** Only `maxTokens` / `maxRequests` / `maxRequestsPerMin` are read. */
+  budget?: Pick<GatewayTicketBudget, "maxTokens" | "maxRequests" | "maxRequestsPerMin">
 }
 
 /** Mint response: the secret appears ONCE and must never be persisted. */

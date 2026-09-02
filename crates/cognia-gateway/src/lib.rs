@@ -536,6 +536,7 @@ impl GatewayState {
         self.persist_config();
         // Flush any last-used-at bumps accumulated while running.
         let _ = api_keys::save_keys(&self.keys.read());
+        let _ = self.tickets.flush();
         Ok(())
     }
 

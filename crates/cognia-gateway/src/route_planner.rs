@@ -3,14 +3,15 @@
 //! Snapshot compilation stays renderer/profile-store side; this module owns
 //! only deterministic eligibility and ordering on the Rust hot path.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use parking_lot::Mutex;
 use serde_json::Value;
 
 use crate::execute::{candidates_from_entries, Candidate};
-use crate::snapshot::{AliasSnapshot, RoutingSnapshot, SnapshotEntry};
+use crate::route_ticket::TicketCandidate;
+use crate::snapshot::{AliasSnapshot, ProviderSnapshot, RoutingSnapshot, SnapshotEntry};
 
 #[derive(Default)]
 pub struct RoutePlannerState {
@@ -401,6 +402,95 @@ pub fn plan_candidates(
     candidates_from_entries(snapshot, &primary_first(&entries, selected))
 }
 
+/// Candidates the gateway can serve for `model`, ordered. Rust twin of
+/// `lib/gateway/mint-session-ticket.ts` `candidatesForModel`: an alias
+/// contributes its ordered entries; a bare or `provider:model` id falls back
+/// to whichever enabled providers list it. Deployment ids address the
+/// Profile Store deployment, falling back to the provider id.
+pub fn candidates_for_model(snapshot: &RoutingSnapshot, model: &str) -> Vec<TicketCandidate> {
+    let deployment_for = |provider_id: &str| -> Option<String> {
+        snapshot
+            .providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .map(|p| p.deployment_id.clone().unwrap_or_else(|| p.id.clone()))
+    };
+    if let Some(alias) = snapshot.find_alias(model) {
+        return alias
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                deployment_for(&entry.provider_id).map(|deployment_id| TicketCandidate {
+                    deployment_id,
+                    model_id: entry.model_id.clone(),
+                })
+            })
+            .collect();
+    }
+    let (pinned_provider, bare_model) = match model.split_once(':') {
+        Some((provider, rest)) if !rest.is_empty() => (Some(provider), rest),
+        _ => (None, model),
+    };
+    snapshot
+        .providers
+        .iter()
+        .filter(|p| p.enabled)
+        .filter(|p| pinned_provider.is_none_or(|pinned| p.id == pinned))
+        .filter(|p| p.models.iter().any(|m| m == bare_model))
+        .map(|p| TicketCandidate {
+            deployment_id: p.deployment_id.clone().unwrap_or_else(|| p.id.clone()),
+            model_id: bare_model.to_string(),
+        })
+        .collect()
+}
+
+/// The family selectors Claude Code sends besides the primary model. Its
+/// background turns (`haiku`) were the first request of every session to
+/// fail with 400 when no ticket bound them.
+const FAMILY_SELECTORS: [&str; 3] = ["sonnet", "haiku", "opus"];
+
+/// Bind `primary` plus every family selector against the providers behind
+/// `candidates`. A family gets the first model any candidate provider lists
+/// whose id contains the family name; a family with no such model binds to
+/// the primary so the turn still routes rather than failing closed.
+pub fn bindings_for_candidates(
+    snapshot: &RoutingSnapshot,
+    candidates: &[TicketCandidate],
+    model: &str,
+) -> BTreeMap<String, String> {
+    let primary = candidates
+        .first()
+        .map(|c| c.model_id.clone())
+        .unwrap_or_else(|| model.to_string());
+    let providers: Vec<&ProviderSnapshot> = candidates
+        .iter()
+        .filter_map(|c| {
+            snapshot
+                .provider_by_deployment(&c.deployment_id)
+                .or_else(|| snapshot.provider(&c.deployment_id))
+        })
+        .collect();
+    let mut bindings = BTreeMap::new();
+    bindings.insert("primary".to_string(), primary.clone());
+    for family in FAMILY_SELECTORS {
+        let bound = providers
+            .iter()
+            .flat_map(|p| p.models.iter())
+            .find(|m| m.to_lowercase().contains(family))
+            .cloned()
+            .unwrap_or_else(|| primary.clone());
+        bindings.insert(family.to_string(), bound);
+    }
+    bindings
+}
+
+/// [`candidates_for_model`] followed by [`bindings_for_candidates`]: the
+/// default `model_bindings` for a mint request that named only its model.
+pub fn default_model_bindings(snapshot: &RoutingSnapshot, model: &str) -> BTreeMap<String, String> {
+    let candidates = candidates_for_model(snapshot, model);
+    bindings_for_candidates(snapshot, &candidates, model)
+}
+
 /// Whether the requested model names a configured route even if every
 /// deployment is currently disabled, unsupported, or cooling down.
 pub fn model_is_known(snapshot: &RoutingSnapshot, model: &str) -> bool {
@@ -690,5 +780,70 @@ mod tests {
             &Default::default(),
         );
         assert_eq!(plan[0].provider.id, "b");
+    }
+
+    fn ticket_snapshot() -> RoutingSnapshot {
+        serde_json::from_value(serde_json::json!({
+            "aliases": [
+                { "alias": "fast", "entries": [
+                    { "providerId": "anthropic", "modelId": "claude-opus-5" },
+                    { "providerId": "openai", "modelId": "gpt-5" }
+                ]}
+            ],
+            "providers": [
+                { "id": "anthropic", "protocol": "anthropic", "baseUrl": "https://a.example",
+                  "enabled": true, "models": ["claude-opus-5", "claude-haiku-4-5-20251001"],
+                  "deploymentId": "dep_anthropic" },
+                { "id": "openai", "protocol": "openai", "baseUrl": "https://o.example",
+                  "enabled": true, "models": ["gpt-5"], "deploymentId": "dep_openai" },
+                { "id": "off", "protocol": "anthropic", "baseUrl": "https://x.example",
+                  "enabled": false, "models": ["claude-opus-5"] }
+            ],
+            "generatedAtMs": 1
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn candidates_for_model_mirrors_the_renderer_twin() {
+        let snap = ticket_snapshot();
+        let ids = |v: Vec<TicketCandidate>| -> Vec<(String, String)> {
+            v.into_iter().map(|c| (c.deployment_id, c.model_id)).collect()
+        };
+        assert_eq!(
+            ids(candidates_for_model(&snap, "fast")),
+            vec![
+                ("dep_anthropic".into(), "claude-opus-5".into()),
+                ("dep_openai".into(), "gpt-5".into())
+            ]
+        );
+        // Bare id: every ENABLED provider that lists it (disabled `off` skipped).
+        assert_eq!(
+            ids(candidates_for_model(&snap, "claude-opus-5")),
+            vec![("dep_anthropic".into(), "claude-opus-5".into())]
+        );
+        // Provider-pinned id.
+        assert_eq!(
+            ids(candidates_for_model(&snap, "anthropic:claude-opus-5")),
+            vec![("dep_anthropic".into(), "claude-opus-5".into())]
+        );
+        assert!(candidates_for_model(&snap, "openai:claude-opus-5").is_empty());
+        assert!(candidates_for_model(&snap, "nope").is_empty());
+    }
+
+    #[test]
+    fn default_model_bindings_bind_every_family_selector() {
+        let snap = ticket_snapshot();
+        let bindings = default_model_bindings(&snap, "claude-opus-5");
+        assert_eq!(bindings["primary"], "claude-opus-5");
+        assert_eq!(bindings["haiku"], "claude-haiku-4-5-20251001");
+        assert_eq!(bindings["opus"], "claude-opus-5");
+        // No sonnet-class model anywhere ⇒ falls back to the primary.
+        assert_eq!(bindings["sonnet"], "claude-opus-5");
+        assert_eq!(bindings.len(), 4);
+        // A model no provider serves still binds (mint validates candidates).
+        let none = default_model_bindings(&snap, "ghost");
+        assert_eq!(none["primary"], "ghost");
+        assert_eq!(none["haiku"], "ghost");
     }
 }

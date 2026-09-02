@@ -575,3 +575,114 @@ async fn count_tokens_upstream_401_is_not_swallowed_into_an_estimate() {
     );
     assert_eq!(upstream_state.hits.lock().len(), 1);
 }
+
+// ---- ticket scope + budget --------------------------------------------------
+
+async fn post_json(port: u16, path: &str, bearer: &str, body: &Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}{path}"))
+        .header("x-api-key", bearer)
+        .json(body)
+        .send()
+        .await
+        .expect("gateway reachable")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ticket_scoped_to_chat_cannot_call_embeddings_or_responses() {
+    let (upstream, upstream_state) = start_upstream().await;
+    let gw = start_gateway(upstream, &["sk-up-only"]).await;
+    let minted = {
+        let snapshot = gw.snapshot.read();
+        gw.tickets
+            .mint(
+                mint_request("s-scope", "session-sticky"),
+                snapshot.as_ref(),
+                now_ms(),
+            )
+            .unwrap()
+    };
+    let body = json!({ "model": "glm-4.6", "input": "vector me" });
+    let resp = post_json(gw.port, "/v1/embeddings", &minted.secret, &body).await;
+    assert_eq!(resp.status(), 403);
+    let resp = post_json(gw.port, "/v1/responses", &minted.secret, &chat_body()).await;
+    assert_eq!(resp.status(), 403);
+    assert!(upstream_state.hits.lock().is_empty(), "closed before any upstream work");
+    // The default scope still serves chat and count_tokens.
+    let resp = post_messages(gw.port, &minted.secret, &chat_body(), &[]).await;
+    assert_eq!(resp.status(), 200);
+    let resp = post_count_tokens(gw.port, &minted.secret, &chat_body()).await;
+    assert_eq!(resp.status(), 200);
+    assert!(
+        gw.tickets.open_reservations().is_empty(),
+        "every served call settled its reservation"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ticket_budget_admits_exactly_max_requests_under_concurrency() {
+    let (upstream, upstream_state) = start_upstream().await;
+    let gw = start_gateway(upstream, &["sk-up-only"]).await;
+    let minted = {
+        let snapshot = gw.snapshot.read();
+        let mut request = mint_request("s-budget", "session-sticky");
+        request.budget = Some(cognia_gateway::route_ticket::TicketBudget {
+            max_requests: Some(1),
+            ..Default::default()
+        });
+        gw.tickets
+            .mint(request, snapshot.as_ref(), now_ms())
+            .unwrap()
+    };
+    let secret = Arc::new(minted.secret);
+    let port = gw.port;
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let secret = Arc::clone(&secret);
+            tokio::spawn(async move { post_messages(port, &secret, &chat_body(), &[]).await })
+        })
+        .collect();
+    let mut ok = 0;
+    let mut exhausted = 0;
+    for task in tasks {
+        let resp = task.await.unwrap();
+        match resp.status().as_u16() {
+            200 => ok += 1,
+            429 => {
+                let text = resp.text().await.unwrap();
+                assert!(text.contains("route ticket budget exhausted"), "{text}");
+                exhausted += 1;
+            }
+            other => panic!("unexpected status {other}"),
+        }
+    }
+    assert_eq!(ok, 1, "exactly one request may pass a max_requests=1 budget");
+    assert_eq!(exhausted, 7);
+    assert_eq!(upstream_state.hits.lock().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn legacy_ticket_without_operations_reaches_messages_and_count_tokens() {
+    let (upstream, _upstream_state) = start_upstream().await;
+    let gw = start_gateway(upstream, &["sk-up-only"]).await;
+    // The pre-scoping mint shape: no `operations`, no `budget`, no `model`.
+    let minted = {
+        let snapshot = gw.snapshot.read();
+        gw.tickets
+            .mint(
+                mint_request("s-legacy", "session-sticky"),
+                snapshot.as_ref(),
+                now_ms(),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        minted.ticket.operations,
+        cognia_gateway::route_ticket::default_ticket_operations()
+    );
+    assert!(minted.ticket.budget.is_none());
+    let resp = post_messages(gw.port, &minted.secret, &chat_body(), &[]).await;
+    assert_eq!(resp.status(), 200);
+    let resp = post_count_tokens(gw.port, &minted.secret, &chat_body()).await;
+    assert_eq!(resp.status(), 200);
+}
