@@ -111,6 +111,46 @@
       "title": "自动备份计划",
       "webOnlyNote": "定时写入仅在桌面应用中可用。浏览器模式下仍会显示提醒横幅。"
     },
+    "shareScan": {
+      "body": "链接会原样携带这些值。备份从不做脱敏，因为脱敏后的备份无法如实恢复。请先核对列表，再确认继续。",
+      "cancel": "取消",
+      "clean": "分享前已扫描个人信息：未发现。",
+      "confirm": "我了解此链接会携带上面列出的个人信息。",
+      "continue": "继续分享",
+      "domainRow": "{hits} 个值",
+      "domains": {
+        "artifacts": "Artifact 与画布",
+        "connectors": "MCP 服务器与连接器",
+        "library": "技能、角色、团队与模板",
+        "memories": "记忆",
+        "plugins": "插件",
+        "retrieval": "检索配置",
+        "sessions": "会话",
+        "settings": "设置与应用状态",
+        "twin": "数字分身"
+      },
+      "encrypted": "此备份已加密，分享前无法扫描个人信息。接收方需要口令或密钥才能恢复。",
+      "keyUnavailable": "当前运行环境没有可用的加密密钥。请改用口令或明文再分享。",
+      "kindCount": "{kind} × {count}",
+      "kinds": {
+        "API_KEY": "API 密钥",
+        "BANK_CARD": "银行卡",
+        "CN_ID": "身份证",
+        "DRIVER_LICENSE": "驾驶证",
+        "EMAIL": "邮箱",
+        "IP_ADDR": "IP 地址",
+        "JWT": "JWT",
+        "NAME": "姓名",
+        "PASSPORT": "护照",
+        "PEM_KEY": "私钥",
+        "PHONE": "电话",
+        "SSN": "SSN"
+      },
+      "prepareFailed": "无法准备用于分享的备份。",
+      "preparing": "正在准备备份…",
+      "title": "此备份中发现个人信息",
+      "total": "共 {total} 个个人信息值，分布在 {domains} 个区域"
+    },
     "showPassphrase": "显示密码短语",
     "unlockButton": "解锁并预览",
     "wrongPassphrase": "密码短语不正确，请再核对。"

@@ -42,6 +42,13 @@ import { loggers } from "@cognia/logging"
 import { ShareSettingsCard } from "@/components/share/share-settings-card"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { backupPayload } from "@/lib/share/payload"
+import type { SharePayload } from "@/lib/share/types"
+import { scanBackupForShare, type BackupShareScan } from "@/lib/share/backup-share-gate"
+import { BackupShareScanDialog } from "@/components/settings/data/backup-share-scan-dialog"
+import { encryptBackupPackage } from "@/lib/data/crypto"
+import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
+import { attachPortableRetrievalKeys } from "@/lib/data/retrieval-key-backup"
+import type { BackupPackageV3, EncryptedEnvelopeV1 } from "@/lib/data/types"
 import { WebDavSyncCard } from "@/components/settings/data/webdav-sync-card"
 import { GithubBackupCard } from "@/components/settings/data/github-backup-card"
 import { GoogleDriveBackupCard } from "@/components/settings/data/google-drive-backup-card"
@@ -73,6 +80,89 @@ function ExportBlock() {
   const [encryption, setEncryption] = useState<EncryptionMode>("auto-key")
   const [passphrase, setPassphrase] = useState("")
   const { run, busy } = useFullBackup()
+  // Share link state. The package is built once when the owner clicks share,
+  // scanned by the PII gate, and the same bytes are what the link carries.
+  const [sharePayload, setSharePayload] = useState<SharePayload | null>(null)
+  const [shareScan, setShareScan] = useState<BackupShareScan | null>(null)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [preparingShare, setPreparingShare] = useState(false)
+
+  const onPrepareShare = async () => {
+    if (encryption === "passphrase" && !passphrase) {
+      toast.error(t("backup.passphraseRequired"))
+      return
+    }
+    setPreparingShare(true)
+    try {
+      const sharePassphrase =
+        encryption === "plaintext"
+          ? undefined
+          : encryption === "passphrase"
+            ? passphrase
+            : await getDefaultBackupPassphrase()
+      if (encryption !== "plaintext" && !sharePassphrase) {
+        toast.error(t("backup.shareScan.keyUnavailable"))
+        return
+      }
+      const basePackage = await buildBackupPackage({
+        includeSessions,
+        includeApiKey,
+        includeBuiltIns,
+      })
+      const pkg = sharePassphrase
+        ? await attachPortableRetrievalKeys(basePackage, sharePassphrase)
+        : basePackage
+      const plaintext = serializePackage(pkg)
+      let artifact: BackupPackageV3 | EncryptedEnvelopeV1 = pkg
+      let serialized = plaintext
+      if (sharePassphrase) {
+        const envelope = await encryptBackupPackage(plaintext, sharePassphrase, {
+          version: pkg.manifest.version,
+          schemaVersion: pkg.manifest.schemaVersion,
+          traceId: pkg.manifest.traceId,
+          exportedAt: pkg.manifest.exportedAt,
+          appVersion: pkg.manifest.appVersion,
+          backend: pkg.manifest.backend,
+          encryption: { enabled: true, format: "encrypted-envelope-v1" },
+        })
+        artifact = envelope
+        serialized = JSON.stringify(envelope, null, 2)
+      }
+      const scan = scanBackupForShare(artifact)
+      loggers.export.info("backup_share_scanned", {
+        encryption,
+        scan: scan.kind,
+        hits: scan.kind === "hits" ? scan.total : 0,
+        domains: scan.kind === "hits" ? scan.domains.map((entry) => entry.domain) : [],
+      })
+      setSharePayload(
+        backupPayload(
+          serialized,
+          defaultExportFileName(new Date(), sharePassphrase ? "encrypted" : "plain")
+        )
+      )
+      setShareScan(scan)
+      if (scan.kind === "hits") setScanOpen(true)
+      else setShareOpen(true)
+    } catch (err) {
+      loggers.export.error("backup_share_prepare_failed", undefined, {
+        error: err instanceof Error ? err.message : String(err),
+        encryption,
+      })
+      toast.error(t("backup.shareScan.prepareFailed"))
+    } finally {
+      setPreparingShare(false)
+    }
+  }
+
+  const onScanConfirmed = () => {
+    loggers.export.warn("backup_share_pii_confirmed", {
+      hits: shareScan?.kind === "hits" ? shareScan.total : 0,
+    })
+    setScanOpen(false)
+    setShareOpen(true)
+  }
 
   const onExport = async () => {
     if (encryption === "passphrase" && !passphrase) {
@@ -178,20 +268,39 @@ function ExportBlock() {
       />
 
       <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || preparingShare}
+          onClick={() => void onPrepareShare()}
+          data-testid="backup-share-button"
+        >
+          <Link2Icon className="mr-1.5 size-4" />
+          {preparingShare ? t("backup.shareScan.preparing") : tShare("shareAction")}
+        </Button>
+        <BackupShareScanDialog
+          open={scanOpen}
+          onOpenChange={setScanOpen}
+          domains={shareScan?.kind === "hits" ? shareScan.domains : []}
+          total={shareScan?.kind === "hits" ? shareScan.total : 0}
+          onConfirm={onScanConfirmed}
+        />
         <ShareLinkDialog
-          buildPayload={async () => {
-            const pkg = await buildBackupPackage({
-              includeSessions,
-              includeApiKey,
-              includeBuiltIns,
-            })
-            return backupPayload(serializePackage(pkg), defaultExportFileName(new Date(), "plain"))
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          buildPayload={() => {
+            if (!sharePayload) throw new Error("Backup share payload was not prepared")
+            return sharePayload
           }}
-          trigger={
-            <Button size="sm" variant="outline" disabled={busy}>
-              <Link2Icon className="mr-1.5 size-4" />
-              {tShare("shareAction")}
-            </Button>
+          artifactSummary={
+            shareScan && shareScan.kind !== "hits" ? (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid={`backup-share-note-${shareScan.kind}`}
+              >
+                {t(`backup.shareScan.${shareScan.kind}`)}
+              </p>
+            ) : undefined
           }
         />
         <Button size="sm" onClick={() => void onExport()} disabled={busy}>
