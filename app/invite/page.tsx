@@ -10,7 +10,7 @@
  * one-time token on a person who has not proven who they are yet.
  */
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { MailIcon } from "lucide-react"
@@ -18,7 +18,20 @@ import { MailIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { rememberPendingInvitation } from "@/lib/identity/pending-invitation"
 
+/**
+ * `useSearchParams` must sit under a Suspense boundary or the static export
+ * refuses to prerender the route. Same split every other query-reading page
+ * in `app/` makes.
+ */
 export default function InvitePage() {
+  return (
+    <Suspense fallback={null}>
+      <InviteLanding />
+    </Suspense>
+  )
+}
+
+function InviteLanding() {
   const t = useTranslations("account.invite")
   const router = useRouter()
   const params = useSearchParams()

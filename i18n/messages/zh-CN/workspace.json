@@ -342,7 +342,8 @@
         "maintainer": "维护者",
         "member": "成员",
         "viewer": "只读"
-      }
+      },
+      "copyLink": "复制邀请链接"
     },
     "errors": {
       "forbidden": "协作服务器拒绝了这次更改：你当前的席位没有这个权限。",

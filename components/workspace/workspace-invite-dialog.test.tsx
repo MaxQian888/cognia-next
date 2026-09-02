@@ -179,3 +179,10 @@ describe("WorkspaceInviteDialog", () => {
     expect(screen.getByTestId("workspace-invite-submit")).toBeDisabled()
   })
 })
+
+describe("invitationLink", () => {
+  it("points at /invite with the token, on this origin", async () => {
+    const { invitationLink } = await import("./workspace-invite-dialog")
+    expect(invitationLink("a b")).toBe(`${window.location.origin}/invite?token=a%20b`)
+  })
+})

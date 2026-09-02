@@ -65,6 +65,7 @@ import { CloudSignInScreen, type CloudSignInView } from "./cloud-sign-in-screen"
 
 export const CLOUD_OFFLINE_KEY_PREFIX = "cognia.cloud-sign-in.offline"
 const UNGATED_PATHS = ["/logto/callback", "/invite", "/pair", "/onboarding"]
+export const DESKTOP_CALLBACK_URI = "cognia://logto/callback"
 
 export interface CloudSignInGateDeps {
   discover?: () => Promise<DeploymentDiscovery>
@@ -295,8 +296,9 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
           clientKind: "web",
         }
       }
-      // The desktop has no popup: the system browser lands on the callback
-      // page the companion host serves, and the person pastes that address.
+      // The desktop has no popup: the system browser is sent to the deep link
+      // registered on the native application, and the person pastes the
+      // address it lands on.
       return {
         drivers: {
           openUrl: (url) => {
@@ -311,7 +313,7 @@ export function CloudSignInGate({ children, deps = {} }: CloudSignInGateProps) {
             })
           },
         },
-        redirectUri: `${deployment.baseUrl}/logto/callback`,
+        redirectUri: DESKTOP_CALLBACK_URI,
         clientKind: "native",
       }
     },

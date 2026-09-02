@@ -21,7 +21,7 @@
 
 import { useId, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, CopyIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, LinkIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -52,6 +52,12 @@ import {
 } from "@/hooks/workspace/use-membership-admin"
 
 export type InviteScope = "workspace" | "org"
+
+/** The landing link for a token: `/invite` keeps it for the sign-in gate. */
+export function invitationLink(token: string): string {
+  const origin = typeof window === "undefined" ? "" : window.location.origin
+  return `${origin}/invite?token=${encodeURIComponent(token)}`
+}
 
 const EXPIRY_DAYS = [1, 7, 30] as const
 
@@ -167,6 +173,22 @@ function InviteForm({
               )}
               <span aria-live="polite">{t(copied ? "copied" : "copy")}</span>
             </Button>
+            <Button
+              type="button"
+
+              variant="outline"
+
+              disabled={isCopying}
+
+              onClick={() => void copy(invitationLink(issued.token))}
+
+              data-testid="workspace-invite-copy-link"
+            >
+              <LinkIcon data-icon="inline-start" />
+
+              {t("copyLink")}
+            </Button>
+
             <Button type="button" onClick={close}>
               {t("done")}
             </Button>

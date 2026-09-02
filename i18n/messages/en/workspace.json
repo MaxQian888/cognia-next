@@ -342,7 +342,8 @@
         "maintainer": "Maintainer",
         "member": "Member",
         "viewer": "Viewer"
-      }
+      },
+      "copyLink": "Copy invitation link"
     },
     "errors": {
       "forbidden": "The collaboration server refused: your seat does not allow that change.",
