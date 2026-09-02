@@ -5799,18 +5799,6 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
-      "name": "external_agent_detect_runtimes",
-      "target": "execution",
-      "operation": "read",
-      "capability": "process.spawn",
-      "risk": "high",
-      "approval": "none",
-      "idempotency": "structural",
-      "transports": ["http", "websocket", "webrtc"],
-      "inputSchema": "#/components/schemas/RpcArgs",
-      "outputSchema": "#/components/schemas/RpcResult"
-    },
-    {
       "name": "fs_workspace_roots",
       "target": "execution",
       "operation": "read",
