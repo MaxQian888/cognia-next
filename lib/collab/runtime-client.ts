@@ -2,7 +2,7 @@
 
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
-import { loadLogtoSession } from "@/lib/logto/session-store"
+import { readActiveAccessToken } from "@/lib/logto/app-session"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
 import { CollabClient, type CollabFetch } from "./client"
 import { loadCollabConnection } from "./connection"
@@ -60,9 +60,7 @@ export async function resolveCurrentCollabContext(
   if (!connection) return null
   const binding = await (deps.registry ?? new UserBindingRegistry()).get(localAccountId)
   if (!binding?.orgId || !binding.userId) return null
-  const token =
-    deps.accessToken ??
-    (async (accountId: string) => (await loadLogtoSession(accountId))?.accessToken ?? null)
+  const token = deps.accessToken ?? ((accountId: string) => readActiveAccessToken(accountId))
   return {
     localAccountId,
     orgId: binding.orgId,

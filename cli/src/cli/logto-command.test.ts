@@ -227,7 +227,36 @@ describe("logtoCommand", () => {
     expect(cap.text()).toMatch(/not signed in/i)
   })
 
-  it("logout: removes the session file", async () => {
+  it("logout: revokes both tokens at the issuer, then removes the session file", async () => {
+    const cap = captureOut()
+    const fs = memFs({ [SESSION_FILE]: JSON.stringify(sampleSession) })
+    const revoke = jest.fn(async () => ({ status: "revoked" as const }))
+    const code = await logtoCommand(parseArgv(["logto", "logout"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: fs,
+      env: {},
+      revoke,
+    })
+    expect(code).toBe(0)
+    expect(fs.store.has(SESSION_FILE)).toBe(false)
+    expect(revoke).toHaveBeenCalledTimes(2)
+    expect(revoke.mock.calls[0]).toEqual([
+      sampleSession,
+      "RTK-secret-xyz",
+      "refresh_token",
+      undefined,
+    ])
+    expect(revoke.mock.calls[1]).toEqual([
+      sampleSession,
+      "ATK-secret-xyz",
+      "access_token",
+      undefined,
+    ])
+    expect(cap.text()).toMatch(/revoked/i)
+  })
+
+  it("logout: still removes the file when the issuer cannot be reached, and says so", async () => {
     const cap = captureOut()
     const fs = memFs({ [SESSION_FILE]: JSON.stringify(sampleSession) })
     const code = await logtoCommand(parseArgv(["logto", "logout"]), {
@@ -235,9 +264,71 @@ describe("logtoCommand", () => {
       out: cap.sink,
       sessionFs: fs,
       env: {},
+      revoke: jest.fn(async () => ({ status: "failed" as const, reason: "ECONNREFUSED" })),
     })
     expect(code).toBe(0)
     expect(fs.store.has(SESSION_FILE)).toBe(false)
+    expect(cap.text()).toMatch(/could not be told to revoke/i)
+    expect(cap.text()).toContain("ECONNREFUSED")
+  })
+
+  it("logout: says when the issuer offers no revocation endpoint", async () => {
+    const cap = captureOut()
+    const fs = memFs({ [SESSION_FILE]: JSON.stringify(sampleSession) })
+    const code = await logtoCommand(parseArgv(["logto", "logout"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: fs,
+      env: {},
+      revoke: jest.fn(async () => ({ status: "unsupported" as const })),
+    })
+    expect(code).toBe(0)
+    expect(fs.store.has(SESSION_FILE)).toBe(false)
+    expect(cap.text()).toMatch(/no revocation endpoint/i)
+  })
+
+  it("status: an expired access token with a refresh token will refresh on next use", async () => {
+    const cap = captureOut()
+    const expired = { ...sampleSession, expiresAt: 1 }
+    await logtoCommand(parseArgv(["logto", "status"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: memFs({ [SESSION_FILE]: JSON.stringify(expired) }),
+      env: {},
+      now: () => 2,
+    })
+    expect(cap.text()).toMatch(/refresh on next use/i)
+    expect(cap.text()).not.toContain("RTK-secret-xyz")
+  })
+
+  it("logout: is a no-op without a session", async () => {
+    const cap = captureOut()
+    const revoke = jest.fn()
+    const code = await logtoCommand(parseArgv(["logto", "logout"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: memFs(),
+      env: {},
+      revoke,
+    })
+    expect(code).toBe(0)
+    expect(revoke).not.toHaveBeenCalled()
+    expect(cap.text()).toMatch(/not signed in/i)
+  })
+
+  it("status: names an expired session instead of calling it signed in", async () => {
+    const cap = captureOut()
+    const expired = { ...sampleSession, expiresAt: 1, refreshToken: undefined }
+    const code = await logtoCommand(parseArgv(["logto", "status"]), {
+      home: HOME,
+      out: cap.sink,
+      sessionFs: memFs({ [SESSION_FILE]: JSON.stringify(expired) }),
+      env: {},
+      now: () => 2,
+    })
+    expect(code).toBe(0)
+    expect(cap.text()).toMatch(/expired/i)
+    expect(cap.text()).toMatch(/logto login/)
   })
 
   it("errors on an unknown subcommand", async () => {

@@ -81,6 +81,7 @@ import {
   activatePluginRuntimeAccount,
   clearPluginRuntimeAccount,
 } from "@/lib/plugin/security/account-runtime-gate"
+import type { ProfileCloudIdentityCleanup } from "@/lib/identity/forget-profile-identity"
 
 export interface CreateLocalAccountInput {
   id?: string
@@ -156,6 +157,16 @@ export interface AccountStoreDependencies {
   activateContentCipher: (accountId: string, databaseName: string) => void
   /** Copy a legacy desktop profile into its encrypted physical database. */
   migrateLocalContentDatabase: (accountId: string) => Promise<void>
+  /**
+   * Remove the profile's cloud identity: revoke and clear its Logto session,
+   * drop its user binding, forget its collaboration server, and tell the host
+   * to forget the person when the profile is the one the host holds. Reports
+   * per-step outcomes and never throws (ADR-0149 section 9).
+   */
+  forgetCloudIdentity: (
+    localAccountId: string,
+    options: { hostBound: boolean }
+  ) => Promise<ProfileCloudIdentityCleanup>
 }
 
 export interface LocalAccountDeletionResult {
@@ -166,6 +177,8 @@ export interface LocalAccountDeletionResult {
   runtimeTargetsDeleted: boolean
   localStatePurged: true
   browserVaultDeleted: boolean
+  /** What happened to the profile's cloud identity. Inspect `failures` and `tokensMayRemainLive`. */
+  cloudIdentity: ProfileCloudIdentityCleanup
 }
 
 export type AccountStore = UseBoundStore<StoreApi<AccountStoreState>>
@@ -214,6 +227,10 @@ export function createAccountStore(
       activateAccountContentCipher(vault.createContentCipher(databaseName))
     },
     migrateLocalContentDatabase: migrateLocalAccountContentDatabase,
+    forgetCloudIdentity: async (localAccountId, options) => {
+      const { forgetProfileCloudIdentity } = await import("@/lib/identity/forget-profile-identity")
+      return forgetProfileCloudIdentity(localAccountId, { hostBound: options.hostBound })
+    },
     clearSubscriptionRuntime: async (localAccountId) => {
       if (!isTauri() && !isCapacitor()) {
         const { hasWebCompanionTarget } = await import("@/lib/platform/web-companion")
@@ -725,13 +742,23 @@ export function createAccountStore(
       deleteAccount: async (accountId, options = {}) => {
         set({ error: null })
         try {
-          const wasActive = get().activeAccountId === accountId
+          const localAccountId = accountId
+          const wasActive = get().activeAccountId === localAccountId
           const replacementAccountId = options.replacementAccountId
-          if (wasActive && get().unlockedAccountId === accountId) {
+          const wasUnlocked = get().unlockedAccountId === localAccountId
+          // The registry delete carries every refusal (last account, missing
+          // replacement), so it runs before anything irreversible. The cloud
+          // identity goes next, while the profile is still the host's bound
+          // namespace: `lock()` unbinds the host, and after that the host
+          // can no longer be told whose person to forget.
+          await dependencies.registry.deleteAccount(localAccountId, { replacementAccountId })
+          const cloudIdentity = await dependencies.forgetCloudIdentity(localAccountId, {
+            hostBound: wasUnlocked,
+          })
+          if (wasActive && wasUnlocked) {
             await get().lock()
           }
-          await dependencies.registry.deleteAccount(accountId, { replacementAccountId })
-          await dependencies.dropAccountDatabase(accountId)
+          await dependencies.dropAccountDatabase(localAccountId)
           let runtimeTargetsDeleted = false
           if (shouldUseBrowserVault()) {
             await dependencies.removeRuntimeTargets(accountId)
@@ -771,6 +798,7 @@ export function createAccountStore(
             runtimeTargetsDeleted,
             localStatePurged: true,
             browserVaultDeleted,
+            cloudIdentity,
           }
         } catch (error) {
           throw setFailure(error)

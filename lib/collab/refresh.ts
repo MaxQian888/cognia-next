@@ -29,7 +29,7 @@ import { loggers } from "@cognia/logging"
 
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
-import { loadLogtoSession } from "@/lib/logto/session-store"
+import { readActiveAccessToken } from "@/lib/logto/app-session"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
 
 import { CollabClient, type CollabFetch } from "./client"
@@ -79,9 +79,13 @@ export interface RefreshCollabPlaneDeps {
   now?: () => number
 }
 
+/**
+ * A token that is good now, refreshed if it had to be. Reading the keyring
+ * directly would hand the plane an expired token and turn "refresh me" into a
+ * 401 indistinguishable from a revoked login.
+ */
 async function defaultAccessToken(localAccountId: string): Promise<string | null> {
-  const session = await loadLogtoSession(localAccountId)
-  return session?.accessToken ?? null
+  return readActiveAccessToken(localAccountId)
 }
 
 /**

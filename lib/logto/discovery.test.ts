@@ -12,6 +12,7 @@ const FULL_DOC = {
   token_endpoint: "https://logto.test/oidc/token",
   jwks_uri: "https://logto.test/oidc/jwks",
   end_session_endpoint: "https://logto.test/oidc/session/end",
+  revocation_endpoint: "https://logto.test/oidc/token/revocation",
 }
 
 describe("discoverLogtoEndpoints", () => {
@@ -23,6 +24,7 @@ describe("discoverLogtoEndpoints", () => {
     expect(ep.tokenEndpoint).toBe("https://logto.test/oidc/token")
     expect(ep.jwksUri).toBe("https://logto.test/oidc/jwks")
     expect(ep.endSessionEndpoint).toBe("https://logto.test/oidc/session/end")
+    expect(ep.revocationEndpoint).toBe("https://logto.test/oidc/token/revocation")
     const url = (fetchImpl as jest.Mock).mock.calls[0][0]
     expect(url).toBe("https://logto.test/oidc/.well-known/openid-configuration")
   })

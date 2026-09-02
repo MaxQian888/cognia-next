@@ -2,36 +2,63 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { LogtoLoginCard, extractCallback } from "./logto-login-card"
-import { getActiveLogtoSession, signInToLogto, signOutFromLogto } from "@/lib/logto/app-session"
-import {
-  completeSignIn,
-  completeSignOut,
-  readSignedInPerson,
-} from "@/lib/identity/complete-sign-in"
+import { signInToLogto, signOutFromLogto } from "@/lib/logto/app-session"
+import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
+import { completeSignIn, completeSignOut } from "@/lib/identity/complete-sign-in"
 import { UserBindingError } from "@/lib/identity/user-binding"
 import { openUrl } from "@/lib/native/opener"
+import { toast } from "sonner"
 
 jest.mock("@/lib/logto/app-session", () => ({
-  getActiveLogtoSession: jest.fn(),
   signInToLogto: jest.fn(),
   signOutFromLogto: jest.fn(),
+  signOutLeftTokensLive: jest.requireActual("@/lib/logto/app-session").signOutLeftTokensLive,
 }))
 // The identity flow owns Dexie and the Tauri bridge; this suite is about the
 // card, so it stubs the flow rather than standing up a registry per test.
+jest.mock("@/lib/identity/cloud-session", () => ({
+  ...jest.requireActual("@/lib/identity/cloud-session"),
+  readCloudSessionState: jest.fn(),
+}))
 jest.mock("@/lib/identity/complete-sign-in", () => ({
   completeSignIn: jest.fn(),
   completeSignOut: jest.fn(),
-  readSignedInPerson: jest.fn(),
 }))
 jest.mock("@/lib/native/opener", () => ({ openUrl: jest.fn() }))
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), warning: jest.fn(), error: jest.fn() },
+}))
 
-const getActive = getActiveLogtoSession as jest.Mock
+const readState = readCloudSessionState as jest.Mock
 const signIn = signInToLogto as jest.Mock
 const signOut = signOutFromLogto as jest.Mock
 const openUrlMock = openUrl as jest.Mock
 const signInIdentity = completeSignIn as jest.Mock
 const signOutIdentity = completeSignOut as jest.Mock
-const readPerson = readSignedInPerson as jest.Mock
+const toastWarning = toast.warning as jest.Mock
+
+const SIGNED_OUT: CloudSessionState = { status: "signed-out" }
+
+function active(
+  sessionOver: Record<string, unknown> = {},
+  identityOver: Record<string, unknown> = {}
+): CloudSessionState {
+  return {
+    status: "active",
+    session: sess(sessionOver) as never,
+    identity: { userId: "usr_ada", logtoSubject: "s", ...identityOver } as never,
+  }
+}
+
+function cleanSignOut() {
+  return {
+    hadSession: true,
+    cleared: true as const,
+    refreshTokenRevocation: { status: "revoked" as const },
+    accessTokenRevocation: { status: "revoked" as const },
+    endSessionUrl: null,
+  }
+}
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
 function setTauri(on: boolean) {
@@ -53,13 +80,13 @@ function sess(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   setTauri(true)
-  getActive.mockReset().mockResolvedValue(null)
+  readState.mockReset().mockResolvedValue(SIGNED_OUT)
   signIn.mockReset()
-  signOut.mockReset().mockResolvedValue(undefined)
+  signOut.mockReset().mockResolvedValue(cleanSignOut())
   signInIdentity.mockReset().mockResolvedValue({ user: { id: "usr_ada" }, binding: {} })
   signOutIdentity.mockReset().mockResolvedValue(undefined)
-  readPerson.mockReset().mockResolvedValue(null)
   openUrlMock.mockReset()
+  toastWarning.mockReset()
 })
 afterEach(() => setTauri(false))
 
@@ -87,7 +114,7 @@ describe("<LogtoLoginCard />", () => {
   })
 
   it("shows the signed-in view and signs out", async () => {
-    getActive.mockResolvedValue(sess({ organizationId: "org_1" }))
+    readState.mockResolvedValue(active({ organizationId: "org_1" }))
     const user = userEvent.setup()
     render(<LogtoLoginCard />)
     expect(await screen.findByTestId("logto-signed-in")).toBeInTheDocument()
@@ -121,6 +148,7 @@ describe("<LogtoLoginCard />", () => {
       ) => {
         drivers.openUrl("https://authorize.example")
         await drivers.waitForCode({ redirectUri: "cb", state: "st-1" })
+        readState.mockResolvedValue(active())
         return sess()
       }
     )
@@ -161,8 +189,7 @@ describe("<LogtoLoginCard />", () => {
 
 describe("the profile this session belongs to (ADR-0149)", () => {
   it("shows the signed-in person beside the session", async () => {
-    getActive.mockResolvedValue(sess())
-    readPerson.mockResolvedValue({ userId: "usr_ada", displayName: "Ada" })
+    readState.mockResolvedValue(active({}, { displayName: "Ada" }))
 
     render(<LogtoLoginCard />)
 
@@ -170,36 +197,73 @@ describe("the profile this session belongs to (ADR-0149)", () => {
   })
 
   it("falls back to the user id when no display name was asserted", async () => {
-    getActive.mockResolvedValue(sess())
-    readPerson.mockResolvedValue({ userId: "usr_ada" })
+    readState.mockResolvedValue(active())
 
     render(<LogtoLoginCard />)
 
     expect(await screen.findByTestId("logto-person")).toHaveTextContent("usr_ada")
   })
 
-  it("says the profile is unlinked when a session exists but no person does", async () => {
-    // Signing in to Logto and owning the profile are two facts; a session with
-    // no binding is a real state and must not render as a blank cell.
-    getActive.mockResolvedValue(sess())
-    readPerson.mockResolvedValue(null)
+  it("a session with no binding is a sign-in-required state, not a blank cell", async () => {
+    // Signing in to Logto and owning the profile are two facts. A token with
+    // no binding is `binding-missing`: real, named, and never rendered as if
+    // somebody were signed in.
+    readState.mockResolvedValue({
+      status: "reauth-required",
+      reason: "binding-missing",
+      sessionMetadata: {
+        issuer: "https://logto.test/oidc",
+        clientId: "c",
+        resource: "r",
+        scopes: [],
+      },
+    })
 
     render(<LogtoLoginCard />)
 
-    const cell = await screen.findByTestId("logto-person")
-    expect(cell.textContent?.trim()).not.toBe("")
-    expect(cell).not.toHaveTextContent("usr_")
+    expect(await screen.findByTestId("logto-state-reauth-required")).toBeInTheDocument()
+    expect(screen.getByTestId("logto-state-reason")).toHaveTextContent(/not linked/i)
+    expect(screen.queryByTestId("logto-signed-in")).not.toBeInTheDocument()
   })
 
   it("clears the person when signing out, and drops the binding too", async () => {
-    getActive.mockResolvedValue(sess())
-    readPerson.mockResolvedValue({ userId: "usr_ada", displayName: "Ada" })
+    readState.mockResolvedValue(active({}, { displayName: "Ada" }))
 
     render(<LogtoLoginCard />)
     await userEvent.click(await screen.findByTestId("logto-sign-out"))
 
     expect(signOutIdentity).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId("logto-person")).not.toBeInTheDocument()
+    expect(toastWarning).not.toHaveBeenCalled()
+    // No end-session endpoint advertised: nothing to open.
+    expect(openUrlMock).not.toHaveBeenCalled()
+  })
+
+  it("ends the issuer's own session in the browser when it advertises how", async () => {
+    readState.mockResolvedValue(active())
+    signOut.mockResolvedValue({
+      ...cleanSignOut(),
+      endSessionUrl: "https://logto.test/oidc/session/end?client_id=app_1",
+    })
+
+    render(<LogtoLoginCard />)
+    await userEvent.click(await screen.findByTestId("logto-sign-out"))
+
+    expect(openUrlMock).toHaveBeenCalledWith("https://logto.test/oidc/session/end?client_id=app_1")
+  })
+
+  it("warns when the issuer could not be told to revoke the token", async () => {
+    readState.mockResolvedValue(active())
+    signOut.mockResolvedValue({
+      ...cleanSignOut(),
+      refreshTokenRevocation: { status: "failed", reason: "ECONNREFUSED" },
+    })
+
+    render(<LogtoLoginCard />)
+    await userEvent.click(await screen.findByTestId("logto-sign-out"))
+
+    expect(toastWarning).toHaveBeenCalledWith(expect.stringMatching(/could not be told/i))
+    expect(await screen.findByTestId("logto-sign-in-form")).toBeInTheDocument()
   })
 
   it("names who holds the profile when the binding is refused, without hiding it", async () => {
@@ -218,8 +282,20 @@ describe("the profile this session belongs to (ADR-0149)", () => {
         return sess()
       }
     )
-    signInIdentity.mockRejectedValue(
-      new UserBindingError("already-bound-to-another-user", "taken", {
+    // The session was persisted, the binding was refused: after the failed
+    // sign-in the state re-reads as a token nobody local owns.
+    signInIdentity.mockImplementation(async () => {
+      readState.mockResolvedValue({
+        status: "reauth-required",
+        reason: "binding-missing",
+        sessionMetadata: {
+          issuer: "https://logto.test/oidc",
+          clientId: "app_1",
+          resource: "https://api.test",
+          scopes: [],
+        },
+      })
+      throw new UserBindingError("already-bound-to-another-user", "taken", {
         localAccountId: "acct_alpha",
         userId: "usr_bob",
         displayName: "Bob",
@@ -228,7 +304,7 @@ describe("the profile this session belongs to (ADR-0149)", () => {
         boundAt: 1,
         updatedAt: 1,
       })
-    )
+    })
 
     const user = userEvent.setup()
     render(<LogtoLoginCard />)
@@ -242,16 +318,79 @@ describe("the profile this session belongs to (ADR-0149)", () => {
     await user.type(await screen.findByTestId("logto-code-input"), "the_code")
     await user.click(screen.getByTestId("logto-submit-code"))
 
-    // The Logto session is real — `signInToLogto` persisted it — so the card
-    // correctly shows the signed-in view. What failed is the profile binding,
-    // and that has to be visible right there rather than on a form nobody sees.
-    expect(await screen.findByTestId("logto-signed-in")).toBeInTheDocument()
+    // The Logto session is real (`signInToLogto` persisted it) but the profile
+    // binding was refused, so the card shows the binding-missing state with
+    // the refusal right there rather than on a form nobody sees.
+    expect(await screen.findByTestId("logto-state-reauth-required")).toBeInTheDocument()
     expect(await screen.findByTestId("logto-error")).toHaveTextContent("Bob")
-    expect(await screen.findByTestId("logto-person")).toHaveTextContent(
-      "Not linked to a Cognia account yet"
-    )
     // And the way out is reachable: signing out clears both.
     expect(screen.getByTestId("logto-sign-out")).toBeInTheDocument()
     expect(signInIdentity).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the states a login can be in (ADR-0149 lifecycle)", () => {
+  const metadata = {
+    issuer: "https://logto.test/oidc",
+    clientId: "app_1",
+    resource: "https://api.test",
+    organizationId: "org_1",
+    scopes: ["openid", "offline_access", "brain:rpc"],
+  }
+
+  it("an expired session asks for a new sign-in and pre-fills the form from what it knew", async () => {
+    readState.mockResolvedValue({
+      status: "reauth-required",
+      reason: "expired",
+      sessionMetadata: metadata,
+    })
+    const user = userEvent.setup()
+    render(<LogtoLoginCard />)
+
+    expect(await screen.findByTestId("logto-state-reauth-required")).toBeInTheDocument()
+    expect(screen.getByTestId("logto-state-reason")).toHaveTextContent(/expired/i)
+    expect(screen.getByText("org_1")).toBeInTheDocument()
+
+    await user.click(screen.getByTestId("logto-sign-in-again"))
+    expect(await screen.findByTestId("logto-sign-in-form")).toBeInTheDocument()
+    expect(screen.getByTestId("logto-issuer")).toHaveValue("https://logto.test/oidc")
+    expect(screen.getByTestId("logto-client-id")).toHaveValue("app_1")
+    expect(screen.getByTestId("logto-resource")).toHaveValue("https://api.test")
+    expect(screen.getByTestId("logto-org")).toHaveValue("org_1")
+    expect(screen.getByTestId("logto-scope")).toHaveValue("brain:rpc")
+  })
+
+  it("a revoked session says so", async () => {
+    readState.mockResolvedValue({
+      status: "reauth-required",
+      reason: "revoked",
+      sessionMetadata: metadata,
+    })
+    render(<LogtoLoginCard />)
+    expect(await screen.findByTestId("logto-state-reason")).toHaveTextContent(/revoked/i)
+  })
+
+  it("offline keeps the person signed in and offers a retry, not a sign-in", async () => {
+    readState.mockResolvedValue({ status: "offline", sessionMetadata: metadata })
+    const user = userEvent.setup()
+    render(<LogtoLoginCard />)
+
+    expect(await screen.findByTestId("logto-state-offline")).toBeInTheDocument()
+    expect(screen.queryByTestId("logto-sign-in-again")).not.toBeInTheDocument()
+
+    readState.mockResolvedValue(active())
+    await user.click(screen.getByTestId("logto-retry"))
+    expect(await screen.findByTestId("logto-signed-in")).toBeInTheDocument()
+  })
+
+  it("an issuer error names the reason", async () => {
+    readState.mockResolvedValue({
+      status: "error",
+      reason: "invalid_client",
+      sessionMetadata: metadata,
+    })
+    render(<LogtoLoginCard />)
+    expect(await screen.findByTestId("logto-state-error")).toBeInTheDocument()
+    expect(screen.getByTestId("logto-state-reason")).toHaveTextContent("invalid_client")
   })
 })

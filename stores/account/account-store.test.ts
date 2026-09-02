@@ -6,7 +6,14 @@ import "fake-indexeddb/auto"
 
 import type { LocalAccountRecord, PasswordVerifierRecord } from "@/lib/accounts/account-types"
 
+import type { ProfileCloudIdentityCleanup } from "@/lib/identity/forget-profile-identity"
+
 import type { AccountStoreDependencies } from "./account-store"
+
+const mockForgetProfileCloudIdentity = jest.fn()
+jest.mock("@/lib/identity/forget-profile-identity", () => ({
+  forgetProfileCloudIdentity: (...args: unknown[]) => mockForgetProfileCloudIdentity(...args),
+}))
 
 const mockBumpPerformanceSecurityGeneration = jest.fn()
 jest.mock("@/lib/perf/security-generation", () => ({
@@ -133,6 +140,10 @@ jest.mock("@/lib/db/boot", () => ({
 }))
 
 const mockDropAccountDatabase = jest.fn<Promise<void>, [string]>()
+const mockForgetCloudIdentity = jest.fn<
+  Promise<ProfileCloudIdentityCleanup>,
+  [string, { hostBound: boolean }]
+>()
 const mockPurgeAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockActivateAccountLocalState = jest.fn<Promise<void>, [string]>()
 const mockClearAccountLocalState = jest.fn<void, []>()
@@ -173,6 +184,20 @@ const account = (
   updatedAt: 100,
 })
 
+function cleanCloudIdentity(localAccountId: string): ProfileCloudIdentityCleanup {
+  return {
+    localAccountId,
+    steps: {
+      session: { status: "done" },
+      binding: { status: "done" },
+      "collab-connection": { status: "done" },
+      "host-person": { status: "skipped", reason: "not-bound-on-host" },
+    },
+    failures: [],
+    tokensMayRemainLive: false,
+  }
+}
+
 function makeStore() {
   const dependencies: Partial<AccountStoreDependencies> = {
     dropAccountDatabase: mockDropAccountDatabase,
@@ -187,6 +212,7 @@ function makeStore() {
     teardownPluginRuntime: mockTeardownPluginRuntime,
     activateContentCipher: mockActivateContentCipher,
     migrateLocalContentDatabase: mockMigrateLocalContentDatabase,
+    forgetCloudIdentity: mockForgetCloudIdentity,
   }
   return createAccountStore(dependencies)
 }
@@ -212,6 +238,12 @@ beforeEach(() => {
   mockDeleteBrowserVault.mockResolvedValue()
   mockTeardownPluginRuntime.mockResolvedValue()
   mockMigrateLocalContentDatabase.mockResolvedValue()
+  mockForgetCloudIdentity.mockImplementation(async (localAccountId) =>
+    cleanCloudIdentity(localAccountId)
+  )
+  mockForgetProfileCloudIdentity.mockImplementation(async (localAccountId: string) =>
+    cleanCloudIdentity(localAccountId)
+  )
   mockListAccounts.mockResolvedValue([])
   mockGetState.mockResolvedValue({ activeAccountId: null })
   mockCreatePasswordVerifier.mockImplementation(async (password) => verifier(password))
@@ -1230,5 +1262,106 @@ describe("account store unlock progress and recovery", () => {
     ).rejects.toMatchObject({ code: "invalid-recovery-key" })
     expect(mockUpdatePasswordVerifier).not.toHaveBeenCalled()
     expect(store.getState().locked).toBe(true)
+  })
+})
+
+describe("deleteAccount cascades through the profile's cloud identity (ADR-0149)", () => {
+  it("forgets the cloud identity of an inactive profile without touching the host", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    const beta = account("acct_beta", "Beta")
+    mockListAccounts.mockResolvedValue([alpha, beta])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+
+    const result = await store.getState().deleteAccount("acct_beta")
+
+    expect(mockForgetCloudIdentity).toHaveBeenCalledWith("acct_beta", { hostBound: false })
+    expect(result.cloudIdentity.localAccountId).toBe("acct_beta")
+    expect(result.cloudIdentity.failures).toEqual([])
+  })
+
+  it("forgets the unlocked profile's identity BEFORE locking, while the host still holds it", async () => {
+    // `lock()` unbinds the host namespace; after that the host can no longer
+    // be told whose person to forget. The order is the whole point.
+    const alpha = account("acct_alpha", "Alpha")
+    const beta = account("acct_beta", "Beta")
+    mockListAccounts.mockResolvedValue([alpha, beta])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const order: string[] = []
+    mockForgetCloudIdentity.mockImplementation(async (localAccountId) => {
+      order.push("forget-cloud-identity")
+      return cleanCloudIdentity(localAccountId)
+    })
+    mockUnbindLocalAccount.mockImplementation(async () => {
+      order.push("unbind-local-account")
+    })
+    const store = makeStore()
+    await store.getState().load()
+    await store.getState().unlockAccount("acct_alpha", "secret")
+    order.length = 0
+
+    await store.getState().deleteAccount("acct_alpha", { replacementAccountId: "acct_beta" })
+
+    expect(mockForgetCloudIdentity).toHaveBeenCalledWith("acct_alpha", { hostBound: true })
+    expect(order.indexOf("forget-cloud-identity")).toBeLessThan(
+      order.indexOf("unbind-local-account")
+    )
+  })
+
+  it("does not reach the cloud identity when the registry refuses the delete", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    const beta = account("acct_beta", "Beta")
+    mockListAccounts.mockResolvedValue([alpha, beta])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    mockDeleteRegistryAccount.mockRejectedValueOnce(new Error("last account"))
+    const store = makeStore()
+    await store.getState().load()
+
+    await expect(store.getState().deleteAccount("acct_beta")).rejects.toThrow(/last account/)
+    expect(mockForgetCloudIdentity).not.toHaveBeenCalled()
+  })
+
+  it("reports a partial cloud cleanup on the result instead of failing the delete", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    const beta = account("acct_beta", "Beta")
+    mockListAccounts.mockResolvedValue([alpha, beta])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    mockForgetCloudIdentity.mockResolvedValue({
+      ...cleanCloudIdentity("acct_beta"),
+      steps: {
+        ...cleanCloudIdentity("acct_beta").steps,
+        session: { status: "failed", error: "keyring" },
+      },
+      failures: [{ step: "session", error: "keyring" }],
+      tokensMayRemainLive: true,
+    })
+    const store = makeStore()
+    await store.getState().load()
+
+    const result = await store.getState().deleteAccount("acct_beta")
+
+    expect(result.cloudIdentity.tokensMayRemainLive).toBe(true)
+    expect(result.cloudIdentity.failures).toEqual([{ step: "session", error: "keyring" }])
+    expect(mockDropAccountDatabase).toHaveBeenCalledWith("acct_beta")
+    expect(store.getState().accounts.map((item) => item.id)).toEqual(["acct_alpha"])
+  })
+
+  it("the default dependency calls the identity module with the host flag", async () => {
+    const alpha = account("acct_alpha", "Alpha")
+    const beta = account("acct_beta", "Beta")
+    mockListAccounts.mockResolvedValue([alpha, beta])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_alpha" })
+    const store = createAccountStore({
+      dropAccountDatabase: mockDropAccountDatabase,
+      purgeAccountLocalState: mockPurgeAccountLocalState,
+      removeRuntimeTargets: mockRemoveRuntimeTargets,
+    })
+    await store.getState().load()
+
+    await store.getState().deleteAccount("acct_beta")
+
+    expect(mockForgetProfileCloudIdentity).toHaveBeenCalledWith("acct_beta", { hostBound: false })
   })
 })

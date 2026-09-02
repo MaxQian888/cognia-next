@@ -9,6 +9,13 @@ import { listCollabPlans } from "@/lib/db/collab-plan-mirror"
 import { listCollabRuns } from "@/lib/db/collab-run-mirror"
 import { saveCollabConnection, forgetCollabConnection } from "./connection"
 import { refreshCollabPlane, refreshCollabPlaneQuietly } from "./refresh"
+import { readActiveAccessToken } from "@/lib/logto/app-session"
+
+// Every case below injects `accessToken`; this one seam is for the default,
+// which must read a token that is good NOW (refreshing if it has to) rather
+// than whatever the keyring happens to hold.
+jest.mock("@/lib/logto/app-session", () => ({ readActiveAccessToken: jest.fn() }))
+const readToken = readActiveAccessToken as jest.Mock
 
 const dbFixture = createDbTestFixture()
 
@@ -461,5 +468,22 @@ describe("refreshCollabPlane — plans and runs (Batch 7c)", () => {
     const [run] = await listCollabRuns({ orgId: ORG })
     expect(run?.artifacts).toEqual([])
     expect(run?.issueId).toBeUndefined()
+  })
+})
+
+describe("the default token source", () => {
+  it("reads an active (refreshed) token for the profile, never the raw keyring blob", async () => {
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+    readToken.mockResolvedValue("fresh-token")
+    const { calls, impl } = fetchReturning({})
+    const result = await refreshCollabPlane({
+      localAccountId: ACCOUNT,
+      registry: registryReturning({ localAccountId: ACCOUNT, orgId: ORG }),
+      fetchImpl: impl,
+      now: () => 1_000,
+    })
+    expect(result.status).toBe("refreshed")
+    expect(readToken).toHaveBeenCalledWith(ACCOUNT)
+    expect(calls.some((url) => url.endsWith("/grants"))).toBe(true)
   })
 })

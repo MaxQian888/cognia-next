@@ -30,6 +30,12 @@ jest.mock("./vector-credential-migration-initializer", () => ({
 jest.mock("./sftp-transfer-initializer", () => ({
   SftpTransferInitializer: () => <span data-boot="sftp-transfers" />,
 }))
+// The real one renders null, so without this stub the group could drop it and
+// this suite would still pass. Cloud identity hygiene (discarding the legacy
+// global Logto session, resolving a lapsed login) would then simply never run.
+jest.mock("./cloud-identity-initializer", () => ({
+  CloudIdentityInitializer: () => <span data-boot="cloud-identity" />,
+}))
 const mockMarkReady = jest.fn()
 jest.mock("@/lib/boot/capabilities", () => ({
   markBootCapabilityReady: (...args: unknown[]) => mockMarkReady(...args),
@@ -44,6 +50,7 @@ it("mounts knowledge and agent workers and reports readiness", () => {
       node.getAttribute("data-boot")
     )
   ).toEqual([
+    "cloud-identity",
     "external-agent",
     "agent-team",
     "memory",

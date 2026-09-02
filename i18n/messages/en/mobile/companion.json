@@ -81,6 +81,10 @@
     "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
     "cancel": "Cancel",
     "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
+    "errorState": {
+      "note": "The identity provider answered with an error: {reason}",
+      "title": "Cloud session error"
+    },
     "errors": {
       "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
       "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
@@ -102,6 +106,18 @@
       "scope": "Scopes (optional)"
     },
     "loading": "Checking cloud session…",
+    "offline": {
+      "note": "The identity provider could not be reached. Local data keeps working; cloud features resume when the connection returns.",
+      "retry": "Retry",
+      "title": "Cloud session offline"
+    },
+    "reauth": {
+      "bindingMissing": "This cloud session is not linked to the local profile. Sign in again to link it.",
+      "expired": "Your cloud session has expired. Sign in again to keep using collaboration and remote features.",
+      "revoked": "Your cloud session was revoked by the identity provider. Sign in again to continue.",
+      "signInAgain": "Sign in again",
+      "title": "Sign-in required"
+    },
     "signIn": "Sign in with Logto",
     "signOut": "Sign out",
     "storageFallback": "Signed-in tokens are stored in an encrypted vault in this browser or app rather than the operating system keyring.",
@@ -109,6 +125,7 @@
     "title": "Logto cloud sign-in",
     "toast": {
       "hostMirrorFailed": "Signed in, but this desktop could not record who you are. Pairing keeps working; try again once the companion service is running.",
+      "revocationFailed": "Signed out on this device, but the identity provider could not be told to revoke the token.",
       "signedIn": "Signed in to Logto.",
       "signedOut": "Signed out of Logto."
     }

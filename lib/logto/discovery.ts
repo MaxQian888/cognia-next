@@ -16,6 +16,8 @@ export interface LogtoEndpoints {
   tokenEndpoint: string
   jwksUri?: string
   endSessionEndpoint?: string
+  /** RFC 7009 token revocation, when the issuer advertises it. */
+  revocationEndpoint?: string
 }
 
 /**
@@ -47,5 +49,7 @@ export async function discoverLogtoEndpoints(
     jwksUri: typeof doc.jwks_uri === "string" ? doc.jwks_uri : undefined,
     endSessionEndpoint:
       typeof doc.end_session_endpoint === "string" ? doc.end_session_endpoint : undefined,
+    revocationEndpoint:
+      typeof doc.revocation_endpoint === "string" ? doc.revocation_endpoint : undefined,
   }
 }

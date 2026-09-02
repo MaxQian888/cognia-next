@@ -1,4 +1,4 @@
-import type { LogtoSession } from "@/lib/logto/client"
+import { LogtoRefreshError, type LogtoSession } from "@/lib/logto/client"
 
 import type { LogtoSessionFs } from "../config/logto-session"
 import { startHeadlessCollabReader } from "./collab-reader"
@@ -78,4 +78,61 @@ it("binds the server identity and installs read-only polling", async () => {
   )
   expect(timeout).toHaveBeenCalled()
   reader.stop()
+})
+
+describe("a refresh that is refused vs one that merely failed", () => {
+  const stale: LogtoSession = {
+    issuer: "https://issuer.test/oidc",
+    clientId: "brain",
+    resource: "collab",
+    accessToken: sessionToken("logto-subject"),
+    refreshToken: "rt",
+    expiresAt: 1,
+    scopes: [],
+  }
+
+  it("removes the session file on invalid_grant, so no later poll presents a dead token", async () => {
+    const fs = sessionFs(stale)
+    const refreshToken = jest.fn(async () => {
+      throw new LogtoRefreshError("invalid_grant", "refused", { oauthError: "invalid_grant" })
+    })
+    const reader = await startHeadlessCollabReader({
+      accountId: "acct-1",
+      cliHome: "/home",
+      config: { url: "https://collab.test", orgId: ORG },
+      deps: { sessionFs: fs, refreshToken, now: () => 10_000 },
+    })
+    expect(reader.status).toBe("not-signed-in")
+    expect(fs.read("/home/logto.json")).toBeNull()
+  })
+
+  it("never treats an untyped throw as a revocation", async () => {
+    const fs = sessionFs(stale)
+    const refreshToken = jest.fn(async () => {
+      throw new Error("something else")
+    })
+    const reader = await startHeadlessCollabReader({
+      accountId: "acct-1",
+      cliHome: "/home",
+      config: { url: "https://collab.test", orgId: ORG },
+      deps: { sessionFs: fs, refreshToken, now: () => 10_000 },
+    })
+    expect(reader.status).toBe("not-signed-in")
+    expect(fs.read("/home/logto.json")).not.toBeNull()
+  })
+
+  it("keeps the file when the issuer was merely unreachable, and hands out no token", async () => {
+    const fs = sessionFs(stale)
+    const refreshToken = jest.fn(async () => {
+      throw new LogtoRefreshError("network", "down")
+    })
+    const reader = await startHeadlessCollabReader({
+      accountId: "acct-1",
+      cliHome: "/home",
+      config: { url: "https://collab.test", orgId: ORG },
+      deps: { sessionFs: fs, refreshToken, now: () => 10_000 },
+    })
+    expect(reader.status).toBe("not-signed-in")
+    expect(fs.read("/home/logto.json")).not.toBeNull()
+  })
 })

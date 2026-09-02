@@ -37,9 +37,24 @@ import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { isTauri } from "@/lib/tauri"
 
-import type { LogtoSession } from "./client"
+import type { LogtoSession, LogtoSessionMetadata } from "./client"
 
 export const LOGTO_KEYRING_NAMESPACE = "logto"
+
+/**
+ * What is left after a refresh proves the stored login dead.
+ *
+ * The tokens are gone, and nothing should ever present them again. The UI
+ * still has to say WHO needs to sign in again and WHERE, which is what the
+ * non-secret metadata is for. Stored beside the session, never inside it, so
+ * `loadLogtoSession` keeps meaning "a session with tokens".
+ */
+export interface LogtoReauthMarker {
+  reason: "expired" | "revoked"
+  metadata: LogtoSessionMetadata
+  /** Epoch ms at which the refresh was refused. */
+  at: number
+}
 
 /**
  * The pre-ADR-0149 global key. Read only to delete it — see the header.
@@ -59,6 +74,11 @@ export const LEGACY_LOGTO_KEYRING: KeyringRef = {
  */
 export function logtoKeyringFor(localAccountId = getActiveAccountId()): KeyringRef {
   return { namespace: LOGTO_KEYRING_NAMESPACE, key: `session:${localAccountId}` }
+}
+
+/** Keyring location of the re-authentication marker for one LocalProfile. */
+export function logtoReauthKeyringFor(localAccountId = getActiveAccountId()): KeyringRef {
+  return { namespace: LOGTO_KEYRING_NAMESPACE, key: `reauth:${localAccountId}` }
 }
 
 let webPassphraseProvisioned = false
@@ -84,13 +104,19 @@ export function __resetLogtoWebPassphraseForTests(): void {
   webPassphraseProvisioned = false
 }
 
-/** Persist (upsert) this profile's Logto session. */
+/**
+ * Persist (upsert) this profile's Logto session.
+ *
+ * A fresh session supersedes any re-authentication marker: the marker says
+ * "sign in again", and this is that sign-in having happened.
+ */
 export async function saveLogtoSession(
   session: LogtoSession,
   localAccountId?: string
 ): Promise<void> {
   await ensureWebPassphrase()
   await setSecret(logtoKeyringFor(localAccountId), JSON.stringify(session))
+  await clearSecret(logtoReauthKeyringFor(localAccountId))
 }
 
 /** Load this profile's Logto session, or `null` if none is stored / it is corrupt. */
@@ -109,6 +135,49 @@ export async function loadLogtoSession(localAccountId?: string): Promise<LogtoSe
 export async function clearLogtoSession(localAccountId?: string): Promise<void> {
   await ensureWebPassphrase()
   await clearSecret(logtoKeyringFor(localAccountId))
+}
+
+/**
+ * Replace a dead session with its marker, atomically enough: the marker is
+ * written first, so a crash between the two leaves "sign in again" visible
+ * rather than a blank where a login used to be.
+ */
+export async function markLogtoSessionForReauth(
+  marker: LogtoReauthMarker,
+  localAccountId?: string
+): Promise<void> {
+  await ensureWebPassphrase()
+  await setSecret(logtoReauthKeyringFor(localAccountId), JSON.stringify(marker))
+  await clearSecret(logtoKeyringFor(localAccountId))
+}
+
+/** The marker left by a refused refresh, or `null` when there is none / it is corrupt. */
+export async function loadLogtoReauthMarker(
+  localAccountId?: string
+): Promise<LogtoReauthMarker | null> {
+  await ensureWebPassphrase()
+  const raw = await getSecret(logtoReauthKeyringFor(localAccountId))
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<LogtoReauthMarker>
+    if (
+      (parsed.reason !== "expired" && parsed.reason !== "revoked") ||
+      typeof parsed.metadata !== "object" ||
+      parsed.metadata === null ||
+      typeof parsed.metadata.issuer !== "string"
+    ) {
+      return null
+    }
+    return parsed as LogtoReauthMarker
+  } catch {
+    return null
+  }
+}
+
+/** Forget the re-authentication marker. Idempotent. */
+export async function clearLogtoReauthMarker(localAccountId?: string): Promise<void> {
+  await ensureWebPassphrase()
+  await clearSecret(logtoReauthKeyringFor(localAccountId))
 }
 
 /**

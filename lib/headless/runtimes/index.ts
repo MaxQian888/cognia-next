@@ -114,6 +114,11 @@
  * - `worker-runtime-initializer` — attaches the WebView through a Tauri IPC
  *   `Channel`; the brain-side bridge-owned worker pool is installed and torn
  *   down by `serveCommand` after its authenticated bridge connects.
+ * - `cloud-identity-initializer` — keyring hygiene for the renderer's
+ *   per-profile Logto session (discarding the pre-ADR-0149 global blob,
+ *   resolving a lapsed login into a re-auth marker at boot). The brain keeps
+ *   its own file-backed session in `cli/src/serve/collab-reader.ts` and
+ *   refreshes it there.
  */
 
 import "./host-event-publisher"

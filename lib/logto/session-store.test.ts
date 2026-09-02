@@ -22,10 +22,15 @@ import {
   saveLogtoSession,
   loadLogtoSession,
   clearLogtoSession,
+  clearLogtoReauthMarker,
   discardLegacyGlobalLogtoSession,
+  loadLogtoReauthMarker,
   logtoKeyringFor,
+  logtoReauthKeyringFor,
+  markLogtoSessionForReauth,
   LEGACY_LOGTO_KEYRING,
   __resetLogtoWebPassphraseForTests,
+  type LogtoReauthMarker,
 } from "./session-store"
 
 const getMock = getSecret as jest.Mock
@@ -187,5 +192,65 @@ describe("discardLegacyGlobalLogtoSession", () => {
     getMock.mockResolvedValue(null)
     expect(await discardLegacyGlobalLogtoSession()).toBe(false)
     expect(clearMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("re-authentication marker", () => {
+  const marker: LogtoReauthMarker = {
+    reason: "revoked",
+    metadata: {
+      issuer: sampleSession.issuer,
+      clientId: sampleSession.clientId,
+      resource: sampleSession.resource,
+      organizationId: "org_9",
+      expiresAt: 123,
+      scopes: ["openid"],
+    },
+    at: 456,
+  }
+  const reauthRef = logtoReauthKeyringFor("acct_active")
+
+  it("lives beside the session under its own per-profile key", () => {
+    expect(reauthRef).toEqual({ namespace: "logto", key: "reauth:acct_active" })
+    expect(logtoReauthKeyringFor("acct_other").key).toBe("reauth:acct_other")
+  })
+
+  it("marking for reauth writes the marker BEFORE clearing the session", async () => {
+    // Order matters: a crash between the two must leave "sign in again"
+    // visible rather than a blank where a login used to be.
+    const order: string[] = []
+    setMock.mockImplementation(async () => {
+      order.push("set")
+    })
+    clearMock.mockImplementation(async () => {
+      order.push("clear")
+    })
+    await markLogtoSessionForReauth(marker)
+    expect(setMock).toHaveBeenCalledWith(reauthRef, JSON.stringify(marker))
+    expect(clearMock).toHaveBeenCalledWith(ref)
+    expect(order).toEqual(["set", "clear"])
+  })
+
+  it("loads a stored marker and rejects a corrupt or unknown one", async () => {
+    getMock.mockResolvedValue(JSON.stringify(marker))
+    expect(await loadLogtoReauthMarker()).toEqual(marker)
+    expect(getMock).toHaveBeenCalledWith(reauthRef)
+
+    getMock.mockResolvedValue(JSON.stringify({ reason: "sideways", metadata: marker.metadata }))
+    expect(await loadLogtoReauthMarker()).toBeNull()
+    getMock.mockResolvedValue("{nope")
+    expect(await loadLogtoReauthMarker()).toBeNull()
+    getMock.mockResolvedValue(null)
+    expect(await loadLogtoReauthMarker()).toBeNull()
+  })
+
+  it("a fresh sign-in clears the marker, because it IS the sign-in the marker asked for", async () => {
+    await saveLogtoSession(sampleSession)
+    expect(clearMock).toHaveBeenCalledWith(reauthRef)
+  })
+
+  it("clears the marker on its own", async () => {
+    await clearLogtoReauthMarker("acct_other")
+    expect(clearMock).toHaveBeenCalledWith(logtoReauthKeyringFor("acct_other"))
   })
 })

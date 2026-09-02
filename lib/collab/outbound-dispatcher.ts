@@ -1,7 +1,7 @@
 "use client"
 
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
-import { loadLogtoSession } from "@/lib/logto/session-store"
+import { readActiveAccessToken } from "@/lib/logto/app-session"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
 
 import {
@@ -59,7 +59,7 @@ export async function dispatchCollabOutbound(
     deps.client ??
     new CollabClient({
       baseUrl: connection?.baseUrl ?? "",
-      accessToken: async () => (await loadLogtoSession(localAccountId))?.accessToken ?? null,
+      accessToken: () => readActiveAccessToken(localAccountId),
       fetchImpl: createPlatformFetch(),
     })
   const body = withoutRouting(payload)

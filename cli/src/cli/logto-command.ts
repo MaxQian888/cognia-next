@@ -14,6 +14,7 @@ import os from "node:os"
 
 import {
   loginToLogto as defaultLogin,
+  revokeLogtoToken as defaultRevoke,
   type LogtoClientConfig,
   type LogtoDrivers,
 } from "@/lib/logto/client"
@@ -39,6 +40,9 @@ export interface LogtoCommandDeps {
   env?: Record<string, string | undefined>
   out?: OutputSink
   login?: typeof defaultLogin
+  revoke?: typeof defaultRevoke
+  fetchImpl?: typeof fetch
+  now?: () => number
   startCallbackServer?: typeof defaultStartCallback
   openBrowser?: typeof defaultOpenBrowser
   sessionFs?: LogtoSessionFs
@@ -56,9 +60,7 @@ export async function logtoCommand(args: ParsedArgs, deps: LogtoCommandDeps = {}
     case "status":
       return statusSub(deps, out, home)
     case "logout":
-      removeLogtoSessionFile(home, deps.sessionFs)
-      out.write("Signed out of Logto (removed logto.json).\n")
-      return 0
+      return logoutSub(deps, out, home)
     default:
       out.error("logto: expected a subcommand — login | status | logout")
       return 2
@@ -130,6 +132,44 @@ async function loginSub(
   }
 }
 
+/**
+ * Revoke at the issuer, then remove the file. Revocation is best effort and
+ * reported: the file is removed whether or not the issuer could be reached,
+ * because a token this process has forgotten but the issuer still honours is
+ * the worse of the two outcomes to hide.
+ */
+async function logoutSub(deps: LogtoCommandDeps, out: OutputSink, home: string): Promise<number> {
+  const session = readLogtoSessionFile(home, deps.sessionFs)
+  if (!session) {
+    out.write("Not signed in to Logto; nothing to sign out of.\n")
+    return 0
+  }
+  const revoke = deps.revoke ?? defaultRevoke
+  const outcomes = []
+  if (session.refreshToken) {
+    outcomes.push(await revoke(session, session.refreshToken, "refresh_token", deps.fetchImpl))
+  }
+  outcomes.push(await revoke(session, session.accessToken, "access_token", deps.fetchImpl))
+  removeLogtoSessionFile(home, deps.sessionFs)
+  const failed = outcomes.find((outcome) => outcome.status === "failed")
+  if (failed && failed.status === "failed") {
+    out.write(
+      "Signed out of Logto (removed logto.json), but the issuer could not be told to " +
+        `revoke the token: ${failed.reason}\n`
+    )
+    return 0
+  }
+  if (outcomes.some((outcome) => outcome.status === "unsupported")) {
+    out.write(
+      "Signed out of Logto (removed logto.json). The issuer advertises no revocation " +
+        "endpoint, so the token expires on its own schedule.\n"
+    )
+    return 0
+  }
+  out.write("Signed out of Logto (removed logto.json; tokens revoked at the issuer).\n")
+  return 0
+}
+
 function statusSub(deps: LogtoCommandDeps, out: OutputSink, home: string): number {
   const session = readLogtoSessionFile(home, deps.sessionFs)
   if (!session) {
@@ -139,9 +179,16 @@ function statusSub(deps: LogtoCommandDeps, out: OutputSink, home: string): numbe
     )
     return 0
   }
+  const now = (deps.now ?? Date.now)()
+  const expired = session.expiresAt !== undefined && session.expiresAt <= now
   const expires = session.expiresAt ? new Date(session.expiresAt).toISOString() : "unknown"
+  const heading = expired
+    ? session.refreshToken
+      ? "Signed in to Logto (access token expired; will refresh on next use)\n"
+      : "Logto session expired; run `cognia-agent logto login` again\n"
+    : "Signed in to Logto\n"
   out.write(
-    "Signed in to Logto\n" +
+    heading +
       `  issuer:   ${session.issuer}\n` +
       `  resource: ${session.resource}\n` +
       `  org:      ${session.organizationId ?? "-"}\n` +

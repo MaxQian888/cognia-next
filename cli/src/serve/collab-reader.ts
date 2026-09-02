@@ -9,11 +9,17 @@ import {
 } from "@/lib/collab/refresh-scheduler"
 import { refreshCollabPlaneQuietly } from "@/lib/collab/refresh"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
-import { refreshLogtoToken, type LogtoClientConfig, type LogtoSession } from "@/lib/logto/client"
+import {
+  isLogtoRefreshError,
+  refreshLogtoToken,
+  type LogtoClientConfig,
+  type LogtoSession,
+} from "@/lib/logto/client"
 
 import type { CollabCliConfig } from "../config/schema"
 import {
   readLogtoSessionFile,
+  removeLogtoSessionFile,
   writeLogtoSessionFile,
   type LogtoSessionFs,
 } from "../config/logto-session"
@@ -64,13 +70,25 @@ async function freshSession(
     redirectUri: "",
     ...(session.organizationId ? { organizationId: session.organizationId } : {}),
   }
-  const refreshed = await (deps.refreshToken ?? refreshLogtoToken)(
-    config,
-    session.refreshToken,
-    deps.fetchImpl as typeof fetch | undefined
-  )
-  writeLogtoSessionFile(cliHome, refreshed, deps.sessionFs)
-  return refreshed
+  try {
+    const refreshed = await (deps.refreshToken ?? refreshLogtoToken)(
+      config,
+      session.refreshToken,
+      deps.fetchImpl as typeof fetch | undefined
+    )
+    writeLogtoSessionFile(cliHome, refreshed, deps.sessionFs)
+    return refreshed
+  } catch (error) {
+    // A refused refresh is a dead login: keeping the file would make every
+    // later poll present the same spent token and read every 401 as a
+    // server fault. A transient failure keeps the file, because the next
+    // poll may succeed, but hands out no token now: the stored one has
+    // expired and presenting it is pointless.
+    if (isLogtoRefreshError(error) && error.permanent) {
+      removeLogtoSessionFile(cliHome, deps.sessionFs)
+    }
+    return null
+  }
 }
 
 export interface HeadlessCollabReader {

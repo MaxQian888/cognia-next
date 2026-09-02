@@ -29,15 +29,21 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
-import { getActiveLogtoSession, signInToLogto, signOutFromLogto } from "@/lib/logto/app-session"
+import { signInToLogto, signOutFromLogto, signOutLeftTokensLive } from "@/lib/logto/app-session"
 import {
-  completeSignIn,
-  completeSignOut,
-  readSignedInPerson,
-} from "@/lib/identity/complete-sign-in"
+  cloudSessionNeedsReauth,
+  isCloudSessionActive,
+  readCloudSessionState,
+  type CloudSessionState,
+} from "@/lib/identity/cloud-session"
+import { completeSignIn, completeSignOut } from "@/lib/identity/complete-sign-in"
 import { UserBindingError } from "@/lib/identity/user-binding"
-import type { LogtoClientConfig, LogtoDrivers, LogtoSession } from "@/lib/logto/client"
-import type { UserBindingRow } from "@/lib/accounts/account-db"
+import type {
+  LogtoClientConfig,
+  LogtoDrivers,
+  LogtoSession,
+  LogtoSessionMetadata,
+} from "@/lib/logto/client"
 
 type Step = "idle" | "awaiting-code" | "exchanging"
 
@@ -59,6 +65,21 @@ const EMPTY_FORM: FormState = {
   org: "",
 }
 
+/** Pre-fill the form from what a lapsed session recorded, so "sign in again" is one click. */
+function formFromMetadata(metadata: LogtoSessionMetadata | null, previous: FormState): FormState {
+  if (!metadata) return previous
+  return {
+    ...previous,
+    issuer: metadata.issuer,
+    clientId: metadata.clientId,
+    resource: metadata.resource,
+    scope: metadata.scopes
+      .filter((scope) => scope !== "openid" && scope !== "offline_access")
+      .join(" "),
+    org: metadata.organizationId ?? "",
+  }
+}
+
 /** Extract `code` (+ optional `state`) from a pasted callback URL or a bare code. */
 export function extractCallback(input: string): { code: string; state?: string } | null {
   const trimmed = input.trim()
@@ -77,11 +98,12 @@ export function extractCallback(input: string): { code: string; state?: string }
 
 export function LogtoLoginCard() {
   const t = useTranslations("mobile.companion.logto")
-  const [session, setSession] = useState<LogtoSession | null>(null)
+  const [cloud, setCloud] = useState<CloudSessionState | null>(null)
   const [loading, setLoading] = useState(true)
   const [step, setStep] = useState<Step>("idle")
   const [error, setError] = useState<string | null>(null)
-  const [person, setPerson] = useState<UserBindingRow | null>(null)
+  /** The person explicitly wants the form, even though a lapsed session could be shown instead. */
+  const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [codeInput, setCodeInput] = useState("")
   const codeResolver = useRef<((v: { code: string; state: string }) => void) | null>(null)
@@ -91,9 +113,11 @@ export function LogtoLoginCard() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      const [active, bound] = await Promise.all([getActiveLogtoSession(), readSignedInPerson()])
-      setSession(active)
-      setPerson(bound)
+      const state = await readCloudSessionState()
+      setCloud(state)
+      if (state.status === "reauth-required" || state.status === "error") {
+        setForm((previous) => formFromMetadata(state.sessionMetadata, previous))
+      }
     } finally {
       setLoading(false)
     }
@@ -142,11 +166,12 @@ export function LogtoLoginCard() {
         })
       },
     }
+    let next: LogtoSession | null = null
     try {
-      const next = await signInToLogto(config, drivers)
-      setSession(next)
+      next = await signInToLogto(config, drivers)
       setStep("idle")
       setCodeInput("")
+      setShowForm(false)
 
       // The token proves who signed in; this is what makes the profile theirs.
       let mirroredToHost = true
@@ -155,19 +180,21 @@ export function LogtoLoginCard() {
           mirroredToHost = false
         },
       })
-      setPerson(await readSignedInPerson())
+      await reload()
       toast.success(t("toast.signedIn"))
       if (!mirroredToHost) toast.warning(t("toast.hostMirrorFailed"))
     } catch (e) {
       if (e instanceof UserBindingError && e.code === "already-bound-to-another-user") {
         // Named rather than generic: the useful fact is WHO holds this profile,
-        // and that signing out here is the way forward.
+        // and that signing out here is the way forward. The Logto session is
+        // real (it was persisted), so the state re-reads as binding-missing.
         setStep("idle")
         setError(
           t("errors.profileBoundToAnother", {
             name: e.existing?.displayName ?? e.existing?.userId ?? "",
           })
         )
+        await reload()
         return
       }
       setStep("idle")
@@ -201,15 +228,31 @@ export function LogtoLoginCard() {
   }
 
   const signOut = async (): Promise<void> => {
-    await signOutFromLogto()
+    const report = await signOutFromLogto()
     // Drops the profile→person binding and tells the host to forget it. The
     // identity projection is left alone on purpose: those rows record who
     // people ARE, so clearing them would blank names on every existing row.
     await completeSignOut()
-    setSession(null)
-    setPerson(null)
+    setCloud({ status: "signed-out" })
+    setShowForm(false)
+    setError(null)
     toast.success(t("toast.signedOut"))
+    // Local material is gone either way. What the person must not be left
+    // believing is that the issuer forgot them too when it was never told.
+    if (signOutLeftTokensLive(report)) toast.warning(t("toast.revocationFailed"))
+    // RP-initiated logout: revocation kills the tokens, but the issuer's own
+    // browser cookie would sign the same person straight back in on the next
+    // authorize call without asking. Ending that session is part of signing out.
+    if (report.endSessionUrl) void openUrl(report.endSessionUrl)
   }
+
+  const session = cloud && isCloudSessionActive(cloud) ? cloud.session : null
+  const identity = cloud && isCloudSessionActive(cloud) ? cloud.identity : null
+  const lapsed =
+    cloud &&
+    (cloudSessionNeedsReauth(cloud) || cloud.status === "offline" || cloud.status === "error")
+      ? cloud
+      : null
 
   return (
     <Card data-testid="logto-login-card">
@@ -252,7 +295,7 @@ export function LogtoLoginCard() {
               )}
               <dt className="text-muted-foreground">{t("field.person")}</dt>
               <dd className="truncate text-xs" data-testid="logto-person">
-                {person ? (person.displayName ?? person.userId) : t("field.personNone")}
+                {identity ? (identity.displayName ?? identity.userId) : t("field.personNone")}
               </dd>
               <dt className="text-muted-foreground">{t("field.expires")}</dt>
               <dd className="text-xs">
@@ -279,6 +322,73 @@ export function LogtoLoginCard() {
               <LogOutIcon className="size-4" aria-hidden />
               {t("signOut")}
             </Button>
+          </div>
+        ) : lapsed && !showForm && step === "idle" ? (
+          <div className="space-y-2" data-testid={`logto-state-${lapsed.status}`}>
+            <p className="text-sm font-medium">
+              {lapsed.status === "reauth-required"
+                ? t("reauth.title")
+                : lapsed.status === "offline"
+                  ? t("offline.title")
+                  : t("errorState.title")}
+            </p>
+            <p className="text-xs text-muted-foreground" data-testid="logto-state-reason">
+              {lapsed.status === "reauth-required"
+                ? t(
+                    lapsed.reason === "expired"
+                      ? "reauth.expired"
+                      : lapsed.reason === "revoked"
+                        ? "reauth.revoked"
+                        : "reauth.bindingMissing"
+                  )
+                : lapsed.status === "offline"
+                  ? t("offline.note")
+                  : t("errorState.note", { reason: lapsed.reason })}
+            </p>
+            {lapsed.sessionMetadata && (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                <dt className="text-muted-foreground">{t("field.issuer")}</dt>
+                <dd className="truncate font-mono text-xs">{lapsed.sessionMetadata.issuer}</dd>
+                {lapsed.sessionMetadata.organizationId && (
+                  <>
+                    <dt className="text-muted-foreground">{t("field.org")}</dt>
+                    <dd className="truncate font-mono text-xs">
+                      {lapsed.sessionMetadata.organizationId}
+                    </dd>
+                  </>
+                )}
+              </dl>
+            )}
+            {error && (
+              <p className="text-xs text-destructive" data-testid="logto-error">
+                {error}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {lapsed.status === "offline" ? (
+                <Button size="sm" onClick={() => void reload()} data-testid="logto-retry">
+                  {t("offline.retry")}
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={() => setShowForm(true)}
+                  data-testid="logto-sign-in-again"
+                >
+                  <LogInIcon className="size-4" aria-hidden />
+                  {t("reauth.signInAgain")}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void signOut()}
+                data-testid="logto-sign-out"
+              >
+                <LogOutIcon className="size-4" aria-hidden />
+                {t("signOut")}
+              </Button>
+            </div>
           </div>
         ) : step === "idle" ? (
           <div className="space-y-2" data-testid="logto-sign-in-form">

@@ -6,10 +6,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, string>) =>
+    values ? `${key}:${Object.values(values).join(",")}` : key,
 }))
 
-const deleteAccountMock = jest.fn<Promise<void>, [string, unknown?]>()
+type DeletionResult = {
+  cloudIdentity: { failures: Array<{ step: string; error: string }>; tokensMayRemainLive: boolean }
+}
+const cleanResult: DeletionResult = { cloudIdentity: { failures: [], tokensMayRemainLive: false } }
+const deleteAccountMock = jest.fn<Promise<DeletionResult>, [string, unknown?]>()
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: (selector: (s: { deleteAccount: typeof deleteAccountMock }) => unknown) =>
     selector({ deleteAccount: deleteAccountMock }),
@@ -17,10 +22,12 @@ jest.mock("@/stores/account/account-store", () => ({
 
 const toastMock = jest.fn<string, [message?: unknown, options?: unknown]>(() => "toast-id")
 const toastErrorMock = jest.fn()
+const toastWarningMock = jest.fn()
 const toastDismissMock = jest.fn()
 jest.mock("sonner", () => ({
   toast: Object.assign((...args: unknown[]) => toastMock(...(args as [])), {
     error: (...args: unknown[]) => toastErrorMock(...(args as [])),
+    warning: (...args: unknown[]) => toastWarningMock(...(args as [])),
     dismiss: (...args: unknown[]) => toastDismissMock(...(args as [])),
   }),
 }))
@@ -44,7 +51,7 @@ const beta = account("acct_beta", "Beta")
 
 beforeEach(() => {
   jest.clearAllMocks()
-  deleteAccountMock.mockResolvedValue()
+  deleteAccountMock.mockResolvedValue(cleanResult)
   jest.useFakeTimers()
 })
 
@@ -183,5 +190,47 @@ describe("AccountDangerTab", () => {
       jest.advanceTimersByTime(UNDO_WINDOW_MS)
     })
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("operationFailed"))
+  })
+})
+
+describe("cloud identity cleanup after the delete (ADR-0149)", () => {
+  it("says nothing extra when the cloud identity cleared cleanly", async () => {
+    render(
+      <AccountDangerTab account={beta} accounts={[alpha, beta]} activeAccountId="acct_alpha" />
+    )
+    armAndType("Beta")
+    fireEvent.click(screen.getByTestId("account-danger-delete"))
+    await act(async () => {
+      jest.advanceTimersByTime(UNDO_WINDOW_MS)
+    })
+    await waitFor(() => expect(deleteAccountMock).toHaveBeenCalled())
+    expect(toastWarningMock).not.toHaveBeenCalled()
+  })
+
+  it("warns which steps failed, and separately that the issuer may still hold a session", async () => {
+    deleteAccountMock.mockResolvedValue({
+      cloudIdentity: {
+        failures: [
+          { step: "session", error: "keyring" },
+          { step: "binding", error: "registry" },
+        ],
+        tokensMayRemainLive: true,
+      },
+    })
+    render(
+      <AccountDangerTab account={beta} accounts={[alpha, beta]} activeAccountId="acct_alpha" />
+    )
+    armAndType("Beta")
+    fireEvent.click(screen.getByTestId("account-danger-delete"))
+    await act(async () => {
+      jest.advanceTimersByTime(UNDO_WINDOW_MS)
+    })
+    await waitFor(() => expect(toastWarningMock).toHaveBeenCalledTimes(2))
+    expect(toastWarningMock).toHaveBeenCalledWith(
+      "deleteCloudIdentityIncomplete:cloudIdentityStep.session, cloudIdentityStep.binding"
+    )
+    expect(toastWarningMock).toHaveBeenCalledWith("deleteTokensMayRemainLive")
+    // The delete itself is not an error.
+    expect(toastErrorMock).not.toHaveBeenCalled()
   })
 })

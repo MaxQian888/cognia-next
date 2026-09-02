@@ -1549,6 +1549,12 @@
       "changeNewPasswordPlaceholder": "New password",
       "changePassword": "Change password",
       "changePasswordHeading": "Change password",
+      "cloudIdentityStep": {
+        "binding": "profile link",
+        "collabConnection": "collaboration server",
+        "hostPerson": "host record",
+        "session": "sign-in tokens"
+      },
       "confirmDelete": "Confirm delete",
       "confirmNewPasswordLabel": "Confirm new password",
       "confirmNewPasswordPlaceholder": "Confirm new password",
@@ -1561,12 +1567,14 @@
       "currentPasswordPlaceholder": "Current password",
       "delete": "Delete",
       "deleteBlockedLast": "You can't delete the only local account.",
+      "deleteCloudIdentityIncomplete": "The account was deleted, but its cloud sign-in could not be fully cleared ({steps}). Sign out from the identity provider's own console to be sure.",
       "deleteConfirmPlaceholder": "Type the account name",
       "deleteConfirmPrompt": "Type “{name}” to confirm permanent deletion.",
       "deleteHeading": "Delete account",
       "deleteHelp": "Permanently delete this account and all of its local data. This can't be undone.",
       "deleteScheduledInline": "Scheduled for deletion — undo to keep it.",
       "deleteScheduledToast": "Deleting “{name}”",
+      "deleteTokensMayRemainLive": "The identity provider may still hold a session for the deleted account. Sign out from the provider's own console to be sure.",
       "description": "Create, rename, and remove local accounts on this device.",
       "editDisplayNameLabel": "Account name",
       "empty": "Select an account",
@@ -16200,6 +16208,10 @@
         "awaitingCode": "A browser window opened. After you authorize, paste the full redirect URL (or just the code) below.",
         "cancel": "Cancel",
         "description": "Sign in to your Logto tenant so this desktop can act as an authenticated client of the cloud / headless companion gateway.",
+        "errorState": {
+          "note": "The identity provider answered with an error: {reason}",
+          "title": "Cloud session error"
+        },
         "errors": {
           "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
           "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
@@ -16221,6 +16233,18 @@
           "scope": "Scopes (optional)"
         },
         "loading": "Checking cloud session…",
+        "offline": {
+          "note": "The identity provider could not be reached. Local data keeps working; cloud features resume when the connection returns.",
+          "retry": "Retry",
+          "title": "Cloud session offline"
+        },
+        "reauth": {
+          "bindingMissing": "This cloud session is not linked to the local profile. Sign in again to link it.",
+          "expired": "Your cloud session has expired. Sign in again to keep using collaboration and remote features.",
+          "revoked": "Your cloud session was revoked by the identity provider. Sign in again to continue.",
+          "signInAgain": "Sign in again",
+          "title": "Sign-in required"
+        },
         "signIn": "Sign in with Logto",
         "signOut": "Sign out",
         "storageFallback": "Signed-in tokens are stored in an encrypted vault in this browser or app rather than the operating system keyring.",
@@ -16228,6 +16252,7 @@
         "title": "Logto cloud sign-in",
         "toast": {
           "hostMirrorFailed": "Signed in, but this desktop could not record who you are. Pairing keeps working; try again once the companion service is running.",
+          "revocationFailed": "Signed out on this device, but the identity provider could not be told to revoke the token.",
           "signedIn": "Signed in to Logto.",
           "signedOut": "Signed out of Logto."
         }

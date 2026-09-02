@@ -23,9 +23,18 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
+import type { ProfileCloudIdentityStep } from "@/lib/identity/forget-profile-identity"
 import { useAccountStore } from "@/stores/account/account-store"
 
 const UNDO_WINDOW_MS = 8000
+
+/** Machine step names → label keys under `account.manage.cloudIdentityStep`. */
+const CLOUD_IDENTITY_STEP_KEY: Record<ProfileCloudIdentityStep, string> = {
+  session: "session",
+  binding: "binding",
+  "collab-connection": "collabConnection",
+  "host-person": "hostPerson",
+}
 
 export interface AccountDangerTabProps {
   account: LocalAccountRecord
@@ -81,9 +90,27 @@ export function AccountDangerTab({ account, accounts, activeAccountId }: Account
     // Detached from the component lifecycle — runs even if the dialog closed.
     timerRef.current = null
     toastRef.current = null
-    void deleteAccount(account.id, { replacementAccountId }).catch((err) => {
-      toast.error(toErrorMessage(err, t("operationFailed")))
-    })
+    void deleteAccount(account.id, { replacementAccountId })
+      .then((result) => {
+        // The profile is gone either way. What must not be reported as a
+        // clean delete is a cloud sign-in the app could not fully clear.
+        const cleanup = result.cloudIdentity
+        if (cleanup.failures.length > 0) {
+          toast.warning(
+            t("deleteCloudIdentityIncomplete", {
+              steps: cleanup.failures
+                .map((failure) => t(`cloudIdentityStep.${CLOUD_IDENTITY_STEP_KEY[failure.step]}`))
+                .join(", "),
+            })
+          )
+        }
+        if (cleanup.tokensMayRemainLive) {
+          toast.warning(t("deleteTokensMayRemainLive"))
+        }
+      })
+      .catch((err) => {
+        toast.error(toErrorMessage(err, t("operationFailed")))
+      })
   }
 
   const schedule = () => {

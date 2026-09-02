@@ -1549,6 +1549,12 @@
       "changeNewPasswordPlaceholder": "新密码",
       "changePassword": "修改密码",
       "changePasswordHeading": "修改密码",
+      "cloudIdentityStep": {
+        "binding": "档案关联",
+        "collabConnection": "协作服务器",
+        "hostPerson": "宿主记录",
+        "session": "登录令牌"
+      },
       "confirmDelete": "确认删除",
       "confirmNewPasswordLabel": "确认新密码",
       "confirmNewPasswordPlaceholder": "确认新密码",
@@ -1561,12 +1567,14 @@
       "currentPasswordPlaceholder": "当前密码",
       "delete": "删除",
       "deleteBlockedLast": "无法删除唯一的本地账户。",
+      "deleteCloudIdentityIncomplete": "账户已删除，但其云端登录未能完全清理（{steps}）。请到身份提供方控制台确认已退出。",
       "deleteConfirmPlaceholder": "输入账户名",
       "deleteConfirmPrompt": "输入「{name}」以确认永久删除。",
       "deleteHeading": "删除账户",
       "deleteHelp": "永久删除此账户及其所有本地数据，此操作无法撤销。",
       "deleteScheduledInline": "已排定删除——点撤销可保留。",
       "deleteScheduledToast": "正在删除「{name}」",
+      "deleteTokensMayRemainLive": "身份提供方可能仍保留着已删除账户的会话。请到身份提供方控制台确认已退出。",
       "description": "创建、重命名和移除此设备上的本地账户。",
       "editDisplayNameLabel": "账户名称",
       "empty": "选择账户",
@@ -16200,6 +16208,10 @@
         "awaitingCode": "已打开浏览器窗口。授权后，请将完整的回调 URL（或仅 code）粘贴到下方。",
         "cancel": "取消",
         "description": "登录你的 Logto 租户，使此桌面端可作为云端 / 无头 companion 网关的已认证客户端。",
+        "errorState": {
+          "note": "身份提供方返回了错误：{reason}",
+          "title": "云会话出错"
+        },
         "errors": {
           "codeMalformed": "无法从输入中解析出 code。请粘贴完整的回调 URL 或 code 值。",
           "missingFields": "Issuer、Client ID、API 资源与回调 URI 均为必填。",
@@ -16221,6 +16233,18 @@
           "scope": "作用域（可选）"
         },
         "loading": "正在检查云会话…",
+        "offline": {
+          "note": "无法连接身份提供方。本地数据照常可用，云端功能将在网络恢复后继续。",
+          "retry": "重试",
+          "title": "云会话离线"
+        },
+        "reauth": {
+          "bindingMissing": "此云会话尚未关联到本地档案。请重新登录以完成关联。",
+          "expired": "云会话已过期。请重新登录以继续使用协作与远程功能。",
+          "revoked": "云会话已被身份提供方撤销。请重新登录以继续。",
+          "signInAgain": "重新登录",
+          "title": "需要重新登录"
+        },
         "signIn": "使用 Logto 登录",
         "signOut": "退出登录",
         "storageFallback": "登录令牌保存在本浏览器/应用内的加密保险库中，而不是操作系统钥匙串。",
@@ -16228,6 +16252,7 @@
         "title": "Logto 云登录",
         "toast": {
           "hostMirrorFailed": "已登录，但本机未能记录你的身份。配对仍然可用；等 companion 服务启动后可重试。",
+          "revocationFailed": "已在本设备退出登录，但未能通知身份提供方撤销令牌。",
           "signedIn": "已登录 Logto。",
           "signedOut": "已退出 Logto。"
         }
