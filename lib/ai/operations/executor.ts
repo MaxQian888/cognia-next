@@ -180,6 +180,7 @@ export function createProviderOperationExecutor(
           "unavailable"
         )
       }
+      const settings = deps.getSettingsSnapshot()
       const resolution = resolveProvider(
         {
           featureId: descriptor.id,
@@ -188,7 +189,7 @@ export function createProviderOperationExecutor(
           ...(providerId ? { providerId } : {}),
           fallbackMode: pinned || providerId ? "none" : "first-eligible",
         },
-        deps.getSettingsSnapshot()
+        settings
       )
       if (resolution.kind !== "resolved") {
         return fail(
@@ -248,6 +249,7 @@ export function createProviderOperationExecutor(
           descriptor,
           provider,
           request,
+          settings,
           signal: options.signal,
         })) as TOutput
         return {

@@ -10,9 +10,10 @@
  * between two keys a user actually holds.
  */
 
-const FNV_OFFSET = 0xcbf29ce484222325n
-const FNV_PRIME = 0x100000001b3n
-const MASK = (1n << 64n) - 1n
+// BigInt() calls, not literals: the app targets ES2018.
+const FNV_OFFSET = BigInt("0xcbf29ce484222325")
+const FNV_PRIME = BigInt("0x100000001b3")
+const MASK = (BigInt(1) << BigInt(64)) - BigInt(1)
 
 export function credentialAffinityOf(secret: string | undefined | null): string {
   if (!secret) return "keyless"

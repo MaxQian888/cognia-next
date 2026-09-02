@@ -238,6 +238,8 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     fineTuning: true,
   },
   bedrock: {
+    // ListFoundationModels, reached through the sidecar discovery call.
+    modelsEndpoint: true,
     embeddings: true,
     images: true,
     video: true,

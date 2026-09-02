@@ -23,6 +23,7 @@ describe("capabilities.read handler", () => {
     const profile = await capabilitiesReadHandler.handler({
       descriptor: getProviderOperationDescriptor("capabilities.read")!,
       provider: provider(),
+      settings: { defaultProvider: "openai", providers: {}, customProviders: [] },
       request: {
         operationId: "capabilities.read",
         scopes: ["provider:read"],
@@ -44,6 +45,7 @@ describe("capabilities.read handler", () => {
     const profile = await capabilitiesReadHandler.handler({
       descriptor: getProviderOperationDescriptor("capabilities.read")!,
       provider: provider({ providerId: "my-relay", isCustomProvider: true, protocol: "anthropic" }),
+      settings: { defaultProvider: "openai", providers: {}, customProviders: [] },
       request: {
         operationId: "capabilities.read",
         scopes: ["provider:read"],

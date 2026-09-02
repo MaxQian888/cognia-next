@@ -17,7 +17,7 @@ import type {
   ResolverProtocol,
 } from "@cognia/provider-types"
 
-import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
+import type { ProviderSettingsSnapshot, ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 export type ProviderOperationProviderMatch =
   | { kind: "provider"; providerId: string }
@@ -28,6 +28,8 @@ export interface ProviderOperationHandlerContext<TInput = unknown> {
   descriptor: ProviderOperationDescriptor
   provider: ResolvedProvider
   request: ProviderOperationRequest<TInput>
+  /** The settings snapshot the provider was resolved from. */
+  settings: ProviderSettingsSnapshot
   signal?: AbortSignal
 }
 

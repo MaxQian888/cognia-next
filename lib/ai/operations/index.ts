@@ -62,9 +62,8 @@ export function getProviderOperationExecutor(): ProviderOperationExecutor {
       // Dynamic require keeps the store (and its Dexie graph) out of the
       // module graph of callers that only need the types or the registry.
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { useSettingsStore } =
-        require("@/stores/settings") as typeof import("@/stores/settings")
-      const live = useSettingsStore.getState().settings
+      const settingsModule = require("@/stores/settings") as typeof import("@/stores/settings")
+      const live = settingsModule.useSettingsStore.getState().settings
       return createProviderSettingsSnapshot({
         defaultProvider: live?.defaultProvider,
         providerSettings: live?.providerSettings,

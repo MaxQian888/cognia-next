@@ -7,6 +7,9 @@ jest.mock("ai", () => ({
   experimental_transcribe: jest.fn(async () => ({ text: "" })),
   experimental_streamTranscribe: jest.fn(() => ({})),
   experimental_generateVideo: jest.fn(async () => ({ videos: [] })),
+  generateText: jest.fn(async () => ({ text: "ok" })),
+  streamText: jest.fn(() => ({ textStream: [] })),
+  generateObject: jest.fn(async () => ({ object: {} })),
 }))
 
 import * as sdk from "ai"
@@ -16,9 +19,12 @@ import {
   embedGated,
   embedManyGated,
   generateImageGated,
+  generateObjectGated,
   generateSpeechGated,
+  generateTextGated,
   generateVideoGated,
   rerankGated,
+  streamTextGated,
   transcribeGated,
 } from "./ai-sdk-surface"
 
@@ -61,5 +67,24 @@ describe("ai-sdk-surface", () => {
   it("does not gate audio-in transcription", async () => {
     await transcribeGated({ model, audio: new Uint8Array([1]) })
     expect(mocked.experimental_transcribe).toHaveBeenCalledTimes(1)
+  })
+
+  it("gates every text leaf of a language request", async () => {
+    await generateTextGated({
+      model,
+      messages: [{ role: "user", content: "hi" }],
+      system: "be terse",
+    })
+    expect(mocked.generateText).toHaveBeenCalledTimes(1)
+    const leak = {
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "mail jane.doe@example.com" }] }],
+    }
+    expect(() => generateTextGated(leak as never)).toThrow(ProviderOperationPiiGateError)
+    expect(() => streamTextGated(leak as never)).toThrow(ProviderOperationPiiGateError)
+    expect(() => generateObjectGated({ ...leak, schema: {} } as never)).toThrow(
+      ProviderOperationPiiGateError
+    )
+    expect(mocked.streamText).not.toHaveBeenCalled()
   })
 })
