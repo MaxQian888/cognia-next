@@ -3,135 +3,42 @@
 /**
  * The issue kanban.
  *
- * A thin dnd-kit shell over `lib/issues/board-model.ts`: columns, drop
- * resolution, drop preview and legality all come from there, so the rules are
- * unit-tested without React. Illegal drop targets grey out at drag start (via
- * `useDroppable.disabled`) rather than accepting the drop and failing after.
- *
- * LAYERING — read before touching the drag path.
- *
- * The dragged card rides a `<DragOverlay>` portaled to `document.body`, not a
- * `transform` on the card in place. Two independent things break the in-place
- * version, and both were live here before:
- *
- *   1. Clipping. The card sits inside a column with `overflow-y-auto`, inside
- *      a board with `overflow-x-auto`. A scroll container clips its
- *      descendants, so a transformed card physically cannot leave its own
- *      column — it vanishes at the column edge instead of following the cursor.
- *   2. Stacking. `opacity < 1` creates a stacking context at `z-auto`. The
- *      dragged card gets one (from its transform and its dimming) and so does
- *      every column greyed out as an illegal target — so columns later in DOM
- *      order paint OVER the card being dragged.
- *
- * `components/desktop/channel-list.tsx` solved exactly this: portal the clone
- * to the body and give it an explicit `zIndex` above the Radix layer. Follow
- * that, and do not re-introduce a bare transform "for simplicity".
+ * A thin shell over `components/board/kanban-board.tsx` and
+ * `lib/issues/board-model.ts`: columns, drop resolution, drop preview and
+ * legality all come from the model, so the rules are unit-tested without
+ * React. Illegal drop targets grey out at drag start (via the board's
+ * `isDimmed`) rather than accepting the drop and failing after. Drag, the
+ * collapse strip, the overlay portal and keyboard movement belong to the
+ * shared primitive and are not re-implemented here.
  */
 
-import {
-  DndContext,
-  DragOverlay,
-  KeyboardSensor,
-  PointerSensor,
-  closestCorners,
-  defaultDropAnimationSideEffects,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragMoveEvent,
-  type DragOverEvent,
-  type DragStartEvent,
-  type DropAnimation,
-} from "@dnd-kit/core"
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
-import type { KeyboardCoordinateGetter } from "@dnd-kit/core"
-import { useMemo, useRef, useState, type ReactNode } from "react"
-import { createPortal } from "react-dom"
+import { useCallback, useMemo, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 
-import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
-import { useBoardEdgeScroll } from "@/hooks/issues/use-board-edge-scroll"
+import {
+  KanbanBoard,
+  type KanbanColumnModel,
+  type KanbanDragState,
+} from "@/components/board/kanban-board"
 import {
   buildIssueColumns,
   columnDropId,
-  ISSUE_BOARD_COLUMN_ORDER,
   resolveIssueDrop,
   resolveIssueDropPreview,
   type IssueDropAction,
 } from "@/lib/issues/board-model"
 import { allowedIssueMoveTargets } from "@/lib/issues/state-machine"
-import { nextBoardColumnCoordinates, type BoardRect } from "@/lib/issues/board-keyboard"
+import type { SquadRunRef } from "@/lib/issues/run/running"
 import { resolveColumnCollapsed } from "@/lib/issues/views"
 import type { IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
-import { BoardColumn } from "./board-column"
+import { IssueStatusIcon, STATUS_COLUMN_TINT } from "../issue-glyphs"
 import { buildIssueDndAnnouncements } from "./dnd-announcements"
-import { IssueCardVisual } from "./issue-card"
+import { IssueCard, IssueCardVisual } from "./issue-card"
 
-/**
- * The clone glides onto the source card's rect on release, so the eye can
- * follow where the card ended up instead of having it teleport.
- */
-const ISSUE_DROP_ANIMATION: DropAnimation = {
-  duration: 200,
-  easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
-  sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: "0.4" } } }),
-}
-
-/**
- * dnd-kit's default keyboard activator claims both Space and Enter. Narrowing
- * it to Space leaves Enter free to OPEN a card — otherwise a keyboard user can
- * drag an issue but can never read one.
- */
-const KEYBOARD_CODES = {
-  start: ["Space"],
-  cancel: ["Escape"],
-  end: ["Space"],
-}
-
-/**
- * Never activate dnd-kit's own auto-scroll horizontally: on this board it
- * would grab the column's vertical scroller and fight `useBoardEdgeScroll`.
- * The y threshold is dnd-kit's own default.
- */
-const AUTO_SCROLL = { threshold: { x: 0, y: 0.2 } }
-
-/**
- * Left/Right walk the COLUMNS; Up/Down stay dnd-kit's sortable getter.
- *
- * dnd-kit's own getter assumes one sortable list. On six lists side by side,
- * each wrapped in a full-height column droppable, it ranks every droppable by
- * corner distance and picks whichever corner is nearest — which in practice
- * meant picking a card up in `todo` and being told the target was `canceled`,
- * with the arrow keys unable to change it. Vertical movement inside a column is
- * an ordinary sortable list, so that half is left alone.
- */
-const boardCoordinateGetter: KeyboardCoordinateGetter = (event, args) => {
-  const direction =
-    event.code === "ArrowRight" ? "right" : event.code === "ArrowLeft" ? "left" : null
-  if (!direction) return sortableKeyboardCoordinates(event, args)
-
-  // dnd-kit's own getter does this for the arrows it handles; ours has to as
-  // well, or the board scrolls sideways under the card being moved.
-  event.preventDefault()
-
-  const { collisionRect, droppableRects } = args.context
-  if (!collisionRect) return undefined
-
-  const columnRects = new Map<IssueStatus, BoardRect>()
-  for (const status of ISSUE_BOARD_COLUMN_ORDER) {
-    const rect = droppableRects.get(columnDropId(status))
-    if (rect) columnRects.set(status, rect)
-  }
-
-  // Absolute client coordinates, matching what `sortableKeyboardCoordinates`
-  // returns — the target's top-left, not a delta.
-  const next = nextBoardColumnCoordinates(direction, collisionRect, columnRects)
-  // Null means the board's edge: returning nothing leaves the card put, which
-  // is what stopping at the end should feel like.
-  return next ?? undefined
-}
+type IssueColumn = KanbanColumnModel<IssueStatus, UnifiedIssueItem>
+type IssueDrag = KanbanDragState<UnifiedIssueItem>
 
 export interface IssueBoardProps {
   items: readonly UnifiedIssueItem[]
@@ -141,7 +48,9 @@ export interface IssueBoardProps {
   projectNamesById?: ReadonlyMap<string, string>
   /** `unifiedId`s with an agent run currently in flight. */
   runningIds?: ReadonlySet<string>
-  /** Per-column collapse overrides; absent means "collapse iff empty". */
+  /** `unifiedId` to the Squad run that owns it, for the card's squad chip. */
+  squadRuns?: ReadonlyMap<string, SquadRunRef>
+  /** Per-column collapse overrides. Absent means "collapse iff empty". */
   columnCollapse?: Readonly<Partial<Record<IssueStatus, boolean>>>
   onToggleColumnCollapsed?: (status: IssueStatus, itemCount: number) => void
   selectedId?: string
@@ -152,11 +61,15 @@ export interface IssueBoardProps {
   renderItemMenu?: (item: UnifiedIssueItem, children: ReactNode) => ReactNode
 }
 
+const itemId = (item: UnifiedIssueItem) => item.unifiedId
+const itemLabel = (item: UnifiedIssueItem) => item.identifier
+
 export function IssueBoard({
   items,
   labelsById,
   projectNamesById,
   runningIds,
+  squadRuns,
   columnCollapse,
   onToggleColumnCollapsed,
   selectedId,
@@ -166,206 +79,134 @@ export function IssueBoard({
   renderItemMenu,
 }: IssueBoardProps) {
   const t = useTranslations("issues")
-  const { reduce } = useFlowMotion()
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const [overId, setOverId] = useState<string | null>(null)
-  const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const edgeScroll = useBoardEdgeScroll(scrollerRef)
 
-  // A pointer sensor with a small activation distance so a click on a card
-  // selects it instead of starting a drag.
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: boardCoordinateGetter,
-      keyboardCodes: KEYBOARD_CODES,
-    })
+  const columns = useMemo<IssueColumn[]>(
+    () => buildIssueColumns(items).map((column) => ({ id: column.status, items: column.items })),
+    [items]
   )
-
-  const columns = useMemo(() => buildIssueColumns(items), [items])
   const itemsById = useMemo(() => new Map(items.map((item) => [item.unifiedId, item])), [items])
 
-  const activeItem = activeId ? (itemsById.get(activeId) ?? null) : null
-  const runActive = activeItem ? (runningIds?.has(activeItem.unifiedId) ?? false) : false
+  const isRunning = useCallback(
+    (unifiedId: string) => runningIds?.has(unifiedId) ?? false,
+    [runningIds]
+  )
 
-  // Which columns may legally receive the card currently being dragged.
-  const legalTargets = useMemo(() => {
-    if (!activeItem) return null
-    return new Set<IssueStatus>([
-      activeItem.status,
-      ...allowedIssueMoveTargets(activeItem.capabilities, activeItem.status, { runActive }),
-    ])
-  }, [activeItem, runActive])
+  const labelsOf = useCallback(
+    (item: UnifiedIssueItem) =>
+      item.labelIds
+        .map((id) => labelsById?.get(id))
+        .filter((label): label is LabelRow => Boolean(label)),
+    [labelsById]
+  )
+  const projectNameOf = useCallback(
+    (item: UnifiedIssueItem) =>
+      item.issueProjectId ? projectNamesById?.get(item.issueProjectId) : undefined,
+    [projectNamesById]
+  )
 
-  const preview = useMemo(
-    () => resolveIssueDropPreview(activeId, overId, itemsById, { runActive }),
-    [activeId, overId, itemsById, runActive]
+  /** Which columns may legally receive the card currently being dragged. */
+  const isDimmed = useCallback(
+    (column: IssueColumn, drag: IssueDrag) => {
+      const active = drag.activeItem
+      if (!active || active.status === column.id) return false
+      return !allowedIssueMoveTargets(active.capabilities, active.status, {
+        runActive: isRunning(active.unifiedId),
+      }).includes(column.id)
+    },
+    [isRunning]
+  )
+
+  /**
+   * Cross-column only: within a column the sortable strategy's own gap already
+   * shows the insertion point.
+   */
+  const insertionIndex = useCallback(
+    (column: IssueColumn, drag: IssueDrag) => {
+      const active = drag.activeItem
+      if (!active || active.status === column.id) return null
+      const preview = resolveIssueDropPreview(drag.activeId, drag.overId, itemsById, {
+        runActive: isRunning(active.unifiedId),
+      })
+      return preview !== null && preview.status === column.id ? preview.index : null
+    },
+    [itemsById, isRunning]
   )
 
   const announcements = useMemo(
     () =>
       buildIssueDndAnnouncements({
         itemsById,
-        columnSize: (status) =>
-          columns.find((column) => column.status === status)?.items.length ?? 0,
+        columnSize: (status) => columns.find((column) => column.id === status)?.items.length ?? 0,
         statusLabel: (status) => t(`status.${status}`),
         preview: (active, over) =>
-          resolveIssueDropPreview(active, over, itemsById, {
-            runActive: runningIds?.has(active) ?? false,
-          }),
+          resolveIssueDropPreview(active, over, itemsById, { runActive: isRunning(active) }),
         t: (key, values) => t(`board.dnd.${key}`, values),
       }),
-    [itemsById, columns, runningIds, t]
+    [itemsById, columns, isRunning, t]
   )
 
-  function endDrag() {
-    setActiveId(null)
-    setOverId(null)
-    edgeScroll.stop()
-  }
+  const accessibility = useMemo(
+    () => ({ announcements, screenReaderInstructions: { draggable: t("board.dnd.instructions") } }),
+    [announcements, t]
+  )
 
-  function handleDragEnd(event: DragEndEvent) {
-    endDrag()
-    const action = resolveIssueDrop(
-      String(event.active.id),
-      event.over ? String(event.over.id) : null,
-      itemsById,
-      { runActive }
-    )
-    if (action) onDrop?.(action)
-  }
-
-  /**
-   * Feed the horizontal auto-scroll from the dragged card's own centre rather
-   * than the pointer: dnd-kit's move event carries the translated rect but not
-   * pointer coordinates, and the card's centre is the thing the user is
-   * actually aiming at a column with.
-   */
-  function handleDragMove(event: DragMoveEvent) {
-    const rect = event.active.rect.current.translated
-    edgeScroll.track(rect ? rect.left + rect.width / 2 : null)
-  }
+  const handleDrop = useCallback(
+    (activeId: string, overId: string | null) => {
+      const action = resolveIssueDrop(activeId, overId, itemsById, {
+        runActive: isRunning(activeId),
+      })
+      if (action) onDrop?.(action)
+    },
+    [itemsById, isRunning, onDrop]
+  )
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCorners}
-      autoScroll={AUTO_SCROLL}
-      accessibility={{
-        announcements,
-        screenReaderInstructions: { draggable: t("board.dnd.instructions") },
-      }}
-      onDragStart={(event: DragStartEvent) => setActiveId(String(event.active.id))}
-      onDragMove={handleDragMove}
-      onDragOver={(event: DragOverEvent) => setOverId(event.over ? String(event.over.id) : null)}
-      onDragCancel={endDrag}
-      onDragEnd={handleDragEnd}
-    >
-      <div
-        ref={scrollerRef}
-        className="flex h-full min-h-0 gap-3 overflow-x-auto p-3"
-        data-testid="issue-board"
-        role="list"
-      >
-        {columns.map((column) => {
-          const dimmed = legalTargets !== null && !legalTargets.has(column.status)
-          // Cross-column only: within a column the sortable strategy's own gap
-          // already shows the insertion point.
-          const showIndicator =
-            preview !== null &&
-            preview.status === column.status &&
-            activeItem !== null &&
-            activeItem.status !== column.status
-
-          return (
-            <BoardColumn
-              key={column.status}
-              status={column.status}
-              items={column.items}
-              labelsById={labelsById}
-              projectNamesById={projectNamesById}
-              runningIds={runningIds}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onAddIssue={onAddIssue}
-              renderItemMenu={renderItemMenu}
-              collapsed={resolveColumnCollapsed(
-                column.status,
-                column.items.length,
-                columnCollapse ?? {}
-              )}
-              onToggleCollapsed={
-                onToggleColumnCollapsed
-                  ? (status) => onToggleColumnCollapsed(status, column.items.length)
-                  : undefined
-              }
-              dimmed={dimmed}
-              insertionIndex={showIndicator ? preview.index : null}
-              emptyText={t("board.empty")}
-              statusLabel={t(`status.${column.status}`)}
-              addLabel={t("board.addIssue", { status: t(`status.${column.status}`) })}
-              collapseLabel={t("board.collapseColumn", { status: t(`status.${column.status}`) })}
-              expandLabel={t("board.expandColumn", { status: t(`status.${column.status}`) })}
-            />
-          )
-        })}
-      </div>
-
-      <IssueDragOverlay
-        item={activeItem}
-        reduce={reduce}
-        labels={
-          activeItem
-            ? activeItem.labelIds
-                .map((id) => labelsById?.get(id))
-                .filter((label): label is LabelRow => Boolean(label))
-            : undefined
-        }
-        projectName={
-          activeItem?.issueProjectId ? projectNamesById?.get(activeItem.issueProjectId) : undefined
-        }
-        running={activeItem ? runningIds?.has(activeItem.unifiedId) : false}
-      />
-    </DndContext>
-  )
-}
-
-/**
- * Pointer-following clone of the dragged card, portaled to the body so neither
- * the column's vertical scroller nor the board's horizontal one can clip it,
- * and stacked above the Radix portal layer (which sits at z-50) so no popover
- * or tooltip can paint over the thing the user is holding.
- */
-function IssueDragOverlay({
-  item,
-  labels,
-  projectName,
-  running,
-  reduce,
-}: {
-  item: UnifiedIssueItem | null
-  labels?: readonly LabelRow[]
-  projectName?: string
-  running?: boolean
-  reduce: boolean
-}) {
-  // Guard the SSR/static-export pass rather than assuming a client-only mount.
-  if (typeof document === "undefined") return null
-  return createPortal(
-    <DragOverlay dropAnimation={reduce ? null : ISSUE_DROP_ANIMATION} zIndex={60}>
-      {item ? (
+    <KanbanBoard<IssueStatus, UnifiedIssueItem>
+      columns={columns}
+      itemId={itemId}
+      itemLabel={itemLabel}
+      columnLabel={(status) => t(`status.${status}`)}
+      dropId={columnDropId}
+      renderColumnIcon={(column) => <IssueStatusIcon status={column.id} />}
+      columnClassName={(column) => STATUS_COLUMN_TINT[column.id]}
+      renderCard={(item) => (
+        <IssueCard
+          item={item}
+          labels={labelsOf(item)}
+          projectName={projectNameOf(item)}
+          selected={selectedId === item.unifiedId}
+          running={isRunning(item.unifiedId)}
+          squadRun={squadRuns?.get(item.unifiedId)}
+          onSelect={onSelect}
+        />
+      )}
+      renderOverlay={(item) => (
         <div className="w-66" data-testid="issue-drag-overlay">
           <IssueCardVisual
             item={item}
-            labels={labels}
-            projectName={projectName}
-            running={running}
+            labels={labelsOf(item)}
+            projectName={projectNameOf(item)}
+            running={isRunning(item.unifiedId)}
+            squadRun={squadRuns?.get(item.unifiedId)}
             overlay
             draggable
           />
         </div>
-      ) : null}
-    </DragOverlay>,
-    document.body
+      )}
+      renderItemMenu={renderItemMenu}
+      isCollapsed={(column) =>
+        resolveColumnCollapsed(column.id, column.items.length, columnCollapse ?? {})
+      }
+      onToggleCollapsed={onToggleColumnCollapsed}
+      onAddItem={onAddIssue}
+      isDimmed={isDimmed}
+      insertionIndex={insertionIndex}
+      onDrop={handleDrop}
+      emptyText={t("board.empty")}
+      accessibility={accessibility}
+      testId="issue-board"
+      testIdPrefix="issue"
+      className="h-full"
+    />
   )
 }

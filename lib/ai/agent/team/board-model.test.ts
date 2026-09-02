@@ -11,6 +11,7 @@ import {
   parseDndId,
   resolveDrop,
   wipHint,
+  originIssuesOfTasks,
 } from "./board-model"
 import type { AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
@@ -212,5 +213,29 @@ describe("resolveDrop", () => {
       taskId: "p1",
       reason: "blocked-column",
     })
+  })
+})
+
+describe("originIssuesOfTasks", () => {
+  it("collects the distinct issues the run adapter stamped, in first-seen order", () => {
+    const stamped = (id: string, issueId: string, identifier?: string) =>
+      task(id, { metadata: { issueId, issueIdentifier: identifier } })
+    expect(
+      originIssuesOfTasks([
+        stamped("t1", "iss-b", "MERC-2"),
+        stamped("t2", "iss-a"),
+        stamped("t3", "iss-b", "MERC-2"),
+        task("t4"),
+      ])
+    ).toEqual([{ issueId: "iss-b", identifier: "MERC-2" }, { issueId: "iss-a" }])
+  })
+
+  it("ignores malformed metadata", () => {
+    expect(
+      originIssuesOfTasks([
+        task("t1", { metadata: { issueId: 7 } }),
+        task("t2", { metadata: { issueId: "" } }),
+      ])
+    ).toEqual([])
   })
 })

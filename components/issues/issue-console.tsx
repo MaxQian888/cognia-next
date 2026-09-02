@@ -57,8 +57,10 @@ import { buildIssueLabelCatalogue } from "@/lib/issues/github-label-display"
 import { computeProgressFromIssues } from "@/lib/issues/project-progress"
 import {
   listRunningIssueIds,
+  listSquadRunsByIssue,
   loadIssueViewerContext,
   SELF_ACTOR_KEY,
+  type SquadRunRef,
 } from "@/lib/issues/run/running"
 import { getIssueSourceRegistry } from "@/lib/issues/sources/registry"
 import { runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
@@ -181,6 +183,13 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
     [projectId],
     new Set<string>()
   )
+  /** Local issue id to the Squad run that owns it, for the board's squad chip. */
+  const squadRuns = useClientLiveQuery(
+    () =>
+      projectId ? listSquadRunsByIssue(projectId) : Promise.resolve(new Map<string, SquadRunRef>()),
+    [projectId],
+    new Map<string, SquadRunRef>()
+  )
   /**
    * Manual re-read trigger for the federated sources. A GitHub write-back
    * changes nothing local, so `localSignature` cannot notice it — without this
@@ -275,6 +284,13 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
   const runningUnifiedIds = useMemo(
     () => new Set([...(runningIds ?? [])].map((id) => makeUnifiedIssueId("local", id))),
     [runningIds]
+  )
+  const squadRunsByUnifiedId = useMemo(
+    () =>
+      new Map(
+        [...(squadRuns ?? [])].map(([id, ref]) => [makeUnifiedIssueId("local", id), ref] as const)
+      ),
+    [squadRuns]
   )
   const groups = useMemo(() => buildIssueGroups(sorted, prefs.groupBy), [sorted, prefs.groupBy])
 
@@ -621,6 +637,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           labelsById={labelsById}
           projectNamesById={projectNamesById}
           runningIds={runningUnifiedIds}
+          squadRuns={squadRunsByUnifiedId}
           columnCollapse={prefs.columnCollapse}
           onToggleColumnCollapsed={(status, count) => toggleColumnCollapsed(viewId, status, count)}
           selectedId={selectedId}

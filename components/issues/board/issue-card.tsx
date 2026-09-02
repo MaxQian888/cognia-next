@@ -27,10 +27,12 @@ import type { KeyboardEvent } from "react"
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
 import { actorKey } from "@/lib/issues/board-model"
+import type { SquadRunRef } from "@/lib/issues/run/running"
 import { cn } from "@/lib/utils"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
+import { SquadRunChip } from "./squad-run-chip"
 
 export interface IssueCardVisualProps {
   item: UnifiedIssueItem
@@ -41,6 +43,8 @@ export interface IssueCardVisualProps {
   selected?: boolean
   /** An `IssueRunAdapter` run is in flight for this issue. */
   running?: boolean
+  /** The Squad this issue was dispatched to, when any. */
+  squadRun?: SquadRunRef
   /** The real card, dimmed while its clone rides the drag overlay. */
   dragging?: boolean
   /** The clone inside `<DragOverlay>` — lifted, and never marked selected. */
@@ -59,6 +63,7 @@ export function IssueCardVisual({
   projectName,
   selected,
   running,
+  squadRun,
   dragging,
   overlay,
   draggable,
@@ -122,6 +127,8 @@ export function IssueCardVisual({
         </div>
       ) : null}
 
+      {squadRun ? <SquadRunChip run={squadRun} inert={overlay} className="self-start" /> : null}
+
       <footer className="flex items-center gap-2 text-xs text-muted-foreground">
         {projectName ? (
           <span className="inline-flex min-w-0 items-center gap-1">
@@ -147,6 +154,7 @@ export interface IssueCardProps {
   projectName?: string
   selected?: boolean
   running?: boolean
+  squadRun?: SquadRunRef
   onSelect?: (unifiedId: string) => void
 }
 
@@ -156,6 +164,7 @@ export function IssueCard({
   projectName,
   selected,
   running,
+  squadRun,
   onSelect,
 }: IssueCardProps) {
   const draggable = item.capabilities.canMove
@@ -199,6 +208,7 @@ export function IssueCard({
         projectName={projectName}
         selected={selected}
         running={running}
+        squadRun={squadRun}
         dragging={isDragging}
         draggable={draggable}
       />

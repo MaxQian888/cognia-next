@@ -1,34 +1,24 @@
 "use client"
 
 // Kanban board for the workspace tasks tab. Columns = the 8 task statuses
-// (TASK_STATUS_CONFIG); drag is guarded by canMoveTask — illegal drop targets
-// grey out the moment a drag starts (dnd-kit `useDroppable.disabled`).
-// Swimlane mode is a read view (drag off): dragging across lanes would imply
-// reassignment, which the board deliberately does not do.
+// (TASK_STATUS_CONFIG). Drag is guarded by canMoveTask: illegal drop targets
+// grey out the moment a drag starts. Swimlane mode is a read view (drag off):
+// dragging across lanes would imply reassignment, which the board deliberately
+// does not do. Drag, columns, the overlay portal and keyboard movement come
+// from the shared `components/board/kanban-board.tsx`.
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { BotIcon, ListTodoIcon } from "lucide-react"
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  closestCorners,
-  defaultDropAnimationSideEffects,
-  useSensor,
-  useSensors,
-  useDroppable,
-  type DragEndEvent,
-  type DragStartEvent,
-  type DropAnimation,
-} from "@dnd-kit/core"
-import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
-import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
+import {
+  KanbanBoard,
+  type KanbanColumnModel,
+  type KanbanDragState,
+} from "@/components/board/kanban-board"
 import { StatusBadge } from "@/components/status-badge"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { cn } from "@/lib/utils"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
 import {
@@ -39,7 +29,6 @@ import {
   columnDropId,
   dependencyLockInfo,
   resolveDrop,
-  type BoardColumn,
   type BoardFilter,
 } from "@/lib/ai/agent/team/board-model"
 import { allowedMoveTargets } from "@/lib/ai/agent/team/task-move-guard"
@@ -48,8 +37,14 @@ import type { TeamTwinSummary } from "@/lib/ai/agent/team/team-run-context"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TASK_STATUS_CONFIG } from "@/types/agent/agent-team"
-import type { AgentTeam, AgentTeammate, AgentTeamTask, TeamStatus } from "@/types/agent/agent-team"
+import type {
+  AgentTeam,
+  AgentTeammate,
+  AgentTeamTask,
+  TeamTaskStatus,
+} from "@/types/agent/agent-team"
 import { BoardToolbar } from "./board-toolbar"
+import { OriginIssueChips } from "./origin-issue-chip"
 import { TaskBoardCard } from "./task-card"
 
 export interface TaskBoardProps {
@@ -58,99 +53,26 @@ export interface TaskBoardProps {
   teammates: AgentTeammate[]
 }
 
-function BoardColumnView({
-  column,
-  teamStatus,
-  activeTask,
-  nameOf,
-  twinNameOf,
-  tasksById,
-  dragDisabled,
-}: {
-  column: BoardColumn
-  teamStatus: TeamStatus
-  activeTask: AgentTeamTask | null
-  nameOf: (id: string | undefined) => string | undefined
-  twinNameOf?: (id: string | undefined) => string | undefined
-  tasksById: ReadonlyMap<string, AgentTeamTask>
-  dragDisabled: boolean
-}) {
-  const t = useTranslations("agentTeamsWorkspace.tasks.board")
-  // While a card is dragged, only its own column + guard-allowed targets stay
-  // enabled; everything else greys out (the visual "you can't drop here").
-  const dropDisabled =
-    activeTask !== null &&
-    activeTask.status !== column.status &&
-    !allowedMoveTargets(activeTask, teamStatus).includes(column.status)
-  const { setNodeRef, isOver } = useDroppable({
-    id: columnDropId(column.status),
-    disabled: dragDisabled || dropDisabled,
-  })
-  const cfg = TASK_STATUS_CONFIG[column.status]
+type TaskColumn = KanbanColumnModel<TeamTaskStatus, AgentTeamTask>
+type TaskDrag = KanbanDragState<AgentTeamTask>
 
-  return (
-    <div
-      ref={setNodeRef}
-      className={cn(
-        "flex w-60 shrink-0 flex-col gap-1.5 rounded-lg bg-muted/40 p-2 transition-opacity",
-        dropDisabled && "opacity-40",
-        isOver && !dropDisabled && "ring-2 ring-primary/40"
-      )}
-      data-testid={`board-column-${column.status}`}
-      data-drop-disabled={dropDisabled || undefined}
-    >
-      <div className="flex items-center justify-between px-1">
-        <StatusBadge
-          value={cfg.labelKey}
-          labelNamespace="agentTeam.taskStatus"
-          className="text-[10px]"
-        />
-        <span
-          className="text-[10px] text-muted-foreground"
-          data-testid={`board-column-${column.status}-count`}
-        >
-          {column.tasks.length}
-        </span>
-      </div>
-      <SortableContext
-        items={column.tasks.map((task) => task.id)}
-        strategy={verticalListSortingStrategy}
-      >
-        <div className="flex min-h-16 flex-col gap-1.5">
-          {column.tasks.map((task) => (
-            <TaskBoardCard
-              key={task.id}
-              task={task}
-              assigneeName={nameOf(task.claimedBy ?? task.assignedTo)}
-              twinName={twinNameOf?.(task.claimedBy ?? task.assignedTo)}
-              lock={dependencyLockInfo(task, tasksById)}
-              dragDisabled={dragDisabled}
-            />
-          ))}
-          {column.tasks.length === 0 && (
-            <p className="rounded border border-dashed border-border/60 p-2 text-center text-[10px] text-muted-foreground">
-              {t("emptyColumn")}
-            </p>
-          )}
-        </div>
-      </SortableContext>
-    </div>
-  )
-}
+const taskId = (task: AgentTeamTask) => task.id
+const taskLabel = (task: AgentTeamTask) => task.title
+const columnClassName = () => "w-60 rounded-lg bg-muted/40"
 
 export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
   const t = useTranslations("agentTeamsWorkspace.tasks.board")
+  const tStatus = useTranslations("agentTeam.taskStatus")
   const moveTask = useAgentTeamStore((s) => s.moveTask)
   const reorderTask = useAgentTeamStore((s) => s.reorderTask)
   const teamStatus = useTeamLiveStatus(team)
 
   const [filter, setFilter] = useState<BoardFilter>(EMPTY_BOARD_FILTER)
   const [swimlanes, setSwimlanes] = useState(false)
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
 
   // Twin visibility: resolve names/expertise for the bindings the runtime
-  // already uses (teammate twinId + config.knowledgeTwinIds). Best-effort —
-  // an empty list simply hides the badges.
+  // already uses (teammate twinId + config.knowledgeTwinIds). Best-effort, an
+  // empty list simply hides the badges.
   const [twins, setTwins] = useState<TeamTwinSummary[]>([])
   useEffect(() => {
     let cancelled = false
@@ -171,32 +93,38 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
   }
   const knowledgeTwinIds = team.config.knowledgeTwinIds ?? []
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
-
   const tasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks])
   const filtered = useMemo(() => applyBoardFilter(tasks, filter), [tasks, filter])
-  const columns = useMemo(() => buildBoardColumns(filtered), [filtered])
+  const columns = useMemo<TaskColumn[]>(
+    () => buildBoardColumns(filtered).map((column) => ({ id: column.status, items: column.tasks })),
+    [filtered]
+  )
   const lanes = useMemo(
     () => (swimlanes ? buildSwimlanes(filtered, teammates) : []),
     [swimlanes, filtered, teammates]
   )
 
-  const activeTask = activeTaskId ? (tasksById.get(activeTaskId) ?? null) : null
   const nameOf = (id: string | undefined) =>
     id ? teammates.find((m) => m.id === id)?.name : undefined
 
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveTaskId(String(event.active.id))
-  }
+  const columnLabel = useCallback(
+    (status: TeamTaskStatus) => tStatus(TASK_STATUS_CONFIG[status].labelKey),
+    [tStatus]
+  )
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    setActiveTaskId(null)
-    const action = resolveDrop(
-      String(event.active.id),
-      event.over ? String(event.over.id) : null,
-      tasksById,
-      teamStatus
-    )
+  // While a card is dragged, only its own column + guard-allowed targets stay
+  // enabled. Everything else greys out (the visual "you can't drop here").
+  const isDimmed = useCallback(
+    (column: TaskColumn, drag: TaskDrag) => {
+      const active = drag.activeItem
+      if (!active || active.status === column.id) return false
+      return !allowedMoveTargets(active, teamStatus).includes(column.id)
+    },
+    [teamStatus]
+  )
+
+  const handleDrop = (activeId: string, overId: string | null) => {
+    const action = resolveDrop(activeId, overId, tasksById, teamStatus)
     if (!action) return
     if (action.type === "denied") {
       toast.error(t(`denied.${action.reason}`))
@@ -212,6 +140,45 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
     }
   }
 
+  const renderColumnHeader = (column: TaskColumn) => (
+    <StatusBadge
+      value={TASK_STATUS_CONFIG[column.id].labelKey}
+      labelNamespace="agentTeam.taskStatus"
+      className="text-[10px]"
+    />
+  )
+
+  const renderCard = (task: AgentTeamTask, dragDisabled: boolean) => (
+    <TaskBoardCard
+      task={task}
+      assigneeName={nameOf(task.claimedBy ?? task.assignedTo)}
+      twinName={twinOf(task.claimedBy ?? task.assignedTo)?.name}
+      lock={dependencyLockInfo(task, tasksById)}
+      dragDisabled={dragDisabled}
+    />
+  )
+
+  /**
+   * The clone is a PREVIEW rather than a second `TaskBoardCard`: that component
+   * owns a dropdown, a comments dialog and a delete dialog, and rendering a
+   * second copy would register a second sortable node under the same task id
+   * for dnd-kit to measure against itself.
+   */
+  const renderOverlay = (task: AgentTeamTask) => {
+    const assigneeName = nameOf(task.assignedTo)
+    return (
+      <div
+        data-testid="task-drag-overlay"
+        className="w-60 cursor-grabbing rounded-lg border bg-card p-2 shadow-lg ring-1 ring-border/60"
+      >
+        <p className="line-clamp-2 text-xs font-medium leading-snug">{task.title}</p>
+        {assigneeName ? (
+          <p className="mt-1 truncate text-[10px] text-muted-foreground">{assigneeName}</p>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3" data-testid="task-board">
       <BoardToolbar
@@ -224,7 +191,10 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
         onSwimlanesChange={setSwimlanes}
       />
 
-      {/* Knowledge twins the team can consult via twin_knowledge_search —
+      {/* Where the work came from: the issues the run adapter dispatched here. */}
+      <OriginIssueChips tasks={tasks} />
+
+      {/* Knowledge twins the team can consult via twin_knowledge_search:
           team-level (config.knowledgeTwinIds), so shown once, not per card. */}
       {knowledgeTwinIds.length > 0 && (
         <div
@@ -286,19 +256,21 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
                   {lane.taskCount}
                 </span>
               </p>
-              <div className="flex gap-2 overflow-x-auto pb-1.5">
-                {lane.columns.map((column) => (
-                  <BoardColumnView
-                    key={column.status}
-                    column={column}
-                    teamStatus={teamStatus}
-                    activeTask={null}
-                    nameOf={nameOf}
-                    tasksById={tasksById}
-                    dragDisabled
-                  />
-                ))}
-              </div>
+              <KanbanBoard<TeamTaskStatus, AgentTeamTask>
+                columns={lane.columns.map((column) => ({ id: column.status, items: column.tasks }))}
+                itemId={taskId}
+                itemLabel={taskLabel}
+                columnLabel={columnLabel}
+                dropId={columnDropId}
+                renderColumnHeader={renderColumnHeader}
+                columnClassName={columnClassName}
+                renderCard={(task) => renderCard(task, true)}
+                dragDisabled
+                emptyText={t("emptyColumn")}
+                testId={`board-lane-${lane.teammateId ?? "unassigned"}-columns`}
+                testIdPrefix={`board-lane-${lane.teammateId ?? "unassigned"}`}
+                className="gap-2 p-0 pb-1.5"
+              />
             </div>
           ))}
           {lanes.length === 0 && (
@@ -306,80 +278,24 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
           )}
         </div>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          onDragCancel={() => setActiveTaskId(null)}
-        >
-          <div className="flex gap-2 overflow-x-auto pb-1.5" data-testid="board-columns">
-            {columns.map((column) => (
-              <BoardColumnView
-                key={column.status}
-                column={column}
-                teamStatus={teamStatus}
-                activeTask={activeTask}
-                nameOf={nameOf}
-                twinNameOf={(id) => twinOf(id)?.name}
-                tasksById={tasksById}
-                dragDisabled={false}
-              />
-            ))}
-          </div>
-          <TaskDragOverlay task={activeTask} assigneeName={nameOf(activeTask?.assignedTo)} />
-        </DndContext>
+        <KanbanBoard<TeamTaskStatus, AgentTeamTask>
+          columns={columns}
+          itemId={taskId}
+          itemLabel={taskLabel}
+          columnLabel={columnLabel}
+          dropId={columnDropId}
+          renderColumnHeader={renderColumnHeader}
+          columnClassName={columnClassName}
+          renderCard={(task) => renderCard(task, false)}
+          renderOverlay={renderOverlay}
+          isDimmed={isDimmed}
+          onDrop={handleDrop}
+          emptyText={t("emptyColumn")}
+          testId="board-columns"
+          testIdPrefix="board"
+          className="gap-2 p-0 pb-1.5"
+        />
       )}
     </div>
   )
-}
-
-/**
- * The card that follows the cursor.
- *
- * Without it the dragged card was moved by a `transform` in place, inside a
- * column that sits in `overflow-x-auto` — a scroll container clips its
- * descendants, so the card vanished at the column edge instead of crossing the
- * board. And because a dragged card carries `opacity-60` while a greyed-out
- * illegal column carries `opacity-40`, both opened stacking contexts at
- * `z-auto`: columns later in DOM order painted OVER the card being dragged.
- * `components/desktop/channel-list.tsx` solved exactly this by portaling the
- * clone to the body above the Radix layer; this follows it.
- *
- * The clone is a PREVIEW rather than a second `TaskBoardCard`: that component
- * owns a dropdown, a comments dialog and a delete dialog, and rendering a
- * second copy would register a second sortable node under the same task id for
- * dnd-kit to measure against itself.
- */
-function TaskDragOverlay({
-  task,
-  assigneeName,
-}: {
-  task: AgentTeamTask | null
-  assigneeName?: string
-}) {
-  if (typeof document === "undefined") return null
-  return createPortal(
-    <DragOverlay dropAnimation={TASK_DROP_ANIMATION} zIndex={60}>
-      {task ? (
-        <div
-          data-testid="task-drag-overlay"
-          className="w-60 cursor-grabbing rounded-lg border bg-card p-2 shadow-lg ring-1 ring-border/60"
-        >
-          <p className="line-clamp-2 text-xs font-medium leading-snug">{task.title}</p>
-          {assigneeName ? (
-            <p className="mt-1 truncate text-[10px] text-muted-foreground">{assigneeName}</p>
-          ) : null}
-        </div>
-      ) : null}
-    </DragOverlay>,
-    document.body
-  )
-}
-
-/** A short ease onto the card's landing rect, matching the issue board. */
-const TASK_DROP_ANIMATION: DropAnimation = {
-  duration: 200,
-  easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
-  sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: "0.4" } } }),
 }

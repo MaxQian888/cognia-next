@@ -1,0 +1,23 @@
+{
+  "dnd": {
+    "instructions": "Press Space to pick up a card. Use the arrow keys to move it between columns, Space to drop it, and Escape to cancel. Press Enter to open a card instead.",
+    "pickedUp": "Picked up {item} from {column}.",
+    "over": "{item} will land in {column}.",
+    "denied": "That target will not accept {item}.",
+    "dropped": "{item} landed in {column}.",
+    "cancelled": "Drag cancelled. {item} stayed in {column}."
+  },
+  "emptyColumn": "Nothing here",
+  "addToColumn": "Add to {column}",
+  "collapseColumn": "Collapse {column}",
+  "expandColumn": "Expand {column}",
+  "squadRun": {
+    "label": "Squad: {name}",
+    "open": "Open the squad board for {name}",
+    "unknownSquad": "Squad"
+  },
+  "originIssue": {
+    "label": "From {identifier}",
+    "open": "Open issue {identifier} in Issues"
+  }
+}

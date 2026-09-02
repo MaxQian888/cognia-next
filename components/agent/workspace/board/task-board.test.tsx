@@ -173,6 +173,25 @@ describe("TaskBoard empty state", () => {
   })
 })
 
+describe("TaskBoard origin issues", () => {
+  it("links back to the issue the run adapter dispatched from", () => {
+    const ctx = seed()
+    useAgentTeamStore
+      .getState()
+      .updateTask(ctx.pending1.id, { metadata: { issueId: "iss-1", issueIdentifier: "MERC-2" } })
+    renderBoard(ctx)
+    expect(screen.getByTestId("origin-issue-chip-iss-1")).toHaveAttribute(
+      "href",
+      "/issues?id=iss-1"
+    )
+  })
+
+  it("shows no chip for a board the team filled on its own", () => {
+    renderBoard(seed())
+    expect(screen.queryByTestId("board-origin-issues")).not.toBeInTheDocument()
+  })
+})
+
 describe("TaskBoard", () => {
   it("renders the 8 canonical columns with counts", () => {
     const ctx = seed()

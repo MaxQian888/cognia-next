@@ -11,9 +11,11 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createCharacter } from "@/lib/db/characters"
 import { createIssueRun, settleIssueRun } from "@/lib/db/issue-runs"
+import type { IssueRun } from "@/types/issues"
 import {
   SELF_ACTOR_KEY,
   listRunningIssueIds,
+  listSquadRunsByIssue,
   loadIssueViewerContext,
   viewerAgentKeys,
 } from "./running"
@@ -60,5 +62,57 @@ describe("listRunningIssueIds", () => {
     expect(await listRunningIssueIds("w1")).toEqual(new Set(["iss-a"]))
     await settleIssueRun(run.id, { status: "succeeded" })
     expect(await listRunningIssueIds("w1")).toEqual(new Set())
+  })
+})
+
+describe("listSquadRunsByIssue", () => {
+  const run = (over: Partial<IssueRun>): IssueRun => ({
+    id: "r",
+    issueId: "iss-a",
+    projectId: "w1",
+    adapterId: "agent-team",
+    kind: "agent-team",
+    targetId: "team-x",
+    status: "running",
+    by: { kind: "human" },
+    startedAt: 1,
+    updatedAt: 1,
+    artifacts: [],
+    ...over,
+  })
+
+  it("keeps the newest squad run per issue and resolves the team name", async () => {
+    const refs = await listSquadRunsByIssue("w1", {
+      listRuns: async () => [
+        run({ id: "r2", startedAt: 2, status: "succeeded", targetId: "team-y" }),
+        run({ id: "r1", startedAt: 1 }),
+        run({ id: "r3", issueId: "iss-b", adapterId: "agent-task", kind: "agent-task" }),
+      ],
+      teamNameOf: async (teamId) => (teamId === "team-y" ? "Docs squad" : undefined),
+    })
+    expect([...refs.entries()]).toEqual([
+      ["iss-a", { runId: "r2", teamId: "team-y", teamName: "Docs squad", status: "succeeded" }],
+    ])
+  })
+
+  it("leaves the name off when the team no longer exists", async () => {
+    const refs = await listSquadRunsByIssue("w1", {
+      listRuns: async () => [run({})],
+      teamNameOf: async () => undefined,
+    })
+    expect(refs.get("iss-a")).toEqual({ runId: "r", teamId: "team-x", status: "running" })
+  })
+
+  it("reads the workspace's run rows and the team store by default", async () => {
+    await createIssueRun({
+      issueId: "iss-z",
+      projectId: "w1",
+      adapterId: "agent-team",
+      kind: "agent-team",
+      targetId: "team-x",
+      by: { kind: "human" },
+    })
+    const refs = await listSquadRunsByIssue("w1")
+    expect(refs.get("iss-z")?.teamId).toBe("team-x")
   })
 })

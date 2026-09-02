@@ -140,9 +140,11 @@ const EMPTY_ROWS: unknown[] = []
 let projectsForTest: unknown[] = EMPTY_ROWS
 let labelsForTest: unknown[] = EMPTY_ROWS
 let runningIdsForTest: ReadonlySet<string> = new Set()
+let squadRunsForTest: ReadonlyMap<string, unknown> = new Map()
 jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: (query: unknown, _deps: unknown, initial: unknown) => {
     if (initial instanceof Set) return runningIdsForTest
+    if (initial instanceof Map) return squadRunsForTest
     const source = String(query)
     if (source.includes("listIssueProjects")) return projectsForTest
     if (source.includes("listLabels")) return labelsForTest
@@ -154,6 +156,7 @@ let viewerForTest = { selfKey: "human:self", agentKeys: [] as string[] }
 jest.mock("@/lib/issues/run/running", () => ({
   SELF_ACTOR_KEY: "human:self",
   listRunningIssueIds: () => Promise.resolve(new Set()),
+  listSquadRunsByIssue: () => Promise.resolve(new Map()),
   loadIssueViewerContext: () => Promise.resolve(viewerForTest),
 }))
 
@@ -240,6 +243,7 @@ beforeEach(() => {
   projectsForTest = EMPTY_ROWS
   labelsForTest = EMPTY_ROWS
   runningIdsForTest = new Set()
+  squadRunsForTest = new Map()
   viewerForTest = { selfKey: "human:self", agentKeys: [] }
   mockListAll.mockResolvedValue({ items: [], errors: [] })
   mockRunSync.mockResolvedValue({ repoCount: 0, results: [], failures: [] })
@@ -429,6 +433,18 @@ describe("IssueConsole", () => {
       render(<IssueConsole />)
       await waitFor(() =>
         expect(boardProps.runningIds as ReadonlySet<string>).toEqual(new Set(["local:i1"]))
+      )
+    })
+
+    it("keys the squad runs by unified id, so the board can badge the card", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      const ref = { runId: "r1", teamId: "team-1", teamName: "Docs", status: "running" }
+      squadRunsForTest = new Map([["i1", ref]])
+      render(<IssueConsole />)
+      await waitFor(() =>
+        expect(boardProps.squadRuns as ReadonlyMap<string, unknown>).toEqual(
+          new Map([["local:i1", ref]])
+        )
       )
     })
 

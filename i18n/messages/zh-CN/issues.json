@@ -42,7 +42,6 @@
     "empty": "暂无议题",
     "agentsWorking": "{count, plural, =0 {0 个 Agent 在工作} other {# 个 Agent 在工作}}",
     "awaitingReview": "{count, plural, =0 {} other {# 个待评审}}",
-    "addIssue": "在「{status}」中新建议题",
     "columnActions": "列操作",
     "denied": {
       "federated-read-only": "该议题归属于 {source}，无法在这里移动。",
@@ -50,8 +49,6 @@
       "illegal-transition": "不允许这样移动。"
     },
     "runningCard": "有 Agent 正在处理这个议题",
-    "collapseColumn": "折叠{status}",
-    "expandColumn": "展开{status}",
     "dnd": {
       "instructions": "按空格键拾起议题，用方向键在列之间移动，空格键放下，Esc 取消。按回车键则是打开议题。",
       "pickedUp": "已从{column}拾起 {identifier}。",

@@ -190,4 +190,20 @@ describe("IssueCard", () => {
     render(<IssueCard item={item()} />)
     expect(screen.getByTestId("issue-card-local:i1")).toHaveAttribute("data-dragging", "true")
   })
+
+  it("shows the squad chip only for an issue that was dispatched to a Squad", () => {
+    const run = { runId: "r1", teamId: "team-1", teamName: "Docs", status: "running" as const }
+    const { rerender } = render(<IssueCard item={item()} />)
+    expect(screen.queryByTestId("squad-run-chip-team-1")).not.toBeInTheDocument()
+    rerender(<IssueCard item={item()} squadRun={run} />)
+    expect(screen.getByTestId("squad-run-chip-team-1")).toHaveAttribute("href", "/squads?id=team-1")
+  })
+
+  it("does not select the card when the squad chip is clicked", () => {
+    const onSelect = jest.fn()
+    const run = { runId: "r1", teamId: "team-1", teamName: "Docs", status: "running" as const }
+    render(<IssueCard item={item()} squadRun={run} onSelect={onSelect} />)
+    fireEvent.click(screen.getByTestId("squad-run-chip-team-1"))
+    expect(onSelect).not.toHaveBeenCalled()
+  })
 })

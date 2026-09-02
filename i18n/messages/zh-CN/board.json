@@ -1,0 +1,23 @@
+{
+  "dnd": {
+    "instructions": "按空格键拾起卡片，用方向键在列之间移动，空格键放下，Esc 取消。按回车键则是打开卡片。",
+    "pickedUp": "已从{column}拾起 {item}。",
+    "over": "{item} 将放入{column}。",
+    "denied": "该位置不接受 {item}。",
+    "dropped": "{item} 已放入{column}。",
+    "cancelled": "已取消拖动，{item} 仍在{column}。"
+  },
+  "emptyColumn": "这里还没有内容",
+  "addToColumn": "在「{column}」中新建",
+  "collapseColumn": "折叠{column}",
+  "expandColumn": "展开{column}",
+  "squadRun": {
+    "label": "小队：{name}",
+    "open": "打开 {name} 的小队看板",
+    "unknownSquad": "小队"
+  },
+  "originIssue": {
+    "label": "来自 {identifier}",
+    "open": "在议题中打开 {identifier}"
+  }
+}

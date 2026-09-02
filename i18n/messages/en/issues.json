@@ -42,7 +42,6 @@
     "empty": "No issues",
     "agentsWorking": "{count, plural, =0 {0 agents working} one {# agent working} other {# agents working}}",
     "awaitingReview": "{count, plural, =0 {} one {# awaiting review} other {# awaiting review}}",
-    "addIssue": "Add issue to {status}",
     "columnActions": "Column actions",
     "denied": {
       "federated-read-only": "This issue lives in {source} and cannot be moved from here.",
@@ -50,8 +49,6 @@
       "illegal-transition": "That move isn't allowed."
     },
     "runningCard": "An agent is working on this issue",
-    "collapseColumn": "Collapse {status}",
-    "expandColumn": "Expand {status}",
     "dnd": {
       "instructions": "Press Space to pick up an issue. Use the arrow keys to move it between columns, Space to drop it, and Escape to cancel. Press Enter to open an issue instead.",
       "pickedUp": "Picked up {identifier} from {column}.",

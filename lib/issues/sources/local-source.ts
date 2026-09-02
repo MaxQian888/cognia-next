@@ -27,10 +27,12 @@ import {
 } from "@/lib/db/issues"
 import { getIssueSourceRegistry, type IssueSourceRegistry } from "./registry"
 
-/** Deep link to an issue. Static export → query param, never a `[id]` route. */
-export function issueHref(issueId: string): string {
-  return `/issues?id=${encodeURIComponent(issueId)}`
-}
+import { issueHref } from "@/lib/issues/hrefs"
+
+// The href lives in `lib/issues/hrefs.ts` so Dexie-free callers can link to an
+// issue. Re-exported here because this is where every source-side caller
+// already imports it from.
+export { issueHref }
 
 /** Project a stored issue into the board's normalized shape. */
 export function toUnifiedIssue(issue: Issue): UnifiedIssueItem {

@@ -231,3 +231,31 @@ export function resolveDrop(
   if (!verdict.allowed) return { type: "denied", taskId: task.id, reason: verdict.reason }
   return { type: "move", taskId: task.id, to: targetStatus }
 }
+
+/** The issue a Squad task was dispatched from, as stamped by the issue run adapter. */
+export interface TaskOriginIssue {
+  issueId: string
+  /** Printed identifier (`MERC-2`), when the adapter recorded one. */
+  identifier?: string
+}
+
+/**
+ * Distinct originating issues across a board's tasks, in first-seen order.
+ *
+ * `lib/issues/run/agent-team-adapter.ts` writes `metadata.issueId` and
+ * `metadata.issueIdentifier` on the task it appends. Tasks the team made for
+ * itself carry neither and contribute nothing.
+ */
+export function originIssuesOfTasks(tasks: readonly AgentTeamTask[]): TaskOriginIssue[] {
+  const seen = new Map<string, TaskOriginIssue>()
+  for (const task of tasks) {
+    const issueId = task.metadata?.issueId
+    if (typeof issueId !== "string" || !issueId || seen.has(issueId)) continue
+    const identifier = task.metadata?.issueIdentifier
+    seen.set(issueId, {
+      issueId,
+      ...(typeof identifier === "string" && identifier ? { identifier } : {}),
+    })
+  }
+  return [...seen.values()]
+}
