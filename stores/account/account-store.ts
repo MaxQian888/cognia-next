@@ -24,6 +24,8 @@ import {
   verifyPassword,
 } from "@/lib/accounts/password-client"
 import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
+import { verifyQuickUnlock, type QuickUnlockOutcome } from "@/lib/accounts/quick-unlock/client"
+import type { QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
 import { AccountUnlockError, asUnlockError } from "@/lib/accounts/account-unlock-error"
 import { publishUnlockStage } from "@/lib/accounts/unlock-progress"
 import { isCapacitor, isTauri } from "@/lib/platform/detect"
@@ -108,6 +110,18 @@ export interface AccountStoreState {
   load: () => Promise<void>
   createAccount: (input: CreateLocalAccountInput) => Promise<LocalAccountRecord>
   unlockAccount: (accountId: string, password: string) => Promise<void>
+  /**
+   * Open an account with an enrolled PIN, pattern or passkey.
+   *
+   * Resolves to the outcome rather than throwing on a wrong secret, because
+   * the attempt count has to be persisted either way and an exception is how
+   * that gets skipped.
+   */
+  unlockAccountWithQuickMethod: (
+    accountId: string,
+    method: QuickUnlockMethod,
+    canonicalSecret: string
+  ) => Promise<QuickUnlockOutcome>
   /**
    * Redeem the Browser Vault recovery key and rotate the password in one step.
    * Browser runtimes only — the desktop host mints no recovery key, so there is
@@ -498,6 +512,47 @@ export function createAccountStore(
           publishUnlockStage(accountId, "failed")
           throw setFailure(asUnlockError(error))
         }
+      },
+
+      unlockAccountWithQuickMethod: async (accountId, method, canonicalSecret) => {
+        set({ error: null })
+        const account = await findAccount(accountId)
+        const enrollment = (account.quickUnlock ?? []).find((entry) => entry.method === method)
+        if (!enrollment) {
+          throw setFailure(
+            new AccountUnlockError("invalid-password", "That unlock method is not enrolled.")
+          )
+        }
+
+        publishUnlockStage(account.id, "verifying")
+        const outcome = await verifyQuickUnlock({
+          accountId: account.id,
+          enrollment,
+          canonicalSecret,
+          passwordVerifier: account.passwordVerifier,
+        })
+
+        // Persisted BEFORE the success branch runs. The attempt count is the
+        // entire protection for a 20-bit secret, so it must survive even if
+        // activation then fails.
+        const nextEnrollments = (account.quickUnlock ?? []).map((entry) =>
+          entry.method === method ? outcome.enrollment : entry
+        )
+        const stored = await dependencies.registry.updateQuickUnlock(account.id, nextEnrollments)
+        set((state) => ({ accounts: upsertAccount(state.accounts, stored) }))
+
+        if (!outcome.ok) {
+          publishUnlockStage(account.id, "failed")
+          return outcome
+        }
+
+        try {
+          await activateUnlockedAccount(account.id)
+        } catch (error) {
+          publishUnlockStage(account.id, "failed")
+          throw setFailure(asUnlockError(error))
+        }
+        return outcome
       },
 
       unlockAccountWithRecoveryKey: async (accountId, recoveryKey, newPassword) => {

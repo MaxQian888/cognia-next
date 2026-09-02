@@ -149,6 +149,48 @@
     "tooShort": "太短",
     "weak": "弱"
   },
+  "quickUnlock": {
+    "attemptsLeft": "{count, plural, =0 {已无剩余次数} other {还剩 # 次机会，用尽后该方式将被停用}}",
+    "failure": {
+      "wrong-secret": "不匹配，请重试。",
+      "locked-out": "该方式已停用，请使用密码。",
+      "not-enrolled": "本设备未设置该方式。",
+      "unavailable": "此处无法使用该方式。",
+      "failed": "出错了。请重试，或改用密码。"
+    },
+    "lockedOut": "{method} 因尝试次数过多已停用。使用密码解锁后可重新启用。",
+    "method": {
+      "pin": "PIN 码",
+      "pattern": "图案",
+      "passkey": "通行密钥"
+    },
+    "methodLabel": "解锁方式",
+    "panelLabel": "快速解锁",
+    "passkeyAction": "使用通行密钥解锁",
+    "passkeyFailure": {
+      "unsupported": "此设备不支持通行密钥。",
+      "no-prf": "该通行密钥无法用于解锁本应用，请使用密码。",
+      "cancelled": "已取消。",
+      "no-credential": "未提供通行密钥。",
+      "failed": "通行密钥校验失败。请重试，或改用密码。"
+    },
+    "passkeyWaiting": "等待身份验证器…",
+    "pattern": {
+      "label": "解锁图案",
+      "node": "第 {index} 个点",
+      "progress": "{count, plural, =0 {绘制你的图案，至少 {min} 个点。} other {已连 # 个点，至少需要 {min} 个。}}",
+      "clear": "重新绘制",
+      "submit": "解锁"
+    },
+    "pin": {
+      "label": "PIN 数字键盘",
+      "entered": "{count, plural, =0 {尚未输入} other {已输入 # 位}}",
+      "clear": "清空",
+      "backspace": "删除最后一位",
+      "submit": "解锁"
+    },
+    "usePassword": "改用密码"
+  },
   "runtimeTarget": {
     "active": "当前",
     "addHost": "添加 Host",

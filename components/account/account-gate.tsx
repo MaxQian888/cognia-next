@@ -41,6 +41,9 @@ export function AccountGate({ children }: AccountGateProps) {
   const unlockAccountWithRecoveryKey = useAccountStore(
     (state) => state.unlockAccountWithRecoveryKey
   )
+  const unlockAccountWithQuickMethod = useAccountStore(
+    (state) => state.unlockAccountWithQuickMethod
+  )
   const acknowledgeRecoveryKey = useAccountStore((state) => state.acknowledgeRecoveryKey)
   const activeAccount = useAccountStore(selectActiveAccount)
 
@@ -226,6 +229,7 @@ export function AccountGate({ children }: AccountGateProps) {
           supportsRecoveryKey={usesBrowserVault()}
           onUnlock={unlockAccount}
           onRecoveryUnlock={unlockAccountWithRecoveryKey}
+          onQuickUnlock={unlockAccountWithQuickMethod}
           onResetLocalStorage={resetRefusedLocalDatabase}
         />
       </GateShell>

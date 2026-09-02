@@ -65,6 +65,9 @@ import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { PasswordStrengthMeter } from "./password-strength-meter"
+import { QuickUnlockPanel } from "./quick-unlock/quick-unlock-panel"
+import { isEnrollmentUsable, type QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
+import type { QuickUnlockFailure } from "@/lib/accounts/quick-unlock/client"
 
 /** The unlock is taking longer than a healthy run — say so, keep waiting. */
 export const DEFAULT_SLOW_AFTER_MS = 8_000
@@ -112,11 +115,23 @@ export interface AccountLockScreenProps {
    * stuck on the lock screen with a correct password and no way in.
    */
   onResetLocalStorage?: () => Promise<void>
+  /**
+   * Open the account with an enrolled PIN, pattern or passkey.
+   *
+   * Absent where no runtime supports it. Resolves to the outcome rather than
+   * throwing on a wrong secret, because the attempt count has to be persisted
+   * either way.
+   */
+  onQuickUnlock?: (
+    accountId: string,
+    method: QuickUnlockMethod,
+    canonicalSecret: string
+  ) => Promise<{ ok: boolean; reason?: QuickUnlockFailure }>
   slowAfterMs?: number
   stuckAfterMs?: number
 }
 
-type Mode = "password" | "recovery"
+type Mode = "password" | "recovery" | "quick"
 
 export function AccountLockScreen({
   accounts,
@@ -124,6 +139,7 @@ export function AccountLockScreen({
   onUnlock,
   onRecoveryUnlock,
   supportsRecoveryKey,
+  onQuickUnlock,
   slowAfterMs = DEFAULT_SLOW_AFTER_MS,
   onResetLocalStorage,
   stuckAfterMs = DEFAULT_STUCK_AFTER_MS,
@@ -139,7 +155,16 @@ export function AccountLockScreen({
   const [selectedId, setSelectedId] = useState<string | null>(
     () => activeAccountId ?? accounts[0]?.id ?? null
   )
-  const [mode, setMode] = useState<Mode>("password")
+  // Quick unlock is the DEFAULT surface where one is enrolled and usable, and
+  // the password is one click away from it. Landing on the password field when
+  // the user set up a PIN would make the PIN pointless.
+  const quickEnrollments = (
+    accounts.find((candidate) => candidate.id === (activeAccountId ?? accounts[0]?.id))
+      ?.quickUnlock ?? []
+  ).filter(() => onQuickUnlock !== undefined)
+  const [mode, setMode] = useState<Mode>(() =>
+    quickEnrollments.some(isEnrollmentUsable) ? "quick" : "password"
+  )
   const [password, setPassword] = useState("")
   const [recoveryKey, setRecoveryKey] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -297,7 +322,7 @@ export function AccountLockScreen({
 
   return (
     <section
-      aria-label={mode === "password" ? t("unlockForm") : t("recoveryUnlockForm")}
+      aria-label={mode === "recovery" ? t("recoveryUnlockForm") : t("unlockForm")}
       data-testid="account-lock-screen"
       className="flex w-full max-w-sm flex-col gap-4"
     >
@@ -345,7 +370,17 @@ export function AccountLockScreen({
         </FieldBlock>
       )}
 
-      {mode === "password" ? (
+      {mode === "quick" && onQuickUnlock && accountId ? (
+        <QuickUnlockPanel
+          accountId={accountId}
+          enrollments={accounts.find((candidate) => candidate.id === accountId)?.quickUnlock ?? []}
+          disabled={submitting}
+          onQuickUnlock={(method, canonicalSecret) =>
+            onQuickUnlock(accountId, method, canonicalSecret)
+          }
+          onUsePassword={() => setMode("password")}
+        />
+      ) : mode === "password" ? (
         <form
           className="flex flex-col gap-4"
           hidden={layoutUnsupported}

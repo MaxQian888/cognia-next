@@ -149,6 +149,48 @@
     "tooShort": "Too short",
     "weak": "Weak"
   },
+  "quickUnlock": {
+    "attemptsLeft": "{count, plural, =0 {No attempts left} =1 {1 attempt left before this method is disabled} other {# attempts left before this method is disabled}}",
+    "failure": {
+      "wrong-secret": "That did not match. Try again.",
+      "locked-out": "This method is disabled. Use your password.",
+      "not-enrolled": "This method is not set up on this device.",
+      "unavailable": "This method is not available here.",
+      "failed": "Something went wrong. Try again, or use your password."
+    },
+    "lockedOut": "{method} is disabled after too many attempts. Unlock with your password to turn it back on.",
+    "method": {
+      "pin": "PIN",
+      "pattern": "Pattern",
+      "passkey": "Passkey"
+    },
+    "methodLabel": "Unlock method",
+    "panelLabel": "Quick unlock",
+    "passkeyAction": "Unlock with passkey",
+    "passkeyFailure": {
+      "unsupported": "This device cannot use passkeys.",
+      "no-prf": "This passkey cannot unlock the app. Use your password.",
+      "cancelled": "Cancelled.",
+      "no-credential": "No passkey was offered.",
+      "failed": "The passkey check failed. Try again, or use your password."
+    },
+    "passkeyWaiting": "Waiting for your authenticator…",
+    "pattern": {
+      "label": "Unlock pattern",
+      "node": "Node {index}",
+      "progress": "{count, plural, =0 {Draw your pattern. At least {min} points.} other {# of at least {min} points.}}",
+      "clear": "Start over",
+      "submit": "Unlock"
+    },
+    "pin": {
+      "label": "PIN keypad",
+      "entered": "{count, plural, =0 {No digits entered} =1 {1 digit entered} other {# digits entered}}",
+      "clear": "Clear",
+      "backspace": "Delete last digit",
+      "submit": "Unlock"
+    },
+    "usePassword": "Use password instead"
+  },
   "runtimeTarget": {
     "active": "Active",
     "addHost": "Add Host",

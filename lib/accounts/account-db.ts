@@ -1,5 +1,7 @@
 import Dexie, { type Table } from "dexie"
 
+import type { QuickUnlockEnrollment } from "./quick-unlock/types"
+
 import {
   ACCOUNT_REGISTRY_STATE_ID,
   AccountRegistryError,
@@ -234,6 +236,45 @@ export class LocalAccountRegistry {
         next.avatarDataUrl = avatarDataUrl
       } else {
         delete next.avatarDataUrl
+      }
+      updated = next
+      await this.db.accounts.put(updated)
+    })
+
+    return updated as LocalAccountRecord
+  }
+
+  /**
+   * Replace the account's quick-unlock enrollments.
+   *
+   * Written whole rather than patched per method, because the caller already
+   * holds the full list and a partial write is how two enrollments end up
+   * disagreeing about which methods exist. An empty list removes the field
+   * entirely, so an account with no quick methods carries no trace of ever
+   * having had one.
+   *
+   * `quickUnlock` is a non-indexed field, so adding it needed no registry
+   * version bump, exactly as `avatarDataUrl` did.
+   */
+  async updateQuickUnlock(
+    accountId: string,
+    enrollments: QuickUnlockEnrollment[],
+    now = Date.now()
+  ): Promise<LocalAccountRecord> {
+    assertAccountId(accountId)
+    let updated: LocalAccountRecord | undefined
+
+    await this.db.transaction("rw", this.db.accounts, async () => {
+      const account = await this.db.accounts.get(accountId)
+      if (!account) throw accountNotFound(accountId)
+      const next: LocalAccountRecord = {
+        ...account,
+        updatedAt: nextTimestamp(now, account.updatedAt),
+      }
+      if (enrollments.length > 0) {
+        next.quickUnlock = enrollments
+      } else {
+        delete next.quickUnlock
       }
       updated = next
       await this.db.accounts.put(updated)

@@ -1,3 +1,5 @@
+import type { QuickUnlockEnrollment } from "./quick-unlock/types"
+
 export const ACCOUNT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{5,63}$/
 
 export const ACCOUNT_REGISTRY_STATE_ID = "singleton"
@@ -39,6 +41,12 @@ export interface LocalAccountRecord {
    * records created before avatars existed.
    */
   avatarDataUrl?: string
+  /**
+   * Enrolled quick-unlock methods. Non-indexed, so adding it needed no
+   * registry version bump. Absent on every account that has never enrolled
+   * one, and removed again when the last is deleted.
+   */
+  quickUnlock?: QuickUnlockEnrollment[]
 }
 
 export interface LegacyMigrationState {
