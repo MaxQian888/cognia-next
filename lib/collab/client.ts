@@ -274,6 +274,52 @@ export interface CollabIdentity {
   orgId: string
 }
 
+/** One org the signed-in subject holds standing in, from `GET /v1/account/memberships`. */
+export interface CollabAccountMembership {
+  orgId: string
+  orgName: string
+  logtoOrganizationId?: string
+  /** The canonical `usr_…` in that org. Never derived locally. */
+  userId: string
+  orgRole?: "owner" | "admin" | "member"
+  workspaceCount: number
+}
+
+export interface CollabAccountMemberships {
+  subject: string
+  memberships: CollabAccountMembership[]
+}
+
+export interface BootstrapCollabAccountInput {
+  /** Client-minted and replayed verbatim on retry. The server resumes by it. */
+  operationId: string
+  credential: string
+  orgName: string
+  displayName?: string
+  email?: string
+}
+
+export interface BootstrappedCollabAccount {
+  operationId: string
+  orgId: string
+  userId: string
+  logtoOrganizationId: string
+}
+
+export interface AcceptCollabInvitationInput {
+  operationId: string
+  token: string
+  displayName?: string
+}
+
+export interface AcceptedCollabInvitation {
+  operationId: string
+  orgId: string
+  userId: string
+  logtoOrganizationId: string
+  invitationId: string
+}
+
 /**
  * Re-exchange this many milliseconds before the grant actually expires.
  *
@@ -313,6 +359,39 @@ export class CollabClient {
     const minted = this.grants.get(orgId)
     if (!minted) throw new CollabError(401, "collaboration identity is unavailable")
     return { userId: minted.userId, orgId: minted.orgId }
+  }
+
+  // ── Account control plane ───────────────────────────────────────────────
+  //
+  // These three take the Logto access token DIRECTLY rather than a grant: a
+  // grant is scoped to an org, and each of these runs before the person has
+  // one. They are the only routes that do.
+
+  /** Every org this subject belongs to, with the canonical `usr_` in each. */
+  async accountMemberships(): Promise<CollabAccountMemberships> {
+    return this.withAccessToken<CollabAccountMemberships>("/v1/account/memberships")
+  }
+
+  /**
+   * Claim the deployment with the one-time bootstrap credential. Replaying
+   * the same `operationId` after a failure resumes the server-side saga
+   * instead of starting a second one.
+   */
+  async bootstrapAccount(input: BootstrapCollabAccountInput): Promise<BootstrappedCollabAccount> {
+    return this.withAccessToken<BootstrappedCollabAccount>("/v1/account/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** Redeem an opaque invitation token with a plain (organization-less) session. */
+  async acceptInvitationByToken(
+    input: AcceptCollabInvitationInput
+  ): Promise<AcceptedCollabInvitation> {
+    return this.withAccessToken<AcceptedCollabInvitation>("/v1/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
   }
 
   /** Feature probe. A legacy plain-text `ok` response means read-only protocol 0. */
@@ -956,6 +1035,22 @@ export class CollabClient {
     const minted = await readJson<MintedGrant>(response)
     this.grants.set(orgId, minted)
     return minted.grant
+  }
+
+  /** A request authenticated by the Logto access token itself, not a grant. */
+  private async withAccessToken<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const token = await this.accessToken()
+    if (!token) throw new CollabError(401, "not signed in")
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: {
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...(init.headers as Record<string, string> | undefined),
+        "x-cognia-collab-protocol": SHARED_CHAT_PROTOCOL_VERSION,
+        authorization: `Bearer ${token}`,
+      },
+    })
+    return readJson<T>(response)
   }
 
   private async json<T>(orgId: string, path: string, init: RequestInit = {}): Promise<T> {

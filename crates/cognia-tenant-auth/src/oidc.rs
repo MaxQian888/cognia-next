@@ -50,26 +50,79 @@ pub enum AuthError {
     MissingTenant(String),
 }
 
+/// A verified token whose tenant claim is allowed to be absent.
+///
+/// The account-control routes (`GET /v1/account/memberships`, bootstrap,
+/// generic invitation acceptance) run BEFORE the person belongs to any
+/// organization, so the token they receive is a plain user token with no
+/// `organization_id`. Requiring the claim there would make the first sign-in
+/// impossible by construction.
+#[derive(Clone, Debug)]
+pub struct SubjectClaims {
+    pub subject: String,
+    pub tenant_id: Option<String>,
+    pub scopes: BTreeSet<String>,
+}
+
 #[async_trait]
 pub trait Authenticator: Send + Sync {
+    /// Verify a token that MUST carry the tenant claim.
     async fn authenticate(&self, token: &str) -> Result<Claims, AuthError>;
+
+    /// Verify a token whose tenant claim MAY be absent.
+    ///
+    /// The default derives from [`Authenticator::authenticate`], which keeps
+    /// every existing implementation strict. Implementations that can tell a
+    /// missing claim from an invalid token override it.
+    async fn authenticate_subject(&self, token: &str) -> Result<SubjectClaims, AuthError> {
+        let claims = self.authenticate(token).await?;
+        Ok(SubjectClaims {
+            subject: claims.subject,
+            tenant_id: Some(claims.tenant_id),
+            scopes: claims.scopes,
+        })
+    }
 }
 
 #[derive(Default)]
 pub struct TestAuthenticator;
 
+/// Test tokens read `"<tenant>:<scopes>"`, or `"<tenant>:<scopes>@<subject>"`
+/// when a test needs a subject other than the default. A tenant segment of
+/// `-` means "no organization claim", which only [`Authenticator::authenticate_subject`]
+/// accepts.
 #[async_trait]
 impl Authenticator for TestAuthenticator {
     async fn authenticate(&self, token: &str) -> Result<Claims, AuthError> {
-        let (tenant_id, scopes) = token
-            .split_once(':')
-            .ok_or_else(|| AuthError::Invalid("test token format".into()))?;
+        let parsed = parse_test_token(token)?;
+        let tenant_id = parsed
+            .tenant_id
+            .ok_or_else(|| AuthError::MissingTenant("organization_id".into()))?;
         Ok(Claims {
-            subject: "test-user".into(),
-            tenant_id: tenant_id.into(),
-            scopes: scopes.split(',').map(str::to_owned).collect(),
+            subject: parsed.subject,
+            tenant_id,
+            scopes: parsed.scopes,
         })
     }
+
+    async fn authenticate_subject(&self, token: &str) -> Result<SubjectClaims, AuthError> {
+        parse_test_token(token)
+    }
+}
+
+fn parse_test_token(token: &str) -> Result<SubjectClaims, AuthError> {
+    let (body, subject) = match token.split_once('@') {
+        Some((body, subject)) if !subject.is_empty() => (body, subject.to_owned()),
+        _ => (token, "test-user".to_owned()),
+    };
+    let (tenant_id, scopes) = body
+        .split_once(':')
+        .ok_or_else(|| AuthError::Invalid("test token format".into()))?;
+    Ok(SubjectClaims {
+        subject,
+        tenant_id: (!tenant_id.is_empty() && tenant_id != "-").then(|| tenant_id.to_owned()),
+        scopes: scopes.split(',').map(str::to_owned).collect(),
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -162,9 +215,8 @@ impl OidcAuthenticator {
     }
 }
 
-#[async_trait]
-impl Authenticator for OidcAuthenticator {
-    async fn authenticate(&self, token: &str) -> Result<Claims, AuthError> {
+impl OidcAuthenticator {
+    async fn verify(&self, token: &str) -> Result<RawClaims, AuthError> {
         let header = decode_header(token).map_err(|error| AuthError::Invalid(error.to_string()))?;
         let kid = header
             .kid
@@ -185,16 +237,41 @@ impl Authenticator for OidcAuthenticator {
         let raw = decode::<RawClaims>(token, &key, &validation)
             .map_err(|error| AuthError::Invalid(error.to_string()))?
             .claims;
-        let tenant_id = raw
-            .extra
+        let _ = raw.exp;
+        Ok(raw)
+    }
+
+    fn tenant_of(&self, raw: &RawClaims) -> Option<String> {
+        raw.extra
             .get(&self.config.tenant_claim)
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    }
+}
+
+#[async_trait]
+impl Authenticator for OidcAuthenticator {
+    async fn authenticate(&self, token: &str) -> Result<Claims, AuthError> {
+        let raw = self.verify(token).await?;
+        let tenant_id = self
+            .tenant_of(&raw)
             .ok_or_else(|| AuthError::MissingTenant(self.config.tenant_claim.clone()))?;
-        let _ = raw.exp;
         Ok(Claims {
             subject: raw.sub,
-            tenant_id: tenant_id.into(),
+            tenant_id,
+            scopes: raw.scope.split_whitespace().map(str::to_owned).collect(),
+        })
+    }
+
+    async fn authenticate_subject(&self, token: &str) -> Result<SubjectClaims, AuthError> {
+        // Same signature, issuer, audience and expiry checks. Only the tenant
+        // claim is allowed to be absent: a token is still evidence of WHO,
+        // it merely says nothing about WHERE yet.
+        let raw = self.verify(token).await?;
+        Ok(SubjectClaims {
+            tenant_id: self.tenant_of(&raw),
+            subject: raw.sub,
             scopes: raw.scope.split_whitespace().map(str::to_owned).collect(),
         })
     }
@@ -229,6 +306,38 @@ mod tests {
         assert!(claims.has_scope("servers:read"));
         assert!(claims.has_scope("servers:operate"));
         assert!(!claims.has_scope("servers:admin"));
+    }
+
+    #[tokio::test]
+    async fn the_strict_path_still_refuses_a_test_token_with_no_tenant() {
+        // `authenticate` keeps every existing route strict: the account
+        // routes opt into the relaxed check explicitly.
+        assert!(matches!(
+            TestAuthenticator.authenticate("-:collab:read").await,
+            Err(AuthError::MissingTenant(_))
+        ));
+        let subject = TestAuthenticator
+            .authenticate_subject("-:collab:read")
+            .await
+            .unwrap();
+        assert_eq!(subject.tenant_id, None);
+        assert_eq!(subject.subject, "test-user");
+    }
+
+    #[tokio::test]
+    async fn a_test_token_may_name_its_subject_after_an_at_sign() {
+        let claims = TestAuthenticator
+            .authenticate_subject("tenant-a:collab:read@logto-ada")
+            .await
+            .unwrap();
+        assert_eq!(claims.subject, "logto-ada");
+        assert_eq!(claims.tenant_id.as_deref(), Some("tenant-a"));
+        // And the strict path sees the same subject.
+        let strict = TestAuthenticator
+            .authenticate("tenant-a:collab:read@logto-ada")
+            .await
+            .unwrap();
+        assert_eq!(strict.subject, "logto-ada");
     }
 
     #[tokio::test]

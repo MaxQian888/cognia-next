@@ -65,6 +65,290 @@ async fn force_rls_isolates_reads_and_every_write_across_pool_reuse() {
     assert_unscoped_connection_is_empty(&mut app).await;
     assert_crud_and_cross_tenant_writes(&mut app).await;
     assert_pool_reuse_clears_tenant(&mut app).await;
+    assert_subject_scope_sees_only_its_own_person(&mut app).await;
+    assert_invitation_lookup_needs_the_token_hash(&mut app).await;
+    assert_bootstrap_writes_pass_every_check_in_order(&mut app).await;
+    assert_operation_and_credential_rows_are_owner_only(&mut app).await;
+}
+
+// ── Migration 0009: the account control plane ────────────────────────────────
+//
+// These run as the least-privilege application role, so what they prove is
+// that the subject-, token-, operation- and credential-scoped policies expose
+// exactly one person's rows and nothing else, with no `app.tenant_id` bound.
+
+/// The two-step bind `PgStore::list_account_memberships` performs: the
+/// subject opens its own `external_identities` rows, and the user ids that
+/// lookup returns are bound as `app.account_user_ids` for every other policy.
+async fn bind_subject(transaction: &tokio_postgres::Transaction<'_>, subject: &str, tenant: &str) {
+    for (name, value) in [
+        ("app.account_provider", "logto"),
+        ("app.account_subject", subject),
+        ("app.account_tenant", tenant),
+    ] {
+        transaction
+            .execute("SELECT set_config($1, $2, true)", &[&name, &value])
+            .await
+            .expect("subject bind must succeed");
+    }
+    let user_ids: Vec<String> = transaction
+        .query(
+            "SELECT DISTINCT user_id FROM external_identities ORDER BY user_id",
+            &[],
+        )
+        .await
+        .expect("subject lookup must succeed")
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    transaction
+        .execute(
+            "SELECT set_config('app.account_user_ids', $1, true)",
+            &[&user_ids.join(",")],
+        )
+        .await
+        .expect("user id bind must succeed");
+}
+
+async fn assert_subject_scope_sees_only_its_own_person(client: &mut Client) {
+    // Subject A across every tenant: exactly A's rows, and only org_a.
+    let transaction = client.transaction().await.expect("transaction must start");
+    bind_subject(&transaction, "subject_a", "").await;
+    let users: Vec<String> = transaction
+        .query("SELECT id FROM users ORDER BY id", &[])
+        .await
+        .expect("subject-scoped users read must succeed")
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(users, vec!["usr_a".to_string()]);
+    let orgs: Vec<String> = transaction
+        .query("SELECT id FROM orgs ORDER BY id", &[])
+        .await
+        .expect("subject-scoped orgs read must succeed")
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(orgs, vec!["org_a".to_string()]);
+    let memberships: i64 = transaction
+        .query_one("SELECT count(*) FROM org_memberships", &[])
+        .await
+        .expect("subject-scoped memberships read must succeed")
+        .get(0);
+    assert_eq!(memberships, 1);
+    // Read-only: the subject scope grants no write anywhere.
+    let write = transaction
+        .execute(
+            "UPDATE org_memberships SET role = 'owner' WHERE user_id = 'usr_a'",
+            &[],
+        )
+        .await
+        .expect("a subject-scoped update must be invisible, not an error");
+    assert_eq!(write, 0);
+    transaction.commit().await.expect("transaction must commit");
+
+    // A tenant narrows: subject A asked about tenant B sees nothing.
+    let transaction = client.transaction().await.expect("transaction must start");
+    bind_subject(&transaction, "subject_a", "logto_org_b").await;
+    let count: i64 = transaction
+        .query_one("SELECT count(*) FROM users", &[])
+        .await
+        .expect("narrowed read must succeed")
+        .get(0);
+    assert_eq!(count, 0);
+    transaction.commit().await.expect("transaction must commit");
+
+    // A subject nobody linked sees nothing at all.
+    let transaction = client.transaction().await.expect("transaction must start");
+    bind_subject(&transaction, "subject_nobody", "").await;
+    let count: i64 = transaction
+        .query_one("SELECT count(*) FROM orgs", &[])
+        .await
+        .expect("stranger read must succeed")
+        .get(0);
+    assert_eq!(count, 0);
+    transaction.commit().await.expect("transaction must commit");
+}
+
+async fn assert_invitation_lookup_needs_the_token_hash(client: &mut Client) {
+    // Mint one invitation inside tenant A, the way the org route does.
+    let transaction = client.transaction().await.expect("transaction must start");
+    bind_tenant(&transaction, "org_a").await;
+    transaction
+        .execute(
+            "INSERT INTO organization_invitations                (id, org_id, org_role, token_hash, created_by, expires_at, created_at)              VALUES ('inv_rls', 'org_a', 'member', 'hash_rls', 'usr_a', 9999999999999, 1)",
+            &[],
+        )
+        .await
+        .expect("same-tenant invitation insert must succeed");
+    transaction.commit().await.expect("transaction must commit");
+
+    // With the hash bound and NO tenant, exactly that row is visible.
+    let transaction = client.transaction().await.expect("transaction must start");
+    transaction
+        .execute(
+            "SELECT set_config('app.invitation_token_hash', 'hash_rls', true)",
+            &[],
+        )
+        .await
+        .expect("hash bind must succeed");
+    let rows = transaction
+        .query("SELECT id, org_id FROM organization_invitations", &[])
+        .await
+        .expect("token-scoped read must succeed");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<_, String>(1), "org_a");
+    // And it is read-only: redeeming needs the tenant scope.
+    let redeemed = transaction
+        .execute(
+            "UPDATE organization_invitations SET redeemed_at = 5 WHERE id = 'inv_rls'",
+            &[],
+        )
+        .await
+        .expect("token-scoped update must be invisible");
+    assert_eq!(redeemed, 0);
+    transaction.commit().await.expect("transaction must commit");
+
+    // A wrong hash sees nothing.
+    let transaction = client.transaction().await.expect("transaction must start");
+    transaction
+        .execute(
+            "SELECT set_config('app.invitation_token_hash', 'hash_other', true)",
+            &[],
+        )
+        .await
+        .expect("hash bind must succeed");
+    let count: i64 = transaction
+        .query_one("SELECT count(*) FROM organization_invitations", &[])
+        .await
+        .expect("wrong-hash read must succeed")
+        .get(0);
+    assert_eq!(count, 0);
+    transaction.commit().await.expect("transaction must commit");
+}
+
+/// The exact statement order `PgStore::bootstrap_account` uses, replayed by
+/// the application role under the NEW org's tenant scope: each WITH CHECK
+/// must pass because of the row inserted just before it.
+async fn assert_bootstrap_writes_pass_every_check_in_order(client: &mut Client) {
+    let transaction = client.transaction().await.expect("transaction must start");
+    bind_tenant(&transaction, "org_new").await;
+    transaction
+        .execute(
+            "INSERT INTO orgs (id, display_name, logto_organization_id, created_at, updated_at)              VALUES ('org_new', 'New', 'logto_org_new', 1, 1)",
+            &[],
+        )
+        .await
+        .expect("the org row passes because its id is the tenant");
+    transaction
+        .execute(
+            "INSERT INTO users (id, display_name, created_at, updated_at)              VALUES ('usr_new', 'Newcomer', 1, 1)",
+            &[],
+        )
+        .await
+        .expect("the user row passes because a tenant is bound");
+    transaction
+        .execute(
+            "INSERT INTO org_memberships (org_id, user_id, role, created_at, updated_at)              VALUES ('org_new', 'usr_new', 'owner', 1, 1)",
+            &[],
+        )
+        .await
+        .expect("the membership passes because its org is the tenant");
+    transaction
+        .execute(
+            "INSERT INTO external_identities (id, user_id, provider, subject, tenant, linked_at)              VALUES ('ext_new', 'usr_new', 'logto', 'subject_new', 'logto_org_new', 1)",
+            &[],
+        )
+        .await
+        .expect("the identity passes because the membership now exists");
+    transaction
+        .commit()
+        .await
+        .expect("bootstrap transaction must commit");
+
+    // And the new person is discoverable by subject afterwards.
+    let transaction = client.transaction().await.expect("transaction must start");
+    bind_subject(&transaction, "subject_new", "").await;
+    let orgs: Vec<String> = transaction
+        .query("SELECT id FROM orgs", &[])
+        .await
+        .expect("subject read must succeed")
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(orgs, vec!["org_new".to_string()]);
+    transaction.commit().await.expect("transaction must commit");
+}
+
+async fn assert_operation_and_credential_rows_are_owner_only(client: &mut Client) {
+    let transaction = client.transaction().await.expect("transaction must start");
+    for (name, value) in [
+        ("app.provisioning_operation", "op_rls"),
+        ("app.account_provider", "logto"),
+        ("app.account_subject", "subject_new"),
+    ] {
+        transaction
+            .execute("SELECT set_config($1, $2, true)", &[&name, &value])
+            .await
+            .expect("operation bind must succeed");
+    }
+    transaction
+        .execute(
+            "INSERT INTO identity_provisioning_operations                (id, kind, state, identity_provider, identity_subject, created_at, updated_at)              VALUES ('op_rls', 'bootstrap', 'pending', 'logto', 'subject_new', 1, 1)",
+            &[],
+        )
+        .await
+        .expect("an operation may be written under its own id");
+    let other = transaction
+        .execute(
+            "INSERT INTO identity_provisioning_operations                (id, kind, state, identity_provider, identity_subject, created_at, updated_at)              VALUES ('op_other', 'bootstrap', 'pending', 'logto', 'subject_new', 1, 1)",
+            &[],
+        )
+        .await;
+    assert!(other.is_err(), "another operation id must be refused");
+    transaction
+        .rollback()
+        .await
+        .expect("failed write transaction must roll back");
+
+    // The right id under the wrong subject is refused too: the policy is
+    // keyed on both, so a guessed handle cannot be claimed.
+    let transaction = client.transaction().await.expect("transaction must start");
+    for (name, value) in [
+        ("app.provisioning_operation", "op_rls"),
+        ("app.account_provider", "logto"),
+        ("app.account_subject", "subject_stranger"),
+    ] {
+        transaction
+            .execute("SELECT set_config($1, $2, true)", &[&name, &value])
+            .await
+            .expect("operation bind must succeed");
+    }
+    let stranger = transaction
+        .execute(
+            "INSERT INTO identity_provisioning_operations \
+               (id, kind, state, identity_provider, identity_subject, created_at, updated_at) \
+             VALUES ('op_rls', 'bootstrap', 'pending', 'logto', 'subject_new', 1, 1)",
+            &[],
+        )
+        .await;
+    assert!(
+        stranger.is_err(),
+        "another subject must not write under this operation id"
+    );
+    transaction
+        .rollback()
+        .await
+        .expect("failed write transaction must roll back");
+
+    let transaction = client.transaction().await.expect("transaction must start");
+    let count: i64 = transaction
+        .query_one("SELECT count(*) FROM deployment_bootstrap_credentials", &[])
+        .await
+        .expect("unscoped credential read must fail closed")
+        .get(0);
+    assert_eq!(count, 0);
+    transaction.commit().await.expect("transaction must commit");
 }
 
 async fn assert_force_rls(client: &Client) {
@@ -73,6 +357,8 @@ async fn assert_force_rls(client: &Client) {
             "SELECT relname, relrowsecurity, relforcerowsecurity \
              FROM pg_class WHERE relname = ANY($1) ORDER BY relname",
             &[&vec![
+                "deployment_bootstrap_credentials",
+                "identity_provisioning_operations",
                 "issues",
                 "issue_events",
                 "org_memberships",
@@ -83,7 +369,7 @@ async fn assert_force_rls(client: &Client) {
         )
         .await
         .expect("RLS metadata must be readable");
-    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.len(), 8);
     for row in rows {
         assert!(
             row.get::<_, bool>(1),

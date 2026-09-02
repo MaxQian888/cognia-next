@@ -5,7 +5,22 @@ import { APP_VERSION } from "@/lib/app-version"
 import { requireJwtPayload } from "@/lib/security/jwt-payload"
 import { isLoopbackHostname } from "@/lib/connectivity/loopback-hostname"
 
+/** A social sign-in method the deployment enabled at Logto. */
+export interface CompanionAuthSocialProvider {
+  /** The Logto connector's identity-provider name, e.g. `github`, `feishu`. */
+  provider: string
+  /** The `direct_sign_in` value for the authorize request, e.g. `social:github`. */
+  directSignIn: string
+}
+
+export type CompanionAuthCallbackMode = "web-popup" | "native-loopback" | "deep-link"
+
 export interface CompanionAuthConfig {
+  /**
+   * Version 1 servers omit it. Every later version only ADDS fields, so a
+   * client reads whatever is present and never branches on the number.
+   */
+  configVersion?: number
   deploymentMode: "single-user" | "multi-tenant"
   hostId: string
   tenantId?: string
@@ -13,11 +28,63 @@ export interface CompanionAuthConfig {
     issuer: string
     audience: string
     webClientId: string
+    /** The Logto "native" application (desktop + CLI). Version 2. */
+    nativeClientId?: string
     scopes: string[]
+    /** Version 2. Absent or empty means the universal Logto page only. */
+    socialProviders?: CompanionAuthSocialProvider[]
+    /** Version 2. */
+    callbackModes?: CompanionAuthCallbackMode[]
   }
   signaling: {
     url: string
     iceServers: RTCIceServer[]
+  }
+  /** Version 2. Present when the deployment enrols accounts on a collaboration server. */
+  collaboration?: {
+    serviceUrl: string
+    registrationPolicy: "bootstrap-then-invite"
+  }
+}
+
+/**
+ * The social providers a config advertises, with anything malformed dropped.
+ *
+ * Defensive on purpose: a version-2 server is trusted for the shape, but a
+ * proxy or a hand-edited mock is not, and one bad row must not hide the good
+ * ones or crash the sign-in screen.
+ */
+export function authConfigSocialProviders(
+  config: Pick<CompanionAuthConfig, "oidc">
+): CompanionAuthSocialProvider[] {
+  const raw = config.oidc?.socialProviders
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const providers: CompanionAuthSocialProvider[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue
+    const { provider, directSignIn } = entry as Partial<CompanionAuthSocialProvider>
+    if (typeof provider !== "string" || typeof directSignIn !== "string") continue
+    const name = provider.trim().toLowerCase()
+    if (!name || seen.has(name) || !/^[a-z0-9_-]+:[a-z0-9_.-]+$/i.test(directSignIn)) continue
+    seen.add(name)
+    providers.push({ provider: name, directSignIn: directSignIn.trim() })
+  }
+  return providers
+}
+
+/** The collaboration service a config names, or `null` when it names none. */
+export function authConfigCollaborationServiceUrl(
+  config: Pick<CompanionAuthConfig, "collaboration">
+): string | null {
+  const url = config.collaboration?.serviceUrl
+  if (typeof url !== "string" || !url.trim()) return null
+  try {
+    const parsed = new URL(url.trim())
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null
+    return parsed.toString().replace(/\/$/, "")
+  } catch {
+    return null
   }
 }
 

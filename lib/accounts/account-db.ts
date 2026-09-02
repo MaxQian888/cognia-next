@@ -64,6 +64,12 @@ export interface UserBindingRow {
   logtoIssuer: string
   displayName?: string
   email?: string
+  /**
+   * Ids this profile was bound under before the collaboration server assigned
+   * the canonical `userId`. Kept so a row that still carries one is read as
+   * this person rather than as a stranger. Not indexed.
+   */
+  legacyUserIds?: string[]
   boundAt: number
   updatedAt: number
 }

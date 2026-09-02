@@ -28,6 +28,7 @@
 import { loggers } from "@cognia/logging"
 
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { reconcileUserId, type ReconcileUserIdDeps } from "@/lib/identity/reconcile-user-id"
 import { UserBindingRegistry } from "@/lib/identity/user-binding"
 import { readActiveAccessToken } from "@/lib/logto/app-session"
 import { createPlatformFetch } from "@/lib/network/platform-fetch"
@@ -57,6 +58,11 @@ export type RefreshCollabPlaneResult =
       status: "refreshed"
       orgId: string
       userId: string
+      /**
+       * Set when this refresh replaced a locally derived user id with the one
+       * the server assigned. Names the id that was retired.
+       */
+      reconciledFrom?: string
       issues: number
       /** Workspaces this person holds, from `memberships/me`. */
       workspaces: number
@@ -76,6 +82,11 @@ export interface RefreshCollabPlaneDeps {
   fetchImpl?: CollabFetch
   /** Injectable so a test need not reach the keyring. */
   accessToken?: (localAccountId: string) => Promise<string | null>
+  /** Injectable so the id reconciliation can be observed without a host. */
+  reconcile?: (
+    input: Parameters<typeof reconcileUserId>[0],
+    deps?: ReconcileUserIdDeps
+  ) => Promise<unknown>
   now?: () => number
 }
 
@@ -119,6 +130,32 @@ export async function refreshCollabPlane(
     ...(deps.now ? { now: deps.now } : {}),
   })
 
+  // The server is the authority for who this person IS. A profile bound
+  // before the server existed carries a derived id, and every row the pulls
+  // below write would otherwise land under a different person. Reconciling
+  // FIRST is what makes those rows, and "assigned to me", line up.
+  const identity = await client.identity(binding.orgId)
+  let reconciledFrom: string | undefined
+  if (binding.userId && identity.userId !== binding.userId) {
+    const token = await readToken(localAccountId)
+    await (deps.reconcile ?? reconcileUserId)(
+      {
+        localAccountId,
+        legacyUserId: binding.userId,
+        canonicalUserId: identity.userId,
+        orgId: binding.orgId,
+        ...(token ? { accessToken: token } : {}),
+        ...(deps.now ? { now: deps.now() } : {}),
+      },
+      { registry: deps.registry }
+    )
+    reconciledFrom = binding.userId
+    log.info("collab: reconciled the profile to the server's user id", {
+      from: binding.userId,
+      to: identity.userId,
+    })
+  }
+
   const memberships = await pullCollabMemberships(
     client,
     { orgId: binding.orgId },
@@ -150,6 +187,7 @@ export async function refreshCollabPlane(
     status: "refreshed",
     orgId: binding.orgId,
     userId: memberships.userId,
+    ...(reconciledFrom ? { reconciledFrom } : {}),
     issues: issues.count,
     workspaces: memberships.workspaces,
     members: workspaces.members,

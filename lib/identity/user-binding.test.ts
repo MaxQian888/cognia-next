@@ -159,3 +159,48 @@ describe("isSameBoundUser", () => {
     expect(isSameBoundUser(existing, input({ userId: "usr_ada", logtoSubject: "s2" }))).toBe(false)
   })
 })
+
+describe("reconcileUserId (server-assigned canonical id)", () => {
+  it("moves the binding to the canonical id and keeps the derived one as an alias", async () => {
+    const { registry } = await freshRegistry("reconcile-moves")
+    await registry.bind({
+      localAccountId: "acct_a",
+      userId: "usr_derived00000000000000",
+      logtoSubject: "sub",
+      logtoIssuer: "https://logto.test/oidc",
+      orgId: "org_acme0000000000000000000",
+      now: 10,
+    })
+    const row = await registry.reconcileUserId("acct_a", "usr_canonical0000000000000", 20)
+    expect(row.userId).toBe("usr_canonical0000000000000")
+    expect(row.legacyUserIds).toEqual(["usr_derived00000000000000"])
+    expect(row.orgId).toBe("org_acme0000000000000000000")
+    expect(row.updatedAt).toBe(20)
+    expect(await registry.get("acct_a")).toEqual(row)
+  })
+
+  it("is a no-op when the ids already agree, and idempotent otherwise", async () => {
+    const { registry } = await freshRegistry("reconcile-idempotent")
+    await registry.bind({
+      localAccountId: "acct_a",
+      userId: "usr_derived00000000000000",
+      logtoSubject: "sub",
+      logtoIssuer: "i",
+      now: 10,
+    })
+    await registry.reconcileUserId("acct_a", "usr_canonical0000000000000", 20)
+    const again = await registry.reconcileUserId("acct_a", "usr_canonical0000000000000", 30)
+    expect(again.legacyUserIds).toEqual(["usr_derived00000000000000"])
+    expect(again.updatedAt).toBe(20)
+  })
+
+  it("refuses a malformed canonical id and an unbound profile", async () => {
+    const { registry } = await freshRegistry("reconcile-refuses")
+    await expect(registry.reconcileUserId("acct_a", "usr_x")).rejects.toMatchObject({
+      code: "invalid-user-id",
+    })
+    await expect(
+      registry.reconcileUserId("acct_a", "usr_canonical0000000000000")
+    ).rejects.toMatchObject({ code: "not-bound" })
+  })
+})

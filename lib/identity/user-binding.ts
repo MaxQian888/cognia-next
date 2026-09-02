@@ -156,4 +156,40 @@ export class UserBindingRegistry {
   async unbind(localAccountId: string): Promise<void> {
     await this.db.userBindings.delete(localAccountId)
   }
+
+  /**
+   * Move the binding to the server-assigned id, remembering the old one.
+   *
+   * Not a takeover: the person is the same, only the id the server chose for
+   * them differs from the one this machine derived before the server existed.
+   * Idempotent, and a no-op when the ids already agree.
+   */
+  async reconcileUserId(
+    localAccountId: string,
+    canonicalUserId: string,
+    now = Date.now()
+  ): Promise<UserBindingRow> {
+    if (!isUserId(canonicalUserId)) {
+      throw new UserBindingError(
+        "invalid-user-id",
+        `"${canonicalUserId}" is not a user id, so it cannot be the canonical one.`
+      )
+    }
+    let result: UserBindingRow | undefined
+    await this.db.transaction("rw", this.db.userBindings, async () => {
+      const existing = await this.db.userBindings.get(localAccountId)
+      if (!existing) {
+        throw new UserBindingError("not-bound", `Profile ${localAccountId} is not bound.`)
+      }
+      if (existing.userId === canonicalUserId) {
+        result = existing
+        return
+      }
+      const legacyUserIds = [...(existing.legacyUserIds ?? [])]
+      if (!legacyUserIds.includes(existing.userId)) legacyUserIds.push(existing.userId)
+      result = { ...existing, userId: canonicalUserId, legacyUserIds, updatedAt: now }
+      await this.db.userBindings.put(result)
+    })
+    return result as UserBindingRow
+  }
 }

@@ -385,3 +385,113 @@ describe("CollabClient", () => {
     })
   })
 })
+
+describe("the account control plane (plain access token, no grant)", () => {
+  function accountHarness(answer: (path: string) => { status?: number; body: unknown }) {
+    const calls: Array<{ path: string; init?: RequestInit }> = []
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      const path = new URL(url).pathname
+      calls.push({ path, init })
+      const { status = 200, body } = answer(path)
+      return jsonResponse(body, status)
+    }
+    return { calls, fetchImpl }
+  }
+
+  it("lists memberships with the Logto token itself and never exchanges a grant", async () => {
+    const { calls, fetchImpl } = accountHarness(() => ({
+      body: {
+        subject: "logto-ada",
+        memberships: [
+          { orgId: ORG, orgName: "Acme", userId: ADA, orgRole: "owner", workspaceCount: 2 },
+        ],
+      },
+    }))
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+    })
+    const result = await client.accountMemberships()
+    expect(result.memberships[0]).toMatchObject({ orgId: ORG, userId: ADA, orgRole: "owner" })
+    expect(calls.map((call) => call.path)).toEqual(["/v1/account/memberships"])
+    expect((calls[0]!.init!.headers as Record<string, string>).authorization).toBe(
+      "Bearer logto-token"
+    )
+  })
+
+  it("bootstraps and accepts invitations by replaying the operation id verbatim", async () => {
+    const { calls, fetchImpl } = accountHarness((path) =>
+      path.endsWith("/bootstrap")
+        ? {
+            status: 201,
+            body: {
+              operationId: "op-1",
+              orgId: ORG,
+              userId: ADA,
+              logtoOrganizationId: "lorg_1",
+            },
+          }
+        : {
+            status: 201,
+            body: {
+              operationId: "inv-1",
+              orgId: ORG,
+              userId: ADA,
+              logtoOrganizationId: "lorg_1",
+              invitationId: "inv_x",
+            },
+          }
+    )
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+    })
+    const claimed = await client.bootstrapAccount({
+      operationId: "op-1",
+      credential: "secret",
+      orgName: "Acme",
+    })
+    expect(claimed.orgId).toBe(ORG)
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({
+      operationId: "op-1",
+      credential: "secret",
+      orgName: "Acme",
+    })
+
+    const accepted = await client.acceptInvitationByToken({ operationId: "inv-1", token: "tok" })
+    expect(accepted.invitationId).toBe("inv_x")
+    expect(calls[1]!.path).toBe("/v1/invitations/accept")
+    expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({
+      operationId: "inv-1",
+      token: "tok",
+    })
+  })
+
+  it("surfaces the server's refusal codes unchanged", async () => {
+    const { fetchImpl } = accountHarness(() => ({
+      status: 409,
+      body: { error: "the deployment bootstrap credential was already used" },
+    }))
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => "logto-token",
+      fetchImpl,
+    })
+    await expect(
+      client.bootstrapAccount({ operationId: "op-2", credential: "secret", orgName: "Acme" })
+    ).rejects.toMatchObject({ status: 409 })
+  })
+
+  it("refuses locally when there is no session, without a request", async () => {
+    const { calls, fetchImpl } = accountHarness(() => ({ body: {} }))
+    const client = new CollabClient({
+      baseUrl: "https://collab.test",
+      accessToken: async () => null,
+      fetchImpl,
+    })
+    await expect(client.accountMemberships()).rejects.toMatchObject({ status: 401 })
+    expect(calls).toEqual([])
+  })
+})

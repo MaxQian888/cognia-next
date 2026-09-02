@@ -51,6 +51,8 @@ pub enum StoreError {
     InvitationUnavailable,
     #[error("authorization policy rejected the mutation: {0}")]
     Policy(String),
+    #[error("the deployment bootstrap credential was already used")]
+    BootstrapCredentialConsumed,
 }
 
 impl From<ActorError> for StoreError {
@@ -174,6 +176,132 @@ pub struct AcceptInvitation {
 pub struct AcceptedInvitation {
     pub invitation: Invitation,
     pub user_id: String,
+}
+
+/// A verified identity-provider subject, before any org is known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubjectRef {
+    pub provider: String,
+    pub tenant: Option<String>,
+    pub subject: String,
+}
+
+impl SubjectRef {
+    /// Same identity-provider principal, whichever organization the token
+    /// was scoped to. This is the ownership test for provisioning operations.
+    pub fn same_person(&self, other: &SubjectRef) -> bool {
+        self.provider == other.provider && self.subject == other.subject
+    }
+}
+
+/// One organization a subject holds standing in, as `GET /v1/account/memberships`
+/// reports it. Raw facts only: `orgRole` absent with `workspaceCount > 0` is a
+/// guest, and the client derives that word.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountMembership {
+    pub org_id: String,
+    pub org_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logto_organization_id: Option<String>,
+    /// The canonical person id in that org. One subject is one person per
+    /// deployment in practice, but the row carries it so a client never
+    /// derives it locally.
+    pub user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_role: Option<OrgRole>,
+    pub workspace_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProvisioningKind {
+    Bootstrap,
+    InvitationAccept,
+}
+
+impl ProvisioningKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bootstrap => "bootstrap",
+            Self::InvitationAccept => "invitation-accept",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "bootstrap" => Some(Self::Bootstrap),
+            "invitation-accept" => Some(Self::InvitationAccept),
+            _ => None,
+        }
+    }
+}
+
+/// `pending` → `idp_applied` → `committed`. Never backwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProvisioningState {
+    Pending,
+    IdpApplied,
+    Committed,
+}
+
+impl ProvisioningState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::IdpApplied => "idp_applied",
+            Self::Committed => "committed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "idp_applied" => Some(Self::IdpApplied),
+            "committed" => Some(Self::Committed),
+            _ => None,
+        }
+    }
+}
+
+/// One cross-system enrolment, resumable by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvisioningOperation {
+    pub id: String,
+    pub kind: ProvisioningKind,
+    pub state: ProvisioningState,
+    pub subject: SubjectRef,
+    /// What the caller asked for, so a retry can be checked against it.
+    pub payload: serde_json::Value,
+    /// Set once Logto has been mutated. This is the resume point.
+    pub logto_organization_id: Option<String>,
+    /// Set once committed: the canonical ids the caller was answered with.
+    pub result: Option<serde_json::Value>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// What the first owner's claim writes, all inside the new org's own scope.
+#[derive(Debug, Clone)]
+pub struct BootstrapAccount {
+    pub operation_id: String,
+    pub org_id: String,
+    pub org_name: String,
+    pub logto_organization_id: String,
+    pub user_id: String,
+    pub display_name: String,
+    pub email: Option<String>,
+    pub subject: SubjectRef,
+    pub now: i64,
+    pub request_id: String,
+    pub source: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrappedAccount {
+    pub org_id: String,
+    pub user_id: String,
+    pub logto_organization_id: String,
 }
 
 /// Context retained for every administrative authorization mutation.
@@ -516,6 +644,72 @@ pub trait Store: Send + Sync {
         input: AcceptInvitation,
     ) -> Result<AcceptedInvitation, StoreError>;
 
+    // ── Account control plane (ADR-0149, unified sign-in) ────────────────────
+
+    /// Every org this verified subject holds standing in, across tenants.
+    ///
+    /// The one read that is not tenant-scoped. It is subject-scoped instead:
+    /// the store binds the subject for the transaction and the policies in
+    /// `0009_account_bootstrap.sql` expose exactly that person's rows.
+    async fn list_account_memberships(
+        &self,
+        subject: &SubjectRef,
+    ) -> Result<Vec<AccountMembership>, StoreError>;
+
+    /// Find an invitation by its token hash, whichever org minted it.
+    async fn find_invitation_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<Invitation>, StoreError>;
+
+    /// Load an operation, only if this subject owns it.
+    ///
+    /// An operation id is a client-supplied resume handle. The store binds the
+    /// subject with it so that another person's id, guessed or leaked, reads
+    /// as absent rather than as somebody else's saga.
+    async fn get_provisioning_operation(
+        &self,
+        operation_id: &str,
+        subject: &SubjectRef,
+    ) -> Result<Option<ProvisioningOperation>, StoreError>;
+
+    /// Insert or advance an operation. State may only move forward.
+    async fn put_provisioning_operation(
+        &self,
+        operation: ProvisioningOperation,
+    ) -> Result<(), StoreError>;
+
+    /// Hold the bootstrap credential for one operation.
+    ///
+    /// Idempotent for the same operation, consumed or not: a retry of the
+    /// claim that spent the credential must still be able to finish its last
+    /// write. Any OTHER operation is refused with `BootstrapCredentialConsumed`,
+    /// and that refusal happens BEFORE Logto is touched.
+    async fn reserve_bootstrap_credential(
+        &self,
+        credential_hash: &str,
+        operation_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError>;
+
+    /// Mark the credential spent by the account that claimed it.
+    async fn consume_bootstrap_credential(
+        &self,
+        credential_hash: &str,
+        operation_id: &str,
+        user_id: &str,
+        org_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError>;
+
+    /// Create the first org, its owner, and the owner's identity link.
+    ///
+    /// Idempotent on every row so a retried operation converges.
+    async fn bootstrap_account(
+        &self,
+        input: BootstrapAccount,
+    ) -> Result<BootstrappedAccount, StoreError>;
+
     async fn set_org_member(
         &self,
         org_id: &str,
@@ -626,9 +820,21 @@ pub trait Store: Send + Sync {
 
 // ── In-memory ────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug)]
+struct BootstrapCredentialRow {
+    reserved_by_operation: String,
+    #[allow(dead_code)]
+    reserved_at: i64,
+    consumed_at: Option<i64>,
+}
+
 #[derive(Default)]
 struct Tables {
     org_memberships: HashMap<(String, String), OrgRole>,
+    /// `org_id -> display name`, for the account membership listing.
+    org_names: HashMap<String, String>,
+    provisioning: HashMap<String, ProvisioningOperation>,
+    bootstrap_credentials: HashMap<String, BootstrapCredentialRow>,
     /// `(org_id, workspace_id, user_id) -> role`. The tenant belongs in the
     /// key: workspace ids are only unique inside an organization.
     workspace_memberships: HashMap<(String, String, String), WorkspaceRole>,
@@ -667,6 +873,26 @@ impl InMemoryStore {
             .write()
             .org_memberships
             .insert((org_id.to_owned(), user_id.to_owned()), role);
+    }
+
+    pub fn add_org(&self, org_id: &str, name: &str) {
+        self.tables
+            .write()
+            .org_names
+            .insert(org_id.to_owned(), name.to_owned());
+    }
+
+    /// Pretend a later write was lost, so a retry path can be exercised.
+    #[cfg(test)]
+    pub(crate) fn rewind_provisioning_state_for_tests(
+        &self,
+        operation_id: &str,
+        state: ProvisioningState,
+    ) {
+        if let Some(operation) = self.tables.write().provisioning.get_mut(operation_id) {
+            operation.state = state;
+            operation.result = None;
+        }
     }
 
     pub fn link_org_to_logto(&self, org_id: &str, logto_organization_id: &str) {
@@ -1107,6 +1333,197 @@ impl Store for InMemoryStore {
         Ok(AcceptedInvitation {
             invitation: redeemed,
             user_id,
+        })
+    }
+
+    // ── Account control plane ────────────────────────────────────────────────
+
+    async fn list_account_memberships(
+        &self,
+        subject: &SubjectRef,
+    ) -> Result<Vec<AccountMembership>, StoreError> {
+        let tables = self.tables.read();
+        let mut rows = Vec::new();
+        for ((org_id, provider, tenant, subject_value), user_id) in &tables.external_identities {
+            // A subject with no tenant claim is asked about across every
+            // organization. A tenant narrows. Same rule as migration 0009.
+            let tenant_matches = match subject.tenant.as_deref() {
+                None => true,
+                Some(wanted) => tenant == wanted,
+            };
+            if provider != &subject.provider || subject_value != &subject.subject || !tenant_matches
+            {
+                continue;
+            }
+            let org_role = tables
+                .org_memberships
+                .get(&(org_id.clone(), user_id.clone()))
+                .copied();
+            let workspace_count = tables
+                .workspace_memberships
+                .keys()
+                .filter(|(org, _, member)| org == org_id && member == user_id)
+                .count();
+            if org_role.is_none() && workspace_count == 0 {
+                // Linked but recruited into nothing: not a membership.
+                continue;
+            }
+            rows.push(AccountMembership {
+                org_id: org_id.clone(),
+                org_name: tables
+                    .org_names
+                    .get(org_id)
+                    .cloned()
+                    .unwrap_or_else(|| org_id.clone()),
+                logto_organization_id: tables.org_logto_ids.get(org_id).cloned(),
+                user_id: user_id.clone(),
+                org_role,
+                workspace_count,
+            });
+        }
+        rows.sort_by(|left, right| left.org_id.cmp(&right.org_id));
+        Ok(rows)
+    }
+
+    async fn find_invitation_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<Invitation>, StoreError> {
+        Ok(self
+            .tables
+            .read()
+            .invitations
+            .values()
+            .find(|(hash, _)| hash == token_hash)
+            .map(|(_, invitation)| invitation.clone()))
+    }
+
+    async fn get_provisioning_operation(
+        &self,
+        operation_id: &str,
+        subject: &SubjectRef,
+    ) -> Result<Option<ProvisioningOperation>, StoreError> {
+        Ok(self
+            .tables
+            .read()
+            .provisioning
+            .get(operation_id)
+            .filter(|operation| operation.subject.same_person(subject))
+            .cloned())
+    }
+
+    async fn put_provisioning_operation(
+        &self,
+        operation: ProvisioningOperation,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        if let Some(existing) = tables.provisioning.get(&operation.id) {
+            if !existing.subject.same_person(&operation.subject) {
+                return Err(StoreError::Policy(
+                    "a provisioning operation belongs to the subject that started it".into(),
+                ));
+            }
+            if existing.state > operation.state {
+                return Err(StoreError::Policy(
+                    "a provisioning operation never moves backwards".into(),
+                ));
+            }
+        }
+        tables.provisioning.insert(operation.id.clone(), operation);
+        Ok(())
+    }
+
+    async fn reserve_bootstrap_credential(
+        &self,
+        credential_hash: &str,
+        operation_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        match tables.bootstrap_credentials.get(credential_hash) {
+            None => {
+                tables.bootstrap_credentials.insert(
+                    credential_hash.to_owned(),
+                    BootstrapCredentialRow {
+                        reserved_by_operation: operation_id.to_owned(),
+                        reserved_at: now,
+                        consumed_at: None,
+                    },
+                );
+                Ok(())
+            }
+            // The same operation may always resume, even after it consumed
+            // the credential: its last write may not have landed.
+            Some(row) if row.reserved_by_operation == operation_id => Ok(()),
+            Some(_) => Err(StoreError::BootstrapCredentialConsumed),
+        }
+    }
+
+    async fn consume_bootstrap_credential(
+        &self,
+        credential_hash: &str,
+        operation_id: &str,
+        _user_id: &str,
+        _org_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut tables = self.tables.write();
+        match tables.bootstrap_credentials.get_mut(credential_hash) {
+            Some(row) if row.reserved_by_operation == operation_id => {
+                row.consumed_at.get_or_insert(now);
+                Ok(())
+            }
+            _ => Err(StoreError::BootstrapCredentialConsumed),
+        }
+    }
+
+    async fn bootstrap_account(
+        &self,
+        input: BootstrapAccount,
+    ) -> Result<BootstrappedAccount, StoreError> {
+        let mut tables = self.tables.write();
+        tables
+            .org_names
+            .insert(input.org_id.clone(), input.org_name.clone());
+        tables
+            .org_logto_ids
+            .insert(input.org_id.clone(), input.logto_organization_id.clone());
+        tables
+            .users
+            .insert(input.user_id.clone(), input.display_name.clone());
+        tables.external_identities.insert(
+            (
+                input.org_id.clone(),
+                input.subject.provider.clone(),
+                input.subject.tenant.clone().unwrap_or_default(),
+                input.subject.subject.clone(),
+            ),
+            input.user_id.clone(),
+        );
+        tables.org_memberships.insert(
+            (input.org_id.clone(), input.user_id.clone()),
+            OrgRole::Owner,
+        );
+        tables.authorization_audit.push(membership_audit_event(
+            &input.org_id,
+            None,
+            &input.user_id,
+            "account.bootstrapped",
+            None,
+            Some("owner".into()),
+            AuthorizationContext {
+                actor_user_id: input.user_id.clone(),
+                reason: "deployment bootstrap claimed".into(),
+                request_id: input.request_id,
+                grant_id: None,
+                source: input.source,
+                now: input.now,
+            },
+        ));
+        Ok(BootstrappedAccount {
+            org_id: input.org_id,
+            user_id: input.user_id,
+            logto_organization_id: input.logto_organization_id,
         })
     }
 
@@ -1736,6 +2153,23 @@ fn ensure_crypto_provider() {
     });
 }
 
+/// Another subject's operation is invisible under its row policy, so a write
+/// under that id surfaces as a unique violation or a policy refusal. Both are
+/// the same answer: not yours.
+fn provisioning_write_error(error: tokio_postgres::Error) -> StoreError {
+    use tokio_postgres::error::SqlState;
+    match error.code() {
+        Some(code)
+            if *code == SqlState::UNIQUE_VIOLATION || *code == SqlState::INSUFFICIENT_PRIVILEGE =>
+        {
+            StoreError::Policy(
+                "a provisioning operation belongs to the subject that started it".into(),
+            )
+        }
+        _ => StoreError::Database(error.to_string()),
+    }
+}
+
 impl PgStore {
     pub async fn connect(database_url: &str, max_connections: usize) -> anyhow::Result<Self> {
         ensure_crypto_provider();
@@ -1799,6 +2233,9 @@ impl PgStore {
             .await?;
         client
             .batch_execute(include_str!("../migrations/0008_shared_chat_control.sql"))
+            .await?;
+        client
+            .batch_execute(include_str!("../migrations/0009_account_bootstrap.sql"))
             .await?;
         Ok(())
     }
@@ -1936,6 +2373,82 @@ impl PgStore {
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
         Ok(transaction)
+    }
+
+    /// Open a transaction with arbitrary `app.*` settings bound, for the
+    /// subject-, token- and operation-scoped reads of migration 0009. Same
+    /// transaction-local discipline as [`PgStore::scoped`].
+    pub(crate) async fn settings_scoped<'a>(
+        &self,
+        client: &'a mut deadpool_postgres::Client,
+        settings: &[(&str, &str)],
+    ) -> Result<deadpool_postgres::Transaction<'a>, StoreError> {
+        let transaction = client
+            .transaction()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        for (name, value) in settings {
+            transaction
+                .execute("SELECT set_config($1, $2, true)", &[name, value])
+                .await
+                .map_err(|error| StoreError::Database(error.to_string()))?;
+        }
+        Ok(transaction)
+    }
+
+    pub(crate) async fn subject_scoped<'a>(
+        &self,
+        client: &'a mut deadpool_postgres::Client,
+        subject: &SubjectRef,
+    ) -> Result<deadpool_postgres::Transaction<'a>, StoreError> {
+        let tenant = subject.tenant.clone().unwrap_or_default();
+        self.settings_scoped(
+            client,
+            &[
+                ("app.account_provider", subject.provider.as_str()),
+                ("app.account_tenant", tenant.as_str()),
+                ("app.account_subject", subject.subject.as_str()),
+            ],
+        )
+        .await
+    }
+
+    /// The operation row is visible to its own id AND its own subject, so a
+    /// guessed id reads as absent.
+    pub(crate) async fn operation_scoped<'a>(
+        &self,
+        client: &'a mut deadpool_postgres::Client,
+        operation_id: &str,
+        subject: &SubjectRef,
+    ) -> Result<deadpool_postgres::Transaction<'a>, StoreError> {
+        self.settings_scoped(
+            client,
+            &[
+                ("app.provisioning_operation", operation_id),
+                ("app.account_provider", subject.provider.as_str()),
+                ("app.account_subject", subject.subject.as_str()),
+            ],
+        )
+        .await
+    }
+
+    /// Bind the user ids a subject lookup returned, for the policies of
+    /// migration 0009 that compare against `app.account_user_ids`. Comma-
+    /// separated: user ids are `usr_` plus hex, so the separator cannot occur
+    /// inside one.
+    pub(crate) async fn bind_account_user_ids(
+        transaction: &deadpool_postgres::Transaction<'_>,
+        user_ids: &[String],
+    ) -> Result<(), StoreError> {
+        let joined = user_ids.join(",");
+        transaction
+            .execute(
+                "SELECT set_config('app.account_user_ids', $1, true)",
+                &[&joined],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(())
     }
 
     pub(crate) async fn client(&self) -> Result<deadpool_postgres::Client, StoreError> {
@@ -2737,6 +3250,321 @@ impl Store for PgStore {
         Ok(AcceptedInvitation {
             invitation: redeemed,
             user_id,
+        })
+    }
+
+    // ── Account control plane ────────────────────────────────────────────────
+
+    async fn list_account_memberships(
+        &self,
+        subject: &SubjectRef,
+    ) -> Result<Vec<AccountMembership>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.subject_scoped(&mut client, subject).await?;
+        // Step one: the only table a subject is looked up in. The subject
+        // policy of migration 0009 exposes this person's identity rows and
+        // nothing else.
+        let user_ids: Vec<String> = transaction
+            .query(
+                "SELECT DISTINCT user_id FROM external_identities ORDER BY user_id",
+                &[],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .iter()
+            .map(|row| row.get("user_id"))
+            .collect();
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Step two: bind those ids. Every other subject policy compares
+        // against the setting and reads no table, so no policy can re-enter
+        // another.
+        Self::bind_account_user_ids(&transaction, &user_ids).await?;
+        let rows = transaction
+            .query(
+                "WITH me AS (SELECT unnest(account_subject_user_ids()) AS user_id),                       standing AS (                         SELECT m.org_id, m.user_id, m.role AS org_role                           FROM org_memberships m JOIN me ON me.user_id = m.user_id                         UNION                         SELECT w.org_id, w.user_id, NULL::text AS org_role                           FROM workspace_memberships w JOIN me ON me.user_id = w.user_id                       )                  SELECT s.org_id, o.display_name, o.logto_organization_id, s.user_id,                         max(s.org_role) AS org_role,                         (SELECT count(*) FROM workspace_memberships wc                           WHERE wc.org_id = s.org_id AND wc.user_id = s.user_id) AS workspace_count                    FROM standing s JOIN orgs o ON o.id = s.org_id                   GROUP BY s.org_id, o.display_name, o.logto_organization_id, s.user_id                   ORDER BY s.org_id",
+                &[],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        rows.iter()
+            .map(|row| {
+                let org_role: Option<String> = row.get("org_role");
+                let workspace_count: i64 = row.get("workspace_count");
+                Ok(AccountMembership {
+                    org_id: row.get("org_id"),
+                    org_name: row.get("display_name"),
+                    logto_organization_id: row.get("logto_organization_id"),
+                    user_id: row.get("user_id"),
+                    org_role: org_role
+                        .map(|raw| {
+                            OrgRole::parse(&raw)
+                                .map_err(|error| StoreError::Corrupt(error.to_string()))
+                        })
+                        .transpose()?,
+                    workspace_count: usize::try_from(workspace_count).unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    async fn find_invitation_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<Invitation>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self
+            .settings_scoped(&mut client, &[("app.invitation_token_hash", token_hash)])
+            .await?;
+        let row = transaction
+            .query_opt(
+                &format!(
+                    "SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE token_hash = $1"
+                ),
+                &[&token_hash],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        row.as_ref().map(invitation_from_row).transpose()
+    }
+
+    async fn get_provisioning_operation(
+        &self,
+        operation_id: &str,
+        subject: &SubjectRef,
+    ) -> Result<Option<ProvisioningOperation>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self
+            .operation_scoped(&mut client, operation_id, subject)
+            .await?;
+        let row = transaction
+            .query_opt(
+                "SELECT id, kind, state, identity_provider, identity_tenant, identity_subject,                         payload, logto_organization_id, result, created_at, updated_at                    FROM identity_provisioning_operations WHERE id = $1",
+                &[&operation_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        row.map(|row| {
+            let kind: String = row.get("kind");
+            let state: String = row.get("state");
+            Ok(ProvisioningOperation {
+                id: row.get("id"),
+                kind: ProvisioningKind::parse(&kind)
+                    .ok_or_else(|| StoreError::Corrupt(format!("provisioning kind {kind}")))?,
+                state: ProvisioningState::parse(&state)
+                    .ok_or_else(|| StoreError::Corrupt(format!("provisioning state {state}")))?,
+                subject: SubjectRef {
+                    provider: row.get("identity_provider"),
+                    tenant: row.get("identity_tenant"),
+                    subject: row.get("identity_subject"),
+                },
+                payload: row.get("payload"),
+                logto_organization_id: row.get("logto_organization_id"),
+                result: row.get("result"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+        })
+        .transpose()
+    }
+
+    async fn put_provisioning_operation(
+        &self,
+        operation: ProvisioningOperation,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self
+            .operation_scoped(&mut client, &operation.id, &operation.subject)
+            .await?;
+        let existing: Option<String> = transaction
+            .query_opt(
+                "SELECT state FROM identity_provisioning_operations WHERE id = $1 FOR UPDATE",
+                &[&operation.id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .map(|row| row.get("state"));
+        if let Some(existing) = existing.as_deref().and_then(ProvisioningState::parse) {
+            if existing > operation.state {
+                return Err(StoreError::Policy(
+                    "a provisioning operation never moves backwards".into(),
+                ));
+            }
+        }
+        transaction
+            .execute(
+                "INSERT INTO identity_provisioning_operations                    (id, kind, state, identity_provider, identity_tenant, identity_subject,                     payload, logto_organization_id, result, created_at, updated_at)                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)                  ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state,                    payload = EXCLUDED.payload,                    logto_organization_id = EXCLUDED.logto_organization_id,                    result = EXCLUDED.result, updated_at = EXCLUDED.updated_at",
+                &[
+                    &operation.id,
+                    &operation.kind.as_str(),
+                    &operation.state.as_str(),
+                    &operation.subject.provider,
+                    &operation.subject.tenant,
+                    &operation.subject.subject,
+                    &operation.payload,
+                    &operation.logto_organization_id,
+                    &operation.result,
+                    &operation.created_at,
+                    &operation.updated_at,
+                ],
+            )
+            .await
+            .map_err(provisioning_write_error)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))
+    }
+
+    async fn reserve_bootstrap_credential(
+        &self,
+        credential_hash: &str,
+        operation_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self
+            .settings_scoped(
+                &mut client,
+                &[("app.bootstrap_credential_hash", credential_hash)],
+            )
+            .await?;
+        let existing = transaction
+            .query_opt(
+                "SELECT reserved_by_operation, consumed_at                    FROM deployment_bootstrap_credentials WHERE credential_hash = $1 FOR UPDATE",
+                &[&credential_hash],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        match existing {
+            None => {
+                transaction
+                    .execute(
+                        "INSERT INTO deployment_bootstrap_credentials                            (credential_hash, reserved_by_operation, reserved_at) VALUES ($1, $2, $3)",
+                        &[&credential_hash, &operation_id, &now],
+                    )
+                    .await
+                    .map_err(|error| StoreError::Database(error.to_string()))?;
+            }
+            Some(row) => {
+                let holder: String = row.get("reserved_by_operation");
+                // The same operation may always resume, consumed or not: its
+                // last write may not have landed.
+                if holder != operation_id {
+                    return Err(StoreError::BootstrapCredentialConsumed);
+                }
+            }
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))
+    }
+
+    async fn consume_bootstrap_credential(
+        &self,
+        credential_hash: &str,
+        operation_id: &str,
+        user_id: &str,
+        org_id: &str,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self
+            .settings_scoped(
+                &mut client,
+                &[("app.bootstrap_credential_hash", credential_hash)],
+            )
+            .await?;
+        let updated = transaction
+            .execute(
+                "UPDATE deployment_bootstrap_credentials                     SET consumed_at = COALESCE(consumed_at, $3), consumed_by_user_id = $4, org_id = $5                   WHERE credential_hash = $1 AND reserved_by_operation = $2",
+                &[&credential_hash, &operation_id, &now, &user_id, &org_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        if updated == 0 {
+            return Err(StoreError::BootstrapCredentialConsumed);
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))
+    }
+
+    async fn bootstrap_account(
+        &self,
+        input: BootstrapAccount,
+    ) -> Result<BootstrappedAccount, StoreError> {
+        let mut client = self.client().await?;
+        // The new org's own scope. The org row passes its WITH CHECK because
+        // its id IS the tenant, the user row passes because migration 0007
+        // only asks that a tenant be bound, the membership passes because its
+        // org is the tenant, and the identity row passes because by then the
+        // membership exists. That is the order below, and it matters.
+        let transaction = self.scoped(&mut client, &input.org_id).await?;
+        transaction
+            .execute(
+                "INSERT INTO orgs (id, display_name, logto_organization_id, created_at, updated_at)                  VALUES ($1, $2, $3, $4, $4)                  ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name,                    logto_organization_id = EXCLUDED.logto_organization_id, updated_at = EXCLUDED.updated_at",
+                &[&input.org_id, &input.org_name, &input.logto_organization_id, &input.now],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        transaction
+            .execute(
+                "INSERT INTO users (id, display_name, email, created_at, updated_at)                  VALUES ($1, $2, $3, $4, $4)                  ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name,                    email = COALESCE(EXCLUDED.email, users.email), updated_at = EXCLUDED.updated_at",
+                &[&input.user_id, &input.display_name, &input.email, &input.now],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        transaction
+            .execute(
+                "INSERT INTO org_memberships (org_id, user_id, role, created_at, updated_at)                  VALUES ($1, $2, 'owner', $3, $3)                  ON CONFLICT (org_id, user_id) DO UPDATE SET role = 'owner', updated_at = EXCLUDED.updated_at",
+                &[&input.org_id, &input.user_id, &input.now],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        transaction
+            .execute(
+                "INSERT INTO external_identities                    (id, user_id, provider, subject, tenant, label, linked_at)                  VALUES ($1, $2, $3, $4, $5, $6, $7)                  ON CONFLICT (provider, tenant, subject) DO UPDATE SET                    user_id = EXCLUDED.user_id, label = EXCLUDED.label",
+                &[
+                    &format!("ext_{}", uuid::Uuid::new_v4().simple()),
+                    &input.user_id,
+                    &input.subject.provider,
+                    &input.subject.subject,
+                    &input.subject.tenant,
+                    &Some(input.display_name.clone()),
+                    &input.now,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        let event = membership_audit_event(
+            &input.org_id,
+            None,
+            &input.user_id,
+            "account.bootstrapped",
+            None,
+            Some("owner".into()),
+            AuthorizationContext {
+                actor_user_id: input.user_id.clone(),
+                reason: "deployment bootstrap claimed".into(),
+                request_id: input.request_id,
+                grant_id: None,
+                source: input.source,
+                now: input.now,
+            },
+        );
+        insert_authorization_audit(&transaction, &event).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(BootstrappedAccount {
+            org_id: input.org_id,
+            user_id: input.user_id,
+            logto_organization_id: input.logto_organization_id,
         })
     }
 

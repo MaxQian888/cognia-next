@@ -487,3 +487,56 @@ describe("the default token source", () => {
     expect(calls.some((url) => url.endsWith("/grants"))).toBe(true)
   })
 })
+
+describe("the server's user id is canonical", () => {
+  it("reconciles a binding that still carries a derived id BEFORE pulling anything", async () => {
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+    const { calls, impl } = fetchReturning({})
+    const reconcile = jest.fn(async () => ({ changed: true }))
+    const result = await refreshCollabPlane({
+      localAccountId: ACCOUNT,
+      registry: registryReturning({ localAccountId: ACCOUNT, orgId: ORG, userId: "usr_derived" }),
+      fetchImpl: impl,
+      accessToken: async () => "logto-token",
+      reconcile,
+      now: () => 1_000,
+    })
+    expect(result).toMatchObject({
+      status: "refreshed",
+      userId: ADA,
+      reconciledFrom: "usr_derived",
+    })
+    expect(reconcile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        localAccountId: ACCOUNT,
+        legacyUserId: "usr_derived",
+        canonicalUserId: ADA,
+        orgId: ORG,
+        accessToken: "logto-token",
+      }),
+      expect.anything()
+    )
+    // The grant exchange (which names the canonical id) came first, and the
+    // membership pull came after the reconciliation.
+    const grantIndex = calls.findIndex((url) => url.endsWith("/grants"))
+    const membershipsIndex = calls.findIndex((url) => url.includes("/memberships/me"))
+    expect(grantIndex).toBeGreaterThanOrEqual(0)
+    expect(grantIndex).toBeLessThan(membershipsIndex)
+  })
+
+  it("leaves a binding alone when the server agrees with it", async () => {
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+    const { impl } = fetchReturning({})
+    const reconcile = jest.fn()
+    const result = await refreshCollabPlane({
+      localAccountId: ACCOUNT,
+      registry: registryReturning({ localAccountId: ACCOUNT, orgId: ORG, userId: ADA }),
+      fetchImpl: impl,
+      accessToken: async () => "logto-token",
+      reconcile,
+      now: () => 1_000,
+    })
+    expect(result).not.toHaveProperty("reconciledFrom")
+    expect(reconcile).not.toHaveBeenCalled()
+  })
+})

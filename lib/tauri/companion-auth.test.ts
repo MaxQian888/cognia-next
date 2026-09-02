@@ -1,5 +1,7 @@
 import { decodePairPayload, encodePairPayload } from "@/lib/qr/pair-payload"
 import {
+  authConfigCollaborationServiceUrl,
+  authConfigSocialProviders,
   clearCompanionAccessTokens,
   CompanionApiError,
   companionErrorCode,
@@ -458,5 +460,73 @@ describe("signaling transport in the auth config", () => {
     await expect(
       fetchCompanionAuthConfig("http://127.0.0.1:27891", undefined, fetcherFor(undefined))
     ).rejects.toThrow(/malformed/)
+  })
+})
+
+describe("auth config version 2 (additive discovery)", () => {
+  it("reads social providers defensively and keeps operator order", () => {
+    const providers = authConfigSocialProviders({
+      oidc: {
+        issuer: "i",
+        audience: "a",
+        webClientId: "w",
+        scopes: [],
+        socialProviders: [
+          { provider: " GitHub ", directSignIn: "social:github" },
+          { provider: "feishu", directSignIn: "social:feishu" },
+          { provider: "github", directSignIn: "social:github" },
+          { provider: "bad", directSignIn: "javascript:alert(1)" } as never,
+          { provider: 7, directSignIn: "social:x" } as never,
+          null as never,
+        ],
+      },
+    })
+    expect(providers).toEqual([
+      { provider: "github", directSignIn: "social:github" },
+      { provider: "feishu", directSignIn: "social:feishu" },
+    ])
+    expect(authConfigSocialProviders({ oidc: undefined })).toEqual([])
+    expect(
+      authConfigSocialProviders({
+        oidc: { issuer: "i", audience: "a", webClientId: "w", scopes: [] },
+      })
+    ).toEqual([])
+  })
+
+  it("normalises the collaboration service url and refuses anything but http(s)", () => {
+    expect(
+      authConfigCollaborationServiceUrl({
+        collaboration: {
+          serviceUrl: "https://collab.example.com/",
+          registrationPolicy: "bootstrap-then-invite",
+        },
+      })
+    ).toBe("https://collab.example.com")
+    expect(authConfigCollaborationServiceUrl({})).toBeNull()
+    expect(
+      authConfigCollaborationServiceUrl({
+        collaboration: { serviceUrl: "ftp://x", registrationPolicy: "bootstrap-then-invite" },
+      })
+    ).toBeNull()
+    expect(
+      authConfigCollaborationServiceUrl({
+        collaboration: { serviceUrl: "   ", registrationPolicy: "bootstrap-then-invite" },
+      })
+    ).toBeNull()
+  })
+
+  it("still accepts a version-1 config with none of the new fields", async () => {
+    const fetcher = jest.fn(async () =>
+      Response.json({
+        deploymentMode: "multi-tenant",
+        hostId: "host-a",
+        oidc: { issuer: "i", audience: "a", webClientId: "w", scopes: ["openid"] },
+        signaling: { url: "wss://host.test/signaling", iceServers: [] },
+      })
+    )
+    const config = await fetchCompanionAuthConfig("https://host.test", undefined, fetcher as never)
+    expect(config.configVersion).toBeUndefined()
+    expect(authConfigSocialProviders(config)).toEqual([])
+    expect(authConfigCollaborationServiceUrl(config)).toBeNull()
   })
 })

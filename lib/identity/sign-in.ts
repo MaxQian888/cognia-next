@@ -20,6 +20,13 @@
  * keeps the id they already have. The property ADR-0149 wanted survives — the id
  * merely happened to be derived once.
  *
+ * Since the collaboration server became the authority for `User.id`, the
+ * derived value is PROVISIONAL: the first successful contact with the server
+ * replaces it with the canonical id through
+ * `lib/identity/reconcile-user-id.ts`, keeping the derived one as a legacy
+ * alias on the binding. A profile that never reaches a server keeps the
+ * derived id for good, which is still the right offline answer.
+ *
  * # What signing in does NOT do
  *
  * It does not unlock, gate or touch the profile's data. A LocalProfile is an

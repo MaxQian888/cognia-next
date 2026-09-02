@@ -32,10 +32,12 @@ parking_lot = "0.12"
 object_store = { version = "0.12", features = ["aws"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rand = "0.9"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+subtle = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }

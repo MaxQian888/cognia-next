@@ -3,13 +3,18 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use cognia_collab_server::api::AccountControlConfig;
 use cognia_collab_server::chat_attachment_store::ObjectStoreChatAttachments;
+use cognia_collab_server::logto_management::{
+    HttpLogtoManagement, LogtoManagementConfig, UnconfiguredLogtoManagement,
+};
 use cognia_collab_server::{router, AppState, PgStore};
 use cognia_tenant_auth::grant::GrantSigner;
 use cognia_tenant_auth::oidc::{OidcAuthenticator, OidcConfig};
 use tracing_subscriber::EnvFilter;
 
-#[derive(Debug, Parser)]
+// No `Debug`: the arguments carry the M2M client secret and the grant key.
+#[derive(Parser)]
 #[command(name = "cognia-collab-server", about = "Cognia collaboration plane")]
 struct Args {
     #[arg(long, env = "COLLAB_BIND", default_value = "0.0.0.0:8080")]
@@ -52,6 +57,41 @@ struct Args {
     /// Rollout gate for server-authoritative shared chat routes.
     #[arg(long, env = "COLLAB_SHARED_CHAT_ENABLED", default_value_t = false)]
     shared_chat_enabled: bool,
+    /// Rollout gate for the account control plane: membership discovery,
+    /// first-owner bootstrap and generic invitation acceptance.
+    #[arg(
+        long,
+        env = "COLLAB_ACCOUNT_BOOTSTRAP_ENABLED",
+        default_value_t = false
+    )]
+    account_bootstrap_enabled: bool,
+    /// SHA-256 (hex) of the one-time deployment bootstrap credential. Mint the
+    /// credential with `openssl rand -base64 32`, hash it with
+    /// `printf %s "$CRED" | sha256sum`, and hand the clear value to the first owner.
+    #[arg(long, env = "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256")]
+    account_bootstrap_credential_sha256: Option<String>,
+    /// Logto's public base URL (NOT the `/oidc` issuer), for the Management API.
+    #[arg(long, env = "COLLAB_LOGTO_ENDPOINT")]
+    logto_endpoint: Option<String>,
+    /// Machine-to-machine application id with `all` on the management resource.
+    #[arg(long, env = "COLLAB_LOGTO_M2M_CLIENT_ID")]
+    logto_m2m_client_id: Option<String>,
+    #[arg(long, env = "COLLAB_LOGTO_M2M_CLIENT_SECRET")]
+    logto_m2m_client_secret: Option<String>,
+    /// The Management API resource indicator. The OSS default is right for a
+    /// self-hosted Logto.
+    #[arg(
+        long,
+        env = "COLLAB_LOGTO_MANAGEMENT_RESOURCE",
+        default_value = "https://default.logto.app/api"
+    )]
+    logto_management_resource: String,
+    /// Logto organization role NAME assigned to the first owner.
+    #[arg(long, env = "COLLAB_LOGTO_OWNER_ROLE", default_value = "owner")]
+    logto_owner_role: String,
+    /// Logto organization role NAME assigned to an invited member.
+    #[arg(long, env = "COLLAB_LOGTO_MEMBER_ROLE", default_value = "member")]
+    logto_member_role: String,
 }
 
 #[tokio::main]
@@ -94,10 +134,44 @@ async fn main() -> anyhow::Result<()> {
     } else {
         ObjectStoreChatAttachments::local(std::path::PathBuf::from("./data/collab-attachments"))?
     };
+    let logto: Arc<dyn cognia_collab_server::logto_management::LogtoManagement> = match (
+        args.logto_endpoint,
+        args.logto_m2m_client_id,
+        args.logto_m2m_client_secret,
+    ) {
+        (Some(endpoint), Some(client_id), Some(client_secret)) => {
+            Arc::new(HttpLogtoManagement::new(LogtoManagementConfig {
+                endpoint,
+                client_id,
+                client_secret,
+                resource: args.logto_management_resource,
+            })?)
+        }
+        _ => {
+            if args.account_bootstrap_enabled {
+                tracing::warn!(
+                    "account bootstrap is enabled but COLLAB_LOGTO_ENDPOINT / \
+                     COLLAB_LOGTO_M2M_CLIENT_ID / COLLAB_LOGTO_M2M_CLIENT_SECRET are not all set; \
+                     bootstrap and invitation acceptance will answer 503"
+                );
+            }
+            Arc::new(UnconfiguredLogtoManagement)
+        }
+    };
+    let account_control = AccountControlConfig {
+        enabled: args.account_bootstrap_enabled,
+        bootstrap_credential_sha256: bootstrap_credential_hash(
+            args.account_bootstrap_credential_sha256.as_deref(),
+        )?,
+        owner_role_name: args.logto_owner_role,
+        member_role_name: args.logto_member_role,
+    };
     let state = AppState::new(store.clone(), signer, Arc::new(oidc))
         .with_chat_store(store)
         .with_chat_attachments(Arc::new(attachment_store))
-        .with_shared_chat_enabled(args.shared_chat_enabled);
+        .with_shared_chat_enabled(args.shared_chat_enabled)
+        .with_logto_management(logto)
+        .with_account_control(account_control);
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     tracing::info!(bind = %args.bind, "collaboration plane listening");
@@ -119,6 +193,26 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// The credential hash is compared byte for byte against a hex digest, so a
+/// value that is not one can never match. Refuse it at startup rather than
+/// run a bootstrap that answers 403 forever.
+fn bootstrap_credential_hash(value: Option<&str>) -> anyhow::Result<Option<String>> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if !is_sha256_hex(value) {
+        anyhow::bail!(
+            "COLLAB_ACCOUNT_BOOTSTRAP_CREDENTIAL_SHA256 must be 64 hex characters (got {})",
+            value.len()
+        );
+    }
+    Ok(Some(value.to_ascii_lowercase()))
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("shutting down");
@@ -126,7 +220,22 @@ async fn shutdown() {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_hex;
+    use super::{bootstrap_credential_hash, decode_hex};
+
+    #[test]
+    fn the_bootstrap_credential_hash_must_be_a_sha256_digest() {
+        let digest = "A".repeat(64);
+        assert_eq!(
+            bootstrap_credential_hash(Some(&format!("  {digest}  "))).unwrap(),
+            Some("a".repeat(64))
+        );
+        assert_eq!(bootstrap_credential_hash(None).unwrap(), None);
+        assert_eq!(bootstrap_credential_hash(Some("   ")).unwrap(), None);
+        // The clear credential pasted where its hash belongs.
+        assert!(bootstrap_credential_hash(Some("hunter2")).is_err());
+        assert!(bootstrap_credential_hash(Some(&"a".repeat(63))).is_err());
+        assert!(bootstrap_credential_hash(Some(&"g".repeat(64))).is_err());
+    }
 
     #[test]
     fn hex_decoding_refuses_the_shapes_a_misconfiguration_produces() {

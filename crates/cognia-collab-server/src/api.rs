@@ -22,20 +22,24 @@ use cognia_tenant_auth::{OrgId, OrgRole, UserId, WorkspaceCapability, WorkspaceR
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::auth::{authorize_workspace, readable_scope, verify_grant, AuthError, WorkspaceScope};
 use crate::chat_api::ChatHub;
 use crate::chat_store::{ChatStore, InMemoryChatStore};
+use crate::logto_management::{LogtoManagement, LogtoManagementError, UnconfiguredLogtoManagement};
 use crate::model::{
     ActorError, ActorKind, ArtifactError, CollabActor, Issue, IssueEvent, IssuePriority,
     IssueStatus, Plan, PlanStatus, PlanStepKind, PlanStepStatus, Run, RunArtifact, RunKind,
     RunStatus,
 };
 use crate::store::{
-    AcceptInvitation, AuthorizationAuditEvent, AuthorizationContext, Invitation, IssuePatch,
-    IssueQuery, MutationGuard, NewInvitation, NewIssue, NewPlan, NewPlanStep, NewRun, PlanPatch,
-    PlanQuery, PlanStepProgress, RunPatch, RunQuery, Store, StoreError, Workspace, WorkspaceMember,
+    AcceptInvitation, AccountMembership, AuthorizationAuditEvent, AuthorizationContext,
+    BootstrapAccount, Invitation, IssuePatch, IssueQuery, MutationGuard, NewInvitation, NewIssue,
+    NewPlan, NewPlanStep, NewRun, PlanPatch, PlanQuery, PlanStepProgress, ProvisioningKind,
+    ProvisioningOperation, ProvisioningState, RunPatch, RunQuery, Store, StoreError, SubjectRef,
+    Workspace, WorkspaceMember,
 };
 
 /// How long a minted grant lives.
@@ -61,11 +65,41 @@ pub struct AppState {
     pub oidc: Arc<dyn Authenticator>,
     /// Injectable so tests can pin timestamps instead of sleeping.
     pub now: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// The server-side door into Logto's Management API. Unconfigured by default.
+    pub logto: Arc<dyn LogtoManagement>,
+    /// The account control plane (bootstrap, discovery, generic invitation
+    /// acceptance). Off by default: `COLLAB_ACCOUNT_BOOTSTRAP_ENABLED`.
+    pub account_control: AccountControlConfig,
+}
+
+/// Rollout gate and policy for the account control plane.
+#[derive(Clone, Debug)]
+pub struct AccountControlConfig {
+    pub enabled: bool,
+    /// SHA-256 (lowercase hex) of the one-time deployment bootstrap credential.
+    /// `None` means no first owner can be claimed, which is the safe default.
+    pub bootstrap_credential_sha256: Option<String>,
+    /// Logto organization role names the saga assigns.
+    pub owner_role_name: String,
+    pub member_role_name: String,
+}
+
+impl Default for AccountControlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bootstrap_credential_sha256: None,
+            owner_role_name: "owner".into(),
+            member_role_name: "member".into(),
+        }
+    }
 }
 
 impl AppState {
     pub fn new(store: Arc<dyn Store>, signer: GrantSigner, oidc: Arc<dyn Authenticator>) -> Self {
         Self {
+            logto: Arc::new(UnconfiguredLogtoManagement),
+            account_control: AccountControlConfig::default(),
             store,
             chat_store: Arc::new(InMemoryChatStore::new()),
             chat_hub: Arc::new(ChatHub::default()),
@@ -102,6 +136,16 @@ impl AppState {
         self.shared_chat_enabled = enabled;
         self
     }
+
+    pub fn with_logto_management(mut self, logto: Arc<dyn LogtoManagement>) -> Self {
+        self.logto = logto;
+        self
+    }
+
+    pub fn with_account_control(mut self, config: AccountControlConfig) -> Self {
+        self.account_control = config;
+        self
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -109,6 +153,15 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/internal/shared-chat-metrics", get(shared_chat_metrics))
         .route("/v1/orgs/{org_id}/grants", axum::routing::post(mint_grant))
+        .route("/v1/account/memberships", get(account_memberships))
+        .route(
+            "/v1/account/bootstrap",
+            axum::routing::post(account_bootstrap),
+        )
+        .route(
+            "/v1/invitations/accept",
+            axum::routing::post(accept_invitation_by_token),
+        )
         .route("/v1/orgs/{org_id}/memberships/me", get(my_memberships))
         .route(
             "/v1/orgs/{org_id}/invitations",
@@ -175,6 +228,9 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     if state.shared_chat_enabled {
         features.push("shared-chat");
     }
+    if state.account_control.enabled {
+        features.push("account-bootstrap");
+    }
     Json(HealthResponse {
         status: "ok",
         collab_protocol_version: 2,
@@ -217,6 +273,14 @@ enum Failure {
     /// a stranger with a valid token enumerate which orgs exist and which
     /// subjects they have linked.
     UnlinkedIdentity,
+    /// `COLLAB_ACCOUNT_BOOTSTRAP_ENABLED` is off. A 404, so a deployment that
+    /// has not turned the plane on looks exactly like one that never had it.
+    AccountControlDisabled,
+    /// The presented bootstrap credential is not the one this deployment
+    /// was minted with. Same shape as a wrong password: no detail.
+    BootstrapCredentialInvalid,
+    /// The identity provider could not be mutated. The saga is left resumable.
+    Idp(LogtoManagementError),
 }
 
 impl IntoResponse for Failure {
@@ -254,6 +318,9 @@ impl Failure {
                 StoreError::Conflict(_) => unreachable!("conflicts are handled before this match"),
                 StoreError::LastOwner => (StatusCode::CONFLICT, error.to_string()),
                 StoreError::InvitationUnavailable => (StatusCode::GONE, error.to_string()),
+                StoreError::BootstrapCredentialConsumed => {
+                    (StatusCode::CONFLICT, error.to_string())
+                }
                 StoreError::Policy(_) => (StatusCode::FORBIDDEN, error.to_string()),
                 other => {
                     tracing::error!(error = %other, "collaboration store failure");
@@ -271,6 +338,22 @@ impl Failure {
                 StatusCode::FORBIDDEN,
                 "this identity is not a member of that organisation".into(),
             ),
+            Self::AccountControlDisabled => (StatusCode::NOT_FOUND, "not found".into()),
+            Self::BootstrapCredentialInvalid => (
+                StatusCode::FORBIDDEN,
+                "the bootstrap credential was not accepted".into(),
+            ),
+            Self::Idp(LogtoManagementError::NotConfigured(message)) => {
+                (StatusCode::SERVICE_UNAVAILABLE, message)
+            }
+            Self::Idp(error) => {
+                tracing::error!(error = %error, "identity provider mutation failed");
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "the identity provider could not be updated; retry with the same operationId"
+                        .into(),
+                )
+            }
         };
         (status, Json(ApiError { error: message })).into_response()
     }
@@ -915,6 +998,536 @@ async fn accept_invitation(
             })
             .await?,
     ))
+}
+
+// ── Account control plane ────────────────────────────────────────────────────
+//
+// Three routes that run BEFORE the caller belongs to any org, so they take a
+// plain OIDC token (no organization claim) and never a grant. Everything is
+// gated on `account_control.enabled`.
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountMembershipsResponse {
+    /// The identity-provider subject the answer is about.
+    pub subject: String,
+    pub memberships: Vec<AccountMembership>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountBootstrapBody {
+    /// Client-minted, replayed verbatim on retry. The saga resumes by it.
+    pub operation_id: String,
+    /// The one-time deployment credential, in the clear. Only its hash is kept.
+    pub credential: String,
+    pub org_name: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// The credential is a secret. It never reaches a log, even at trace level.
+impl std::fmt::Debug for AccountBootstrapBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountBootstrapBody")
+            .field("operation_id", &self.operation_id)
+            .field("credential", &"<redacted>")
+            .field("org_name", &self.org_name)
+            .field("display_name", &self.display_name)
+            .field("email", &self.email)
+            .finish()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountBootstrapResponse {
+    pub operation_id: String,
+    pub org_id: String,
+    pub user_id: String,
+    pub logto_organization_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptInvitationByTokenBody {
+    pub operation_id: String,
+    pub token: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+/// The token redeems the invitation. It never reaches a log.
+impl std::fmt::Debug for AcceptInvitationByTokenBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AcceptInvitationByTokenBody")
+            .field("operation_id", &self.operation_id)
+            .field("token", &"<redacted>")
+            .field("display_name", &self.display_name)
+            .finish()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedInvitationResponse {
+    pub operation_id: String,
+    pub org_id: String,
+    pub user_id: String,
+    pub logto_organization_id: String,
+    pub invitation_id: String,
+}
+
+fn require_account_control(state: &AppState) -> Result<(), Failure> {
+    if state.account_control.enabled {
+        Ok(())
+    } else {
+        Err(Failure::AccountControlDisabled)
+    }
+}
+
+/// Verify the bearer as a subject: tenant claim optional.
+async fn verify_subject(state: &AppState, headers: &HeaderMap) -> Result<SubjectRef, Failure> {
+    let token = crate::auth::bearer_token(authorization(headers))?;
+    let claims = state
+        .oidc
+        .authenticate_subject(token)
+        .await
+        .map_err(Failure::Oidc)?;
+    Ok(SubjectRef {
+        provider: LOGTO_PROVIDER.into(),
+        tenant: claims.tenant_id,
+        subject: claims.subject,
+    })
+}
+
+fn sha256_hex(value: &str) -> String {
+    format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+/// Constant-time comparison of two hex digests. Both sides are digests of a
+/// fixed width, so a length mismatch is a malformed configuration, not a
+/// timing channel worth hiding.
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    left.len() == right.len() && bool::from(left.ct_eq(right))
+}
+
+fn operation_id_is_sane(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
+/// Load an operation for this subject, or refuse: an operation id is a resume
+/// handle, and one subject must not be able to resume another's.
+async fn load_operation_for(
+    state: &AppState,
+    operation_id: &str,
+    subject: &SubjectRef,
+    kind: ProvisioningKind,
+) -> Result<Option<ProvisioningOperation>, Failure> {
+    if !operation_id_is_sane(operation_id) {
+        return Err(Failure::BadRequest(
+            "operationId must be 1-128 characters of [A-Za-z0-9_-]".into(),
+        ));
+    }
+    let Some(operation) = state
+        .store
+        .get_provisioning_operation(operation_id, subject)
+        .await?
+    else {
+        return Ok(None);
+    };
+    // The store already hid another subject's operation. Kind is checked
+    // here: a bootstrap handle replayed at the invitation route is a client
+    // bug, answered as forbidden rather than resumed as the wrong saga.
+    if !operation.subject.same_person(subject) || operation.kind != kind {
+        return Err(Failure::Auth(AuthError::Forbidden));
+    }
+    Ok(Some(operation))
+}
+
+/// Which organizations this verified subject belongs to, across tenants.
+async fn account_memberships(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AccountMembershipsResponse>, Failure> {
+    require_account_control(&state)?;
+    let subject = verify_subject(&state, &headers).await?;
+    // Discovery asks about the person in EVERY organization, whatever the
+    // token happens to be scoped to right now.
+    let lookup = SubjectRef {
+        tenant: None,
+        ..subject.clone()
+    };
+    let memberships = state.store.list_account_memberships(&lookup).await?;
+    Ok(Json(AccountMembershipsResponse {
+        subject: subject.subject,
+        memberships,
+    }))
+}
+
+/// Claim the deployment: create the first Logto organization and Cognia org,
+/// and make the caller its owner. One-time, by credential.
+async fn account_bootstrap(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AccountBootstrapBody>,
+) -> Result<(StatusCode, Json<AccountBootstrapResponse>), Failure> {
+    require_account_control(&state)?;
+    let subject = verify_subject(&state, &headers).await?;
+    if body.org_name.trim().is_empty() || body.org_name.len() > 128 {
+        return Err(Failure::BadRequest(
+            "orgName must be 1-128 characters".into(),
+        ));
+    }
+    let Some(expected) = state.account_control.bootstrap_credential_sha256.as_deref() else {
+        return Err(Failure::BootstrapCredentialInvalid);
+    };
+    let presented = sha256_hex(body.credential.trim());
+    if !constant_time_eq(&presented, expected) {
+        return Err(Failure::BootstrapCredentialInvalid);
+    }
+    let now = (state.now)();
+
+    // A committed operation answers the same way every time.
+    let existing = load_operation_for(
+        &state,
+        &body.operation_id,
+        &subject,
+        ProvisioningKind::Bootstrap,
+    )
+    .await?;
+    if let Some(ProvisioningOperation {
+        state: ProvisioningState::Committed,
+        result: Some(result),
+        ..
+    }) = &existing
+    {
+        let response: AccountBootstrapResponse = serde_json::from_value(result.clone())
+            .map_err(|error| Failure::Store(StoreError::Corrupt(error.to_string())))?;
+        return Ok((StatusCode::OK, Json(response)));
+    }
+
+    // Reserve the credential BEFORE Logto is touched: a second claimant must
+    // be refused without creating an organization nobody will own.
+    state
+        .store
+        .reserve_bootstrap_credential(&presented, &body.operation_id, now)
+        .await?;
+
+    let mut operation = match existing {
+        Some(operation) => operation,
+        None => {
+            // The ids are minted once and travel in the payload, so a retry
+            // converges on the same rows instead of a second set.
+            let operation = ProvisioningOperation {
+                id: body.operation_id.clone(),
+                kind: ProvisioningKind::Bootstrap,
+                state: ProvisioningState::Pending,
+                subject: subject.clone(),
+                payload: serde_json::json!({
+                    "orgName": body.org_name.trim(),
+                    "displayName": body.display_name,
+                    "email": body.email,
+                    "orgId": format!("org_{}", Uuid::new_v4().simple()),
+                    "userId": format!("usr_{}", Uuid::new_v4().simple()),
+                }),
+                logto_organization_id: None,
+                result: None,
+                created_at: now,
+                updated_at: now,
+            };
+            state
+                .store
+                .put_provisioning_operation(operation.clone())
+                .await?;
+            operation
+        }
+    };
+    let org_name = operation.payload["orgName"]
+        .as_str()
+        .unwrap_or(body.org_name.trim())
+        .to_owned();
+    let org_id = payload_string(&operation.payload, "orgId")?;
+    let user_id = payload_string(&operation.payload, "userId")?;
+    let display_name = operation.payload["displayName"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| subject.subject.clone());
+    let email = operation.payload["email"].as_str().map(str::to_owned);
+
+    // Step one: the identity provider. Recorded the moment the organization
+    // exists, because that is the step a retry must never repeat.
+    if operation.state == ProvisioningState::Pending {
+        let logto_organization_id = state
+            .logto
+            .create_organization(&org_name)
+            .await
+            .map_err(Failure::Idp)?;
+        operation.state = ProvisioningState::IdpApplied;
+        operation.logto_organization_id = Some(logto_organization_id.clone());
+        operation.updated_at = now;
+        if let Err(error) = state
+            .store
+            .put_provisioning_operation(operation.clone())
+            .await
+        {
+            // The one window the saga cannot close on its own: Logto has the
+            // organization and this database does not know. Named for the
+            // operator, because organization names are not unique at Logto
+            // and nothing else will ever point at this row.
+            tracing::error!(
+                operation_id = %operation.id,
+                logto_organization_id = %logto_organization_id,
+                error = %error,
+                "orphaned Logto organization: created, but its idp_applied record failed to land"
+            );
+            return Err(error.into());
+        }
+    }
+    let logto_organization_id = operation
+        .logto_organization_id
+        .clone()
+        .ok_or_else(|| Failure::Store(StoreError::Corrupt("idp_applied without an org".into())))?;
+    // Membership and role are idempotent at Logto, so they are simply redone
+    // on a retry rather than tracked as their own states.
+    state
+        .logto
+        .add_organization_user(&logto_organization_id, &subject.subject)
+        .await
+        .map_err(Failure::Idp)?;
+    state
+        .logto
+        .assign_organization_role(
+            &logto_organization_id,
+            &subject.subject,
+            &state.account_control.owner_role_name,
+        )
+        .await
+        .map_err(Failure::Idp)?;
+
+    // Step two: this database. Idempotent row by row.
+    let bootstrapped = state
+        .store
+        .bootstrap_account(BootstrapAccount {
+            operation_id: operation.id.clone(),
+            org_id,
+            org_name,
+            logto_organization_id: logto_organization_id.clone(),
+            user_id,
+            display_name,
+            email,
+            subject: SubjectRef {
+                provider: subject.provider.clone(),
+                tenant: Some(logto_organization_id.clone()),
+                subject: subject.subject.clone(),
+            },
+            now,
+            request_id: request_id(&headers),
+            source: request_source(&headers),
+        })
+        .await?;
+    state
+        .store
+        .consume_bootstrap_credential(
+            &presented,
+            &operation.id,
+            &bootstrapped.user_id,
+            &bootstrapped.org_id,
+            now,
+        )
+        .await?;
+
+    let response = AccountBootstrapResponse {
+        operation_id: operation.id.clone(),
+        org_id: bootstrapped.org_id,
+        user_id: bootstrapped.user_id,
+        logto_organization_id: bootstrapped.logto_organization_id,
+    };
+    operation.state = ProvisioningState::Committed;
+    operation.result = Some(serde_json::to_value(&response).unwrap_or_default());
+    operation.updated_at = now;
+    state.store.put_provisioning_operation(operation).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
+
+fn payload_string(payload: &serde_json::Value, key: &str) -> Result<String, Failure> {
+    payload[key].as_str().map(str::to_owned).ok_or_else(|| {
+        Failure::Store(StoreError::Corrupt(format!(
+            "operation payload lacks {key}"
+        )))
+    })
+}
+
+/// Redeem an invitation with a plain token: find which org minted it, put the
+/// person into that org at Logto, then create the local identity and
+/// membership. The org-scoped `…/invitations/accept` stays for callers that
+/// already hold an organization token.
+async fn accept_invitation_by_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AcceptInvitationByTokenBody>,
+) -> Result<(StatusCode, Json<AcceptedInvitationResponse>), Failure> {
+    require_account_control(&state)?;
+    let subject = verify_subject(&state, &headers).await?;
+    if body.token.trim().is_empty() {
+        return Err(Failure::BadRequest("token must not be blank".into()));
+    }
+    let now = (state.now)();
+
+    let existing = load_operation_for(
+        &state,
+        &body.operation_id,
+        &subject,
+        ProvisioningKind::InvitationAccept,
+    )
+    .await?;
+    if let Some(ProvisioningOperation {
+        state: ProvisioningState::Committed,
+        result: Some(result),
+        ..
+    }) = &existing
+    {
+        let response: AcceptedInvitationResponse = serde_json::from_value(result.clone())
+            .map_err(|error| Failure::Store(StoreError::Corrupt(error.to_string())))?;
+        return Ok((StatusCode::OK, Json(response)));
+    }
+
+    let token_hash = invitation_token_hash(body.token.trim());
+    let invitation = state
+        .store
+        .find_invitation_by_token_hash(&token_hash)
+        .await?
+        .ok_or(Failure::Store(StoreError::InvitationUnavailable))?;
+    if invitation.revoked_at.is_some() || invitation.expires_at < now {
+        return Err(Failure::Store(StoreError::InvitationUnavailable));
+    }
+    // A redeemed invitation is only acceptable as a resume of the operation
+    // that redeemed it, which the committed short-circuit above handles.
+    if invitation.redeemed_at.is_some() && existing.is_none() {
+        return Err(Failure::Store(StoreError::InvitationUnavailable));
+    }
+    let logto_organization_id = state
+        .store
+        .org_logto_id(&invitation.org_id)
+        .await?
+        .ok_or_else(|| {
+            Failure::Store(StoreError::Policy(
+                "the inviting organization is not linked to the identity provider".into(),
+            ))
+        })?;
+
+    let mut operation = match existing {
+        Some(operation) => operation,
+        None => {
+            let operation = ProvisioningOperation {
+                id: body.operation_id.clone(),
+                kind: ProvisioningKind::InvitationAccept,
+                state: ProvisioningState::Pending,
+                subject: subject.clone(),
+                payload: serde_json::json!({
+                    "invitationId": invitation.id,
+                    "orgId": invitation.org_id,
+                    "displayName": body.display_name,
+                }),
+                logto_organization_id: Some(logto_organization_id.clone()),
+                result: None,
+                created_at: now,
+                updated_at: now,
+            };
+            state
+                .store
+                .put_provisioning_operation(operation.clone())
+                .await?;
+            operation
+        }
+    };
+
+    if operation.state == ProvisioningState::Pending {
+        state
+            .logto
+            .add_organization_user(&logto_organization_id, &subject.subject)
+            .await
+            .map_err(Failure::Idp)?;
+        let role_name = match invitation.org_role {
+            Some(OrgRole::Owner) => state.account_control.owner_role_name.as_str(),
+            _ => state.account_control.member_role_name.as_str(),
+        };
+        state
+            .logto
+            .assign_organization_role(&logto_organization_id, &subject.subject, role_name)
+            .await
+            .map_err(Failure::Idp)?;
+        operation.state = ProvisioningState::IdpApplied;
+        operation.updated_at = now;
+        state
+            .store
+            .put_provisioning_operation(operation.clone())
+            .await?;
+    }
+
+    let display_name = operation.payload["displayName"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| subject.subject.clone());
+    let accepted = match state
+        .store
+        .accept_invitation(AcceptInvitation {
+            org_id: invitation.org_id.clone(),
+            token_hash,
+            identity_provider: subject.provider.clone(),
+            identity_tenant: logto_organization_id.clone(),
+            identity_subject: subject.subject.clone(),
+            display_name,
+            now,
+            request_id: request_id(&headers),
+            source: request_source(&headers),
+        })
+        .await
+    {
+        Ok(accepted) => accepted,
+        // The local rows landed on an earlier attempt that died before it
+        // could record the result. The person is already linked, so the
+        // answer is whoever that link names.
+        Err(StoreError::InvitationUnavailable) if invitation.redeemed_at.is_some() => {
+            let user_id = state
+                .store
+                .user_for_external_identity(
+                    &invitation.org_id,
+                    &subject.provider,
+                    Some(&logto_organization_id),
+                    &subject.subject,
+                )
+                .await?
+                .ok_or(Failure::Store(StoreError::InvitationUnavailable))?;
+            crate::store::AcceptedInvitation {
+                invitation: invitation.clone(),
+                user_id,
+            }
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    let response = AcceptedInvitationResponse {
+        operation_id: operation.id.clone(),
+        org_id: invitation.org_id.clone(),
+        user_id: accepted.user_id,
+        logto_organization_id,
+        invitation_id: accepted.invitation.id,
+    };
+    operation.state = ProvisioningState::Committed;
+    operation.result = Some(serde_json::to_value(&response).unwrap_or_default());
+    operation.updated_at = now;
+    state.store.put_provisioning_operation(operation).await?;
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 async fn patch_org_member(
@@ -3162,5 +3775,686 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    // ── Account control plane ────────────────────────────────────────────────
+
+    use crate::logto_management::{FakeLogtoManagement, LogtoCall};
+
+    const CREDENTIAL: &str = "first-owner-secret";
+
+    fn account_app(store: InMemoryStore, logto: Arc<FakeLogtoManagement>) -> Router {
+        let mut state = AppState::new(
+            Arc::new(store),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 1_000);
+        router(
+            state
+                .with_logto_management(logto)
+                .with_account_control(AccountControlConfig {
+                    enabled: true,
+                    bootstrap_credential_sha256: Some(sha256_hex(CREDENTIAL)),
+                    ..AccountControlConfig::default()
+                }),
+        )
+    }
+
+    /// A plain token: no organization claim, an explicit subject.
+    fn subject_token(subject: &str) -> String {
+        format!("Bearer -:collab:read@{subject}")
+    }
+
+    fn subject_ref(subject: &str) -> SubjectRef {
+        SubjectRef {
+            provider: LOGTO_PROVIDER.into(),
+            tenant: None,
+            subject: subject.into(),
+        }
+    }
+
+    fn json_post(path: &str, token: &str, body: serde_json::Value) -> Request<Body> {
+        request_with_body("POST", path, token, body)
+    }
+
+    #[tokio::test]
+    async fn account_routes_are_hidden_until_the_plane_is_enabled() {
+        let (status, _) = call(
+            app(seeded()),
+            get("/v1/account/memberships", &subject_token("logto-ada")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = call(
+            app(seeded()),
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op", "credential": CREDENTIAL, "orgName": "Acme" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn memberships_list_every_org_the_subject_belongs_to_and_nothing_for_a_stranger() {
+        let store = InMemoryStore::new();
+        store.add_org("org_one000000000000000000", "One");
+        store.add_org("org_two000000000000000000", "Two");
+        store.link_org_to_logto("org_one000000000000000000", "lorg_one");
+        store.link_org_to_logto("org_two000000000000000000", "lorg_two");
+        store.add_user(ada().as_str(), "Ada");
+        store.link_external_identity(
+            "org_one000000000000000000",
+            "logto",
+            Some("lorg_one"),
+            "logto-ada",
+            ada().as_str(),
+        );
+        store.link_external_identity(
+            "org_two000000000000000000",
+            "logto",
+            Some("lorg_two"),
+            "logto-ada",
+            ada().as_str(),
+        );
+        store.add_org_member("org_one000000000000000000", ada().as_str(), OrgRole::Owner);
+        // Guest in Two: a workspace seat and no org membership.
+        store.add_workspace_member(
+            "org_two000000000000000000",
+            "proj-2",
+            ada().as_str(),
+            WorkspaceRole::Viewer,
+        );
+
+        let (status, body) = call(
+            account_app(store.clone(), FakeLogtoManagement::new()),
+            get("/v1/account/memberships", &subject_token("logto-ada")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["subject"], "logto-ada");
+        let memberships = body["memberships"].as_array().unwrap();
+        assert_eq!(memberships.len(), 2, "{body}");
+        assert_eq!(memberships[0]["orgId"], "org_one000000000000000000");
+        assert_eq!(memberships[0]["orgName"], "One");
+        assert_eq!(memberships[0]["logtoOrganizationId"], "lorg_one");
+        assert_eq!(memberships[0]["orgRole"], "owner");
+        assert_eq!(memberships[0]["userId"], ada().as_str());
+        assert_eq!(memberships[1]["orgId"], "org_two000000000000000000");
+        assert!(
+            memberships[1].get("orgRole").is_none(),
+            "a guest has no org role"
+        );
+        assert_eq!(memberships[1]["workspaceCount"], 1);
+
+        let (status, body) = call(
+            account_app(store, FakeLogtoManagement::new()),
+            get("/v1/account/memberships", &subject_token("nobody")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["memberships"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_claims_the_deployment_once_and_the_claim_opens_the_door() {
+        let store = InMemoryStore::new();
+        let logto = FakeLogtoManagement::new();
+        let claim = |op: &str, credential: &str| {
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({
+                    "operationId": op,
+                    "credential": credential,
+                    "orgName": "Acme",
+                    "displayName": "Ada"
+                }),
+            )
+        };
+
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            claim("op-1", "not-the-credential"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(
+            logto.calls().is_empty(),
+            "a wrong credential never reaches Logto"
+        );
+
+        let (status, first) = call(
+            account_app(store.clone(), logto.clone()),
+            claim("op-1", CREDENTIAL),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{first}");
+        let org_id = first["orgId"].as_str().unwrap().to_owned();
+        let user_id = first["userId"].as_str().unwrap().to_owned();
+        assert!(org_id.starts_with("org_"));
+        assert!(user_id.starts_with("usr_"));
+        assert_eq!(first["logtoOrganizationId"], "lorg_1");
+        assert_eq!(
+            logto.calls(),
+            vec![
+                LogtoCall::CreateOrganization {
+                    name: "Acme".into()
+                },
+                LogtoCall::AddUser {
+                    organization_id: "lorg_1".into(),
+                    user_id: "logto-ada".into()
+                },
+                LogtoCall::AssignRole {
+                    organization_id: "lorg_1".into(),
+                    user_id: "logto-ada".into(),
+                    role_name: "owner".into()
+                },
+            ]
+        );
+
+        // Replaying the same operation answers the same way and touches nothing.
+        let (status, replay) = call(
+            account_app(store.clone(), logto.clone()),
+            claim("op-1", CREDENTIAL),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(replay, first);
+        assert_eq!(logto.organizations_named("Acme").len(), 1);
+
+        // A second claimant is refused before Logto is touched.
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-bob"),
+                serde_json::json!({ "operationId": "op-2", "credential": CREDENTIAL, "orgName": "Bob Co" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(logto.organizations_named("Bob Co").len(), 0);
+
+        // Discovery now names the org, with the canonical ids.
+        let (status, body) = call(
+            account_app(store.clone(), logto.clone()),
+            get("/v1/account/memberships", &subject_token("logto-ada")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["memberships"][0]["orgId"], org_id);
+        assert_eq!(body["memberships"][0]["userId"], user_id);
+        assert_eq!(body["memberships"][0]["orgRole"], "owner");
+
+        // And an organization-scoped token for the new Logto org mints a grant
+        // that names the same person: the rest of the plane accepts the claim.
+        let (status, minted) = call(
+            account_app(store, logto),
+            post(
+                &format!("/v1/orgs/{org_id}/grants"),
+                "Bearer lorg_1:collab:read@logto-ada",
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        assert_eq!(minted["userId"], user_id);
+        assert_eq!(minted["orgId"], org_id);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_resumes_after_the_identity_provider_fails_without_a_second_org() {
+        let store = InMemoryStore::new();
+        let logto = FakeLogtoManagement::new();
+        let claim = || {
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            )
+        };
+
+        // Failure before anything exists at Logto: the operation stays pending.
+        logto.fail_with("idp down");
+        let (status, _) = call(account_app(store.clone(), logto.clone()), claim()).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            store
+                .get_provisioning_operation("op-1", &subject_ref("logto-ada"))
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ProvisioningState::Pending
+        );
+
+        // Failure AFTER the organization was created: recorded as idp_applied,
+        // so the retry adds the member instead of creating a second org.
+        logto.recover();
+        logto.fail_next_add_user();
+        let (status, _) = call(account_app(store.clone(), logto.clone()), claim()).await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        let operation = store
+            .get_provisioning_operation("op-1", &subject_ref("logto-ada"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(operation.state, ProvisioningState::IdpApplied);
+        assert_eq!(operation.logto_organization_id.as_deref(), Some("lorg_1"));
+
+        let (status, body) = call(account_app(store.clone(), logto.clone()), claim()).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        assert_eq!(body["logtoOrganizationId"], "lorg_1");
+        assert_eq!(logto.organizations_named("Acme").len(), 1);
+        assert_eq!(
+            logto
+                .calls()
+                .iter()
+                .filter(|call| matches!(call, LogtoCall::CreateOrganization { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            store
+                .get_provisioning_operation("op-1", &subject_ref("logto-ada"))
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            ProvisioningState::Committed
+        );
+    }
+
+    #[tokio::test]
+    async fn a_claim_that_lost_its_final_write_still_finishes_on_retry() {
+        let store = InMemoryStore::new();
+        let logto = FakeLogtoManagement::new();
+        let claim = || {
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            )
+        };
+        let (status, first) = call(account_app(store.clone(), logto.clone()), claim()).await;
+        assert_eq!(status, StatusCode::CREATED, "{first}");
+
+        // The credential was consumed, the rows exist, and then the process
+        // died before the operation was marked committed.
+        store.rewind_provisioning_state_for_tests("op-1", ProvisioningState::IdpApplied);
+
+        let (status, second) = call(account_app(store.clone(), logto.clone()), claim()).await;
+        assert_eq!(status, StatusCode::CREATED, "{second}");
+        assert_eq!(second["orgId"], first["orgId"]);
+        assert_eq!(second["userId"], first["userId"]);
+        assert_eq!(logto.organizations_named("Acme").len(), 1);
+
+        // A different claimant is still refused: the credential is spent.
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-bob"),
+                serde_json::json!({ "operationId": "op-2", "credential": CREDENTIAL, "orgName": "Evil" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn an_operation_id_belongs_to_the_subject_that_started_it() {
+        let store = InMemoryStore::new();
+        let logto = FakeLogtoManagement::new();
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, _) = call(
+            account_app(store, logto),
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-bob"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn an_invitation_is_redeemed_with_a_plain_token_and_puts_the_person_in_the_logto_org() {
+        let store = seeded_for_exchange();
+        store.add_org(ORG, "Acme");
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let logto = FakeLogtoManagement::new();
+
+        // Ada, already an owner, mints an org invitation through the org route.
+        let (status, created) = call(
+            account_app(store.clone(), logto.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": "member", "reason": "onboarding" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let token = created["token"].as_str().unwrap().to_owned();
+        let invitation_id = created["id"].as_str().unwrap().to_owned();
+
+        // A newcomer with a plain token, no org claim, redeems it.
+        let accept = |op: &str| {
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-newbie"),
+                serde_json::json!({ "operationId": op, "token": token, "displayName": "Newbie" }),
+            )
+        };
+        let (status, first) =
+            call(account_app(store.clone(), logto.clone()), accept("inv-1")).await;
+        assert_eq!(status, StatusCode::CREATED, "{first}");
+        assert_eq!(first["orgId"], ORG);
+        assert_eq!(first["logtoOrganizationId"], LOGTO_ORG);
+        assert_eq!(first["invitationId"], invitation_id);
+        let user_id = first["userId"].as_str().unwrap().to_owned();
+        assert!(user_id.starts_with("usr_"));
+        assert_eq!(
+            logto.calls(),
+            vec![
+                LogtoCall::AddUser {
+                    organization_id: LOGTO_ORG.into(),
+                    user_id: "logto-newbie".into()
+                },
+                LogtoCall::AssignRole {
+                    organization_id: LOGTO_ORG.into(),
+                    user_id: "logto-newbie".into(),
+                    role_name: "member".into()
+                },
+            ]
+        );
+
+        // Replay: same answer. A fresh operation on the spent token: gone.
+        let (status, replay) =
+            call(account_app(store.clone(), logto.clone()), accept("inv-1")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(replay, first);
+        let (status, _) = call(account_app(store.clone(), logto.clone()), accept("inv-2")).await;
+        assert_eq!(status, StatusCode::GONE);
+
+        // Discovery and the grant exchange both know the newcomer now.
+        let (status, body) = call(
+            account_app(store.clone(), logto.clone()),
+            get("/v1/account/memberships", &subject_token("logto-newbie")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["memberships"][0]["orgId"], ORG);
+        assert_eq!(body["memberships"][0]["orgRole"], "member");
+        assert_eq!(body["memberships"][0]["userId"], user_id);
+        let (status, minted) = call(
+            account_app(store, logto),
+            post(
+                &format!("/v1/orgs/{ORG}/grants"),
+                &format!("Bearer {LOGTO_ORG}:collab:read@logto-newbie"),
+                serde_json::json!({}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        assert_eq!(minted["userId"], user_id);
+    }
+
+    #[tokio::test]
+    async fn a_revoked_or_unknown_invitation_token_is_gone_before_logto_is_touched() {
+        let store = seeded_for_exchange();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let logto = FakeLogtoManagement::new();
+        let (_, created) = call(
+            account_app(store.clone(), logto.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": "member", "reason": "onboarding" }),
+            ),
+        )
+        .await;
+        let token = created["token"].as_str().unwrap().to_owned();
+        let invitation_id = created["id"].as_str().unwrap().to_owned();
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/orgs/{ORG}/invitations/{invitation_id}"))
+                .header("authorization", token_for(&ada()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        for presented in [token.as_str(), "never-minted"] {
+            let (status, _) = call(
+                account_app(store.clone(), logto.clone()),
+                json_post(
+                    "/v1/invitations/accept",
+                    &subject_token("logto-newbie"),
+                    serde_json::json!({ "operationId": "inv-x", "token": presented }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::GONE);
+        }
+        assert!(logto.calls().is_empty());
+    }
+
+    #[test]
+    fn the_credential_comparison_is_by_value_and_by_length() {
+        assert!(constant_time_eq("abc", "abc"));
+        assert!(!constant_time_eq("abc", "abd"));
+        assert!(!constant_time_eq("abc", "abcd"));
+        assert!(!constant_time_eq("", "a"));
+    }
+
+    #[tokio::test]
+    async fn the_plane_refuses_cleanly_when_misconfigured_or_misused() {
+        // No Logto credential: 503 naming the variables, op left pending.
+        let store = InMemoryStore::new();
+        let mut state = AppState::new(
+            Arc::new(store.clone()),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 1_000);
+        let unconfigured = router(state.with_account_control(AccountControlConfig {
+            enabled: true,
+            bootstrap_credential_sha256: Some(sha256_hex(CREDENTIAL)),
+            ..AccountControlConfig::default()
+        }));
+        let (status, body) = call(
+            unconfigured,
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert!(body["error"]
+            .as_str()
+            .unwrap()
+            .contains("COLLAB_LOGTO_M2M_CLIENT_ID"));
+
+        // No credential configured at all: every claim is a 403.
+        let mut state = AppState::new(
+            Arc::new(InMemoryStore::new()),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        state.now = Arc::new(|| 1_000);
+        let no_credential = router(
+            state
+                .with_logto_management(FakeLogtoManagement::new())
+                .with_account_control(AccountControlConfig {
+                    enabled: true,
+                    bootstrap_credential_sha256: None,
+                    ..AccountControlConfig::default()
+                }),
+        );
+        let (status, _) = call(
+            no_credential,
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        // Malformed operation ids and org names are 400s.
+        let logto = FakeLogtoManagement::new();
+        for (op, name) in [
+            ("op with spaces", "Acme"),
+            ("op-1", "   "),
+            ("op-1", &"x".repeat(129)),
+        ] {
+            let (status, _) = call(
+                account_app(InMemoryStore::new(), logto.clone()),
+                json_post(
+                    "/v1/account/bootstrap",
+                    &subject_token("logto-ada"),
+                    serde_json::json!({ "operationId": op, "credential": CREDENTIAL, "orgName": name }),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{op:?} / {name:?}");
+        }
+        assert!(logto.calls().is_empty());
+
+        // A bootstrap operation id cannot be replayed as an invitation one.
+        let store = InMemoryStore::new();
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/account/bootstrap",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "credential": CREDENTIAL, "orgName": "Acme" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, _) = call(
+            account_app(store, logto),
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-ada"),
+                serde_json::json!({ "operationId": "op-1", "token": "whatever" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn health_advertises_the_plane_only_when_it_is_on() {
+        let (_, off) = call(app(seeded()), get("/health", "")).await;
+        assert!(!off["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature == "account-bootstrap"));
+        let (_, on) = call(
+            account_app(seeded(), FakeLogtoManagement::new()),
+            get("/health", ""),
+        )
+        .await;
+        assert!(on["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature == "account-bootstrap"));
+    }
+
+    #[tokio::test]
+    async fn an_owner_invitation_assigns_the_owner_role_at_logto_and_an_expired_one_is_gone() {
+        let store = seeded_for_exchange();
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let logto = FakeLogtoManagement::new();
+        let (status, created) = call(
+            account_app(store.clone(), logto.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": "owner", "reason": "co-founder" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let token = created["token"].as_str().unwrap().to_owned();
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-cofounder"),
+                serde_json::json!({ "operationId": "inv-owner", "token": token }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(logto.calls().iter().any(|call| matches!(
+            call,
+            LogtoCall::AssignRole { role_name, .. } if role_name == "owner"
+        )));
+
+        // Expired: the pinned clock sits at 1_000 and the invitation expires
+        // days later, so build one that is already past due.
+        let (_, created) = call(
+            account_app(store.clone(), logto.clone()),
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": "member", "reason": "late", "expiresInDays": 1 }),
+            ),
+        )
+        .await;
+        let token = created["token"].as_str().unwrap().to_owned();
+        let mut late = AppState::new(
+            Arc::new(store),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
+        late.now = Arc::new(|| 1_000 + 2 * 86_400_000);
+        let late = router(
+            late.with_logto_management(logto.clone())
+                .with_account_control(AccountControlConfig {
+                    enabled: true,
+                    bootstrap_credential_sha256: None,
+                    ..AccountControlConfig::default()
+                }),
+        );
+        let calls_before = logto.calls().len();
+        let (status, _) = call(
+            late,
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-late"),
+                serde_json::json!({ "operationId": "inv-late", "token": token }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(logto.calls().len(), calls_before);
     }
 }

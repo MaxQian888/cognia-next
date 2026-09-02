@@ -57,23 +57,101 @@ pub fn router() -> Router<SharedState> {
         .layer(from_fn(super::middleware::pre_auth_rate_limit))
 }
 
+/// Bumped when a field is ADDED. Nothing is ever removed or reshaped: a
+/// client built against version 1 keeps reading version 2.
+pub const AUTH_CONFIG_VERSION: u32 = 2;
+
+/// Registration policy of every deployment this server describes. The first
+/// owner presents the one-time bootstrap credential; everyone after joins by
+/// invitation. "First visitor wins" is not a policy this server can announce.
+pub const REGISTRATION_POLICY_BOOTSTRAP_THEN_INVITE: &str = "bootstrap-then-invite";
+
+/// The Logto "native" application id (desktop + CLI loopback callbacks).
+pub const ENV_LOGTO_NATIVE_CLIENT_ID: &str = "COGNIA_LOGTO_NATIVE_CLIENT_ID";
+/// Comma/whitespace-separated Logto social connector names, e.g. `github,feishu`.
+/// Each becomes a `direct_sign_in=social:<name>` button on the client.
+pub const ENV_LOGTO_SOCIAL_PROVIDERS: &str = "COGNIA_LOGTO_SOCIAL_PROVIDERS";
+/// Base URL of the `cognia-collab-server` this deployment enrols accounts on.
+pub const ENV_COLLAB_SERVICE_URL: &str = "COGNIA_COLLAB_SERVICE_URL";
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AuthConfigResponse {
+    config_version: u32,
     deployment_mode: &'static str,
     host_id: String,
     tenant_id: Option<String>,
     oidc: Option<OidcPublicConfig>,
     signaling: SignalingPublicConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    collaboration: Option<CollaborationPublicConfig>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct OidcPublicConfig {
     issuer: String,
     audience: String,
     web_client_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_client_id: Option<String>,
     scopes: Vec<String>,
+    /// Enabled social sign-in methods, in operator order.
+    social_providers: Vec<SocialProviderConfig>,
+    /// How a callback may reach the client. Names, not URLs: the redirect URI
+    /// is registered at Logto per application and the client already knows
+    /// which of these it is.
+    callback_modes: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct SocialProviderConfig {
+    /// The Logto connector's identity-provider name, e.g. `github`, `feishu`.
+    provider: String,
+    /// The `direct_sign_in` value the client passes on the authorize request.
+    direct_sign_in: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct CollaborationPublicConfig {
+    service_url: String,
+    registration_policy: &'static str,
+}
+
+const CALLBACK_MODES: [&str; 3] = ["web-popup", "native-loopback", "deep-link"];
+
+/// Parse `COGNIA_LOGTO_SOCIAL_PROVIDERS`: trimmed, lower-cased, de-duplicated,
+/// blanks dropped, operator order kept.
+fn social_providers_from(raw: Option<String>) -> Vec<SocialProviderConfig> {
+    let mut seen: Vec<String> = Vec::new();
+    for name in raw
+        .unwrap_or_default()
+        .split(|character: char| character == ',' || character.is_whitespace())
+    {
+        let name = name.trim().to_ascii_lowercase();
+        if name.is_empty() || seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+    }
+    seen.into_iter()
+        .map(|provider| SocialProviderConfig {
+            direct_sign_in: format!("social:{provider}"),
+            provider,
+        })
+        .collect()
+}
+
+fn collaboration_config_from(service_url: Option<String>) -> Option<CollaborationPublicConfig> {
+    service_url
+        .map(|url| url.trim().trim_end_matches('/').to_string())
+        .filter(|url| !url.is_empty())
+        .map(|service_url| CollaborationPublicConfig {
+            service_url,
+            registration_policy: REGISTRATION_POLICY_BOOTSTRAP_THEN_INVITE,
+        })
 }
 
 #[derive(Debug, Serialize)]
@@ -111,7 +189,12 @@ async fn auth_config_handler(
                     issuer,
                     audience,
                     web_client_id,
+                    native_client_id: non_empty_env(ENV_LOGTO_NATIVE_CLIENT_ID),
                     scopes,
+                    social_providers: social_providers_from(non_empty_env(
+                        ENV_LOGTO_SOCIAL_PROVIDERS,
+                    )),
+                    callback_modes: CALLBACK_MODES.to_vec(),
                 })
             }
             _ => {
@@ -131,6 +214,7 @@ async fn auth_config_handler(
         super::signaling::installed_signaling_url()
     });
     Json(AuthConfigResponse {
+        config_version: AUTH_CONFIG_VERSION,
         deployment_mode: match mode {
             DeploymentMode::SingleUser => "single-user",
             DeploymentMode::MultiTenant => "multi-tenant",
@@ -146,6 +230,7 @@ async fn auth_config_handler(
                 json!({ "urls": ["stun:stun.cloudflare.com:3478"] }),
             ],
         },
+        collaboration: collaboration_config_from(non_empty_env(ENV_COLLAB_SERVICE_URL)),
     })
     .into_response()
 }
@@ -2971,5 +3056,79 @@ mod tests {
                 &json!({ "network": true }),
             )
         );
+    }
+
+    #[test]
+    fn social_providers_are_trimmed_lowercased_deduplicated_and_ordered() {
+        let parsed = social_providers_from(Some(" GitHub, feishu ,github\n".into()));
+        assert_eq!(
+            parsed,
+            vec![
+                SocialProviderConfig {
+                    provider: "github".into(),
+                    direct_sign_in: "social:github".into()
+                },
+                SocialProviderConfig {
+                    provider: "feishu".into(),
+                    direct_sign_in: "social:feishu".into()
+                },
+            ]
+        );
+        assert!(social_providers_from(None).is_empty());
+        assert!(social_providers_from(Some(" , ".into())).is_empty());
+    }
+
+    #[test]
+    fn the_collaboration_block_is_absent_until_a_service_url_is_set() {
+        assert_eq!(collaboration_config_from(None), None);
+        assert_eq!(collaboration_config_from(Some("  ".into())), None);
+        assert_eq!(
+            collaboration_config_from(Some("https://collab.example.com/".into())),
+            Some(CollaborationPublicConfig {
+                service_url: "https://collab.example.com".into(),
+                registration_policy: "bootstrap-then-invite",
+            })
+        );
+    }
+
+    #[test]
+    fn the_auth_config_wire_shape_is_additive_and_versioned() {
+        // A version-1 client reads deploymentMode/hostId/oidc/signaling exactly
+        // as before. The new fields sit beside them under camelCase names, and
+        // the optional ones vanish rather than serialising as null.
+        let response = AuthConfigResponse {
+            config_version: AUTH_CONFIG_VERSION,
+            deployment_mode: "multi-tenant",
+            host_id: "host".into(),
+            tenant_id: None,
+            oidc: Some(OidcPublicConfig {
+                issuer: "https://auth.test/oidc".into(),
+                audience: "https://api.test".into(),
+                web_client_id: "web".into(),
+                native_client_id: None,
+                scopes: vec!["openid".into()],
+                social_providers: social_providers_from(Some("github".into())),
+                callback_modes: CALLBACK_MODES.to_vec(),
+            }),
+            signaling: SignalingPublicConfig {
+                url: "wss://s.test".into(),
+                ice_servers: vec![],
+            },
+            collaboration: None,
+        };
+        let value = serde_json::to_value(&response).unwrap();
+        assert_eq!(value["configVersion"], 2);
+        assert_eq!(value["deploymentMode"], "multi-tenant");
+        assert_eq!(value["oidc"]["webClientId"], "web");
+        assert!(value["oidc"].get("nativeClientId").is_none());
+        assert_eq!(
+            value["oidc"]["socialProviders"][0]["directSignIn"],
+            "social:github"
+        );
+        assert_eq!(
+            value["oidc"]["callbackModes"],
+            serde_json::json!(["web-popup", "native-loopback", "deep-link"])
+        );
+        assert!(value.get("collaboration").is_none());
     }
 }
