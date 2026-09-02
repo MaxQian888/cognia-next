@@ -1350,7 +1350,13 @@ describe("useClaudeChat — actions", () => {
     })
     expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
       "continue",
-      expect.objectContaining({ agentId: "ext-1", sessionId: "thread-1" })
+      expect.objectContaining({
+        agentId: "ext-1",
+        sessionId: "thread-1",
+        context: expect.objectContaining({
+          custom: expect.objectContaining({ chatSessionId: "import:codex:thread-1" }),
+        }),
+      })
     )
     expect(clearBranchSeedMock).toHaveBeenCalledWith("import:codex:thread-1")
     expect(freezeImportedSessionMock).not.toHaveBeenCalled()
@@ -1446,7 +1452,9 @@ describe("useClaudeChat — actions", () => {
       expect.objectContaining({
         agentId: "ext-1",
         reasoningEffort: "xhigh",
-        context: { custom: { additionalDirectories: ["/shared"] } },
+        context: {
+          custom: { additionalDirectories: ["/shared"], chatSessionId: "sess-1" },
+        },
       })
     )
     // Built-in SDK path did NOT run for the delegated turn.

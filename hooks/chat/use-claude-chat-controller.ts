@@ -1347,6 +1347,35 @@ export function useClaudeChat() {
         return
       }
 
+      // ── Independent reviewer (ADR-0117 `verified-fresh-agent`) ──
+      // Armed here, after the Squad branch and before any direct-path await,
+      // so the watcher sees this turn's `streaming` state and settles on its
+      // end whichever executor runs it (SDK, standalone engine or an external
+      // agent). The verifier itself is a brand-new session with none of this
+      // turn's context. A companion shell is refused with a reason rather
+      // than left to hang, and the picker shows the same reason.
+      const turnOrchestration =
+        callOptions?.compositionOverride?.orchestration ??
+        compositionForSession(sessionId).orchestration
+      if (turnOrchestration === "verified-fresh-agent") {
+        void import("@/lib/agent/composition/verified-fresh-agent")
+          .then(({ armVerifiedFreshAgentFollowup }) =>
+            armVerifiedFreshAgentFollowup({
+              sessionId,
+              request: providerText,
+              cwd: turnCwd,
+              ...(session?.projectId ? { projectId: session.projectId } : {}),
+              ...(session?.title ? { mainSessionTitle: session.title } : {}),
+            })
+          )
+          .then((armed) => {
+            if (!armed.armed) {
+              console.warn("verified-fresh-agent follow-up not armed", armed.reason)
+            }
+          })
+          .catch((error) => console.warn("verified-fresh-agent arm failed", error))
+      }
+
       // A persisted execution context owns the chat's Task Workspace identity.
       // Repeated turns create versioned TaskRuns inside that same managed
       // worktree. The developer flag remains a compatibility path for sessions
@@ -2192,6 +2221,7 @@ export function useClaudeChat() {
                   context: {
                     custom: {
                       additionalDirectories: sendOptions.additionalDirectories ?? [],
+                      chatSessionId: sessionId,
                     },
                   },
                   onEvent: handleExternalEvent,

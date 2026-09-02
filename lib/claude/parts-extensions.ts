@@ -474,3 +474,60 @@ export function hasMcpContent(part: unknown): part is { mcpContent: McpResultBlo
   const blocks = (part as { mcpContent?: unknown })?.mcpContent
   return Array.isArray(blocks) && blocks.length > 0
 }
+
+// ---- Independent verification (ADR-0117 `verified-fresh-agent`) -------------
+
+export type VerificationVerdict = "pass" | "fail" | "unsure"
+
+/**
+ * VerificationVerdictPart: what a brand-new agent, with none of the main
+ * turn's context, concluded about that turn.
+ *
+ * Written twice. Once as `running` the moment the main turn settles, so the
+ * conversation shows that a check is in progress instead of going quiet for a
+ * minute, and once more when the verifier's session ends, with the verdict.
+ * The part is the transcript's own record, not a live projection: the verdict
+ * is a one-shot answer and a reload must read the same answer, so it is baked
+ * in here rather than re-derived from the verification session.
+ *
+ * `verificationSessionId` names an ordinary, visible chat session. The card
+ * opens it so the user can read the verifier's whole reasoning or argue with
+ * it, which is the whole point of keeping the verifier a real session rather
+ * than a hidden one-shot completion.
+ */
+export interface VerificationVerdictPart {
+  type: "verification-verdict"
+  status: "running" | "completed" | "failed"
+  /** The fresh session the verifier ran in. Never equals the main session. */
+  verificationSessionId: string
+  /** The conversation whose turn was checked. */
+  mainSessionId: string
+  verdict?: VerificationVerdict
+  /** One or two sentences in the verifier's words. */
+  summary?: string
+  /** Concrete findings, each one line. Empty when the verifier had none. */
+  points: string[]
+  /** Set with `status: "failed"` when the verifier could not run or answer. */
+  error?: string
+  /** True when a working-tree diff was part of the verifier's input. */
+  diffIncluded: boolean
+  startedAt: number
+  completedAt?: number
+}
+
+export function isVerificationVerdictPart(part: unknown): part is VerificationVerdictPart {
+  const p = part as {
+    type?: unknown
+    verificationSessionId?: unknown
+    mainSessionId?: unknown
+    points?: unknown
+  }
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    p.type === "verification-verdict" &&
+    typeof p.verificationSessionId === "string" &&
+    typeof p.mainSessionId === "string" &&
+    Array.isArray(p.points)
+  )
+}

@@ -21,6 +21,7 @@
         "workflow": "工作流"
       },
       "unavailable": {
+        "companionShell": "只能在运行 Agent 的宿主上使用，配对设备不可用",
         "notImplemented": "尚未实现",
         "viaMention": "用 @ 提及子代理",
         "viaSlashCommand": "用 /workflow 命令"
@@ -68,6 +69,22 @@
     "title": "本轮将以此运行"
   },
   "title": "模式",
+  "verification": {
+    "failed": "复核未能运行",
+    "noPoints": "Reviewer 没有提出具体问题。",
+    "openSession": "打开 Reviewer 会话",
+    "points": "发现",
+    "running": "独立 Reviewer 正在复核这条回复",
+    "sessionMissing": "本机没有该 Reviewer 会话。",
+    "title": "独立复核",
+    "verdict": {
+      "fail": "未通过",
+      "pass": "通过",
+      "unsure": "不确定"
+    },
+    "withDiff": "已对照工作区改动复核",
+    "withoutDiff": "仅对照回复内容复核"
+  },
   "warnings": {
     "authority-capped-by-ceiling": "权限已降为 {applied}：子 Agent 不能超过父 Agent。",
     "authority-capped-by-preset": "权限已降为 {applied}：{preset} 预置不允许 {requested}。",

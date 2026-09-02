@@ -28,6 +28,7 @@ import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { SquadRunPart } from "@/components/chat/message-parts/squad-run-part"
 import { SquadGatePart } from "@/components/chat/message-parts/squad-gate-part"
+import { VerificationVerdictPart } from "@/components/chat/message-parts/verification-verdict-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { GroundingPart } from "@/components/chat/message-parts/grounding-part"
@@ -85,6 +86,7 @@ import type {
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
   SquadRunPart as SquadRunPartType,
   SquadGatePart as SquadGatePartType,
+  VerificationVerdictPart as VerificationVerdictPartType,
   ArtifactPart as ArtifactPartType,
   CanvasInlinePart as CanvasInlinePartType,
   GroundingPart as GroundingPartType,
@@ -1553,6 +1555,12 @@ function renderPart(
 
   if (type === "squad-gate") {
     return <SquadGatePart key={key} part={part as unknown as SquadGatePartType} />
+  }
+
+  if (type === "verification-verdict") {
+    return (
+      <VerificationVerdictPart key={key} part={part as unknown as VerificationVerdictPartType} />
+    )
   }
 
   if (type === "text") {

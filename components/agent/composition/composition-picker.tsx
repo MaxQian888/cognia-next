@@ -45,6 +45,7 @@ import { visiblePresets } from "@/lib/agent/composition/preset-catalog"
 import { resolveComposition } from "@/lib/agent/composition/resolve-composition"
 import { chatOrchestrationUnavailableReason } from "@/lib/agent/composition/chat-orchestrations"
 import { presetDisplayName, type PresetNameTranslator } from "@/lib/agent/composition/preset-label"
+import { useHostProfile } from "@/hooks/use-host-profile"
 
 export interface CompositionPickerProps {
   presets: readonly AgentPresetDefinitionV1[]
@@ -113,6 +114,10 @@ export function CompositionPicker({
 }: CompositionPickerProps) {
   const t = useTranslations("agentComposition")
   const tModes = useTranslations("agentMode.modes")
+  // The independent reviewer runs only on a shell that owns the sidecar. On a
+  // companion shell the option stays listed and disabled with that reason,
+  // never hidden (three-axis dormancy, see `lib/agent/composition/verified-fresh-agent.ts`).
+  const hostProfile = useHostProfile()
 
   const offered = useMemo(
     () => visiblePresets(presets, { developerMode, includeExperimental }),
@@ -285,7 +290,7 @@ export function CompositionPicker({
               disabled={disabled}
               inheritLabel={inheritLabel}
               options={AGENT_ORCHESTRATION_POLICIES.map((value) => {
-                const reason = chatOrchestrationUnavailableReason(value)
+                const reason = chatOrchestrationUnavailableReason(value, { hostProfile })
                 return {
                   value,
                   label: t(`axis.orchestration.options.${value}`),
@@ -388,8 +393,9 @@ function AxisSelect({
               <span className="flex flex-col items-start gap-0.5">
                 <span>{option.label}</span>
                 {/* Named rather than hidden: two of these are real features
-                    reachable another way, and one is genuinely unbuilt. A
-                    silently-missing entry teaches neither. */}
+                    reachable another way, and one runs only on the shell
+                    that owns the agent. A silently-missing entry teaches
+                    neither. */}
                 {option.unavailableHint ? (
                   <span className="text-[0.6875rem] text-muted-foreground">
                     {option.unavailableHint}

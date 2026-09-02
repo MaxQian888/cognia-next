@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+
 import userEvent from "@testing-library/user-event"
 import { NextIntlClientProvider } from "next-intl"
 
@@ -15,6 +16,66 @@ import {
   presetFromAgentMode,
 } from "@/lib/agent/composition/preset-catalog"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
+
+// The global next-intl mock resolves keys from the generated aggregate, which
+// lags the split sources on dev. This one reads the files the keys are
+// authored in, so a new key is testable without regenerating the bundle.
+jest.mock("next-intl", () => {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const messages: Record<string, unknown> = {
+    agentComposition: require("@/i18n/messages/en/agentComposition.json"),
+    agentMode: require("@/i18n/messages/en/agentMode.json"),
+  }
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const resolve = (root: unknown, dotted: string): unknown =>
+    dotted.split(".").reduce<unknown>((cursor, segment) => {
+      if (cursor && typeof cursor === "object" && segment in (cursor as object)) {
+        return (cursor as Record<string, unknown>)[segment]
+      }
+      return undefined
+    }, root)
+  const plural = (template: string, values: Record<string, unknown>): string =>
+    template.replace(
+      /\{(\w+),\s*plural,\s*((?:[^{}]|\{[^{}]*\})*)\}/g,
+      (_match, name: string, body: string) => {
+        const value = Number(values[name])
+        const branches = new Map<string, string>()
+        const re = /(=\d+|\w+)\s*\{([^{}]*)\}/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(body))) branches.set(m[1], m[2])
+        const chosen =
+          branches.get(`=${value}`) ??
+          (value === 1 ? branches.get("one") : undefined) ??
+          branches.get("other") ??
+          ""
+        return chosen.replace(/#/g, String(value))
+      }
+    )
+  const make = (namespace?: string) => {
+    const root = namespace ? resolve(messages, namespace) : messages
+    const t = (key: string, values: Record<string, unknown> = {}) => {
+      const found = resolve(root, key)
+      if (typeof found !== "string") return namespace ? `${namespace}.${key}` : key
+      return plural(found, values).replace(/\{(\w+)\}/g, (whole, name: string) =>
+        name in values ? String(values[name]) : whole
+      )
+    }
+    t.has = (key: string) => typeof resolve(root, key) === "string"
+    t.rich = t
+    t.raw = (key: string) => resolve(root, key)
+    return t
+  }
+  return {
+    useTranslations: make,
+    useLocale: () => "en",
+    NextIntlClientProvider: ({ children }: { children: React.ReactNode }) => children,
+  }
+})
+
+const hostProfile = jest.fn<string, []>(() => "desktop")
+jest.mock("@/hooks/use-host-profile", () => ({
+  useHostProfile: () => hostProfile(),
+}))
 
 const messages = {
   agentComposition: compositionMessages,
@@ -265,5 +326,41 @@ describe("CompositionPicker", () => {
     for (const combobox of screen.getAllByRole("combobox")) {
       expect(combobox).toBeDisabled()
     }
+  })
+
+  describe("independent reviewer availability", () => {
+    beforeEach(() => hostProfile.mockReturnValue("desktop"))
+
+    it("offers the independent reviewer on a shell that owns the agent", async () => {
+      const { onChange } = renderPicker({ presetId: "standard" }, { advancedOpen: true })
+      await userEvent.click(screen.getByRole("combobox", { name: /orchestration/i }))
+      const option = await screen.findByRole("option", { name: /Independent reviewer/ })
+      expect(option).not.toHaveAttribute("aria-disabled", "true")
+      expect(option).not.toHaveTextContent("Not built yet")
+      await userEvent.click(option)
+      expect(onChange).toHaveBeenCalledWith({
+        presetId: "standard",
+        orchestration: "verified-fresh-agent",
+      })
+    })
+
+    // Three-axis dormancy: the option stays listed on a companion shell,
+    // disabled, with the reason the follow-up itself refuses with.
+    it.each(["mobile-companion", "cloud-companion"])(
+      "keeps it visible but disabled with a reason on %s",
+      async (profile) => {
+        hostProfile.mockReturnValue(profile)
+        renderPicker({ presetId: "standard" }, { advancedOpen: true })
+        await userEvent.click(screen.getByRole("combobox", { name: /orchestration/i }))
+        const option = await screen.findByRole("option", { name: /Independent reviewer/ })
+        expect(option).toHaveAttribute("aria-disabled", "true")
+        expect(option).toHaveTextContent(
+          compositionMessages.axis.orchestration.unavailable.companionShell
+        )
+        expect(zhCompositionMessages.axis.orchestration.unavailable).toHaveProperty(
+          "companionShell"
+        )
+      }
+    )
   })
 })

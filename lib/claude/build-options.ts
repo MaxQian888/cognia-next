@@ -15,6 +15,10 @@ import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
 import type { IVectorStore } from "@cognia/vector/store"
 import { RESTRICTED_MODE_DENIED_TOOLS } from "@/lib/workspace/restricted-tools"
+import {
+  externalAgentIdFromProviderId,
+  isExternalAgentProviderId,
+} from "@/lib/ai/agent/external/session-models"
 import { mergeRulesets } from "@/lib/claude/permissions/ruleset"
 import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { detectHostProfile } from "@/lib/platform/capabilities"
@@ -1201,9 +1205,23 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     character,
     appSettings?.defaultModel
   )
+  // A model picked from an external agent's OWN list is stamped with the
+  // reserved provider id, because it is the agent's vocabulary rather than any
+  // provider's. The row is kept so the agent replays the choice on its next
+  // session, and it must be invisible to every other lane: switching the
+  // conversation back to the built-in runtime otherwise dispatched at an id no
+  // configured provider offers. The marker is never handed downstream as a
+  // provider on either lane, since it does not name one.
+  const sessionModelBelongsToAgent = isExternalAgentProviderId(session?.providerOverride)
+  const sessionModelAgentId = externalAgentIdFromProviderId(session?.providerOverride)
+  const sessionModelMatchesAgent =
+    sessionModelAgentId !== null && sessionModelAgentId === ctx.externalRuntimeId
+  const sessionModel =
+    sessionModelBelongsToAgent && !sessionModelMatchesAgent ? undefined : session?.model
+  const sessionProviderOverride = sessionModelBelongsToAgent ? undefined : session?.providerOverride
   let model: string | undefined =
     imModelOverride ??
-    session?.model ??
+    sessionModel ??
     memberOverride?.modelOverride ??
     modeUpdate?.model ??
     imDefaultModel ??
@@ -1218,7 +1236,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // best-effort semantic also covers a stale bot-default provider id.
   let providerId =
     imProviderOverride ??
-    session?.providerOverride ??
+    sessionProviderOverride ??
     imDefaultProvider ??
     character?.providerId ??
     appSettings?.defaultProvider ??
@@ -1246,7 +1264,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   )
   const autoRequested = Boolean(
     appSettings?.autoRouting?.enabled &&
-    (model === "auto" || (!session?.model && appSettings.autoRouting.defaultSelection === "auto"))
+    (model === "auto" || (!sessionModel && appSettings.autoRouting.defaultSelection === "auto"))
   )
   const aliasRequested =
     !autoRequested && model && enabledAliases.has(model.toLowerCase()) ? model : undefined

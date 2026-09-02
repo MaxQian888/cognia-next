@@ -21,6 +21,7 @@
         "workflow": "Workflow"
       },
       "unavailable": {
+        "companionShell": "Runs on the host that owns the agent, not from a paired device",
         "notImplemented": "Not built yet",
         "viaMention": "Reach it with @mention",
         "viaSlashCommand": "Reach it with /workflow"
@@ -68,6 +69,22 @@
     "title": "This turn will run as"
   },
   "title": "Mode",
+  "verification": {
+    "failed": "Verification could not run",
+    "noPoints": "The reviewer raised no specific points.",
+    "openSession": "Open reviewer session",
+    "points": "Findings",
+    "running": "An independent reviewer is checking this reply",
+    "sessionMissing": "The reviewer session is not on this device.",
+    "title": "Independent review",
+    "verdict": {
+      "fail": "Did not pass",
+      "pass": "Passed",
+      "unsure": "Unsure"
+    },
+    "withDiff": "Checked against the working-tree diff",
+    "withoutDiff": "Checked against the reply only"
+  },
   "warnings": {
     "authority-capped-by-ceiling": "Permission lowered to {applied}: a subagent cannot exceed its parent.",
     "authority-capped-by-preset": "Permission lowered to {applied}: the {preset} preset does not allow {requested}.",

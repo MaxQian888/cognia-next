@@ -243,6 +243,10 @@ import {
   resolveSendOptions,
 } from "./build-options"
 import type { BuildOptionsContext } from "./build-options"
+import {
+  EXTERNAL_AGENT_PROVIDER_ID,
+  externalAgentProviderId,
+} from "@/lib/ai/agent/external/session-models"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type {
   AppSettings,
@@ -6274,5 +6278,65 @@ describe("resolveSendOptions — Agent profile routing and execution policy", ()
       code: "secret_missing",
       variableName: "MISSING_TOKEN",
     })
+  })
+})
+
+describe("resolveSendOptions — a model that belongs to an external agent", () => {
+  const agentSession = () =>
+    makeSession({
+      id: "ses_ext",
+      model: "openai/agent-gpt",
+      providerOverride: externalAgentProviderId("pi-1"),
+    })
+
+  it("replays the agent's model on the lane that agent runs", async () => {
+    // The row exists so `applyModelToSession` re-requests the choice on every
+    // session the agent opens. On its own lane it is the answer.
+    const opts = await resolveSendOptions({
+      character: makeChar(),
+      session: agentSession(),
+      externalRuntimeId: "pi-1",
+    })
+    expect(opts.model).toBe("openai/agent-gpt")
+  })
+
+  it("keeps it off the built-in lane, which has no provider that offers it", async () => {
+    // Switching the runtime chip back to Cognia Agent used to leave the
+    // conversation pinned to the agent's id, and the turn dispatched at a
+    // model no configured provider lists.
+    const opts = await resolveSendOptions({
+      character: makeChar({ model: "char-model", providerId: "anthropic" }),
+      session: agentSession(),
+    })
+    expect(opts.model).not.toBe("openai/agent-gpt")
+  })
+
+  it("does not replay one external agent's model to another", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ model: "char-model", providerId: "anthropic" }),
+      session: agentSession(),
+      externalRuntimeId: "codex-1",
+    })
+    expect(opts.model).not.toBe("openai/agent-gpt")
+  })
+
+  it("never hands the reserved marker downstream as a provider", async () => {
+    // It names a group in a picker, not a provider anything could route at.
+    for (const externalRuntimeId of [undefined, "pi-1"]) {
+      const opts = await resolveSendOptions({
+        character: makeChar({ model: "char-model", providerId: "anthropic" }),
+        session: agentSession(),
+        externalRuntimeId,
+      })
+      expect(opts.provider).not.toBe(EXTERNAL_AGENT_PROVIDER_ID)
+    }
+  })
+
+  it("leaves an ordinary session override exactly as it was", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar(),
+      session: makeSession({ id: "s_plain", model: "gpt-4o-mini", providerOverride: "openai" }),
+    })
+    expect(opts.model).toBe("gpt-4o-mini")
   })
 })

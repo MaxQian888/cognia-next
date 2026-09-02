@@ -3,6 +3,7 @@ import {
   isGroundingPart,
   isSubagentPart,
   isToolUseSummaryPart,
+  isVerificationVerdictPart,
   type McpResultBlock,
   type SubagentPart,
 } from "./parts-extensions"
@@ -93,5 +94,46 @@ describe("parts-extensions — isSubagentPart forward-compat (gap7)", () => {
     expect(isSubagentPart({ type: "subagent" })).toBe(false)
     expect(isSubagentPart({ type: "text", subagentId: "x" })).toBe(false)
     expect(isSubagentPart(null)).toBe(false)
+  })
+})
+
+describe("parts-extensions: isVerificationVerdictPart", () => {
+  it("accepts a running and a completed verdict part", () => {
+    expect(
+      isVerificationVerdictPart({
+        type: "verification-verdict",
+        status: "running",
+        verificationSessionId: "v-1",
+        mainSessionId: "m-1",
+        points: [],
+        diffIncluded: false,
+        startedAt: 1,
+      })
+    ).toBe(true)
+    expect(
+      isVerificationVerdictPart({
+        type: "verification-verdict",
+        status: "completed",
+        verdict: "pass",
+        verificationSessionId: "v-1",
+        mainSessionId: "m-1",
+        points: ["ok"],
+        diffIncluded: true,
+        startedAt: 1,
+        completedAt: 2,
+      })
+    ).toBe(true)
+  })
+
+  it("rejects a part without the two session ids or the points list", () => {
+    expect(isVerificationVerdictPart({ type: "verification-verdict", points: [] })).toBe(false)
+    expect(
+      isVerificationVerdictPart({
+        type: "verification-verdict",
+        verificationSessionId: "v",
+        mainSessionId: "m",
+      })
+    ).toBe(false)
+    expect(isVerificationVerdictPart({ type: "squad-run", runId: "r", squadId: "s" })).toBe(false)
   })
 })
