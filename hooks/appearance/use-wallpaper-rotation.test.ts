@@ -59,6 +59,7 @@ function setState(background: Partial<BackgroundSettings>, wallpapers: Wallpaper
 
 beforeEach(() => {
   jest.useFakeTimers()
+  jest.clearAllTimers()
   setBackground.mockClear()
   setState({})
   Object.defineProperty(document, "hidden", { configurable: true, value: false, writable: true })
@@ -273,7 +274,10 @@ describe("useWallpaperRotation", () => {
     spy.mockRestore()
   })
 
-  it("clears its timer on unmount", () => {
+  it("clears the timer it armed on unmount", () => {
+    // Asserted against the id this hook actually armed. Under fake timers
+    // React's own scheduler can leave a pending timer in the same pool, so
+    // jest.getTimerCount() is not a proxy for "did this hook clean up".
     setState(
       {
         activeId: "a",
@@ -281,9 +285,17 @@ describe("useWallpaperRotation", () => {
       },
       [image("a"), image("b")]
     )
+    const setSpy = jest.spyOn(window, "setTimeout")
+    const clearSpy = jest.spyOn(window, "clearTimeout")
+
     const { unmount } = renderHook(() => useWallpaperRotation())
-    expect(jest.getTimerCount()).toBeGreaterThan(0)
+    const armed = setSpy.mock.results.at(-1)?.value
+    expect(armed).toBeDefined()
+
     unmount()
-    expect(jest.getTimerCount()).toBe(0)
+    expect(clearSpy).toHaveBeenCalledWith(armed)
+
+    setSpy.mockRestore()
+    clearSpy.mockRestore()
   })
 })

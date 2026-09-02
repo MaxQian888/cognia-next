@@ -18,6 +18,7 @@ import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotatio
 import { withBuiltinPresets } from "@/lib/appearance/presets"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { useWallpaperRotation } from "@/hooks/appearance/use-wallpaper-rotation"
+import { useDailyWallpaper } from "@/hooks/appearance/use-daily-wallpaper"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
 /** Body data attributes the appearance module owns. globals.css selectors key off these. */
@@ -57,9 +58,11 @@ export function BackgroundApplier(): null {
   const customCssEnabled = useSettingsStore((s) => s.customCssEnabled)
   const customCssScope = useSettingsStore((s) => s.customCssScope)
 
-  // The carousel timer. Lives here rather than in its own initializer so it
-  // shares the single mount point the background already has.
+  // The carousel timer and the daily-wallpaper scheduler. Both live here
+  // rather than in initializers of their own so the whole background subsystem
+  // shares the single mount point it already had.
   useWallpaperRotation()
+  useDailyWallpaper()
 
   const lastUrlRef = useRef<string | null>(null)
   // Which wallpaper is currently painted. A change in this value between two

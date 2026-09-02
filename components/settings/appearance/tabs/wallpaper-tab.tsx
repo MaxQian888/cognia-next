@@ -20,7 +20,7 @@
 // and only the released value is persisted.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { ImagePlusIcon, PaletteIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -58,6 +58,11 @@ import {
   DEFAULT_WALLPAPER_ROTATION,
   type WallpaperRotationSettings,
 } from "@/types/appearance/wallpaper-rotation"
+import {
+  DEFAULT_DAILY_WALLPAPER,
+  type DailyWallpaperSettings,
+} from "@/types/appearance/daily-wallpaper"
+import { runDailyWallpaperFetch } from "@/hooks/appearance/use-daily-wallpaper"
 import { cn, responsiveSelectClass } from "@/lib/utils"
 import { WallpaperCard } from "../components/wallpaper-card"
 import { WallpaperUploader, type UploadedWallpaper } from "../components/wallpaper-uploader"
@@ -67,6 +72,7 @@ import {
 } from "../components/wallpaper-theme-generator"
 import { GradientBuilder } from "../components/gradient-builder"
 import { WallpaperRotationCard } from "../components/wallpaper-rotation-card"
+import { DailyWallpaperCard } from "../components/daily-wallpaper-card"
 import {
   listPluginWallpapers,
   subscribePluginWallpapers,
@@ -200,6 +206,7 @@ function nanoId(): string {
 
 export function WallpaperTab() {
   const t = useTranslations("settings.appearance.wallpaper")
+  const locale = useLocale()
 
   const background = useSettingsStore((s) => s.background)
   const userWallpapers = useSettingsStore((s) => s.wallpapers)
@@ -263,6 +270,25 @@ export function WallpaperTab() {
   const handleRotationChange = (patch: Partial<WallpaperRotationSettings>) => {
     void setBackground({ rotation: { ...rotation, ...patch } })
   }
+
+  const dailySettings: DailyWallpaperSettings = {
+    ...DEFAULT_DAILY_WALLPAPER,
+    ...(background.daily ?? {}),
+  }
+
+  const handleDailyChange = (patch: Partial<DailyWallpaperSettings>) => {
+    void setBackground({ daily: { ...dailySettings, ...patch } })
+  }
+
+  // Runs the same function the scheduler runs, rather than a parallel manual
+  // path that could drift from it.
+  const handleFetchNow = () =>
+    runDailyWallpaperFetch({
+      locale,
+      setBackground,
+      addWallpaper,
+      deleteWallpaper: deleteWallpaperRow,
+    })
 
   const activeAnalysis = analysis?.id === activeWallpaper?.id ? (analysis?.value ?? null) : null
   const verdict = computeOpacityVerdict({
@@ -485,6 +511,15 @@ export function WallpaperTab() {
           onChange={handleRotationChange}
         />
       </fieldset>
+
+      {/* 2c. Daily wallpaper. Deliberately OUTSIDE the `hasActive` fieldset:
+             turning it on is how a user with an empty gallery gets their first
+             wallpaper, so gating it on already having one is backwards. */}
+      <DailyWallpaperCard
+        daily={dailySettings}
+        onChange={handleDailyChange}
+        onFetchNow={handleFetchNow}
+      />
 
       {/* 3. Adjustments — inert until there's something to adjust. `fieldset`
              only disables form controls, so the Radix sliders below take an

@@ -28849,6 +28849,76 @@
           "pauseHiddenHint": "窗口切到后台时暂停计时。",
           "reducedMotionLabel": "尊重减少动态效果",
           "reducedMotionHint": "当系统要求减少动态效果时，直接切换壁纸。"
+        },
+        "daily": {
+          "title": "每日壁纸",
+          "hint": "按计划自动获取一张新的背景图。",
+          "enableAria": "启用每日壁纸",
+          "networkNotice": "这是外观设置中唯一会联网的功能。开启前不会发起任何请求，且只会访问你在下方选择的来源。",
+          "providerLabel": "来源",
+          "provider": {
+            "bing": "Bing 每日一图",
+            "nasaApod": "NASA 每日天文图",
+            "custom": "自定义 URL"
+          },
+          "providerHint": {
+            "bing": "Bing 公开的首页图片，无需账号或密钥。",
+            "nasaApod": "NASA 每日天文图。不填密钥也能用，但共享较低的公共限额。",
+            "custom": "你自己的接口。不允许指向内网或本机地址。"
+          },
+          "bing": {
+            "marketLabel": "地区",
+            "marketAuto": "跟随应用语言",
+            "resolutionLabel": "分辨率",
+            "resolution": {
+              "1080p": "1080p（体积较小）",
+              "uhd": "4K（每天数 MB）"
+            }
+          },
+          "nasa": {
+            "apiKeyLabel": "API 密钥",
+            "apiKeyPlaceholder": "可留空，将使用 DEMO_KEY",
+            "apiKeyHint": "不填密钥时，请求会与其他所有 DEMO_KEY 调用方共享一个很低的公共限额。在 api.nasa.gov 免费申请一个即可解除。",
+            "preferHdLabel": "优先使用高清原图",
+            "preferHdHint": "画质更好，但每天通常 3-6 MB。"
+          },
+          "custom": {
+            "urlLabel": "接口地址",
+            "kindLabel": "响应类型",
+            "kind": {
+              "image": "该地址本身就是图片",
+              "json": "该地址返回 JSON"
+            },
+            "imagePathLabel": "图片地址所在路径",
+            "imagePathHint": "图片 URL 在响应中的位置，例如 images.0.url",
+            "titlePathLabel": "标题所在路径（可选）",
+            "baseUrlLabel": "基础地址（可选）",
+            "baseUrlHint": "当响应返回相对路径时，会拼接到前面。"
+          },
+          "refreshLabel": "检查间隔",
+          "refreshOption": "{hours, plural, other {# 小时}}",
+          "keepLabel": "保留数量",
+          "keepHint": "较旧的自动获取壁纸会被删除，你自己上传的壁纸不受影响。",
+          "autoApplyLabel": "自动应用",
+          "autoApplyHint": "每次取到新图后立即设为当前壁纸。",
+          "wifiOnlyLabel": "计费网络下跳过",
+          "wifiOnlyHint": "当系统报告为蜂窝网络或省流量模式时暂缓下载。",
+          "fetchNow": "立即获取",
+          "fetching": "获取中…",
+          "lastFetched": "上次更新于 {when}",
+          "neverFetched": "尚未获取过。",
+          "error": {
+            "network": "无法连接到该来源，稍后会自动重试。",
+            "blocked-host": "该地址不被允许。内网、本机与元数据地址会被拒绝。",
+            "bad-response": "来源返回了应用无法解析的内容。",
+            "no-image": "响应中没有图片地址。",
+            "not-an-image": "返回的内容不是图片。",
+            "too-large": "图片超过了 12 MB 的上限。",
+            "rate-limited": "来源正在限流。请稍后重试，或填入你自己的 API 密钥。",
+            "unsupported-media": "今天的内容不是图片，因此没有可应用的壁纸。",
+            "storage-failed": "图片无法保存到本设备。",
+            "no-transport": "当前构建没有可用的网络传输方式。"
+          }
         }
       }
     },

@@ -21,6 +21,15 @@ if (typeof Blob.prototype.arrayBuffer !== "function") {
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
+  // The daily-wallpaper card resolves Bing's `auto` market from the locale,
+  // and reports its last-fetch time as relative text.
+  useLocale: () => "en",
+  useFormatter: () => ({ relativeTime: () => "just now" }),
+}))
+
+// The daily scheduler must not reach the network from a settings-panel test.
+jest.mock("@/hooks/appearance/use-daily-wallpaper", () => ({
+  runDailyWallpaperFetch: jest.fn(async () => {}),
 }))
 
 jest.mock("@/lib/appearance", () => ({

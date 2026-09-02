@@ -28849,6 +28849,76 @@
           "pauseHiddenHint": "Hold the timer while the window is in the background.",
           "reducedMotionLabel": "Respect reduced motion",
           "reducedMotionHint": "Change wallpapers instantly when the system asks for less motion."
+        },
+        "daily": {
+          "title": "Daily wallpaper",
+          "hint": "Fetch a new background image on a schedule.",
+          "enableAria": "Enable daily wallpaper",
+          "networkNotice": "This is the only appearance setting that contacts the internet. Nothing is fetched until you turn it on, and only the source you pick below is contacted.",
+          "providerLabel": "Source",
+          "provider": {
+            "bing": "Bing image of the day",
+            "nasaApod": "NASA Astronomy Picture of the Day",
+            "custom": "Custom URL"
+          },
+          "providerHint": {
+            "bing": "Bing's public homepage image. No account or key needed.",
+            "nasaApod": "NASA's daily astronomy image. Works without a key, at a shared rate limit.",
+            "custom": "Your own endpoint. It may not point at a private or local address."
+          },
+          "bing": {
+            "marketLabel": "Region",
+            "marketAuto": "Match app language",
+            "resolutionLabel": "Resolution",
+            "resolution": {
+              "1080p": "1080p (smaller)",
+              "uhd": "4K (several MB per day)"
+            }
+          },
+          "nasa": {
+            "apiKeyLabel": "API key",
+            "apiKeyPlaceholder": "Optional, uses DEMO_KEY",
+            "apiKeyHint": "Without a key, requests share a low public rate limit with every other DEMO_KEY caller. A free key from api.nasa.gov removes that.",
+            "preferHdLabel": "Prefer the HD image",
+            "preferHdHint": "Higher quality, often 3-6 MB per day."
+          },
+          "custom": {
+            "urlLabel": "Endpoint",
+            "kindLabel": "Response type",
+            "kind": {
+              "image": "The URL is the image",
+              "json": "The URL returns JSON"
+            },
+            "imagePathLabel": "Path to the image URL",
+            "imagePathHint": "Where the image URL sits in the response, for example images.0.url",
+            "titlePathLabel": "Path to the title (optional)",
+            "baseUrlLabel": "Base URL (optional)",
+            "baseUrlHint": "Prepended when the response returns a relative image path."
+          },
+          "refreshLabel": "Check every",
+          "refreshOption": "{hours, plural, =1 {1 hour} other {# hours}}",
+          "keepLabel": "Keep",
+          "keepHint": "Older fetched wallpapers are deleted. Your own uploads are never touched.",
+          "autoApplyLabel": "Apply automatically",
+          "autoApplyHint": "Make each new image the active wallpaper as it arrives.",
+          "wifiOnlyLabel": "Skip on metered connections",
+          "wifiOnlyHint": "Hold the download when the system reports cellular or data-saver.",
+          "fetchNow": "Fetch now",
+          "fetching": "Fetching…",
+          "lastFetched": "Last updated {when}",
+          "neverFetched": "Not fetched yet.",
+          "error": {
+            "network": "Could not reach the source. It will retry shortly.",
+            "blocked-host": "That address is not allowed. Private, local and metadata addresses are refused.",
+            "bad-response": "The source replied with something this app could not read.",
+            "no-image": "The response contained no image URL.",
+            "not-an-image": "What came back was not an image.",
+            "too-large": "The image was larger than the 12 MB limit.",
+            "rate-limited": "The source is rate limiting requests. Try again later, or add your own API key.",
+            "unsupported-media": "Today's entry is not an image, so there is nothing to apply.",
+            "storage-failed": "The image could not be saved to this device.",
+            "no-transport": "This build has no way to make network requests."
+          }
         }
       }
     },

@@ -21,6 +21,17 @@ jest.mock("@/lib/pet/window-role", () => ({
     role === "overlay" || role === "popup" || role === "island",
 }))
 
+// The applier drives the rotation timer and the daily-wallpaper scheduler as
+// well as the layer itself, so the mock has to carry the whole surface those
+// two read, `getState` included.
+jest.mock("next-intl", () => ({ useLocale: () => "en" }))
+
+// The daily scheduler must not reach the network from a layer test.
+jest.mock("@/lib/appearance/daily-wallpaper/fetch-daily-wallpaper", () => ({
+  fetchDailyWallpaper: jest.fn(async () => ({ ok: false, code: "network" })),
+  selectExpiredDailyWallpapers: jest.fn(() => []),
+}))
+
 // Mock the settings store with a manual selector implementation.
 jest.mock("@/stores/settings", () => {
   const state: {
@@ -28,14 +39,22 @@ jest.mock("@/stores/settings", () => {
     wallpapers: Wallpaper[]
     customCss: string
     customCssEnabled: boolean
+    setBackground: jest.Mock
+    addWallpaper: jest.Mock
+    deleteWallpaper: jest.Mock
   } = {
     background: { ...DEFAULT_BACKGROUND_SETTINGS },
     wallpapers: [],
     customCss: "",
     customCssEnabled: false,
+    setBackground: jest.fn(async () => {}),
+    addWallpaper: jest.fn(async () => {}),
+    deleteWallpaper: jest.fn(async () => {}),
   }
+  const useSettingsStore = jest.fn((selector: (s: typeof state) => unknown) => selector(state))
+  ;(useSettingsStore as unknown as { getState: () => typeof state }).getState = () => state
   return {
-    useSettingsStore: jest.fn((selector: (s: typeof state) => unknown) => selector(state)),
+    useSettingsStore,
     __setStoreState: (patch: Partial<typeof state>) => {
       Object.assign(state, patch)
     },
