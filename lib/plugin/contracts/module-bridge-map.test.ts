@@ -96,6 +96,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "wallpapers",
         "density-preset",
         "chat-middleware",
+        "commands",
         "modal-mount",
         "terminal-completion",
         "routing-strategy",
@@ -116,7 +117,9 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     // verified: the loop at `manager.ts:3830` / `:4118` is fully generic, and
     // `registerIntegrationsForPlugin` / `unregisterIntegrationsForPlugin` are
     // real and covered by `integrations-bridge.test.ts`.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(24)
+    // `commands` (25th) is declarative bookkeeping for python-backed
+    // `manifest.commands[]`, covered by `commands-bridge.test.ts`.
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(25)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

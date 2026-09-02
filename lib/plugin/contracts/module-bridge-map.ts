@@ -78,6 +78,11 @@ import {
   unregisterChatMiddlewaresForPlugin,
 } from "@/lib/plugin/bridge/chat-middleware-bridge"
 import {
+  registerCommandsForPlugin,
+  unregisterCommandsForPlugin,
+} from "@/lib/plugin/bridge/commands-bridge"
+import { getPluginHookContribution } from "@/lib/plugin/registries/hook-registry"
+import {
   registerTerminalCompletionProvidersForPlugin,
   unregisterTerminalCompletionProvidersForPlugin,
 } from "@/lib/plugin/bridge/terminal-completion-bridge"
@@ -319,6 +324,25 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterChatMiddlewaresForPlugin(pluginId)
+    },
+  },
+  commands: {
+    // Declarative `manifest.commands[]`, python half. The manager still turns
+    // every entry into a palette + slash registration (JS or python alike),
+    // this records which plugins answer those commands from python so
+    // `dispatchOnCommand` hands their `@hook("onCommand")` one structured
+    // invocation instead of a positional list. Python hooks are bridged
+    // before the module bridges run, so the hook lookup here is decisive.
+    key: "commands",
+    manifestField: "commands",
+    register: async (ctx) => {
+      registerCommandsForPlugin(ctx.manifest, {
+        hasCommandHook: (pluginId) =>
+          getPluginHookContribution(pluginId)?.hooks.onCommand !== undefined,
+      })
+    },
+    unregister: (pluginId) => {
+      unregisterCommandsForPlugin(pluginId)
     },
   },
   "modal-mount": {

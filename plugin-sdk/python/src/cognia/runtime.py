@@ -17,6 +17,7 @@ package is the standalone/reference implementation of the identical contract.
 
 from __future__ import annotations
 
+import asyncio
 import collections.abc
 import inspect
 import sys
@@ -44,6 +45,11 @@ HostCallHandler = Callable[[str, Dict[str, Any]], Any]
 
 class HostCallError(RuntimeError):
     """A ``cognia.ctx.*`` call the host refused, or that had no host at all."""
+
+
+async def _drive(awaitable: Any) -> Any:
+    """Await one hook result on a fresh loop (the offline stand-in for the host's loop)."""
+    return await awaitable
 
 
 class Runtime:
@@ -300,12 +306,18 @@ class Runtime:
         return ensure_serializable(result, f"tool '{name}'")
 
     def call_hook(self, event: str, name: str, payload: Any = None) -> Any:
-        """Invoke a named hook for an event (mirrors host `_handle_call_hook`)."""
+        """Invoke a named hook for an event (mirrors host `_handle_call_hook`).
+
+        The embedded host awaits a coroutine-returning hook (`_invoke`), so an
+        ``async def`` handler that calls ``ctx.*`` is a normal shape. Offline
+        there is no loop, so the coroutine is driven to completion here.
+        """
         for hook in self._hooks:
             if hook.event == event and hook.name == name:
-                return ensure_serializable(
-                    hook.fn(payload), f"hook '{name}' for '{event}'"
-                )
+                result = hook.fn(payload)
+                if inspect.isawaitable(result):
+                    result = asyncio.run(_drive(result))
+                return ensure_serializable(result, f"hook '{name}' for '{event}'")
         raise RuntimeError(f"no hook named '{name}' registered for event '{event}'")
 
     # -- protocol -----------------------------------------------------------

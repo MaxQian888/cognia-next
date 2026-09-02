@@ -7,6 +7,10 @@
  */
 
 import {
+  __resetCommandsBridgeForTesting,
+  registerCommandsForPlugin,
+} from "@/lib/plugin/bridge/commands-bridge"
+import {
   HookPriority,
   normalizePriority,
   priorityToNumber,
@@ -1378,6 +1382,52 @@ describe("PluginLifecycleHooks.dispatchOnCommand", () => {
     await expect(lifecycleHooks.dispatchOnCommand("run", [])).resolves.toEqual({
       handled: true,
       message: "mine",
+    })
+  })
+
+  describe("python-backed plugins", () => {
+    afterEach(() => __resetCommandsBridgeForTesting())
+
+    it("hands a python plugin one structured invocation and reads the answer back", async () => {
+      // The bridged `@hook("onCommand")` carries one payload value, so the
+      // python plugin sees an object rather than `[command, argv, context]`.
+      const onCommand = jest.fn(async () => ({ handled: true, message: "from python" }))
+      registerCommandsForPlugin({
+        id: "py",
+        type: "python",
+        pythonMain: "main.py",
+        commands: [{ id: "hello", name: "Hello" }],
+      } as PluginManifest)
+      lifecycleHooks.registerHooks("py", { onCommand: onCommand as never })
+      await expect(
+        lifecycleHooks.dispatchOnCommand("hello", ["a", "b"], { sessionId: "s1" })
+      ).resolves.toEqual({ handled: true, message: "from python" })
+      expect(onCommand).toHaveBeenCalledTimes(1)
+      expect(onCommand.mock.calls[0]).toEqual([
+        { command: "hello", args: ["a", "b"], sessionId: "s1" },
+      ])
+    })
+
+    it("keeps looking when python declines or answers with a foreign shape", async () => {
+      registerCommandsForPlugin({
+        id: "py",
+        type: "python",
+        pythonMain: "main.py",
+        commands: [{ id: "hello", name: "Hello" }],
+      } as PluginManifest)
+      lifecycleHooks.registerHooks("py", { onCommand: (async () => "just text") as never })
+      lifecycleHooks.registerHooks("js", { onCommand: () => ({ handled: true, message: "js" }) })
+      await expect(lifecycleHooks.dispatchOnCommand("hello", [])).resolves.toEqual({
+        handled: true,
+        message: "js",
+      })
+    })
+
+    it("leaves a plugin without python-backed commands on the positional contract", async () => {
+      const onCommand = jest.fn(() => true)
+      lifecycleHooks.registerHooks("js", { onCommand })
+      await lifecycleHooks.dispatchOnCommand("hello", ["x"], { sessionId: "s1" })
+      expect(onCommand).toHaveBeenCalledWith("hello", ["x"], { sessionId: "s1" })
     })
   })
 

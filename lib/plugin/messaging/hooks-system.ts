@@ -36,6 +36,11 @@ import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { getSlashCommand, listSlashCommands } from "@/lib/slash-commands/registry"
 import {
+  dispatchPythonCommand,
+  isPythonCommandPlugin,
+  type PythonCommandHook,
+} from "@/lib/plugin/bridge/commands-bridge"
+import {
   getPluginHookContribution,
   listEnabledHookPlugins,
   listHookContributors,
@@ -926,9 +931,21 @@ export class PluginLifecycleHooks {
   ): Promise<PluginCommandResult | null> {
     for (const pluginId of this.commandDispatchOrder(command)) {
       const registered = this.registered(pluginId)
-      if (registered?.hooks.onCommand) {
+      const onCommand = registered?.hooks.onCommand
+      if (onCommand) {
         try {
-          const outcome = await registered.hooks.onCommand(command, args, context)
+          // A python plugin's `onCommand` is the bridged `@hook("onCommand")`,
+          // which carries one payload value. The commands bridge hands it a
+          // structured invocation and reads the answer back into this contract.
+          const outcome = isPythonCommandPlugin(pluginId)
+            ? await dispatchPythonCommand(
+                pluginId,
+                onCommand as unknown as PythonCommandHook,
+                command,
+                args,
+                context
+              )
+            : await onCommand(command, args, context)
           if (outcome === true) return { handled: true }
           if (outcome && typeof outcome === "object" && outcome.handled) return outcome
         } catch (error) {

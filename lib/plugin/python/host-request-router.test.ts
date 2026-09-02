@@ -59,6 +59,23 @@ describe("routePythonHostRequest", () => {
     expect(send).toHaveBeenCalledWith("x")
   })
 
+  it("round-trips ctx.commands.listSlashCommands now the namespace is open to python", async () => {
+    // ADR-0164 deferred this route. The router needed no per-namespace
+    // branch: opening `commands` to python in the catalog is what made the
+    // SDK emit the frame, and the generic dotted resolution answers it.
+    const listSlashCommands = jest
+      .fn()
+      .mockResolvedValue([{ id: "py.hello", name: "Hello", source: "plugin" }])
+    const outcome = await routePythonHostRequest(frame("commands.listSlashCommands", {}), {
+      getContext: () => contextWith({ commands: { listSlashCommands } }),
+    })
+    expect(outcome).toEqual({
+      ok: true,
+      result: [{ id: "py.hello", name: "Hello", source: "plugin" }],
+    })
+    expect(listSlashCommands).toHaveBeenCalledWith()
+  })
+
   it("preserves the namespace as `this` so guarded APIs keep their closure", async () => {
     const namespace = {
       secret: "kept",

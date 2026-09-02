@@ -24,7 +24,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.characterPacks` | 3 | None | frontend, hybrid | internal |
 | `ctx.chat` | 4 | `session:write` | frontend, hybrid, python | internal |
 | `ctx.clipboard` | 7 | `clipboard:write`, `clipboard:read` | frontend, hybrid | sensitive |
-| `ctx.commands` | 7 | `commands:write`, `commands:read` | frontend, hybrid | internal |
+| `ctx.commands` | 7 | `commands:write`, `commands:read` | frontend, hybrid, python | internal |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
 | `ctx.configuration` | 5 | `settings:read`, `settings:write` | frontend, hybrid | internal |
 | `ctx.connectors` | 48 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
@@ -75,7 +75,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.storage` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.subscription` | 7 | `subscription:read` | frontend, hybrid | sensitive |
 | `ctx.team` | 30 | `team:write`, `team:read`, `agent:dispatch`, `agent:control` | frontend, hybrid, python | sensitive |
-| `ctx.templates` | 11 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid | internal |
+| `ctx.templates` | 11 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid, python | internal |
 | `ctx.terminal` | 11 | `terminal:safety`, `terminal:spawn`, `terminal:kill`, `terminal:completion`, `terminal:write` | frontend, hybrid | internal |
 | `ctx.theme` | 16 | `theme:write`, `theme:read` | frontend, hybrid | internal |
 | `ctx.toolResult` | 1 | `extension:ui` | frontend, hybrid | internal |
