@@ -5218,6 +5218,8 @@ export type PluginAPIPermission =
   | "templates:contribute"
   | "templates:instantiate"
   | "templates:library:write"
+  | "commands:read"
+  | "commands:write"
   | "export:session"
   | "export:project"
   | "theme:read"
@@ -5333,6 +5335,16 @@ export interface PluginContextAPI {
 
   /** Unified template catalog, validation, contribution and guarded execution API. */
   templates: import("@/packages/plugin-sdk/src/templates").PluginTemplatesAPI
+
+  /**
+   * Slash commands: the registry a plugin registers into at runtime, and the
+   * `.claude/commands` / `.cognia/commands` markdown files the user authors.
+   *
+   * Separate from `manifest.commands[]`, which is the declarative path and is
+   * unchanged. This is the imperative one, for a plugin whose command set is
+   * only known once it has talked to something (a repo, an account, a server).
+   */
+  commands: import("@/lib/plugin/api/commands-api").PluginCommandsAPI
 
   /**
    * Message-part renderer API — register a React component for a custom

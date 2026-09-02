@@ -1,4 +1,11 @@
 {
+  "authoring": {
+    "hostLacks": "The host you are paired with does not offer command file access.",
+    "localLacks": "This build cannot reach the command directories.",
+    "needsDesktop": "User-scope commands live in ~/.claude/commands, outside every workspace, so they can only be created or edited from the desktop app.",
+    "noHost": "Nothing is paired, so there is no filesystem to write commands to. Pair this browser with a host to author project commands.",
+    "projectNeedsWorkspace": "Open a workspace, or start a session with a working directory, to author project commands."
+  },
   "builtin": "Built-in ({count})",
   "cancel": "Cancel",
   "copiedToClipboard": "Copied `/{name} ` to clipboard.",
@@ -24,6 +31,7 @@
     "description": "Custom commands are markdown files written to .claude/commands/. The body is the prompt template; YAML frontmatter carries hints, allowed-tools, and an optional model override.",
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "Shown in the picker.",
+    "globalNotWritable": "User-scope commands need the desktop app.",
     "modelLabel": "Model override",
     "modelPlaceholder": "e.g. claude-sonnet-4-5 (optional)",
     "nameHint": "Used as the filename and the slash command — letters, digits, `_`, `-`, `.` or `/` (max 64 chars).",
@@ -31,6 +39,7 @@
     "namePlaceholder": "e.g. refactor",
     "previewLabel": "Preview",
     "projectNeedsCwd": "Project scope needs the active session to have a working directory set.",
+    "projectNotWritable": "Project commands need a host that can write this repository.",
     "removeTool": "Remove {tool}",
     "save": "Save",
     "savedToast": "Saved.",
@@ -42,12 +51,12 @@
     "scopeUserHint": "Available across every chat on this machine.",
     "titleCreate": "New custom command",
     "titleEdit": "Edit custom command",
-    "webModeBanner": "Read-only preview — saving requires the desktop build.",
-    "webModeBlocked": "Saving custom commands requires the desktop build."
+    "webModeBanner": "Read-only preview. Saving needs the desktop app, or a paired host with a workspace open.",
+    "webModeBlocked": "Saving custom commands needs the desktop app, or a paired host with a workspace open."
   },
   "emptyBuiltin": "No matches.",
   "emptyCustom": "No custom commands found in ~/.claude/commands or .claude/commands.",
-  "emptyCustomWeb": "Custom command discovery requires the desktop app.",
+  "emptyCustomWeb": "No commands are reachable from here. Pair with a host, or open the desktop app.",
   "emptyPlugin": "No plugin-contributed commands.",
   "filterPlaceholder": "Filter by name or description…",
   "newBtn": "New command",

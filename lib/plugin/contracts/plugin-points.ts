@@ -1178,6 +1178,12 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "workflow.template": "extension:workflow",
   "auth.provider": "auth:provide",
   "cli.tool": "cli:execute",
+  // A slash command is a runtime entry point: whoever registers one
+  // decides what `/name` does for the user. `commands:write` is the
+  // permission `ctx.commands.registerSlashCommand` already takes, so the
+  // manifest path and the runtime path answer to the same name instead of
+  // the canonical point being the one contribution nothing gated.
+  "command.slash": "commands:write",
 }
 
 // Runtime points that are NOT yet stable (everything else defaults to

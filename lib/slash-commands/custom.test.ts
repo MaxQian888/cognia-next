@@ -23,15 +23,38 @@ jest.mock("@tauri-apps/api/path", () => ({
   dirname: (path: string) => mockDirname(path),
 }))
 
+// The workspace fallback. Partial-actual so the shared constants
+// (`DEFAULT_PROJECT_COMMAND_DIR`) that `custom.ts` imports are the real ones.
+jest.mock("./custom-workspace", () => ({
+  ...jest.requireActual("./custom-workspace"),
+  listWorkspaceCustomCommands: jest.fn(async () => []),
+  saveWorkspaceCustomCommand: jest.fn(async () => ".claude/commands/x.md"),
+  deleteWorkspaceCustomCommand: jest.fn(async () => undefined),
+}))
+
 import {
+  GlobalScopeUnavailableError,
   applyTemplate,
   assertValidCommandName,
   buildCommandFile,
   deleteCustomSlashCommand,
   loadCustomSlashCommands,
+  projectCommandDirOf,
   resolveCommandPath,
   saveCustomSlashCommand,
 } from "./custom"
+import {
+  deleteWorkspaceCustomCommand,
+  listWorkspaceCustomCommands,
+  saveWorkspaceCustomCommand,
+} from "./custom-workspace"
+
+const mockedListWorkspace = listWorkspaceCustomCommands as jest.Mock
+const mockedSaveWorkspace = saveWorkspaceCustomCommand as jest.Mock
+const mockedDeleteWorkspace = deleteWorkspaceCustomCommand as jest.Mock
+
+/** What `invoke` / `plugin-fs` reject with when there is no desktop process. */
+const NO_HOST = () => new Error("Cannot read properties of undefined (reading 'invoke')")
 
 const mockedInvoke = invoke as unknown as jest.Mock
 
@@ -43,6 +66,9 @@ beforeEach(() => {
   mockHomeDir.mockReset().mockResolvedValue("/Users/me")
   mockJoin.mockClear()
   mockDirname.mockClear()
+  mockedListWorkspace.mockReset().mockResolvedValue([])
+  mockedSaveWorkspace.mockReset().mockResolvedValue(".claude/commands/x.md")
+  mockedDeleteWorkspace.mockReset().mockResolvedValue(undefined)
 })
 
 describe("loadCustomSlashCommands", () => {
@@ -349,5 +375,149 @@ describe("deleteCustomSlashCommand", () => {
     await expect(deleteCustomSlashCommand({ scope: "user", name: "refactor" })).rejects.toThrow(
       /EACCES/
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Off-desktop routing. The local scanner and `plugin-fs` are `target: "client"`
+// and simply do not exist on a paired browser or phone, so the project scope
+// falls through to the workspace filesystem and the global scope refuses.
+// ---------------------------------------------------------------------------
+
+describe("loadCustomSlashCommands off the desktop", () => {
+  it("falls through to the workspace scan when the local scanner is unreachable", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => {})
+    mockedInvoke.mockRejectedValue(NO_HOST())
+    mockedListWorkspace.mockResolvedValue([
+      { name: "deploy", description: "d", scope: "project", originDir: ".cognia/commands" },
+    ])
+    const out = await loadCustomSlashCommands("/repo")
+    expect(mockedListWorkspace).toHaveBeenCalledWith("/repo")
+    expect(out).toEqual([
+      { name: "deploy", description: "d", scope: "project", originDir: ".cognia/commands" },
+    ])
+    ;(console.debug as jest.Mock).mockRestore()
+  })
+
+  it("does not try the workspace when there is no working directory", async () => {
+    jest.spyOn(console, "debug").mockImplementation(() => {})
+    mockedInvoke.mockRejectedValue(NO_HOST())
+    await expect(loadCustomSlashCommands(null)).resolves.toEqual([])
+    expect(mockedListWorkspace).not.toHaveBeenCalled()
+    ;(console.debug as jest.Mock).mockRestore()
+  })
+
+  it("prefers the local scanner when it answers, because only it sees the global scope", async () => {
+    mockedInvoke.mockResolvedValue([])
+    await loadCustomSlashCommands("/repo")
+    expect(mockedListWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("carries the host's originDir through so an edit goes back where it came from", async () => {
+    mockedInvoke.mockResolvedValue([
+      {
+        name: "deploy",
+        scope: "project",
+        path: "/repo/.cognia/commands/deploy.md",
+        originDir: "/repo/.cognia/commands",
+        description: null,
+        argumentHint: null,
+        allowedTools: null,
+        model: null,
+        paths: null,
+        disableModelInvocation: null,
+        userInvocable: null,
+        body: "b",
+      },
+    ])
+    const [command] = await loadCustomSlashCommands("/repo")
+    expect(command.originDir).toBe("/repo/.cognia/commands")
+    expect(projectCommandDirOf(command.originDir)).toBe(".cognia/commands")
+  })
+})
+
+describe("projectCommandDirOf", () => {
+  it("recognises .cognia and defaults everything else to .claude", () => {
+    expect(projectCommandDirOf("/repo/.cognia/commands")).toBe(".cognia/commands")
+    expect(projectCommandDirOf("C:\\repo\\.cognia\\commands")).toBe(".cognia/commands")
+    expect(projectCommandDirOf("/repo/.claude/commands")).toBe(".claude/commands")
+    expect(projectCommandDirOf(undefined)).toBe(".claude/commands")
+    expect(projectCommandDirOf(null)).toBe(".claude/commands")
+  })
+})
+
+describe("resolveCommandPath with an explicit directory", () => {
+  it("writes a project command into the directory it came from", async () => {
+    await expect(
+      resolveCommandPath("project", "deploy", "/repo", ".cognia/commands")
+    ).resolves.toBe("/repo/.cognia/commands/deploy.md")
+  })
+
+  it("ignores the directory for user scope, which has only one", async () => {
+    await expect(resolveCommandPath("user", "deploy", null, ".cognia/commands")).resolves.toBe(
+      "/Users/me/.claude/commands/deploy.md"
+    )
+  })
+})
+
+describe("saveCustomSlashCommand off the desktop", () => {
+  it("writes a project command through the workspace filesystem", async () => {
+    mockMkdir.mockRejectedValueOnce(NO_HOST())
+    const path = await saveCustomSlashCommand({
+      scope: "project",
+      name: "deploy",
+      cwd: "/repo",
+      dir: ".cognia/commands",
+      body: "body",
+    })
+    expect(path).toBe(".claude/commands/x.md")
+    expect(mockedSaveWorkspace).toHaveBeenCalledWith({
+      root: "/repo",
+      name: "deploy",
+      dir: ".cognia/commands",
+      content: expect.stringContaining("body"),
+    })
+    expect(mockWriteTextFile).not.toHaveBeenCalled()
+  })
+
+  it("refuses the user scope with a reason instead of writing it somewhere else", async () => {
+    mockMkdir.mockRejectedValueOnce(NO_HOST())
+    await expect(
+      saveCustomSlashCommand({ scope: "user", name: "deploy", body: "body" })
+    ).rejects.toBeInstanceOf(GlobalScopeUnavailableError)
+    expect(mockedSaveWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("still propagates a real write failure rather than writing elsewhere", async () => {
+    mockMkdir.mockRejectedValueOnce(new Error("EACCES: permission denied"))
+    await expect(
+      saveCustomSlashCommand({ scope: "project", name: "deploy", cwd: "/repo", body: "b" })
+    ).rejects.toThrow(/permission denied/)
+    expect(mockedSaveWorkspace).not.toHaveBeenCalled()
+  })
+})
+
+describe("deleteCustomSlashCommand off the desktop", () => {
+  it("deletes a project command through the workspace filesystem", async () => {
+    mockRemove.mockRejectedValueOnce(NO_HOST())
+    await deleteCustomSlashCommand({
+      scope: "project",
+      name: "deploy",
+      cwd: "/repo",
+      dir: ".cognia/commands",
+    })
+    expect(mockedDeleteWorkspace).toHaveBeenCalledWith({
+      root: "/repo",
+      name: "deploy",
+      dir: ".cognia/commands",
+    })
+  })
+
+  it("refuses the user scope with a reason", async () => {
+    mockRemove.mockRejectedValueOnce(NO_HOST())
+    await expect(
+      deleteCustomSlashCommand({ scope: "user", name: "deploy" })
+    ).rejects.toBeInstanceOf(GlobalScopeUnavailableError)
+    expect(mockedDeleteWorkspace).not.toHaveBeenCalled()
   })
 })

@@ -65,6 +65,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "templates:contribute",
   "templates:instantiate",
   "templates:library:write",
+  "commands:read",
+  "commands:write",
   "ipc:call",
   "ipc:expose",
   "events:publish",
@@ -549,6 +551,27 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.clipboard.writeText": {
+    kind: "none",
+  },
+  "ctx.commands.registerSlashCommand": {
+    kind: "returned-disposer",
+  },
+  "ctx.commands.unregisterSlashCommand": {
+    kind: "none",
+  },
+  "ctx.commands.listSlashCommands": {
+    kind: "none",
+  },
+  "ctx.commands.listCustomCommands": {
+    kind: "none",
+  },
+  "ctx.commands.getCustomCommand": {
+    kind: "none",
+  },
+  "ctx.commands.saveCustomCommand": {
+    kind: "none",
+  },
+  "ctx.commands.deleteCustomCommand": {
     kind: "none",
   },
   "ctx.companion.getDevice": {

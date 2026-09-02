@@ -33,6 +33,7 @@ describe("plugin-sdk package exports", () => {
     "./api/balance-adapter",
     "./api/character-pack",
     "./api/cli-tool",
+    "./api/commands",
     "./api/context-provider",
     "./api/eval",
     "./api/external-agent-adapter",

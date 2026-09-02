@@ -65,6 +65,28 @@ jest.mock("@/lib/ai/agent/team/durable-new-team", () => ({
 const publishTemplate = jest.fn(async () => {})
 jest.mock("@/lib/agent-team/publish-template-to-platform", () => ({
   publishSquadTemplateToPlatform: (...a: unknown[]) => publishTemplate(...(a as [])),
+  platformIdForSquadTemplate: (template: { id: string }) => `legacy.agentTeam.${template.id}`,
+}))
+
+// The same broker `ctx.templates.createDraft` prompts through. Spread the
+// actual module so the permission guard's own use of it is untouched.
+const consentRequest = jest.fn(async () => true)
+jest.mock("@/lib/plugin/security/consent-broker", () => ({
+  ...jest.requireActual("@/lib/plugin/security/consent-broker"),
+  getPluginConsentBroker: () => ({ request: (...a: unknown[]) => consentRequest(...(a as [])) }),
+}))
+
+const mirroredDraft = jest.fn(
+  async () =>
+    ({ id: "legacy.agentTeam.t", revision: 1, provenance: { source: "user" } }) as
+      Record<string, unknown> | undefined
+)
+const mirroredSaveDraft = jest.fn(async (input: unknown) => input)
+jest.mock("@/lib/templates/runtime", () => ({
+  getTemplateRuntime: () => ({
+    repository: { getDraft: (...a: unknown[]) => mirroredDraft(...(a as [])) },
+    service: { saveDraft: (...a: unknown[]) => mirroredSaveDraft(...(a as [])) },
+  }),
 }))
 
 const PLUGIN = "tracker-sync"
@@ -91,6 +113,12 @@ describe("createTeamAPI", () => {
     useAgentTeamStore.getState().reset()
     resetPermissionGuard()
     guard = getPermissionGuard()
+    publishTemplate.mockClear().mockResolvedValue(undefined)
+    consentRequest.mockClear().mockResolvedValue(true)
+    mirroredDraft
+      .mockClear()
+      .mockResolvedValue({ id: "legacy.agentTeam.t", revision: 1, provenance: { source: "user" } })
+    mirroredSaveDraft.mockClear()
   })
 
   describe("lifecycle", () => {
@@ -156,7 +184,7 @@ describe("createTeamAPI", () => {
     })
 
     it("saveAsTemplate mirrors into the unified platform at write time", async () => {
-      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "templates:library:write"])
       const { team } = seed()
       const api = createTeamAPI(PLUGIN)
       const template = await api.saveAsTemplate(team.id, "Review Crew blueprint")
@@ -166,11 +194,72 @@ describe("createTeamAPI", () => {
     })
 
     it("a failed platform mirror does not lose the template", async () => {
-      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "templates:library:write"])
       publishTemplate.mockRejectedValueOnce(new Error("catalog offline"))
       const { team } = seed()
       const api = createTeamAPI(PLUGIN)
       await expect(api.saveAsTemplate(team.id, "Blueprint")).resolves.not.toBeNull()
+    })
+
+    /**
+     * The back door. This call reaches `TemplateService.saveDraft`, so it has
+     * to answer to the permission and the prompt `ctx.templates` uses, and the
+     * row it leaves behind has to say which plugin wrote it.
+     */
+    it("saveAsTemplate needs templates:library:write on top of team:write", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      expect(() => api.saveAsTemplate(team.id, "Blueprint")).toThrow(PermissionError)
+      expect(publishTemplate).not.toHaveBeenCalled()
+    })
+
+    it("saveAsTemplate prompts through the template consent broker and refuses a decline", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "templates:library:write"])
+      consentRequest.mockResolvedValueOnce(false)
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      await expect(api.saveAsTemplate(team.id, "Blueprint")).rejects.toThrow(
+        /denied by user confirmation/
+      )
+      expect(consentRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pluginId: PLUGIN,
+          permission: "templates:library:write",
+          reason: "library-write:Blueprint",
+        })
+      )
+      // Nothing was written: the prompt comes before the legacy store write.
+      expect(publishTemplate).not.toHaveBeenCalled()
+    })
+
+    it("stamps the mirrored draft with the plugin that asked for it", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "templates:library:write"])
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      const template = await api.saveAsTemplate(team.id, "Blueprint")
+      expect(mirroredDraft).toHaveBeenCalledWith(`legacy.agentTeam.${template!.id}`)
+      expect(mirroredSaveDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provenance: expect.objectContaining({ pluginId: PLUGIN }),
+        }),
+        1
+      )
+    })
+
+    it("does not steal a mirrored draft another plugin already owns", async () => {
+      guard.registerPlugin(PLUGIN, ["team:read", "team:write", "templates:library:write"])
+      mirroredDraft.mockResolvedValueOnce({
+        id: "legacy.agentTeam.t",
+        revision: 1,
+        provenance: { source: "user", pluginId: "someone.else" },
+      })
+      const { team } = seed()
+      const api = createTeamAPI(PLUGIN)
+      // Non-fatal, exactly like the mirror it follows: the squad template is
+      // still saved, the attribution is simply not rewritten.
+      await expect(api.saveAsTemplate(team.id, "Blueprint")).resolves.not.toBeNull()
+      expect(mirroredSaveDraft).not.toHaveBeenCalled()
     })
 
     it("takes team:write, not agent:dispatch: creating spends nothing", () => {

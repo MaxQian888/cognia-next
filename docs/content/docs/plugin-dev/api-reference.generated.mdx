@@ -24,6 +24,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.characterPacks` | 3 | None | frontend, hybrid | internal |
 | `ctx.chat` | 4 | `session:write` | frontend, hybrid, python | internal |
 | `ctx.clipboard` | 7 | `clipboard:write`, `clipboard:read` | frontend, hybrid | sensitive |
+| `ctx.commands` | 7 | `commands:write`, `commands:read` | frontend, hybrid | internal |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
 | `ctx.configuration` | 5 | `settings:read`, `settings:write` | frontend, hybrid | internal |
 | `ctx.connectors` | 48 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
@@ -300,6 +301,18 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `clipboard.readText` | `clipboard:read` | medium | Yes |
 | `clipboard.writeImage` | `clipboard:write` | high | No |
 | `clipboard.writeText` | `clipboard:write` | high | No |
+
+## `ctx.commands`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `commands.registerSlashCommand` | `commands:write` | medium | No |
+| `commands.unregisterSlashCommand` | `commands:write` | medium | Yes |
+| `commands.listSlashCommands` | `commands:read` | low | Yes |
+| `commands.listCustomCommands` | `commands:read` | low | Yes |
+| `commands.getCustomCommand` | `commands:read` | low | Yes |
+| `commands.saveCustomCommand` | `commands:write` | high | No |
+| `commands.deleteCustomCommand` | `commands:write` | high | Yes |
 
 ## `ctx.companion`
 

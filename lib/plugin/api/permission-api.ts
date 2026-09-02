@@ -74,6 +74,11 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "templates:contribute": ["templates:contribute"],
   "templates:instantiate": ["templates:instantiate"],
   "templates:library:write": ["templates:library:write"],
+  // Identity mappings. Without them a manifest that declares `commands:read` /
+  // `commands:write` never has the API permission granted, so every
+  // `ctx.commands.*` call throws inside `createGuardedAPI`.
+  "commands:read": ["commands:read"],
+  "commands:write": ["commands:write"],
   "export:session": ["export:session"],
   "export:project": ["export:project"],
   "theme:read": ["theme:read"],

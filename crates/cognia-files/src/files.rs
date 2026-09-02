@@ -1582,24 +1582,50 @@ pub struct SlashCommandFile {
     /// When `false`, hide from the user-facing picker. Defaults to `true`.
     pub user_invocable: Option<bool>,
     pub body: String,
+    /// Absolute path of the directory this file was discovered under — one of
+    /// `<cwd>/.cognia/commands`, `<cwd>/.claude/commands` or
+    /// `~/.claude/commands`. The writer needs it: a command edited in the UI
+    /// must be written back to the directory it came from, and `path` alone
+    /// forces every caller to re-derive that by string surgery.
+    pub origin_dir: String,
 }
 
-/// Discover Claude Code custom commands at `<cwd>/.claude/commands/**/*.md`
-/// and `~/.claude/commands/**/*.md`. Returns an empty list rather than erroring
-/// when neither directory exists; missing/unreadable entries are skipped.
+/// Discover custom commands at `<cwd>/.cognia/commands/**/*.md`,
+/// `<cwd>/.claude/commands/**/*.md` and `~/.claude/commands/**/*.md`. Returns
+/// an empty list rather than erroring when no directory exists;
+/// missing/unreadable entries are skipped.
+///
+/// One name resolves to exactly one file. The collection order below IS the
+/// precedence order — the project's own `.cognia` directory first, then the
+/// project's `.claude` directory, then the user's global one — and
+/// [`dedupe_command_files_by_name`] keeps the first of each name. Before this,
+/// a name defined both in the project and globally was returned twice and the
+/// picker showed `/deploy` two rows apart with no way to tell them apart.
+///
+/// `.cognia` beats `.claude` inside the project because it is this app's own
+/// directory: a repository that has both is deliberately overriding the
+/// Claude Code file it also ships.
 #[tauri::command]
 pub fn slash_commands_scan(cwd: Option<String>) -> Result<Vec<SlashCommandFile>, String> {
     let mut out: Vec<SlashCommandFile> = Vec::new();
     if let Some(cwd) = cwd.as_ref() {
-        let project_root = PathBuf::from(cwd).join(".claude").join("commands");
-        collect_command_files(&project_root, "project", &mut out);
+        let project = PathBuf::from(cwd);
+        collect_command_files(&project.join(".cognia").join("commands"), "project", &mut out);
+        collect_command_files(&project.join(".claude").join("commands"), "project", &mut out);
     }
     if let Some(home) = dirs::home_dir() {
         let user_root = home.join(".claude").join("commands");
         collect_command_files(&user_root, "user", &mut out);
     }
+    dedupe_command_files_by_name(&mut out);
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+/// Keep the first entry for each command name, preserving input order.
+fn dedupe_command_files_by_name(out: &mut Vec<SlashCommandFile>) {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    out.retain(|file| seen.insert(file.name.clone()));
 }
 
 fn collect_command_files(root: &Path, scope: &str, out: &mut Vec<SlashCommandFile>) {
@@ -1684,6 +1710,7 @@ fn collect_command_files(root: &Path, scope: &str, out: &mut Vec<SlashCommandFil
             name,
             scope: scope.to_string(),
             path: path.to_string_lossy().to_string(),
+            origin_dir: root.to_string_lossy().to_string(),
             description,
             argument_hint,
             allowed_tools,
@@ -2956,5 +2983,85 @@ mod tests {
         );
         assert!(escape.is_err(), "traversal copy must be rejected");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn slash_commands_scan_reads_cognia_and_claude_with_cognia_winning() {
+        let root = make_sandbox("slash-commands-scan");
+        let claude = root.join(".claude").join("commands");
+        let cognia = root.join(".cognia").join("commands");
+        std::fs::create_dir_all(claude.join("nested")).unwrap();
+        std::fs::create_dir_all(&cognia).unwrap();
+
+        // Same name in both project directories: `.cognia` must win.
+        std::fs::write(
+            claude.join("zz-shadowed.md"),
+            "---\ndescription: from claude\n---\n\nclaude body\n",
+        )
+        .unwrap();
+        std::fs::write(
+            cognia.join("zz-shadowed.md"),
+            "---\ndescription: from cognia\nargument-hint: <env>\n---\n\ncognia body\n",
+        )
+        .unwrap();
+        // Only in `.claude`, and nested, so the walk depth is exercised too.
+        std::fs::write(
+            claude.join("nested").join("zz-claude-only.md"),
+            "claude-only body\n",
+        )
+        .unwrap();
+        // Only in `.cognia`.
+        std::fs::write(cognia.join("zz-cognia-only.md"), "cognia-only body\n").unwrap();
+        // Not markdown — must be ignored.
+        std::fs::write(cognia.join("zz-notes.txt"), "ignored").unwrap();
+
+        let found = slash_commands_scan(Some(root.to_string_lossy().to_string())).unwrap();
+        let by_name = |name: &str| {
+            found
+                .iter()
+                .filter(|f| f.name == name)
+                .collect::<Vec<_>>()
+        };
+
+        let shadowed = by_name("zz-shadowed");
+        assert_eq!(shadowed.len(), 1, "one name resolves to exactly one file");
+        assert_eq!(shadowed[0].description.as_deref(), Some("from cognia"));
+        assert_eq!(shadowed[0].argument_hint.as_deref(), Some("<env>"));
+        assert_eq!(shadowed[0].body, "cognia body");
+        assert_eq!(shadowed[0].scope, "project");
+        assert_eq!(
+            shadowed[0].origin_dir,
+            cognia.to_string_lossy().to_string(),
+            "origin_dir names the directory the file was found in"
+        );
+
+        let nested = by_name("nested/zz-claude-only");
+        assert_eq!(nested.len(), 1, "nested .claude command is discovered");
+        assert_eq!(
+            nested[0].origin_dir,
+            claude.to_string_lossy().to_string()
+        );
+
+        assert_eq!(by_name("zz-cognia-only").len(), 1);
+        assert!(
+            by_name("zz-notes").is_empty(),
+            "non-markdown files are skipped"
+        );
+
+        // Sorted by name, as the picker expects.
+        let names: Vec<&str> = found.iter().map(|f| f.name.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn slash_commands_scan_without_cwd_never_reads_a_project() {
+        // No cwd: only the user-global directory is consulted, and the call
+        // still succeeds on a machine that has none.
+        let found = slash_commands_scan(None).unwrap();
+        assert!(found.iter().all(|f| f.scope == "user"));
     }
 }

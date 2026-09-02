@@ -490,7 +490,7 @@ describe("plugin point contracts", () => {
       { point: "a2ui.component" },
       { point: "a2ui.template" },
       { point: "agent.mode" },
-      { point: "command.slash" },
+      { point: "command.slash", permission: "commands:write" },
       { point: "importer.format" },
       { point: "exporter.format" },
       { point: "appearance.theme" },

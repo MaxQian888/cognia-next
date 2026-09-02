@@ -1,4 +1,11 @@
 {
+  "authoring": {
+    "hostLacks": "当前配对的主机不提供命令文件访问能力。",
+    "localLacks": "当前构建无法访问命令目录。",
+    "needsDesktop": "用户级命令位于 ~/.claude/commands，在所有工作区之外，因此只能在桌面端新建或编辑。",
+    "noHost": "尚未配对任何主机，没有可写入的文件系统。先配对一台主机，才能编写项目级命令。",
+    "projectNeedsWorkspace": "先打开一个工作区，或让当前会话具备工作目录，才能编写项目级命令。"
+  },
   "builtin": "内置 ({count})",
   "cancel": "取消",
   "copiedToClipboard": "已复制 `/{name} ` 到剪贴板。",
@@ -24,6 +31,7 @@
     "description": "自定义命令以 markdown 文件形式写入 .claude/commands/。正文是 prompt 模板，YAML frontmatter 用于声明 description / argument-hint / allowed-tools / 可选的 model。",
     "descriptionLabel": "描述",
     "descriptionPlaceholder": "在命令选择器中显示的说明。",
+    "globalNotWritable": "用户级命令需要桌面端。",
     "modelLabel": "模型覆盖",
     "modelPlaceholder": "例如 claude-sonnet-4-5（可选）",
     "nameHint": "同时作为文件名与 slash 命令——只能包含字母、数字、`_`、`-`、`.` 或 `/`（最长 64）。",
@@ -31,6 +39,7 @@
     "namePlaceholder": "例如 refactor",
     "previewLabel": "预览",
     "projectNeedsCwd": "项目级命令需要当前会话已设置工作目录。",
+    "projectNotWritable": "项目级命令需要一台能写入该仓库的主机。",
     "removeTool": "移除 {tool}",
     "save": "保存",
     "savedToast": "已保存。",
@@ -42,12 +51,12 @@
     "scopeUserHint": "本机所有会话都可使用。",
     "titleCreate": "新建自定义命令",
     "titleEdit": "编辑自定义命令",
-    "webModeBanner": "只读预览——保存需要桌面端版本。",
-    "webModeBlocked": "保存自定义命令需要桌面端版本。"
+    "webModeBanner": "只读预览。保存需要桌面端，或已配对且打开工作区的主机。",
+    "webModeBlocked": "保存自定义命令需要桌面端，或已配对且打开工作区的主机。"
   },
   "emptyBuiltin": "没有匹配。",
   "emptyCustom": "在 ~/.claude/commands 或 .claude/commands 下未发现自定义命令。",
-  "emptyCustomWeb": "自定义命令扫描仅在桌面端可用。",
+  "emptyCustomWeb": "当前环境访问不到任何命令。请先配对一台主机，或使用桌面端。",
   "emptyPlugin": "暂无插件贡献的命令。",
   "filterPlaceholder": "按名称或描述筛选…",
   "newBtn": "新建命令",

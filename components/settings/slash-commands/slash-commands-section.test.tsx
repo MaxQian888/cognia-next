@@ -15,6 +15,16 @@ const mockDeleteCustom = jest.fn()
 jest.mock("@/lib/slash-commands/custom", () => ({
   loadCustomSlashCommands: (...args: unknown[]) => mockLoadCustom(...args),
   deleteCustomSlashCommand: (...args: unknown[]) => mockDeleteCustom(...args),
+  projectCommandDirOf: (originDir?: string | null) =>
+    originDir?.includes("/.cognia/") ? ".cognia/commands" : ".claude/commands",
+}))
+
+// The authoring gate is the host profile, not `isTauri()`. A paired browser
+// reaches this repository's `.claude/commands` over the workspace filesystem,
+// and a jsdom process is neither a desktop nor a companion.
+const mockHostProfile = jest.fn(() => "desktop")
+jest.mock("@/hooks/use-host-profile", () => ({
+  useHostProfile: () => mockHostProfile(),
 }))
 
 // Stub the editor dialog so we don't drag the form into this test surface.
@@ -113,6 +123,7 @@ beforeEach(() => {
   mockListRegistry.mockReset()
   mockDeleteCustom.mockReset().mockResolvedValue(undefined)
   isTauriMock.mockReturnValue(true)
+  mockHostProfile.mockReturnValue("desktop")
   __setActiveSessionId(null)
   getSessionMock.mockResolvedValue(null)
   resolveEffectiveCwdMock.mockReset().mockResolvedValue(null)
@@ -293,23 +304,96 @@ describe("SlashCommandsSection", () => {
     expect(arg.scope).toBe("user")
   })
 
-  it("hides the New button + edit/delete actions in web mode", async () => {
-    isTauriMock.mockReturnValue(false)
+  /**
+   * Render, disable, explain. Hiding these collapsed three different answers
+   * into one silence: nothing paired, one pairing away, and desktop-only.
+   */
+  it("disables rather than hides authoring when nothing is paired", async () => {
+    mockHostProfile.mockReturnValue("web-standalone")
     mockLoadCustom.mockResolvedValue([
-      {
-        name: "ship-it",
-        description: "Ship",
-        scope: "user",
-        filePath: "/p",
-        template: "ship",
-      },
+      { name: "ship-it", description: "Ship", scope: "user", filePath: "/p", template: "ship" },
     ])
     mockListRegistry.mockReturnValue([])
     render(<SlashCommandsSection />)
     await waitFor(() => expect(screen.getByTestId("slash-command-row-ship-it")).toBeInTheDocument())
     expect(screen.getByTestId("slash-commands-new")).toBeDisabled()
     expect(screen.getByTestId("slash-commands-web-banner")).toBeInTheDocument()
-    expect(screen.queryByTestId("edit-ship-it")).toBeNull()
-    expect(screen.queryByTestId("delete-ship-it")).toBeNull()
+    expect(screen.getByTestId("slash-commands-project-block")).toHaveTextContent("authoring.noHost")
+    expect(screen.getByTestId("edit-ship-it")).toBeDisabled()
+    expect(screen.getByTestId("delete-ship-it")).toBeDisabled()
+    expect(screen.getByTestId("blocked-ship-it")).toBeInTheDocument()
+  })
+
+  it("lets a paired browser author project commands and explains the global scope", async () => {
+    mockHostProfile.mockReturnValue("cloud-companion")
+    __setActiveSessionId("s1")
+    getSessionMock.mockResolvedValue({ id: "s1" })
+    resolveEffectiveCwdMock.mockResolvedValue("/ws/root")
+    mockLoadCustom.mockResolvedValue([
+      {
+        name: "proj",
+        description: "P",
+        scope: "project",
+        filePath: ".claude/commands/proj.md",
+        template: "p",
+      },
+      { name: "glob", description: "G", scope: "user", filePath: "/p", template: "g" },
+    ])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(screen.getByTestId("slash-command-row-proj")).toBeInTheDocument())
+
+    // Project scope works over the pairing.
+    expect(screen.getByTestId("edit-proj")).toBeEnabled()
+    expect(screen.getByTestId("delete-proj")).toBeEnabled()
+    expect(screen.queryByTestId("blocked-proj")).toBeNull()
+    expect(screen.getByTestId("slash-commands-new")).toBeEnabled()
+    // The user's home directory does not, and the row says so.
+    expect(screen.getByTestId("edit-glob")).toBeDisabled()
+    expect(screen.getByTestId("blocked-glob")).toHaveTextContent("authoring.needsDesktop")
+  })
+
+  it("says a project command needs a workspace before it says anything else", async () => {
+    mockHostProfile.mockReturnValue("cloud-companion")
+    mockLoadCustom.mockResolvedValue([
+      {
+        name: "proj",
+        description: "P",
+        scope: "project",
+        filePath: ".claude/commands/proj.md",
+        template: "p",
+      },
+    ])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(screen.getByTestId("slash-command-row-proj")).toBeInTheDocument())
+    expect(screen.getByTestId("blocked-proj")).toHaveTextContent("authoring.projectNeedsWorkspace")
+  })
+
+  it("deletes from the directory the command was read from", async () => {
+    __setActiveSessionId("s1")
+    getSessionMock.mockResolvedValue({ id: "s1" })
+    resolveEffectiveCwdMock.mockResolvedValue("/ws/root")
+    mockLoadCustom.mockResolvedValue([
+      {
+        name: "ship-it",
+        description: "Ship",
+        scope: "project",
+        filePath: "/ws/root/.cognia/commands/ship-it.md",
+        originDir: "/ws/root/.cognia/commands",
+        template: "ship",
+      },
+    ])
+    mockListRegistry.mockReturnValue([])
+    render(<SlashCommandsSection />)
+    await waitFor(() => expect(screen.getByTestId("slash-command-row-ship-it")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("delete-ship-it"))
+    fireEvent.click(await screen.findByTestId("slash-commands-delete-confirm"))
+    await waitFor(() => expect(mockDeleteCustom).toHaveBeenCalled())
+    expect(mockDeleteCustom.mock.calls[0][0]).toMatchObject({
+      name: "ship-it",
+      scope: "project",
+      dir: ".cognia/commands",
+    })
   })
 })

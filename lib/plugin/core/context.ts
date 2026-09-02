@@ -146,6 +146,7 @@ import {
   createContextPanelAPI,
   createTemplatesAPI,
 } from "../api"
+import { createCommandsAPI } from "../api/commands-api"
 import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
 import { createToolResultAPI } from "../api/tool-result-api"
@@ -322,6 +323,11 @@ export function createFullPluginContext(
 
   const permissionsAPI = createPermissionAPI(pluginId, plugin.manifest.permissions || [])
   const templateRuntime = getTemplateRuntime()
+  // Resolved before the feature APIs are built, not after: `ctx.commands`
+  // registers into a process-global registry and needs the plugin's own
+  // lifecycle ledger to hand its disposers to.
+  const scope = manager.getPluginDisposableScope?.(pluginId) ?? new PluginDisposableScope(pluginId)
+  let lifecycleDisposerSequence = 0
 
   // Create feature APIs
   const contextAPI: PluginContextAPI = {
@@ -370,6 +376,9 @@ export function createFullPluginContext(
           reason: `${action}:${definitionId}`,
         }),
     }),
+    commands: createCommandsAPI(pluginId, {
+      track: (dispose, label) => scope.track(dispose, label),
+    }),
     messagePart: createMessagePartAPI(pluginId),
     toolResult: createToolResultAPI(pluginId),
   }
@@ -392,8 +401,6 @@ export function createFullPluginContext(
     getLocale: contextAPI.i18n.getCurrentLocale,
     hasKey: contextAPI.i18n.hasTranslation,
   }
-  const scope = manager.getPluginDisposableScope?.(pluginId) ?? new PluginDisposableScope(pluginId)
-  let lifecycleDisposerSequence = 0
 
   // Combine base and feature API contexts with enhanced APIs + ADR-0026
   // v2 namespaces (`ocr`, `workspace`). Both are stateless wrappers; the

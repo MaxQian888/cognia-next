@@ -76,6 +76,8 @@ VALID_PERMISSIONS = (
     "templates:contribute",
     "templates:instantiate",
     "templates:library:write",
+    "commands:read",
+    "commands:write",
     "ipc:call",
     "ipc:expose",
     "events:publish",
@@ -3279,6 +3281,7 @@ PLUGIN_POINT_CONTRACTS = [
         "stability": "stable",
         "status": "implemented",
         "introducedIn": "0.5.0",
+        "permission": "commands:write",
     },
     {
         "id": "importer.format",
@@ -5750,6 +5753,130 @@ API_NAMESPACE_CONTRACTS = [
                 "consentTier": "policy",
                 "risk": "high",
                 "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+        ],
+    },
+    {
+        "id": "commands",
+        "authorPath": "ctx.commands",
+        "type": "PluginCommandsAPI",
+        "stability": "stable",
+        "introducedIn": "0.4.0",
+        "runtimes": [
+            "frontend",
+            "hybrid",
+        ],
+        "platforms": [
+            "desktop",
+            "web",
+            "mobile",
+        ],
+        "transport": "direct",
+        "factory": "context.commands",
+        "enforcement": "shadow",
+        "dataClassification": "internal",
+        "timeoutMs": None,
+        "retry": "never",
+        "errorPolicy": "preserve",
+        "lifecycle": "plugin",
+        "methods": [
+            {
+                "id": "commands.registerSlashCommand",
+                "name": "registerSlashCommand",
+                "requiredPermissions": [
+                    "commands:write",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-disposer",
+                },
+            },
+            {
+                "id": "commands.unregisterSlashCommand",
+                "name": "unregisterSlashCommand",
+                "requiredPermissions": [
+                    "commands:write",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "commands.listSlashCommands",
+                "name": "listSlashCommands",
+                "requiredPermissions": [
+                    "commands:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "commands.listCustomCommands",
+                "name": "listCustomCommands",
+                "requiredPermissions": [
+                    "commands:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "commands.getCustomCommand",
+                "name": "getCustomCommand",
+                "requiredPermissions": [
+                    "commands:read",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "commands.saveCustomCommand",
+                "name": "saveCustomCommand",
+                "requiredPermissions": [
+                    "commands:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "commands.deleteCustomCommand",
+                "name": "deleteCustomCommand",
+                "requiredPermissions": [
+                    "commands:write",
+                ],
+                "consentTier": "confirm",
+                "risk": "high",
+                "idempotent": True,
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "none",

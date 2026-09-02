@@ -26,6 +26,7 @@ const runtimeEntries = {
   browser: "src/api/browser.ts",
   "character-pack": "src/api/character-pack.ts",
   "cli-tool": "src/api/cli-tool.ts",
+  commands: "src/api/commands.ts",
   "context-provider": "src/api/context-provider.ts",
   download: "src/api/download.ts",
   eval: "src/api/eval.ts",

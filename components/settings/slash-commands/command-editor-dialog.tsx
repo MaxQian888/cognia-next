@@ -4,9 +4,16 @@
  * CommandEditorDialog — create / edit a custom slash-command markdown file.
  *
  * Stage 3 (Phase 7c) of the ClaudeCode 完整化 plan. Persistence goes through
- * `lib/slash-commands/custom:saveCustomSlashCommand`, which writes via
- * `@tauri-apps/plugin-fs`. In web mode the form is read-only with a banner —
- * the Settings UI also gates the trigger button behind `isTauri()`.
+ * `lib/slash-commands/custom:saveCustomSlashCommand`, which writes through
+ * `@tauri-apps/plugin-fs` on the desktop and through the workspace filesystem
+ * on a paired browser or phone.
+ *
+ * Which scopes are writable is decided by the section
+ * (`command-authoring-reach.ts`) and passed in, because it is a property of
+ * the shell rather than of this dialog. The two answers differ: a project
+ * command is writable wherever a host is reachable, while the user-global
+ * `~/.claude/commands` needs the desktop process. A scope that cannot be
+ * written is offered, disabled, with the reason next to it.
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -38,11 +45,12 @@ import { toast } from "sonner"
 import {
   assertValidCommandName,
   buildCommandFile,
+  projectCommandDirOf,
   saveCustomSlashCommand,
+  type CustomSlashCommand,
   type SaveCustomCommandInput,
 } from "@/lib/slash-commands/custom"
-import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import { isTauri } from "@/lib/tauri"
+import type { ProjectCommandDir } from "@/lib/slash-commands/custom-workspace"
 
 export type CommandEditorMode = "create" | "edit"
 
@@ -50,11 +58,15 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Pre-populates the form when editing an existing command. */
-  initial?: SlashCommand | null
-  /** Active session cwd for project-scope commands; null when not available. */
+  initial?: CustomSlashCommand | null
+  /** Active session cwd for project-scope commands. Null when not available. */
   cwd?: string | null
-  /** Called after a successful save with the absolute file path. */
+  /** Called after a successful save with the file path that was written. */
   onSaved?: (filePath: string) => void
+  /** Can `<cwd>/.claude/commands` be written from this shell? */
+  projectWritable?: boolean
+  /** Can `~/.claude/commands` be written from this shell? */
+  globalWritable?: boolean
 }
 
 interface FormState {
@@ -66,6 +78,8 @@ interface FormState {
   allowedToolDraft: string
   allowedTools: string[]
   body: string
+  /** Which project directory to write to. Preserved from the file being edited. */
+  dir: ProjectCommandDir
 }
 
 const EMPTY: FormState = {
@@ -77,11 +91,19 @@ const EMPTY: FormState = {
   allowedToolDraft: "",
   allowedTools: [],
   body: "",
+  dir: ".claude/commands",
 }
 
-export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved }: Props) {
+export function CommandEditorDialog({
+  open,
+  onOpenChange,
+  initial,
+  cwd,
+  onSaved,
+  projectWritable = false,
+  globalWritable = false,
+}: Props) {
   const t = useTranslations("settings.slashCommands.editor")
-  const desktop = isTauri()
   const isEdit = !!initial
 
   const [form, setForm] = useState<FormState>(EMPTY)
@@ -103,12 +125,16 @@ export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved 
         allowedToolDraft: "",
         allowedTools: initial.allowedTools ?? [],
         body: initial.template ?? "",
+        // An edit rewrites the file it came from. Defaulting to
+        // `.claude/commands` here would leave a second copy behind and let the
+        // `.cognia` original go on shadowing the edit the user just made.
+        dir: projectCommandDirOf(initial.originDir),
       })
     } else {
-      setForm(EMPTY)
+      setForm({ ...EMPTY, scope: globalWritable ? "user" : "project" })
     }
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [open, initial])
+  }, [open, initial, globalWritable])
 
   const preview = useMemo<string>(() => {
     try {
@@ -127,9 +153,11 @@ export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved 
     if (form.scope === "project" && !cwd) {
       return t("projectNeedsCwd")
     }
+    if (form.scope === "project" && !projectWritable) return t("projectNotWritable")
+    if (form.scope === "user" && !globalWritable) return t("globalNotWritable")
     if (!form.body.trim()) return t("bodyRequired")
     return null
-  }, [form, cwd, t])
+  }, [form, cwd, projectWritable, globalWritable, t])
 
   const addTool = () => {
     const draft = form.allowedToolDraft.trim()
@@ -153,10 +181,6 @@ export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved 
       toast.error(validationError)
       return
     }
-    if (!desktop) {
-      toast.error(t("webModeBlocked"))
-      return
-    }
     setBusy(true)
     try {
       const path = await saveCustomSlashCommand(toInput(form, cwd))
@@ -170,7 +194,10 @@ export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved 
     }
   }
 
-  const readOnly = !desktop
+  // Read-only only when NEITHER scope can be written. A shell that can author
+  // project commands gets a working form, and the scope it cannot use says so
+  // on its own option.
+  const readOnly = !projectWritable && !globalWritable
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -217,8 +244,10 @@ export function CommandEditorDialog({ open, onOpenChange, initial, cwd, onSaved 
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="user">{t("scopeUser")}</SelectItem>
-                <SelectItem value="project" disabled={!cwd}>
+                <SelectItem value="user" disabled={!globalWritable}>
+                  {t("scopeUser")}
+                </SelectItem>
+                <SelectItem value="project" disabled={!cwd || !projectWritable}>
                   {t("scopeProject")}
                 </SelectItem>
               </SelectContent>
@@ -366,6 +395,7 @@ function toInput(form: FormState, cwd: string | null | undefined): SaveCustomCom
     scope: form.scope,
     name: form.name.trim(),
     cwd: form.scope === "project" ? (cwd ?? null) : null,
+    dir: form.dir,
     description: form.description,
     argumentHint: form.argumentHint,
     allowedTools: form.allowedTools,

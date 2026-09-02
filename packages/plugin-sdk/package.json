@@ -75,6 +75,12 @@
       "require": "./dist/cli-tool.cjs",
       "default": "./dist/cli-tool.js"
     },
+    "./api/commands": {
+      "types": "./dist/commands.d.ts",
+      "import": "./dist/commands.js",
+      "require": "./dist/commands.cjs",
+      "default": "./dist/commands.js"
+    },
     "./api/connector": {
       "types": "./dist/connector.d.ts",
       "import": "./dist/connector.js",

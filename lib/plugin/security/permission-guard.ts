@@ -127,6 +127,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
     "templates:instantiate",
     "templates:library:write",
   ],
+  commands: ["commands:read", "commands:write"],
   native: ["native:input", "native:screen", "native:filesystem", "native:process"],
   dangerous: [
     "shell:execute",
@@ -264,6 +265,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "templates:contribute": "Register lifecycle-scoped template packages",
   "templates:instantiate": "Preflight and instantiate templates after confirmation",
   "templates:library:write": "Create user-owned template drafts after confirmation",
+  "commands:read": "List the slash commands this app offers and read your custom command files",
+  "commands:write":
+    "Register slash commands, and create, overwrite or delete the markdown command files in .claude/commands and .cognia/commands",
 }
 
 /**
@@ -360,6 +364,17 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   // privileges — argv templating prevents injection but the binary itself can
   // do anything (`shell:execute` risk tier).
   "cli:execute",
+  // A custom command file is a prompt the user runs by name, and its
+  // front matter carries `allowed-tools` — so writing one both puts text in
+  // front of the model and can widen the tool surface of every later run of
+  // that command. It also writes to `~/.claude/commands`, outside any
+  // workspace root. Same tier as `filesystem:write`.
+  //
+  // The two in-memory methods (`registerSlashCommand` / `unregisterSlashCommand`)
+  // are `consentExempt` in `commands-api.ts`: they touch no disk, are undone on
+  // unload, and run during `activate()` where a modal would deadlock the
+  // enable. The disk writes are the consent-worthy half, and they prompt.
+  "commands:write",
 ]
 
 /**

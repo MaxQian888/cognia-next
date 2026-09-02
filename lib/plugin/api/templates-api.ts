@@ -21,9 +21,26 @@ import { createTemplateDefinition } from "@/lib/templates/contracts"
 export type TemplatePluginPermission =
   "templates:read" | "templates:contribute" | "templates:instantiate" | "templates:library:write"
 
+/**
+ * What the user is being asked to allow. Every value other than `instantiate`
+ * is a library write and resolves to `templates:library:write` at the consent
+ * broker, so the verbs exist to make the prompt say what is about to happen
+ * rather than to open a second permission.
+ */
+export type PluginTemplateConfirmationAction =
+  | "instantiate"
+  | "library-write"
+  | "save-draft"
+  | "publish"
+  | "fork"
+  | "deprecate"
+  | "delete-draft"
+  | "export-package"
+  | "import-package"
+
 export interface PluginTemplateConfirmation {
   pluginId: string
-  action: "instantiate" | "library-write"
+  action: PluginTemplateConfirmationAction
   definitionId: string
   operations?: string[]
 }
@@ -32,7 +49,19 @@ export type PluginTemplatesAPI = PublicPluginTemplatesAPI
 
 export interface CreateTemplatesAPIDependencies {
   catalog: TemplateCatalog
-  service: Pick<TemplateService, "createDraft" | "preflight" | "instantiate">
+  service: Pick<
+    TemplateService,
+    | "createDraft"
+    | "preflight"
+    | "instantiate"
+    | "saveDraft"
+    | "publish"
+    | "fork"
+    | "deprecate"
+    | "deleteDraft"
+    | "exportPackage"
+    | "importPackage"
+  >
   hasPermission(permission: TemplatePluginPermission | string): boolean
   confirm(request: PluginTemplateConfirmation): Promise<boolean>
 }
@@ -77,6 +106,88 @@ function assertDynamicPluginTemplate(
         .join("; ")}`
     )
   }
+}
+
+/**
+ * One permission and one consent prompt for every library write.
+ *
+ * Extracted so a method added later cannot land with the permission check and
+ * without the prompt, which is exactly how `ctx.team.saveAsTemplate` came to
+ * reach `saveDraft` on `team:write` alone.
+ */
+async function authorizeLibraryWrite(
+  deps: CreateTemplatesAPIDependencies,
+  pluginId: string,
+  action: PluginTemplateConfirmationAction,
+  definitionId: string
+): Promise<void> {
+  requirePermission(deps, "templates:library:write")
+  const confirmed = await deps.confirm({ pluginId, action, definitionId })
+  if (!confirmed) {
+    throw new Error("Plugin template library write was denied by user confirmation")
+  }
+}
+
+/**
+ * Refuse to mutate a library entry this plugin did not create.
+ *
+ * `templates:library:write` says a plugin may keep templates in the user's
+ * library. It does not say it may edit, republish, deprecate or delete the
+ * user's own work, or another plugin's. The discriminator is
+ * `provenance.pluginId`, which {@link stampPluginAuthorship} writes on every
+ * draft this API creates.
+ *
+ * `version: null` addresses the draft, a string addresses that release. The
+ * catalog is the read side: a draft only ever reaches it through the service's
+ * own `upsert("user", …)`, and a plugin's self-registered definitions are
+ * forced to be published releases under its own `<pluginId>:` prefix
+ * (`assertDynamicPluginTemplate`), so neither can impersonate a user draft.
+ */
+function assertPluginOwnsLibraryEntry(
+  deps: CreateTemplatesAPIDependencies,
+  pluginId: string,
+  id: string,
+  version: string | null,
+  verb: string
+): void {
+  const definition = deps.catalog.get(id, version)
+  if (!definition) {
+    throw new Error(`Template ${id} was not found in the catalog`)
+  }
+  if (definition.provenance.pluginId !== pluginId) {
+    throw new Error(
+      `Plugin "${pluginId}" may not ${verb} template ${id}: it belongs to ` +
+        (definition.provenance.pluginId
+          ? `plugin "${definition.provenance.pluginId}"`
+          : "the user's own library")
+    )
+  }
+}
+
+/**
+ * Record which plugin created a library draft.
+ *
+ * `TemplateService.createDraft` hard-codes `provenance: {source: "user"}` and
+ * that is correct: ADR-0100 treats a user-library row as the user's, whoever
+ * typed it, and changing the source would move these drafts out of the library
+ * the Studio reads. So authorship goes in `provenance.pluginId`, which the
+ * source leaves free, and the stamp is a second `saveDraft` because the
+ * service overwrites whatever provenance a `createDraft` input carried.
+ *
+ * The draft therefore lands at revision 2 rather than 1. That is visible and
+ * deliberate: the alternative is an unattributable row, and every refusal in
+ * {@link assertPluginOwnsLibraryEntry} depends on the attribution existing.
+ */
+async function stampPluginAuthorship(
+  deps: CreateTemplatesAPIDependencies,
+  pluginId: string,
+  draft: TemplateDefinitionEnvelope
+): Promise<TemplateDefinitionEnvelope> {
+  if (draft.provenance.pluginId === pluginId) return draft
+  return deps.service.saveDraft(
+    { ...draft, provenance: { ...draft.provenance, pluginId } },
+    draft.revision
+  )
 }
 
 export function createTemplatesAPI(
@@ -139,16 +250,63 @@ export function createTemplatesAPI(
     },
 
     async createDraft(input) {
-      requirePermission(deps, "templates:library:write")
-      const confirmed = await deps.confirm({
-        pluginId,
-        action: "library-write",
-        definitionId: input.id,
-      })
-      if (!confirmed) {
-        throw new Error("Plugin template library write was denied by user confirmation")
-      }
-      return deps.service.createDraft(input)
+      await authorizeLibraryWrite(deps, pluginId, "library-write", input.id)
+      return stampPluginAuthorship(deps, pluginId, await deps.service.createDraft(input))
+    },
+
+    async saveDraft(input, expectedRevision) {
+      await authorizeLibraryWrite(deps, pluginId, "save-draft", input.id)
+      assertPluginOwnsLibraryEntry(deps, pluginId, input.id, null, "save")
+      return deps.service.saveDraft(
+        { ...input, provenance: { ...input.provenance, pluginId } },
+        expectedRevision
+      )
+    },
+
+    async publish(id, input) {
+      await authorizeLibraryWrite(deps, pluginId, "publish", id)
+      assertPluginOwnsLibraryEntry(deps, pluginId, id, null, "publish")
+      return deps.service.publish(id, input)
+    },
+
+    async fork(definitionId, input) {
+      await authorizeLibraryWrite(deps, pluginId, "fork", input.newId)
+      // No ownership check on the SOURCE. Deriving an editable copy of somebody
+      // else's release is the entire point of a fork, and the copy is a new
+      // draft that this plugin then owns. The stamp below is what makes that
+      // ownership checkable on the next `saveDraft` or `publish`.
+      return stampPluginAuthorship(deps, pluginId, await deps.service.fork(definitionId, input))
+    },
+
+    async deprecate(id, version, status) {
+      await authorizeLibraryWrite(deps, pluginId, "deprecate", `${id}@${version}`)
+      assertPluginOwnsLibraryEntry(deps, pluginId, id, version, "deprecate")
+      return deps.service.deprecate(id, version, status)
+    },
+
+    async deleteDraft(id) {
+      await authorizeLibraryWrite(deps, pluginId, "delete-draft", id)
+      assertPluginOwnsLibraryEntry(deps, pluginId, id, null, "delete")
+      return deps.service.deleteDraft(id)
+    },
+
+    async exportPackage(input) {
+      await authorizeLibraryWrite(deps, pluginId, "export-package", input.id)
+      return deps.service.exportPackage(input)
+    },
+
+    async importPackage(bytes) {
+      await authorizeLibraryWrite(deps, pluginId, "import-package", "package")
+      // `source: "plugin"` is what the row records, and it is the honest one:
+      // this package entered the library because a plugin asked, not because
+      // the user opened a file. `confirmed` is the consent just obtained above.
+      //
+      // Per-definition `provenance.pluginId` is written by
+      // `lib/templates/service.ts:importPackage` from the package's OWN
+      // definitions, so it names the plugin that AUTHORED the package, not the
+      // one that imported it. Which plugin asked is recorded on the consent
+      // request, not on the row.
+      return deps.service.importPackage(bytes, { source: "plugin", confirmed: true })
     },
 
     async preflight(input) {

@@ -15,6 +15,7 @@ import {
   PluginLifecycleHooks,
   getPluginEventHooks,
   getRecentPluginHookErrors,
+  resolveCommandOwner,
   __resetPluginHookErrorsForTesting,
 } from "./hooks-system"
 import type { PluginTeamStartPayload } from "@/types/plugin"
@@ -39,6 +40,7 @@ jest.mock("@/stores/plugin-runtime", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { __resetSlashCommandsForTesting, registerSlashCommand } from "@/lib/slash-commands/registry"
 import {
   registerPluginHookContribution,
   __resetHookRegistryForTesting,
@@ -1377,5 +1379,114 @@ describe("PluginLifecycleHooks.dispatchOnCommand", () => {
       handled: true,
       message: "mine",
     })
+  })
+
+  /**
+   * Hook order is priority order, which says nothing about whose command this
+   * is. The first structured acceptance wins, so without an owner-first pass a
+   * plugin with a high priority and an indiscriminate `onCommand` answers
+   * everyone else's commands before their owners are even asked.
+   */
+  describe("owner first", () => {
+    beforeEach(() => __resetSlashCommandsForTesting())
+    afterEach(() => __resetSlashCommandsForTesting())
+
+    it("asks the plugin named by a namespaced id before anyone else", async () => {
+      const greedy = jest.fn(() => ({ handled: true, message: "stolen" }))
+      lifecycleHooks.registerHooks("greedy", { onCommand: greedy })
+      lifecycleHooks.registerHooks("acme.tools", {
+        onCommand: () => ({ handled: true, message: "mine" }),
+      })
+
+      await expect(lifecycleHooks.dispatchOnCommand("acme.tools.deploy", [])).resolves.toEqual({
+        handled: true,
+        message: "mine",
+      })
+      expect(greedy).not.toHaveBeenCalled()
+    })
+
+    it("resolves the owner of a short manifest id through the slash-command registry", async () => {
+      registerSlashCommand({
+        id: "acme.tools.deploy",
+        name: "deploy",
+        source: "plugin",
+        pluginId: "acme.tools",
+        handler: () => ({}),
+      })
+      const greedy = jest.fn(() => ({ handled: true, message: "stolen" }))
+      lifecycleHooks.registerHooks("greedy", { onCommand: greedy })
+      lifecycleHooks.registerHooks("acme.tools", {
+        onCommand: () => ({ handled: true, message: "mine" }),
+      })
+
+      await expect(lifecycleHooks.dispatchOnCommand("deploy", [])).resolves.toEqual({
+        handled: true,
+        message: "mine",
+      })
+      expect(greedy).not.toHaveBeenCalled()
+    })
+
+    it("still offers the command to everyone else when the owner declines", async () => {
+      const extender = jest.fn(() => ({ handled: true, message: "extended" }))
+      lifecycleHooks.registerHooks("extender", { onCommand: extender })
+      lifecycleHooks.registerHooks("acme.tools", { onCommand: () => ({ handled: false }) })
+
+      await expect(lifecycleHooks.dispatchOnCommand("acme.tools.deploy", [])).resolves.toEqual({
+        handled: true,
+        message: "extended",
+      })
+      expect(extender).toHaveBeenCalled()
+    })
+
+    it("leaves the order alone when nothing identifies an owner", async () => {
+      const first = jest.fn(() => ({ handled: true, message: "first" }))
+      lifecycleHooks.registerHooks("first", { onCommand: first })
+      lifecycleHooks.registerHooks("second", { onCommand: () => ({ handled: true }) })
+
+      await expect(lifecycleHooks.dispatchOnCommand("unowned", [])).resolves.toEqual({
+        handled: true,
+        message: "first",
+      })
+    })
+  })
+})
+
+describe("resolveCommandOwner", () => {
+  afterEach(() => __resetSlashCommandsForTesting())
+
+  it("prefers the longest matching prefix", () => {
+    expect(resolveCommandOwner("acme.tools.deploy", ["acme", "acme.tools"])).toBe("acme.tools")
+  })
+
+  it("answers from the registry when the id is not namespaced", () => {
+    registerSlashCommand({
+      id: "acme.tools.deploy",
+      name: "deploy",
+      source: "plugin",
+      pluginId: "acme.tools",
+      handler: () => ({}),
+    })
+    expect(resolveCommandOwner("deploy", ["acme.tools", "other"])).toBe("acme.tools")
+  })
+
+  it("ignores a registry entry whose plugin is not in the dispatch order", () => {
+    registerSlashCommand({
+      id: "disabled.plugin.deploy",
+      name: "deploy",
+      source: "plugin",
+      pluginId: "disabled.plugin",
+      handler: () => ({}),
+    })
+    expect(resolveCommandOwner("deploy", ["other"])).toBeUndefined()
+  })
+
+  it("never claims a built-in as an owner", () => {
+    registerSlashCommand({
+      id: "compact",
+      name: "compact",
+      source: "builtin",
+      handler: () => ({}),
+    })
+    expect(resolveCommandOwner("compact", ["other"])).toBeUndefined()
   })
 })

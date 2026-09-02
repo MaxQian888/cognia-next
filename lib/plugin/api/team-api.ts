@@ -37,6 +37,8 @@
  *    durable-v2 wherever the workspace supports it.
  */
 
+import { loggers } from "@cognia/logging"
+
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
@@ -327,6 +329,65 @@ async function runControl(
   }
 }
 
+/**
+ * The prompt `ctx.templates.createDraft` raises, raised from here too.
+ *
+ * Same broker, same permission id, same `library-write:` reason prefix, so a
+ * user who has answered "always allow" for this plugin's template writes is
+ * not asked twice for what is the same decision.
+ */
+async function confirmTemplateLibraryWrite(pluginId: string, definitionId: string): Promise<void> {
+  const { getPluginConsentBroker } = await import("@/lib/plugin/security/consent-broker")
+  const confirmed = await getPluginConsentBroker().request({
+    pluginId,
+    permission: "templates:library:write",
+    reason: `library-write:${definitionId}`,
+  })
+  if (!confirmed) {
+    throw new Error("Plugin template library write was denied by user confirmation")
+  }
+}
+
+/**
+ * Record which plugin created the mirrored draft, the way
+ * `lib/plugin/api/templates-api.ts` does for every other library write.
+ *
+ * Without it the mirror is an unattributable row, so the ownership refusals on
+ * `ctx.templates.saveDraft` / `publish` / `deleteDraft` cannot tell a
+ * plugin-created squad template from one the user wrote, and a plugin can
+ * neither manage its own mirror nor be stopped from managing someone else's.
+ *
+ * A foreign stamp is refused rather than overwritten: two plugins saving a
+ * squad template under the same legacy id is a collision, not a handover.
+ * Non-fatal on every other path, exactly like the mirror it follows.
+ */
+async function stampMirroredTemplateAuthorship(
+  pluginId: string,
+  definitionId: string
+): Promise<void> {
+  try {
+    const { getTemplateRuntime } = await import("@/lib/templates/runtime")
+    const runtime = getTemplateRuntime()
+    const draft = await runtime.repository.getDraft(definitionId)
+    if (!draft) return
+    if (draft.provenance.pluginId === pluginId) return
+    if (draft.provenance.pluginId) {
+      throw new Error(
+        `Template ${definitionId} already belongs to plugin "${draft.provenance.pluginId}"`
+      )
+    }
+    await runtime.service.saveDraft(
+      { ...draft, provenance: { ...draft.provenance, pluginId } },
+      draft.revision
+    )
+  } catch (error) {
+    loggers.agent.warn("squad template plugin attribution failed", {
+      definitionId,
+      err: String(error),
+    })
+  }
+}
+
 export function createTeamAPI(pluginId: string): PluginTeamAPI {
   const api: PluginTeamAPI = {
     // reads
@@ -531,15 +592,26 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
         ...(input.projectId ? { projectId: input.projectId } : {}),
       }),
     saveAsTemplate: async (teamId, name, category) => {
+      // This call reaches `TemplateService.saveDraft`, the same write
+      // `ctx.templates.createDraft` performs, so it answers to the same two
+      // gates. It used to answer to neither: `team:write` alone put a row in
+      // the user's template library with no consent prompt and no attribution,
+      // which made it the way around every check on `ctx.templates`.
+      //
+      // Consent is asked BEFORE the legacy store write, so a refusal leaves
+      // nothing behind, and it throws rather than returning null because a
+      // null here already means "no such squad".
+      await confirmTemplateLibraryWrite(pluginId, name)
       const template = useAgentTeamStore.getState().saveAsTemplate(teamId, name, category)
       if (!template) return null
       // Same write-time mirror the Settings derive action performs, so a
       // plugin-saved template shows up in the unified catalog immediately
       // instead of only after the next boot projection. Non-fatal: the legacy
       // store is still the read side.
-      const { publishSquadTemplateToPlatform } =
+      const { platformIdForSquadTemplate, publishSquadTemplateToPlatform } =
         await import("@/lib/agent-team/publish-template-to-platform")
       await publishSquadTemplateToPlatform(template).catch(() => undefined)
+      await stampMirroredTemplateAuthorship(pluginId, platformIdForSquadTemplate(template))
       return template
     },
 
@@ -598,7 +670,11 @@ export function createTeamAPI(pluginId: string): PluginTeamAPI {
     createTeam: "team:write",
     deleteTeam: "team:write",
     duplicateTeam: "team:write",
-    saveAsTemplate: "team:write",
+    // Two permissions, because this is two writes: a squad template in the
+    // legacy store AND a draft in the user's unified template library. The
+    // second one is what `ctx.templates` calls `templates:library:write`, and
+    // naming only `team:write` here is what made this the back door.
+    saveAsTemplate: ["team:write", "templates:library:write"],
     // Starting spends tokens the way `ctx.agent.runTeam` does, and takes the
     // same permission. Pause / resume / stop are execution control, which
     // `agent:control` already names.

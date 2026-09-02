@@ -12,6 +12,7 @@ import {
   type TemplateJson,
   type TemplateMetadata,
   type TemplatePlatform,
+  type TemplateVersionBump,
 } from "@/lib/templates/contracts"
 import type { TemplateCatalogQuery } from "@/lib/templates/catalog"
 
@@ -29,6 +30,7 @@ export type {
   TemplateInputSpec,
   TemplateDependency,
   TemplateCatalogQuery,
+  TemplateVersionBump,
 }
 
 export interface CreateTemplateDraftInput<TPayload extends TemplateJson = TemplateJson> {
@@ -475,7 +477,74 @@ export interface PluginTemplatesAPI {
   getRevision(): number
   subscribe(listener: () => void): () => void
   validate(definition: TemplateDefinitionEnvelope): ReturnType<typeof validateTemplateDefinition>
+  /**
+   * Create a library draft owned by this plugin.
+   *
+   * The row lands in the user's library with `provenance.source: "user"`, as
+   * ADR-0100 requires, and with `provenance.pluginId` set to the calling
+   * plugin. That stamp is what the mutating calls below check: a plugin may
+   * edit, publish, deprecate and delete its own drafts and no one else's.
+   */
   createDraft(input: CreateTemplateDraftInput): Promise<TemplateDefinitionEnvelope>
+  /**
+   * Overwrite a draft this plugin created, at a known revision. A concurrent
+   * edit does not throw: the host writes a `conflict` copy and returns it, so
+   * check the returned `status` rather than assuming a clean save.
+   */
+  saveDraft(
+    input: TemplateDefinitionEnvelope,
+    expectedRevision: number
+  ): Promise<TemplateDefinitionEnvelope>
+  /**
+   * Turn a draft this plugin created into an immutable release.
+   * `confirmedBump` has to match the host's own conservative suggestion, so
+   * publishing a breaking change as a patch is refused rather than silently
+   * accepted.
+   */
+  publish(
+    id: string,
+    input: { expectedRevision: number; confirmedBump: TemplateVersionBump }
+  ): Promise<TemplateDefinitionEnvelope & { version: string }>
+  /**
+   * Derive a new editable draft from ANY definition, including one this plugin
+   * does not own. That is what a fork is for. The resulting draft is stamped
+   * with this plugin and carries its lineage back to the original.
+   */
+  fork(
+    definitionId: string,
+    input: { version?: string; newId: string; workspaceId?: string }
+  ): Promise<TemplateDefinitionEnvelope>
+  /** Mark a release this plugin published as deprecated or yanked. */
+  deprecate(
+    id: string,
+    version: string,
+    status?: "deprecated" | "yanked"
+  ): Promise<TemplateDefinitionEnvelope>
+  /** Delete a draft this plugin created. Releases are immutable, use `deprecate`. */
+  deleteDraft(id: string): Promise<void>
+  /** Bundle one or more releases into portable package bytes. */
+  exportPackage(input: {
+    id: string
+    version: string
+    name: string
+    description?: string
+    compatibility?: TemplateCompatibility
+    definitionIds: Array<{ id: string; version: string }>
+  }): Promise<{ bytes: Uint8Array; fingerprint: string; manifest: TemplatePackageManifest }>
+  /**
+   * Import package bytes into the library, recorded with `source: "plugin"`.
+   *
+   * The per-definition `provenance.pluginId` comes from the package itself, so
+   * it names whoever AUTHORED those definitions. Which plugin performed the
+   * import is recorded on the consent request the user answers, not on the row.
+   */
+  importPackage(bytes: Uint8Array): Promise<{
+    fingerprint: string
+    manifest: TemplatePackageManifest
+    definitions: TemplateDefinitionEnvelope[]
+    assets: Map<string, Uint8Array>
+    trust: "signed-unknown" | "unsigned"
+  }>
   preflight(input: {
     definitionId: string
     version?: string

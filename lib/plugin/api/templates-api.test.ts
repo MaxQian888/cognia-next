@@ -167,11 +167,17 @@ describe("PluginTemplatesAPI", () => {
 
   it("requires the dedicated write permission and confirmation for user drafts", async () => {
     const catalog = new TemplateCatalog()
-    const createDraft = jest.fn(async (input) => ({ ...input, id: input.id }))
+    const createDraft = jest.fn(async (input) => ({
+      ...input,
+      id: input.id,
+      revision: 1,
+      provenance: { source: "user", trust: "unsigned" },
+    }))
+    const saveDraft = jest.fn(async (input) => ({ ...input, revision: 2 }))
     const confirm = jest.fn(async () => true)
     const api = createTemplatesAPI("demo.plugin", {
       catalog,
-      service: { createDraft } as never,
+      service: { createDraft, saveDraft } as never,
       hasPermission: (permission) => permission === "templates:library:write",
       confirm,
     })
@@ -186,7 +192,7 @@ describe("PluginTemplatesAPI", () => {
       compatibility: { platforms: ["desktop" as const] },
     }
 
-    await api.createDraft(input)
+    const draft = await api.createDraft(input)
 
     expect(confirm).toHaveBeenCalledWith({
       pluginId: "demo.plugin",
@@ -194,6 +200,20 @@ describe("PluginTemplatesAPI", () => {
       definitionId: "skill.from-plugin",
     })
     expect(createDraft).toHaveBeenCalledWith(input)
+    // ADR-0100 keeps the row in the user's library, so the source stays "user".
+    // Authorship goes in `pluginId`, which is what every ownership refusal below
+    // reads.
+    expect(draft.provenance).toEqual({
+      source: "user",
+      trust: "unsigned",
+      pluginId: "demo.plugin",
+    })
+    expect(saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: expect.objectContaining({ pluginId: "demo.plugin" }),
+      }),
+      1
+    )
   })
 
   it("registers declarative packages as one lifecycle-scoped catalog source", async () => {
@@ -376,5 +396,233 @@ describe("PluginTemplatesAPI", () => {
       status: "published",
       provenance: { pluginId: "demo.plugin" },
     })
+  })
+})
+
+/**
+ * The library-write half of the API. Every method here reaches
+ * `TemplateService`, so the interesting behaviour is the two things the API
+ * adds on top: one consent prompt, and a refusal to touch a row this plugin
+ * did not create.
+ */
+describe("PluginTemplatesAPI library writes", () => {
+  async function userDraft(overrides: Record<string, unknown> = {}) {
+    return createTemplateDefinition({
+      id: "skill.mine",
+      domain: "skill",
+      status: "draft",
+      revision: 3,
+      version: null,
+      metadata: { name: "Mine" },
+      payload: { content: "Body" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+      provenance: { source: "user", trust: "unsigned", pluginId: "demo.plugin" },
+      ...overrides,
+    })
+  }
+
+  function apiWith(catalog: TemplateCatalog, service: Record<string, unknown>) {
+    const confirm = jest.fn(async () => true)
+    const api = createTemplatesAPI("demo.plugin", {
+      catalog,
+      service: service as never,
+      hasPermission: (permission) => permission === "templates:library:write",
+      confirm,
+    })
+    return { api, confirm }
+  }
+
+  it("saves, publishes, deprecates and deletes a draft this plugin created", async () => {
+    const catalog = new TemplateCatalog()
+    const draft = await userDraft()
+    catalog.upsert("user", draft)
+    catalog.upsert(
+      "user",
+      await userDraft({ id: "skill.mine", status: "published", version: "1.0.0", revision: 1 })
+    )
+    const service = {
+      saveDraft: jest.fn(async (input) => input),
+      publish: jest.fn(async () => ({ ...draft, version: "1.0.0" })),
+      deprecate: jest.fn(async () => draft),
+      deleteDraft: jest.fn(async () => undefined),
+    }
+    const { api, confirm } = apiWith(catalog, service)
+
+    await api.saveDraft(draft, 3)
+    await api.publish("skill.mine", { expectedRevision: 3, confirmedBump: "minor" })
+    await api.deprecate("skill.mine", "1.0.0")
+    await api.deleteDraft("skill.mine")
+
+    expect(service.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: expect.objectContaining({ pluginId: "demo.plugin" }),
+      }),
+      3
+    )
+    expect(service.publish).toHaveBeenCalledWith("skill.mine", {
+      expectedRevision: 3,
+      confirmedBump: "minor",
+    })
+    expect(service.deprecate).toHaveBeenCalledWith("skill.mine", "1.0.0", undefined)
+    expect(service.deleteDraft).toHaveBeenCalledWith("skill.mine")
+    // One prompt per write, each naming what it is about to do.
+    expect(confirm.mock.calls.map(([request]) => request.action)).toEqual([
+      "save-draft",
+      "publish",
+      "deprecate",
+      "delete-draft",
+    ])
+  })
+
+  it.each([
+    ["saveDraft", async (api, draft) => api.saveDraft(draft, 3)],
+    [
+      "publish",
+      async (api) => api.publish("skill.mine", { expectedRevision: 3, confirmedBump: "minor" }),
+    ],
+    ["deprecate", async (api) => api.deprecate("skill.mine", "1.0.0")],
+    ["deleteDraft", async (api) => api.deleteDraft("skill.mine")],
+  ])("refuses %s on a row another plugin owns", async (_name, call) => {
+    const catalog = new TemplateCatalog()
+    const foreign = await userDraft({
+      provenance: { source: "user", trust: "unsigned", pluginId: "other.plugin" },
+    })
+    catalog.upsert("user", foreign)
+    catalog.upsert(
+      "user",
+      await userDraft({
+        status: "published",
+        version: "1.0.0",
+        revision: 1,
+        provenance: { source: "user", trust: "unsigned", pluginId: "other.plugin" },
+      })
+    )
+    const service = {
+      saveDraft: jest.fn(),
+      publish: jest.fn(),
+      deprecate: jest.fn(),
+      deleteDraft: jest.fn(),
+    }
+    const { api } = apiWith(catalog, service)
+
+    await expect(call(api, foreign)).rejects.toThrow(/belongs to plugin "other.plugin"/)
+    for (const fn of Object.values(service)) expect(fn).not.toHaveBeenCalled()
+  })
+
+  it("refuses a row the user wrote, which carries no plugin at all", async () => {
+    const catalog = new TemplateCatalog()
+    catalog.upsert("user", await userDraft({ provenance: { source: "user", trust: "unsigned" } }))
+    const service = { deleteDraft: jest.fn() }
+    const { api } = apiWith(catalog, service)
+    await expect(api.deleteDraft("skill.mine")).rejects.toThrow(/the user's own library/)
+    expect(service.deleteDraft).not.toHaveBeenCalled()
+  })
+
+  it("refuses every write without templates:library:write, before prompting", async () => {
+    const catalog = new TemplateCatalog()
+    catalog.upsert("user", await userDraft())
+    const confirm = jest.fn(async () => true)
+    const service = { deleteDraft: jest.fn(), exportPackage: jest.fn(), importPackage: jest.fn() }
+    const api = createTemplatesAPI("demo.plugin", {
+      catalog,
+      service: service as never,
+      hasPermission: () => false,
+      confirm,
+    })
+    await expect(api.deleteDraft("skill.mine")).rejects.toThrow(/templates:library:write/)
+    await expect(api.importPackage(new Uint8Array([1]))).rejects.toThrow(/templates:library:write/)
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it("refuses every write the user declines", async () => {
+    const catalog = new TemplateCatalog()
+    catalog.upsert("user", await userDraft())
+    const service = { deleteDraft: jest.fn() }
+    const api = createTemplatesAPI("demo.plugin", {
+      catalog,
+      service: service as never,
+      hasPermission: () => true,
+      confirm: async () => false,
+    })
+    await expect(api.deleteDraft("skill.mine")).rejects.toThrow(/denied by user confirmation/)
+    expect(service.deleteDraft).not.toHaveBeenCalled()
+  })
+
+  it("forks somebody else's release and stamps the copy with this plugin", async () => {
+    const catalog = new TemplateCatalog()
+    const upstream = await userDraft({
+      id: "skill.theirs",
+      status: "published",
+      version: "2.0.0",
+      revision: 1,
+      provenance: { source: "user", trust: "unsigned", pluginId: "other.plugin" },
+    })
+    catalog.upsert("user", upstream)
+    const service = {
+      fork: jest.fn(async () => ({
+        ...upstream,
+        id: "skill.copy",
+        status: "draft",
+        version: null,
+        revision: 1,
+        provenance: { source: "user", trust: "unsigned" },
+      })),
+      saveDraft: jest.fn(async (input) => input),
+    }
+    const { api } = apiWith(catalog, service)
+
+    const forked = await api.fork("skill.theirs", { version: "2.0.0", newId: "skill.copy" })
+
+    expect(service.fork).toHaveBeenCalledWith("skill.theirs", {
+      version: "2.0.0",
+      newId: "skill.copy",
+    })
+    expect(forked.provenance.pluginId).toBe("demo.plugin")
+  })
+
+  it('imports a package as source "plugin" with the consent already given', async () => {
+    const catalog = new TemplateCatalog()
+    const inspected = {
+      fingerprint: "f",
+      manifest: {},
+      definitions: [],
+      assets: new Map(),
+      trust: "unsigned",
+    }
+    const service = { importPackage: jest.fn(async () => inspected) }
+    const { api, confirm } = apiWith(catalog, service)
+    const bytes = new Uint8Array([1, 2, 3])
+
+    await expect(api.importPackage(bytes)).resolves.toBe(inspected)
+
+    expect(service.importPackage).toHaveBeenCalledWith(bytes, {
+      source: "plugin",
+      confirmed: true,
+    })
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "import-package", pluginId: "demo.plugin" })
+    )
+  })
+
+  it("exports a package behind the same permission and prompt", async () => {
+    const catalog = new TemplateCatalog()
+    const exported = { bytes: new Uint8Array(), fingerprint: "f", manifest: {} }
+    const service = { exportPackage: jest.fn(async () => exported) }
+    const { api, confirm } = apiWith(catalog, service)
+    const input = {
+      id: "pkg",
+      version: "1.0.0",
+      name: "Pack",
+      definitionIds: [{ id: "skill.mine", version: "1.0.0" }],
+    }
+
+    await expect(api.exportPackage(input)).resolves.toBe(exported)
+    expect(service.exportPackage).toHaveBeenCalledWith(input)
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "export-package", definitionId: "pkg" })
+    )
   })
 })

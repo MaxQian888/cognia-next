@@ -1840,7 +1840,8 @@
       "kind": "runtime",
       "stability": "stable",
       "status": "implemented",
-      "introducedIn": "0.5.0"
+      "introducedIn": "0.5.0",
+      "permission": "commands:write"
     },
     {
       "id": "importer.format",

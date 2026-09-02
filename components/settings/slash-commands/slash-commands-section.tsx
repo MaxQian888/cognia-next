@@ -35,10 +35,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { BUILTIN_SLASH_COMMANDS } from "@/lib/slash-commands/builtin"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
-import { deleteCustomSlashCommand, loadCustomSlashCommands } from "@/lib/slash-commands/custom"
+import {
+  deleteCustomSlashCommand,
+  loadCustomSlashCommands,
+  projectCommandDirOf,
+  type CustomSlashCommand,
+} from "@/lib/slash-commands/custom"
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import type { SlashCommandDefinition } from "@/lib/slash-commands/registry"
-import { isTauri } from "@/lib/tauri"
+import { commandAuthoringBlockKey, useCommandAuthoringReach } from "./command-authoring-reach"
 import { toast } from "@/components/ui/sonner"
 import { createLogger } from "@cognia/logging"
 import { CommandEditorDialog } from "./command-editor-dialog"
@@ -54,9 +59,9 @@ const log = createLogger("settings.slash-commands")
 
 export function SlashCommandsSection() {
   const t = useTranslations("settings.slashCommands")
-  const desktop = isTauri()
+  const reach = useCommandAuthoringReach()
   const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const [custom, setCustom] = useState<SlashCommand[]>([])
+  const [custom, setCustom] = useState<CustomSlashCommand[]>([])
   const [filter, setFilter] = useState("")
   const [loading, setLoading] = useState(false)
   const [reloadCounter, setReloadCounter] = useState(0)
@@ -66,8 +71,8 @@ export function SlashCommandsSection() {
   const [cwd, setCwd] = useState<string | null>(null)
 
   const [editorOpen, setEditorOpen] = useState(false)
-  const [editorInitial, setEditorInitial] = useState<SlashCommand | null>(null)
-  const [deleteTarget, setDeleteTarget] = useState<SlashCommand | null>(null)
+  const [editorInitial, setEditorInitial] = useState<CustomSlashCommand | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CustomSlashCommand | null>(null)
   const [busy, setBusy] = useState(false)
 
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -118,7 +123,25 @@ export function SlashCommandsSection() {
 
   const triggerReload = () => setReloadCounter((n) => n + 1)
 
-  const onEdit = (c: SlashCommand) => {
+  const projectBlockKey = commandAuthoringBlockKey(reach.project)
+  const globalBlockKey = commandAuthoringBlockKey(reach.global)
+  const projectBlocked = projectBlockKey ? t(projectBlockKey) : null
+  const globalBlocked = globalBlockKey ? t(globalBlockKey) : null
+  // A project write also needs somewhere to write TO. A host with no workspace
+  // open is not blocked, it is unaddressed, which is a different sentence.
+  const projectAuthorable = reach.project.available && !!cwd
+  const canAuthorAnything = projectAuthorable || reach.global.available
+
+  /** Why this row's Edit / Delete are inert here, or undefined when they work. */
+  const blockedReasonFor = (command: CustomSlashCommand): string | undefined => {
+    if (command.scope === "project") {
+      if (!reach.project.available) return projectBlocked ?? undefined
+      return cwd ? undefined : t("authoring.projectNeedsWorkspace")
+    }
+    return reach.global.available ? undefined : (globalBlocked ?? undefined)
+  }
+
+  const onEdit = (c: CustomSlashCommand) => {
     setEditorInitial(c)
     setEditorOpen(true)
   }
@@ -136,6 +159,10 @@ export function SlashCommandsSection() {
         scope: deleteTarget.scope === "project" ? "project" : "user",
         name: deleteTarget.name,
         cwd,
+        // Put the delete where the file actually is. A command read from
+        // `.cognia/commands` whose delete targeted `.claude/commands` reported
+        // success and left the command in the picker.
+        dir: projectCommandDirOf(deleteTarget.originDir),
       })
       toast.success(t("deletedToast", { name: deleteTarget.name }))
       setDeleteTarget(null)
@@ -204,23 +231,32 @@ export function SlashCommandsSection() {
         <Button
           size="sm"
           onClick={onCreate}
-          disabled={!desktop}
+          disabled={!canAuthorAnything}
           aria-label={t("newBtn")}
+          title={canAuthorAnything ? undefined : (projectBlocked ?? undefined)}
           data-testid="slash-commands-new"
         >
           <PlusIcon className="mr-1 size-3.5" />
           {t("newBtn")}
         </Button>
       </div>
-      {!desktop && (
-        <p
-          className="rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+      {/*
+        Render, disable, explain. Two sentences because there are two answers:
+        the project scope may be one pairing away, while the user-global scope
+        is desktop-only for a reason pairing does not change.
+      */}
+      {projectBlocked || globalBlocked ? (
+        <div
+          className="space-y-1 rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
           role="status"
           data-testid="slash-commands-web-banner"
         >
-          {t("webModeBanner")}
-        </p>
-      )}
+          {projectBlocked ? (
+            <p data-testid="slash-commands-project-block">{projectBlocked}</p>
+          ) : null}
+          {globalBlocked ? <p data-testid="slash-commands-global-block">{globalBlocked}</p> : null}
+        </div>
+      ) : null}
 
       <Accordion type="multiple" defaultValue={["builtin", "custom", "plugin"]}>
         <AccordionItem value="builtin">
@@ -258,7 +294,7 @@ export function SlashCommandsSection() {
                 <p className="px-2 text-xs text-muted-foreground">{t("scanning")}</p>
               ) : filteredCustom.length === 0 ? (
                 <p className="px-2 text-xs italic text-muted-foreground">
-                  {desktop ? t("emptyCustom") : t("emptyCustomWeb")}
+                  {reach.project.available ? t("emptyCustom") : t("emptyCustomWeb")}
                 </p>
               ) : (
                 filteredCustom.map((c) => (
@@ -272,10 +308,14 @@ export function SlashCommandsSection() {
                     filePath={c.filePath}
                     onTry={() => tryInComposer(c.name)}
                     tryLabel={t("try")}
-                    onEdit={desktop ? () => onEdit(c) : undefined}
+                    // Never hidden. A control the user cannot use here still
+                    // has to say so, and which of the two scopes it is decides
+                    // whether pairing would help.
+                    onEdit={() => onEdit(c)}
                     editLabel={t("edit")}
-                    onDelete={desktop ? () => setDeleteTarget(c) : undefined}
+                    onDelete={() => setDeleteTarget(c)}
                     deleteLabel={t("delete")}
+                    actionsDisabledReason={blockedReasonFor(c)}
                   />
                 ))
               )}
@@ -319,6 +359,8 @@ export function SlashCommandsSection() {
         onOpenChange={setEditorOpen}
         initial={editorInitial}
         cwd={cwd}
+        projectWritable={reach.project.available}
+        globalWritable={reach.global.available}
         onSaved={() => {
           setEditorOpen(false)
           triggerReload()
@@ -366,6 +408,12 @@ interface RowProps {
   editLabel?: string
   onDelete?: () => void
   deleteLabel?: string
+  /**
+   * Present when the row's write actions cannot run from this shell. They are
+   * still rendered, disabled, carrying this sentence as their tooltip and
+   * accessible description.
+   */
+  actionsDisabledReason?: string
 }
 
 function CommandRow({
@@ -381,6 +429,7 @@ function CommandRow({
   editLabel,
   onDelete,
   deleteLabel,
+  actionsDisabledReason,
 }: RowProps) {
   return (
     <Card className="p-3" data-testid={`slash-command-row-${name}`}>
@@ -401,6 +450,15 @@ function CommandRow({
           {filePath ? (
             <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{filePath}</p>
           ) : null}
+          {actionsDisabledReason ? (
+            <p
+              id={`${name}-blocked`}
+              className="mt-1 text-[10px] text-muted-foreground"
+              data-testid={`blocked-${name}`}
+            >
+              {actionsDisabledReason}
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Button
@@ -420,9 +478,11 @@ function CommandRow({
               size="icon"
               className="size-7"
               onClick={onEdit}
+              disabled={!!actionsDisabledReason}
               data-testid={`edit-${name}`}
-              title={editLabel}
+              title={actionsDisabledReason ?? editLabel}
               aria-label={editLabel}
+              aria-describedby={actionsDisabledReason ? `${name}-blocked` : undefined}
             >
               <PencilIcon className="size-3.5" />
             </Button>
@@ -433,9 +493,11 @@ function CommandRow({
               size="icon"
               className="size-7 text-destructive hover:text-destructive"
               onClick={onDelete}
+              disabled={!!actionsDisabledReason}
               data-testid={`delete-${name}`}
-              title={deleteLabel}
+              title={actionsDisabledReason ?? deleteLabel}
               aria-label={deleteLabel}
+              aria-describedby={actionsDisabledReason ? `${name}-blocked` : undefined}
             >
               <Trash2Icon className="size-3.5" />
             </Button>
@@ -446,7 +508,7 @@ function CommandRow({
   )
 }
 
-function filterCommandsByName(list: SlashCommand[], filter: string): SlashCommand[] {
+function filterCommandsByName<T extends SlashCommand>(list: T[], filter: string): T[] {
   if (!filter.trim()) return list
   const q = filter.toLowerCase().replace(/^\//, "")
   return list.filter(

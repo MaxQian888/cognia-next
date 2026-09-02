@@ -34,6 +34,7 @@ import type {
 } from "@/types/plugin"
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { getSlashCommand, listSlashCommands } from "@/lib/slash-commands/registry"
 import {
   getPluginHookContribution,
   listEnabledHookPlugins,
@@ -923,7 +924,7 @@ export class PluginLifecycleHooks {
     args: string[],
     context?: PluginCommandContext
   ): Promise<PluginCommandResult | null> {
-    for (const pluginId of this.hookExecutionOrder) {
+    for (const pluginId of this.commandDispatchOrder(command)) {
       const registered = this.registered(pluginId)
       if (registered?.hooks.onCommand) {
         try {
@@ -936,6 +937,28 @@ export class PluginLifecycleHooks {
       }
     }
     return null
+  }
+
+  /**
+   * The owning plugin first, then everyone else in hook order.
+   *
+   * `hookExecutionOrder` is sorted by hook PRIORITY, which has nothing to do
+   * with who the command belongs to. So a plugin that declared a high priority
+   * and an indiscriminate `onCommand` saw, and could answer, every other
+   * plugin's commands before their owners were asked. The first structured
+   * acceptance wins, so that is not a race, it is a takeover: `/acme.deploy`
+   * quietly stops being Acme's.
+   *
+   * The rest of the order is preserved rather than truncated. Declining is a
+   * real answer (`false` keeps the search going), and a plugin that extends
+   * another's command by handling what the owner passed on is a supported
+   * pattern.
+   */
+  private commandDispatchOrder(command: string): string[] {
+    const order = this.hookExecutionOrder
+    const owner = resolveCommandOwner(command, order)
+    if (!owner) return order
+    return [owner, ...order.filter((pluginId) => pluginId !== owner)]
   }
 
   // ===========================================================================
@@ -1954,6 +1977,47 @@ export class PluginEventHooks {
 
 let pluginLifecycleHooksInstance: PluginLifecycleHooks | null = null
 let pluginEventHooksInstance: PluginEventHooks | null = null
+
+/**
+ * Which plugin owns `command`, if the id or the registry says.
+ *
+ * Two shapes reach `dispatchOnCommand`. The palette and slash paths in
+ * `PluginManager` pass the manifest's SHORT id, so the owner is looked up in
+ * the unified slash-command registry, where the manifest registration stamped
+ * `pluginId` on `<pluginId>.<id>`. A caller that already holds the namespaced
+ * id is answered from the string alone, without touching the registry.
+ *
+ * The longest matching prefix wins, so `acme.tools` owns `acme.tools.deploy`
+ * even when a plugin literally called `acme` is also installed.
+ *
+ * Exported for the dispatch-order test, which cannot otherwise observe the
+ * difference between "no owner" and "owner already first".
+ */
+export function resolveCommandOwner(
+  command: string,
+  candidates: readonly string[]
+): string | undefined {
+  let prefixed: string | undefined
+  for (const pluginId of candidates) {
+    if (!command.startsWith(`${pluginId}.`)) continue
+    if (!prefixed || pluginId.length > prefixed.length) prefixed = pluginId
+  }
+  if (prefixed) return prefixed
+  const enabled = new Set(candidates)
+  for (const pluginId of candidates) {
+    if (getSlashCommand(`${pluginId}.${command}`)?.pluginId === pluginId) return pluginId
+  }
+  // Last resort: an entry registered under some other id that still names this
+  // command and an enabled owner.
+  const named = listSlashCommands().find(
+    (definition) =>
+      definition.source === "plugin" &&
+      definition.name === command &&
+      definition.pluginId !== undefined &&
+      enabled.has(definition.pluginId)
+  )
+  return named?.pluginId
+}
 
 /**
  * Get the plugin lifecycle hooks singleton instance
