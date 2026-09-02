@@ -3,6 +3,7 @@ import { argon2idAsync } from "@noble/hashes/argon2.js"
 
 import { assertAccountId } from "@/lib/accounts/account-types"
 import { AccountContentCipher } from "@/lib/accounts/content-cipher"
+import type { QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
 
 export const BROWSER_VAULT_DB_NAME = "cognia-browser-vault"
 export const BROWSER_VAULT_PBKDF2_ITERATIONS = 600_000
@@ -48,8 +49,34 @@ export interface BrowserVaultRecord {
       }
   passwordWrap: WrappedVaultKey
   recoveryWrap: WrappedVaultKey
+  /**
+   * Quick-unlock wraps of the SAME master key, one per enrolled method.
+   *
+   * Optional, and deliberately not a version bump: a record carrying these is
+   * still a v2 record, so every vault minted before quick unlock existed keeps
+   * validating and opening unchanged.
+   *
+   * Each wrap is keyed by a KEK derived from the user's low-entropy secret
+   * COMBINED with this device's pepper. Without the pepper the wrap cannot be
+   * attacked offline at all, which is the only reason a six-digit PIN is
+   * allowed near a master key. See `lib/accounts/quick-unlock/device-pepper`.
+   */
+  quickWraps?: Partial<Record<QuickUnlockMethod, QuickUnlockWrap>>
   createdAt: number
   updatedAt: number
+}
+
+/** AAD domains. Each wrap is bound to its own, so one cannot open another. */
+type WrapKind = "password" | "recovery" | QuickUnlockMethod
+
+export interface QuickUnlockWrap {
+  /** Argon2id salt for the secret half of the KEK. */
+  salt: string
+  memoryKiB: number
+  timeCost: number
+  parallelism: number
+  wrap: WrappedVaultKey
+  createdAt: number
 }
 
 export interface EncryptedVaultSecret {
@@ -327,6 +354,166 @@ export async function provisionBrowserVault(
 
 export async function browserVaultExists(accountId: string): Promise<boolean> {
   return (await repository().get(accountId)) !== undefined
+}
+
+/**
+ * Combine a low-entropy secret with this device's pepper into a KEK.
+ *
+ * The pepper is appended to the Argon2 password input rather than mixed into
+ * the salt. Salts are stored in the clear next to the wrap, so peppering there
+ * would hand an attacker the material the whole scheme depends on staying off
+ * disk. Appending keeps it purely in memory, derived from a key that never
+ * leaves the device.
+ */
+async function deriveQuickUnlockKey(
+  canonicalSecret: string,
+  pepper: Uint8Array,
+  salt: Uint8Array,
+  parameters: Argon2Parameters
+): Promise<CryptoKey> {
+  const secretBytes = new TextEncoder().encode(canonicalSecret)
+  const combined = new Uint8Array(secretBytes.length + pepper.length)
+  combined.set(secretBytes, 0)
+  combined.set(pepper, secretBytes.length)
+  try {
+    const derived = await argon2idAsync(combined, salt, {
+      t: parameters.timeCost,
+      m: parameters.memoryKiB,
+      p: parameters.parallelism,
+      version: 0x13,
+      dkLen: 32,
+      asyncTick: 8,
+      maxmem: parameters.memoryKiB * 1024 + 1024 * 1024,
+    })
+    try {
+      return await importAesKey(derived, ["encrypt", "decrypt"])
+    } finally {
+      zeroBytes(derived)
+    }
+  } finally {
+    zeroBytes(secretBytes)
+    zeroBytes(combined)
+  }
+}
+
+/**
+ * Enroll a quick-unlock method by wrapping the master key under it.
+ *
+ * Requires the CURRENT PASSWORD, not merely an unlocked session. Enrollment
+ * mints a new way into the account, and the bar for that has to be proof of
+ * the factor it is being layered onto. An unlocked-session check would let
+ * anyone who walked up to a signed-in machine add their own PIN.
+ */
+export async function enrollBrowserVaultQuickUnlock(args: {
+  accountId: string
+  method: QuickUnlockMethod
+  password: string
+  canonicalSecret: string
+  pepper: Uint8Array
+  now?: number
+}): Promise<QuickUnlockWrap> {
+  const { accountId, method, password, canonicalSecret, pepper } = args
+  const now = args.now ?? Date.now()
+  const record = await repository().get(accountId)
+  if (!record) throw new Error("Browser Vault is not provisioned for this account.")
+
+  const passwordKey = await derivePasswordKeyForRecord(record, password)
+  const masterBytes = await unwrapMasterKey(
+    record.passwordWrap,
+    passwordKey,
+    wrapAad(accountId, "password")
+  )
+  const salt = randomBytes(16)
+  try {
+    const parameters = { ...activeArgon2Parameters }
+    const kek = await deriveQuickUnlockKey(canonicalSecret, pepper, salt, parameters)
+    const wrap = await wrapMasterKey(masterBytes, kek, wrapAad(accountId, method))
+    const entry: QuickUnlockWrap = {
+      salt: encodeBase64Url(salt),
+      memoryKiB: parameters.memoryKiB,
+      timeCost: parameters.timeCost,
+      parallelism: parameters.parallelism,
+      wrap,
+      createdAt: now,
+    }
+    await repository().put({
+      ...record,
+      quickWraps: { ...(record.quickWraps ?? {}), [method]: entry },
+      updatedAt: now,
+    })
+    return entry
+  } finally {
+    zeroBytes(masterBytes)
+    zeroBytes(salt)
+  }
+}
+
+/**
+ * Open the vault with a quick-unlock secret.
+ *
+ * Throws on a wrong secret, exactly as the password path does. The caller owns
+ * the attempt cap: this layer cannot, because it has no memory between calls.
+ */
+export async function unlockBrowserVaultWithQuickSecret(args: {
+  accountId: string
+  method: QuickUnlockMethod
+  canonicalSecret: string
+  pepper: Uint8Array
+}): Promise<void> {
+  const { accountId, method, canonicalSecret, pepper } = args
+  const record = await repository().get(accountId)
+  if (!record) throw new Error("Browser Vault is not provisioned for this account.")
+  validateRecord(record)
+
+  const entry = record.quickWraps?.[method]
+  if (!entry) throw new Error("That unlock method is not enrolled on this account.")
+
+  const salt = decodeBase64Url(entry.salt)
+  try {
+    // The ENTRY's parameters, never the current globals. A future cost bump
+    // must not lock a user out of a PIN minted under the old settings, which
+    // is the same trap `derivePasswordKeyForRecord` documents.
+    const kek = await deriveQuickUnlockKey(canonicalSecret, pepper, salt, {
+      memoryKiB: entry.memoryKiB,
+      timeCost: entry.timeCost,
+      parallelism: entry.parallelism,
+    })
+    const masterBytes = await unwrapMasterKey(entry.wrap, kek, wrapAad(accountId, method))
+    try {
+      const session = new BrowserVaultSession(
+        accountId,
+        await importAesKey(masterBytes, ["encrypt", "decrypt"])
+      )
+      activeBrowserVaultSession?.lock()
+      activeBrowserVaultSession = session
+    } finally {
+      zeroBytes(masterBytes)
+    }
+  } finally {
+    zeroBytes(salt)
+  }
+}
+
+/** Drop one enrolled method. The vault and every other method are untouched. */
+export async function removeBrowserVaultQuickUnlock(
+  accountId: string,
+  method: QuickUnlockMethod,
+  now = Date.now()
+): Promise<void> {
+  const record = await repository().get(accountId)
+  if (!record?.quickWraps?.[method]) return
+  const next = { ...record.quickWraps }
+  delete next[method]
+  await repository().put({ ...record, quickWraps: next, updatedAt: now })
+}
+
+/** Which methods currently have a wrap on this account. */
+export async function listBrowserVaultQuickUnlockMethods(
+  accountId: string
+): Promise<QuickUnlockMethod[]> {
+  const record = await repository().get(accountId)
+  if (!record?.quickWraps) return []
+  return Object.keys(record.quickWraps) as QuickUnlockMethod[]
 }
 
 export async function unlockBrowserVault(accountId: string, password: string): Promise<void> {
@@ -700,7 +887,7 @@ async function unwrapMasterKey(
   return new Uint8Array(plaintext)
 }
 
-function wrapAad(accountId: string, kind: "password" | "recovery"): Uint8Array {
+function wrapAad(accountId: string, kind: WrapKind): Uint8Array {
   return new TextEncoder().encode(`cognia-vault:v1:${accountId}:${kind}`)
 }
 
