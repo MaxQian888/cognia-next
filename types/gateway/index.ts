@@ -376,6 +376,11 @@ export interface GatewayRequestLogRow {
   outputTokens: number | null
   error: string | null
   stream: boolean
+  /**
+   * True when the gateway answered without an upstream call (the local
+   * `count_tokens` estimate). Such rows never draw quota or train cooldowns.
+   */
+  synthesized?: boolean
   decisionId?: string | null
   policyRevision?: string | null
   strategy?: GatewayRoutingStrategy | string | null

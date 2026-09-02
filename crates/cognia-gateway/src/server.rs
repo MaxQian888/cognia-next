@@ -6,6 +6,7 @@
 //!   - GET  /v1/models                → aliases + provider models (exposure-filtered)
 //!   - POST /v1/chat/completions      → OpenAI-format chat (stream + non-stream)
 //!   - POST /v1/messages              → Anthropic-format chat (Claude Code CLI)
+//!   - POST /v1/messages/count_tokens → Anthropic token count (forwarded, or a local estimate when no Anthropic route)
 //!   - POST /v1/embeddings            → OpenAI-format embeddings
 //!   - POST /v1/responses             → OpenAI Responses API (non-stream)
 //!
@@ -46,8 +47,10 @@ use cognia_net::inbound_policy::{FixedWindowRateLimiter, ParsedAllowlist};
 use super::api_keys::{self, GatewayApiKey};
 use super::concurrency::{ConcurrencyLimiter, InFlightGuard, InFlightTracker, Slot};
 use super::cooldown::{self, KeyCooldownMap};
+use super::count_tokens::estimate_input_tokens;
 use super::execute::{
-    candidates_from_entries, embeddings_url, expand_for_ticket, expand_key_pools,
+    candidates_from_entries, count_tokens_url, embeddings_url, expand_for_ticket,
+    expand_key_pools,
     is_executable_protocol, record_key_success, resolve_candidates, rewrite_model,
     strip_request_fields, upstream_headers, upstream_url, Candidate, KeyRotationMap, SseDeframer,
 };
@@ -312,6 +315,7 @@ pub async fn spawn_server(
         .route("/v1/models", get(list_models))
         .route("/v1/chat/completions", post(openai_chat))
         .route("/v1/messages", post(anthropic_messages))
+        .route("/v1/messages/count_tokens", post(anthropic_count_tokens))
         .route("/v1/embeddings", post(openai_embeddings))
         .route("/v1/responses", post(openai_responses))
         .layer(from_fn_with_state(state.clone(), middleware))
@@ -887,6 +891,258 @@ async fn anthropic_messages(
     Json(body): Json<Value>,
 ) -> Response {
     handle_chat(state, ctx, InboundFormat::AnthropicMessages, body).await
+}
+
+/// A ticket's frozen candidates joined against the live snapshot by
+/// deployment id. A candidate whose deployment vanished is skipped. Shared by
+/// every ticket-authenticated handler so the walk cannot drift per route.
+fn ticket_base_candidates(snapshot: &RoutingSnapshot, ticket: &RouteTicket) -> Vec<Candidate> {
+    ticket
+        .candidates
+        .iter()
+        .filter_map(|tc| {
+            snapshot
+                .provider_by_deployment(&tc.deployment_id)
+                .or_else(|| snapshot.provider(&tc.deployment_id))
+                .map(|p| Candidate {
+                    provider: p.clone(),
+                    model_id: tc.model_id.clone(),
+                })
+        })
+        .collect()
+}
+
+// ---- count_tokens handler ---------------------------------------------------
+
+/// `POST /v1/messages/count_tokens`. Gate order is identical to
+/// [`handle_chat`]: snapshot, model, exposure guard (keys) or frozen binding
+/// (tickets), then the same candidate walk. The request is forwarded to the
+/// first Anthropic-protocol candidate and the upstream answer returned
+/// verbatim (status, body, safe headers). Only when there is NO Anthropic
+/// candidate, or the upstream explicitly lacks the endpoint (404 / 405 /
+/// 501), does the gateway synthesize a local estimate. Every other upstream
+/// failure (401 / 403 / 429 / 5xx) passes through untouched, otherwise Claude
+/// Code would read a dead credential as a healthy connection.
+///
+/// The synthesized path draws no quota, records no cooldown, and logs with
+/// `synthesized: true`. The forwarded path draws no quota either: counting
+/// tokens consumes none.
+async fn anthropic_count_tokens(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<ReqCtx>,
+    Json(body): Json<Value>,
+) -> Response {
+    let _perf = cognia_instrument::guard("gateway.count_tokens");
+    let format = InboundFormat::AnthropicMessages;
+    let cfg = state.config.read().clone();
+    let snapshot = state.snapshot.read().clone();
+    let Some(snapshot) = snapshot else {
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded_error",
+            "no routing snapshot yet — open the Cognia window once so it can publish providers",
+            None,
+        );
+    };
+    let Some(model) = body["model"].as_str().map(|s| s.to_string()) else {
+        return logged_error(
+            &state,
+            &ctx,
+            format,
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "model is required",
+            None,
+        );
+    };
+    let ticket = ctx.ticket.clone();
+    if ticket.is_none() {
+        if let Some(resp) = exposure_guard(&state, &ctx, format, &cfg, &model) {
+            return resp;
+        }
+    }
+    if let Some(t) = &ticket {
+        if t.resolve_model(&model).is_none() {
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                &format!("model \"{model}\" is not bound by this route ticket"),
+                Some(&model),
+            );
+        }
+    }
+
+    let session_id = match &ticket {
+        Some(t) => t.session_id.clone(),
+        None => derive_session_id(
+            &body,
+            &ctx.remote_ip,
+            &ctx.user_agent,
+            ctx.key_id.as_deref().unwrap_or(""),
+        ),
+    };
+    // Same walk as chat, but NOT expanded across key pools: a token count
+    // needs one credential, never a rotation slot.
+    let candidates = match &ticket {
+        Some(t) => ticket_base_candidates(&snapshot, t),
+        None => route_candidates(&state, &snapshot, &cfg, &model, &body, &session_id).await,
+    };
+    let anthropic = candidates
+        .iter()
+        .find(|c| c.provider.protocol == "anthropic")
+        .cloned();
+    let Some(candidate) = anthropic else {
+        return synthesized_count(&state, &ctx, &model, &body);
+    };
+
+    let started = Instant::now();
+    let mut upstream_body = rewrite_model(&body, &candidate.model_id);
+    strip_request_fields(
+        &mut upstream_body,
+        &candidate.provider.id,
+        &cfg.stripped_request_fields,
+        &cfg.field_strip_allow,
+    );
+    let url = count_tokens_url(&candidate.provider.base_url);
+    let mut req = state.http.post(&url).json(&upstream_body);
+    req = apply_timeout(req, &cfg);
+    let inbound_version = ctx
+        .inbound_headers
+        .iter()
+        .find(|(name, _)| name == "anthropic-version")
+        .map(|(_, value)| value.as_str());
+    for (name, value) in super::execute::upstream_headers_for(
+        &candidate.provider.protocol,
+        candidate.provider.transport.as_ref(),
+        candidate.provider.api_key.as_deref(),
+        inbound_version,
+    ) {
+        req = req.header(name, value);
+    }
+    // Always same-protocol here, so semantic headers forward as on chat.
+    let transport_extra: Vec<&str> = candidate
+        .provider
+        .transport
+        .as_ref()
+        .map(|t| {
+            t.forwarded_semantic_headers
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    for (name, value) in &ctx.inbound_headers {
+        if name == "anthropic-version" {
+            continue;
+        }
+        let semantic = crate::header_policy::is_forwardable_semantic_header(name)
+            || transport_extra
+                .iter()
+                .any(|extra| extra.eq_ignore_ascii_case(name));
+        if semantic {
+            req = req.header(name, value);
+        }
+    }
+
+    let resp = match req.send().await {
+        Ok(resp) => resp,
+        Err(err) => {
+            let message = format!("connect error: {err}");
+            emit_outcome(
+                state.host.as_ref(),
+                &candidate,
+                false,
+                started,
+                None,
+                Some(&message),
+                None,
+                None,
+            );
+            return logged_error(
+                &state,
+                &ctx,
+                format,
+                StatusCode::BAD_GATEWAY,
+                "api_error",
+                &message,
+                Some(&model),
+            );
+        }
+    };
+
+    let status = resp.status().as_u16();
+    let headers = resp.headers().clone();
+    let text = resp.text().await.unwrap_or_default();
+    if matches!(status, 404 | 405 | 501) {
+        // The upstream is reachable but has no count_tokens endpoint (an
+        // Anthropic-compatible relay, not Anthropic itself). Estimate locally.
+        return synthesized_count(&state, &ctx, &model, &body);
+    }
+    let input_tokens = if status < 400 {
+        serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| v["input_tokens"].as_u64())
+    } else {
+        None
+    };
+    let error = (status >= 400).then(|| {
+        format!(
+            "HTTP {status}: {}",
+            text.chars().take(500).collect::<String>()
+        )
+    });
+    emit_request_log_ctx(
+        state.host.as_ref(),
+        &ctx,
+        Some(&model),
+        Some(&candidate.provider.id),
+        status,
+        started.elapsed().as_millis() as u64,
+        input_tokens,
+        None,
+        error.as_deref(),
+        false,
+        Some(&candidate),
+    );
+    let mut builder = axum::http::Response::builder()
+        .status(StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY))
+        .header("content-type", "application/json");
+    for (name, value) in safe_upstream_response_headers(&headers) {
+        builder = builder.header(name, value);
+    }
+    builder
+        .body(Body::from(text))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// The local count_tokens estimate. Draws no quota, records no cooldown, and
+/// is flagged `synthesized` in the request log so the audit surface never
+/// mistakes it for an upstream answer.
+fn synthesized_count(state: &AppState, ctx: &ReqCtx, model: &str, body: &Value) -> Response {
+    let input_tokens = estimate_input_tokens(body);
+    emit_request_log_full(
+        state.host.as_ref(),
+        &ctx.route,
+        &ctx.remote_ip,
+        ctx.key_id.as_deref(),
+        Some(model),
+        None,
+        200,
+        0,
+        Some(input_tokens),
+        None,
+        None,
+        false,
+        None,
+        true,
+    );
+    Json(json!({ "input_tokens": input_tokens })).into_response()
 }
 
 // ---- embeddings handler -----------------------------------------------------
@@ -1964,19 +2220,7 @@ async fn handle_chat(state: AppState, ctx: ReqCtx, format: InboundFormat, body: 
         // snapshot by deployment id. A global alias update cannot change this
         // set; a candidate whose deployment vanished is skipped, and zero
         // servable candidates is a 503 (gateway-generated — legitimate here).
-        let base: Vec<Candidate> = t
-            .candidates
-            .iter()
-            .filter_map(|tc| {
-                snapshot
-                    .provider_by_deployment(&tc.deployment_id)
-                    .or_else(|| snapshot.provider(&tc.deployment_id))
-                    .map(|p| Candidate {
-                        provider: p.clone(),
-                        model_id: tc.model_id.clone(),
-                    })
-            })
-            .collect();
+        let base = ticket_base_candidates(&snapshot, t);
         if base.is_empty() {
             return logged_error(
                 &state,
@@ -2803,6 +3047,43 @@ fn emit_request_log(
     stream: bool,
     candidate: Option<&Candidate>,
 ) {
+    emit_request_log_full(
+        host,
+        route,
+        remote_ip,
+        key_id,
+        model,
+        provider_id,
+        status,
+        latency_ms,
+        input_tokens,
+        output_tokens,
+        error,
+        stream,
+        candidate,
+        false,
+    );
+}
+
+/// [`emit_request_log`] plus the `synthesized` marker: true only for answers
+/// the gateway produced without any upstream call.
+#[allow(clippy::too_many_arguments)]
+fn emit_request_log_full(
+    host: &dyn GatewayHost,
+    route: &str,
+    remote_ip: &str,
+    key_id: Option<&str>,
+    model: Option<&str>,
+    provider_id: Option<&str>,
+    status: u16,
+    latency_ms: u64,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    error: Option<&str>,
+    stream: bool,
+    candidate: Option<&Candidate>,
+    synthesized: bool,
+) {
     let id = uuid::Uuid::new_v4().to_string();
     let decision_id = id.clone();
     let selected_deployment = candidate.and_then(|value| value.provider.deployment_id.as_deref());
@@ -2824,6 +3105,7 @@ fn emit_request_log(
         "outputTokens": output_tokens,
         "error": error,
         "stream": stream,
+        "synthesized": synthesized,
         "selectedDeployment": selected_deployment,
         "keyFingerprint": key_fingerprint,
     });

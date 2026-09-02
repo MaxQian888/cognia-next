@@ -27,6 +27,7 @@ pub mod api_keys;
 #[cfg(feature = "tauri-host")]
 pub mod commands;
 pub mod concurrency;
+pub mod count_tokens;
 pub mod cooldown;
 pub mod credentials;
 pub mod execute;

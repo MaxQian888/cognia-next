@@ -105,6 +105,44 @@ async fn upstream_messages(
         .into_response()
 }
 
+/// Mock `/v1/messages/count_tokens`. Shares the 401 switch so a dead
+/// credential is reported the same way on both endpoints.
+async fn upstream_count_tokens(
+    State(state): State<UpstreamState>,
+    headers: HeaderMap,
+    _body: axum::extract::Json<Value>,
+) -> axum::response::Response {
+    state.hits.lock().push(UpstreamHit {
+        api_key: headers
+            .get("x-api-key")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from),
+        headers: vec![("x-upstream-route".into(), "count_tokens".into())],
+    });
+    if state
+        .fail_first_with_401
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+        .is_ok()
+    {
+        return axum::http::Response::builder()
+            .status(401)
+            .header("content-type", "application/json")
+            .header("request-id", "req_upstream_count_auth")
+            .body(axum::body::Body::from(
+                r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+            ))
+            .unwrap()
+            .into_response();
+    }
+    axum::http::Response::builder()
+        .status(200)
+        .header("content-type", "application/json")
+        .header("request-id", "req_upstream_count_ok")
+        .body(axum::body::Body::from(r#"{"input_tokens":4242}"#))
+        .unwrap()
+        .into_response()
+}
+
 async fn start_upstream() -> (SocketAddr, UpstreamState) {
     let state = UpstreamState {
         hits: Arc::new(Mutex::new(Vec::new())),
@@ -112,6 +150,7 @@ async fn start_upstream() -> (SocketAddr, UpstreamState) {
     };
     let app = Router::new()
         .route("/v1/messages", post(upstream_messages))
+        .route("/v1/messages/count_tokens", post(upstream_count_tokens))
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -159,6 +198,10 @@ fn snapshot_json(upstream: SocketAddr, keys: &[&str]) -> Value {
 }
 
 async fn start_gateway(upstream: SocketAddr, pool_keys: &[&str]) -> Gateway {
+    start_gateway_with_snapshot(snapshot_json(upstream, pool_keys)).await
+}
+
+async fn start_gateway_with_snapshot(snapshot_value: Value) -> Gateway {
     let config = GatewayConfig {
         port: 0,
         exposed_models: vec![],
@@ -182,7 +225,7 @@ async fn start_gateway(upstream: SocketAddr, pool_keys: &[&str]) -> Gateway {
     }]));
 
     let snapshot: Arc<RwLock<Option<RoutingSnapshot>>> = Arc::new(RwLock::new(Some(
-        serde_json::from_value(snapshot_json(upstream, pool_keys)).unwrap(),
+        serde_json::from_value(snapshot_value).unwrap(),
     )));
     let tickets = Arc::new(RouteTicketRegistry::new(Arc::new(
         InMemoryTicketMetaStore::default(),
@@ -241,6 +284,16 @@ fn chat_body() -> Value {
         "max_tokens": 16,
         "messages": [{ "role": "user", "content": "hi" }],
     })
+}
+
+async fn post_count_tokens(port: u16, bearer: &str, body: &Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/messages/count_tokens"))
+        .header("x-api-key", bearer)
+        .json(body)
+        .send()
+        .await
+        .expect("gateway reachable")
 }
 
 async fn post_messages(
@@ -430,4 +483,95 @@ async fn ticket_auth_failure_never_switches_accounts_and_sticky_lease_holds() {
         before + 1,
         "exactly one auth attempt, no failover"
     );
+}
+
+// ---- /v1/messages/count_tokens ----------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_forwards_to_the_anthropic_candidate_verbatim() {
+    let (upstream, upstream_state) = start_upstream().await;
+    let gw = start_gateway(upstream, &["sk-up-only"]).await;
+
+    // Key auth.
+    let resp = post_count_tokens(gw.port, &gw.key, &chat_body()).await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers().get("request-id").unwrap(),
+        "req_upstream_count_ok"
+    );
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(body["input_tokens"], json!(4242), "upstream count, not an estimate");
+    {
+        let hits = upstream_state.hits.lock();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].api_key.as_deref(), Some("sk-up-only"));
+        assert_eq!(hits[0].headers[0].1, "count_tokens");
+    }
+
+    // Ticket auth walks the frozen candidate the same way.
+    let minted = {
+        let snapshot = gw.snapshot.read();
+        gw.tickets
+            .mint(
+                mint_request("s-count", "session-sticky"),
+                snapshot.as_ref(),
+                now_ms(),
+            )
+            .unwrap()
+    };
+    let resp = post_count_tokens(gw.port, &minted.secret, &chat_body()).await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(upstream_state.hits.lock().len(), 2);
+
+    // A selector the ticket never bound fails closed with no upstream call.
+    let mut unbound = chat_body();
+    unbound["model"] = json!("gpt-4o");
+    let resp = post_count_tokens(gw.port, &minted.secret, &unbound).await;
+    assert_eq!(resp.status(), 400);
+    assert_eq!(upstream_state.hits.lock().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_synthesizes_locally_when_no_anthropic_candidate_exists() {
+    let (upstream, upstream_state) = start_upstream().await;
+    let mut snapshot = snapshot_json(upstream, &["sk-up-only"]);
+    snapshot["providers"][0]["protocol"] = json!("openai");
+    let gw = start_gateway_with_snapshot(snapshot).await;
+
+    let body = json!({
+        "model": "glm-4.6",
+        "system": "You are terse.",
+        "messages": [{ "role": "user", "content": "Count these words please." }],
+    });
+    let resp = post_count_tokens(gw.port, &gw.key, &body).await;
+    assert_eq!(resp.status(), 200);
+    let parsed: Value = resp.json().await.unwrap();
+    let count = parsed["input_tokens"].as_u64().expect("input_tokens present");
+    assert!(count > 0 && count < 100, "local estimate, got {count}");
+    assert!(
+        upstream_state.hits.lock().is_empty(),
+        "an OpenAI-protocol upstream must never be asked to count tokens"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tokens_upstream_401_is_not_swallowed_into_an_estimate() {
+    let (upstream, upstream_state) = start_upstream().await;
+    upstream_state
+        .fail_first_with_401
+        .store(1, Ordering::SeqCst);
+    let gw = start_gateway(upstream, &["sk-up-only"]).await;
+
+    let resp = post_count_tokens(gw.port, &gw.key, &chat_body()).await;
+    assert_eq!(resp.status(), 401, "auth failures pass through verbatim");
+    assert_eq!(
+        resp.headers().get("request-id").unwrap(),
+        "req_upstream_count_auth"
+    );
+    let text = resp.text().await.unwrap();
+    assert_eq!(
+        text,
+        r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#
+    );
+    assert_eq!(upstream_state.hits.lock().len(), 1);
 }

@@ -246,3 +246,40 @@ test(
     }
   }
 )
+
+test(
+  "gateway leg: /v1/messages/count_tokens is forwarded to the upstream, not 404",
+  {
+    timeout: 300_000,
+    skip: RUN_GATEWAY_LEG
+      ? false
+      : "cognia-server binary missing — run `pnpm conformance:prepare` (CI always must)",
+  },
+  async () => {
+    const { server, baseUrl } = await createConformanceServer(SCENARIOS["text-sse"]())
+    const gateway = await startGatewayLeg({ conformanceBaseUrl: baseUrl })
+    try {
+      // Claude Code sizes its context window with this call before every
+      // turn. The conformance server answers a fixed 42 so a forwarded count
+      // is distinguishable from a locally synthesized estimate.
+      const resp = await fetch(`${gateway.gatewayBaseUrl}/v1/messages/count_tokens`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": gateway.gatewayKey },
+        body: JSON.stringify({
+          model: "claude-opus-4-8",
+          messages: [{ role: "user", content: "how many tokens is this?" }],
+        }),
+      })
+      assert.equal(resp.status, 200, await resp.text())
+      const body = await resp.json()
+      assert.equal(body.input_tokens, 42)
+
+      const { hits } = await controlRequests(baseUrl)
+      assert.equal(hits.filter((h) => h.countTokens).length, 1)
+      assert.ok(hits.every((h) => h.apiKey === UPSTREAM_KEY))
+    } finally {
+      await gateway.close()
+      await server.close()
+    }
+  }
+)

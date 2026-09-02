@@ -284,6 +284,12 @@ pub fn embeddings_url(base_url: &str) -> String {
     format!("{}/embeddings", base_url.trim_end_matches('/'))
 }
 
+/// Upstream Anthropic token-count endpoint. Sibling of [`upstream_url`]'s
+/// `/messages` leg: the catalog base URL already carries `/v1`.
+pub fn count_tokens_url(base_url: &str) -> String {
+    format!("{}/messages/count_tokens", base_url.trim_end_matches('/'))
+}
+
 /// Auth + protocol headers for an upstream request. Never logged.
 pub fn upstream_headers(protocol: &str, api_key: Option<&str>) -> Vec<(&'static str, String)> {
     let mut headers = vec![("content-type", "application/json".to_string())];
