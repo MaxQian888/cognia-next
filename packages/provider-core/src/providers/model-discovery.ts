@@ -1,19 +1,22 @@
 import { fetchModels as fetchCLIProxyAPIModels } from "./cliproxyapi"
 import { createLocalProviderService } from "./local-provider-service"
 import { listModels as listOpenRouterModels, parseModelPricing } from "./openrouter"
-import type {
-  LocalProviderName,
-  ModelConfig,
-  ModelPricing,
-  ProviderModelDiscoveryEntry,
-} from "@cognia/provider-types"
+import type { LocalProviderName, ModelConfig, ModelPricing } from "@cognia/provider-types"
 import { proxyFetch } from "./runtime-adapters"
 
-export type ProviderModelSource =
-  "catalog-static" | "models-dev" | "remote-discovered" | "user-curated"
-export type ProviderModelFreshness = "static" | "fresh" | "stale"
-
-export type ProviderModelCandidate = ProviderModelDiscoveryEntry
+// The three pure vocabulary types moved to `@cognia/provider-types`
+// (`model-discovery-types.ts`) so the operation contract can name them.
+// Re-exported here so every existing call site keeps its import path.
+export type {
+  ProviderModelCandidate,
+  ProviderModelFreshness,
+  ProviderModelSource,
+} from "@cognia/provider-types"
+import type {
+  ProviderModelCandidate,
+  ProviderModelFreshness,
+  ProviderModelSource,
+} from "@cognia/provider-types"
 
 export interface DiscoveredProviderModel extends ModelConfig {
   source: ProviderModelSource

@@ -40,6 +40,7 @@ import {
   getBuiltInProviderDefaultModel,
 } from "@cognia/provider-types/built-in-provider-catalog"
 import type {
+  ResolutionFailureNextAction,
   ApiFlavor,
   ApiProtocol,
   BedrockConnectionSettings,
@@ -199,13 +200,9 @@ export interface ResolveFeatureProviderArgs {
   proxyMode?: "preferred" | "always" | "never"
 }
 
-export type ResolutionFailureNextAction =
-  | "add_api_key"
-  | "enable_provider"
-  | "configure_base_url"
-  | "select_default_model"
-  | "verify_connection"
-  | "open_provider_settings"
+// Moved to `@cognia/provider-types` (next to `ResolverProtocol`) so the
+// operation contract can name it. Re-exported so importers are untouched.
+export type { ResolutionFailureNextAction } from "@cognia/provider-types"
 
 export interface ResolvedProvider {
   kind: "resolved"

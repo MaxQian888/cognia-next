@@ -126,6 +126,10 @@ const REGISTRY = [
   // in CI; until now nothing ran it (ADR-0119).
   { script: "pi:extension:pin:check", group: "artifacts" },
   { script: "companion-api:check", group: "artifacts" },
+  // ADR-0163: the provider operation manifest must name real zod exports and
+  // agree with the frozen id list in both directions. A `$ref` string every
+  // descriptor points at the same way validates nothing, so this checks names.
+  { script: "provider-ops:check", group: "artifacts" },
   { script: "support:docs:check", group: "artifacts" },
   { script: "plugin-convert:check", group: "artifacts" },
   { script: "plugin:contract:check", group: "artifacts" },

@@ -295,6 +295,7 @@
     "db:governance:write": "node scripts/gates/check-data-governance.mjs --write",
     "// 13 ─── Codegen & config sync ───": "",
     "companion-api:check": "node scripts/build/gen-companion-api.mjs --check",
+    "provider-ops:check": "node scripts/gates/check-provider-operation-manifest.mjs",
     "companion-api:gen": "node scripts/build/gen-companion-api.mjs",
     "companion-api:lint": "redocly lint docs/api/mobile-companion-api.openapi.yaml docs/api/headless-service-api.openapi.yaml",
     "settings-sync:check": "node scripts/build/gen-settings-sync.mjs --check",

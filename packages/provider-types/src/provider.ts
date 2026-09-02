@@ -432,6 +432,21 @@ export type ResolverProtocol =
   "openai" | "anthropic" | "google" | "mistral" | "cohere" | "azure" | "bedrock" | (string & {})
 
 /**
+ * What a caller can do about a failed provider resolution. Defined here, next
+ * to {@link ResolverProtocol}, for the same reason: the app resolver
+ * (`lib/ai/provider-consumption.ts`) and the operation contract
+ * (`provider-operations.ts`) both name it, and the app file re-exports it so
+ * its existing importers are untouched.
+ */
+export type ResolutionFailureNextAction =
+  | "add_api_key"
+  | "enable_provider"
+  | "configure_base_url"
+  | "select_default_model"
+  | "verify_connection"
+  | "open_provider_settings"
+
+/**
  * OpenAI endpoint family selection. "responses"/"chat" override the host
  * heuristic — this is what unlocks the Responses API on Azure OpenAI, on
  * compatible gateways that proxy `/responses`, and on custom base URLs. "auto"
