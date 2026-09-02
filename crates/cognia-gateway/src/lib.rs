@@ -568,6 +568,13 @@ impl GatewayState {
         self.tickets.revoke(ticket_id)
     }
 
+    /// Read the live routing snapshot without cloning it. `None` until the
+    /// renderer (or the headless profile store) has published one.
+    pub fn with_snapshot<R>(&self, f: impl FnOnce(Option<&RoutingSnapshot>) -> R) -> R {
+        let snapshot = self.snapshot.read();
+        f(snapshot.as_ref())
+    }
+
     /// Redacted ticket metadata (no secrets are ever stored).
     pub fn list_route_tickets(&self) -> Vec<route_ticket::RouteTicket> {
         let now = chrono::Utc::now().timestamp_millis();

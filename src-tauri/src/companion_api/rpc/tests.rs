@@ -3257,6 +3257,7 @@ fn every_known_command_has_a_dispatch_arm() {
         include_str!("native_tools.rs"),
         include_str!("data_sync.rs"),
         include_str!("service_plane.rs"),
+        include_str!("gateway_plane.rs"),
         include_str!("source_control.rs"),
         include_str!("filesystem.rs"),
         include_str!("terminal.rs"),
@@ -3375,6 +3376,44 @@ async fn dispatch_coverage_provider_catalog_status() {
 #[tokio::test]
 async fn dispatch_coverage_provider_catalog_search() {
     assert_not_404!("provider_catalog_search", json!({ "query": "gpt" }));
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_status() {
+    assert_not_404!("gateway_status", json!({}));
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_list_models() {
+    assert_not_404!("gateway_list_models", json!({}));
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_provider_capabilities() {
+    assert_not_404!("gateway_provider_capabilities", json!({}));
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_mint_route_ticket() {
+    assert_not_404!(
+        "gateway_mint_route_ticket",
+        json!({ "request": { "model": "m", "sessionId": "s", "executionFingerprint": "f", "routePolicy": "gateway-required" } })
+    );
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_list_route_tickets() {
+    assert_not_404!("gateway_list_route_tickets", json!({}));
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_revoke_route_ticket() {
+    assert_not_404!("gateway_revoke_route_ticket", json!({ "ticketId": "t" }));
+}
+
+#[tokio::test]
+async fn dispatch_coverage_gateway_probe_upstream() {
+    assert_not_404!("gateway_probe_upstream", json!({ "model": "m" }));
 }
 
 #[tokio::test]
@@ -4462,6 +4501,7 @@ fn command_families_cover_known_non_browser_commands_once() {
         super::native_tools::COMMANDS,
         super::data_sync::COMMANDS,
         super::service_plane::COMMANDS,
+        super::gateway_plane::COMMANDS,
         super::source_control::COMMANDS,
         super::filesystem::COMMANDS,
         super::terminal::COMMANDS,

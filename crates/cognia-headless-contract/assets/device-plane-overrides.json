@@ -6276,6 +6276,65 @@
         "additionalProperties": false
       }
     },
+    "sftp_download_open": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path",
+          "adminLease"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "sftp_upload_open": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "profileId",
+          "path",
+          "size",
+          "adminLease"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "example": 0
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "skills_bundle_upload_abort": {
       "inputSchemaSource": "contract",
       "inputSchema": {

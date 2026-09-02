@@ -43,6 +43,7 @@ mod codex_app;
 mod data_sync;
 mod diagnostics;
 mod filesystem;
+mod gateway_plane;
 mod host_state;
 mod native_tools;
 mod plugins;
@@ -566,6 +567,16 @@ const KNOWN_COMMANDS: &[&str] = &[
     "provider_catalog_status",
     "provider_catalog_search",
     "provider_catalog_refresh",
+    // ADR-0163 — gateway management plane. One namespace on both hosts:
+    // the desktop reads the Tauri-managed GatewayState, cognia-server reads
+    // HeadlessServices::gateway. Never routes on the gateway listener itself.
+    "gateway_status",
+    "gateway_list_models",
+    "gateway_provider_capabilities",
+    "gateway_mint_route_ticket",
+    "gateway_list_route_tickets",
+    "gateway_revoke_route_ticket",
+    "gateway_probe_upstream",
     // ADR-0059 T-A5 — connector command plane for the headless brain's
     // connector-runtime. Same names as the Tauri commands; each arm
     // delegates to the same free function the command wraps.
@@ -1198,6 +1209,12 @@ pub fn known_commands() -> &'static [&'static str] {
 /// They are cheap to re-run and structurally idempotent.
 #[cfg(test)]
 const READ_ONLY_COMMANDS: &[&str] = &[
+    // ADR-0163 gateway reads: status, exposed models, provider view, and the
+    // redacted ticket list are pure reads of the gateway's own state.
+    "gateway_status",
+    "gateway_list_models",
+    "gateway_provider_capabilities",
+    "gateway_list_route_tickets",
     "codex_app_runtime_status",
     "codex_app_task_list",
     "codex_app_task_read",
@@ -2226,6 +2243,16 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "provider_catalog_status",
     "provider_catalog_search",
     "provider_catalog_refresh",
+    // ADR-0163 — gateway management plane: minting and revoking route
+    // tickets, and probing upstreams with real requests, are operator
+    // actions on the host's own gateway, never a paired-device capability.
+    "gateway_status",
+    "gateway_list_models",
+    "gateway_provider_capabilities",
+    "gateway_mint_route_ticket",
+    "gateway_list_route_tickets",
+    "gateway_revoke_route_ticket",
+    "gateway_probe_upstream",
     // Lark dual-entry (plan 2026-07-24): token minting binds principals to
     // accounts, intent completion feeds browser-visible results, and metric
     // names are allowlisted — none of it is a paired-device capability.
@@ -3288,6 +3315,11 @@ pub(super) async fn dispatch(
 
     if service_plane::COMMANDS.contains(&name) {
         return service_plane::dispatch(name, args, state, host, device_id, account_id, scope)
+            .await;
+    }
+
+    if gateway_plane::COMMANDS.contains(&name) {
+        return gateway_plane::dispatch(name, args, state, host, device_id, account_id, scope)
             .await;
     }
 

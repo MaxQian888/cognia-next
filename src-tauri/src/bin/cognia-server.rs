@@ -3,8 +3,11 @@
 //! # What this binary does
 //!
 //! - Opens (or creates) a SQLite-backed `AppStore` at
-//!   `--data-dir/cognia-server.sqlite`.
-//! - Loads or generates the TLS material in the same `--data-dir` so the
+//!   `$COGNIA_DATA_DIR/cognia-server.sqlite`. There is no `--data-dir` flag on
+//!   this binary: the directory comes from the `COGNIA_DATA_DIR` environment
+//!   variable (`scripts/dev/headless.mjs` accepts `--data-dir` and translates
+//!   it into that variable).
+//! - Loads or generates the TLS material in the same directory so the
 //!   self-signed cert is stable across restarts.
 //! - Exposes two subcommands:
 //!   - `cognia-server pair --device-name <name>` issues a one-time Owner
@@ -347,6 +350,11 @@ enum GatewayCommand {
     KeyList,
     /// Revoke (delete) a key by id.
     KeyRevoke { id: String },
+    /// List route tickets (redacted metadata, never secrets).
+    TicketList,
+    /// Revoke a route ticket by id. The running listener refuses it on its
+    /// next request; the secret is dropped here.
+    TicketRevoke { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -366,6 +374,66 @@ enum ProfilesCommand {
 /// Resolve the advertised base URL: explicit flag → `COGNIA_PUBLIC_URL` →
 /// loopback default for `port`. The old skeleton hardcoded
 /// `https://127.0.0.1:<DEFAULT_PORT>` regardless of the actual port.
+/// Headless half of the push fan-out.
+///
+/// The desktop wakes backgrounded phones through one Tauri listener per
+/// push-worthy channel (`commands::register_default_event_channels`). A
+/// headless server has no Tauri event loop: the same events reach its
+/// `EventBus` — sidecar frames through `HeadlessSidecarHost`, brain frames
+/// through the `companion_event_publish` bridge route — and until this
+/// subscriber existed they stopped there. Push credentials were installed at
+/// boot (`push_creds::reinstall_persisted_dispatchers`) and never used, so a
+/// phone attached to a cloud Host got an "approval needed" alert only while
+/// its socket was open, which is exactly when it did not need one.
+///
+/// Subscribes once at the current high-water mark (no replay: a restart must
+/// not re-push last night's events) and filters on the shared
+/// `PUSH_TRIGGER_CHANNELS` table, so the two hosts cannot drift on which
+/// channels are push-worthy. A lagged receiver skips the missed frames rather
+/// than dying — the bus is bursty under a sync storm and a push is
+/// best-effort by contract.
+fn spawn_headless_push_triggers(shared: app_lib::companion_api::SharedState) {
+    use app_lib::companion_api::commands::{fan_out_push, PUSH_TRIGGER_CHANNELS};
+    use app_lib::companion_api::event_bus::SubscribeResult;
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let SubscribeResult::Ok { mut receiver, .. } = shared.event_bus.subscribe(None, now) else {
+        // `since: None` anchors at the high-water mark and cannot demand a
+        // resync; this arm is unreachable but must not panic if the bus ever
+        // changes its mind.
+        log::warn!("push triggers: event bus refused a live subscription");
+        return;
+    };
+    tokio::spawn(async move {
+        loop {
+            let frame = match receiver.recv().await {
+                Ok(frame) => frame,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    log::warn!("push triggers: lagged behind the event bus by {skipped} frames");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            let Some(channel) = PUSH_TRIGGER_CHANNELS
+                .iter()
+                .copied()
+                .find(|channel| *channel == frame.event_type)
+            else {
+                continue;
+            };
+            let raw = frame.payload.to_string();
+            fan_out_push(
+                Arc::clone(&shared.push_tokens),
+                app_lib::companion_api::push_dispatchers(),
+                channel,
+                &raw,
+            )
+            .await;
+        }
+        log::info!("push triggers: event bus closed");
+    });
+}
+
 fn resolve_advertise_url(flag: Option<String>, port: u16) -> String {
     flag.or_else(|| std::env::var("COGNIA_PUBLIC_URL").ok())
         .filter(|s| !s.trim().is_empty())
@@ -698,7 +766,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         CliCommand::Profiles { command } => run_profiles(&dir, command),
-        CliCommand::Gateway { command } => run_gateway_admin(command),
+        CliCommand::Gateway { command } => run_gateway_admin(&dir, command),
         CliCommand::Devices { command } => run_devices_admin(command).await,
         CliCommand::DesktopHost { .. } => unreachable!("handled before headless initialization"),
         CliCommand::RotateMasterKey { .. }
@@ -1024,8 +1092,14 @@ fn grant_kind_capabilities(kind: GrantKind) -> &'static [&'static str] {
     kind.capabilities()
 }
 
-fn run_gateway_admin(command: GatewayCommand) -> Result<(), Box<dyn std::error::Error>> {
+fn run_gateway_admin(
+    data_dir: &std::path::Path,
+    command: GatewayCommand,
+) -> Result<(), Box<dyn std::error::Error>> {
     let state = app_lib::gateway::GatewayState::new();
+    // Same file `run_serve` hydrates from, so the ticket metadata store this
+    // reads is the one the running listener writes.
+    state.hydrate_from_disk(data_dir.join(".cognia").join("gateway-config.json"));
     match command {
         GatewayCommand::Status => {
             println!("{}", serde_json::to_string_pretty(&state.status())?);
@@ -1048,6 +1122,21 @@ fn run_gateway_admin(command: GatewayCommand) -> Result<(), Box<dyn std::error::
             state.delete_key(&id)?;
             eprintln!("[cognia-server] gateway key {id} revoked");
             Ok(())
+        }
+        GatewayCommand::TicketList => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&state.list_route_tickets())?
+            );
+            Ok(())
+        }
+        GatewayCommand::TicketRevoke { id } => {
+            if state.revoke_route_ticket(&id) {
+                eprintln!("[cognia-server] route ticket {id} revoked");
+                Ok(())
+            } else {
+                Err(format!("no route ticket with id {id}").into())
+            }
         }
     }
 }
@@ -1354,8 +1443,13 @@ async fn run_serve(
         desktop_writes_bridge: DesktopWritesBridge::new(),
         sync_registry: SyncTableRegistry::with_defaults(),
         rate_limiter: RateLimiter::with_defaults(),
-        push_tokens: PushTokenRegistry::new(),
+        // Persisted like the desktop's (`CompanionServerState::new`): a phone
+        // registers its APNs/FCM token once, and an in-memory registry forgot
+        // every token on each restart — so a redeployed cloud Host could not
+        // wake a single device until each one re-registered.
+        push_tokens: PushTokenRegistry::with_persistence(&data_dir),
     });
+    spawn_headless_push_triggers(Arc::clone(&shared));
     let signaling_hub = SignalingHub::new();
     signaling::install_hub(Some(&signaling_hub));
     signaling_hub.bind(Arc::clone(&shared));
@@ -1427,9 +1521,16 @@ async fn run_serve(
         .map_err(|error| format!("activate headless plugin account: {error}"))?;
     install_headless_services(Some(services));
     if let Some(services) = headless_services() {
-        spawn_sidecar(Arc::clone(&services.sidecar_host), services.sidecar.clone())
-            .await
-            .map_err(|error| format!("headless sidecar startup: {error}"))?;
+        // Degraded, not dead: a missing or broken sidecar script must not abort
+        // boot. The data plane, sync, and every non-claude arm keep serving,
+        // `/readyz` reports the sidecar as not ready, and the claude_* arms
+        // fail at spawn time with the path error — which is what the
+        // resolve_sidecar_script_path warning above already promises.
+        if let Err(error) =
+            spawn_sidecar(Arc::clone(&services.sidecar_host), services.sidecar.clone()).await
+        {
+            log::warn!("headless sidecar startup failed; claude_* arms will fail until it recovers: {error}");
+        }
     }
 
     // Audit trail for the RCE-grade external-agent arms (ADR-0059 R11) —
@@ -1550,6 +1651,13 @@ async fn run_serve(
                         "browser listener on http://127.0.0.1:{} (plaintext, loopback only)",
                         handle.bound_port
                     );
+                    // The listener alone is not browser access: `browser_context_submit`
+                    // / `_cancel` are gated on this switch before dispatch, and the
+                    // desktop flips it in `CompanionServerState::start`. Without it a
+                    // headless plane lets the extension enrol and read but refuses every
+                    // submission with `browser_submissions_disabled` — a port that looks
+                    // live and is not.
+                    app_lib::companion_api::browser_access::set_submissions_enabled(true);
                     Some(handle)
                 }
                 Err(error) => {
@@ -1602,14 +1710,23 @@ async fn run_serve(
             );
         }
     }
-    log::info!("press Ctrl-C to stop.");
+    log::info!("press Ctrl-C (or send SIGTERM) to stop.");
 
-    // Block until Ctrl-C, then trigger graceful shutdown: brain + sidecar
-    // first (children), then the HTTP listener.
-    tokio::signal::ctrl_c()
-        .await
-        .map_err(|e| format!("ctrl-c handler: {e}"))?;
+    // Block until SIGINT / SIGTERM (Ctrl-C on Windows), then trigger graceful
+    // shutdown: brain + sidecar first (children), then the HTTP listener.
+    // `SIGTERM` matters more than Ctrl-C here — it is what systemd, Docker and
+    // `kill <pid>` send, and with no handler the kernel default hard-kills the
+    // process mid-drain, orphaning the brain and sidecar children.
+    app_lib::shutdown::wait_for_signal().await;
     log::info!("shutting down…");
+    // Escape hatch: the drain below is bounded but a wedged child can still
+    // hold it for a long time. A second signal force-exits instead of leaving
+    // the operator with a process that ignores every further Ctrl-C.
+    tokio::spawn(async {
+        app_lib::shutdown::wait_for_signal().await;
+        log::warn!("second shutdown signal — forcing exit");
+        std::process::exit(app_lib::shutdown::SIGNAL_EXIT_CODE);
+    });
     app_lib::companion_api::server::begin_draining();
     if let Some(supervisor) = brain_supervisor {
         supervisor.shutdown();
@@ -1635,6 +1752,7 @@ async fn run_serve(
         }
     }
     if let Some(browser_handle) = browser_handle {
+        app_lib::companion_api::browser_access::set_submissions_enabled(false);
         let mut browser_terminated = browser_handle.terminated.clone();
         let _ = browser_handle.shutdown.send(());
         let browser_drained =

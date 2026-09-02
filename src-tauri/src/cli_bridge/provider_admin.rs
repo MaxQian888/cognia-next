@@ -34,13 +34,19 @@ pub const PROVIDER_ADMIN_DISPLAY_NAME: &str = "Cognia CLI provider admin";
 /// Commands the bridge exposes. Every entry must be a `read` operation of
 /// `low` risk needing `none` approval (pinned by
 /// `provider_admin_allowlist_is_read_only_and_low_risk`), which is what stops
-/// this list from quietly becoming a privilege escalation path. Batch 8 adds
-/// the `gateway_*` read operations.
+/// this list from quietly becoming a privilege escalation path. The
+/// `gateway_*` entries are the read half of the gateway management plane
+/// (ADR-0163): minting, revoking and probing stay off this leg because they
+/// are side effects, and the mint has its own dedicated bridge route.
 pub const PROVIDER_ADMIN_COMMANDS: &[&str] = &[
     "provider_catalog_status",
     "provider_catalog_search",
     "provider_diagnostics_status",
     "provider_diagnostics_history",
+    "gateway_status",
+    "gateway_list_models",
+    "gateway_provider_capabilities",
+    "gateway_list_route_tickets",
 ];
 
 #[derive(Debug, PartialEq, Eq)]

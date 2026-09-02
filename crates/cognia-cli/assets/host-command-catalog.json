@@ -34,7 +34,7 @@
     {
       "id": "extensions",
       "title": "Extensions and providers",
-      "description": "Plugins, skills, MCP servers, provider catalogs, and diagnostics.",
+      "description": "Plugins, skills, MCP servers, provider catalogs, the gateway plane, and diagnostics.",
       "skill": "cognia-host-extensions"
     },
     {
@@ -161,6 +161,11 @@
       "id": "fleet",
       "title": "Fleet",
       "category": "agents"
+    },
+    {
+      "id": "gateway",
+      "title": "Gateway",
+      "category": "extensions"
     },
     {
       "id": "git",
@@ -12769,6 +12774,85 @@
       "outputTyped": true
     },
     {
+      "name": "external_agent_detect_runtimes",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "process.spawn",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "external_agent_detect_runtimes (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-external-agent/src/version_probe.rs DetectedRuntimesReport",
+        "description": "Which catalogued agent runtimes this Host already has. `resolution` is the only verdict here: `installed` means the command resolved and its catalogued `--version` was read, `missing` means it is on no PATH or install root, `package-runner` means it launches through npx and its presence cannot be established without a network install, `not-local` means the runtime has no local command at all. `versionOutput` is raw probe output; the version verdict is rendered by assessRuntimeVersion() in lib/ai/agent/external/runtime-version.ts.",
+        "required": [
+          "runtimes"
+        ],
+        "properties": {
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "runtimeId",
+                "resolution"
+              ],
+              "properties": {
+                "runtimeId": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "installed",
+                    "missing",
+                    "package-runner",
+                    "not-local"
+                  ]
+                },
+                "executablePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "versionOutput": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "external_agent_list",
       "category": "agents",
       "resource": "external-agents",
@@ -15001,6 +15085,316 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_list_models",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "gateway_list_models (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "snapshot",
+          "models"
+        ],
+        "properties": {
+          "snapshot": {
+            "type": "boolean"
+          },
+          "generatedAtMs": {
+            "type": "integer"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+            }
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "gateway"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_list_route_tickets",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "gateway_list_route_tickets (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "tickets"
+        ],
+        "properties": {
+          "tickets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+            }
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "gateway"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_mint_route_ticket",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "gateway_mint_route_ticket (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {}
+        },
+        "required": [
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "secret"
+        ],
+        "properties": {
+          "ticket": {
+            "type": "object",
+            "additionalProperties": true,
+            "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+          },
+          "secret": {
+            "type": "string"
+          },
+          "gatewayPort": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "gateway"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_probe_upstream",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "gateway_probe_upstream (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "model": {}
+        },
+        "required": [
+          "model"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+        },
+        "x-cognia-schema-owner": "gateway"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_provider_capabilities",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "gateway_provider_capabilities (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "snapshot",
+          "providers"
+        ],
+        "properties": {
+          "snapshot": {
+            "type": "boolean"
+          },
+          "generatedAtMs": {
+            "type": "integer"
+          },
+          "profileVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
+            }
+          }
+        },
+        "additionalProperties": false,
+        "x-cognia-schema-owner": "gateway"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_revoke_route_ticket",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "side-effect",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "gateway_revoke_route_ticket (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ticketId": {}
+        },
+        "required": [
+          "ticketId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ticketId",
+          "revoked"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string"
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "gateway_status",
+      "category": "extensions",
+      "resource": "gateway",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "gateway_status (service.internal)",
+      "description": "Loopback service-token command. Target: service; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "running",
+          "host"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "routeTickets": {
+            "type": "integer"
+          },
+          "activeRouteTickets": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes the gateway's own status or snapshot projection whose stable root is an object; property-level compatibility remains owned by the gateway crate.",
+        "x-cognia-schema-owner": "gateway"
       },
       "outputTyped": true
     },
@@ -35169,7 +35563,7 @@
       "idempotency": "required",
       "summary": "sftp_create_dir (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35216,7 +35610,7 @@
       "idempotency": "required",
       "summary": "sftp_delete_entry (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35266,7 +35660,7 @@
       "idempotency": "required",
       "summary": "sftp_download_close (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35308,7 +35702,7 @@
       "idempotency": "required",
       "summary": "sftp_download_open (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35366,7 +35760,7 @@
       "idempotency": "structural",
       "summary": "sftp_download_read_chunk (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35420,7 +35814,7 @@
       "idempotency": "structural",
       "summary": "sftp_list_dir (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35512,7 +35906,7 @@
       "idempotency": "structural",
       "summary": "sftp_realpath (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35559,7 +35953,7 @@
       "idempotency": "required",
       "summary": "sftp_rename_entry (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35611,7 +36005,7 @@
       "idempotency": "required",
       "summary": "sftp_session_close (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35654,7 +36048,7 @@
       "idempotency": "structural",
       "summary": "sftp_stat (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: low.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35743,7 +36137,7 @@
       "idempotency": "required",
       "summary": "sftp_upload_abort (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35785,7 +36179,7 @@
       "idempotency": "required",
       "summary": "sftp_upload_commit (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35841,7 +36235,7 @@
       "idempotency": "required",
       "summary": "sftp_upload_open (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -35906,7 +36300,7 @@
       "idempotency": "required",
       "summary": "sftp_upload_write_chunk (ssh.files)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
-      "inputSchemaSource": "runtime-inferred",
+      "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
@@ -36773,6 +37167,7 @@
               "agentTeamBoard",
               "agentTasks",
               "agentTaskAttempts",
+              "chatTemplates",
               "templateDefinitions",
               "templatePackages",
               "templateInstances",
@@ -36788,7 +37183,14 @@
               "projects",
               "issues",
               "issueProjects",
-              "labels"
+              "labels",
+              "issueEvents",
+              "issueRuns",
+              "connectorHeartbeats",
+              "platformIdentities",
+              "connectorCallbackBindings",
+              "workflowDeployments",
+              "executionRunBindings"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -46377,5 +46779,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "ab11dfc21c318bebb471737e53271d04cdeed61e113831bdf1595862aa2476c3"
+  "catalogHash": "159c14b2b2f04dbcc9149d08e58d822297258daeeac3834fb1633bdb4abe944b"
 }

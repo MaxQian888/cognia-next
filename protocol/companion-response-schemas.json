@@ -1180,6 +1180,44 @@
       },
       "additionalProperties": false
     },
+    "DetectedRuntimesReport": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-external-agent/src/version_probe.rs DetectedRuntimesReport",
+      "description": "Which catalogued agent runtimes this Host already has. `resolution` is the only verdict here: `installed` means the command resolved and its catalogued `--version` was read, `missing` means it is on no PATH or install root, `package-runner` means it launches through npx and its presence cannot be established without a network install, `not-local` means the runtime has no local command at all. `versionOutput` is raw probe output; the version verdict is rendered by assessRuntimeVersion() in lib/ai/agent/external/runtime-version.ts.",
+      "required": ["runtimes"],
+      "properties": {
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "resolution"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "command": {
+                "type": ["string", "null"]
+              },
+              "resolution": {
+                "type": "string",
+                "enum": ["installed", "missing", "package-runner", "not-local"]
+              },
+              "executablePath": {
+                "type": ["string", "null"]
+              },
+              "versionOutput": {
+                "type": ["string", "null"]
+              },
+              "detail": {
+                "type": ["string", "null"]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "ExternalAgentConfigReconcileOutcome": {
       "type": "object",
       "required": ["configId", "from", "to", "changed"],
@@ -1528,6 +1566,119 @@
           }
         },
         "additionalProperties": false
+      }
+    },
+    "GatewayMintedRouteTicket": {
+      "type": "object",
+      "required": ["ticket", "secret"],
+      "properties": {
+        "ticket": {
+          "$ref": "#/$defs/LegacyRecord"
+        },
+        "secret": {
+          "type": "string"
+        },
+        "gatewayPort": {
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GatewayModelCatalog": {
+      "type": "object",
+      "required": ["snapshot", "models"],
+      "properties": {
+        "snapshot": {
+          "type": "boolean"
+        },
+        "generatedAtMs": {
+          "type": "integer"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyRecord"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GatewayProviderCapabilities": {
+      "type": "object",
+      "required": ["snapshot", "providers"],
+      "properties": {
+        "snapshot": {
+          "type": "boolean"
+        },
+        "generatedAtMs": {
+          "type": "integer"
+        },
+        "profileVersion": {
+          "type": ["integer", "null"]
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyRecord"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GatewayRouteTicketList": {
+      "type": "object",
+      "required": ["tickets"],
+      "properties": {
+        "tickets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LegacyRecord"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GatewayStatusReport": {
+      "type": "object",
+      "required": ["running", "host"],
+      "properties": {
+        "running": {
+          "type": "boolean"
+        },
+        "host": {
+          "type": "string"
+        },
+        "routeTickets": {
+          "type": "integer"
+        },
+        "activeRouteTickets": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true,
+      "x-cognia-opaque-reason": "The command serializes the gateway's own status or snapshot projection whose stable root is an object; property-level compatibility remains owned by the gateway crate.",
+      "x-cognia-schema-owner": "gateway"
+    },
+    "GatewayTicketRevocation": {
+      "type": "object",
+      "required": ["ticketId", "revoked"],
+      "properties": {
+        "ticketId": {
+          "type": "string"
+        },
+        "revoked": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GatewayUpstreamProbeRows": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/LegacyRecord"
       }
     },
     "GitBlameLine": {
@@ -6602,6 +6753,9 @@
       },
       "additionalProperties": false
     },
+    "external_agent_detect_runtimes": {
+      "$ref": "#/$defs/DetectedRuntimesReport"
+    },
     "external_agent_list": {
       "$ref": "#/$defs/ExternalAgentSummaryList"
     },
@@ -7558,6 +7712,13 @@
     "provider_catalog_search": {
       "$ref": "#/$defs/ProviderSearch"
     },
+    "gateway_list_models": { "$ref": "#/$defs/GatewayModelCatalog" },
+    "gateway_list_route_tickets": { "$ref": "#/$defs/GatewayRouteTicketList" },
+    "gateway_mint_route_ticket": { "$ref": "#/$defs/GatewayMintedRouteTicket" },
+    "gateway_probe_upstream": { "$ref": "#/$defs/GatewayUpstreamProbeRows" },
+    "gateway_provider_capabilities": { "$ref": "#/$defs/GatewayProviderCapabilities" },
+    "gateway_revoke_route_ticket": { "$ref": "#/$defs/GatewayTicketRevocation" },
+    "gateway_status": { "$ref": "#/$defs/GatewayStatusReport" },
     "provider_catalog_status": {
       "$ref": "#/$defs/LegacyRecord"
     },

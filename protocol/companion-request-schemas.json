@@ -452,8 +452,7 @@
       "required": [
         "session_id",
         "request_id",
-        "decision",
-        "remote_execution_context"
+        "decision"
       ],
       "properties": {
         "session_id": {
@@ -1091,8 +1090,7 @@
       "required": [
         "session_id",
         "request_id",
-        "decision",
-        "remote_execution_context"
+        "decision"
       ],
       "properties": {
         "session_id": {
@@ -3594,6 +3592,9 @@
       },
       "additionalProperties": false
     },
+    "external_agent_detect_runtimes": {
+      "type": "object"
+    },
     "external_agent_list": {
       "type": "object"
     },
@@ -4285,6 +4286,56 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    },
+    "gateway_list_models": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "gateway_list_route_tickets": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "gateway_mint_route_ticket": {
+      "type": "object",
+      "properties": {
+        "request": {}
+      },
+      "required": [
+        "request"
+      ],
+      "additionalProperties": false
+    },
+    "gateway_probe_upstream": {
+      "type": "object",
+      "properties": {
+        "model": {}
+      },
+      "required": [
+        "model"
+      ],
+      "additionalProperties": false
+    },
+    "gateway_provider_capabilities": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "gateway_revoke_route_ticket": {
+      "type": "object",
+      "properties": {
+        "ticketId": {}
+      },
+      "required": [
+        "ticketId"
+      ],
+      "additionalProperties": false
+    },
+    "gateway_status": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     },
     "get_external_agent_status": {
@@ -10139,7 +10190,12 @@
             "issueProjects",
             "labels",
             "issueEvents",
-            "issueRuns"
+            "issueRuns",
+            "connectorHeartbeats",
+            "platformIdentities",
+            "connectorCallbackBindings",
+            "workflowDeployments",
+            "executionRunBindings"
           ],
           "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
         },
