@@ -1,0 +1,70 @@
+{
+  "empty": "No events yet.",
+  "eventKind": {
+    "approval_requested": "Approval requested",
+    "budget_exceeded": "Budget exceeded",
+    "deadlock_resolved": "Deadlock resolved",
+    "delegation_completed": "Delegation completed",
+    "delegation_failed": "Delegation failed",
+    "delegation_started": "Delegation started",
+    "message_sent": "Message sent",
+    "pattern_selected": "Pattern selected",
+    "plan_approved": "Plan approved",
+    "plan_rejected": "Plan rejected",
+    "plan_submitted": "Plan submitted",
+    "progress_update": "Progress update",
+    "routing_assessed": "Routing assessed",
+    "task_claimed": "Task claimed",
+    "task_completed": "Task completed",
+    "task_created": "Task created",
+    "task_failed": "Task failed",
+    "task_retried": "Task retried",
+    "task_started": "Task started",
+    "team_cancelled": "Team cancelled",
+    "team_completed": "Team completed",
+    "team_created": "Team created",
+    "team_failed": "Team failed",
+    "team_started": "Team started",
+    "teammate_added": "Teammate added",
+    "teammate_completed": "Teammate completed",
+    "teammate_failed": "Teammate failed",
+    "teammate_shutdown": "Teammate shut down",
+    "teammate_started": "Teammate started"
+  },
+  "eventsTitle": "Events",
+  "liveProgress": "Working — {tools} tools · {chars} chars · {secs}s",
+  "liveProgressStarting": "Starting…",
+  "progressPhase": {
+    "done": "done",
+    "failed": "failed",
+    "running": "working",
+    "start": "starting"
+  },
+  "report": {
+    "checkpoints": {
+      "toggle": "Checkpoint timeline"
+    },
+    "emptyCheckpoints": "No checkpoints recorded for this run yet.",
+    "kpi": {
+      "duration": "Duration",
+      "escalations": "Escalations",
+      "successRate": "Success rate",
+      "tokens": "Total tokens"
+    },
+    "pluginSlot": {
+      "placeholder": "Plugins can render custom analytics here. Install one from the Plugin Marketplace."
+    },
+    "status": "Status: {status}",
+    "taskline": {
+      "empty": "No delegation segments recorded.",
+      "title": "Task timeline",
+      "tooltip": "{title} · {start} → {end}"
+    },
+    "title": "Execution report",
+    "tokenBurn": {
+      "empty": "No token usage recorded yet.",
+      "title": "Token burn"
+    }
+  },
+  "runsTitle": "Runs"
+}

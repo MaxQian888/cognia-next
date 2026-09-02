@@ -1,0 +1,317 @@
+{
+  "accordion": {
+    "execution": "执行",
+    "governance": "治理",
+    "memory": "共享内存",
+    "overview": "概览",
+    "plugins": "插件与能力",
+    "prFeedback": "PR 反馈",
+    "stackedDelivery": "分栈投递",
+    "ultracode": "Ultracode",
+    "worktrees": "工作树隔离"
+  },
+  "autoShutdown": "完成后自动关闭",
+  "awaitingExternalPickup": "等待外部认领",
+  "cancel": "取消",
+  "confirm": {
+    "cancelLabel": "取消",
+    "clearMemory": {
+      "description": "此操作会永久删除该团队的所有共享内存条目。",
+      "title": "清空共享内存？"
+    },
+    "confirmLabel": "确认",
+    "forceResolve": {
+      "description": "将以 lead 的强制裁定解决该投票，忽略未投出的票。",
+      "title": "强制解决共识？"
+    },
+    "onCritical": {
+      "description": "选择\"暂停以待审核\"或\"切换到后台\"会改变运行时在严重预算阈值处的阻断方式。",
+      "title": "更改严重阈值动作？"
+    },
+    "removeTeammate": {
+      "description": "此操作会将该队友移出团队，其认领的任务将被释放。",
+      "title": "移除队友？"
+    },
+    "typeToConfirm": "输入 \"{value}\" 以确认"
+  },
+  "dangerZone": "危险区域",
+  "deleteAction": "永久删除",
+  "deleteWarning": "将永久删除该团队及其所有成员、任务和消息。",
+  "description": "描述",
+  "dispatchDecisionLabel": "调度决策",
+  "enableMessaging": "智能体间消息",
+  "execution": {
+    "description": "团队级执行默认值（ADR-0090）：继承模式成员解析到的绑定，以及团队间委派深度上限。",
+    "maxDelegationDepth": "团队委派最大深度",
+    "maxDelegationDepthHint": "仅计团队间委派（默认 2）。达到上限的团队再委派会被拒绝。与原生 subagent 嵌套深度相互独立。",
+    "title": "执行"
+  },
+  "executionMode": "执行模式",
+  "executionModeOption": {
+    "autonomous": "自主",
+    "coordinated": "协同",
+    "delegate": "委派"
+  },
+  "executionPattern": "执行策略",
+  "executionPatternOption": {
+    "backgroundHandoff": "后台转交",
+    "externalHandoff": "外部转交",
+    "managerWorker": "经理/工人",
+    "parallelSpecialists": "并行专家",
+    "singleAgent": "单一智能体（推荐）"
+  },
+  "externalClaimedBy": "已由 {claimer} 认领",
+  "governance": {
+    "adaptiveReplan": {
+      "description": "在每一波运行之间，组长会复盘结果，并可对剩余任务进行新增、取消、重排或提前结束。",
+      "enabled": "启用自适应重规划",
+      "heading": "自适应重规划",
+      "requireApproval": "应用重规划前需要审批"
+    },
+    "approval": {
+      "heading": "审批",
+      "requireDelegationApproval": "向外部智能体委派前需要审批",
+      "requirePlanApproval": "运行前需要计划审批",
+      "requireResultReview": "结果需人工验收",
+      "requireResultReviewHint": "自动运行成功的任务将进入「评审」列等待人工验收；运行本身不受阻塞。",
+      "taskReview": "由 Lead 评审每个任务",
+      "taskReviewHint": "在依赖任务开始之前，Lead 会评审每个任务的产出及其实际改动的 diff。被驳回的工作会退回给同一位成员修订。无法通过评审的任务会让整个运行失败。",
+      "taskReviewMaxRevisions": "修订次数"
+    },
+    "budget": {
+      "criticalThreshold": "严重阈值（0–1）",
+      "heading": "Token 预算",
+      "onCritical": "触发严重时",
+      "tokenBudget": "Token 预算（0 = 无限）",
+      "warningThreshold": "警告阈值（0–1）"
+    },
+    "description": "审批门、预算阈值、升级行为以及拒答检测。",
+    "escalation": {
+      "allowOperatorPatternOverride": "允许操作员覆盖执行模式",
+      "heading": "升级",
+      "pauseOnHighRisk": "路由评估标记高风险时自动暂停"
+    },
+    "escalationOption": {
+      "handoff_to_background": "切换到后台",
+      "notify": "仅通知",
+      "pause_for_review": "暂停以待审核",
+      "reduce_concurrency": "并发降到 1"
+    },
+    "nudges": {
+      "busySignalHint": "若成员在该窗口内有工具活动则跳过 —— 说明它在干活，不是卡住了。",
+      "busySignalWindowMs": "忙信号窗口（毫秒）",
+      "description": "当某个成员回合因模型限流失败时，运行时会等冷却结束再发一次「继续」提示，而不是直接中止整波任务。",
+      "enabled": "启用限流提示",
+      "heading": "限流提示（nudges）",
+      "maxPerMemberPerHour": "每人每小时提示上限"
+    },
+    "progressLedger": {
+      "allowAutonomousConsensus": "停滞时允许自主发起共识",
+      "allowAutonomousDelegation": "停滞时允许自主委派任务",
+      "description": "当某一波停滞（无新完成任务或新产出）时，由判断器诊断运行状态，并可重新规划、发起共识或委派以打破停滞。",
+      "enabled": "启用进度账本",
+      "heading": "自主进度账本"
+    },
+    "refusal": {
+      "detect": "在队员输出中检测拒答模式",
+      "heading": "拒答检测",
+      "patterns": "拒答模式（每行一条）",
+      "patternsPlaceholder": "我无法协助\n我没办法"
+    },
+    "title": "治理策略"
+  },
+  "knowledgeTwins": {
+    "empty": "还没有数字员工，请在孪生工作台创建。",
+    "hint": "在此选中的孪生可被任意成员在运行中通过知识工具检索。",
+    "title": "数字员工知识"
+  },
+  "maxConcurrent": "最大并发数",
+  "maxRetries": "最大重试次数",
+  "memory": {
+    "acl": {
+      "aclHint": "\"可读成员\"留空表示所有队友都可读取该条目。",
+      "operatorBadge": "操作员视图 — 全部条目"
+    },
+    "adapter": {
+      "configure": "配置",
+      "label": "后端存储",
+      "noAdapter": "仅本地",
+      "pickerTitle": "共享内存后端存储",
+      "sync": "立即同步",
+      "syncFailed": "同步失败",
+      "synced": "已同步 {count} 条",
+      "unset": "（无）"
+    },
+    "addEntry": "新增条目",
+    "clearAll": "清空",
+    "composer": {
+      "cancel": "取消",
+      "expiresAt": "过期时间（可选）",
+      "invalidJson": "值不是有效的 JSON。",
+      "key": "键",
+      "parseJson": "按 JSON 解析值",
+      "piiBlocked": "写入被拦截：值中包含 PII。",
+      "readableBy": "可读成员",
+      "readableByAll": "全部队友（留空）",
+      "removeTag": "移除 {tag}",
+      "submit": "保存条目",
+      "tags": "标签",
+      "tagsPlaceholder": "输入标签后按回车",
+      "titleCreate": "新建内存条目",
+      "titleEdit": "编辑内存条目",
+      "value": "值"
+    },
+    "deleteEntry": "删除 \"{key}\"",
+    "description": "由队员在运行期间写入的键值条目。写入受 PII 网关保护。",
+    "detail": {
+      "copied": "已复制",
+      "copy": "复制值",
+      "delete": "删除",
+      "edit": "编辑",
+      "title": "内存条目"
+    },
+    "empty": "暂无共享内存条目。",
+    "filter": {
+      "dateRange": "时间范围",
+      "empty": "没有条目匹配当前筛选。",
+      "reset": "重置筛选",
+      "tags": "标签",
+      "text": "搜索键或值",
+      "writer": "写入者"
+    },
+    "title": "共享内存",
+    "writtenBy": "由 {name} 写入 · {when}"
+  },
+  "name": "团队名称",
+  "plugins": {
+    "intro": "这些插件能力将被团队所有队友继承。在队员配置中可以单独覆盖。"
+  },
+  "prFeedback": {
+    "caveat": "在团队运行期间及结束后的短暂窗口内生效；需要 GitHub 远程与可解析的凭据（例如 gh auth）。",
+    "description": "观测每个成员的拉取请求（CI、评审意见、合并冲突），并将反馈作为受控 nudge 回灌给团队。默认关闭；仅桌面应用 + 已配置凭据的 GitHub 仓库可用。",
+    "enabled": "启用 PR 反馈",
+    "observeWindow": {
+      "hint": "任务列表完成后，对每个 PR 继续轮询多久。单次仅捕获当前状态；设置窗口则持续监控 CI/评审（会延长运行）。",
+      "label": "运行结束后继续观测",
+      "option": {
+        "fiveMin": "5 分钟",
+        "onePass": "单次（不等待）",
+        "tenMin": "10 分钟",
+        "twoMin": "2 分钟"
+      }
+    },
+    "publishPr": {
+      "hint": "自动 push 每个成员的分支并开拉取请求。关闭时仅观测成员自己开的 PR。",
+      "label": "为每个成员自动开 PR"
+    },
+    "reviewer": {
+      "hint": "对每个 PR 的 diff 自动跑一次评审，并在请求修改时把结论回灌给成员。",
+      "label": "内置 reviewer 智能体"
+    },
+    "title": "PR 反馈闭环"
+  },
+  "requirePlanApproval": "需要计划审批",
+  "riskGating": "按风险要求计划审批",
+  "save": "保存",
+  "saveIndicator": {
+    "auditCompleted": "审核完成 · {count} 个失效 id",
+    "auditNow": "立即审核",
+    "auditUnavailable": "审核器未就绪",
+    "savedJustNow": "已保存",
+    "savedSecondsAgo": "已保存 · {seconds} 秒前",
+    "unsaved": "未变更"
+  },
+  "saved": "设置已保存。",
+  "saving": "保存中…",
+  "sectionControls": "控制项",
+  "sectionExecution": "执行",
+  "stackedDelivery": {
+    "caveat": "仅桌面端，且仅适用于能解析出默认分支的 GitHub 远端。无法分栈的运行会按现有方式发布。",
+    "description": "当一次运行在同一个仓库里产出多个分支时，把它们发成一条 PR 链而不是一堆平铺的 PR——每一层基于下面一层，于是每个 PR 的评审只看到它自己的改动。",
+    "enabled": {
+      "hint": "默认关闭。打开后会改变运行结束时提交到 GitHub 的方式。",
+      "label": "把这个团队的 PR 分栈"
+    },
+    "layerCount": "{count, plural, other {# 层}}",
+    "maxLayers": {
+      "label": "最多层数"
+    },
+    "mergeMode": {
+      "approvedBottomUp": "批准后自底向上依次合并",
+      "label": "合并顺序"
+    },
+    "minLayers": {
+      "hint": "分支数少于下限的运行按平铺方式发布。超出上限的分支不会进入栈，但也不会被丢弃。",
+      "label": "最少层数"
+    },
+    "title": "分栈投递"
+  },
+  "streamProgress": "实时显示队友进度",
+  "title": "团队设置",
+  "tokenBudget": "Token 预算（0 = 无限）",
+  "typeToConfirm": "输入 \"{name}\" 确认",
+  "ultracode": {
+    "autoMode": {
+      "hint": {
+        "always": "该团队每次运行都编排。",
+        "auto": "仅当路由评估判定任务复杂时才编排。",
+        "never": "不自动编排；改用「以 Ultracode 运行」手动触发。"
+      },
+      "label": "自动触发",
+      "option": {
+        "always": "始终",
+        "auto": "自动（复杂任务）",
+        "never": "从不"
+      }
+    },
+    "description": "用多智能体质量模式（多模态扫描、loop-until-dry、对抗式校验、评审团、完整性批判、综合）替代扁平任务清单运行。带工具的队友走桌面 sidecar；Web/移动端降级为纯文本推理。",
+    "dryRoundsToStop": "连续空轮停止数",
+    "enabled": "启用 Ultracode 编排",
+    "judgesPerAttempt": "每个方案的评委数",
+    "maxFinderRounds": "最大查找轮数",
+    "skepticsPerFinding": "每个发现的质疑者数",
+    "title": "Ultracode 编排",
+    "workingDir": {
+      "hint": "带工具的队友读取并执行命令的仓库路径（仅桌面）。",
+      "label": "工作目录",
+      "placeholder": "/仓库的绝对路径"
+    }
+  },
+  "worktrees": {
+    "caveat": "工作树从工作目录当前提交（HEAD）切出，因此其中未提交的改动对 agent 不可见。",
+    "description": "为每个成员派发分配独立的 git worktree + 分支，让并行 agent 不再互相覆盖对方的改动或 git 状态。默认关闭；仅桌面应用 + git 仓库可用。",
+    "enabled": "启用每 agent 工作树",
+    "reconcile": {
+      "hint": {
+        "manual": "保留所有分支，交由你审阅合并。",
+        "merge-all": "把所有成功分支合并到一条集成分支；冲突则停止并报告（绝不改动你的真实分支）。",
+        "pipeline": "顺序派发共用一条分支。",
+        "select": "保留一条分支，丢弃其余。"
+      },
+      "label": "运行结束后",
+      "option": {
+        "manual": "手动审阅",
+        "merge-all": "全部合并",
+        "pipeline": "流水线",
+        "select": "择一保留"
+      }
+    },
+    "retain": {
+      "label": "收尾保留",
+      "option": {
+        "all": "全部保留",
+        "keep-winner": "保留优胜，删除其余",
+        "prune-losers": "清理落选"
+      }
+    },
+    "selectStrategy": {
+      "label": "如何择优",
+      "option": {
+        "first-success": "第一个成功",
+        "judge": "AI 评审",
+        "manual": "我来选"
+      }
+    },
+    "title": "工作树隔离"
+  }
+}

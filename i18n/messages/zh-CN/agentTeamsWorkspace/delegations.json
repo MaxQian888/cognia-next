@@ -1,0 +1,17 @@
+{
+  "approve": "批准",
+  "cancel": "取消",
+  "description": "委派给后台 Agent、外部 Agent 或其他团队的工作。",
+  "empty": "该团队暂无委派。",
+  "status": {
+    "active": "进行中",
+    "awaiting_approval": "等待批准",
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "failed": "失败",
+    "pending": "待处理",
+    "timeout": "超时"
+  },
+  "target": "目标：{type}（{id}）",
+  "title": "委派"
+}

@@ -1,0 +1,8 @@
+{
+  "cancelAriaLabel": "Cancel",
+  "editAriaLabel": "Edit",
+  "editDescription": "Edit description",
+  "editName": "Edit name",
+  "emptyHint": "Add a description…",
+  "saveAriaLabel": "Save"
+}

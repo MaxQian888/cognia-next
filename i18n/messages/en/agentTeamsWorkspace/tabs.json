@@ -1,0 +1,11 @@
+{
+  "activity": "Activity",
+  "chat": "Chat",
+  "editor": "Editor",
+  "members": "Members",
+  "operations": "Operations",
+  "overview": "Overview",
+  "settings": "Settings",
+  "tasks": "Tasks",
+  "worktrees": "Worktrees"
+}

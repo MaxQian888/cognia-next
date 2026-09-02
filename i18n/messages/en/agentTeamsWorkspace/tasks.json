@@ -1,0 +1,63 @@
+{
+  "addTask": "Add task",
+  "assignee": "Assignee",
+  "board": {
+    "cardMenu": "Task actions",
+    "clearFilters": "Clear",
+    "denied": {
+      "blocked-column": "Blocked is managed automatically — cards enter and leave it with their dependencies.",
+      "illegal-transition": "That move isn't allowed from this column.",
+      "runtime-owned": "The team is running this task — pause the run to move it.",
+      "task-not-found": "Task no longer exists."
+    },
+    "empty": {
+      "description": "Add the first task and the board fills in as the team picks work up.",
+      "title": "No tasks on this board yet"
+    },
+    "emptyColumn": "No tasks",
+    "filterAssignee": "Assignee",
+    "filterPriority": "Priority",
+    "filterTags": "Tags",
+    "filters": "Filters",
+    "knowledgeTwins": "Knowledge twins",
+    "lockedBy": "Blocked by: {titles}",
+    "pause": "Pause",
+    "resume": "Resume",
+    "run": "Run",
+    "swimlanes": "Swimlanes",
+    "twinBound": "Digital employee: {name}",
+    "unassignedLane": "Unassigned",
+    "viewBoard": "Board view",
+    "viewList": "List view",
+    "viewToggle": "Tasks view",
+    "wip": "WIP {active}/{capacity}",
+    "wipOver": "More tasks are active than the team can run at once ({capacity})."
+  },
+  "cancel": "Cancel",
+  "comments": {
+    "add": "Add comment",
+    "added": "Comment added",
+    "count": "{count, plural, =0 {No comments} =1 {# comment} other {# comments}}",
+    "empty": "No comments yet. Findings, decisions, and results posted here are visible on the board.",
+    "placeholder": "Add a finding, decision, or result… (⌘/Ctrl+Enter to send)",
+    "refCopied": "Reference copied to clipboard"
+  },
+  "createTask": "Create task",
+  "delete": "Delete",
+  "deleteBody": "This task will be permanently removed. This cannot be undone.",
+  "deleteTitle": "Delete task?",
+  "dependencies": "Dependencies",
+  "description": "Description",
+  "empty": "No tasks yet.",
+  "expectedOutput": "Expected output",
+  "priority": "Priority",
+  "save": "Save",
+  "tags": "Tags",
+  "taskCreated": "Task created.",
+  "taskDeleted": "Task deleted.",
+  "taskDescriptionPlaceholder": "What needs to be done?",
+  "taskTitlePlaceholder": "Task title",
+  "tasksCount": "{count, plural, one {# task} other {# tasks}}",
+  "title": "Title",
+  "unassigned": "Unassigned"
+}

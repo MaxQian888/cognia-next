@@ -1,0 +1,70 @@
+{
+  "empty": "暂无事件。",
+  "eventKind": {
+    "approval_requested": "已请求审批",
+    "budget_exceeded": "预算超限",
+    "deadlock_resolved": "死锁已解决",
+    "delegation_completed": "委派已完成",
+    "delegation_failed": "委派失败",
+    "delegation_started": "委派已开始",
+    "message_sent": "消息已发送",
+    "pattern_selected": "已选择协作模式",
+    "plan_approved": "计划已批准",
+    "plan_rejected": "计划被拒绝",
+    "plan_submitted": "计划已提交",
+    "progress_update": "进度更新",
+    "routing_assessed": "路由已评估",
+    "task_claimed": "任务已认领",
+    "task_completed": "任务已完成",
+    "task_created": "任务已创建",
+    "task_failed": "任务失败",
+    "task_retried": "任务已重试",
+    "task_started": "任务已开始",
+    "team_cancelled": "团队已取消",
+    "team_completed": "团队已完成",
+    "team_created": "团队已创建",
+    "team_failed": "团队失败",
+    "team_started": "团队已启动",
+    "teammate_added": "已添加队友",
+    "teammate_completed": "队友已完成",
+    "teammate_failed": "队友失败",
+    "teammate_shutdown": "队友已关闭",
+    "teammate_started": "队友已启动"
+  },
+  "eventsTitle": "事件",
+  "liveProgress": "工作中 — {tools} 个工具 · {chars} 字符 · {secs} 秒",
+  "liveProgressStarting": "启动中…",
+  "progressPhase": {
+    "done": "完成",
+    "failed": "失败",
+    "running": "工作中",
+    "start": "启动中"
+  },
+  "report": {
+    "checkpoints": {
+      "toggle": "检查点时间线"
+    },
+    "emptyCheckpoints": "本次运行尚未记录任何检查点。",
+    "kpi": {
+      "duration": "时长",
+      "escalations": "升级次数",
+      "successRate": "成功率",
+      "tokens": "总 Token"
+    },
+    "pluginSlot": {
+      "placeholder": "插件可在此渲染自定义分析。可从插件市场安装。"
+    },
+    "status": "状态：{status}",
+    "taskline": {
+      "empty": "未记录委派分段。",
+      "title": "任务时间线",
+      "tooltip": "{title} · {start} → {end}"
+    },
+    "title": "执行报告",
+    "tokenBurn": {
+      "empty": "尚未记录 Token 使用。",
+      "title": "Token 消耗"
+    }
+  },
+  "runsTitle": "运行记录"
+}

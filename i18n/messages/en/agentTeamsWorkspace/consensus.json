@@ -1,0 +1,18 @@
+{
+  "cancel": "Cancel",
+  "description": "Active and recently resolved votes among teammates.",
+  "empty": "No consensus requests in this team.",
+  "forceResolve": "Resolve as lead",
+  "status": {
+    "cancelled": "Cancelled",
+    "open": "Open",
+    "resolved": "Resolved",
+    "timeout": "Timed out"
+  },
+  "title": "Consensus",
+  "type": "Type: {type}",
+  "vote": "Vote",
+  "voteAs": "Vote as",
+  "voteAsEmpty": "This team has no members to vote as",
+  "voteCount": "{count} votes"
+}

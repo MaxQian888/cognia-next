@@ -1,0 +1,14 @@
+{
+  "categories": {
+    "analysis": "分析",
+    "debugging": "调试",
+    "development": "开发",
+    "documentation": "文档",
+    "general": "通用",
+    "research": "研究",
+    "review": "评审",
+    "security": "安全"
+  },
+  "missingDependencies": "缺失 {count} 项依赖",
+  "openStudioForBindings": "请打开模板工作室配置必需的绑定。"
+}

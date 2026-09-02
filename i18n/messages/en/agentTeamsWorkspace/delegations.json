@@ -1,0 +1,17 @@
+{
+  "approve": "Approve",
+  "cancel": "Cancel",
+  "description": "Work handed off to background agents, external agents, or other teams.",
+  "empty": "No delegations in this team.",
+  "status": {
+    "active": "Active",
+    "awaiting_approval": "Awaiting approval",
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "failed": "Failed",
+    "pending": "Pending",
+    "timeout": "Timed out"
+  },
+  "target": "Target: {type} ({id})",
+  "title": "Delegations"
+}

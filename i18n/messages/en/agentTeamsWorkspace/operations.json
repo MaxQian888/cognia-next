@@ -1,0 +1,101 @@
+{
+  "children": {
+    "cancel": "Cancel child",
+    "cancelled": "Child cancelled.",
+    "commandsPlaceholder": "Manual commands, one per line",
+    "diffPlaceholder": "Manual diff or edit summary",
+    "host": "Host: {value}",
+    "lease": "Dispatch lease: {value}",
+    "leaseExpired": "expired",
+    "leaseFresh": "fresh",
+    "localHost": "local",
+    "noLease": "none",
+    "noRemoteSession": "none",
+    "noWorkspace": "workspace pending",
+    "openBrowser": "Open browser",
+    "openEditor": "Open editor",
+    "openTerminal": "Open terminal",
+    "recoveryRequired": "Operator recovery is required before this child can continue.",
+    "remoteSession": "Remote session: {value}",
+    "resume": "Checkpoint and resume",
+    "retryHostLabel": "Compatible retry host",
+    "retrySameHost": "Retry same host",
+    "retrySelectedHost": "Retry selected host",
+    "retryStarted": "Child retry started.",
+    "selectHost": "Select compatible host",
+    "steer": "Send steering",
+    "steerPlaceholder": "Steer this child at the next safe boundary",
+    "steered": "Steering recorded.",
+    "takeover": "Begin takeover",
+    "takeoverCompleted": "Manual takeover checkpointed.",
+    "takeoverStarted": "Child paused for takeover.",
+    "title": "Child sessions and takeover",
+    "waitingReason": "Waiting: {value}"
+  },
+  "decisions": {
+    "accept": "Accept",
+    "accepted": "Decision accepted.",
+    "empty": "No constraints or proposals.",
+    "reject": "Reject",
+    "rejected": "Decision rejected.",
+    "title": "Decision ledger"
+  },
+  "delivery": {
+    "approveMerge": "Approve and merge stack",
+    "empty": "No delivery stack prepared.",
+    "merged": "Delivery stack merged.",
+    "title": "Delivery graph"
+  },
+  "empty": "No durable run exists for this team yet.",
+  "environment": {
+    "blocked": "Blocked: missing {capabilities}",
+    "missing": "No immutable environment version selected.",
+    "ready": "Host capabilities ready",
+    "title": "Environment preflight",
+    "version": "{name} · version {version}"
+  },
+  "evidence": {
+    "empty": "No evidence collected yet.",
+    "title": "Evidence bundle"
+  },
+  "legacy": "This team remains on the legacy runtime until you accept a durable-v2 migration preview.",
+  "migration": {
+    "accept": "Accept migration",
+    "blocked": "Migration blocked: {reason}",
+    "environment": "Freeze the selected environment version for each run.",
+    "migrated": "Team migrated to durable-v2.",
+    "preview": "Preview durable-v2 migration",
+    "primaryRepository": "exactly one primary repository is required",
+    "retention": "Keep local trajectories until explicit cleanup.",
+    "runtime": "Use checkpoint-based durable-v2 execution.",
+    "summary": "This migration changes only future runs. Existing definitions and runtime records remain readable.",
+    "writer": "Serialize repository writes by default."
+  },
+  "retrospective": {
+    "approve": "Approve and apply",
+    "approved": "Proposal applied.",
+    "empty": "No retrospective generated yet.",
+    "reject": "Reject",
+    "rejected": "Proposal rejected.",
+    "title": "Retrospective learning"
+  },
+  "run": {
+    "children": "{value} children",
+    "decisionVersion": "Decision version {value}",
+    "title": "Current durable run",
+    "tokens": "{value} tokens"
+  },
+  "status": {
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "failed": "Failed",
+    "needs_input": "Needs input",
+    "paused": "Paused",
+    "pausing": "Pausing",
+    "queued": "Queued",
+    "recovering": "Recovering",
+    "running": "Running",
+    "sleeping": "Sleeping",
+    "terminated": "Terminated"
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "children": {
+    "cancel": "取消子任务",
+    "cancelled": "子任务已取消。",
+    "commandsPlaceholder": "人工命令，每行一条",
+    "diffPlaceholder": "人工 diff 或编辑摘要",
+    "host": "执行主机：{value}",
+    "lease": "分发租约：{value}",
+    "leaseExpired": "已过期",
+    "leaseFresh": "有效",
+    "localHost": "本机",
+    "noLease": "无",
+    "noRemoteSession": "无",
+    "noWorkspace": "工作区待创建",
+    "openBrowser": "打开浏览器",
+    "openEditor": "打开编辑器",
+    "openTerminal": "打开终端",
+    "recoveryRequired": "该子任务需要操作员确认恢复方式后才能继续。",
+    "remoteSession": "远程会话：{value}",
+    "resume": "创建检查点并恢复",
+    "retryHostLabel": "兼容的重试主机",
+    "retrySameHost": "在原主机重试",
+    "retrySelectedHost": "在所选主机重试",
+    "retryStarted": "子任务重试已开始。",
+    "selectHost": "选择兼容主机",
+    "steer": "发送引导",
+    "steerPlaceholder": "在下一个安全边界引导该子任务",
+    "steered": "引导已记录。",
+    "takeover": "开始接管",
+    "takeoverCompleted": "人工接管已创建检查点。",
+    "takeoverStarted": "子任务已暂停，可人工接管。",
+    "title": "子会话与人工接管",
+    "waitingReason": "等待原因：{value}"
+  },
+  "decisions": {
+    "accept": "接受",
+    "accepted": "决策已接受。",
+    "empty": "暂无约束或提案。",
+    "reject": "拒绝",
+    "rejected": "决策已拒绝。",
+    "title": "决策账本"
+  },
+  "delivery": {
+    "approveMerge": "批准并合并交付栈",
+    "empty": "尚未准备交付栈。",
+    "merged": "交付栈已合并。",
+    "title": "交付图"
+  },
+  "empty": "此团队尚无持久化运行。",
+  "environment": {
+    "blocked": "已阻止：缺少 {capabilities}",
+    "missing": "尚未选择不可变环境版本。",
+    "ready": "主机能力已就绪",
+    "title": "环境预检",
+    "version": "{name} · 版本 {version}"
+  },
+  "evidence": {
+    "empty": "尚未收集证据。",
+    "title": "证据包"
+  },
+  "legacy": "此团队将继续使用旧版运行时，直到你接受 durable-v2 迁移预览。",
+  "migration": {
+    "accept": "接受迁移",
+    "blocked": "迁移已阻止：{reason}",
+    "environment": "每次运行冻结所选环境版本。",
+    "migrated": "团队已迁移到 durable-v2。",
+    "preview": "预览 durable-v2 迁移",
+    "primaryRepository": "必须且只能配置一个主仓库",
+    "retention": "本地轨迹保留到显式清理。",
+    "runtime": "使用基于检查点的 durable-v2 执行。",
+    "summary": "迁移只影响未来运行；现有定义和运行记录仍可读取。",
+    "writer": "默认串行化仓库写入。"
+  },
+  "retrospective": {
+    "approve": "批准并应用",
+    "approved": "提案已应用。",
+    "empty": "尚未生成复盘。",
+    "reject": "拒绝",
+    "rejected": "提案已拒绝。",
+    "title": "复盘学习"
+  },
+  "run": {
+    "children": "{value} 个子任务",
+    "decisionVersion": "决策版本 {value}",
+    "title": "当前持久化运行",
+    "tokens": "{value} tokens"
+  },
+  "status": {
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "failed": "失败",
+    "needs_input": "需要输入",
+    "paused": "已暂停",
+    "pausing": "正在暂停",
+    "queued": "已排队",
+    "recovering": "恢复中",
+    "running": "运行中",
+    "sleeping": "休眠中",
+    "terminated": "已终止"
+  }
+}

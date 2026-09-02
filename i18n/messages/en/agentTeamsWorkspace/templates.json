@@ -1,0 +1,14 @@
+{
+  "categories": {
+    "analysis": "Analysis",
+    "debugging": "Debugging",
+    "development": "Development",
+    "documentation": "Documentation",
+    "general": "General",
+    "research": "Research",
+    "review": "Review",
+    "security": "Security"
+  },
+  "missingDependencies": "{count} missing dep(s)",
+  "openStudioForBindings": "Open Template Studio to configure the required bindings."
+}

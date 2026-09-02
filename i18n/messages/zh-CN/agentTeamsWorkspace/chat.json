@@ -1,0 +1,83 @@
+{
+  "composer": {
+    "attachmentsNotSupported": "团队对话暂不支持附件。",
+    "imageNotSupported": "团队对话暂不支持图片附件。",
+    "mentionTitle": "提及一个智能体",
+    "missingMention": "请用 @<智能体名> 开头的方式发送消息。",
+    "missingPrompt": "在 @ 提及之后请输入消息内容。",
+    "noAgents": "暂无可用智能体 —— 请先添加队友",
+    "noMatches": "没有匹配 \"{query}\" 的智能体",
+    "placeholder": "输入 @ 提及智能体 —— 试试 @claude 或 @codex",
+    "sendingFailed": "发送给 {agent} 失败：{reason}",
+    "stop": "停止",
+    "unknownAgent": "未知的智能体：@{name}"
+  },
+  "empty": "暂无消息。",
+  "emptyHint": "试试 @claude、@codex 或 @<成员名> 把消息发给对应的智能体。",
+  "errorGeneric": "出错了",
+  "errorReason": "错误详情",
+  "mentionAgents": "@ 提及智能体",
+  "messageActions": {
+    "copied": "已复制到剪贴板",
+    "copy": "复制",
+    "delete": "删除",
+    "deleteFailed": "删除消息失败",
+    "open": "消息操作",
+    "retry": "重试",
+    "retrying": "正在重试…"
+  },
+  "messageTypes": {
+    "broadcast": "广播",
+    "consensus": "共识",
+    "direct": "私聊",
+    "idle": "空闲",
+    "plan_approval": "计划审批",
+    "plan_feedback": "计划反馈",
+    "result_share": "结果分享",
+    "shutdown": "关闭",
+    "system": "系统",
+    "task_assignment": "任务分配",
+    "task_update": "任务更新"
+  },
+  "runtime": {
+    "claude": "Claude",
+    "claudeCode": "Claude Code",
+    "codex": "Codex",
+    "codexAppServer": "Codex（应用服务）",
+    "copilotCli": "GitHub Copilot",
+    "cursorCli": "Cursor",
+    "droid": "Droid",
+    "geminiCli": "Gemini",
+    "kiro": "Kiro",
+    "opencodeAcp": "OpenCode（ACP）",
+    "opencodeRemote": "OpenCode（远程）",
+    "opencodeServer": "OpenCode",
+    "pi": "Pi",
+    "piRpc": "Pi（原生 RPC）",
+    "qwenCode": "Qwen Code"
+  },
+  "runtimeStatus": {
+    "disconnected": "{runtime} 已配置但未连接。请到「设置 → 外部 Agent」连接。",
+    "missingKey": "请在「设置 → Providers」配置 Anthropic API Key 后再使用 @claude。",
+    "noAgent": "尚未为 {runtime} 配置外部 Agent。请到「设置 → 外部 Agent」添加。"
+  },
+  "scrollToLatest": "滚动到最新消息",
+  "streaming": "思考中…",
+  "structuredPayload": "载荷",
+  "tokenUsage": {
+    "input": "输入",
+    "label": "Token",
+    "output": "输出",
+    "total": "总计"
+  },
+  "toolCall": {
+    "complete": "完成",
+    "error": "出错",
+    "input": "输入",
+    "output": "输出",
+    "running": "运行中",
+    "toggleDetails": "展开 / 折叠 {name} 的详情"
+  },
+  "unreadDivider": "{count} 条新消息",
+  "virtualTag": "虚拟"
+}

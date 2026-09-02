@@ -1,0 +1,83 @@
+{
+  "composer": {
+    "attachmentsNotSupported": "Attachments aren't supported in team chat yet.",
+    "imageNotSupported": "Image attachments aren't supported in team chat yet.",
+    "mentionTitle": "Mention an agent",
+    "missingMention": "Start your message with @'<agent-name>' to dispatch it.",
+    "missingPrompt": "Add a message after the mention.",
+    "noAgents": "No agents available — add a teammate first",
+    "noMatches": "No agent matches \"{query}\"",
+    "placeholder": "Type @ to mention an agent — try @claude or @codex",
+    "sendingFailed": "Failed to send to {agent}: {reason}",
+    "stop": "Stop",
+    "unknownAgent": "Unknown agent: @{name}"
+  },
+  "empty": "No messages yet.",
+  "emptyHint": "Try @claude, @codex, or @'<member-name>' to dispatch this message to that agent.",
+  "errorGeneric": "Something went wrong",
+  "errorReason": "Error details",
+  "mentionAgents": "Mention an agent",
+  "messageActions": {
+    "copied": "Copied to clipboard",
+    "copy": "Copy",
+    "delete": "Delete",
+    "deleteFailed": "Couldn't delete this message",
+    "open": "Message actions",
+    "retry": "Retry",
+    "retrying": "Retrying…"
+  },
+  "messageTypes": {
+    "broadcast": "Broadcast",
+    "consensus": "Consensus",
+    "direct": "Direct",
+    "idle": "Idle",
+    "plan_approval": "Plan",
+    "plan_feedback": "Feedback",
+    "result_share": "Result",
+    "shutdown": "Shutdown",
+    "system": "System",
+    "task_assignment": "Assignment",
+    "task_update": "Task update"
+  },
+  "runtime": {
+    "claude": "Claude",
+    "claudeCode": "Claude Code",
+    "codex": "Codex",
+    "codexAppServer": "Codex (App Server)",
+    "copilotCli": "GitHub Copilot",
+    "cursorCli": "Cursor",
+    "droid": "Droid",
+    "geminiCli": "Gemini",
+    "kiro": "Kiro",
+    "opencodeAcp": "OpenCode (ACP)",
+    "opencodeRemote": "OpenCode (Remote)",
+    "opencodeServer": "OpenCode",
+    "pi": "Pi",
+    "piRpc": "Pi (native RPC)",
+    "qwenCode": "Qwen Code"
+  },
+  "runtimeStatus": {
+    "disconnected": "{runtime} is configured but not connected. Open Settings → External Agents to connect.",
+    "missingKey": "Set an Anthropic API key in Settings → Providers to enable @claude.",
+    "noAgent": "No external agent configured for {runtime}. Add one in Settings → External Agents."
+  },
+  "scrollToLatest": "Scroll to latest message",
+  "streaming": "Thinking…",
+  "structuredPayload": "Payload",
+  "tokenUsage": {
+    "input": "in",
+    "label": "Tokens",
+    "output": "out",
+    "total": "total"
+  },
+  "toolCall": {
+    "complete": "complete",
+    "error": "error",
+    "input": "Input",
+    "output": "Output",
+    "running": "running",
+    "toggleDetails": "Toggle details for {name}"
+  },
+  "unreadDivider": "{count, plural, one {# new message} other {# new messages}}",
+  "virtualTag": "Virtual"
+}

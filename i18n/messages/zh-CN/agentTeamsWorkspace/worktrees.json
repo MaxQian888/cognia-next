@@ -1,0 +1,23 @@
+{
+  "actions": {
+    "checkout": "检出",
+    "compare": "对比",
+    "delete": "删除"
+  },
+  "description": "隔离运行产生的分支（agent/<运行>/<成员>/<任务>）——工作树回收后仍持久保留。可审阅、检出或删除。",
+  "desktopOnly": {
+    "description": "工作树隔离需要桌面应用，且团队工作目录为 git 仓库。",
+    "title": "仅桌面端可用"
+  },
+  "empty": {
+    "description": "启用工作树隔离并运行团队后，各 agent 的分支会显示在这里。",
+    "title": "暂无 agent 分支"
+  },
+  "moved": {
+    "action": "打开工作区",
+    "description": "实时环境与隔离运行留下的分支现在都在工作区页面。它们属于仓库，不属于某一个小队。",
+    "title": "工作树已迁移"
+  },
+  "refresh": "刷新",
+  "title": "Agent 分支"
+}

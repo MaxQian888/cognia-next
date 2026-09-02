@@ -1,0 +1,317 @@
+{
+  "accordion": {
+    "execution": "Execution",
+    "governance": "Governance",
+    "memory": "Shared memory",
+    "overview": "Overview",
+    "plugins": "Plugins & capabilities",
+    "prFeedback": "PR feedback",
+    "stackedDelivery": "Stacked delivery",
+    "ultracode": "Ultracode",
+    "worktrees": "Worktree isolation"
+  },
+  "autoShutdown": "Auto-shutdown on completion",
+  "awaitingExternalPickup": "Awaiting external pickup",
+  "cancel": "Cancel",
+  "confirm": {
+    "cancelLabel": "Cancel",
+    "clearMemory": {
+      "description": "This permanently drops every shared-memory entry for this team.",
+      "title": "Clear shared memory?"
+    },
+    "confirmLabel": "Confirm",
+    "forceResolve": {
+      "description": "This resolves the poll with the lead's override, ignoring outstanding votes.",
+      "title": "Force-resolve consensus?"
+    },
+    "onCritical": {
+      "description": "Selecting \"pause for review\" or \"hand off to background\" changes how the runtime blocks at the critical budget threshold.",
+      "title": "Change critical action?"
+    },
+    "removeTeammate": {
+      "description": "This removes the teammate from the team. Tasks they claimed will be released.",
+      "title": "Remove teammate?"
+    },
+    "typeToConfirm": "Type \"{value}\" to confirm"
+  },
+  "dangerZone": "Danger zone",
+  "deleteAction": "Delete permanently",
+  "deleteWarning": "This permanently removes the team, all members, tasks, and messages.",
+  "description": "Description",
+  "dispatchDecisionLabel": "Dispatch decision",
+  "enableMessaging": "Inter-agent messaging",
+  "execution": {
+    "description": "Team-level execution defaults (ADR-0090): the binding every inheriting teammate resolves to, and the team-to-team delegation depth cap.",
+    "maxDelegationDepth": "Max team delegation depth",
+    "maxDelegationDepthHint": "Team-to-team delegations only (default 2). A team at the cap has its further delegations refused. Distinct from native subagent nesting depth.",
+    "title": "Execution"
+  },
+  "executionMode": "Execution mode",
+  "executionModeOption": {
+    "autonomous": "Autonomous",
+    "coordinated": "Coordinated",
+    "delegate": "Delegate"
+  },
+  "executionPattern": "Execution pattern",
+  "executionPatternOption": {
+    "backgroundHandoff": "Background handoff",
+    "externalHandoff": "External handoff",
+    "managerWorker": "Manager / worker",
+    "parallelSpecialists": "Parallel specialists",
+    "singleAgent": "Single agent (recommended)"
+  },
+  "externalClaimedBy": "Claimed by {claimer}",
+  "governance": {
+    "adaptiveReplan": {
+      "description": "Between waves of a run, the lead reviews results and can inject, cancel, reorder, or finish the remaining tasks.",
+      "enabled": "Enable adaptive re-planning",
+      "heading": "Adaptive re-planning",
+      "requireApproval": "Require approval before applying a re-plan"
+    },
+    "approval": {
+      "heading": "Approvals",
+      "requireDelegationApproval": "Require approval before delegating to an external agent",
+      "requirePlanApproval": "Require plan approval before run starts",
+      "requireResultReview": "Require result review",
+      "requireResultReviewHint": "Successful auto-runs land in the Review column for human acceptance; the run itself keeps progressing.",
+      "taskReview": "Lead reviews each task",
+      "taskReviewHint": "The lead reviews every task's work — and the diff it produced — before dependent tasks may start. Work the lead rejects goes back to the same teammate to revise. A task that cannot be approved fails the run.",
+      "taskReviewMaxRevisions": "Revision attempts"
+    },
+    "budget": {
+      "criticalThreshold": "Critical threshold (0–1)",
+      "heading": "Token budget",
+      "onCritical": "On critical",
+      "tokenBudget": "Token budget (0 = unlimited)",
+      "warningThreshold": "Warning threshold (0–1)"
+    },
+    "description": "Approval gates, budget thresholds, escalation behavior, and refusal detection.",
+    "escalation": {
+      "allowOperatorPatternOverride": "Allow operator to override the execution pattern",
+      "heading": "Escalation",
+      "pauseOnHighRisk": "Pause automatically when the routing assessment flags high risk"
+    },
+    "escalationOption": {
+      "handoff_to_background": "Hand off to background",
+      "notify": "Notify only",
+      "pause_for_review": "Pause for review",
+      "reduce_concurrency": "Reduce concurrency to 1"
+    },
+    "nudges": {
+      "busySignalHint": "Skipped if the member produced tool activity inside this window — it is working, not stuck.",
+      "busySignalWindowMs": "Busy-signal window (ms)",
+      "description": "When a teammate turn fails on a provider rate limit, the runtime waits out the cooldown and sends one \"continue\" nudge instead of aborting the whole wave.",
+      "enabled": "Enable guarded nudges",
+      "heading": "Rate-limit nudges",
+      "maxPerMemberPerHour": "Max nudges per member per hour"
+    },
+    "progressLedger": {
+      "allowAutonomousConsensus": "Allow autonomously opening a consensus on stall",
+      "allowAutonomousDelegation": "Allow autonomously delegating work on stall",
+      "description": "After a wave stalls (no new completed tasks or output), a judge diagnoses the run and can re-plan, open a consensus, or delegate to break the stall.",
+      "enabled": "Enable progress ledger",
+      "heading": "Autonomous progress ledger"
+    },
+    "refusal": {
+      "detect": "Detect refusal patterns in teammate output",
+      "heading": "Refusal detection",
+      "patterns": "Refusal patterns (one per line)",
+      "patternsPlaceholder": "I cannot help with that\nI'm not able to"
+    },
+    "title": "Governance policy"
+  },
+  "knowledgeTwins": {
+    "empty": "No digital employees yet. Create one in the Twin workbench.",
+    "hint": "Twins selected here can be searched by any teammate via the knowledge tool during a run.",
+    "title": "Digital employee knowledge"
+  },
+  "maxConcurrent": "Max concurrent",
+  "maxRetries": "Max task retries",
+  "memory": {
+    "acl": {
+      "aclHint": "Empty \"readable by\" means every teammate can read this entry.",
+      "operatorBadge": "Operator view — all entries"
+    },
+    "adapter": {
+      "configure": "Configure",
+      "label": "Backing store",
+      "noAdapter": "Local only",
+      "pickerTitle": "Shared-memory backing store",
+      "sync": "Sync now",
+      "syncFailed": "Sync failed",
+      "synced": "{count} entries synced",
+      "unset": "(none)"
+    },
+    "addEntry": "Add entry",
+    "clearAll": "Clear all",
+    "composer": {
+      "cancel": "Cancel",
+      "expiresAt": "Expires at (optional)",
+      "invalidJson": "Value is not valid JSON.",
+      "key": "Key",
+      "parseJson": "Parse value as JSON",
+      "piiBlocked": "Write blocked: the value contains PII.",
+      "readableBy": "Readable by",
+      "readableByAll": "All teammates (leave empty)",
+      "removeTag": "Remove {tag}",
+      "submit": "Save entry",
+      "tags": "Tags",
+      "tagsPlaceholder": "Add a tag and press Enter",
+      "titleCreate": "New memory entry",
+      "titleEdit": "Edit memory entry",
+      "value": "Value"
+    },
+    "deleteEntry": "Delete \"{key}\"",
+    "description": "Key/value entries written by teammates during a run. Writes are PII-gated.",
+    "detail": {
+      "copied": "Copied",
+      "copy": "Copy value",
+      "delete": "Delete",
+      "edit": "Edit",
+      "title": "Memory entry"
+    },
+    "empty": "No shared-memory entries yet.",
+    "filter": {
+      "dateRange": "Date range",
+      "empty": "No entries match the current filters.",
+      "reset": "Reset filters",
+      "tags": "Tags",
+      "text": "Search key or value",
+      "writer": "Writer"
+    },
+    "title": "Shared memory",
+    "writtenBy": "Written by {name} · {when}"
+  },
+  "name": "Team name",
+  "plugins": {
+    "intro": "These plugin capabilities are inherited by every teammate. Use per-teammate overlays to override them on a specific member."
+  },
+  "prFeedback": {
+    "caveat": "Runs while the team run is active and for a short window after; needs a GitHub remote and resolvable credentials (e.g. gh auth).",
+    "description": "Observe each teammate's pull request (CI, review comments, merge conflicts) and route the feedback back to the team as a guarded nudge. Off by default; desktop app + a GitHub repository with credentials only.",
+    "enabled": "Enable PR feedback",
+    "observeWindow": {
+      "hint": "How long to keep polling each PR after the task list finishes. One pass captures the current state; a window keeps monitoring CI/reviews (and extends the run).",
+      "label": "Keep observing after the run",
+      "option": {
+        "fiveMin": "5 minutes",
+        "onePass": "One pass (no wait)",
+        "tenMin": "10 minutes",
+        "twoMin": "2 minutes"
+      }
+    },
+    "publishPr": {
+      "hint": "Push each teammate's branch and open a pull request automatically. Off = only observe PRs teammates open themselves.",
+      "label": "Auto-open a PR per teammate"
+    },
+    "reviewer": {
+      "hint": "Run an automated reviewer over each PR's diff and route a changes-requested verdict back to the teammate.",
+      "label": "Internal reviewer agent"
+    },
+    "title": "PR feedback loop"
+  },
+  "requirePlanApproval": "Require plan approval",
+  "riskGating": "Risk-based plan approval",
+  "save": "Save",
+  "saveIndicator": {
+    "auditCompleted": "Audit complete · {count} stale id(s)",
+    "auditNow": "Audit now",
+    "auditUnavailable": "Auditor not available",
+    "savedJustNow": "Saved",
+    "savedSecondsAgo": "Saved · {seconds}s ago",
+    "unsaved": "No changes"
+  },
+  "saved": "Settings saved.",
+  "saving": "Saving…",
+  "sectionControls": "Controls",
+  "sectionExecution": "Execution",
+  "stackedDelivery": {
+    "caveat": "Desktop app only, and only for a GitHub remote whose default branch can be resolved. A run that cannot be stacked is published as it is today.",
+    "description": "When a completed run produced several branches in one repository, open them as a chain of pull requests instead of a flat set — each based on the one below it, so every review shows only its own change.",
+    "enabled": {
+      "hint": "Off by default. Turning it on changes how a finished run reaches GitHub.",
+      "label": "Stack this team's pull requests"
+    },
+    "layerCount": "{count, plural, one {# layer} other {# layers}}",
+    "maxLayers": {
+      "label": "Most layers"
+    },
+    "mergeMode": {
+      "approvedBottomUp": "Bottom layer first, once approved",
+      "label": "Merge order"
+    },
+    "minLayers": {
+      "hint": "Runs with fewer branches than the minimum are published flat. Extra branches beyond the maximum are left out of the stack rather than dropped.",
+      "label": "Fewest layers"
+    },
+    "title": "Stacked delivery"
+  },
+  "streamProgress": "Live teammate progress",
+  "title": "Team Settings",
+  "tokenBudget": "Token budget (0 = unlimited)",
+  "typeToConfirm": "Type \"{name}\" to confirm",
+  "ultracode": {
+    "autoMode": {
+      "hint": {
+        "always": "Orchestrate every run for this team.",
+        "auto": "Orchestrate only when routing judges the task complex.",
+        "never": "Never auto-orchestrate; use Run with ultracode manually."
+      },
+      "label": "Auto-trigger",
+      "option": {
+        "always": "Always",
+        "auto": "Auto (complex tasks)",
+        "never": "Never"
+      }
+    },
+    "description": "Run the multi-agent quality patterns (sweep, loop-until-dry, adversarial verify, judge panel, completeness critic, synthesize) instead of a flat task list. Tool-enabled teammates run on the desktop sidecar; the web/mobile shells fall back to text-only reasoning.",
+    "dryRoundsToStop": "Dry rounds to stop",
+    "enabled": "Enable ultracode orchestration",
+    "judgesPerAttempt": "Judges / attempt",
+    "maxFinderRounds": "Max finder rounds",
+    "skepticsPerFinding": "Skeptics / finding",
+    "title": "Ultracode orchestration",
+    "workingDir": {
+      "hint": "Repo path tool-enabled teammates read and run commands in (desktop only).",
+      "label": "Working directory",
+      "placeholder": "/absolute/path/to/repo"
+    }
+  },
+  "worktrees": {
+    "caveat": "Worktrees branch off the working directory's current commit (HEAD), so uncommitted changes there are not visible to agents.",
+    "description": "Give each teammate dispatch its own git worktree + branch so parallel agents never overwrite each other's work or git state. Off by default; desktop app + git repository only.",
+    "enabled": "Enable per-agent worktrees",
+    "reconcile": {
+      "hint": {
+        "manual": "Leave every branch for you to review and merge.",
+        "merge-all": "Merge all successful branches into one integration branch; a conflict stops and reports (never your real branch).",
+        "pipeline": "Sequential dispatches share one branch.",
+        "select": "Keep one branch and discard the rest."
+      },
+      "label": "When the run settles",
+      "option": {
+        "manual": "Manual review",
+        "merge-all": "Merge all",
+        "pipeline": "Pipeline",
+        "select": "Select one"
+      }
+    },
+    "retain": {
+      "label": "After reconcile",
+      "option": {
+        "all": "Keep everything",
+        "keep-winner": "Keep winner, drop losers",
+        "prune-losers": "Prune losers"
+      }
+    },
+    "selectStrategy": {
+      "label": "How to pick the winner",
+      "option": {
+        "first-success": "First success",
+        "judge": "AI judge",
+        "manual": "I choose"
+      }
+    },
+    "title": "Worktree isolation"
+  }
+}

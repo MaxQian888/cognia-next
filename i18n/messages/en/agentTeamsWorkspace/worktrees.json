@@ -1,0 +1,23 @@
+{
+  "actions": {
+    "checkout": "Check out",
+    "compare": "Compare",
+    "delete": "Delete"
+  },
+  "description": "Branches produced by isolated runs (agent/'<'run>/'<'teammate>/'<'task>) — the durable record once worktrees are reclaimed. Review, check out, or delete them.",
+  "desktopOnly": {
+    "description": "Worktree isolation needs the desktop app and a git repository as the team's working directory.",
+    "title": "Desktop only"
+  },
+  "empty": {
+    "description": "Enable worktree isolation and run the team; each agent's branch will appear here.",
+    "title": "No agent branches yet"
+  },
+  "moved": {
+    "action": "Open workspace",
+    "description": "Live environments and the branches isolated runs leave behind are both on the workspace page now. They belong to the repository, not to one squad.",
+    "title": "Worktrees moved"
+  },
+  "refresh": "Refresh",
+  "title": "Agent branches"
+}

@@ -1,0 +1,8 @@
+{
+  "cancelAriaLabel": "取消",
+  "editAriaLabel": "编辑",
+  "editDescription": "编辑描述",
+  "editName": "编辑名称",
+  "emptyHint": "添加描述…",
+  "saveAriaLabel": "保存"
+}

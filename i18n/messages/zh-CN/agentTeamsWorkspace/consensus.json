@@ -1,0 +1,18 @@
+{
+  "cancel": "取消",
+  "description": "活跃和最近解决的成员投票。",
+  "empty": "该团队暂无共识投票。",
+  "forceResolve": "领队裁决",
+  "status": {
+    "cancelled": "已取消",
+    "open": "进行中",
+    "resolved": "已解决",
+    "timeout": "超时"
+  },
+  "title": "共识投票",
+  "type": "类型：{type}",
+  "vote": "投票",
+  "voteAs": "以谁的身份投票",
+  "voteAsEmpty": "该团队暂无可代为投票的成员",
+  "voteCount": "{count} 票"
+}
