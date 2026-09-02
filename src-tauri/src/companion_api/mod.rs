@@ -336,6 +336,11 @@ pub struct CompanionServerState {
     /// encodes the public trycloudflare URL instead of the LAN IP. Default
     /// off — opt-in via Settings.
     pub tunnel: tunnel::TunnelState,
+    /// The axum `SharedState` of the running listener, present only while
+    /// the server is up. Co-located, non-HTTP callers (the CLI bridge's
+    /// provider admin leg) use it to enter `remote_execution::execute`, the
+    /// one sanctioned non-HTTP door into the dispatch table.
+    pub shared: RwLock<Option<SharedState>>,
 }
 
 struct CompanionServerInner {
@@ -406,7 +411,13 @@ impl CompanionServerState {
             push_tokens,
             mdns: mdns::BroadcasterState::new(),
             tunnel,
+            shared: RwLock::new(None),
         }
+    }
+
+    /// The running listener's shared state, or `None` while stopped.
+    pub fn shared_state(&self) -> Option<SharedState> {
+        self.shared.read().clone()
     }
 
     /// Whether the server is currently running.
@@ -453,6 +464,7 @@ impl CompanionServerState {
         let origin_policy = web_origin::WebOriginPolicy::from_env_and_config(&browser_config);
         let handle = server::spawn_server(port, bind_loopback_only, tls, state.clone()).await?;
         let bound_port = handle.bound_port;
+        *self.shared.write() = Some(state.clone());
         let mode = if bind_loopback_only {
             BindMode::Loopback
         } else {
@@ -505,6 +517,7 @@ impl CompanionServerState {
         // reflect "server stopped" rather than a stale port.
         set_advertised_port(0);
         *self.event_bus.write() = None;
+        *self.shared.write() = None;
     }
 
     /// Data directory for file-backed persistence (tunnel config, etc.).

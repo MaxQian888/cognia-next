@@ -540,6 +540,20 @@ impl GatewayState {
         Ok(())
     }
 
+    /// Candidates the CURRENT snapshot can serve for `model`, for callers
+    /// that must decide affinity before minting (the CLI bridge). `Err` when
+    /// no snapshot has been pushed yet.
+    pub fn ticket_candidates_for_model(
+        &self,
+        model: &str,
+    ) -> Result<Vec<route_ticket::TicketCandidate>, route_ticket::TicketError> {
+        let snapshot = self.snapshot.read();
+        let snapshot = snapshot
+            .as_ref()
+            .ok_or(route_ticket::TicketError::NoSnapshot)?;
+        Ok(route_planner::candidates_for_model(snapshot, model))
+    }
+
     /// Mint a route ticket against the CURRENT snapshot (ADR-0090 Phase 2).
     pub fn mint_route_ticket(
         &self,

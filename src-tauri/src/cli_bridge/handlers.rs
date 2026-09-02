@@ -1436,6 +1436,126 @@ fn err_response(status: StatusCode, message: &str) -> Response {
         .into_response()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider admin leg (ADR-0163 Phase 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `GET /api/dev/provider-operations/manifest` — the operation contract and
+/// the admin commands this desktop exposes, so a CLI can degrade per verb
+/// against an older desktop instead of erroring.
+pub async fn provider_operations_manifest() -> Response {
+    Json(super::provider_admin::operation_manifest_projection()).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProviderExecuteRequest {
+    pub name: String,
+    #[serde(default)]
+    pub args: serde_json::Value,
+}
+
+/// `POST /api/dev/provider-operations/execute` — one allowlisted, read-only
+/// companion command, dispatched through `remote_execution::execute` as the
+/// bridge's service principal. Not a second dispatcher: the same door the
+/// headless `/internal/_rpc/{name}` route uses.
+pub async fn provider_execute(
+    State(state): State<SharedState>,
+    Json(request): Json<ProviderExecuteRequest>,
+) -> Response {
+    use super::provider_admin;
+    if let Err(reject) = provider_admin::authorize_provider_command(&request.name) {
+        return (
+            reject.status(),
+            Json(json!({ "ok": false, "error": reject.code(), "command": request.name })),
+        )
+            .into_response();
+    }
+    let Some(server_state) = state
+        .app_handle
+        .try_state::<crate::companion_api::CompanionServerState>()
+    else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion server state unavailable",
+        );
+    };
+    let Some(shared) = server_state.shared_state() else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion API server is not running — start it from Settings → Companion",
+        );
+    };
+    let Some(store) = crate::companion_api::security_store::security_store() else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion security store is unavailable",
+        );
+    };
+    let now = Utc::now().timestamp();
+    if let Err(error) = store.ensure_service_principal(
+        provider_admin::PROVIDER_ADMIN_ACCOUNT_ID,
+        provider_admin::PROVIDER_ADMIN_DEVICE_ID,
+        provider_admin::PROVIDER_ADMIN_DISPLAY_NAME,
+        &provider_admin::provider_admin_capabilities(),
+        now,
+    ) {
+        return err_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+    }
+    let execution = crate::companion_api::remote_execution::ExecutionRequest::new(
+        request.name.clone(),
+        request.args,
+        provider_admin::provider_admin_principal(),
+        crate::companion_api::remote_execution::ExecutionTransport::Internal,
+        None,
+    );
+    match crate::companion_api::remote_execution::execute(&shared, execution).await {
+        Ok(crate::companion_api::remote_execution::ExecutionOutcome::Completed {
+            result, ..
+        }) => Json(json!({ "ok": true, "command": request.name, "result": result })).into_response(),
+        Ok(crate::companion_api::remote_execution::ExecutionOutcome::Accepted {
+            operation_id,
+            ..
+        }) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "ok": true, "command": request.name, "operationId": operation_id })),
+        )
+            .into_response(),
+        Err(error) => (
+            error.status,
+            Json(json!({
+                "ok": false,
+                "error": error.message,
+                "code": error.code,
+                "command": request.name,
+                "retryable": error.retryable,
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/dev/gateway/route-ticket` — mint a session-scoped route ticket
+/// against the desktop gateway's current snapshot. This is what lets
+/// `cognia-agent x` present a real ticket instead of an upstream provider
+/// key that the listener can never accept.
+pub async fn gateway_route_ticket(
+    State(state): State<SharedState>,
+    Json(request): Json<super::provider_admin::BridgeTicketRequest>,
+) -> Response {
+    let gateway = state.app_handle.state::<crate::gateway::GatewayState>();
+    let status = gateway.status();
+    let Some(port) = status.bound_port.filter(|_| status.running) else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the LLM gateway is not running — enable it in Settings → Gateway",
+        );
+    };
+    match super::provider_admin::mint_bridge_ticket(&gateway, request) {
+        Ok(minted) => Json(super::provider_admin::bridge_ticket_payload(&minted, port)).into_response(),
+        Err((status, message)) => err_response(status, &message),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
