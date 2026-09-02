@@ -10,7 +10,19 @@ import { z } from "zod"
 
 import { findSecretMaterialPaths, type ProfileParseResult } from "./provider-profile"
 
-export const CATALOG_SCHEMA_VERSION = 1
+/**
+ * Bumped when the enums below widen. Readers accept any snapshot whose
+ * `schemaVersion` is at or below this number: the guard in
+ * `parseCatalogSnapshot` only rejects NEWER snapshots, so a v1 snapshot still
+ * parses under v2. Indexes are unaffected (the multi-entry modality index
+ * indexes values, and `endpointType` is not indexed).
+ *
+ * v2 (ADR-0163): `video`, `transcription`, `moderation` modalities and the
+ * `transcription`, `moderation`, `video`, `batch`, `files`, `fine-tuning`,
+ * `vector-store` endpoint types, so the operation contract can map every
+ * operation to an offering.
+ */
+export const CATALOG_SCHEMA_VERSION = 2
 
 export const catalogTierSchema = z.enum(["certified", "verified", "experimental"])
 export type CatalogTier = z.infer<typeof catalogTierSchema>
@@ -18,7 +30,16 @@ export type CatalogTier = z.infer<typeof catalogTierSchema>
 export const modelLifecycleSchema = z.enum(["preview", "active", "deprecated", "retired"])
 export type ModelLifecycle = z.infer<typeof modelLifecycleSchema>
 
-export const catalogModalitySchema = z.enum(["language", "embedding", "rerank", "image", "speech"])
+export const catalogModalitySchema = z.enum([
+  "language",
+  "embedding",
+  "rerank",
+  "image",
+  "speech",
+  "video",
+  "transcription",
+  "moderation",
+])
 export type CatalogModality = z.infer<typeof catalogModalitySchema>
 
 export const modelDataModalitySchema = z.enum(["text", "image", "audio", "video"])
@@ -145,6 +166,13 @@ export const providerOfferingSchema = z.object({
     "realtime",
     "bedrock-runtime",
     "local",
+    "transcription",
+    "moderation",
+    "video",
+    "batch",
+    "files",
+    "fine-tuning",
+    "vector-store",
   ]),
   lifecycle: modelLifecycleSchema,
   available: z.boolean(),
