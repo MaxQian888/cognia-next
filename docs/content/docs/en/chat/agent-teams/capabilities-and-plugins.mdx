@@ -1,416 +1,173 @@
 ---
-title: Capabilities & Plugin Integration
-description: How Agent Team consumes the plugin ecosystem — the two-layer capability scope, the teammate→Character bridge, plugin subagents and team templates, the capability audit gate, and the plugin-manager dispatch loop (ADR-0032).
+title: Capabilities & Plugins
+description: How a Squad consumes the plugin ecosystem. The two-layer capability scope and its runtime clamp, the teammate to Character bridge, the overlay registries, the capability-audit gate, the 13 lifecycle hooks, and the ctx.team API.
 ---
 
-# Capabilities & Plugin Integration
+# Capabilities & Plugins
 
-Agent Team is a **first-class plugin ecosystem consumer**. A team carries a default
-capability pool; each teammate overlays it; the resolver flattens the pair into a
-`ResolvedCapabilities` snapshot; that snapshot is projected onto a synthetic
-`Character`; and the teammate then rides the *full* build-options pipeline — the same
-one direct chat uses for skills, MCP servers, computer-use, and permissions. Plugins
-extend all of this through uniform overlay registries, exactly as they extend
-characters and skills. This page traces every seam ADR-0032 introduced.
+A Squad is a first-class plugin ecosystem consumer. It carries a default capability pool, each teammate overlays it, the resolver flattens the pair, the runtime clamps the result to what the execution binding can actually offer, and the teammate then rides the *same* build-options pipeline direct chat uses. Plugins extend all of it through uniform overlay registries, and reach in the other direction through `ctx.team`.
 
 <TLDR>
-- **Two-layer scope** — `TeamCapabilityBundle` (`types/agent/agent-team.ts:193`) is the team default pool; `TeammateCapabilityOverlay` (`:222`) adds/removes/replaces per key; `resolveTeammateCapabilities` (`lib/ai/agent/team/capability-resolver.ts:91`) merges them into `ResolvedCapabilities` (`:238`).
-- **7 capability keys** — `mcpServerIds`, `skillIds`, `nativeAnthropicToolIds`, `characterPackIds`, `externalAgentPresetIds`, `subagentIds`, `a2uiTemplateIds` (`capability-resolver.ts:36-44`).
-- **Character bridge** — `teammateToCharacter` (`lib/ai/agent/team/teammate-character.ts:56`) is pure, never persisted, stable id `__teammate__:{id}`; consumed at `lib/ai/agent/team/dispatch-teammate.ts:107-113`.
-- **Plugin overlays** — `PluginSubagentDef` (`types/plugin/plugin-subagent.ts:29`) and `PluginAgentTeamTemplateDef` (`types/plugin/plugin-agent-team-template.ts:110`); dispatched by the plugin manager loop (`lib/plugin/core/manager.ts:2482-2495`) over `OVERLAY_REGISTRY_CAPABILITIES` (`lib/plugin/contracts/capability-bridge-map.ts:156-303`).
-- **Audit gate** — `buildKnownCapabilityIds` (`lib/ai/agent/team/capability-audit.ts:110`) + `validateInstanceCapabilitiesWith` (`:156`) feed the pre-run operator gate (`lib/ai/agent/team/agent-team-runtime.ts:173-199`).
+- **Two layers plus a clamp.** `TeamCapabilityBundle` is the pool, `TeammateCapabilityOverlay` adjusts it per member, `resolveTeammateCapabilities` (`lib/ai/agent/team/capability-resolver.ts:91`) merges them, and `clampCapabilitiesToRuntime` (`:170`) can only remove.
+- **7 capability keys**, enumerated once as `CAPABILITY_KEYS` (`capability-resolver.ts:36-44`).
+- **Character bridge.** `teammateToCharacter` (`lib/ai/agent/team/teammate-character.ts:62`) is pure, never persisted, stable id `__teammate__:{id}`, consumed at `dispatch-teammate.ts:236`.
+- **20 overlay capabilities** in `OVERLAY_REGISTRY_CAPABILITIES` (`lib/plugin/contracts/capability-bridge-map.ts:220`), dispatched by one loop in the plugin manager.
+- **Audit gate.** `buildKnownCapabilityIds` (`capability-audit.ts:109`) plus `validateInstanceCapabilitiesWith` (`:155`) feed a pre-run gate whose behaviour depends on the run's gate policy.
+- **`ctx.team`** exposes 30 methods behind five permission ids.
 </TLDR>
 
-## 1. The two-layer capability scope
+## The two-layer capability scope
 
-A team's capabilities are declared in two layers. The team-level
-`TeamCapabilityBundle` is the **default pool** every teammate inherits; each teammate
-optionally narrows or extends it through a `TeammateCapabilityOverlay`. The merge is a
-single pure function — `resolveTeammateCapabilities` — that produces a flat
-`ResolvedCapabilities` record with no undefined fields, so downstream consumers iterate
-without null guards.
+A Squad's capabilities are declared in two layers. The Squad-level `TeamCapabilityBundle` is the default pool every teammate inherits, and each teammate optionally narrows or extends it through a `TeammateCapabilityOverlay`. The merge is one pure function producing a flat `ResolvedCapabilities` record with no undefined fields, so downstream consumers iterate without null guards.
 
 ```typescript
-// types/agent/agent-team.ts:193 (TeamCapabilityBundle) + :222 (overlay) + :238 (resolved)
-export interface TeamCapabilityBundle {
-  mcpServerIds?: string[]
-  skillIds?: string[]
-  nativeAnthropicToolIds?: string[]
-  characterPackIds?: string[]
-  externalAgentPresetIds?: string[]
-  subagentIds?: string[]
-  a2uiTemplateIds?: string[]
-}
-
-export interface CapabilityListOverlay {
-  add?: string[]      // add these ids to the team default
-  remove?: string[]   // subtract these ids from the team default
-  replace?: string[]  // replace the team default entirely (wins over add/remove)
-}
-
-export interface TeammateCapabilityOverlay {
-  mcpServerIds?: CapabilityListOverlay
-  // ... one CapabilityListOverlay per capability key
-}
+// lib/ai/agent/team/capability-resolver.ts:36-44
+const CAPABILITY_KEYS = [
+  "mcpServerIds",
+  "skillIds",
+  "nativeAnthropicToolIds",
+  "characterPackIds",
+  "externalAgentPresetIds",
+  "subagentIds",
+  "a2uiTemplateIds",
+] as const
 ```
 
-### The 7 capability keys
-
-The resolver enumerates exactly seven keys as a module-level tuple
-(`capability-resolver.ts:36-44`). Every key is overlaid independently.
-
 | Key | Resolves to | Consumed by |
-|-----|-------------|-------------|
+| --- | --- | --- |
 | `mcpServerIds` | MCP server presets | `Character.mcpServerIds` |
-| `skillIds` | Plugin / native skills | `Character.skillIds` + `pluginSkillIds` |
-| `nativeAnthropicToolIds` | Computer-use tool ids | `enableComputerUse` + `computerUseSettings` |
+| `skillIds` | Plugin and native skills | `Character.skillIds` plus `pluginSkillIds` |
+| `nativeAnthropicToolIds` | Computer-use tool ids | `enableComputerUse` and `computerUseSettings` |
 | `characterPackIds` | ADR-0030 persona packs | persona projection at run time |
 | `externalAgentPresetIds` | External CLI presets | `lib/ai/agent/external/presets.ts` |
 | `subagentIds` | Built-in or `pluginId:id` subagents | `resolveAllSubagents` |
-| `a2uiTemplateIds` | A2UI rich-content templates | IM &#124; A2UI bridge |
+| `a2uiTemplateIds` | A2UI rich-content templates | the A2UI to IM bridge |
 
 ### Overlay semantics
 
-For each key the merge follows one rule: if `replace` is present it short-circuits and
-wins (the team default is ignored); otherwise the result is `(team default minus remove)
-union add`. Duplicate ids are deduplicated preserving first-occurrence order, so the
-runtime always sees a stable, minimal id list. The function is deliberately pure and
-sync — no registry lookups, no persistence, no logging.
+For each key the merge follows one rule. If `replace` is present it short-circuits and wins, so the Squad default is ignored. Otherwise the result is the Squad default minus `remove`, unioned with `add`. Duplicate ids are deduplicated preserving first-occurrence order, so the runtime always sees a stable, minimal id list. `applyOverlay` (`:65`) is the per-key kernel, and the whole function is pure and synchronous: no registry lookups, no persistence, no logging.
 
-```typescript
-// lib/ai/agent/team/capability-resolver.ts:91-127
-export function resolveTeammateCapabilities(
-  team: Pick<AgentTeam, "config">,
-  teammate: Pick<AgentTeammate, "config">
-): ResolvedCapabilities {
-  const teamBundle: TeamCapabilityBundle = team.config.capabilities ?? {}
-  const overlay: TeammateCapabilityOverlay = teammate.config.capabilities ?? {}
-  // ... fast path: both empty → fresh empty bundle (never shares the sentinel
-  // arrays, because callers commonly push onto the returned lists) ...
-  const result: ResolvedCapabilities = {
-    mcpServerIds: [], skillIds: [], nativeAnthropicToolIds: [],
-    characterPackIds: [], externalAgentPresetIds: [], subagentIds: [], a2uiTemplateIds: [],
-  }
-  for (const key of CAPABILITY_KEYS) {
-    result[key] = applyOverlay(teamBundle[key], overlay[key])
-  }
-  return result
-}
-```
+`resolveTeamCapabilities` (`:135`) resolves the Squad-level pool alone. It backs the Plugins settings view and validates a team template's `requires` block at registration time.
 
-`applyOverlay` (`:65-84`) is the per-key kernel: `if (overlay?.replace !== undefined)
-return dedupe(overlay.replace)`, else dedupe `(base minus removeSet) ++ add`.
-`resolveTeamCapabilities` (`:135`) resolves the team-level pool alone, used when emitting
-team-scoped artifacts with no teammate context.
+### The third stage: the runtime clamp
 
-### End-to-end flow
+`clampCapabilitiesToRuntime(resolved, effective)` (`:170`, ADR-0090 Phase 7) narrows the resolved bundle to what the effective execution binding actually supports. It can only **remove**.
+
+| Runtime axis | Clamps |
+| --- | --- |
+| `mcp` | `mcpServerIds` |
+| `subagents.native` | `subagentIds` |
+| `tools.ordinary` | `nativeAnthropicToolIds` and `skillIds` |
+
+Character packs, A2UI templates and external presets pass through untouched. So a teammate dispatch resolves in three stages, Squad bundle then teammate overlay then runtime clamp, and only then reaches `lib/claude/build-options.ts`.
 
 ```mermaid
 flowchart TD
   PM[Plugin manifests] --> OR[Overlay registries]
-  OR --> TB[TeamCapabilityBundle\nteam.config.capabilities]
-  OR --> TO[TeammateCapabilityOverlay\nteammate.config.capabilities]
+  OR --> TB["TeamCapabilityBundle<br/>team.config.capabilities"]
+  OR --> TO["TeammateCapabilityOverlay<br/>teammate.config.capabilities"]
   TB --> R[resolveTeammateCapabilities]
   TO --> R
-  R --> RC[ResolvedCapabilities]
-  RC --> D[dispatch-teammate]
+  R --> CL["clampCapabilitiesToRuntime<br/>removes only"]
+  CL --> D[dispatch-teammate]
   D --> TC[teammateToCharacter]
   TC --> SO[resolveSendOptions]
-  SO --> RUN[Teammate dispatch]
+  SO --> RUN[Teammate turn]
 ```
 
-The resolved capabilities are cached per teammate per run so the merge runs once each:
+The resolved bundle is cached per teammate per run on the `TeamRunContext`, so the merge runs once each (`dispatch-teammate.ts:598`).
 
-```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:182-188
-if (!teamCtx.resolvedCapabilities.has(teammate.id)) {
-  teamCtx.resolvedCapabilities.set(
-    teammate.id,
-    resolveTeammateCapabilities(teamCtx.team, teammate)
-  )
-}
-```
+## The teammate to Character bridge
 
-## 2. The teammate → Character bridge
+A teammate is not a persisted persona. To run one, the dispatcher synthesizes an ephemeral `Character` from the teammate config plus its resolved capabilities. The synthesis is pure and never persisted, with a stable id `__teammate__:{id}` so it can be referenced consistently within a run without colliding with a real character.
 
-A teammate is not a persisted persona. To run one, the dispatcher synthesizes an
-ephemeral `Character` from the teammate config plus its `ResolvedCapabilities`. The
-synthesis is **pure and never persisted**, with a stable id `__teammate__:{id}` so it
-can be referenced consistently within a run without colliding with real characters.
+That single projection is what buys the Squad the whole direct-chat pipeline. Skills, MCP servers, computer-use, permissions, hooks, memory and the sidecar all come from `resolveSendOptions` unchanged.
 
-```typescript
-// lib/ai/agent/team/teammate-character.ts:56-103 (trimmed)
-export function teammateToCharacter(input: TeammateCharacterInput): Character {
-  const { team, teammate, resolvedCaps, cwd, modelHint } = input
-  const systemPrompt =
-    teammate.config?.systemPrompt?.trim() ||
-    team.config?.defaultSystemPrompt?.trim() ||
-    DEFAULT_TEAMMATE_SYSTEM_PROMPT
-  const enableComputerUse = resolvedCaps.nativeAnthropicToolIds.length > 0
-  const character: Character = {
-    id: teammateCharacterId(teammate),   // __teammate__:{id}
-    name: teammate.name,
-    systemPrompt, createdAt: ts, updatedAt: ts,
-    ...(mcpServerIds ? { mcpServerIds } : {}),
-    ...(skillIds ? { skillIds, pluginSkillIds: skillIds } : {}),
-    ...(allowedTools ? { allowedTools } : {}),
-    ...(cwd ? { workingDir: cwd } : {}),
-    enableComputerUse,
-    ...(enableComputerUse
-      ? { computerUseSettings: { allowedToolIds: [...resolvedCaps.nativeAnthropicToolIds] } }
-      : {}),
-  }
-  return character
-}
-```
+## Plugin overlay registries
 
-### Field mapping
+Plugins contribute capabilities the same way they contribute to characters and skills, through uniform overlay registries. Each entry in `OVERLAY_REGISTRY_CAPABILITIES` pairs a manifest field with register and unregister handlers. There are twenty entries in total. These are the ones a Squad reads.
 
-| Source | Character field | Notes |
-|--------|-----------------|-------|
-| `resolvedCaps.mcpServerIds` | `mcpServerIds` | empty → omitted → inherits defaults |
-| `resolvedCaps.skillIds` | `skillIds` + `pluginSkillIds` | both set, for polymorphic resolution |
-| `resolvedCaps.nativeAnthropicToolIds` | `enableComputerUse` + `computerUseSettings.allowedToolIds` | non-empty list flips computer-use on |
-| `teammate.config.tools` | `allowedTools` | direct tool allowlist |
-| `cwd` | `workingDir` | per-dispatch working directory |
-| `teammateCharacterId(teammate)` | `id` | stable `__teammate__:{id}` (`:23`) |
+| Capability key | Source | Capability id and manifest field |
+| --- | --- | --- |
+| `skillIds` | `lib/plugin/registries/skill-registry.ts:15` | `skills` / `skills` |
+| `mcpServerIds` | `lib/plugin/registries/mcp-server-preset-registry.ts:25` | `mcp-server-preset` / `mcpServerPresets` |
+| `nativeAnthropicToolIds` | `lib/plugin/registries/native-anthropic-tool-registry.ts:24` | `native-anthropic-tool` / `nativeAnthropicTools` |
+| `characterPackIds` | `lib/plugin/registries/character-pack-registry.ts:42` | `character-pack` / `characterPacks` |
+| `externalAgentPresetIds` | `lib/ai/agent/external/presets.ts:331` | `external-agent-preset` / `externalAgentPresets` |
+| `subagentIds` | `lib/plugin/registries/subagent-registry.ts:25` | `subagent` / `subagents` |
+| `a2uiTemplateIds` | Dexie `a2uiTemplates`, not a plugin overlay registry | the `a2ui` capability, via the A2UI bridge |
 
-Subagents are enabled at the **session** level (session kind `team`), not on the
-Character — see §3. The synthesized character is consumed immediately by the dispatcher,
-which threads it through the full send-options pipeline:
+Two more registries are Squad-adjacent rather than capability keys. `agent-team-template-registry.ts:62` takes Squad blueprints from a plugin manifest, validates each template's `requires` block at registration, and stamps non-blocking warnings rather than refusing, so a template with missing dependencies stays visible but inert and the operator gets a discoverability nudge instead of a silent failure. `shared-memory-adapter-registry.ts` is opted into per Squad through `config.sharedMemoryAdapterId`.
 
-```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:107-113
-const character = teammateToCharacter({ team, teammate, resolvedCaps, cwd, modelHint })
-const sendOptions = await resolveSendOptions({ character, session, /* ... */ })
-```
+A plugin's own template is projected into the host `AgentTeamTemplate` shape by `projectPluginTemplate`, which mints the runtime id `pluginId:templateId` and carries the ADR-0032 extended fields (system prompt, capabilities, governance hints, tags, icon key). That is the same string the template platform registers it under, which is why a plugin row's definition id is returned unchanged.
 
-From here teammates ride the same path documented in <LinkCard href="./built-in-agent"
-title="Built-in Agent" description="resolveSendOptions assembly" /> and
-<LinkCard href="./characters" title="Characters" description="Character runtime shape" />.
+### The dispatch loop
 
-## 3. Plugin subagents (overlay registry #6)
+All twenty overlay capabilities are registered and unregistered by one loop in the plugin manager (`lib/plugin/core/manager.ts:5280` for register, `:5778` for unregister), iterating `OVERLAY_REGISTRY_CAPABILITY_KEYS` with per-entry try/catch isolation, so one bad manifest entry never aborts a plugin's registration.
 
-Plugins declare subagents via `manifest.subagents`, mirroring the Claude SDK
-`AgentDefinition` shape. They register through a one-line `createOverlayRegistry`
-instance and are namespaced `pluginId:id` so dispatcher-name collisions are impossible.
+Registering or unregistering one capability can resolve or stale another's warnings, so several entries fan out. Registering a skill, an MCP preset or a native tool refreshes character-pack, team-template and workflow-template warnings. Registering a subagent refreshes team-template and workflow-template warnings. Templates clear their missing-dependency warnings as soon as the dependencies arrive.
 
-```typescript
-// types/plugin/plugin-subagent.ts:29
-export interface PluginSubagentDef {
-  id: string
-  name: string
-  description: string
-  prompt: string
-  tools?: string[]
-  disallowedTools?: string[]
-  model?: string
-  maxTurns?: number
-  effort?: string
-}
-```
+## The capability audit and its gate
 
-Four host-bundled subagents ship alongside the overlay (`lib/claude/agents/subagents`):
-<Term>workflow-designer</Term>, <Term>workflow-debugger</Term>,
-<Term>workflow-refactorer</Term>, and <Term>workflow-doc-writer</Term>.
-`resolveAllSubagents({ context })` (`lib/claude/agents/subagents/index.ts:118`) unions
-the built-ins with the live overlay registry and projects plugin entries under their
-namespaced ids. The team session enables them at build time:
+Because capabilities are stored as plain id lists, a disabled plugin can leave a Squad referencing ids that no longer resolve. The audit detects this without ever persisting the result.
 
-```typescript
-// lib/claude/build-options.ts:1458-1462 (team context union)
-const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
-opts.agents = { ...(opts.agents ?? {}), ...resolveAllSubagents({ context: "team" }) }
-```
+`buildKnownCapabilityIds()` (`capability-audit.ts:109`) snapshots eight buckets, the seven capability lists plus `sharedMemoryAdapterIds`, by unioning the Dexie skill, MCP and A2UI tables, the overlay registries, and the built-in subagent ids. `validateInstanceCapabilitiesWith(known, team, teammate?)` (`:155`) diffs an instance against that snapshot into `CapabilityAuditWarning[]`. `refreshAllInstanceCapabilityWarnings()` (`:250`) maintains a derived, never-persisted sidecar map, and `getInstanceCapabilityWarnings` (`:257`) and `getTeammateCapabilityWarnings` (`:262`) feed the UI.
 
-## 4. Plugin agent-team templates (overlay registry #7)
+The pre-run gate is in `lib/ai/agent/agent-team-runtime.ts:495`. Its behaviour depends on the run's gate policy, which is the headless split rather than a single hardcoded modal.
 
-Plugins declare complete team blueprints via `manifest.agentTeamTemplates`. Each entry
-can declare a `requires` block of cross-capability dependencies.
+- `capabilityAudit === "block"` (interactive) raises a critical notification carrying `openApproval: { scope: "agent-team-capability-audit", id: runId }` and waits on the approval bus. Anything other than approve cancels the run. The notify is load-bearing: without it the gate used to wait on a scope no UI ever produced, hanging even on the desktop.
+- Otherwise the run emits a warning that it is proceeding with stale capabilities, and continues.
 
-```typescript
-// types/plugin/plugin-agent-team-template.ts:110
-export interface PluginAgentTeamTemplateDef {
-  id: string
-  name: string
-  description: string
-  category: string
-  teammates: /* roster */ unknown[]
-  taskTemplates?: unknown[]
-  config?: unknown
-  icon?: string
-  requires?: TeamAgentTemplateRequires   // :41 — cross-capability dependency block
-}
-```
+<Callout type="warn" title="Cleanup has no store action any more">
+  The store's `clearStaleCapabilityIds` went with the retired workspace. The audit still
+  detects and reports stale ids, and the gate still stops an interactive run, but there is no
+  one-click strip. The operator edits the Squad's capabilities in Settings.
+</Callout>
 
-At register time `validateTemplateRequires(template)`
-(`lib/plugin/registries/agent-team-template-registry.ts:88`) checks each capability
-bucket against the live registries and stamps **non-blocking** warnings
-(`missing-subagent`, etc.); `refreshAllTemplateWarnings()` (`:139`) re-runs when sibling
-registries mutate. The settings UI surfaces these as a destructive missing-dependencies
-badge and disables the Use button:
+## Teammate editing reuses PresetEditor
 
-```tsx
-// components/settings/agent/agent-team-templates-section.tsx:350-378
-{hasMissingDeps && <Badge variant="destructive">{t("missingDependencies")}</Badge>}
-<Button disabled={hasMissingDeps} onClick={onUse}>{t("use")}</Button>
-```
+Teammate editing does not fork an editor. `teammateToPresetState(teammate, team)` (`lib/ai/agent/team/teammate-preset-adapter.ts:97`) maps a teammate into `PresetEditorState`, flattening each capability overlay against the Squad bundle, and `presetStateToTeammateConfig(state, previous, team)` (`:180`) is the inverse, rebuilding per-key overlays through `diffListToOverlay` (`:149`). `TeammateConfigDialog` wraps `PresetEditor` with extra sections and a roster section. Fields with no preset equivalent, such as specialization, runtime and temperature, ride along as metadata across the round trip.
 
-`projectPluginTemplate(entry)` (`lib/agent-team/project-plugin-template.ts:21`) projects
-a plugin def into the host `AgentTeamTemplate` consumed by the workspace template picker —
-id namespaced `pluginId:id`, carrying systemPrompt, capabilities, governanceHints, tags,
-and iconKey.
+## Lifecycle hooks
 
-<Status status="info">Templates with missing deps stay visible but inert — operators get
-a discoverability nudge instead of a silent failure.</Status>
+Thirteen hooks, declared on `PluginHooks` and dispatched from `lib/plugin/messaging/hooks-system.ts:544-594` through one private `dispatchTeamHook` helper:
 
-## 5. Capability audit + pre-run gate
+`onTeamStart`, `onTeamPlanReady`, `onTeammateClaim`, `onTeammateRelease`, `onTeamBudgetWarn`, `onTeamComplete`, `onConsensusOpened`, `onConsensusVoted`, `onConsensusResolved`, `onSharedMemoryWrite`, `onSharedMemoryDelete`, `onTeamDelegationStart`, `onTeamDelegationComplete`.
 
-Because capabilities are stored as plain id lists, a disabled plugin can leave a team
-referencing ids that no longer resolve. The audit detects this without ever persisting
-the result.
+All are fire-and-forget `void` handlers dispatched in hook execution order, each in its own microtask with per-plugin try/catch, and each recorded through `recordPluginHookEvent`, so one misbehaving plugin's errors are observable without crashing the Squad runtime. Every payload carries a `PluginTeamHookContext` with `teamId` and `runId`. Budget warnings reuse `BudgetGuard`'s existing emitters rather than adding new infrastructure.
 
-`buildKnownCapabilityIds()` (`lib/ai/agent/team/capability-audit.ts:110`) snapshots **8
-buckets** — the 7 capability lists plus `sharedMemoryAdapterIds` — by unioning the Dexie
-skill/MCP/A2UI tables, the overlay registries, and `BUILT_IN_SUBAGENT_IDS`.
-`validateInstanceCapabilitiesWith(known, team, teammate?)` (`:156`) diffs an instance
-against that snapshot into `CapabilityAuditWarning[]`.
-`refreshAllInstanceCapabilityWarnings()` (`:251`) maintains a derived, never-persisted
-sidecar map, refreshed on plugin disable; `getInstanceCapabilityWarnings(teamId)` (`:258`)
-and `getTeammateCapabilityWarnings(teamId, teammateId)` (`:263`) feed the UI.
+`ctx.team.getRunStatus` is the pull-style complement for a plugin that holds only `ctx.team`.
 
-```typescript
-// lib/ai/agent/team/agent-team-runtime.ts:173-199 (trimmed) — pre-run gate
-const known = await buildKnownCapabilityIds()
-const auditWarnings = [
-  ...validateInstanceCapabilitiesWith(known, team),
-  ...workers.flatMap((w) => validateInstanceCapabilitiesWith(known, team, w)),
-]
-if (auditWarnings.length > 0) {
-  void refreshAllInstanceCapabilityWarnings()
-  const decision = await waitForDecision(
-    { scope: "agent-team-capability-audit", id: runId }, ac.signal
-  ).catch(() => ({ outcome: "reject" as const }))
-  if (decision.outcome !== "approve") {
-    return { runId: "", status: "cancelled", reason: "Operator declined to run with stale capabilities" }
-  }
-}
-```
+## The `ctx.team` API
 
-The store-side `clearStaleCapabilityIds` action strips stale ids from an instance once
-the operator chooses to clean up rather than approve.
+The host module is `lib/plugin/api/team-api.ts`, wired into every plugin context by `createTeamAPI(pluginId)`. It is published to authors both from the SDK root (as types, through `./context`) and from the dedicated subpath `@cognia/plugin-sdk/api/team`, which under ADR-0156 is the explicit allowlist. Every SDK export is a **type**, because the host owns the behaviour.
 
-## 6. The plugin-manager dispatch loop
+Thirty methods, gated by five permission ids.
 
-All nine uniform-shaped capabilities are dispatched by one loop. The descriptor table
-`OVERLAY_REGISTRY_CAPABILITIES` (`lib/plugin/contracts/capability-bridge-map.ts:156-303`)
-maps each capability to its manifest field and register/unregister handlers.
+| Group | Permission | Methods |
+| --- | --- | --- |
+| Reads | `team:read` | `listTeams`, `getTeam`, `listTeammates`, `getTeammate`, `listTasks`, `subscribe`, `getRunStatus`, `listEvents`, `getExecutionReport`, `listCheckpoints` |
+| Board and roster | `team:write` | `createTask`, `updateTask`, `reorderTask`, `assignTask`, `addComment`, `attachTaskFile`, `moveTask`, `addTeammate`, `updateTeammate`, `removeTeammate`, `updateTeamConfig`, `instantiateTemplate` |
+| Lifecycle | `team:write` | `createTeam`, `deleteTeam`, `duplicateTeam` |
+| Save as template | `team:write` **and** `templates:library:write` | `saveAsTemplate` |
+| Run control | `agent:dispatch` for `start`, `agent:control` for the rest | `start`, `pause`, `resume`, `stop` |
 
-| Capability | capability-bridge-map.ts lines |
-|------------|--------------------------------|
-| skills | 157-177 |
-| mcp-server-preset | 178-193 |
-| native-anthropic-tool | 194-209 |
-| external-agent-preset | 210-227 |
-| character-pack | 228-245 |
-| subagent | 246-265 |
-| agent-team-template | 266-277 |
-| shared-memory-adapter | 278-290 |
-| workflow-template | 291-302 |
+Five details worth knowing before writing against it.
 
-The manager iterates the descriptor keys with per-entry try/catch isolation, so one bad
-entry never aborts a plugin's registration:
+- **`saveAsTemplate` is dual-gated on purpose.** It is two writes: a Squad template in the legacy store *and* a draft in the user's unified template library. Naming only `team:write` was what made it a back door. It additionally goes through the same library-write confirmation broker `ctx.templates.createDraft` uses, and stamps authorship by refusing a foreign stamp rather than overwriting one.
+- **`createTeam` goes through `createSquad`**, not the raw store action, so a plugin-made Squad lands on durable-v2 where the workspace supports it.
+- **`instantiateTemplate` uses the legacy instantiator**, so a Squad a plugin creates from a template gets no `TemplateInstanceRecord`, and therefore no lineage, update or detach. See [Surfaces](./surfaces) for the path that does.
+- **Denials are values, not throws.** `moveTask`, `removeTeammate` and `deleteTeam` return a refusal (`{ ok: false, reason }` or `false`) rather than raising.
+- **`start` goes through `startSquadRun`**, ADR-0140's one dispatch funnel. `pause`, `resume` and `stop` share one body mapping onto `agentTeamManager`, answering `squad_not_found` for an unknown id.
 
-```typescript
-// lib/plugin/core/manager.ts:2482-2495 (register loop; :2720 mirrors for unregister)
-for (const cap of OVERLAY_REGISTRY_CAPABILITY_KEYS) {
-  const descriptor = OVERLAY_REGISTRY_CAPABILITIES[cap]
-  const entries = plugin.manifest[descriptor.manifestField] as
-    ReadonlyArray<{ id: string }> | undefined
-  if (!entries?.length) continue
-  for (const entry of entries) {
-    try { descriptor.registerEntry(entry, { pluginId }) }
-    catch (err) { loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} ${entry.id}:`, err) }
-  }
-}
-```
-
-### Cross-registry refresh hooks
-
-Registering or unregistering one capability can resolve or stale another's warnings.
-
-| When this registry changes | Refreshes warnings for | Lines |
-|----------------------------|------------------------|-------|
-| skill / mcp / native-tool | char-pack + team-template + workflow-template | 165-208 |
-| character-pack | team-template | 237-244 |
-| external-preset | team-template | 219-226 |
-| subagent | team-template + workflow-template | 255-264 |
-
-Templates clear their missing-dependency warnings as soon as the deps arrive.
-
-## 7. Teammate preset adapter (PresetEditor reuse)
-
-Teammate editing reuses the existing `<PresetEditor>` rather than a bespoke editor. The
-teammate-preset-adapter bridges the two shapes:
-
-- `teammateToPresetState(teammate, team)` (`lib/ai/agent/team/teammate-preset-adapter.ts:97`)
-  maps a teammate into `PresetEditorState`: systemPrompt → content, model → model,
-  tools → allowed/disallowed lists, and each `capabilities.*` overlay flattened via
-  `overlayToFlatList(undefined, overlay.X, teamBundle.X)`; `characterPackIds[0]` →
-  `characterPackId`, `externalAgentPresetIds[0]` → `externalAgentPresetId`.
-- `presetStateToTeammateConfig(state, previous, team)` (`:180`) is the inverse, rebuilding
-  per-key overlays via `diffListToOverlay` (`:149-171`).
-
-`<TeammateConfigDialog>` wraps `<PresetEditor>` with the new `extraSections` /
-`requireContent` props plus a roster section. Lossy fields with no preset equivalent
-(specialization / runtime / temperature) are carried as metadata across the round-trip.
-
-## 8. Lifecycle hooks
-
-`runTeamLifecycle` and the dispatch executor fire the canonical team hook set. Budget
-warnings reuse `BudgetGuard`'s existing `on("warning_crossed")` /
-`on("critical_crossed")` emitters — no new emitter infrastructure was added.
-
-Canonical hooks: `onTeamStart`, `onTeamPlanReady`, `onTeammateClaim`,
-`onTeammateRelease`, `onTeamBudgetWarn`, `onTeamComplete`, `onConsensusOpened`,
-`onConsensusVoted`, `onConsensusResolved`, `onSharedMemoryWrite`, `onSharedMemoryDelete`,
-`onTeamDelegationStart`, `onTeamDelegationComplete`.
-
-```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:190-216 (claim/release lifecycle)
-dispatchOnTeammateClaim(payload); dispatchOnAgentStart(payload)
-// ... teammate runs ...
-dispatchOnTeammateRelease(payload)
-dispatchOnAgentComplete(payload) // or dispatchOnAgentError on failure
-```
-
-The consensus / shared-memory / delegation orchestrators each fire their matching hook
-set — see <LinkCard href="./consensus-delegation-memory" title="Consensus, Delegation & Memory"
-description="The three thin orchestrators" />.
-
-## 9. ADR-0032 verification
-
-Every mechanism the ADR promised is wired and verified against source — no drift.
-
-| # | Mechanism | Evidence |
-|---|-----------|----------|
-| 1 | Two-layer capability scope | capability-resolver.ts:91, :135 |
-| 2 | Subagent plugin capability | plugin-subagent.ts:29 + subagent-registry + subagents/index.ts:118 |
-| 3 | Agent-team-template capability | agent-team-template-registry.ts:88 validates requires |
-| 4 | Full hook integration | dispatch-teammate.ts:190-216 |
-| 5 | Consensus / SharedMemory / Delegation | three orchestrator modules |
-| 6 | PresetEditor reuse | teammate-preset-adapter.ts:97, :180 |
-| 7 | Workspace settings refactor | accordion + Plugins & capabilities section |
-| + | Capability audit | capability-audit.ts:110, :156, :251 + pre-run gate |
-| + | Plugin manager dispatch | capability-bridge-map.ts:156-303 |
-| + | Teammate &#124; Character bridge | teammate-character.ts:56 |
+`subscribe` is the only method with a disposer, so a plugin must release it. The rest are one-shot calls.
 
 ## Related
 
 <Cards>
-  <Card href="./data-model" title="Data Model" description="AgentTeam / AgentTeammate config shapes" />
+  <Card href="./data-model" title="Data Model & Store" description="AgentTeam and AgentTeammate config shapes" />
   <Card href="./consensus-delegation-memory" title="Consensus, Delegation & Memory" description="The three thin orchestrators and their hooks" />
-  <Card href="./workspace-ui" title="Workspace UI" description="Plugins & capabilities accordion, template picker" />
+  <Card href="./surfaces" title="Surfaces" description="The Settings gallery, the template lineage path, the composer chip" />
   <Card href="../subsystems/plugin-system" title="Plugin System" description="Overlay registries and the manifest contract" />
   <Card href="../adr/0032-agent-team-plugin-integration" title="ADR-0032" description="Agent Team Plugin Integration decision record" />
 </Cards>

@@ -9,7 +9,6 @@
     "consensus-delegation-memory",
     "ultracode-and-patterns",
     "capabilities-and-plugins",
-    "workspace-ui",
-    "workspace-chat"
+    "surfaces"
   ]
 }

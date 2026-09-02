@@ -18,7 +18,6 @@ import {
   selectTeamTeammates,
   selectActiveTeamConsensus,
   selectTeamConsensus,
-  selectActiveTeamDelegations,
   selectTeamDelegations,
   selectActiveDelegations,
   selectSharedMemoryEntriesForReader,
@@ -290,14 +289,21 @@ describe("agent-team-store derived selectors with populated state", () => {
     expect(selectActiveDelegations(state).map((d) => d.id)).toEqual(["d-1"])
   })
 
-  it("the activeTeamId fallbacks still resolve the last-created team", () => {
+  it("the activeTeamId fallback still resolves the last-created team", () => {
     expect(
       selectActiveTeamConsensus(state)
         .map((c) => c.id)
         .sort()
     ).toEqual(["c-1", "c-2"])
+  })
+
+  // Delegations have no active-team twin: the panel resolves
+  // `teamId ?? activeTeamId` itself and names the answer here, so the fallback
+  // exists at one call site rather than as a second selector.
+  it("exposes no active-team delegations selector", () => {
+    expect("selectActiveTeamDelegations" in barrel).toBe(false)
     expect(
-      selectActiveTeamDelegations(state)
+      selectTeamDelegations(state, state.activeTeamId ?? undefined)
         .map((d) => d.id)
         .sort()
     ).toEqual(["d-1", "d-2"])

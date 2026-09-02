@@ -1,359 +1,173 @@
 ---
-title: 能力体系与插件集成
-description: Agent Team 如何消费插件生态 —— 两层能力作用域、teammate→Character 桥接、插件子智能体与团队模板、能力审计门，以及插件管理器分派循环（ADR-0032）。
+title: 能力与插件
+description: 一支小队如何消费插件生态。两层能力作用域与它的运行时收紧、队友到 Character 的桥、覆盖层注册表、能力审计闸门、13 个生命周期钩子，以及 ctx.team API。
 ---
 
-# 能力体系与插件集成
+# 能力与插件
 
-Agent Team 是**一等的插件生态消费者**。一个团队携带一个默认能力池；每个队友在其之上叠加；解析器把这一对扁平化为一份 `ResolvedCapabilities` 快照；该快照被投影到一个合成的 `Character` 上；随后队友便驶入*完整的* build-options 流水线——与直接聊天用于技能、MCP 服务器、computer-use 和权限的那条流水线完全相同。插件通过统一的叠加注册表扩展所有这些内容，正如它们扩展角色与技能一样。本页梳理 ADR-0032 引入的每一处接缝。
+小队是插件生态的一等消费者。它携带一个默认能力池，每名队友在其上叠加，解析器把这一对压平，运行时再把结果收紧到执行绑定真正能提供的范围，然后队友就骑上了与直聊*同一条* build-options 流水线。插件通过统一的覆盖层注册表扩展这一切，也通过 `ctx.team` 反向伸进来。
 
 <TLDR>
-- **两层作用域** —— `TeamCapabilityBundle`（`types/agent/agent-team.ts:193`）是团队默认池；`TeammateCapabilityOverlay`（`:222`）按键进行增/删/替换；`resolveTeammateCapabilities`（`lib/ai/agent/team/capability-resolver.ts:91`）将二者合并为 `ResolvedCapabilities`（`:238`）。
-- **7 个能力键** —— `mcpServerIds`、`skillIds`、`nativeAnthropicToolIds`、`characterPackIds`、`externalAgentPresetIds`、`subagentIds`、`a2uiTemplateIds`（`capability-resolver.ts:36-44`）。
-- **Character 桥接** —— `teammateToCharacter`（`lib/ai/agent/team/teammate-character.ts:56`）为纯函数，从不持久化，稳定 id 为 `__teammate__:{id}`；在 `lib/ai/agent/team/dispatch-teammate.ts:107-113` 处消费。
-- **插件叠加** —— `PluginSubagentDef`（`types/plugin/plugin-subagent.ts:29`）与 `PluginAgentTeamTemplateDef`（`types/plugin/plugin-agent-team-template.ts:110`）；由插件管理器循环（`lib/plugin/core/manager.ts:2482-2495`）基于 `OVERLAY_REGISTRY_CAPABILITIES`（`lib/plugin/contracts/capability-bridge-map.ts:156-303`）分派。
-- **审计门** —— `buildKnownCapabilityIds`（`lib/ai/agent/team/capability-audit.ts:110`）+ `validateInstanceCapabilitiesWith`（`:156`）馈入运行前的操作者门（`lib/ai/agent/team/agent-team-runtime.ts:173-199`）。
+- **两层加一次收紧。** `TeamCapabilityBundle` 是池，`TeammateCapabilityOverlay` 按成员调整它，`resolveTeammateCapabilities`（`lib/ai/agent/team/capability-resolver.ts:91`）合并两者，`clampCapabilitiesToRuntime`（`:170`）只会做减法。
+- **7 个能力键**，只在 `CAPABILITY_KEYS`（`capability-resolver.ts:36-44`）中枚举一次。
+- **Character 桥。** `teammateToCharacter`（`lib/ai/agent/team/teammate-character.ts:62`）是纯的、从不持久化、id 稳定为 `__teammate__:{id}`，在 `dispatch-teammate.ts:236` 被消费。
+- **20 个覆盖层能力**，位于 `OVERLAY_REGISTRY_CAPABILITIES`（`lib/plugin/contracts/capability-bridge-map.ts:220`），由插件管理器里的一个循环统一派发。
+- **审计闸门。** `buildKnownCapabilityIds`（`capability-audit.ts:109`）与 `validateInstanceCapabilitiesWith`（`:155`）喂给一道运行前闸门，其行为取决于本次运行的闸门策略。
+- **`ctx.team`** 暴露 30 个方法，由五个权限 id 把守。
+
 </TLDR>
 
-## 1. 两层能力作用域
+## 两层能力作用域
 
-一个团队的能力分两层声明。团队级的 `TeamCapabilityBundle` 是每个队友继承的**默认池**；每个队友可选地通过 `TeammateCapabilityOverlay` 收窄或扩展它。合并是单个纯函数——`resolveTeammateCapabilities`——它产出一份没有 undefined 字段的扁平 `ResolvedCapabilities` 记录，因此下游消费者无需 null 守卫即可迭代。
+一支小队的能力分两层声明。小队级的 `TeamCapabilityBundle` 是每名队友都继承的默认池，每名队友可以通过 `TeammateCapabilityOverlay` 选择性地收窄或扩展它。这次合并是一个纯函数，产出一个没有 undefined 字段的扁平 `ResolvedCapabilities` 记录，于是下游消费者无需空值守卫即可遍历。
 
 ```typescript
-// types/agent/agent-team.ts:193 (TeamCapabilityBundle) + :222 (overlay) + :238 (resolved)
-export interface TeamCapabilityBundle {
-  mcpServerIds?: string[]
-  skillIds?: string[]
-  nativeAnthropicToolIds?: string[]
-  characterPackIds?: string[]
-  externalAgentPresetIds?: string[]
-  subagentIds?: string[]
-  a2uiTemplateIds?: string[]
-}
-
-export interface CapabilityListOverlay {
-  add?: string[]      // add these ids to the team default
-  remove?: string[]   // subtract these ids from the team default
-  replace?: string[]  // replace the team default entirely (wins over add/remove)
-}
-
-export interface TeammateCapabilityOverlay {
-  mcpServerIds?: CapabilityListOverlay
-  // ... one CapabilityListOverlay per capability key
-}
+// lib/ai/agent/team/capability-resolver.ts:36-44
+const CAPABILITY_KEYS = [
+  "mcpServerIds",
+  "skillIds",
+  "nativeAnthropicToolIds",
+  "characterPackIds",
+  "externalAgentPresetIds",
+  "subagentIds",
+  "a2uiTemplateIds",
+] as const
 ```
 
-### 7 个能力键
-
-解析器把恰好七个键枚举为一个模块级元组（`capability-resolver.ts:36-44`）。每个键都独立地被叠加。
-
-| 键 | 解析为 | 由谁消费 |
-|-----|-------------|-------------|
+| 键 | 解析成 | 被谁消费 |
+| --- | --- | --- |
 | `mcpServerIds` | MCP 服务器预设 | `Character.mcpServerIds` |
-| `skillIds` | 插件 / 原生技能 | `Character.skillIds` + `pluginSkillIds` |
-| `nativeAnthropicToolIds` | computer-use 工具 id | `enableComputerUse` + `computerUseSettings` |
-| `characterPackIds` | ADR-0030 人格包 | 运行时的人格投影 |
+| `skillIds` | 插件与原生技能 | `Character.skillIds` 加 `pluginSkillIds` |
+| `nativeAnthropicToolIds` | Computer-use 工具 id | `enableComputerUse` 与 `computerUseSettings` |
+| `characterPackIds` | ADR-0030 人格包 | 运行期的人格投影 |
 | `externalAgentPresetIds` | 外部 CLI 预设 | `lib/ai/agent/external/presets.ts` |
-| `subagentIds` | 内置或 `pluginId:id` 子智能体 | `resolveAllSubagents` |
-| `a2uiTemplateIds` | A2UI 富内容模板 | IM &#124; A2UI 桥 |
+| `subagentIds` | 内置或 `pluginId:id` 形式的子智能体 | `resolveAllSubagents` |
+| `a2uiTemplateIds` | A2UI 富内容模板 | A2UI 到 IM 的桥 |
 
 ### 叠加语义
 
-对每个键，合并遵循一条规则：如果存在 `replace`，它短路并胜出（团队默认被忽略）；否则结果为 `(team default minus remove) union add`。重复 id 在保持首次出现顺序的前提下去重，因此运行时总是看到一个稳定、最小的 id 列表。该函数刻意保持纯且同步——无注册表查找、无持久化、无日志。
+每个键的合并只有一条规则。若存在 `replace` 就短路取胜，小队默认值被忽略。否则结果是小队默认值减去 `remove` 再并上 `add`。重复 id 会按首次出现顺序去重，于是运行时总能看到一份稳定且最小的 id 列表。`applyOverlay`（`:65`）是每个键的内核，整个函数是纯的、同步的：没有注册表查询、没有持久化、没有日志。
 
-```typescript
-// lib/ai/agent/team/capability-resolver.ts:91-127
-export function resolveTeammateCapabilities(
-  team: Pick<AgentTeam, "config">,
-  teammate: Pick<AgentTeammate, "config">
-): ResolvedCapabilities {
-  const teamBundle: TeamCapabilityBundle = team.config.capabilities ?? {}
-  const overlay: TeammateCapabilityOverlay = teammate.config.capabilities ?? {}
-  // ... fast path: both empty → fresh empty bundle (never shares the sentinel
-  // arrays, because callers commonly push onto the returned lists) ...
-  const result: ResolvedCapabilities = {
-    mcpServerIds: [], skillIds: [], nativeAnthropicToolIds: [],
-    characterPackIds: [], externalAgentPresetIds: [], subagentIds: [], a2uiTemplateIds: [],
-  }
-  for (const key of CAPABILITY_KEYS) {
-    result[key] = applyOverlay(teamBundle[key], overlay[key])
-  }
-  return result
-}
-```
+`resolveTeamCapabilities`（`:135`）只解析小队级的池。它支撑设置里的 Plugins 视图，也在注册时校验团队模板的 `requires` 块。
 
-`applyOverlay`（`:65-84`）是每键内核：`if (overlay?.replace !== undefined) return dedupe(overlay.replace)`，否则 dedupe `(base minus removeSet) ++ add`。`resolveTeamCapabilities`（`:135`）单独解析团队级池，用于在没有队友上下文时发出团队范围的工件。
+### 第三个阶段：运行时收紧
 
-### 端到端流程
+`clampCapabilitiesToRuntime(resolved, effective)`（`:170`，ADR-0090 Phase 7）把已解析的束收紧到生效的执行绑定真正支持的范围。它只会**减**。
+
+| 运行时维度 | 收紧 |
+| --- | --- |
+| `mcp` | `mcpServerIds` |
+| `subagents.native` | `subagentIds` |
+| `tools.ordinary` | `nativeAnthropicToolIds` 与 `skillIds` |
+
+人格包、A2UI 模板与外部预设原样通过。所以一次队友派发要经过三个阶段，先是小队束、再是队友叠加层、最后是运行时收紧，然后才抵达 `lib/claude/build-options.ts`。
 
 ```mermaid
 flowchart TD
   PM[Plugin manifests] --> OR[Overlay registries]
-  OR --> TB[TeamCapabilityBundle\nteam.config.capabilities]
-  OR --> TO[TeammateCapabilityOverlay\nteammate.config.capabilities]
+  OR --> TB["TeamCapabilityBundle<br/>team.config.capabilities"]
+  OR --> TO["TeammateCapabilityOverlay<br/>teammate.config.capabilities"]
   TB --> R[resolveTeammateCapabilities]
   TO --> R
-  R --> RC[ResolvedCapabilities]
-  RC --> D[dispatch-teammate]
+  R --> CL["clampCapabilitiesToRuntime<br/>removes only"]
+  CL --> D[dispatch-teammate]
   D --> TC[teammateToCharacter]
   TC --> SO[resolveSendOptions]
-  SO --> RUN[Teammate dispatch]
+  SO --> RUN[Teammate turn]
 ```
 
-解析后的能力按队友、按运行缓存，因此合并每次只运行一遍：
+已解析的束按「每名队友每次运行」缓存在 `TeamRunContext` 上，所以合并每次只跑一遍（`dispatch-teammate.ts:598`）。
 
-```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:182-188
-if (!teamCtx.resolvedCapabilities.has(teammate.id)) {
-  teamCtx.resolvedCapabilities.set(
-    teammate.id,
-    resolveTeammateCapabilities(teamCtx.team, teammate)
-  )
-}
-```
+## 队友到 Character 的桥
 
-## 2. teammate → Character 桥接
+队友不是一个被持久化的人格。要跑一名队友，派发器会用队友配置加它已解析的能力，合成一个临时的 `Character`。这次合成是纯的、从不持久化，id 稳定为 `__teammate__:{id}`，于是可以在一次运行内被一致地引用而不与真实角色撞车。
 
-队友不是一个持久化的人格。要运行它，分派器从队友配置加上其 `ResolvedCapabilities` 合成出一个临时 `Character`。该合成是**纯的且从不持久化**，带有稳定 id `__teammate__:{id}`，因此可在一次运行内被一致地引用，而不会与真实角色冲突。
+正是这一次投影，让小队白拿到了整条直聊流水线。技能、MCP 服务器、computer-use、权限、钩子、记忆和侧车全都原封不动地来自 `resolveSendOptions`。
 
-```typescript
-// lib/ai/agent/team/teammate-character.ts:56-103 (trimmed)
-export function teammateToCharacter(input: TeammateCharacterInput): Character {
-  const { team, teammate, resolvedCaps, cwd, modelHint } = input
-  const systemPrompt =
-    teammate.config?.systemPrompt?.trim() ||
-    team.config?.defaultSystemPrompt?.trim() ||
-    DEFAULT_TEAMMATE_SYSTEM_PROMPT
-  const enableComputerUse = resolvedCaps.nativeAnthropicToolIds.length > 0
-  const character: Character = {
-    id: teammateCharacterId(teammate),   // __teammate__:{id}
-    name: teammate.name,
-    systemPrompt, createdAt: ts, updatedAt: ts,
-    ...(mcpServerIds ? { mcpServerIds } : {}),
-    ...(skillIds ? { skillIds, pluginSkillIds: skillIds } : {}),
-    ...(allowedTools ? { allowedTools } : {}),
-    ...(cwd ? { workingDir: cwd } : {}),
-    enableComputerUse,
-    ...(enableComputerUse
-      ? { computerUseSettings: { allowedToolIds: [...resolvedCaps.nativeAnthropicToolIds] } }
-      : {}),
-  }
-  return character
-}
-```
+## 插件覆盖层注册表
 
-### 字段映射
+插件贡献能力的方式，和它们贡献角色与技能的方式一样，都是通过统一的覆盖层注册表。`OVERLAY_REGISTRY_CAPABILITIES` 里的每一项把一个 manifest 字段和一对注册 / 反注册处理器配起来。总共有二十项。下面这些是小队会读的。
 
-| 来源 | Character 字段 | 备注 |
-|--------|-----------------|-------|
-| `resolvedCaps.mcpServerIds` | `mcpServerIds` | 为空 → 省略 → 继承默认 |
-| `resolvedCaps.skillIds` | `skillIds` + `pluginSkillIds` | 两者都设置，用于多态解析 |
-| `resolvedCaps.nativeAnthropicToolIds` | `enableComputerUse` + `computerUseSettings.allowedToolIds` | 非空列表会开启 computer-use |
-| `teammate.config.tools` | `allowedTools` | 直接的工具允许列表 |
-| `cwd` | `workingDir` | 每次分派的工作目录 |
-| `teammateCharacterId(teammate)` | `id` | 稳定的 `__teammate__:{id}`（`:23`） |
+| 能力键 | 来源 | 能力 id 与 manifest 字段 |
+| --- | --- | --- |
+| `skillIds` | `lib/plugin/registries/skill-registry.ts:15` | `skills` / `skills` |
+| `mcpServerIds` | `lib/plugin/registries/mcp-server-preset-registry.ts:25` | `mcp-server-preset` / `mcpServerPresets` |
+| `nativeAnthropicToolIds` | `lib/plugin/registries/native-anthropic-tool-registry.ts:24` | `native-anthropic-tool` / `nativeAnthropicTools` |
+| `characterPackIds` | `lib/plugin/registries/character-pack-registry.ts:42` | `character-pack` / `characterPacks` |
+| `externalAgentPresetIds` | `lib/ai/agent/external/presets.ts:331` | `external-agent-preset` / `externalAgentPresets` |
+| `subagentIds` | `lib/plugin/registries/subagent-registry.ts:25` | `subagent` / `subagents` |
+| `a2uiTemplateIds` | Dexie `a2uiTemplates`，不是插件覆盖层注册表 | `a2ui` 能力，经由 A2UI 桥 |
 
-子智能体在 **session** 层（session kind 为 `team`）启用，而非在 Character 上——参见 §3。合成出的 character 立即被分派器消费，由其穿过完整的 send-options 流水线：
+另有两个注册表与小队相邻，但不是能力键。`agent-team-template-registry.ts:62` 从插件 manifest 收取小队蓝图，在注册时校验每份模板的 `requires` 块，并盖上非阻断的警告而不是拒绝，于是一份缺依赖的模板仍然可见但惰性，操作者拿到的是一次可发现性提示而不是一次静默失败。`shared-memory-adapter-registry.ts` 则通过 `config.sharedMemoryAdapterId` 按小队选择性启用。
 
-```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:107-113
-const character = teammateToCharacter({ team, teammate, resolvedCaps, cwd, modelHint })
-const sendOptions = await resolveSendOptions({ character, session, /* ... */ })
-```
+插件自己的模板由 `projectPluginTemplate` 投影成宿主的 `AgentTeamTemplate` 形状，它铸出运行期 id `pluginId:templateId`，并携带 ADR-0032 的扩展字段（系统提示词、能力、治理提示、标签、图标键）。模板平台注册它用的正是同一个字符串，这也是为什么插件行的定义 id 会被原样返回。
 
-从这里开始，队友驶入与 <LinkCard href="./built-in-agent"
-title="Built-in Agent" description="resolveSendOptions assembly" /> 和
-<LinkCard href="./characters" title="Characters" description="Character runtime shape" /> 中所记述的相同路径。
+### 派发循环
 
-## 3. 插件子智能体（叠加注册表 #6）
+全部二十个覆盖层能力由插件管理器里的一个循环注册和反注册（注册在 `lib/plugin/core/manager.ts:5280`，反注册在 `:5778`），它遍历 `OVERLAY_REGISTRY_CAPABILITY_KEYS`，每一项各自 try/catch 隔离，于是一条坏的 manifest 条目绝不会中断一个插件的整体注册。
 
-插件通过 `manifest.subagents` 声明子智能体，镜像 Claude SDK 的 `AgentDefinition` 形状。它们通过一行 `createOverlayRegistry` 实例注册，并以 `pluginId:id` 命名空间化，使分派器名称冲突成为不可能。
+注册或反注册某一个能力可能会解掉或造成另一个能力的警告，所以有几项会向外扇出。注册一个技能、一个 MCP 预设或一个原生工具会刷新 character-pack、team-template 与 workflow-template 的警告。注册一个子智能体会刷新 team-template 与 workflow-template 的警告。依赖一到齐，模板就会清掉自己的缺依赖警告。
 
-```typescript
-// types/plugin/plugin-subagent.ts:29
-export interface PluginSubagentDef {
-  id: string
-  name: string
-  description: string
-  prompt: string
-  tools?: string[]
-  disallowedTools?: string[]
-  model?: string
-  maxTurns?: number
-  effort?: string
-}
-```
+## 能力审计与它的闸门
 
-四个宿主自带的子智能体与该叠加一起出厂（`lib/claude/agents/subagents`）：
-<Term>workflow-designer</Term>、<Term>workflow-debugger</Term>、
-<Term>workflow-refactorer</Term> 与 <Term>workflow-doc-writer</Term>。
-`resolveAllSubagents({ context })`（`lib/claude/agents/subagents/index.ts:118`）将内置项与实时叠加注册表取并集，并把插件条目投影到它们命名空间化的 id 下。团队 session 在构建时启用它们：
+因为能力是以纯 id 列表存放的，一个被禁用的插件可以让一支小队引用着再也解析不出来的 id。审计会检测出这一点，而且从不持久化结果。
 
-```typescript
-// lib/claude/build-options.ts:1458-1462 (team context union)
-const { resolveAllSubagents } = await import("@/lib/claude/agents/subagents")
-opts.agents = { ...(opts.agents ?? {}), ...resolveAllSubagents({ context: "team" }) }
-```
+`buildKnownCapabilityIds()`（`capability-audit.ts:109`）快照八个桶，即七个能力列表加上 `sharedMemoryAdapterIds`，方式是把 Dexie 的技能、MCP 与 A2UI 表、覆盖层注册表和内置子智能体 id 求并。`validateInstanceCapabilitiesWith(known, team, teammate?)`（`:155`）把一个实例与该快照做差，得到 `CapabilityAuditWarning[]`。`refreshAllInstanceCapabilityWarnings()`（`:250`）维护一张派生的、从不持久化的旁注表，`getInstanceCapabilityWarnings`（`:257`）和 `getTeammateCapabilityWarnings`（`:262`）喂给界面。
 
-## 4. 插件 agent-team 模板（叠加注册表 #7）
+运行前闸门在 `lib/ai/agent/agent-team-runtime.ts:495`。它的行为取决于本次运行的闸门策略，也就是无头拆分，而不是一个写死的模态框。
 
-插件通过 `manifest.agentTeamTemplates` 声明完整的团队蓝图。每个条目可声明一个 `requires` 块，列出跨能力依赖。
+- `capabilityAudit === "block"`（交互式）会发出一条 critical 通知，带上 `openApproval: { scope: "agent-team-capability-audit", id: runId }`，然后在审批总线上等待。approve 之外的任何结果都会取消这次运行。这条通知是关键的：没有它，这道闸门曾经在等待一个没有任何 UI 会产生的 scope，即便在桌面端也会一直挂住。
+- 否则这次运行只发出一条「正在带着失效能力继续」的警告，然后继续。
 
-```typescript
-// types/plugin/plugin-agent-team-template.ts:110
-export interface PluginAgentTeamTemplateDef {
-  id: string
-  name: string
-  description: string
-  category: string
-  teammates: /* roster */ unknown[]
-  taskTemplates?: unknown[]
-  config?: unknown
-  icon?: string
-  requires?: TeamAgentTemplateRequires   // :41 — cross-capability dependency block
-}
-```
+<Callout type="warn" title="清理动作已经没有对应的 store action 了">
+  store 上的 `clearStaleCapabilityIds` 随已退役的工作区一起走了。审计仍然会检测并报告失效 id，
+  闸门也仍然会拦住一次交互式运行，但没有一键剔除。操作者要去设置里编辑该小队的能力。
+</Callout>
 
-注册时 `validateTemplateRequires(template)`
-（`lib/plugin/registries/agent-team-template-registry.ts:88`）针对实时注册表检查每个能力桶，并打上**非阻塞**警告（`missing-subagent` 等）；当同级注册表变更时 `refreshAllTemplateWarnings()`（`:139`）会重新运行。设置 UI 将这些显示为一个破坏性的缺失依赖徽章，并禁用 Use 按钮：
+## 队友编辑复用 PresetEditor
 
-```tsx
-// components/settings/agent/agent-team-templates-section.tsx:350-378
-{hasMissingDeps && <Badge variant="destructive">{t("missingDependencies")}</Badge>}
-<Button disabled={hasMissingDeps} onClick={onUse}>{t("use")}</Button>
-```
+队友编辑没有分叉出一个编辑器。`teammateToPresetState(teammate, team)`（`lib/ai/agent/team/teammate-preset-adapter.ts:97`）把一名队友映射成 `PresetEditorState`，并把每个能力叠加层相对小队束展平；`presetStateToTeammateConfig(state, previous, team)`（`:180`）是它的逆运算，通过 `diffListToOverlay`（`:149`）重建每个键的叠加层。`TeammateConfigDialog` 用额外区块和一个花名册区块包住 `PresetEditor`。没有预设对应物的字段，例如 specialization、runtime 和 temperature，以 metadata 的形式在往返中随行。
 
-`projectPluginTemplate(entry)`（`lib/agent-team/project-plugin-template.ts:21`）将一个插件 def 投影为工作区模板选择器消费的宿主 `AgentTeamTemplate`——id 命名空间化为 `pluginId:id`，携带 systemPrompt、capabilities、governanceHints、tags 和 iconKey。
+## 生命周期钩子
 
-<Status status="info">缺失依赖的模板保持可见但失活——操作者得到的是一个可发现性提示，而非静默失败。</Status>
+十三个钩子，声明在 `PluginHooks` 上，由 `lib/plugin/messaging/hooks-system.ts:544-594` 通过一个私有的 `dispatchTeamHook` 助手派发：
 
-## 5. 能力审计 + 运行前门
+`onTeamStart`、`onTeamPlanReady`、`onTeammateClaim`、`onTeammateRelease`、`onTeamBudgetWarn`、`onTeamComplete`、`onConsensusOpened`、`onConsensusVoted`、`onConsensusResolved`、`onSharedMemoryWrite`、`onSharedMemoryDelete`、`onTeamDelegationStart`、`onTeamDelegationComplete`。
 
-由于能力以纯 id 列表存储，被禁用的插件可能让一个团队仍引用着不再能解析的 id。审计在不持久化任何结果的前提下检测到这一点。
+它们全部是即发即忘的 `void` 处理器，按钩子执行顺序派发，各自在自己的微任务里、带每插件的 try/catch，并且都经 `recordPluginHookEvent` 记录，于是某个行为不端的插件的报错可被观测，却不会拖垮小队运行时。每个负载都带一个含 `teamId` 与 `runId` 的 `PluginTeamHookContext`。预算警告复用 `BudgetGuard` 已有的发射器，没有新增任何基础设施。
 
-`buildKnownCapabilityIds()`（`lib/ai/agent/team/capability-audit.ts:110`）对 **8 个桶**进行快照——7 个能力列表加上 `sharedMemoryAdapterIds`——做法是把 Dexie 的 skill/MCP/A2UI 表、叠加注册表以及 `BUILT_IN_SUBAGENT_IDS` 取并集。`validateInstanceCapabilitiesWith(known, team, teammate?)`（`:156`）把一个实例与该快照做差，得出 `CapabilityAuditWarning[]`。`refreshAllInstanceCapabilityWarnings()`（`:251`）维护一份派生的、从不持久化的旁挂映射，在插件禁用时刷新；`getInstanceCapabilityWarnings(teamId)`（`:258`）与 `getTeammateCapabilityWarnings(teamId, teammateId)`（`:263`）馈入 UI。
+对于只持有 `ctx.team` 的插件，`ctx.team.getRunStatus` 是这一族钩子的拉取式补充。
 
-```typescript
-// lib/ai/agent/team/agent-team-runtime.ts:173-199 (trimmed) — pre-run gate
-const known = await buildKnownCapabilityIds()
-const auditWarnings = [
-  ...validateInstanceCapabilitiesWith(known, team),
-  ...workers.flatMap((w) => validateInstanceCapabilitiesWith(known, team, w)),
-]
-if (auditWarnings.length > 0) {
-  void refreshAllInstanceCapabilityWarnings()
-  const decision = await waitForDecision(
-    { scope: "agent-team-capability-audit", id: runId }, ac.signal
-  ).catch(() => ({ outcome: "reject" as const }))
-  if (decision.outcome !== "approve") {
-    return { runId: "", status: "cancelled", reason: "Operator declined to run with stale capabilities" }
-  }
-}
-```
+## `ctx.team` API
 
-存储侧的 `clearStaleCapabilityIds` 动作会在操作者选择清理而非批准时，从一个实例中剥除过期 id。
+宿主模块是 `lib/plugin/api/team-api.ts`，由 `createTeamAPI(pluginId)` 接进每一个插件上下文。它对作者同时从 SDK 根（以类型形式，经 `./context`）和专用子路径 `@cognia/plugin-sdk/api/team` 发布，后者在 ADR-0156 下是那份显式白名单。SDK 侧每一个导出都是**类型**，因为行为归宿主所有。
 
-## 6. 插件管理器分派循环
+三十个方法，由五个权限 id 把守。
 
-全部九种统一形状的能力都由一个循环分派。描述符表 `OVERLAY_REGISTRY_CAPABILITIES`（`lib/plugin/contracts/capability-bridge-map.ts:156-303`）把每种能力映射到其 manifest 字段以及注册/注销处理器。
+| 组 | 权限 | 方法 |
+| --- | --- | --- |
+| 读取 | `team:read` | `listTeams`、`getTeam`、`listTeammates`、`getTeammate`、`listTasks`、`subscribe`、`getRunStatus`、`listEvents`、`getExecutionReport`、`listCheckpoints` |
+| 看板与花名册 | `team:write` | `createTask`、`updateTask`、`reorderTask`、`assignTask`、`addComment`、`attachTaskFile`、`moveTask`、`addTeammate`、`updateTeammate`、`removeTeammate`、`updateTeamConfig`、`instantiateTemplate` |
+| 生命周期 | `team:write` | `createTeam`、`deleteTeam`、`duplicateTeam` |
+| 存为模板 | `team:write` **加** `templates:library:write` | `saveAsTemplate` |
+| 运行控制 | `start` 用 `agent:dispatch`，其余用 `agent:control` | `start`、`pause`、`resume`、`stop` |
 
-| 能力 | capability-bridge-map.ts 行 |
-|------------|--------------------------------|
-| skills | 157-177 |
-| mcp-server-preset | 178-193 |
-| native-anthropic-tool | 194-209 |
-| external-agent-preset | 210-227 |
-| character-pack | 228-245 |
-| subagent | 246-265 |
-| agent-team-template | 266-277 |
-| shared-memory-adapter | 278-290 |
-| workflow-template | 291-302 |
+在对着它写代码之前，有五处细节值得知道。
 
-管理器以逐条目 try/catch 隔离遍历描述符键，因此一个坏条目绝不会中止一个插件的注册：
+- **`saveAsTemplate` 的双重把关是刻意的。** 它是两次写入：一份在传统 store 里的小队模板，*以及*一份在用户统一模板库里的草稿。只写 `team:write` 正是它当初成为后门的原因。它还会走 `ctx.templates.createDraft` 用的那同一个库写入确认经纪人，并以「拒绝盖外来章」而不是「覆盖」的方式标记作者身份。
+- **`createTeam` 走 `createSquad`**，而不是裸的 store action，这样在工作区支持的场合，插件建出来的小队也落在 durable-v2 上。
+- **`instantiateTemplate` 用的是传统实例化器**，所以插件从模板建出来的小队没有 `TemplateInstanceRecord`，因而没有血缘、更新或脱钩。走平台路径的那条路见 [界面](./surfaces)。
+- **拒绝是值，不是抛错。** `moveTask`、`removeTeammate` 与 `deleteTeam` 返回一个拒绝结果（`{ ok: false, reason }` 或 `false`），而不是抛异常。
+- **`start` 走 `startSquadRun`**，即 ADR-0140 唯一的派发漏斗。`pause`、`resume` 与 `stop` 共用一段映射到 `agentTeamManager` 的实现，遇到未知 id 时回答 `squad_not_found`。
 
-```typescript
-// lib/plugin/core/manager.ts:2482-2495 (register loop; :2720 mirrors for unregister)
-for (const cap of OVERLAY_REGISTRY_CAPABILITY_KEYS) {
-  const descriptor = OVERLAY_REGISTRY_CAPABILITIES[cap]
-  const entries = plugin.manifest[descriptor.manifestField] as
-    ReadonlyArray<{ id: string }> | undefined
-  if (!entries?.length) continue
-  for (const entry of entries) {
-    try { descriptor.registerEntry(entry, { pluginId }) }
-    catch (err) { loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} ${entry.id}:`, err) }
-  }
-}
-```
-
-### 跨注册表刷新钩子
-
-注册或注销一种能力可能会解决或使另一种能力的警告变为过期。
-
-| 当此注册表变更时 | 刷新谁的警告 | 行 |
-|----------------------------|------------------------|-------|
-| skill / mcp / native-tool | char-pack + team-template + workflow-template | 165-208 |
-| character-pack | team-template | 237-244 |
-| external-preset | team-template | 219-226 |
-| subagent | team-template + workflow-template | 255-264 |
-
-模板一旦依赖到位，便清除其缺失依赖警告。
-
-## 7. 队友预设适配器（PresetEditor 复用）
-
-队友编辑复用既有的 `<PresetEditor>` 而非定制编辑器。teammate-preset-adapter 在两种形状之间架桥：
-
-- `teammateToPresetState(teammate, team)`（`lib/ai/agent/team/teammate-preset-adapter.ts:97`）
-  把一个队友映射为 `PresetEditorState`：systemPrompt → content，model → model，
-  tools → allowed/disallowed 列表，以及每个 `capabilities.*` 叠加经由
-  `overlayToFlatList(undefined, overlay.X, teamBundle.X)` 扁平化；`characterPackIds[0]` →
-  `characterPackId`，`externalAgentPresetIds[0]` → `externalAgentPresetId`。
-- `presetStateToTeammateConfig(state, previous, team)`（`:180`）是其逆操作，经由 `diffListToOverlay`（`:149-171`）重建每键叠加。
-
-`<TeammateConfigDialog>` 用新的 `extraSections` / `requireContent` 属性加一个 roster 区包裹 `<PresetEditor>`。无预设对应项的有损字段（specialization / runtime / temperature）作为元数据在往返过程中被携带。
-
-## 8. 生命周期钩子
-
-`runTeamLifecycle` 与分派执行器触发规范的团队钩子集。预算警告复用 `BudgetGuard` 既有的 `on("warning_crossed")` / `on("critical_crossed")` 发射器——未新增任何发射器基础设施。
-
-规范钩子：`onTeamStart`、`onTeamPlanReady`、`onTeammateClaim`、
-`onTeammateRelease`、`onTeamBudgetWarn`、`onTeamComplete`、`onConsensusOpened`、
-`onConsensusVoted`、`onConsensusResolved`、`onSharedMemoryWrite`、`onSharedMemoryDelete`、
-`onTeamDelegationStart`、`onTeamDelegationComplete`。
-
-```typescript
-// lib/ai/agent/team/dispatch-teammate.ts:190-216 (claim/release lifecycle)
-dispatchOnTeammateClaim(payload); dispatchOnAgentStart(payload)
-// ... teammate runs ...
-dispatchOnTeammateRelease(payload)
-dispatchOnAgentComplete(payload) // or dispatchOnAgentError on failure
-```
-
-共识 / 共享内存 / 委派编排器各自触发其匹配的钩子集——参见 <LinkCard href="./consensus-delegation-memory" title="Consensus, Delegation & Memory"
-description="The three thin orchestrators" />。
-
-## 9. ADR-0032 验证
-
-ADR 承诺的每一项机制都已接线并对照源码验证——无漂移。
-
-| # | 机制 | 证据 |
-|---|-----------|----------|
-| 1 | 两层能力作用域 | capability-resolver.ts:91, :135 |
-| 2 | 子智能体插件能力 | plugin-subagent.ts:29 + subagent-registry + subagents/index.ts:118 |
-| 3 | agent-team-template 能力 | agent-team-template-registry.ts:88 validates requires |
-| 4 | 完整钩子集成 | dispatch-teammate.ts:190-216 |
-| 5 | 共识 / 共享内存 / 委派 | three orchestrator modules |
-| 6 | PresetEditor 复用 | teammate-preset-adapter.ts:97, :180 |
-| 7 | 工作区设置重构 | accordion + Plugins & capabilities section |
-| + | 能力审计 | capability-audit.ts:110, :156, :251 + pre-run gate |
-| + | 插件管理器分派 | capability-bridge-map.ts:156-303 |
-| + | Teammate &#124; Character 桥接 | teammate-character.ts:56 |
+`subscribe` 是唯一带 disposer 的方法，插件必须释放它。其余都是一次性调用。
 
 ## 相关
 
 <Cards>
-  <Card href="./data-model" title="Data Model" description="AgentTeam / AgentTeammate 配置形状" />
-  <Card href="./consensus-delegation-memory" title="Consensus, Delegation & Memory" description="三个轻量编排器及其钩子" />
-  <Card href="./workspace-ui" title="Workspace UI" description="Plugins & capabilities 折叠面板、模板选择器" />
-  <Card href="../subsystems/plugin-system" title="Plugin System" description="叠加注册表与 manifest 契约" />
-  <Card href="../adr/0032-agent-team-plugin-integration" title="ADR-0032" description="Agent Team 插件集成决策记录" />
+  <Card href="./data-model" title="数据模型与 Store" description="AgentTeam 与 AgentTeammate 的配置形状" />
+  <Card href="./consensus-delegation-memory" title="共识、委派与记忆" description="三个薄编排器及其钩子" />
+  <Card href="./surfaces" title="界面" description="设置里的画廊、模板血缘路径、组合器芯片" />
+  <Card href="../subsystems/plugin-system" title="插件系统" description="覆盖层注册表与 manifest 契约" />
+  <Card href="../adr/0032-agent-team-plugin-integration" title="ADR-0032" description="智能体团队插件集成决策记录" />
 </Cards>

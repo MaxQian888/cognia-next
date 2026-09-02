@@ -22,7 +22,8 @@
  *     delegation actually executes once approved.
  *   - `cancelDelegation`: aborts an in-flight delegation and flips status
  *     to `cancelled`. No new hook fires (consumers tail
- *     `selectActiveTeamDelegations` for status flips).
+ *     `selectTeamDelegations` for the team they are showing to see status
+ *     flips).
  *
  * Thin by design — every store mutation funnels through existing actions
  * so persistence / event-log wiring stays in one place.

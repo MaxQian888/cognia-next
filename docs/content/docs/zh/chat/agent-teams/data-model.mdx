@@ -1,338 +1,255 @@
 ---
 title: 数据模型与 Store
-description: types/agent/agent-team.ts 中的智能体团队类型清单、Zustand persist-v3 store，以及 localStorage / RAM / Dexie 持久化矩阵。
+description: types/agent/agent-team.ts 里的小队类型清单、persist-v8 的 Zustand store、从 v215 起成为权威的 Dexie 定义表，以及 ADR-0140 移除了什么。
 ---
 
 # 数据模型与 Store
 
-智能体团队由一个类型模块 —— `types/agent/agent-team.ts` —— 描述，并在运行时由 `stores/agent/agent-team-store/` 下的一个 Zustand store 持有。该 store 刻意几乎不持久化任何东西：只有模板、默认配置和 UI 偏好能在重新加载后留存。团队实例、队友、任务、消息、共享内存、共识和委派都仅驻留内存并按每次运行重建，而持久的运行历史则存放在 Dexie `workflowRuns` 中，并带有 `triggerKind: "team"`。
+一支小队由一个类型模块 `types/agent/agent-team.ts` 描述，并在运行时由 `stores/agent/agent-team-store/` 下的一个 Zustand store 持有。自 **persist v8** 起，store 已经不是小队的家：Dexie 才是小队、队友和任务的权威来源，`localStorage` 那一份只剩模板、默认配置和少数视图偏好。
+
+<Callout title="两个名词，一个子系统">
+  ADR-0140 把产品名词改成了 **Squad（小队）**，并刻意没有动代码里的名词。下文每一个类型、store、
+  action 和 Dexie 表仍然写作 `AgentTeam*`，包括改名之后才新增的那几张表，因为 `teams` 这个名字
+  早已属于角色团队（Character Teams），那是另一个完全不同的功能
+  （`lib/db/agent-team-definitions.ts:12-17`）。
+</Callout>
 
 <TLDR>
-  `types/agent/agent-team.ts` 是权威 schema —— `AgentTeam`（`:882`）、`AgentTeamConfig`
-  （`:266`）、`AgentTeammate`（`:486`）、`AgentTeamTask`（`:547`，带 `dependencies`），以及消息 /
-  治理 / 能力类型。该 store（`stores/agent/agent-team-store/store.ts:104`）是 `persist`
-  v3，其 `partialize` 只保留 `templates`、`defaultConfig`、`displayMode`、`workspaceTab`、
-  `lastAdapterSyncVersion`。一切运行态都按设计仅驻留内存（ADR-0022 的非目标）。运行
-  历史持久化到 Dexie `workflowRuns`/`workflowRunEvents`。聊天侧的 `teams` Dexie 表是一个
-  不同的概念（`lib/claude/types.ts` Team）。
+  `types/agent/agent-team.ts` 是权威 schema：`AgentTeam`（`:1409`）、`AgentTeamConfig`
+  （`:410`）、`AgentTeammate`（`:955`）、`AgentTeamTask`（`:1018`）。store
+  （`stores/agent/agent-team-store/store.ts:83`）是 `persist` **v8**，其 `partialize`
+  （`:263`）只保留 `templates`、`defaultConfig`、`tasksView`、`editorSession`、
+  `lastAdapterSyncVersion`，外加两个刻意保持惰性的字段。小队、队友和任务在 Dexie 中才是权威
+  （`agentTeams`、`agentTeammates`、`agentTeamTasks`，在 schema v215 加入），由 `dexie-bridge.ts`
+  镜像。消息、事件、共识、共享内存和委派这类运行态仍仅驻留内存。运行历史持久化在 `agentTeamRuns`
+  与 `workflowRuns` 中。
 </TLDR>
 
-## 类型清单 —— `types/agent/agent-team.ts`
+<StatGrid>
+  <Stat label="持久化版本" value="8" hint="v8 把 teams / teammates / tasks 搬去了 Dexie" />
+  <Stat label="Dexie 定义表" value="3" hint="agentTeams · agentTeammates · agentTeamTasks，在 schema v215 加入" />
+  <Stat label="Store actions" value="53" hint="全部在一个 slice 上，slices/actions.slice.ts" />
+  <Stat label="导出的 selector" value="18" hint="10 个基础 + 8 个派生，要么按小队限定，要么是全局的" />
+</StatGrid>
 
-该子系统中每一个面向用户的实体都在这里声明。行号是精确的。
+## 类型清单
+
+`types/agent/agent-team.ts` 有 2103 行。下面这些是子系统其余部分会点名的实体。
 
 | 类型 | 行 | 描述 |
 | --- | --- | --- |
-| `TeamMemberRole` | `:25` | "lead" 或 "teammate" |
-| `TeamStatus` | `:30-37` | 7 种状态：idle、planning、executing、paused、completed、failed、cancelled |
-| `TeammateStatus` | `:42-51` | 9 种状态：idle、planning、awaiting_approval、executing、paused、completed、failed、cancelled、shutdown |
-| `TeamExecutionMode` | `:61-64` | coordinated、autonomous、delegate |
-| `TeamExecutionPattern` | `:69-82` | manager_worker、parallel_specialists、background_handoff、external_handoff、single_agent_recommended、ultracode_orchestration |
-| `TeamGovernancePolicy` | `:135-166` | approval / budget / escalation / delivery 子策略（见下文） |
-| `TeamCapabilityBundle` | `:193-201` | mcpServerIds、skillIds、nativeAnthropicToolIds、characterPackIds、externalAgentPresetIds、subagentIds、a2uiTemplateIds |
-| `CapabilityListOverlay` | `:208-215` | 每个键 3 种状态：`add` 求并、`remove` 求差、`replace` 覆盖 |
-| `TeammateCapabilityOverlay` | `:222-230` | 每名队友针对各能力种类的叠加层 |
-| `ResolvedCapabilities` | `:238-246` | 运行时由团队默认值 + 队友叠加层解析出的扁平化集合 |
-| `AgentTeamConfig` | `:266-371` | 团队配置对象（下方逐字给出） |
-| `TeammateConfig` | `:445-481` | systemPrompt + provider/model/apiKey/baseURL/temperature 覆盖、tools、requirePlanApproval、specialization、`runtime`、metadata、`capabilities` 叠加层 |
-| `AgentTeammate` | `:486-525` | id、teamId、name、role、status、config、spawnPrompt、currentTaskId、proposedPlan、planFeedback、completedTaskIds、tokenUsage、progress、timestamps、error、specialization |
-| `TeamTaskStatus` | `:534-542` | pending、blocked、claimed、in_progress、review、completed、failed、cancelled |
-| `AgentTeamTask` | `:547-594` | id、teamId、title、status、priority、assignedTo/claimedBy、`dependencies`、tags、result、timings、`delegationRecord`、metadata |
-| `TeamMessageType` | `:603-614` | 11 种：direct、broadcast、system、plan_approval、plan_feedback、task_update、result_share、shutdown、idle、task_assignment、consensus |
-| `AgentTeamMessage` | `:642-669` | id、teamId、type、senderId、recipientId、content、taskId、read、timestamp、`structuredPayload` |
-| `SharedMemoryEntry` | `:678-697` | key、value、writtenBy、writtenAt、expiresAt、version、tags、`readableBy`（ACL 允许列表） |
-| `ConsensusRequest` | `:750-779` | id、teamId、initiatorId、question、options、`type`、status、votes、winningOption、timeoutMs、timestamps |
-| `TeamDelegationRecord` | `:828-843` | id、sourceTeamId、sourceTaskId、`targetType`、targetId、`status`、reason、manual、timestamps、result、metadata |
-| `AgentTeam` | `:882-937` | 团队聚合（下方逐字给出） |
-| `TeamExecutionReport` | `:988-1000` | id、teamId、status、routingAssessment、activeExecutionPattern、checkpoints、summary、traceSessionId、timestamps |
+| `TeamMemberRole` | `:38` | "lead" 或 "teammate" |
+| `TeamStatus` | `:62` | idle、planning、executing、paused、completed、failed、cancelled |
+| `TeammateStatus` | `:68` | idle、planning、awaiting_approval、executing、paused、completed、failed、cancelled、shutdown |
+| `TeamDisplayMode` | `:82` | compact / expanded / split。已休眠，见下方惰性状态一节 |
+| `TeamExecutionMode` | `:87` | coordinated、autonomous、delegate |
+| `TEAM_EXECUTION_PATTERNS` | `:107` | `TeamExecutionPattern`（`:117`）由它派生的有序模式列表 |
+| `AgentTeamWorkspaceTab` | `:137` | 已退役工作区的标签页联合类型。刻意休眠，见下文 |
+| `AgentTeamWorkspaceFocus` | `:159` | 类型还在，它对应的 store 字段已经没有了 |
+| `TeamRoutingAssessment` | `:168` | 运行前的路由建议 |
+| `TeamDispatchDecision` | `:211` | 哪个执行器物化了这支小队，作为溯源信息盖章 |
+| `TeamExternalPickup` | `:240` | 外部交接的认领状态 |
+| `TeamGovernancePolicy` | `:270` | approval、budget、escalation 与 delivery（安静时段）子策略 |
+| `TeamCapabilityBundle` | `:337` | 7 个能力键，全部是可选的 `string[]` |
+| `CapabilityListOverlay` | `:352` | `add` 求并、`remove` 求差、`replace` 覆盖 |
+| `TeammateCapabilityOverlay` | `:366` | 每个能力键一个 `CapabilityListOverlay` |
+| `ResolvedCapabilities` | `:382` | 交由 `lib/claude/build-options.ts` 消费的扁平集合 |
+| `AgentTeamConfig` | `:410` | 小队配置面，下面按组归纳 |
+| `DEFAULT_TEAM_CONFIG` | `:729` | 种子配置：10 名队友、并发 5、coordinated、`riskGating: true` |
+| `TeammateConfig` | `:866` | 每名队友的提示词、模型、工具、`runtime`、`capabilities` 叠加层 |
+| `AgentTeammate` | `:955` | 一名成员：角色、状态、配置、当前任务、计划、token 用量、进度 |
+| `TeamTaskStatus` | `:1005` | pending、blocked、claimed、in_progress、review、completed、failed、cancelled |
+| `AgentTeamTask` | `:1018` | 一张看板卡：标题、状态、优先级、指派、`dependencies`、`comments`、结果 |
+| `AgentTaskComment` | `:1096` | 评论线程条目，带 `TaskCommentAttachment[]`（`:1076`） |
+| `TeamMessageType` | `:1120` | 11 种，从 `direct` 到 `consensus` |
+| `AgentTeamMessage` | `:1164` | 运行期消息日志条目 |
+| `SharedMemoryEntry` | `:1200` | key、value、写入者、版本、标签、`readableBy` ACL 允许列表 |
+| `ConsensusRequest` | `:1272` | 问题、选项、投票、`type`、状态、获胜选项 |
+| `TeamDelegationRecord` | `:1349` | 交给后台、外部或嵌套小队运行时的一次交接 |
+| `AgentTeam` | `:1409` | 小队聚合，下面按组归纳 |
+| `TeamExecutionReport` | `:1537` | 每次运行的检查点（`:1508`）与汇总计数（`:1522`） |
+| `AgentTeamEvent` | `:1702` | 只追加的事件日志条目 |
+| `AgentTeamTemplate` | `:1735` | 一份小队蓝图：花名册、任务模板、分类 |
+| `BUILT_IN_TEAM_TEMPLATES` | `:1781` | 为 `initialState.templates` 播种的内置蓝图 |
 
-`TeammateConfig` 上的 `runtime` 字段为每名队友选择执行后端 —— `claude`、`codex`、`claude-code`、`gemini-cli` 或 `cursor-cli` 之一。`ConsensusRequest.type` 是 `majority`、`supermajority`、`unanimous`、`weighted` 或 `lead_override` 之一。`TeamDelegationRecord.targetType` 是 `sub_agent`、`team` 或 `background`；其 `status` 依次经过 pending、awaiting_approval、active、completed、failed、cancelled 或 timeout。
+有 8 个配置子类型并不在这里声明，只是在 `:20-29` 被导入：`AgentTeamRuntimeVersion`、`AgentTeamWriteMode`、`AgentTeamRepositoryBinding`、`AgentTeamEnvironmentRef`、`AgentTeamResourcePolicy`、`AgentTeamEvidencePolicy`、`AgentTeamRetrospectivePolicy` 和 `AgentTeamGithubDeliveryPolicy`，全部来自 `./agent-team-runtime`。
 
-`types/agent/index.ts:5-14` 通过 `export * from "./agent-team"` 重新导出以上全部内容，同时还有 `SubAgentTokenUsage` / `SubAgentPriority`（来自 `sub-agent.ts`，用于任务）以及独立的 `agent-mode.ts` 关注点。
+### `AgentTeamConfig`
 
-### `AgentTeamConfig`（逐字）
+大约五十个字段，逐字给出并无意义。它们分成六组。
 
-```typescript
-// types/agent/agent-team.ts:266-371
-export interface AgentTeamConfig {
-  maxTeammates: number
-  maxConcurrentTeammates: number
-  executionMode: TeamExecutionMode
-  preferredExecutionPattern?: TeamExecutionPattern
-  displayMode: TeamDisplayMode
-  defaultProvider?: ProviderName
-  defaultModel?: string
-  tokenBudget?: number
-  maxRetries?: number
-  enableTaskRetry?: boolean
-  enableDeadlockRecovery?: boolean
-  governancePolicy?: TeamGovernancePolicy
-  capabilities?: TeamCapabilityBundle
-  sharedMemoryAdapterId?: string
-  ultracode?: {
-    enabled?: boolean
-    autoMode?: "auto" | "always" | "never"
-    maxFinderRounds?: number
-    skepticsPerFinding?: number
-    judgesPerAttempt?: number
-    dryRoundsToStop?: number
-  }
-  workingDir?: string
-  /** 在依赖任务开始前，由 Lead 阻塞式评审每个任务（ADR-0071）。 */
-  taskReview?: {
-    enabled?: boolean
-    /** 收到 `changes_requested` 后允许成员修订的次数。默认 2。 */
-    maxRevisions?: number
+| 组 | 字段 |
+| --- | --- |
+| 持久运行时 | `runtimeVersion`、`writeMode`、`repositories`、`environmentRef`、`resourcePolicy`、`evidencePolicy`、`retrospectivePolicy`、`githubDeliveryPolicy` |
+| 规模与模式 | `maxTeammates`、`maxConcurrentTeammates`、`executionMode`、`preferredExecutionPattern`、`displayMode` |
+| 队友默认值 | `defaultProvider`、`defaultModel`、`defaultApiKey`、`defaultBaseURL`、`defaultSystemPrompt`、`defaultTemperature`、`defaultMaxSteps`、`defaultTimeout`、`defaultExecution` |
+| 闸门与治理 | `requirePlanApproval`、`riskGating`、`taskReview`、`governancePolicy`、`userConstraints`、`maxRetries`、`maxPlanRevisions`、`enableTaskRetry`、`enableDeadlockRecovery` |
+| 工具与沙箱 | `allowedTools`、`disallowedTools`、`defaultPermissionMode`、`sandboxEnabled`、`sandboxPolicy`、`capabilities`、`maxTeamDelegationDepth` |
+| 记忆与工作区 | `sharedMemoryAdapterId`、`autoCleanSharedMemory`、`maxSharedMemoryEntries`、`knowledgeTwinIds`、`workingDir`、`workspaceIsolation`、`ultracode`、`progressLedger`、`adaptiveReplan`、`nudges`、`prFeedback`、`streamProgress` |
+
+`riskGating`（ADR-0070）只会*抬高*计划闸门。操作者设置的 `requirePlanApproval` 永远不会被风险评估降下来。`allowedTools`、`disallowedTools`、`defaultPermissionMode` 和 `sandboxPolicy` 都是上限：队友只能收窄，永远不能突破。
+
+### `AgentTeam`
+
+这个聚合体由身份、配置、id 列表和汇总构成。
+
+- **身份与作用域**：`id`、`projectId`、`name`、`description`、`task`、`sessionId`、`metadata`
+- **配置与路由**：`config`、`routingAssessment`、`selectedExecutionPattern`、`dispatchDecision`、`externalPickup`
+- **成员**：`leadId`、`teammateIds`、`taskIds`、`messageIds`
+- **协作**：`sharedMemory`、`consensusIds`、`delegationIds`、`parentDelegationId`
+- **汇总**：`status`、`progress`、`totalTokenUsage`、`finalResult`、`error`、`executionReport`
+- **时间**：`createdAt`、`startedAt`、`completedAt`、`totalDuration`
+
+`projectId` 是工作区边界。在搬到 Dexie 之前它虽然存在，却只是三处列表界面各自应用的一个过滤条件，所以清空工作区从来不会真的删掉一支小队。现在它是表上的索引。
+
+## Store
+
+### 状态
+
+`AgentTeamState`（`stores/agent/agent-team-store/types.ts:32`）持有十个数据字段（`teams`、`teammates`、`tasks`、`messages`、`templates`、`events`、`consensus`、`sharedMemory`、`delegations`、`lastAdapterSyncVersion`）、五个视图字段，以及 `defaultConfig`。
+
+其中三个视图字段是刻意的休眠，在类型上、初始状态里都有标注，并由 `store.test.ts` 和 `selectors.test.ts` 钉死。
+
+| 字段 | 状态 |
+| --- | --- |
+| `activeTeamId` | 只有 `createTeam` 会写。作为最后兜底被 `selectActiveTeamConsensus`、`getActiveTeam` 和 `DelegationsPanel` 读取。不持久化，所以重新加载后它是空的，这正是每个真实界面都自己点名 team id 的原因。 |
+| `displayMode` | **刻意惰性。** 持久化只是为了让旧版本写下的 blob 能原样往返，自紧凑/展开开关随工作区一同退役后就没有读取方了。 |
+| `workspaceTab` | **刻意惰性**，原因相同。它的类型上带着同一条标注的类型层一半。 |
+
+`tasksView` 和 `editorSession` 是有真实读取方的活跃视图偏好。
+
+### 持久化
+
+```ts
+// stores/agent/agent-team-store/store.ts:263-277
+export function partializeAgentTeamState(state: AgentTeamState) {
+  return {
+    templates: state.templates,
+    defaultConfig: state.defaultConfig,
+    displayMode: state.displayMode,
+    workspaceTab: state.workspaceTab,
+    tasksView: state.tasksView,
+    lastAdapterSyncVersion: state.lastAdapterSyncVersion,
+    // teams / teammates / tasks are Dexie's from v8 on. Leaving them here as
+    // well would give the subsystem two durable copies with no rule for which
+    // wins, and the localStorage one cannot be workspace-scoped or synced.
+    // `dexie-bridge.ts` owns them; only what is left is UI-shaped preference.
+    editorSession: state.editorSession,
   }
 }
 ```
 
-`taskReview` **默认关闭**；开启后，合成器会为每个任务额外产出一个
-`action.team.task.review` 节点，并把该任务的下游依赖改指向它，因此未通过评审的产出无法被继续使用。
-它是 `governancePolicy.approval.requireResultReview`（一个**人工**看板闸门）的自动化同胞，两者可以叠加：
-当 `requireResultReview` 也开启时，自动通过的任务会交给人工复核，否则直接标记完成。
-开关与预算的解析集中在 `lib/ai/agent/team/task-review-policy.ts`，以确保合成器与执行器不会各自解读。
+存储键是 `cognia-agent-teams`，由 `activateAgentTeamAccountStorage`（`:303`）按账户改指到 `cognia-agent-teams:<accountId>`。那条路径绕开了 `migrate` 和 `onRehydrateStorage`，所以它自己又跑了一遍 `resetStaleTeamStatuses` 和 `backfillTeamProjectIds`。
 
-`DEFAULT_TEAM_CONFIG`（`:376`）填充 `maxTeammates: 10`、`maxConcurrentTeammates: 5`、`executionMode: "coordinated"`、`preferredExecutionPattern: "manager_worker"`、`displayMode: "expanded"`。`TeamGovernancePolicy`（`:135-166`）将四个子策略分组：**approval**（`requirePlanApproval`、`requireDelegationApproval`）、**budget**（`tokenBudget`、警告/告急阈值，以及一个 `onCritical` 动作）、**escalation**（`allowOperatorPatternOverride`、`pauseOnHighRisk`），以及 **delivery**（带时区的静默时段窗口）。
+`PERSIST_VERSION` 是 **8**。文件头的迁移阶梯记录了每一步，其中两步对读取旧数据尤其重要。
 
-### `AgentTeam`（逐字）
+- **v3 到 v4** 才第一次让 `teams`、`teammates` 和 `tasks` 变成持久的，这样一个定时的 `agent-team` 任务才能在应用重启后重新实例化它的小队。
+- **v7 到 v8** 又把这三者从 `localStorage` 搬回 Dexie。这次迁移*不*自己搬行：它把行留在 rehydrate 后的状态里，让 `dexie-bridge.ts` 在第一次同步时把内存里有、表里没有的写进去，因为一个同步的存储回调根本没办法 await 一个账户数据库。
 
-```typescript
-// types/agent/agent-team.ts:882-937
-export interface AgentTeam {
-  id: string
-  name: string
-  description: string
-  task: string
-  status: TeamStatus
-  config: AgentTeamConfig
-  routingAssessment?: TeamRoutingAssessment
-  selectedExecutionPattern?: TeamExecutionPattern
-  leadId: string
-  teammateIds: string[]
-  taskIds: string[]
-  messageIds: string[]
-  progress: number
-  totalTokenUsage: SubAgentTokenUsage
-  finalResult?: string
-  executionReport?: TeamExecutionReport
-  sharedMemory?: Record<string, SharedMemoryEntry>
-  consensusIds?: string[]
-  delegationIds?: string[]
-}
-```
+`migrate` 和 `onRehydrateStorage` 都会把停在 `planning`、`executing` 或 `paused` 的小队重置为 `idle`。只靠 `migrate` 不够：版本相同的普通重载会让它短路，于是一次幽灵般的 "executing" 就被 rehydrate 出来了。
 
-## 实体关系
+### Dexie 镜像
 
-`AgentTeam` 聚合通过 id 集合引用一切；store 持有它所指向的实体表。
+自 persist v8 起，Dexie 是定义的权威。`dexie-bridge.ts` 订阅一次并按引用做差分，而不是往 1300 行同步 `set()` 里逐个穿一个 `await`，并用 **400 毫秒** 去抖，因为一支运行中的小队几乎每个 token 都会发出进度。它遵守本仓库每个 dexie-bridge 都付过学费的两条安全规则。
 
-```mermaid
-classDiagram
-  class AgentTeam {
-    +leadId : string
-    +teammateIds : string[]
-    +taskIds : string[]
-    +messageIds : string[]
-    +consensusIds : string[]
-    +delegationIds : string[]
-    +sharedMemory : Record~SharedMemoryEntry~
-    +executionReport : TeamExecutionReport
-  }
-  class AgentTeammate {
-    +teamId : string
-    +role : TeamMemberRole
-    +config : TeammateConfig
-  }
-  class AgentTeamTask {
-    +teamId : string
-    +dependencies : string[]
-    +delegationRecord : TeamDelegationRecord
-  }
-  class AgentTeamMessage {
-    +type : TeamMessageType
-    +structuredPayload : StructuredMessagePayload
-  }
-  class SharedMemoryEntry {
-    +readableBy : string[]
-  }
-  class ConsensusRequest {
-    +type : ConsensusType
-    +votes : ConsensusVote[]
-  }
-  class TeamDelegationRecord {
-    +targetType : string
-    +status : string
-  }
-  class TeamExecutionReport {
-    +checkpoints : TeamExecutionCheckpoint[]
-  }
-  AgentTeam "1" --> "1" AgentTeammate : lead
-  AgentTeam "1" --> "N" AgentTeammate : teammates
-  AgentTeam "1" --> "N" AgentTeamTask : tasks
-  AgentTeam "1" --> "N" AgentTeamMessage : messages
-  AgentTeam "1" --> "N" SharedMemoryEntry : sharedMemory map
-  AgentTeam "1" --> "N" ConsensusRequest : consensusIds
-  AgentTeam "1" --> "N" TeamDelegationRecord : delegationIds
-  AgentTeam "1" --> "1" TeamExecutionReport : executionReport
-  AgentTeamTask "1" --> "0..1" TeamDelegationRecord : delegationRecord
-```
+1. **绝不写入不是自己所对应的那个数据库。** 锁定账户时会*先*清掉 Dexie 选择再清 store，否则一个仍然活着的订阅就会看到一个指向别人数据库的空 store，然后把里面每一行都删掉。
+2. **hydration 失败就整体停用镜像。** 删除是由「镜像里有、内存里没有」推导出来的，而如果 hydration 抛过错，内存就是表的一个未知子集。
 
-## Zustand Store —— `stores/agent/agent-team-store/`
+模板和 `defaultConfig` 不在镜像范围内。小队模板按设计是跨 profile 共享的，由统一模板平台拥有。桥由 `components/providers/initializers/agent-team-bridge-initializer.tsx` 启动。
 
-该 store 拆分为 `store.ts`（持久化层）、`initial-state.ts`、`types.ts`（状态 + 动作签名）、`selectors.ts`，以及 `slices/actions.slice.ts`（实现）。
-
-### 持久化配置（逐字）
-
-```typescript
-// stores/agent/agent-team-store/store.ts:104-124
-export const useAgentTeamStore = create<AgentTeamState>()(
-  persist(
-    (set, get) => ({
-      ...initialState,
-      ...createAgentTeamActionsSlice(set, get),
-    }),
-    {
-      name: "cognia-agent-teams",
-      storage: createJSONStorage(() => localStorage),
-      version: PERSIST_VERSION,
-      partialize: (state) => ({
-        templates: state.templates,
-        defaultConfig: state.defaultConfig,
-        displayMode: state.displayMode,
-        workspaceTab: state.workspaceTab,
-        lastAdapterSyncVersion: state.lastAdapterSyncVersion,
-      }),
-      migrate: (persistedState, version) => migrateAgentTeamPersisted(persistedState, version),
-    }
-  )
-)
-```
-
-<Status>PERSIST_VERSION 为 3</Status>
-
-**会被持久化的内容**（`partialize` 允许列表）：`templates`、`defaultConfig`、`displayMode`、`workspaceTab` 和 `lastAdapterSyncVersion` —— 最后一项是共享内存适配器的每（teamId, adapterId）反向同步游标。
-
-**不会被持久化的内容**（刻意为之，ADR-0022 的非目标）：`teams`、`teammates`、`tasks`、`messages`、`events`、`consensus`、`sharedMemory`、`delegations` 和 `executionReports`。所有运行态都仅驻留内存并按每次运行重建。store 仍在 `initialState` 中声明这些槽位，使读取永不抛错。
-
-### 迁移
-
-`migrateAgentTeamPersisted`（`store.ts:50-102`）对 v3+ 输入是幂等的：
-
-- **v1 到 v2** —— 在默认配置和每个模板配置上回填 `governancePolicy` 与 `capabilities`。
-- **v2 到 v3** —— 回填 `sharedMemoryAdapterId` 并将 `lastAdapterSyncVersion` 初始化为 `{}`。
-
-### 初始状态（逐字）
-
-```typescript
-// stores/agent/agent-team-store/initial-state.ts:1-51
-export const initialState = {
-  teams: {} as Record<string, AgentTeam>,
-  teammates: {} as Record<string, AgentTeammate>,
-  tasks: {} as Record<string, AgentTeamTask>,
-  messages: {} as Record<string, AgentTeamMessage>,
-  templates: builtInTemplatesMap, // BUILT_IN_TEAM_TEMPLATES
-  events: [] as AgentTeamEvent[],
-  consensus: {} as Record<string, ConsensusRequest>,
-  sharedMemory: {} as Record<string, Record<string, SharedMemoryEntry>>,
-  delegations: {} as Record<string, TeamDelegationRecord>,
-  activeTeamId: null,
-  selectedTeammateId: null,
-  displayMode: "expanded" as TeamDisplayMode,
-  isPanelOpen: false,
-  workspaceTab: "overview" as const,
-  workspaceFocus: { teammateId: null, taskId: null, messageId: null },
-  workspaceDetailOpen: true,
-  defaultConfig: { ...DEFAULT_TEAM_CONFIG },
-  lastAdapterSyncVersion: {} as Record<string, Record<string, number>>,
-}
-```
-
-### 动作面
-
-签名存放在 `types.ts`；实现在 `slices/actions.slice.ts`（`createAgentTeamActionsSlice`，第 121 行起）。
-
-| 分组 | 动作 | 行 |
+| 表 | 主键与索引 | 行类型 |
 | --- | --- | --- |
-| Team | createTeam、upsertTeam、updateTeam、updateTeamConfig、updateTeamCapabilities、clearStaleCapabilityIds、deleteTeam、setTeamStatus | `:62-83` |
-| Teammate | addTeammate、upsertTeammate、updateTeammate、updateTeammateCapabilities、removeTeammate、setTeammateStatus、setTeammateProgress | `:86-100` |
-| Task | createTask、upsertTask、updateTask、deleteTask、setTaskStatus、claimTask、assignTask | `:103-109` |
-| Message | addMessage、upsertMessage、removeMessage、markMessageRead、markAllMessagesRead、markTeamMessagesRead | `:112-117` |
-| Events | addEvent、clearEvents | `:120-121` |
-| Template CRUD | addTemplate、deleteTemplate、saveAsTemplate、updateTemplate、importTemplates、exportTemplates | `:124-133` |
-| UI 状态 | setActiveTeam、setSelectedTeammate、setDisplayMode、setIsPanelOpen、setWorkspaceTab、setWorkspaceFocus、setWorkspaceTeamFromRoute、closeAgentTeamWorkspaceDetail | `:136-143` |
-| 读取视图 | getTeam、getTeammate、getTeammates、getTeamTasks、getTeamMessages、getUnreadMessages、getActiveTeam | `:146-152` |
-| 批量操作 | cancelAllTasks、shutdownAllTeammates、cleanupTeam | `:155-157` |
-| Consensus | upsertConsensus、deleteConsensus、clearTeamConsensus | `:160-162` |
-| Shared memory | writeSharedMemory、deleteSharedMemory、clearTeamSharedMemory、setAdapterSyncVersion | `:165-169` |
-| Delegation | upsertDelegation、updateDelegationStatus、clearTeamDelegations | `:172-178` |
-| Execution report | upsertExecutionReport、addExecutionCheckpoint | `:181-182` |
-| Protocol / lifecycle | addStructuredMessage、requestTeammateShutdown | `:185-190` |
-| Settings | updateDefaultConfig、reset | `:193-196` |
+| `agentTeams` | `&id, projectId, status, createdAt, updatedAt, [projectId+createdAt]` | `AgentTeamRow` |
+| `agentTeammates` | `&id, teamId, role, updatedAt, [teamId+createdAt]` | `AgentTeammateRow` |
+| `agentTeamTasks` | `&id, teamId, status, assignedTo, updatedAt, [teamId+order]` | `AgentTeamTaskRow` |
 
-`actions.slice.ts` 中值得注意的实现护栏：`createTeam` 自动孵化首席协调员并运行 `normalizeAgentTeamConfig`；`clearStaleCapabilityIds`（`:217-259`）剥离插件被禁用后不再可解析的 id；`upsertTeammate` / `removeTeammate` 防止首席协调员成为孤儿；`setTeammateProgress` 钳制到 `[0, 100]`；`setTeamStatus` 在进入 "executing" 时盖上 `startedAt`，在终态时盖上 `completedAt` + `totalDuration`。
+行会把 `Date` 摊平成 epoch 毫秒，并补上一个领域类型从来没有的 `updatedAt`，因为同步需要游标，而镜像是唯一知道某一行真的变了的地方（`lib/db/agent-team-definitions.ts:24-49`）。这三张表在 schema **v215** 落地。运行态那一半（`agentTeamRuns` 加十张子表）自 v145 起就在 Dexie 里了。`lib/db/schema.ts` 现在把整套 schema 一次性声明在 `CURRENT_SCHEMA_VERSION` **217** 上，而不是重放一条迁移链，所以上面那些版本号是历史，而不是 `version(N)` 代码块。
 
-### 选择器
+### 持久化矩阵
 
-`selectors.ts`（`:1-305`）暴露基础选择器以及派生族。要点：
-
-- **治理摘要** —— `selectActiveTeamGovernanceSummary`（`:57-77`）将路由评估 + 活跃执行模式 + 执行报告组合成工作区治理视图所渲染的单个对象。
-- **共享内存 ACL**（`:212-250`）—— `OPERATOR_READER_ID = "operator"`；`isEntryReadableBy(entry, readerId)` 授予操作员一切权限，将空的 `readableBy` 视为全局可读，始终允许写入者读取自己的条目，否则检查 `readableBy` 允许列表。`selectSharedMemoryEntriesForReader(teamId, readerId)` 按读者应用此规则。
-- **已解析能力** —— `selectResolvedCapabilities(teamId, teammateId)`（`:262-279`）通过 `resolveTeammateCapabilities` 将团队默认能力束与队友叠加层合并。
-- 其他族：team 派生（`:43-77`）、按状态分的队友（`:83-99`）、按状态/受派人分的任务（`:105-137`）、未读/按类型/结构化消息（`:143-191`）、活跃/待处理共识（`:197-206`）、委派与事件（`:285-304`）。
-
-## 持久化矩阵
-
-按意图分三层。注意运行态层**有意**仅驻留内存 —— ADR-0022 将“团队运行不新增 Dexie 表”定为目标，因此持久历史改而搭乘工作流运行日志。
-
-| 数据 | 是否持久化？ | 位置 |
+| 数据 | 存放位置 | 重载后是否还在 |
 | --- | --- | --- |
-| 模板、defaultConfig、UI 偏好、适配器同步游标 | 是 | localStorage（`partialize`，持久化 v3） |
-| 团队实例、队友、任务、消息 | 否 | 仅内存（每次运行临时） |
-| 共享内存、共识、委派、执行报告 | 否 | 仅内存（每次运行临时） |
-| 团队运行历史 + 步骤事件 | 是 | Dexie `workflowRuns`（`triggerKind: "team"`）+ `workflowRunEvents` |
-| 待处理 HITL 关卡 | 否 | 仅内存（按设计以运行为范围） |
+| 小队、队友、任务 | Dexie `agentTeams` / `agentTeammates` / `agentTeamTasks` | 在，且按工作区限定 |
+| 模板、`defaultConfig` | `localStorage` blob，以及模板平台的 `templateDefinitions` 表 | 在，跨 profile |
+| `tasksView`、`editorSession`、`lastAdapterSyncVersion` | `localStorage` blob | 在 |
+| `displayMode`、`workspaceTab` | `localStorage` blob | 在，但没人读 |
+| 消息、事件、共识、共享内存、委派 | 仅内存 | 不在 |
+| `activeTeamId` | 仅内存 | 不在 |
+| 运行历史 | Dexie `agentTeamRuns` 及其子表，以及 `triggerKind: "team"` 的 `workflowRuns` | 在 |
+| 会话绑定 | `sessions.squadId`，带索引。在 Dexie v177 引入，如今属于合并后的单一 schema | 在 |
 
-Dexie 接线（`lib/db/schema.ts`）：`workflowRuns`（`:194`，按 id、createdAt、status、workflowId、triggerKind 索引）持久化每次团队运行；`workflowRunEvents`（`:195`，按 id、runId、timestamp 索引）是步骤级日志。`lib/ai/agent/agent-team.ts:113` 中的门面注释指引 UI “直接订阅 workflowRuns”。
+`sessions.squadId`（这段对话交给哪支小队跑）与 `sessions.teamId`（这段对话本身*是*哪个角色团队房间）是刻意分开的两件事，`lib/db/schema.test.ts` 把这对关系钉死。
 
-<Status>聊天侧的 teams Dexie 表是一个不同的概念</Status>
+本子系统的备份快照是 `lib/data/snapshots/agent-teams.ts`，它对同一处命名冲突给出了同样的提醒：Dexie 的 `teams` 表是角色团队，不是小队。
 
-Dexie `teams` 表（`schema.ts:130, 356`，按 id、name、updatedAt、isBuiltIn 索引）存储**聊天侧**的持久团队定义，其类型由 `lib/claude/types.ts` Team 给出。它与智能体团队 store 的仅驻留内存 `teams` record 无关 —— 切勿混为一谈。
+## Action 面
 
-## 兼容层 —— `lib/ai/agent/agent-team-compat.ts`
+一个 slice 上的 53 个 action，位于 `slices/actions.slice.ts`，按类型声明的顺序分组。
 
-这些规范化器在每次 store 输入时运行；`dispatchAgentTeam` 是工作流节点和远程控制所用的无头派发接缝。
+| 组 | Actions |
+| --- | --- |
+| 小队 CRUD | `createTeam`、`upsertTeam`、`updateTeam`、`updateTeamConfig`、`updateTeamCapabilities`、`deleteTeam`、`purgeProject`、`setTeamStatus` |
+| 队友 CRUD | `addTeammate`、`upsertTeammate`、`updateTeammate`、`updateTeammateCapabilities`、`removeTeammate` |
+| 任务 CRUD | `createTask`、`upsertTask`、`updateTask`、`deleteTask`、`setTaskStatus`、`moveTask`、`reorderTask`、`assignTask`、`addTaskComment`、`attachTaskFile` |
+| 消息与事件 | `addMessage`、`removeMessage`、`addEvent`、`clearEvents` |
+| 模板 | `addTemplate`、`deleteTemplate`、`duplicateSquad`、`saveAsTemplate`、`updateTemplate` |
+| 读取视图 | `getTeam`、`getTeammate`、`getTeammates`、`getTeamTasks`、`getTaskComments`、`getTeamMessages`、`getActiveTeam` |
+| 共识 | `upsertConsensus`、`deleteConsensus`、`clearTeamConsensus` |
+| 共享内存 | `writeSharedMemory`、`deleteSharedMemory`、`clearTeamSharedMemory`、`setAdapterSyncVersion` |
+| 委派 | `upsertDelegation`、`updateDelegationStatus`、`clearTeamDelegations` |
+| 执行报告 | `upsertExecutionReport`、`addExecutionCheckpoint` |
+| 视图状态与重置 | `setTasksView`、`reset` |
 
-| 导出 | 行 | 用途 |
+`moveTask` 是人类发起的看板移动。它经由 `canMoveTask` 校验，那是看板 UI、Companion RPC 与 `ctx.team.moveTask` 共用的唯一守卫，并施加状态副作用（移回 `pending` 时释放认领，进入终态时盖完成戳）。
+
+`upsertExecutionReport` 和 `addExecutionCheckpoint` 被保留了下来，尽管运行时目前并不会盖出一份报告。因为没有它们，三个活着的读取方 `ctx.team.getRunStatus`、`getExecutionReport` 和 `listCheckpoints` 将永远无法被填充。
+
+`purgeProject` 被注册为本子系统的工作区清空钩子（`registerProjectBucketPurger("agent-teams", …)`）。
+
+## Selectors
+
+`selectors.ts` 导出十个基础 selector（`selectTeams`、`selectTeammates`、`selectTasks`、`selectMessages`、`selectTemplates`、`selectDefaultConfig`、`selectConsensus`、`selectSharedMemory`、`selectDelegations`、`selectEvents`）以及 `selectTeamCount`，然后是真正重要的那些派生 selector。
+
+| Selector | 行 | 说明 |
 | --- | --- | --- |
-| `dispatchAgentTeam(options)` | `:32-52` | 通过 `agentTeamManager.start(teamId)` 启动一次运行；返回 `{ ok, reason? }` |
-| `normalizeAgentTeamConfig(config)` | `:68-124` | 修剪 name/description/task；钳制为负的 `maxTeammates`、`maxConcurrentTeammates`、`tokenBudget` |
-| `normalizeAgentTeamTask(task)` | `:131-158` | 修剪字符串；钳制为负的 `order` / `retryCount` |
-| `agentTeamCompat` | `:54-56` | 暴露 `dispatch: dispatchAgentTeam` 的门面 |
+| `selectTeamTeammates(state, teamId)` | `:45` | 一支被点名小队的花名册，按其自身顺序，队长在前 |
+| `selectTeamConsensus(state, teamId)` | `:69` | 一支被点名小队的共识行 |
+| `selectActiveTeamConsensus(state)` | `:83` | 仅存的一个 `activeTeamId` 兜底 selector |
+| `selectTeamDelegations(state, teamId)` | `:162` | 以某支被点名小队为源的委派 |
+| `selectActiveDelegations(state)` | `:170` | 跨小队的所有在途委派 |
+| `selectResolvedCapabilities(teamId, teammateId)` | `:131` | 对 store 状态跑一遍 ADR-0032 的解析器 |
+| `selectSharedMemoryEntriesForReader(teamId, readerId)` | `:114` | 带 ACL 的投影。`isEntryReadableBy`（`:103`）是谓词，`OPERATOR_READER_ID`（`:94`）能看到全部 |
 
-## 待处理关卡 Store —— `stores/agent/pending-gates-store.ts`
+barrel 重新导出其中十六个。`OPERATOR_READER_ID`、`isEntryReadableBy`、`selectSharedMemoryEntriesForReader` 和 `selectResolvedCapabilities` 需要直接从 `./selectors` 导入。
 
-一个独立的、同样仅驻留内存的 store 镜像着已打开的 HITL 审批关卡。`TeamNotifier` 推送携带 `openApproval: { scope, id }` 的告急通知；工作区挂载一个 `GateModalsHost`，为每个待处理条目渲染一个 `ApprovalGateDialog`。`gateTypeFromScope` 将审批总线 scope 映射为 UI 关卡种类：
+没有 `selectActiveTeamDelegations` 了。它唯一的调用方 `DelegationsPanel` 自己解析 `teamId ?? activeTeamId` 并把答案点名传下去，于是「本次会话中最后创建的那个」这条兜底规则只存在于一个调用点，而不是变成第二个 selector。`selectors.test.ts` 钉死了它在 barrel 中的缺席。
 
-```typescript
-// stores/agent/pending-gates-store.ts:35-44
-export function gateTypeFromScope(scope: string): PendingGateType {
-  switch (scope) {
-    case "agent-team-budget": return "budget"
-    case "agent-team-deadlock": return "deadlock"
-    case "agent-team-teammate-fix": return "teammate_fix"
-    case "agent-team":
-    default: return "plan"
-  }
-}
-```
+## ADR-0140 移除了什么
 
-`PendingGate` 携带 `key`（一个由 scope + id 构成的 `ApprovalKey`）、`gateType`、`title`、可选的 `body`、`runId`、`teamId`、可选的 `taskId`，以及 `openedAt`。store API 为 `open(gate)`（按 scope + id 去重）、`close(key)` 和 `clearForRun(runId)`。完整的审批总线故事见 [HITL 关卡](./hitl-gates)。
+`/agent-teams/workspace` 这个外壳曾经拥有一大簇再无他人调用的 store 状态与 action。它们都没了。这张表的作用是让拿着旧书签的读者停止寻找。
+
+| 已移除 | 替代 |
+| --- | --- |
+| `setActiveTeam`、`setWorkspaceTeamFromRoute`、`closeAgentTeamWorkspaceDetail`、`setIsPanelOpen`、`setDisplayMode`、`setWorkspaceTab`、`setWorkspaceFocus`、`setSelectedTeammate` | 没有替代。界面自己传 `teamId` prop。 |
+| `selectedTeammateId`、`isPanelOpen`、`workspaceFocus`、`workspaceDetailOpen` | 没有替代。共识面板改为从花名册里挑投票人。 |
+| `setTeammateStatus`、`setTeammateProgress`、`claimTask` | 运行时改经 `updateTeammate`、`setTaskStatus` 和 `moveTask` 写入。 |
+| `cancelAllTasks`、`shutdownAllTeammates`、`cleanupTeam`、`requestTeammateShutdown`、`addStructuredMessage` | `agentTeamManager.shutdown` 与 `addMessage`。 |
+| `upsertMessage`、`markMessageRead`、`markAllMessagesRead`、`markTeamMessagesRead`、`getUnreadMessages` | `addMessage` 与 `removeMessage`。已读状态早已没有读取方。 |
+| `importTemplates`、`exportTemplates` | 模板平台上的 `service.exportPackage` 与 `service.importPackage`。 |
+| `updateDefaultConfig`、`clearStaleCapabilityIds` | `defaultConfig` 改在设置表单里编辑。失效的 id 由能力审计闸门呈现，而那道闸门比替它做清理的 action 活得更久。 |
+| 整个 `selectActiveTeam*` 家族，以及 `selectActiveTeamId`、`selectSelectedTeammateId`、`selectDisplayMode`、`selectIsPanelOpen`、`selectWorkspaceTab`、`selectWorkspaceFocus`、`selectWorkspaceDetailOpen`、`selectTeamUnreadCount`、`selectTotalUnreadCount` | 上文那些按小队限定的 selector。`selectActiveTeamConsensus` 是唯一的幸存者。 |
+| `agent-team-compat.ts` 上的 `dispatchAgentTeam` | `startSquadRun`，ADR-0140 唯一的派发漏斗。 |
+
+## 相邻模块
+
+- `lib/ai/agent/agent-team-compat.ts` 如今只剩两个纯函数 `normalizeAgentTeamConfig` 和 `normalizeAgentTeamTask`，store 在每次创建和更新时都会调用它们。它们裁剪字符串、夹紧计数，并在什么都没变时返回原引用。
+- `stores/agent/pending-gates-store.ts` 是 HITL 闸门队列，由 ADR-0022 的小队闸门和 ADR-0045 的计划闸门共用。七种闸门类型：`budget`、`deadlock`、`plan`、`teammate_fix`、`replan`、`capability_audit`、`plan_step`。`gateTypeFromScope` 把审批总线的 scope 映射到它们上，而 rehydrate 会把每个恢复出来的闸门盖成 `interrupted`，因为等待审批总线的那一方随页面一起死了。参见 [HITL 闸门](./hitl-gates)。
 
 ## 相关
 
 <Cards>
-  <Card title="概览" href="./index" description="智能体团队是什么，以及各部件如何组合。" />
-  <Card title="生命周期与合成" href="./lifecycle-and-synthesis" description="团队如何被规划、运行并合成为最终结果。" />
-  <Card title="能力与插件" href="./capabilities-and-plugins" description="能力束与叠加层如何解析为某名队友的工具集。" />
-  <Card title="ADR-0022" href="../adr/0022-agent-team-runtime-hardening" description="运行时加固 —— 仅驻留内存与不新增 Dexie 表决策的来源。" />
+  <Card href="./index" title="小队" description="小队是什么，一次运行如何被合成出来" />
+  <Card href="./surfaces" title="界面" description="设置、/squads、/agent-runs 与组合器芯片" />
+  <Card href="./capabilities-and-plugins" title="能力与插件" description="7 个能力键与 ctx.team API" />
+  <Card href="../adr/0140-squad-as-an-executor" title="ADR-0140" description="把小队当作执行器" />
 </Cards>

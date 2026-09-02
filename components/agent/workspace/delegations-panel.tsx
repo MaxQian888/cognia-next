@@ -4,12 +4,13 @@
  * Delegations panel — workspace-side surface for active + recently settled
  * team delegations (background / external / team handoffs).
  *
- * Mirrors {@link ConsensusPanel}: data comes from `selectActiveTeamDelegations`;
- * approve / cancel dispatch through the delegation orchestrator so plugins
- * listening on `onTeamDelegationComplete` see the events. Without this surface
- * the delegation runtime (which teammates can drive via the `team_delegate`
- * tool) had no operator-facing view — a delegation stuck in
- * `awaiting_approval` (e.g. inside quiet hours) could never be released.
+ * Mirrors {@link ConsensusPanel}: rows come from `selectTeamDelegations` for
+ * the team this panel was opened for; approve / cancel dispatch through the
+ * delegation orchestrator so plugins listening on `onTeamDelegationComplete`
+ * see the events. Without this surface the delegation runtime (which teammates
+ * can drive via the `team_delegate` tool) had no operator-facing view — a
+ * delegation stuck in `awaiting_approval` (e.g. inside quiet hours) could never
+ * be released.
  */
 
 import { useMemo } from "react"
@@ -25,10 +26,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import type { TeamDelegationRecord, TeamDelegationStatus } from "@/types/agent/agent-team"
 import type { AgentTeamState } from "@/stores/agent/agent-team-store/types"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import {
-  selectActiveTeamDelegations,
-  selectTeamDelegations,
-} from "@/stores/agent/agent-team-store/selectors"
+import { selectTeamDelegations } from "@/stores/agent/agent-team-store/selectors"
 import { approveDelegation, cancelDelegation } from "@/lib/ai/agent/team/delegation-orchestrator"
 
 function statusVariant(
@@ -53,19 +51,27 @@ function statusVariant(
 }
 
 export interface DelegationsPanelProps {
-  /** Which team's delegations to show. See `ConsensusPanelProps.teamId`. */
+  /**
+   * Which team's delegations to show. See `ConsensusPanelProps.teamId`.
+   *
+   * Omitted means "whichever team the store last selected", which only
+   * `createTeam` writes and persist does not carry — so it is right inside a
+   * surface the user just created a squad from and empty after a reload. Every
+   * real caller names its team.
+   */
   teamId?: string
 }
 
 export function DelegationsPanel({ teamId }: DelegationsPanelProps = {}) {
   const t = useTranslations("agentTeamsWorkspace.delegations")
   // The selector materialises a fresh array, so `useShallow` bails out when the
-  // contents are reference-equal and the panel does not churn.
+  // contents are reference-equal and the panel does not churn. One selector,
+  // one fallback rule — the same `teamId ?? activeTeamId` resolution the
+  // consensus panel's roster follows, so a named team and an unnamed one
+  // cannot drift apart.
   const delegations = useAgentTeamStore(
     useShallow((state: AgentTeamState) =>
-      teamId === undefined
-        ? selectActiveTeamDelegations(state)
-        : selectTeamDelegations(state, teamId)
+      selectTeamDelegations(state, teamId ?? state.activeTeamId ?? undefined)
     )
   )
 

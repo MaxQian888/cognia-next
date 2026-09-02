@@ -19,14 +19,15 @@ jest.mock("@/lib/ai/agent/team/delegation-orchestrator", () => ({
 
 let mockDelegations: TeamDelegationRecord[] = []
 
+let mockActiveTeamId: string | null = null
+
 jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: (selector: (state: unknown) => unknown) =>
-    selector({ delegations: {}, teams: {}, activeTeamId: null }),
+    selector({ delegations: {}, teams: {}, activeTeamId: mockActiveTeamId }),
 }))
 
 let namedTeamIds: (string | undefined)[] = []
 jest.mock("@/stores/agent/agent-team-store/selectors", () => ({
-  selectActiveTeamDelegations: () => mockDelegations,
   // Records what the panel asked for. See the team-scoping block below.
   selectTeamDelegations: (_state: unknown, teamId: string | undefined) => {
     namedTeamIds.push(teamId)
@@ -56,6 +57,8 @@ describe("DelegationsPanel", () => {
     approveDelegationMock.mockReset()
     cancelDelegationMock.mockReset()
     mockDelegations = []
+    mockActiveTeamId = null
+    namedTeamIds = []
   })
 
   it("shows the empty hint when there are no delegations", () => {
@@ -116,21 +119,35 @@ describe("DelegationsPanel", () => {
 })
 
 /**
- * Same reasoning as `ConsensusPanel`: the active-team selector reads whatever
- * the store last selected, which the run cockpit never sets.
+ * Same reasoning as `ConsensusPanel`: `activeTeamId` reads whatever the store
+ * last created, which the run cockpit never sets. There is one selector and one
+ * fallback rule, so these tests pin what the panel NAMES rather than which of
+ * two selectors it reached for.
  */
 describe("DelegationsPanel team scoping", () => {
   beforeEach(() => {
     namedTeamIds = []
+    mockDelegations = []
+    mockActiveTeamId = null
   })
 
-  it("reads the named team when given one", () => {
+  it("reads the named team when given one, ignoring the store's selection", () => {
+    mockActiveTeamId = "team-last-created"
     render(<DelegationsPanel teamId="team-42" />)
     expect(namedTeamIds).toEqual(["team-42"])
   })
 
   it("falls back to the store's selection when no team is named", () => {
+    mockActiveTeamId = "team-last-created"
     render(<DelegationsPanel />)
-    expect(namedTeamIds).toEqual([])
+    expect(namedTeamIds).toEqual(["team-last-created"])
+  })
+
+  it("names no team at all when nothing was ever selected", () => {
+    render(<DelegationsPanel />)
+    // `null` would be a team id the selector has to defend against; the panel
+    // normalises it to `undefined` so the selector's "no team" branch is the
+    // one that runs.
+    expect(namedTeamIds).toEqual([undefined])
   })
 })

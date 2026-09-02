@@ -51,9 +51,11 @@ export interface AgentTeamState {
   /**
    * The most recently created team. Written by `createTeam` only — the
    * `setActiveTeam` / `setWorkspaceTeamFromRoute` setters went with the
-   * `/agent-teams/workspace` route ADR-0140 retired. Still read by the two
-   * `selectActiveTeam*` selectors that have callers, as the last-resort
-   * fallback for a surface that names no team. Not persisted.
+   * `/agent-teams/workspace` route ADR-0140 retired. Still read as the
+   * last-resort fallback for a surface that names no team: by
+   * `selectActiveTeamConsensus`, and by `DelegationsPanel`, which resolves
+   * `teamId ?? activeTeamId` itself and passes the answer to
+   * `selectTeamDelegations`. Not persisted.
    */
   activeTeamId: string | null
   /**

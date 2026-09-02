@@ -151,7 +151,14 @@ export const selectResolvedCapabilities =
 // Derived: Delegations
 // ============================================================================
 
-/** Delegations a NAMED team is the source of. See `selectTeamConsensus`. */
+/**
+ * Delegations a NAMED team is the source of. See `selectTeamConsensus`.
+ *
+ * There is no active-team twin of this selector any more: its only caller was
+ * the delegations panel, which now resolves `teamId ?? activeTeamId` itself and
+ * names the result here, so the "whatever was created last in this session"
+ * fallback lives at exactly one call site instead of being a second selector.
+ */
 export const selectTeamDelegations = (state: AgentTeamState, teamId: string | undefined) => {
   const team = teamId ? state.teams[teamId] : undefined
   if (!team) return []
@@ -159,9 +166,6 @@ export const selectTeamDelegations = (state: AgentTeamState, teamId: string | un
     (d): d is TeamDelegationRecord => d.sourceTeamId === team.id
   )
 }
-
-export const selectActiveTeamDelegations = (state: AgentTeamState) =>
-  selectTeamDelegations(state, state.activeTeamId ?? undefined)
 
 export const selectActiveDelegations = (state: AgentTeamState) =>
   Object.values(state.delegations).filter((d) => d.status === "active")

@@ -24,7 +24,6 @@ export {
   selectActiveTeamConsensus,
   selectTeamConsensus,
   // Derived: Delegations
-  selectActiveTeamDelegations,
   selectTeamDelegations,
   selectActiveDelegations,
 } from "./selectors"

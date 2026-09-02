@@ -28,9 +28,9 @@ description: 由首席协调员 + 队友 + 任务组成，通过合成一个 Vis
   <Stat label="HITL 关卡" value="5" hint="计划 / 预算 / 死锁 / 队友修复 / 能力审计，位于审批总线上" />
   <Stat label="Ultracode 模式节点" value="6" hint="multi-modal-sweep · loop-until-dry · adversarial-verify · judge-panel · completeness-critic · synthesize" />
   <Stat label="能力键" value="7" hint="mcpServerIds · skillIds · nativeAnthropicToolIds · characterPackIds · externalAgentPresetIds · subagentIds · a2uiTemplateIds" />
-  <Stat label="工作区标签页" value="6" hint="overview · tasks · chat · activity · members · settings" />
+  <Stat label="运行详情的小队标签页" value="3" hint="coordination · report · operations，仅在 /agent-runs 的团队运行行上出现" />
   <Stat label="队友运行时" value="5" hint="claude · codex · claude-code · gemini-cli · cursor-cli" />
-  <Stat label="Store 持久化版本" value="3" hint="仅模板 + defaultConfig + UI 偏好；实例仅驻留内存" />
+  <Stat label="Store 持久化版本" value="8" hint="v8 把小队 / 队友 / 任务搬去了 Dexie" />
 </StatGrid>
 
 ## 它是什么
@@ -38,7 +38,7 @@ description: 由首席协调员 + 队友 + 任务组成，通过合成一个 Vis
 团队是工作流引擎之上一层薄薄的合成层。该架构围绕五项承诺构建：
 
 1. **唯一编排器。** 根据 ADR-0022，重复的团队执行器已被移除。`runWorkflow` 是唯一的步骤调度器；团队运行时只负责*生成*它所运行的工作流。并发调度、重试、崩溃恢复和事件日志都从工作流层免费获得。
-2. **临时状态，持久运行。** 团队实例、队友、任务、消息、共享内存、共识和委派都作为仅驻留内存的状态存活在 Zustand store 中。只有模板、默认配置和少数 UI 偏好会持久化（`stores/agent/agent-team-store/store.ts:104-124`，持久化版本 3）。运行*历史*则作为 `workflowRuns` + `workflowRunEvents` 行持久化 —— 没有团队专属的 Dexie 表。
+2. **持久的定义，临时的运行态。** 从持久化 v8 起，小队、队友和任务以 Dexie 为权威（`agentTeams` / `agentTeammates` / `agentTeamTasks`），由 `stores/agent/agent-team-store/dexie-bridge.ts` 镜像。localStorage 这一份只剩模板、默认配置和少数视图偏好。消息、共享内存、共识和委派仍仅驻留内存，运行*历史*则作为 `agentTeamRuns` 以及 `triggerKind: "team"` 的 `workflowRuns` 行持久化。
 3. **派发时一切皆为 Character。** 一名队友携带自己的运行时、模型、系统提示词和能力叠加层。派发时，`teammateToCharacter`（`team/teammate-character.ts:56`）将其投射为一个合成的 `Character`，因此每名队友的 Claude 回合都会经过与[内置智能体](./built-in-agent)相同的 build-options 流水线（技能、MCP、computer-use、权限）。
 4. **两层能力作用域。** 团队能力束（7 个键）通过 add / remove / replace 语义按队友叠加，运行时由 `resolveTeammateCapabilities`（`team/capability-resolver.ts:91`）解析。插件通过叠加注册表贡献能力（[ADR-0032](../adr/0032-agent-team-plugin-integration)）。
 5. **失败可见的 HITL 关卡。** 当运行无法安全推进时 —— 过期的能力引用、等待审批的计划、预算告急、所有队友均不可用、某个被取消资格的队友 —— 运行会暂停、打开关卡弹窗，并在审批总线上等待操作员决策，而非悄无声息地降级。
@@ -116,7 +116,7 @@ flowchart TB
 | 原则 | 含义 | 位置 |
 | --- | --- | --- |
 | **单一编排器** | 团队运行时合成一个 `VisualWorkflow` 并委派；`runWorkflow` 是唯一的步骤调度器。没有重复引擎。 | `agent-team-runtime.ts:122` → `lib/workflow/runtime/orchestrator.ts` |
-| **临时 store，持久运行** | 团队实例是仅驻留内存的 Zustand 状态；运行历史作为 `triggerKind` 设为 "team" 的 `workflowRuns` 行持久化。 | `stores/agent/agent-team-store/store.ts:104-124` · `lib/db/schema.ts:194` |
+| **持久的定义，临时的运行态** | 从持久化 v8 起小队存放在 Dexie；运行历史作为 `triggerKind` 设为 "team" 的 `workflowRuns` 行持久化。 | `stores/agent/agent-team-store/dexie-bridge.ts` · `lib/db/agent-team-definitions.ts` |
 | **一切皆为 Character** | 队友在派发时被投射为一个合成的 `Character`，因此队友搭乘完整的 `resolveSendOptions` 流水线。 | `team/teammate-character.ts:56` · `team/dispatch-teammate.ts:107-113` |
 | **两层能力作用域** | 团队能力束（7 个键）通过 add / remove / replace 按队友叠加并在运行时解析；插件为注册表供给数据。 | `team/capability-resolver.ts:91` · ADR-0032 |
 | **失败可见的 HITL 关卡** | 当运行无法安全推进时即暂停、打开关卡，并在审批总线上等待人工决策 —— 绝不静默降级。 | `agent-team-runtime.ts:265-391` · `lib/runtime/approval-bus.ts` |
@@ -125,15 +125,14 @@ flowchart TB
 
 下面每个页面都以行级精确的内部细节记录一个切片。先从 **生命周期与合成** 了解主干；其余都挂接在它之上。
 
-- [数据模型](./data-model) —— `AgentTeam` / `AgentTeammate` / `AgentTeamTask` 类型、Zustand store（持久化 v3，仅驻留内存的实例），以及 `workflowRuns` 持久化路径。
+- [数据模型](./data-model) —— `AgentTeam` / `AgentTeammate` / `AgentTeamTask` 类型、Zustand store（持久化 v8）与 Dexie 定义表，以及 ADR-0140 移除了什么。
 - [生命周期与合成](./lifecycle-and-synthesis) —— `agentTeamManager`、逐步剖析的 `runTeamLifecycle` 合成器，以及 `synthesizeTeamWorkflow`（Kahn 环检测、合成工作流 id）。
 - [派发与共享状态](./dispatch-and-shared-state) —— `dispatchTeammate`、`TeamRunContext` 注册表、`TeammatePool`（熔断器）、`BudgetGuard`（四种 onCritical 动作）以及 `TeamNotifier`。
 - [HITL 关卡](./hitl-gates) —— 五个审批总线关卡（计划 / 预算 / 死锁 / 队友修复 / 能力审计）、它们的载荷模式，以及 pending-gates store。
 - [共识、委派与内存](./consensus-delegation-memory) —— 法定人数投票、带静默时段门控的后台 / 外部委派，以及带 PII 门控、通过适配器同步的共享内存 store。
 - [Ultracode 与模式](./ultracode-and-patterns) —— 复杂度感知触发器、规划器，以及六个高阶 `pattern.*` 质量节点。
 - [能力与插件](./capabilities-and-plugins) —— 两层能力模型、插件子智能体 / 团队模板 / 共享内存适配器，以及能力审计关卡（ADR-0032）。
-- [工作区 UI](./workspace-ui) —— 六标签页工作区、团队列表中枢、设置手风琴和报告时间线。
-- [工作区聊天](./workspace-chat) —— 基于 @提及 的派发（`@claude`、`@codex`、队友）、复合流式器，以及运行时可用性。
+- [界面](./surfaces) —— ADR-0140 解散工作区之后，小队在哪里配置、运行与观察：设置、`/squads`、`/agent-runs` 的小队标签页，以及组合器上的执行器芯片。
 
 ## 与其他子系统的关系
 

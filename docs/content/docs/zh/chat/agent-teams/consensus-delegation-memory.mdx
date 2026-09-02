@@ -86,7 +86,7 @@ switch (type) {
 
 ### 插件钩子与消费者
 
-`createConsensus`、`castVote` 和 `resolveConsensus` 分别触发 <Term>onConsensusOpened</Term>、<Term>onConsensusVoted</Term> 和 <Term>onConsensusResolved</Term>，让插件能观察其生命周期。渲染端消费者是工作区 Activity 标签页中的 `ConsensusPanel`（参见 <LinkCard href="./workspace-ui" title="工作区 UI" description="ConsensusPanel 在何处渲染" />）。
+`createConsensus`、`castVote` 和 `resolveConsensus` 分别触发 <Term>onConsensusOpened</Term>、<Term>onConsensusVoted</Term> 和 <Term>onConsensusResolved</Term>，让插件能观察其生命周期。渲染端消费者是 `/agent-runs` Coordination 标签页中的 `ConsensusPanel`（参见 <LinkCard href="./surfaces" title="界面" description="ConsensusPanel 在何处渲染" />）。
 
 ## 委派编排器
 
@@ -235,6 +235,6 @@ export function isEntryReadableBy(entry: SharedMemoryEntry, readerId: string): b
 <Cards>
   <Card href="./data-model" title="数据模型与 Store" description="ConsensusRequest、TeamDelegationRecord、SharedMemoryEntry 类型以及这些编排器包装的 Zustand store CRUD。" />
   <Card href="./capabilities-and-plugins" title="能力与插件" description="插件钩子表面（onConsensus*、onTeamDelegation*、onSharedMemory*）以及共享记忆适配器注册表。" />
-  <Card href="./workspace-ui" title="工作区 UI" description="Activity 标签页中的 ConsensusPanel 和共享记忆视图。" />
+  <Card href="./surfaces" title="界面" description="ConsensusPanel 与 DelegationsPanel 在何处渲染。" />
   <Card href="../adr/0032-agent-team-plugin-integration" title="ADR-0032" description="Agent Team 插件集成——这三个编排器背后的架构决策。" />
 </Cards>

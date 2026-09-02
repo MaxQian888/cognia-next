@@ -86,7 +86,7 @@ Votes are **deduped by voterId**: a re-cast replaces the prior vote rather than 
 
 ### Plugin hooks & consumers
 
-`createConsensus`, `castVote`, and `resolveConsensus` fire <Term>onConsensusOpened</Term>, <Term>onConsensusVoted</Term>, and <Term>onConsensusResolved</Term> respectively, letting plugins observe the lifecycle. The renderer consumer is the `ConsensusPanel` in the workspace Activity tab (see <LinkCard href="./workspace-ui" title="Workspace UI" description="Where ConsensusPanel renders" />).
+`createConsensus`, `castVote`, and `resolveConsensus` fire <Term>onConsensusOpened</Term>, <Term>onConsensusVoted</Term>, and <Term>onConsensusResolved</Term> respectively, letting plugins observe the lifecycle. The renderer consumer is the `ConsensusPanel` on the `/agent-runs` Coordination tab (see <LinkCard href="./surfaces" title="Surfaces" description="Where ConsensusPanel renders" />).
 
 ## Delegation orchestrator
 
@@ -235,6 +235,6 @@ export function isEntryReadableBy(entry: SharedMemoryEntry, readerId: string): b
 <Cards>
   <Card href="./data-model" title="Data Model & Store" description="ConsensusRequest, TeamDelegationRecord, SharedMemoryEntry types and the Zustand store CRUD these orchestrators wrap." />
   <Card href="./capabilities-and-plugins" title="Capabilities & Plugins" description="The plugin hook surface (onConsensus*, onTeamDelegation*, onSharedMemory*) and the shared-memory adapter registry." />
-  <Card href="./workspace-ui" title="Workspace UI" description="ConsensusPanel and the shared-memory view in the Activity tab." />
+  <Card href="./surfaces" title="Surfaces" description="Where ConsensusPanel and DelegationsPanel render." />
   <Card href="../adr/0032-agent-team-plugin-integration" title="ADR-0032" description="Agent Team plugin integration — the architectural decision behind these three orchestrators." />
 </Cards>
