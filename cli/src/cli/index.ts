@@ -21,6 +21,7 @@ import { xCommand as defaultX } from "./x-command"
 import { rpcCommand as defaultRpc } from "./rpc-command"
 import { workerCommand as defaultWorker } from "./worker-command"
 import { securityCommand as defaultSecurity } from "./security-command"
+import { providerCommand as defaultProvider } from "./provider-command"
 import {
   attachCommand as defaultAttach,
   detachCommand as defaultDetach,
@@ -71,6 +72,10 @@ Usage:
                       headless persistence: inspect, migrate, recover, roll back
   cognia-agent sdk <capabilities|sessions|info|messages|rename|tag|fork|delete|settings>
                      typed Claude Agent SDK management (never raw option JSON)
+  cognia-agent provider <capabilities|models|balance|limits|usage|probe>
+                     [--provider id] [--operation id] [--refresh] [--days n]
+                     [--model m] [--transport auto|bridge|rpc|local] [--live] [--yes] [--json]
+                     the provider operation plane: profiles, inventory, meters, spend, probes
   cognia-agent rpc [--model m] [--provider p] [--backend id]
   Bidirectional JSON-RPC 2.0 host on stdin/stdout (for @cognia/agent)
   cognia-agent worker <enroll|bind|list|remove|connect|daemon|service>
@@ -137,6 +142,7 @@ const KNOWN_COMMANDS = new Set([
   "sync",
   "backend",
   "security",
+  "provider",
 ])
 
 export interface MainDeps {
@@ -160,6 +166,7 @@ export interface MainDeps {
   syncStatus?: typeof defaultSyncStatus
   backend?: typeof defaultBackend
   security?: typeof defaultSecurity
+  provider?: typeof defaultProvider
   out?: OutputSink
 }
 
@@ -245,6 +252,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.syncStatus ?? defaultSyncStatus)(args, { out })
     case "security":
       return (deps.security ?? defaultSecurity)(args, { out })
+    case "provider":
+      return (deps.provider ?? defaultProvider)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

@@ -54,6 +54,11 @@ export const BOOLEAN_FLAGS = new Set([
   "authorized",
   // `security --only-new` — gate on findings absent from the baseline.
   "only-new",
+  // `provider balance|limits|probe --live` — the operator's confirmation that
+  // a billed upstream read is wanted. Must never swallow the next token.
+  "live",
+  // `provider models --refresh` — bypass the cached inventory.
+  "refresh",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
@@ -69,6 +74,7 @@ export const GROUPED_COMMANDS = new Set([
   "sync",
   "backend",
   "security",
+  "provider",
 ])
 
 const SHORT_ALIAS: Record<string, string> = {

@@ -65,6 +65,21 @@ describe("main", () => {
     expect(durability).toHaveBeenCalled()
   })
 
+  it("dispatches provider and treats it as a real command under --print", async () => {
+    const s = sink()
+    const provider = jest.fn().mockResolvedValue(0)
+    const run = jest.fn().mockResolvedValue(0)
+    expect(
+      await main(["provider", "capabilities", "--provider", "openai"], { out: s.out, provider })
+    ).toBe(0)
+    expect(provider.mock.calls[0][0].subcommand).toBe("capabilities")
+    await main(["--print", "provider", "models"], { provider, run })
+    expect(run).not.toHaveBeenCalled()
+    expect(provider).toHaveBeenCalledTimes(2)
+    expect(await main(["--help"], { out: s.out })).toBe(0)
+    expect(s.stdout()).toMatch(/cognia-agent provider <capabilities\|models/)
+  })
+
   it("dispatches sdk management", async () => {
     const s = sink()
     const sdk = jest.fn().mockResolvedValue(0)
