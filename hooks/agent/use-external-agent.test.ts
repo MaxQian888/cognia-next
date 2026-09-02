@@ -9,18 +9,28 @@
 import { act, renderHook } from "@testing-library/react"
 
 const logError = jest.fn()
-jest.mock("@cognia/logging", () => ({
-  loggers: {
-    agent: {
-      child: () => ({
-        error: (...args: unknown[]) => logError(...args),
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-      }),
-    },
-  },
-}))
+// Any namespace, not just `agent`. This suite's import graph reaches modules
+// that take a logger at module scope under other names (`lib/db/mcp-servers`
+// calls `loggers.mcp.child(...)` on import), and a namespace the mock does not
+// name throws `Cannot read properties of undefined (reading 'child')` before a
+// single test runs, which jest reports as the whole file failing to load.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => {
+    const logger: Record<string, unknown> = {
+      error: (...args: unknown[]) => logError(...args),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      child: () => logger,
+    }
+    return logger
+  }
+  return {
+    loggers: new Proxy({}, { get: () => makeLogger() }),
+    // `lib/execution/broker` takes one at module scope too.
+    createLogger: () => makeLogger(),
+  }
+})
 
 const dispatchConnect = jest.fn()
 const dispatchDisconnect = jest.fn()
@@ -123,6 +133,8 @@ const storeUpdateAgent = jest.fn((id: string, updates: { metadata?: Record<strin
   }
 })
 
+const storeRecordAgentFailure = jest.fn()
+const storeClearAgentFailure = jest.fn()
 const stableGetAgent = (id: string) => storeStateRef.current.agents[id]
 const stableGetAllAgents = () => Object.values(storeStateRef.current.agents)
 const stableGetConnectionStatus = (id: string) =>
@@ -134,6 +146,10 @@ function getStoreState() {
     addAgent: storeAddAgent,
     removeAgent: storeRemoveAgent,
     setConnectionStatus: storeSetConnectionStatus,
+    // Per-agent failure reporting: the hook clears before an attempt and
+    // records on the way out, so both have to exist for connect to run at all.
+    recordAgentFailure: storeRecordAgentFailure,
+    clearAgentFailure: storeClearAgentFailure,
     setAgentValidity: storeSetAgentValidity,
     getAgent: stableGetAgent,
     getAllAgents: stableGetAllAgents,
@@ -946,6 +962,51 @@ describe("useExternalAgent core actions", () => {
     })
     await flush()
     expect(result.current.error).toMatch(/cancelled/)
+  })
+
+  it("records a failed execution against its agent, not just in local state", async () => {
+    // The panel-level error banner is gone; a per-agent report drawn in that
+    // agent's row replaced it. Only the connect path ever filed one, so an
+    // execution that failed set state nothing rendered and, because the
+    // commands list calls `onExecute` fire-and-forget, surfaced as an
+    // unhandled rejection instead of a message.
+    seedAgent("a1")
+    storeRecordAgentFailure.mockClear()
+    fakeManager.execute.mockRejectedValueOnce(new Error("adapter refused the prompt"))
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await expect(result.current.execute("hi")).rejects.toThrow("adapter refused the prompt")
+    })
+    await flush()
+    expect(storeRecordAgentFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "a1",
+        phase: "execute",
+        message: "adapter refused the prompt",
+      })
+    )
+  })
+
+  it("records a failed session operation under its own phase", async () => {
+    // "session" and "execute" were declared on the failure type from the
+    // start and produced by nothing, so every path but connect was silent.
+    seedAgent("a1")
+    storeRecordAgentFailure.mockClear()
+    fakeManager.createSession.mockRejectedValueOnce(new Error("agent refused a new session"))
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+    await act(async () => {
+      await expect(result.current.createSession()).rejects.toThrow("agent refused a new session")
+    })
+    await flush()
+    expect(storeRecordAgentFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "a1",
+        phase: "session",
+        message: "agent refused a new session",
+      })
+    )
   })
 
   it("setSessionMode/Model require active session", async () => {

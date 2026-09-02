@@ -7,6 +7,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "ocr_model_status",
     "ocr_download_model",
     "ocr_cancel_model_download",
+    // Which agent runtimes this Host already has. A read of this machine, so it
+    // answers here rather than riding the generic renderer bridge the
+    // `external_agent_config_*` arms use: the browser asking has no PATH.
+    "external_agent_detect_runtimes",
     "skills_scan_native",
     "skills_load_registry",
     "skills_install_native",
@@ -64,6 +68,10 @@ pub(super) async fn dispatch(
         // itself already subtracts the OS-bound `apple-vision` /
         // `windows-media-ocr` backends where they cannot run. There is nothing
         // desktop-only about the arms, only about two of the backends.
+        "external_agent_detect_runtimes" => {
+            to_json(crate::external_agent::version_probe::detect_runtimes().await)
+        }
+
         "ocr_list_native_backends" => {
             let ids = host
                 .ocr_registry()

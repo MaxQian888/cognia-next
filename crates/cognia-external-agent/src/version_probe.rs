@@ -231,9 +231,212 @@ pub async fn probe_runtime_version(runtime_id: &str) -> Result<RuntimeVersionPro
     }
 }
 
+// ============================================================================
+// Detection: what agent runtimes does this machine already have?
+// ============================================================================
+
+/// The command resolved to a file on this machine and its version was read.
+pub const RUNTIME_INSTALLED: &str = "installed";
+/// The command is nowhere on PATH or any known install root.
+pub const RUNTIME_MISSING: &str = "missing";
+/// The runtime launches through a package runner (npx and friends).
+///
+/// Presence cannot be established without a network install: resolving `npx`
+/// itself proves only that Node is here, and running the catalogued probe
+/// would be `npx -y <package> --version`, which DOWNLOADS the package. A badge
+/// is not worth a 20 second install the user did not ask for, so this reports
+/// the honest third answer instead of guessing either way.
+pub const RUNTIME_PACKAGE_RUNNER: &str = "package-runner";
+/// The runtime has no local command at all (a remote or managed runtime).
+pub const RUNTIME_NOT_LOCAL: &str = "not-local";
+
+/// One catalogued runtime as this machine currently presents it.
+///
+/// Facts only, exactly like [`RuntimeVersionProbe`]: the version STRING is not
+/// parsed here and no runtime is called certified, supported or stale. That
+/// verdict is `assessRuntimeVersion()` in
+/// `lib/ai/agent/external/runtime-version.ts`, which every host shares.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedRuntime {
+    pub runtime_id: String,
+    /// The catalogued system command. `None` for a runtime with no local one.
+    pub command: Option<String>,
+    /// One of the four `RUNTIME_*` constants above.
+    pub resolution: String,
+    /// The executable the command resolved to, when it resolved at all.
+    pub executable_path: Option<String>,
+    /// Raw probe output, for the shared TypeScript version reader.
+    pub version_output: Option<String>,
+    /// Non-localized note for logs when the probe produced nothing usable.
+    pub detail: Option<String>,
+}
+
+/// Everything the catalog governs, in catalog order.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedRuntimesReport {
+    pub runtimes: Vec<DetectedRuntime>,
+}
+
+fn not_local(runtime_id: &str, command: Option<&str>) -> DetectedRuntime {
+    DetectedRuntime {
+        runtime_id: runtime_id.to_string(),
+        command: command.map(str::to_string),
+        resolution: RUNTIME_NOT_LOCAL.to_string(),
+        executable_path: None,
+        version_output: None,
+        detail: Some(format!("{runtime_id} has no local command to detect")),
+    }
+}
+
+/// Detect one catalogued runtime without installing anything.
+async fn detect_one(entry: &'static CatalogEntry) -> DetectedRuntime {
+    let runtime_id = entry.runtime_id.as_str();
+    let Some(command) = entry.system_command.as_deref() else {
+        return not_local(runtime_id, None);
+    };
+    if is_package_runner(command) {
+        return DetectedRuntime {
+            runtime_id: runtime_id.to_string(),
+            command: Some(command.to_string()),
+            resolution: RUNTIME_PACKAGE_RUNNER.to_string(),
+            executable_path: super::command_resolver::resolve_command_path(command)
+                .map(|path| path.to_string_lossy().into_owned()),
+            version_output: None,
+            detail: Some(format!(
+                "{runtime_id} runs through {command}; its package is fetched on first launch"
+            )),
+        };
+    }
+    let Some(resolved) = super::command_resolver::resolve_command_path(command) else {
+        return DetectedRuntime {
+            runtime_id: runtime_id.to_string(),
+            command: Some(command.to_string()),
+            resolution: RUNTIME_MISSING.to_string(),
+            executable_path: None,
+            version_output: None,
+            detail: None,
+        };
+    };
+    // The command is here, so run the catalogued probe for its version. This is
+    // the only spawn detection performs, and only for a binary already on this
+    // machine that the launch allowlist already permits.
+    let probe = probe_runtime_version(runtime_id).await.unwrap_or_default();
+    DetectedRuntime {
+        runtime_id: runtime_id.to_string(),
+        command: Some(command.to_string()),
+        resolution: RUNTIME_INSTALLED.to_string(),
+        executable_path: probe
+            .executable_path
+            .or_else(|| Some(resolved.to_string_lossy().into_owned())),
+        version_output: probe.output,
+        detail: probe.detail,
+    }
+}
+
+/// Detect every catalogued runtime, concurrently.
+///
+/// Concurrent because the whole point is a picker that can render a badge per
+/// preset: run serially and a machine with six agent CLIs waits for six
+/// sequential process spawns before the first badge appears.
+pub async fn detect_runtimes() -> DetectedRuntimesReport {
+    let entries = &catalog().runtimes;
+    let mut slots: Vec<Option<DetectedRuntime>> = vec![None; entries.len()];
+    let mut set = tokio::task::JoinSet::new();
+    for (index, entry) in entries.iter().enumerate() {
+        set.spawn(async move { (index, detect_one(entry).await) });
+    }
+    while let Some(joined) = set.join_next().await {
+        // A panicked probe drops that runtime rather than the whole report: a
+        // picker missing one badge is recoverable, a picker with none is not.
+        if let Ok((index, detected)) = joined {
+            slots[index] = Some(detected);
+        }
+    }
+    DetectedRuntimesReport {
+        runtimes: slots.into_iter().flatten().collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn detection_answers_for_every_catalogued_runtime_in_catalog_order() {
+        let report = detect_runtimes().await;
+        let expected: Vec<&str> = catalog()
+            .runtimes
+            .iter()
+            .map(|entry| entry.runtime_id.as_str())
+            .collect();
+        let actual: Vec<&str> = report
+            .runtimes
+            .iter()
+            .map(|runtime| runtime.runtime_id.as_str())
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn detection_never_reports_a_state_outside_the_four_it_defines() {
+        let report = detect_runtimes().await;
+        for runtime in &report.runtimes {
+            assert!(
+                [
+                    RUNTIME_INSTALLED,
+                    RUNTIME_MISSING,
+                    RUNTIME_PACKAGE_RUNNER,
+                    RUNTIME_NOT_LOCAL,
+                ]
+                .contains(&runtime.resolution.as_str()),
+                "{} reported an unknown resolution {}",
+                runtime.runtime_id,
+                runtime.resolution
+            );
+            if runtime.resolution == RUNTIME_MISSING {
+                assert!(runtime.executable_path.is_none());
+                assert!(runtime.version_output.is_none());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_package_runner_runtime_is_named_rather_than_installed_to_answer() {
+        // `npx -y @google/gemini-cli --version` DOWNLOADS the package. Detection
+        // must never pay that to draw a badge, so these report the third state.
+        let report = detect_runtimes().await;
+        let npx_backed: Vec<&DetectedRuntime> = report
+            .runtimes
+            .iter()
+            .filter(|runtime| runtime.command.as_deref() == Some("npx"))
+            .collect();
+        assert!(
+            !npx_backed.is_empty(),
+            "the catalog is expected to still ship npx-backed runtimes"
+        );
+        for runtime in npx_backed {
+            assert_eq!(runtime.resolution, RUNTIME_PACKAGE_RUNNER);
+            assert!(
+                runtime.version_output.is_none(),
+                "{} was probed through its package runner",
+                runtime.runtime_id
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_runtime_with_no_local_command_reports_not_local() {
+        let report = detect_runtimes().await;
+        let remote = report
+            .runtimes
+            .iter()
+            .find(|runtime| runtime.runtime_id == "opencode-remote")
+            .expect("the catalog ships a remote runtime");
+        assert_eq!(remote.resolution, RUNTIME_NOT_LOCAL);
+        assert!(remote.command.is_none());
+    }
 
     #[test]
     fn the_shipped_catalog_parses() {

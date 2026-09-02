@@ -62,6 +62,7 @@
   "terminal": "Terminal",
   "tools": "Tools",
   "usageCost": "Usage & cost",
+  "webhooks": "Webhooks",
   "workflows": "Workflows",
   "workspaceTrust": "Workspace Trust"
 }

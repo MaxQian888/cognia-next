@@ -381,6 +381,23 @@ pub async fn external_agent_probe_runtime_version(
     crate::version_probe::probe_runtime_version(&runtime_id).await
 }
 
+/// Which catalogued agent runtimes does this machine already have?
+///
+/// One call for the whole catalog rather than one per runtime, because the
+/// caller is a picker rendering a badge per preset and a browser driving a
+/// paired Host would otherwise pay a round trip for each.
+///
+/// It installs nothing. A runtime that launches through a package runner is
+/// reported as such instead of being probed, since its catalogued probe is
+/// `npx -y <package> --version` and running that to draw a badge would download
+/// the package. The only spawns are catalogued `--version` reads of binaries
+/// already resolvable on this machine.
+#[tauri::command]
+pub async fn external_agent_detect_runtimes(
+) -> Result<crate::version_probe::DetectedRuntimesReport, String> {
+    Ok(crate::version_probe::detect_runtimes().await)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

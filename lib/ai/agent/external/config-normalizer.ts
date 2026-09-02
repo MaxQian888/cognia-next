@@ -1,5 +1,10 @@
 import { nanoid } from "nanoid"
 import { supportsExternalAgents } from "./agent-transport"
+import {
+  PROCESS_PLANE_COMMANDS,
+  externalAgentProcessPlane,
+  type ProcessPlaneAvailability,
+} from "./process-plane"
 import type {
   CreateExternalAgentInput,
   ExternalAgentBranchReasonCode,
@@ -489,19 +494,65 @@ export function getUnsupportedProtocolReason(protocol: ExternalAgentProtocol): s
   return `Protocol "${protocol}" is not executable yet. Please migrate this configuration to ACP.`
 }
 
+/**
+ * How far the caller has already resolved "can a process start from here".
+ *
+ * A boolean is still accepted because most callers only have one, and because
+ * every existing test passes one. The richer form carries the REASON, which is
+ * what lets a companion say "this device has no Agent Control grant" instead of
+ * the flatly wrong "you need the desktop app".
+ */
+export type ExternalAgentRuntimeReach = boolean | ProcessPlaneAvailability
+
+function reachOf(reach: ExternalAgentRuntimeReach): ProcessPlaneAvailability {
+  if (typeof reach !== "boolean") return reach
+  return reach ? { ok: true, via: "local" } : { ok: false, reason: "no-host" }
+}
+
+/**
+ * The default answer: ask the process plane, not the shell.
+ *
+ * Evaluated per call rather than cached, because the answer changes while the
+ * app is open. A paired Host is connected, upgraded or granted underneath a
+ * long-lived tab, and a verdict captured at import time would describe a
+ * situation that has passed.
+ */
+function defaultReach(): ProcessPlaneAvailability {
+  return externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
+}
+
+/**
+ * Why a stdio agent cannot start, in the caller's words rather than the
+ * shell's. Each branch names a different thing to do about it.
+ */
+function transportBlockReason(reach: ProcessPlaneAvailability): string {
+  if (reach.ok) return ""
+  switch (reach.reason) {
+    case "manifest-missing":
+      return "The paired Host has not finished reporting what it supports yet. Try again once it connects."
+    case "unsupported":
+      return "The paired Host does not start external agent processes. Update it, or connect to a Host that does."
+    case "not-granted":
+      return "This device has not been granted Agent Control on the paired Host, which is what starting an agent process requires. Grant it from the Host (Settings -> Devices), or run `cognia-server devices grant --agent-control` on a headless Host."
+    case "no-host":
+    default:
+      return "The stdio transport needs a runtime that can start a process: the desktop app, or a paired Host. Pair one, or open Cognia as the desktop app."
+  }
+}
+
 export function isTransportSupportedOnCurrentPlatform(
   transport: ExternalAgentTransport,
-  runtimeIsTauri = supportsExternalAgents()
+  runtimeIsTauri: ExternalAgentRuntimeReach = defaultReach()
 ): boolean {
   if (transport !== "stdio") {
     return true
   }
-  return runtimeIsTauri
+  return reachOf(runtimeIsTauri).ok
 }
 
 export function getExternalAgentExecutionBlockReason(
   config: ExternalAgentConfig,
-  runtimeSupportsExternalAgents = supportsExternalAgents()
+  runtimeSupportsExternalAgents: ExternalAgentRuntimeReach = defaultReach()
 ): string | null {
   const assessment = getExternalAgentExecutionBlock(config, runtimeSupportsExternalAgents)
   return assessment?.reason ?? null
@@ -509,8 +560,10 @@ export function getExternalAgentExecutionBlockReason(
 
 export function getExternalAgentExecutionBlock(
   config: ExternalAgentConfig,
-  runtimeSupportsExternalAgents = supportsExternalAgents()
+  reach: ExternalAgentRuntimeReach = defaultReach()
 ): ExternalAgentExecutionBlockAssessment | null {
+  const runtimeReach = reachOf(reach)
+  const runtimeSupportsExternalAgents = runtimeReach.ok
   if (!config.enabled) {
     return {
       code: "agent_disabled",
@@ -535,10 +588,14 @@ export function getExternalAgentExecutionBlock(
       transient: isPluginContributedProtocol(config.protocol),
     }
   }
-  if (!isTransportSupportedOnCurrentPlatform(config.transport, runtimeSupportsExternalAgents)) {
+  if (!isTransportSupportedOnCurrentPlatform(config.transport, runtimeReach)) {
     return {
       code: "transport_blocked",
-      reason: "The stdio transport requires the desktop (Tauri) runtime.",
+      reason: transportBlockReason(runtimeReach),
+      // A Host mid-handshake becomes a Host that can spawn moments later. Same
+      // reason a plugin-contributed protocol is transient: rendering the block
+      // is fine and self-correcting, persisting a decision from it is not.
+      transient: runtimeReach.ok ? undefined : runtimeReach.reason === "manifest-missing",
     }
   }
   // An OpenCode config without an explicit endpoint auto-spawns `opencode
@@ -593,7 +650,7 @@ export function getExternalAgentExecutionBlock(
 
 export function isExternalAgentExecutable(
   config: ExternalAgentConfig,
-  runtimeIsTauri = supportsExternalAgents()
+  runtimeIsTauri: ExternalAgentRuntimeReach = defaultReach()
 ): boolean {
   return getExternalAgentExecutionBlockReason(config, runtimeIsTauri) === null
 }

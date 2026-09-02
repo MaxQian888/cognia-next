@@ -360,7 +360,13 @@ export function getExternalAgentExecutionBlock(
   if (config.transport === "stdio" && !runtimeSupportsExternalAgents) {
     return {
       code: "transport_blocked",
-      reason: "The stdio transport requires the desktop (Tauri) runtime.",
+      // The desktop app is one runtime that can start a process, not the only
+      // one. A browser or phone paired to a Host starts the agent on the Host,
+      // so naming Tauri here told an author with a working setup to go get a
+      // different app. The host application decides which of the two it is and
+      // passes the answer in, so the wording stays runtime neutral.
+      reason:
+        "The stdio transport needs a runtime that can start a process: the desktop app, or a paired Host.",
     }
   }
   return null

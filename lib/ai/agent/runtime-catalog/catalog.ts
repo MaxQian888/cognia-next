@@ -15,7 +15,10 @@
  * way a third-party runtime could.
  */
 
-import { getExternalAgentExecutionBlock } from "@/lib/ai/agent/external/config-normalizer"
+import {
+  getExternalAgentExecutionBlock,
+  type ExternalAgentRuntimeReach,
+} from "@/lib/ai/agent/external/config-normalizer"
 import { isFromPreset } from "@/lib/ai/agent/external/presets"
 import { runtimeFromLegacy } from "@/lib/ai/agent/execution/legacy-mapping"
 import type { AgentRuntimeAdapterId } from "@cognia/agent-config-types/agent-execution"
@@ -56,10 +59,19 @@ export interface AgentRuntimeCatalogInput {
   /** Configurations the paired host owns. Pass an empty list when unavailable. */
   hostConfigs?: readonly ExternalAgentConfigRecord[]
   /**
-   * Whether this shell can spawn a local agent process at all. Threaded rather
+   * Whether an agent process can be started from here at all. Threaded rather
    * than probed so the module stays pure.
+   *
+   * A bare boolean is still accepted, and is what the tests pass, but a caller
+   * that has the richer verdict should hand that over instead: the REASON is
+   * what lets a row say "this device has no Agent Control" rather than the
+   * flatly wrong "you need the desktop app", and it is what carries the
+   * `transient` marker for a Host that is merely still handshaking. Collapsing
+   * it to a boolean here made every companion look permanently blocked, and a
+   * permanent block is what the selector treats as grounds to rewrite the
+   * user's chosen runtime back to the default.
    */
-  runtimeSupportsExternalAgents: boolean
+  runtimeSupportsExternalAgents: ExternalAgentRuntimeReach
   /** Resolves a validity snapshot into the one-line warning. Injected for i18n. */
   describeWarning?: (validity: ExternalAgentValiditySnapshot | undefined) => string | null
 }

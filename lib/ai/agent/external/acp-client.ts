@@ -866,7 +866,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   private async connectViaStdio(config: ExternalAgentConfig): Promise<void> {
     if (!supportsExternalAgents()) {
-      throw new Error("stdio transport requires the Tauri desktop or a headless host")
+      throw new Error(
+        "stdio needs a runtime that can start a process: the desktop app, a headless host, or a paired Host that has granted this device Agent Control"
+      )
     }
 
     // Defensive: a prior connect that errored after the early-return guard may

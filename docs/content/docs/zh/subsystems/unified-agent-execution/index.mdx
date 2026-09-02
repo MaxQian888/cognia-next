@@ -46,6 +46,41 @@ spec 一旦为会话生成,**任何人不得**再从别处推导 runtime/route/h
   结果与插件 meta。
 - headless/受管安装直接禁止 legacy completion 回退。
 
+## 进程从哪里启动
+
+stdio 外部 agent 需要一张进程表。能提供进程表的运行时有三种，而很长一段时间里只有前两种被算数：
+
+| 运行时 | 子进程怎么起 |
+| --- | --- |
+| Tauri 桌面端、headless brain、CLI | 自己 spawn。 |
+| 配对到某台 Host 的伴侣端（浏览器标签页、手机） | 由 Host spawn。`agentInvoke` 会把 `spawn_external_agent` 及其同伴命令走伴侣 RPC 面发过去。 |
+| 什么都没配对的浏览器 | 没有地方可起。只有这一种情况是真的被挡住。 |
+
+`supportsExternalAgents()` 的答案是 `isTauri() || isHeadlessHost()`，也就是只算第一行，于是每一个伴侣端都会被以「stdio 传输需要桌面（Tauri）运行时」拒绝，而它说的那台 Host 本来完全跑得动。`lib/ai/agent/external/process-plane.ts` 给出的是三态答案，并且返回的是**原因**而不是布尔值：有四种情况都会得到「不行」，而每一种要给的建议都不一样。什么都没配对、Host 还在握手、Host 太旧起不了进程、Host 没给这台设备 Agent Control 授权。
+
+最后这一条不是可选项。`spawn_external_agent` 声明的是 `capability: "process.spawn"`，已配对设备只能通过单独的 Agent Control 授权（`GrantKind::AgentControl`）持有它；只查能力特性、不查授权的客户端，会给出一个 Host 只会回 403 的「运行」按钮。Host 通过 `external-agent.process-plane` 这个 feature 逐个操作地声明这个面，因此「先上了 spawn、还没上探测」的构建也能被准确描述。
+
+## 宿主上已经装了哪些 agent CLI
+
+`external_agent_detect_runtimes` 读的是真正会跑子进程的那台机器，一次调用覆盖整份目录，「添加 Agent」的预设选择处会为每个预设打上对应标记。它不会安装任何东西：目录里探测命令是 `npx -y <package> --version` 的运行时，会被报成 `package-runner` 而不是被下载下来。那种情况下不联网安装就无法确定它是否存在，而为了画一个标记不值得付这个代价。版本字符串在客户端用目录声明的解析器读出，认证结论仍然由 `assessRuntimeVersion` 给出。
+
+## 选择 agent 的模型，以及确认它跑得起来
+
+对「你有哪些模型」这个问题，agent 会用两种毫不相干的结构回答；只认其中一种的调用方，会从另一半 agent 那里拿到空列表：
+
+| 结构 | 谁在用 |
+| --- | --- |
+| category 为 `model` 的**配置项**（`session/config_options`） | ACP，以及 Pi 的 RPC adapter 把 `get_available_models` 投影成的形态 |
+| **会话模型状态**（`session/new` 的 `models`） | 只填这一处、没有配置项的较早 ACP agent |
+
+`lib/ai/agent/external/session-models.ts` 两种都读，而更关键的是它决定**写**往哪里去：配置项是 agent 自己声明的控件，所以它优先，`session/set_model` 是兜底。这个优先级本来就存在于 `AgentManager.applyModelToSession`（创建会话时带模型参数走的那条路）。两个写入方对「哪一次调用真的到达 agent」意见不一致，正是选择器点了没反应的成因。
+
+以前没有任何人去问。唯一能填上列表的路径是 agent 主动推的 `config_options_update`，所以 ACP agent 碰巧能用，而 Pi 根本没有模型那一行。`AgentManager.fetchSessionModelSurface` 就是那两个同步能力做不到的异步孪生（它们都把返回 promise 的 adapter 判为 `unsupported`，对它们自己而言这是对的），`model-surface-cache` 则让同时挂载的组合器芯片和会话面板共用同一次拉取。
+
+组合器芯片把 agent 的模型放在最前面，同时保留下方所有在 Cognia 里配置的 provider：对接受模型参数的 agent 来说，Cognia 配置的模型依然是合法选项；而那个保留的分组 id，就是让处理函数知道该写给 agent、而不是只写一个会话覆盖。
+
+凭据是「跑不跑得起来」的另一半。`pi auth check --provider <id> --json --no-refresh`（ADR-0119）本来就在连接时自动跑，但只渲染在设置页里，而那不是选运行时的地方。现在它以徽章形式出现在运行时选择器和 Manage Agents 卡片上，并且把四种答案分开：已登录、部分登录、一个都没登录、无法确认。探测不可读**永远不会**被画成未登录——Pi 对「缺凭据」和「调用方式不对」都退出 `1`。
+
 ## 线上载体
 
 spec 经 `SendOptions.execution`（`AgentExecutionSendSpec`）传输,构造上无
@@ -64,3 +99,7 @@ flatten 透传,sidecar dispatch（`sidecar/dispatch/index.mjs`）按
 | Gateway（ticket、snapshot CAS、parity） | `crates/cognia-gateway/` |
 | 通用 Agent 宿主 | `sidecar/agent-host.mjs`（+ `claude-host.mjs` 兼容 shim） |
 | Conformance 套件 | `tests/conformance/`（`pnpm test:conformance`） |
+| 进程可以在哪里启动 | `lib/ai/agent/external/process-plane.ts` |
+| 已装运行时探测 | `crates/cognia-external-agent/src/version_probe.rs`、`lib/ai/agent/external/installed-runtimes.ts` |
+| agent 自己的模型（读 / 写 / 缓存） | `lib/ai/agent/external/session-models.ts`、`lib/ai/agent/external/model-surface-cache.ts` |
+| 选 agent 处的凭据状态 | `components/agent/external-agent/credential-status-badge.tsx` |

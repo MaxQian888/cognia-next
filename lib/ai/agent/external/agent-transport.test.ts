@@ -32,10 +32,17 @@ import {
   agentReadTextFile,
   agentWriteTextFile,
   getAcpHostCapabilities,
+  runsExternalAgentProcessesLocally,
   supportsAgentFs,
   supportsAgentTerminal,
   supportsExternalAgents,
 } from "./agent-transport"
+import {
+  __setProcessPlaneDepsForTests,
+  PROCESS_PLANE_COMMANDS,
+  PROCESS_PLANE_FEATURE,
+  PROCESS_SPAWN_CAPABILITY,
+} from "./process-plane"
 
 const g = globalThis as Record<string, unknown>
 
@@ -64,6 +71,38 @@ describe("capability predicates", () => {
       fs: { read: false, write: false },
       terminal: false,
     })
+  })
+
+  it("separates a Host that can spawn from a shell that can", () => {
+    // A paired browser reaches `spawn_external_agent` over the companion
+    // plane, so agents are supported. It still has no process table, and a
+    // local-only command (the DSH runtime's facts/install arms) cannot be
+    // answered for it by any Host. Collapsing the two is what offered those
+    // controls to a tab that could only get a transport error back.
+    const restore = __setProcessPlaneDepsForTests({
+      hasLocalProcessTable: () => false,
+      isRemoteHostActive: () => true,
+      activeHostId: () => "host-1",
+      activeHostFeatureManifest: () =>
+        ({
+          schemaVersion: 2,
+          hostId: "host-1",
+          deviceGrants: [PROCESS_SPAWN_CAPABILITY],
+          operations: [{ name: PROCESS_PLANE_COMMANDS.spawn, healthy: true }],
+          features: {
+            [PROCESS_PLANE_FEATURE]: {
+              version: 1,
+              operations: [PROCESS_PLANE_COMMANDS.spawn],
+            },
+          },
+        }) as never,
+    })
+    try {
+      expect(supportsExternalAgents()).toBe(true)
+      expect(runsExternalAgentProcessesLocally()).toBe(false)
+    } finally {
+      restore()
+    }
   })
 
   it("tauri: everything supported", () => {

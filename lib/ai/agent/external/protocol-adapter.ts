@@ -500,6 +500,19 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
     return Array.from(this._sessions.values())
   }
 
+  /**
+   * Drop every session this adapter remembers.
+   *
+   * These ids name state inside an agent PROCESS. When that process is gone
+   * the ids are gone with it, so a reconnect to a fresh process must not be
+   * able to hand one back as a session to resume. `disconnect()` already
+   * clears them on the paths it owns; this is for the ones it does not, where
+   * the process died on its own and the adapter is reused as-is.
+   */
+  forgetSessions(): void {
+    this._sessions.clear()
+  }
+
   async healthCheck(): Promise<boolean> {
     return this.isConnected()
   }

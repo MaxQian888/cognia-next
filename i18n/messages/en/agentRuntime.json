@@ -11,5 +11,7 @@
   "label": "Agent runtime",
   "lastCheckFailed": "Last check failed — it may not start.",
   "needsAuth": "Needs sign-in — connect it under Manage agents.",
-  "tooltip": "Active agent runtime: Cognia's own runtime or an external agent"
+  "tooltip": "Active agent runtime: Cognia's own runtime or an external agent",
+  "noMatches": "No runtime matches that.",
+  "searchPlaceholder": "Filter runtimes"
 }

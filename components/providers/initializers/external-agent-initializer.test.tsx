@@ -41,7 +41,20 @@ const connectMock = jest.fn(async (id: string) => {
   if (inst) inst.connectionStatus = "connected"
 })
 const getAgentMock = jest.fn((id: string) => agentsInManager.get(id))
-const fakeManager = { addAgent: addAgentMock, connect: connectMock, getAgent: getAgentMock }
+let lifecycleListener: ((e: { agentId: string; connectionStatus: string }) => void) | null = null
+const unbindLifecycleMock = jest.fn()
+const addLifecycleListenerMock = jest.fn(
+  (listener: (e: { agentId: string; connectionStatus: string }) => void) => {
+    lifecycleListener = listener
+    return unbindLifecycleMock
+  }
+)
+const fakeManager = {
+  addAgent: addAgentMock,
+  connect: connectMock,
+  getAgent: getAgentMock,
+  addLifecycleListener: addLifecycleListenerMock,
+}
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: () => fakeManager,
 }))
@@ -106,6 +119,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   agentsInManager.clear()
   registryListener = null
+  lifecycleListener = null
   hasMock.mockReturnValue(false)
   isSupportedMock.mockImplementation((p: string) => p === "acp" || p === "opencode")
   isExecutableMock.mockReturnValue(true)
@@ -205,7 +219,8 @@ describe("ExternalAgentInitializer", () => {
 
     await waitFor(() => expect(addAgentMock).toHaveBeenCalledTimes(1))
     expect(addAgentMock).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "p1", protocol: "plug:demo" })
+      expect.objectContaining({ id: "p1", protocol: "plug:demo" }),
+      { connect: false }
     )
   })
 
@@ -228,7 +243,8 @@ describe("ExternalAgentInitializer", () => {
 
     await waitFor(() =>
       expect(addAgentMock).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "p1", protocol: "plug:demo" })
+        expect.objectContaining({ id: "p1", protocol: "plug:demo" }),
+        { connect: false }
       )
     )
   })
@@ -256,5 +272,39 @@ describe("ExternalAgentInitializer", () => {
     })
     unmount()
     expect(unsubscribeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("projects a runtime transition into the store with no panel open", async () => {
+    // The listener that kept the shared map current used to live inside
+    // `useExternalAgent`, a hook only three panels mount. With all of them
+    // closed an agent could drop and every other surface went on reporting it
+    // connected, because nothing was listening.
+    await act(async () => {
+      render(<ExternalAgentInitializer />)
+    })
+    setConnectionStatusMock.mockClear()
+
+    await act(async () => {
+      lifecycleListener?.({ agentId: "a1", connectionStatus: "connected" })
+    })
+    expect(setConnectionStatusMock).toHaveBeenCalledWith("a1", "connected")
+
+    await act(async () => {
+      lifecycleListener?.({ agentId: "a1", connectionStatus: "error" })
+    })
+    expect(setConnectionStatusMock).toHaveBeenLastCalledWith("a1", "error")
+  })
+
+  it("stops projecting once unmounted", async () => {
+    let unmount = () => {}
+    await act(async () => {
+      ;({ unmount } = render(<ExternalAgentInitializer />))
+    })
+    const listener = lifecycleListener
+    unmount()
+    expect(unbindLifecycleMock).toHaveBeenCalled()
+    setConnectionStatusMock.mockClear()
+    listener?.({ agentId: "a1", connectionStatus: "connected" })
+    expect(setConnectionStatusMock).not.toHaveBeenCalled()
   })
 })

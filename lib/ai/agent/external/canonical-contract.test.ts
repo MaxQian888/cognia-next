@@ -1,12 +1,17 @@
 import {
   EXTERNAL_AGENT_CANONICAL_CONTRACT_VERSION,
   createUnknownSessionExtensionSupport,
+  isEnvironmentScopedVerdict,
   normalizeExternalAgentValiditySnapshot,
+  withoutEnvironmentScopedVerdicts,
   validateExternalAgentBenchmarkCapabilityEntry,
   validateExternalAgentBenchmarkCapabilityMap,
   createExternalAgentBenchmarkBaseline,
 } from "./canonical-contract"
-import type { ExternalAgentBenchmarkCapabilityEntry } from "@/types/agent/external-agent"
+import type {
+  ExternalAgentBenchmarkCapabilityEntry,
+  ExternalAgentValiditySnapshot,
+} from "@/types/agent/external-agent"
 
 describe("createUnknownSessionExtensionSupport", () => {
   it("returns the three method slots all in 'unknown' state", () => {
@@ -255,7 +260,7 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
   // Asserting on ids is also what keeps a copy edit from breaking this suite.
   const cases: Array<[string, string]> = [
     ["protocol_unsupported", "switchToAcp"],
-    ["transport_blocked", "useDesktopRuntime"],
+    ["transport_blocked", "startOnAProcessCapableRuntime"],
     ["initialization_failed", "checkCommandAndArgs"],
     ["health_check_failed", "inspectHealthEndpoint"],
     ["extension_unsupported", "useSupportedOperations"],
@@ -517,5 +522,55 @@ describe("createExternalAgentBenchmarkBaseline", () => {
     for (const entry of baseline) {
       expect(entry.updatedAt).toBe(fixed)
     }
+  })
+})
+
+describe("environment scoped verdicts", () => {
+  const snapshot = (
+    overrides: Partial<ExternalAgentValiditySnapshot> = {}
+  ): ExternalAgentValiditySnapshot =>
+    normalizeExternalAgentValiditySnapshot({
+      executable: false,
+      sessionExtensions: createUnknownSessionExtensionSupport(),
+      ...overrides,
+    })
+
+  it("names a transport block, whichever field carries the code", () => {
+    expect(isEnvironmentScopedVerdict({ blockingReasonCode: "transport_blocked" })).toBe(true)
+    expect(isEnvironmentScopedVerdict({ canonicalReasonCode: "transport_blocked" })).toBe(true)
+    expect(isEnvironmentScopedVerdict({ lastBranchReasonCode: "transport_blocked" })).toBe(true)
+  })
+
+  it("leaves every verdict that is about the agent alone", () => {
+    // These stay true while the app is closed, which is what makes them worth
+    // storing. A bad command is a bad command in any runtime.
+    expect(isEnvironmentScopedVerdict({ blockingReasonCode: "initialization_failed" })).toBe(false)
+    expect(isEnvironmentScopedVerdict({ blockingReasonCode: "protocol_unsupported" })).toBe(false)
+    expect(isEnvironmentScopedVerdict({ blockingReasonCode: "health_check_failed" })).toBe(false)
+    expect(isEnvironmentScopedVerdict({})).toBe(false)
+  })
+
+  it("drops the transport blocked row and keeps the rest", () => {
+    const map = {
+      blocked: snapshot({ blockingReasonCode: "transport_blocked" }),
+      broken: snapshot({ blockingReasonCode: "initialization_failed" }),
+    }
+    const kept = withoutEnvironmentScopedVerdicts(map)
+    expect(Object.keys(kept)).toEqual(["broken"])
+  })
+
+  it("drops the row whole, so the caller falls through to the live gate", () => {
+    // Flipping `executable` back to true instead would report an agent as
+    // runnable that the live gate still blocks, because the panel reads
+    // `validity.executable` before it asks anything.
+    const kept = withoutEnvironmentScopedVerdicts({
+      blocked: snapshot({ blockingReasonCode: "transport_blocked" }),
+    })
+    expect(kept.blocked).toBeUndefined()
+  })
+
+  it("survives an empty or absent map", () => {
+    expect(withoutEnvironmentScopedVerdicts({})).toEqual({})
+    expect(withoutEnvironmentScopedVerdicts(undefined)).toEqual({})
   })
 })

@@ -11,9 +11,17 @@ import {
 import {
   createExternalAgentBenchmarkBaseline,
   normalizeExternalAgentValiditySnapshot,
+  withoutEnvironmentScopedVerdicts,
 } from "@/lib/ai/agent/external/canonical-contract"
 
-const EXTERNAL_AGENT_STORE_VERSION = 5
+/**
+ * Bumped to 6 so `migrate` runs once against stores written before
+ * `withoutEnvironmentScopedVerdicts` existed. Those hold a `transport_blocked`
+ * verdict taken in a browser, and the panel prefers a stored verdict to the
+ * live gate, so without this pass the agent keeps reporting that it needs the
+ * desktop app on a machine that has since paired a Host.
+ */
+const EXTERNAL_AGENT_STORE_VERSION = 6
 
 type PersistedExternalAgentState = Partial<
   Pick<
@@ -127,7 +135,7 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
         return {
           ...state,
           agents,
-          agentValidity: normalizedValidity,
+          agentValidity: withoutEnvironmentScopedVerdicts(normalizedValidity),
           benchmarkCapabilityMap,
           lastRunSnapshots,
           chatFailurePolicy: state.chatFailurePolicy ?? "fallback",
@@ -137,7 +145,7 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
         agents: state.agents,
         delegationRules: state.delegationRules,
         activeAgentId: state.activeAgentId,
-        agentValidity: state.agentValidity,
+        agentValidity: withoutEnvironmentScopedVerdicts(state.agentValidity),
         benchmarkCapabilityMap: state.benchmarkCapabilityMap,
         lastRunSnapshots: state.lastRunSnapshots,
         enabled: state.enabled,

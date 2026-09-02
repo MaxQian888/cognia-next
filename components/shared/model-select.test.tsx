@@ -18,6 +18,15 @@ beforeAll(() => {
   if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
 })
 
+const useIsMobileMock = jest.fn().mockReturnValue(false)
+jest.mock("@/hooks/ui/use-mobile", () => ({
+  useIsMobile: () => useIsMobileMock(),
+}))
+
+beforeEach(() => {
+  useIsMobileMock.mockReset().mockReturnValue(false)
+})
+
 const ANTHROPIC_MODEL = PROVIDERS.anthropic.defaultModel
 const ANTHROPIC_NAME = PROVIDERS.anthropic.models.find((m) => m.id === ANTHROPIC_MODEL)?.name
 
@@ -136,5 +145,29 @@ describe("ModelSelect", () => {
     const trigger = screen.getByRole("button")
     expect(trigger.className).toContain("min-w-0")
     expect(trigger.className).toContain("max-w-full")
+  })
+})
+
+describe("ModelSelect shells", () => {
+  it("opens an anchored panel carrying the overlay tier on a desktop pane", () => {
+    renderSelect({ onSelectAuto: undefined })
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const panel = screen.getByTestId("model-select-panel")
+    expect(panel).toHaveAttribute("data-surface-layer", "overlay")
+    expect(screen.queryByTestId("responsive-picker-drawer")).toBeNull()
+  })
+
+  it("opens a bottom sheet on a phone instead of a popover into the keyboard", () => {
+    useIsMobileMock.mockReturnValue(true)
+    renderSelect()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.getByTestId("model-select-panel")).toBeInTheDocument()
+    // Same panel test id, different shell: the drawer branch is what renders.
+    expect(screen.getByTestId("model-select-panel").getAttribute("data-slot")).toBe(
+      "drawer-content"
+    )
+    // The models themselves are still there, unchanged. Two matches: the
+    // trigger's own label and the row inside the sheet.
+    expect(screen.getAllByText(ANTHROPIC_NAME as string).length).toBeGreaterThan(1)
   })
 })

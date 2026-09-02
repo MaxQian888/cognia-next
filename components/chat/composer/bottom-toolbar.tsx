@@ -184,6 +184,9 @@ function GenericBottomToolbar({
     <AgentRuntimeSelector
       disabled={isStreaming}
       className={TOOLBAR_CHIP}
+      // The same measurement the rest of this row lays itself out by, so the
+      // chip collapses with its neighbours instead of on a rule of its own.
+      dense={compact}
       // The chip names the sidecar runtime that will really serve the turn, and
       // that is derived from the provider, so it has to be told which one.
       providerId={providerId}

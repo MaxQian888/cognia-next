@@ -21,13 +21,26 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-jest.mock("@cognia/logging", () => ({
-  loggers: {
-    agent: {
-      child: () => ({ error: jest.fn(), debug: jest.fn(), info: jest.fn(), warn: jest.fn() }),
-    },
-  },
-}))
+// Any namespace, not just `agent`. The import graph this test pulls in takes
+// loggers at module scope under other names (`lib/db/mcp-servers` calls
+// `loggers.mcp.child(...)`), and one the mock does not name throws before the
+// module it belongs to has finished loading.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => {
+    const logger: Record<string, unknown> = {
+      error: jest.fn(),
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      child: () => logger,
+    }
+    return logger
+  }
+  return {
+    loggers: new Proxy({}, { get: () => makeLogger() }),
+    createLogger: () => makeLogger(),
+  }
+})
 
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({

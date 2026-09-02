@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Pick an external agent's own model, and see whether it is signed in, from the place you choose it. Selecting an agent now asks it what models it has instead of waiting for it to volunteer them: ACP agents pushed their list and worked, while a pull-based adapter like Pi implemented `get_available_models` and was never called, so its model row did not exist. The composer's model chip leads with the agent's models and keeps every model configured in Cognia underneath, since an agent that accepts one is still a legitimate target. Choosing an agent model writes through whichever control the agent declared, the same precedence session bootstrap already used, and the choice is recorded so it survives the agent opening a new session. The chip is also a control again between conversations, where it used to render as a plain label naming the default model with no way to change it, and Pi's credential check, which already ran on connect and was only ever displayed in settings, now shows as a badge on the runtime selector and the Manage Agents card, distinguishing signed in, partly signed in, signed into nothing, and could-not-check.

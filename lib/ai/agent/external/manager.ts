@@ -70,9 +70,18 @@ import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
 import { A2aClientAdapter } from "./a2a-client"
 import { DshSdkClientAdapter } from "./dsh-sdk-client"
 import { PiRpcClientAdapter } from "./pi-rpc-client"
+import {
+  catalogModelSurface,
+  resolveExternalAgentModels,
+  type ExternalAgentModelSurface,
+} from "./session-models"
+import { forgetAgentModelSurface } from "./model-surface-cache"
 import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "./dsh-runtime-transport"
-import { supportsExternalAgents } from "./agent-transport"
+import { runsExternalAgentProcessesLocally } from "./agent-transport"
 import { acpToolsToAgentTools } from "./translators"
+import { detectInstalledRuntimes } from "./installed-runtimes"
+import { externalAgentProcessPlane, PROCESS_PLANE_COMMANDS } from "./process-plane"
+import { findRuntimeForConfig } from "./runtime-catalog"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
 import {
   observeExternalAgentEvent,
@@ -335,6 +344,10 @@ export class ExternalAgentManager {
       status: "idle",
     })
     instance.sessions.clear()
+    // The adapter keeps its own copy, and `disconnect()` is not on this path,
+    // so without this the reconnect leaves ids from the dead process visible
+    // to `liveSessions` and reuses one instead of opening a session.
+    adapter.forgetSessions()
 
     if (!this.config.autoReconnect || !instance.config.enabled) {
       return
@@ -515,6 +528,112 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Ask the agent what models it has, awaiting an adapter that has to go and
+   * find out.
+   *
+   * The synchronous {@link getSessionModels} and {@link getConfigOptions}
+   * above both report a promise-returning adapter as `unsupported`, which is
+   * correct for them and is also why nothing ever learned Pi's models: Pi asks
+   * its process (`get_available_models`), so it can only answer a promise.
+   * This is the async twin those two needed, and the answer is cached onto the
+   * session so the panel, the composer and a later read all see one list
+   * without three round trips to the agent.
+   *
+   * Best-effort by construction: an agent with no model concept answers
+   * `unsupported`, which is a fact about the agent, not a failure to report.
+   */
+  async fetchSessionModelSurface(
+    agentId: string,
+    sessionId: string
+  ): Promise<AgentCapabilityResult<ExternalAgentModelSurface>> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter) return { status: "unsupported" }
+    if (!adapter.getConfigOptions && !adapter.getSessionModels) return { status: "unsupported" }
+    try {
+      const [configOptions, sessionModels] = await Promise.all([
+        adapter.getConfigOptions?.(sessionId),
+        adapter.getSessionModels?.(sessionId),
+      ])
+      // Cache both raw shapes, not the resolved surface: the session panel
+      // renders every config option, not only the model one, and it is the
+      // same fetch that would otherwise have to happen twice.
+      const session = this.instances.get(agentId)?.sessions.get(sessionId)
+      if (session && configOptions) {
+        session.metadata = { ...(session.metadata ?? {}), configOptions }
+      }
+      if (session && sessionModels) {
+        session.metadata = { ...(session.metadata ?? {}), models: sessionModels }
+      }
+      return {
+        status: "ok",
+        data: resolveExternalAgentModels({
+          configOptions,
+          sessionModels: sessionModels ?? null,
+        }),
+      }
+    } catch (error) {
+      return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }
+    }
+  }
+
+  /**
+   * Put a chosen model on the session, through whichever control the agent
+   * declared.
+   *
+   * Same precedence as {@link applyModelToSession}: a `model` config option is
+   * the agent's own control and wins, `session/set_model` is the fallback, and
+   * an agent offering neither is told nothing rather than being sent a write
+   * it would reject.
+   */
+  async selectSessionModel(
+    agentId: string,
+    sessionId: string,
+    surface: ExternalAgentModelSurface,
+    modelId: string
+  ): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter) throw new Error("Agent is not connected")
+    if (surface.write.kind === "config-option") {
+      if (!adapter.setConfigOption) throw new Error("Agent does not support config options")
+      await adapter.setConfigOption(sessionId, surface.write.optionId, modelId)
+      return
+    }
+    if (surface.write.kind === "session-model") {
+      if (!adapter.setSessionModel) throw new Error("Agent does not support model selection")
+      await adapter.setSessionModel(sessionId, modelId)
+      return
+    }
+    // No session yet: the caller records the choice on the conversation and
+    // `applyModelToSession` replays it when one opens. Nothing to send.
+    if (surface.write.kind === "session-seed") return
+    throw new Error("Agent does not expose a way to change its model")
+  }
+
+  /**
+   * The agent's model catalog with NO session open.
+   *
+   * Only Pi answers today (`pi --list-models`, the same probe the credential
+   * card reads). Every other adapter has nothing to say before a session
+   * exists, which is `unsupported`, not an error: the picker then keeps its
+   * "models arrive with the first turn" notice.
+   */
+  async fetchAgentModelCatalog(
+    agentId: string
+  ): Promise<AgentCapabilityResult<ExternalAgentModelSurface>> {
+    const pi = this.getPiRpcAdapter(agentId)
+    if (!pi || !pi.isConnected()) return { status: "unsupported" }
+    try {
+      const listing = await pi.listAgentModels()
+      if (listing.status !== "ok") {
+        return { status: "error", error: new Error("Pi's model listing was unreadable") }
+      }
+      return { status: "ok", data: catalogModelSurface(listing.models) }
+    } catch (error) {
+      return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }
+    }
+  }
+
+  /**
    * Set a session config option
    * @see https://agentclientprotocol.com/protocol/session-config-options
    */
@@ -528,7 +647,13 @@ export class ExternalAgentManager {
     if (!adapter?.setConfigOption) {
       throw new Error("Agent does not support config options")
     }
-    return adapter.setConfigOption(sessionId, configId, value)
+    const updated = await adapter.setConfigOption(sessionId, configId, value)
+    // Both writes land here or in `selectSessionModel`, and both change what a
+    // model surface would report, so both invalidate it. Without this the
+    // settings panel could change the model while the composer's chip, reading
+    // a cached surface, kept naming the previous one until it remounted.
+    forgetAgentModelSurface(agentId)
+    return updated
   }
 
   async respondToElicitation(agentId: string, response: AcpElicitationResponse): Promise<void> {
@@ -587,7 +712,14 @@ export class ExternalAgentManager {
     }
 
     const support = this.getSessionExtensionSupport(adapter, instance)["session/list"]
-    if (support.state === "unsupported") {
+    // A persisted `unsupported` is only trusted while the adapter still has no
+    // `listSessions`. The verdict is hydrated from the stored validity
+    // snapshot, so an adapter that gained the method (Pi did) would otherwise
+    // stay blocked on every restart by a verdict about code that no longer
+    // runs. An adapter that owns its own support view is not second-guessed.
+    const persistedVerdictIsStale =
+      !adapter.getSessionExtensionSupport && typeof adapter.listSessions === "function"
+    if (support.state === "unsupported" && !persistedVerdictIsStale) {
       this.updateInstanceState(agentId, instance, {
         validity: {
           source: "execution",
@@ -1017,7 +1149,13 @@ export class ExternalAgentManager {
       () =>
         new DshSdkClientAdapter({
           createTransport: (config) =>
-            createDshRuntimeTransport(config, resolveDshLaunchFromConfig, supportsExternalAgents()),
+            createDshRuntimeTransport(
+              config,
+              resolveDshLaunchFromConfig,
+              // The harness transport spawns the child in this process, so the
+              // question is whether THIS shell can, not whether some Host can.
+              runsExternalAgentProcessesLocally()
+            ),
         })
     )
     // Pi's own RPC protocol, not ACP (ADR-0119). Registered here rather than
@@ -1439,8 +1577,25 @@ export class ExternalAgentManager {
   private async enrichConfigWithDynamicReadiness(
     config: ExternalAgentConfig
   ): Promise<ExternalAgentConfig> {
+    const spawnPlane = externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
+    let checkCommandExists: ((command: string) => Promise<boolean>) | undefined
+
+    if (spawnPlane.ok && spawnPlane.via === "local") {
+      checkCommandExists = checkExternalAgentCommandExists
+    } else if (spawnPlane.ok && externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.detect).ok) {
+      const runtime = findRuntimeForConfig(config)
+      if (runtime) {
+        checkCommandExists = async () => {
+          const installed = (await detectInstalledRuntimes()).find(
+            (candidate) => candidate.runtimeId === runtime.runtimeId
+          )
+          return installed?.resolution === "installed" || installed?.resolution === "package-runner"
+        }
+      }
+    }
+
     const probedReadiness = await probeExternalAgentEcosystemReadiness(config, {
-      checkCommandExists: checkExternalAgentCommandExists,
+      checkCommandExists,
     })
 
     if (!probedReadiness) {
@@ -1903,6 +2058,13 @@ export class ExternalAgentManager {
       instance.sessions.clear()
     }
 
+    // The session metadata a cached model surface was read alongside has just
+    // been cleared, and the next connect may be a different process with a
+    // different list. Leaving the entry meant a reconnect answered from it
+    // without fetching, so nothing rewrote `metadata.configOptions` and the
+    // session panel rendered no config rows at all.
+    forgetAgentModelSurface(agentId)
+
     externalAgentManagerLogger.info("Disconnected external agent", { agentId })
   }
 
@@ -2001,11 +2163,19 @@ export class ExternalAgentManager {
       (typeof options?.context?.custom?.sessionId === "string"
         ? options.context.custom.sessionId
         : undefined)
+    const chatSessionId =
+      typeof options?.context?.custom?.chatSessionId === "string"
+        ? options.context.custom.chatSessionId
+        : undefined
     const sessionOptions = this.buildSessionOptions(instance, options)
 
     let session = preferredSessionId
       ? (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
-      : undefined
+      : chatSessionId
+        ? adapter
+            .getSessions()
+            .find((candidate) => candidate.metadata?.cogniaSessionId === chatSessionId)
+        : undefined
     // A cached session was created earlier, with an earlier `selectedModel`;
     // unlike createSession/resumeSession it never sees `sessionOptions`, so a
     // model requested now has to be applied to it explicitly (below).
@@ -2111,6 +2281,10 @@ export class ExternalAgentManager {
           }),
         })
       }
+    }
+
+    if (chatSessionId) {
+      session.metadata = { ...(session.metadata ?? {}), cogniaSessionId: chatSessionId }
     }
 
     if (options?.model) {
@@ -2266,6 +2440,49 @@ export class ExternalAgentManager {
     if (instance) {
       instance.sessions.delete(sessionId)
     }
+  }
+
+  /**
+   * The sessions this agent has open right now.
+   *
+   * Read from the adapter rather than from `instance.sessions` so a session an
+   * adapter created on its own (a resume, a fork) is included. Callers that
+   * need "the one the user is looking at" should prefer an executing session
+   * and fall back to the most recent, which is what
+   * {@link resolveLiveSessionId} does.
+   */
+  liveSessions(agentId: string): ExternalAgentSession[] {
+    return this.adapters.get(agentId)?.getSessions() ?? []
+  }
+
+  /**
+   * The session a surface should describe: the executing one, else the last.
+   *
+   * `null` when the agent is connected but has never opened a session, which
+   * is an ordinary state right after connecting and not an error.
+   */
+  resolveLiveSessionId(agentId: string): string | null {
+    const sessions = this.liveSessions(agentId)
+    if (sessions.length === 0) return null
+    const executing = sessions.find((session) => session.status === "executing")
+    return (executing ?? sessions[sessions.length - 1]).id
+  }
+
+  /**
+   * The external session owned by one Cognia conversation.
+   *
+   * Reads {@link liveSessions} for the same reason that does: the adapter is
+   * the one store that includes a session it created itself. Reading
+   * `instance.sessions` here disagreed with the reuse lookup in `execute`,
+   * which already read the adapter, so one of them could find the session
+   * while the other reported the agent had nothing open.
+   */
+  resolveConversationSessionId(agentId: string, chatSessionId: string): string | null {
+    return (
+      this.liveSessions(agentId).find(
+        (session) => session.metadata?.cogniaSessionId === chatSessionId
+      )?.id ?? null
+    )
   }
 
   /**

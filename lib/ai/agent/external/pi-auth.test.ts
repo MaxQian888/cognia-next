@@ -4,7 +4,9 @@ import {
   PI_AUTH_FORBIDDEN_SUBCOMMANDS,
   buildPiAuthCheckArgs,
   classifyPiAuthProbe,
+  parsePiModelListing,
   parsePiModelProviders,
+  reconcilePiAuthVerdict,
 } from "./pi-auth"
 
 // Every fixture below is a verbatim capture from Pi 0.84.1 on macOS, not a
@@ -195,5 +197,72 @@ describe("parsePiModelProviders", () => {
       "deepseek  deepseek-v4-pro  1M  384K  yes  no  0.1",
     ].join("\n")
     expect(parsePiModelProviders(widened)).toEqual({ status: "ok", providers: ["deepseek"] })
+  })
+})
+
+describe("parsePiModelListing", () => {
+  const LISTING = [
+    "provider     model                                  context  max-out  thinking  images",
+    "commandcode  claude-opus-4-8                        1M       65.5K    yes       yes   ",
+    "deepseek     deepseek-v4-pro                        1M       384K     yes       no    ",
+    "",
+  ].join("\n")
+
+  it("reads every column by header name", () => {
+    expect(parsePiModelListing(LISTING)).toEqual({
+      status: "ok",
+      models: [
+        {
+          provider: "commandcode",
+          id: "claude-opus-4-8",
+          context: "1M",
+          maxOut: "65.5K",
+          thinking: true,
+          images: true,
+        },
+        {
+          provider: "deepseek",
+          id: "deepseek-v4-pro",
+          context: "1M",
+          maxOut: "384K",
+          thinking: true,
+          images: false,
+        },
+      ],
+    })
+  })
+
+  it("keeps provider and model when the optional columns move or vanish", () => {
+    expect(parsePiModelListing("provider  model\ndeepseek  deepseek-v4-pro\n")).toEqual({
+      status: "ok",
+      models: [{ provider: "deepseek", id: "deepseek-v4-pro" }],
+    })
+    expect(parsePiModelListing("")).toEqual({ status: "unreadable" })
+  })
+})
+
+describe("reconcilePiAuthVerdict", () => {
+  it("promotes an extension provider that the listing offers", () => {
+    expect(
+      reconcilePiAuthVerdict(
+        { status: "not_ready", provider: "commandcode", reason: "provider_not_found" },
+        ["commandcode", "deepseek"]
+      )
+    ).toEqual({ status: "ready", provider: "commandcode", evidence: "model_listing" })
+  })
+
+  it("leaves Pi's own answers alone", () => {
+    const notConfigured = {
+      status: "not_ready" as const,
+      provider: "anthropic",
+      reason: "credentials_not_configured" as const,
+    }
+    expect(reconcilePiAuthVerdict(notConfigured, ["anthropic"])).toBe(notConfigured)
+    const unlisted = {
+      status: "not_ready" as const,
+      provider: "ghost",
+      reason: "provider_not_found" as const,
+    }
+    expect(reconcilePiAuthVerdict(unlisted, ["deepseek"])).toBe(unlisted)
   })
 })

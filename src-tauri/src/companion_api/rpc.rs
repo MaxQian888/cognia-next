@@ -510,6 +510,9 @@ const KNOWN_COMMANDS: &[&str] = &[
     // through the mobile outbound queue. Both via desktop_writes_bridge.
     "external_agent_list",
     "external_agent_update",
+    // What agent runtimes this Host already has. A read of the Host's own
+    // machine — the browser asking has no PATH of its own to look at.
+    "external_agent_detect_runtimes",
     // Host-owned external-agent configurations: an append-only head/revision
     // store in Dexie, distinct from the desktop's own localStorage configs
     // above. A paired browser runs against THESE, which is why the brain has
@@ -1383,6 +1386,11 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "task_resource_download_open",
     "task_resource_download_read_chunk",
     "task_resource_download_close",
+    // Detecting installed agent runtimes reads this machine and changes only
+    // when the user installs one, so an idempotency key would cache an answer
+    // the caller wants fresh. It spawns only catalogued `--version` reads of
+    // binaries already present; a package-runner runtime is named, not fetched.
+    "external_agent_detect_runtimes",
     // File-tree browser reads — same (root, relPath) returns the same listing/stat,
     // and the roots report is a pure read of the Host's own confinement.
     "fs_workspace_roots",

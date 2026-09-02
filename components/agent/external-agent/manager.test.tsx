@@ -10,6 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import type { AcpPermissionRequest, ExternalAgentInstance } from "@/types/agent/external-agent"
 
 import { ExternalAgentManager } from "./manager"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { registerPreset, __resetDynamicPresetsForTesting } from "@/lib/ai/agent/external/presets"
 import {
   registerPluginProtocolAdapter,
@@ -130,6 +131,9 @@ const baseHookValue = () => ({
 describe("ExternalAgentManager", () => {
   beforeEach(() => {
     mockUseExternalAgent.mockReset()
+    // The store is real here, so a failure left by one test would be drawn by
+    // the next one's render.
+    useExternalAgentStore.setState({ agentFailures: {}, connectionStatus: {} })
   })
 
   it("renders the empty state when no agents are configured", () => {
@@ -267,16 +271,58 @@ describe("ExternalAgentManager", () => {
     expect(screen.getByText(/Evidence: manager\.test\.ts/)).toBeInTheDocument()
   })
 
-  it("renders the dismiss button when an error is set and clears it", () => {
-    const clearError = jest.fn()
+  it("shows the status the rest of the app shows, not this panel's own copy", () => {
+    // The shared map is written by the lifecycle listener on every transition.
+    // This panel used to render an array rebuilt per hook instance, so it could
+    // sit on Disconnected while the composer already said connected.
+    act(() => {
+      useExternalAgentStore.setState({ connectionStatus: { "agent-1": "connected" } })
+    })
     mockUseExternalAgent.mockReturnValue({
       ...baseHookValue(),
-      error: "boom",
-      clearError,
+      agents: [{ ...makeAgent(), connectionStatus: "disconnected" } as never],
     })
     render(wrap(<ExternalAgentManager />))
+    expect(screen.getByText(en.externalAgent.statusConnected)).toBeInTheDocument()
+    expect(screen.queryByText(en.externalAgent.statusDisconnected)).toBeNull()
+  })
+
+  it("draws a failure inside the row of the agent it belongs to", () => {
+    // It used to be one banner above the whole list, which could not say which
+    // of several agents had failed.
+    useExternalAgentStore.setState({
+      agentFailures: {
+        "agent-1": {
+          agentId: "agent-1",
+          phase: "connect",
+          message: "could not start the process",
+          causes: ["Could not determine the Pi version"],
+          at: 1,
+        },
+      },
+    })
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [makeAgent()] })
+    render(wrap(<ExternalAgentManager />))
+    const card = screen.getByTestId("agent-card-agent-1")
+    expect(within(card).getByTestId("agent-failure-agent-1")).toBeInTheDocument()
+    expect(within(card).getByText("could not start the process")).toBeInTheDocument()
+    // The cause is the half that says what to do about it.
+    expect(within(card).getByText("Could not determine the Pi version")).toBeInTheDocument()
+  })
+
+  it("dismissing a failure forgets that agent's report and no other", () => {
+    useExternalAgentStore.setState({
+      agentFailures: {
+        "agent-1": { agentId: "agent-1", phase: "connect", message: "mine", causes: [], at: 1 },
+        other: { agentId: "other", phase: "connect", message: "theirs", causes: [], at: 1 },
+      },
+    })
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [makeAgent()] })
+    render(wrap(<ExternalAgentManager />))
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }))
-    expect(clearError).toHaveBeenCalled()
+    const failures = useExternalAgentStore.getState().agentFailures
+    expect(failures["agent-1"]).toBeUndefined()
+    expect(failures.other).toBeDefined()
   })
 
   it("opens the ACP permission dialog when pendingPermission is non-null", () => {
@@ -812,7 +858,7 @@ describe("ExternalAgentManager", () => {
     ).toBe(true)
   })
 
-  it("toasts a connection-failed message when connect rejects", async () => {
+  it("does not toast when connect rejects, because the row carries it", async () => {
     ;(toast.error as jest.Mock).mockClear()
     const connect = jest.fn().mockRejectedValue(new Error("nope"))
     const agent = makeAgent({
@@ -830,14 +876,16 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(connectBtn!)
     })
-    expect((toast.error as jest.Mock).mock.calls.some((call) => call[0] === "nope")).toBe(true)
+    // No toast: the report is recorded against the agent and drawn in its row,
+    // and the toast was the copy that vanished first.
+    expect((toast.error as jest.Mock).mock.calls.some((call) => call[0] === "nope")).toBe(false)
   })
 
-  it("shows the manager-level error banner when the hook reports an error", () => {
-    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), error: "connection lost" })
+  it("shows no banner above the list when nothing has failed", () => {
+    useExternalAgentStore.setState({ agentFailures: {} })
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [makeAgent()] })
     render(wrap(<ExternalAgentManager />))
-    expect(screen.getByText("connection lost")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /dismiss/i })).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-failure-agent-1")).toBeNull()
   })
 
   it("invokes resumeSession when the resume button is clicked", async () => {

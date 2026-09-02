@@ -468,6 +468,12 @@
       "userLabel": "User memory"
     },
     "modelPicker": {
+      "agentModelSwitchFailed": "The agent refused that model: {reason}",
+      "agentModelsGroup": "Agent models",
+      "agentModelsLoading": "Asking {agent} which models it has.",
+      "agentNoModels": "{agent} reported no models of its own. The models below are the ones configured in Cognia.",
+      "agentNoSession": "{agent} is connected with nothing open, so its models arrive with the first turn.",
+      "agentNotConnected": "{agent} is not connected, so its own models are not listed yet.",
       "autoBadge": "Auto",
       "autoBadgeHint": "Auto routing is on — each prompt picks a model tier by difficulty.",
       "autoEnableHint": "Select to enable reliability-first routing for this conversation",

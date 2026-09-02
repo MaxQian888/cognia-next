@@ -1,15 +1,17 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { ModelPicker, __testing__ } from "./model-picker"
+import { externalAgentProviderId } from "@/lib/ai/agent/external/session-models"
 import { PROVIDERS } from "@cognia/provider-types/provider"
 import type { UserProviderSettings, CustomProviderSettings } from "@cognia/provider-types/provider"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { updateSession } from "@/lib/db/sessions"
 import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import enMessages from "@/i18n/messages/en.json"
 import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 
@@ -39,6 +41,34 @@ jest.mock("@/lib/claude/ipc", () => {
   }
 })
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+import { toast } from "sonner"
+
+// The agent's own models. Default: a built-in lane, so every existing test in
+// this file sees exactly the picker it saw before.
+const mockAgentModels: {
+  agentId: string | null
+  externalSessionId: string | null
+  surface: {
+    choices: Array<{ modelId: string; name: string }>
+    currentModelId: string | null
+    write: { kind: string; optionId?: string }
+  } | null
+  loading: boolean
+  status: string
+  select: jest.Mock
+  refresh: jest.Mock
+} = {
+  agentId: null,
+  externalSessionId: null,
+  surface: null,
+  loading: false,
+  status: "idle",
+  select: jest.fn(async () => undefined),
+  refresh: jest.fn(),
+}
+jest.mock("@/hooks/agent/use-external-agent-models", () => ({
+  useExternalAgentModels: () => mockAgentModels,
+}))
 
 // Radix Popover + cmdk Command need these pointer/scroll primitives in jsdom.
 beforeAll(() => {
@@ -268,7 +298,7 @@ describe("trigger rendering (narrow-container truncation)", () => {
     expect(label.className).toContain("min-w-0")
   })
 
-  it("caps the static (no-session) chip the same way", () => {
+  it("caps the between-sessions chip the same way", () => {
     const { container } = renderPicker(null)
     const chip = container.firstChild as HTMLElement
     expect(chip.className).toContain("min-w-0")
@@ -276,6 +306,14 @@ describe("trigger rendering (narrow-container truncation)", () => {
     const label = chip.querySelector("span.truncate") as HTMLElement
     expect(label).not.toBeNull()
     expect(label.className).toContain("min-w-0")
+  })
+
+  it("stays a control between sessions instead of becoming a label", () => {
+    // It used to render a plain `<span>`: it named the app default, which IS
+    // the model the next turn runs on, so there was a real choice on screen
+    // and no way to make it. Every click was silently dropped.
+    renderPicker(null)
+    expect(screen.getByRole("button")).toBeInTheDocument()
   })
 
   it("opens an anchored popover without a modal dialog overlay", () => {
@@ -774,5 +812,200 @@ describe("live model switch", () => {
     fireEvent.click(screen.getByRole("button"))
     fireEvent.click(screen.getAllByText(target)[0])
     expect(mockSetSessionModel).not.toHaveBeenCalled()
+  })
+})
+
+describe("an external agent's own models", () => {
+  const session: ChatSession = {
+    id: "ses_ext",
+    title: "t",
+    kind: "direct",
+    model: "claude-sonnet-4-5",
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  function renderPicker(s: ChatSession | null = session) {
+    return render(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <ModelPicker session={s} />
+      </NextIntlClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    mockedUpdateSession.mockClear()
+    mockAgentModels.select.mockClear()
+    ;(toast.error as jest.Mock).mockClear()
+    mockAgentModels.agentId = "pi-1"
+    mockAgentModels.externalSessionId = "sess-1"
+    mockAgentModels.status = "ready"
+    mockAgentModels.surface = {
+      choices: [
+        { modelId: "anthropic/agent-sonnet", name: "Agent Sonnet" },
+        { modelId: "openai/agent-gpt", name: "Agent GPT" },
+      ],
+      currentModelId: "anthropic/agent-sonnet",
+      write: { kind: "config-option", optionId: "model" },
+    }
+    act(() => {
+      useSettingsStore.setState({
+        settings: { defaultModel: "claude-sonnet-4-5", defaultProvider: "anthropic" } as never,
+      })
+    })
+  })
+
+  afterEach(() => {
+    mockAgentModels.agentId = null
+    mockAgentModels.surface = null
+    mockAgentModels.status = "idle"
+    act(() => useSettingsStore.setState({ settings: undefined as never }))
+  })
+
+  describe("when the agent contributes no models", () => {
+    beforeEach(() => {
+      mockAgentModels.surface = null
+      mockAgentModels.status = "idle"
+    })
+
+    it("says the agent is offline rather than showing an unchanged list", () => {
+      // Picking an agent and seeing the identical provider list reads as "that
+      // did nothing". Offline is one action away from being fixed.
+      mockAgentModels.externalSessionId = null
+      act(() => {
+        useExternalAgentStore.setState({ connectionStatus: { "pi-1": "disconnected" } })
+      })
+      renderPicker()
+      fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+      expect(screen.getByText(/is not connected/i)).toBeInTheDocument()
+    })
+
+    it("separates connected-with-nothing-open from offline", () => {
+      mockAgentModels.externalSessionId = null
+      act(() => {
+        useExternalAgentStore.setState({ connectionStatus: { "pi-1": "connected" } })
+      })
+      renderPicker()
+      fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+      expect(screen.getByText(/nothing open/i)).toBeInTheDocument()
+    })
+
+    it("says the agent reported none only when it was actually asked", () => {
+      mockAgentModels.externalSessionId = "sess-1"
+      mockAgentModels.status = "unsupported"
+      act(() => {
+        useExternalAgentStore.setState({ connectionStatus: { "pi-1": "connected" } })
+      })
+      renderPicker()
+      fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+      expect(screen.getByText(/reported no models/i)).toBeInTheDocument()
+    })
+
+    it("keeps every Cognia model selectable underneath the notice", () => {
+      act(() => {
+        useExternalAgentStore.setState({ connectionStatus: { "pi-1": "disconnected" } })
+      })
+      renderPicker()
+      fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+      const options = Array.from(document.querySelectorAll('[data-slot="command-item"]'))
+      expect(
+        options.some((node) => node.textContent?.includes(PROVIDERS.anthropic.defaultModel))
+      ).toBe(true)
+    })
+  })
+
+  it("re-asks the agent as the list opens, so a session opened since is seen", () => {
+    // The agent opens its session on the first turn and no store says so. A
+    // picker mounted before that turn resolved `null` once and, with nothing
+    // re-running it, reported "nothing open" for the rest of the conversation.
+    mockAgentModels.refresh.mockClear()
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(mockAgentModels.refresh).toHaveBeenCalled()
+  })
+
+  it("shows the agent's current model on the trigger, because that is what runs", () => {
+    renderPicker()
+    expect(screen.getByRole("button", { name: /switch model/i })).toHaveTextContent("Agent Sonnet")
+  })
+
+  it("says nothing extra once the agent has actually listed models", () => {
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    expect(screen.queryByText(/is not connected/i)).toBeNull()
+    expect(screen.queryByText(/reported no models/i)).toBeNull()
+  })
+
+  it("lists the agent's models above the models configured in Cognia", () => {
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const options = Array.from(document.querySelectorAll('[data-slot="command-item"]'))
+    const agentIndex = options.findIndex((node) => node.textContent?.includes("Agent Sonnet"))
+    const anthropicIndex = options.findIndex((node) =>
+      node.textContent?.includes(PROVIDERS.anthropic.defaultModel)
+    )
+    expect(agentIndex).toBeGreaterThanOrEqual(0)
+    // Both are offered. A model configured in Cognia stays a legitimate choice
+    // for an agent that accepts one, so the agent's list leads rather than
+    // replacing the providers.
+    expect(anthropicIndex).toBeGreaterThan(agentIndex)
+  })
+
+  it("routes a pick of an agent model to the agent, not to a session override alone", async () => {
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const target = Array.from(document.querySelectorAll('[data-slot="command-item"]')).find(
+      (node) => node.textContent?.includes("Agent GPT")
+    ) as HTMLElement
+    fireEvent.click(target)
+
+    expect(mockAgentModels.select).toHaveBeenCalledWith("openai/agent-gpt")
+    // The id is persisted so `applyModelToSession` replays it on the next
+    // session, and stamped with the reserved group id so the send path can
+    // tell it apart. Left unmarked it was indistinguishable from a provider
+    // model the user chose, and switching the conversation back to the
+    // built-in lane dispatched at an id no provider offers.
+    await waitFor(() =>
+      expect(mockedUpdateSession).toHaveBeenCalledWith("ses_ext", {
+        model: "openai/agent-gpt",
+        providerOverride: externalAgentProviderId("pi-1"),
+      })
+    )
+  })
+
+  it("does not persist a model the agent refused", async () => {
+    // The row is replayed by `applyModelToSession` on every session the agent
+    // opens, so a rejected id written anyway is re-requested forever while the
+    // chip, rolled back, shows the model that is actually running.
+    mockAgentModels.select.mockRejectedValueOnce(new Error("Pi rejected the model"))
+    renderPicker()
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const target = Array.from(document.querySelectorAll('[data-slot="command-item"]')).find(
+      (node) => node.textContent?.includes("Agent GPT")
+    ) as HTMLElement
+    fireEvent.click(target)
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(mockedUpdateSession).not.toHaveBeenCalled()
+  })
+
+  it("writes the app default when there is no conversation to override", () => {
+    mockAgentModels.agentId = null
+    mockAgentModels.surface = null
+    const save = jest.fn()
+    act(() => useSettingsStore.setState({ save } as never))
+
+    renderPicker(null)
+    fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
+    const target = Array.from(document.querySelectorAll('[data-slot="command-item"]')).find(
+      (node) => node.textContent?.includes(PROVIDERS.anthropic.defaultModel)
+    ) as HTMLElement
+    fireEvent.click(target)
+
+    expect(save).toHaveBeenCalledWith({
+      defaultModel: PROVIDERS.anthropic.defaultModel,
+      defaultProvider: "anthropic",
+    })
+    expect(mockedUpdateSession).not.toHaveBeenCalled()
   })
 })

@@ -157,7 +157,10 @@ function resolveRecoveryHints(reasonCode: ExternalAgentBranchReasonCode): string
     case "protocol_unsupported":
       return ["switchToAcp", "resaveConfiguration"]
     case "transport_blocked":
-      return ["useDesktopRuntime"]
+      // Two hints because the block has two shapes and the code alone cannot
+      // tell them apart: nowhere to run at all, and a Host that can run it but
+      // has not granted this device the right to ask.
+      return ["startOnAProcessCapableRuntime", "grantAgentControlOnTheHost"]
     case "initialization_failed":
       return ["checkCommandAndArgs", "retryAfterReconnect"]
     case "health_check_failed":
@@ -264,6 +267,55 @@ export function normalizeExternalAgentValiditySnapshot(
         : undefined),
     recoveryHints,
   }
+}
+
+/**
+ * True when a verdict describes where the app was standing, not the agent.
+ *
+ * A validity snapshot mixes two kinds of fact. Almost every one of them is
+ * about the agent: what it negotiated, whether its health check answered,
+ * whether its protocol is one this build speaks. Those stay true while the app
+ * is closed, which is the whole reason the snapshot is worth persisting.
+ *
+ * `transport_blocked` is the exception. Every branch that produces it is gated
+ * on whether the current runtime can start a process, so what it really records
+ * is the runtime the verdict was taken on. That moves with nothing from the
+ * agent: pair a Host, receive the Agent Control grant, or open the desktop app,
+ * and a stored "this needs a process" is already wrong. Nothing rewrites it,
+ * because nothing about the agent happened.
+ */
+export function isEnvironmentScopedVerdict(
+  snapshot: Pick<
+    ExternalAgentValiditySnapshot,
+    "blockingReasonCode" | "canonicalReasonCode" | "lastBranchReasonCode"
+  >
+): boolean {
+  return (
+    snapshot.blockingReasonCode === "transport_blocked" ||
+    snapshot.canonicalReasonCode === "transport_blocked" ||
+    snapshot.lastBranchReasonCode === "transport_blocked"
+  )
+}
+
+/**
+ * The validity map with environment scoped verdicts left out.
+ *
+ * Rows are dropped whole rather than patched. A caller that finds no snapshot
+ * asks the live gate and gets today's answer, while one that finds a snapshot
+ * with `executable` flipped back to true would call an agent runnable that the
+ * live gate still blocks. Nothing of value goes with it: an agent blocked at
+ * the transport never connected, so the negotiation and capability halves such
+ * a row would carry are empty anyway.
+ */
+export function withoutEnvironmentScopedVerdicts<T extends ExternalAgentValiditySnapshot>(
+  agentValidity: Record<string, T> | undefined
+): Record<string, T> {
+  const kept: Record<string, T> = {}
+  for (const [agentId, snapshot] of Object.entries(agentValidity ?? {})) {
+    if (snapshot && isEnvironmentScopedVerdict(snapshot)) continue
+    kept[agentId] = snapshot
+  }
+  return kept
 }
 
 export interface ExternalAgentBenchmarkValidationResult {

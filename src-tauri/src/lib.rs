@@ -119,6 +119,7 @@ mod parse;
 mod perf;
 mod pet_window;
 mod pi_extension;
+mod pi_sessions;
 // ADR-0067 Tier B — extracted to `crates/cognia-plugin-runtime` (isolates
 // wasmtime/cranelift); re-aliased so `crate::plugin_api::…` (companion_api,
 // cli_bridge, generate_handler! + .manage()) resolves unchanged.
@@ -169,7 +170,7 @@ mod shell;
 // letting the kernel hard-kill the process (which orphans children and leaves
 // the crash sentinel dirty). Desktop-only — mobile has no terminal signals.
 #[cfg(desktop)]
-mod shutdown;
+pub mod shutdown;
 // ADR-0067 follow-up — extracted to `crates/cognia-skills` (zero coupling);
 // re-aliased so `crate::skills::…` (companion_api rpc + generate_handler!)
 // resolves unchanged.
@@ -1102,7 +1103,9 @@ pub fn run() {
             external_agent::commands::acp_terminal_list,
             external_agent::commands::check_command_exists,
             external_agent::commands::external_agent_probe_runtime_version,
+            external_agent::commands::external_agent_detect_runtimes,
             pi_extension::resolve_pi_extension,
+            pi_sessions::list_pi_sessions,
             logging::commands::native_logging_get_readiness,
             logging::commands::native_logging_get_log_directory,
             logging::commands::native_logging_open_log_directory,

@@ -27,6 +27,12 @@
 // The `chat.composer.modelPicker` namespace stays as-is: the strings describe a
 // model picker, not a chat, and re-keying them would fork the catalog for no
 // gain.
+//
+// The frame around all of that is `ResponsivePicker`, not a hand-rolled Popover.
+// Two things follow. On a phone this is a bottom sheet rather than an anchored
+// panel opening into the keyboard, and the panel now carries the overlay
+// surface tier, so a style pack's elevation ceiling reaches it like it reaches
+// every other container. The list below is untouched cmdk either way.
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -43,8 +49,8 @@ import { useSettingsStore } from "@/stores/settings"
 import { collectModelOptions, type ModelOption } from "@/lib/ai/model-options"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Command } from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import type { PopoverContent } from "@/components/ui/popover"
+import { ResponsivePicker } from "@/components/shared/responsive-picker"
 import {
   ModelSelectorEmpty,
   ModelSelectorGroup,
@@ -88,6 +94,37 @@ export interface ModelSelectProps {
    * not offer a choice it cannot honour.
    */
   onSelectAuto?: () => void
+  /**
+   * Groups rendered ABOVE the configured providers, in the order given.
+   *
+   * The one caller today is an external agent: when a conversation runs on
+   * Codex, Pi or Claude Code, that agent's own models are the ones the turn
+   * will actually use, so they lead. The provider groups stay underneath
+   * because a model configured in Cognia is still a legitimate choice for an
+   * agent that accepts one. Selection reports the group's own `providerId`,
+   * which is how the caller tells the two apart.
+   */
+  leadingGroups?: ModelProviderGroup[]
+  /**
+   * One line above the groups, for a caller that has something to explain
+   * about why its leading group is missing or empty.
+   *
+   * An external agent contributes its own models, and when it contributes none
+   * there are several different reasons: not connected, connected with nothing
+   * open, or asked and unable to say. Rendering only the provider list in every
+   * one of those cases tells the user their choice of agent did nothing.
+   */
+  leadingNotice?: React.ReactNode
+  /**
+   * Fired as the popover opens, before the list is drawn.
+   *
+   * For a caller whose leading group is fetched rather than configured. An
+   * external agent's models cannot be read until the agent has a session open,
+   * and it opens one on the first turn, with nothing in any store to say so.
+   * Re-asking here is what stops a picker opened before that turn from
+   * reporting "nothing open" for the rest of the conversation.
+   */
+  onOpen?: () => void
   /** Whether auto-routing is enabled app-wide; drives the Auto row's hint copy. */
   autoEnabled?: boolean
   disabled?: boolean
@@ -185,6 +222,9 @@ export function ModelSelect({
   provider,
   onSelect,
   onSelectAuto,
+  leadingGroups,
+  leadingNotice,
+  onOpen,
   autoEnabled = false,
   disabled,
   className,
@@ -192,7 +232,11 @@ export function ModelSelect({
   side = "top",
 }: ModelSelectProps) {
   const t = useTranslations("chat.composer.modelPicker")
-  const { options, groups } = useModelOptions()
+  const { options, groups: providerGroups } = useModelOptions()
+  const groups = useMemo(
+    () => (leadingGroups?.length ? [...leadingGroups, ...providerGroups] : providerGroups),
+    [leadingGroups, providerGroups]
+  )
   const [open, setOpen] = useState(false)
   const positionedActiveModelRef = useRef(false)
 
@@ -212,18 +256,31 @@ export function ModelSelect({
   )
 
   const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) positionedActiveModelRef.current = false
+    if (nextOpen) {
+      positionedActiveModelRef.current = false
+      onOpen?.()
+    }
     setOpen(nextOpen)
   }
 
   const activeModelName = useMemo(() => {
     if (autoActive) return t("autoModel")
+    const leading = leadingGroups
+      ?.find((group) => group.providerId === provider)
+      ?.models.find((candidate) => candidate.id === model)
+    if (leading) return leading.name
     return resolveOptionModelName(options, model, provider)
-  }, [options, model, provider, autoActive, t])
+  }, [options, leadingGroups, model, provider, autoActive, t])
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
+    <ResponsivePicker
+      open={open}
+      onOpenChange={handleOpenChange}
+      title={t("title")}
+      align={align}
+      side={side}
+      testId="model-select-panel"
+      trigger={
         <Button
           variant="ghost"
           size="sm"
@@ -250,130 +307,126 @@ export function ModelSelect({
           </span>
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align={align}
-        side={side}
-        sideOffset={8}
-        aria-label={t("title")}
-        className="w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0 shadow-xl"
-      >
-        <Command className="**:data-[slot=command-input-wrapper]:h-auto">
-          <ModelSelectorInput placeholder={t("searchPlaceholder")} />
-          <ModelSelectorList>
-            {onSelectAuto ? (
-              <>
-                <ModelSelectorGroup heading={t("routingGroup")}>
-                  <ModelSelectorItem
-                    ref={autoActive ? positionActiveModelItem : undefined}
-                    value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
-                    onSelect={() => {
-                      setOpen(false)
-                      onSelectAuto()
-                    }}
-                    className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
-                  >
-                    <BrainIcon className="size-4 shrink-0 text-primary" />
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className={cn("text-xs leading-none", autoActive && "font-medium")}>
-                        {t("autoModel")}
-                      </span>
-                      <span className="truncate text-[10px] leading-tight text-muted-foreground">
-                        {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
-                      </span>
-                    </span>
-                    <CheckIcon
-                      className={cn(
-                        "size-3.5 shrink-0 text-primary",
-                        autoActive ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                  </ModelSelectorItem>
-                </ModelSelectorGroup>
-                <ModelSelectorSeparator />
-              </>
-            ) : null}
-            {groups.length === 0 ? (
-              <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
-            ) : (
-              groups.map((group, idx) => (
-                <div key={group.providerId}>
-                  {idx > 0 ? <ModelSelectorSeparator /> : null}
-                  <ModelSelectorGroup heading={group.providerName}>
-                    {group.models.map((gm) => {
-                      const { id: modelId, name: modelName } = gm
-                      const isActive = modelId === model && group.providerId === provider
-                      const hasMeta =
-                        gm.contextLength !== undefined ||
-                        gm.supportsTools ||
-                        gm.supportsVision ||
-                        gm.supportsReasoning
-                      return (
-                        <ModelSelectorItem
-                          key={`${group.providerId}:${modelId}`}
-                          ref={isActive ? positionActiveModelItem : undefined}
-                          // Include both name and id so the command filter matches
-                          // either the friendly name or the raw id the user types.
-                          value={`${group.providerId} ${modelName} ${modelId}`}
-                          onSelect={() => {
-                            setOpen(false)
-                            onSelect({ providerId: group.providerId, modelId })
-                          }}
-                          className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
+      }
+    >
+      <ModelSelectorInput placeholder={t("searchPlaceholder")} />
+      <ModelSelectorList>
+        {onSelectAuto ? (
+          <>
+            <ModelSelectorGroup heading={t("routingGroup")}>
+              <ModelSelectorItem
+                ref={autoActive ? positionActiveModelItem : undefined}
+                value={`auto ${t("autoModel")} ${t("autoToggleHint")}`}
+                onSelect={() => {
+                  setOpen(false)
+                  onSelectAuto()
+                }}
+                className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
+              >
+                <BrainIcon className="size-4 shrink-0 text-primary" />
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className={cn("text-xs leading-none", autoActive && "font-medium")}>
+                    {t("autoModel")}
+                  </span>
+                  <span className="truncate text-[10px] leading-tight text-muted-foreground">
+                    {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
+                  </span>
+                </span>
+                <CheckIcon
+                  className={cn(
+                    "size-3.5 shrink-0 text-primary",
+                    autoActive ? "opacity-100" : "opacity-0"
+                  )}
+                />
+              </ModelSelectorItem>
+            </ModelSelectorGroup>
+            <ModelSelectorSeparator />
+          </>
+        ) : null}
+        {leadingNotice ? (
+          <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground">
+            {leadingNotice}
+          </p>
+        ) : null}
+        {groups.length === 0 ? (
+          <ModelSelectorEmpty>{t("noProviders")}</ModelSelectorEmpty>
+        ) : (
+          groups.map((group, idx) => (
+            <div key={group.providerId}>
+              {idx > 0 ? <ModelSelectorSeparator /> : null}
+              <ModelSelectorGroup heading={group.providerName}>
+                {group.models.map((gm) => {
+                  const { id: modelId, name: modelName } = gm
+                  const isActive = modelId === model && group.providerId === provider
+                  const hasMeta =
+                    gm.contextLength !== undefined ||
+                    gm.supportsTools ||
+                    gm.supportsVision ||
+                    gm.supportsReasoning
+                  return (
+                    <ModelSelectorItem
+                      key={`${group.providerId}:${modelId}`}
+                      ref={isActive ? positionActiveModelItem : undefined}
+                      // Include both name and id so the command filter matches
+                      // either the friendly name or the raw id the user types.
+                      value={`${group.providerId} ${modelName} ${modelId}`}
+                      onSelect={() => {
+                        setOpen(false)
+                        onSelect({ providerId: group.providerId, modelId })
+                      }}
+                      className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span
+                          className={cn(
+                            "truncate text-xs leading-none",
+                            isActive && "font-medium text-foreground"
+                          )}
                         >
-                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                            <span
-                              className={cn(
-                                "truncate text-xs leading-none",
-                                isActive && "font-medium text-foreground"
-                              )}
-                            >
-                              {modelName}
-                            </span>
-                            {modelName !== modelId ? (
-                              <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
-                                {modelId}
-                              </span>
-                            ) : null}
+                          {modelName}
+                        </span>
+                        {modelName !== modelId ? (
+                          <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
+                            {modelId}
                           </span>
-                          {/* Metadata reads as one right-aligned cluster: the
+                        ) : null}
+                      </span>
+                      {/* Metadata reads as one right-aligned cluster: the
                               context window, then the capability glyphs in a
                               fixed order so the same capability sits in the
                               same place on every row. */}
-                          {hasMeta ? (
-                            <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
-                              {gm.contextLength !== undefined ? (
-                                <span title={t("contextWindowLabel")}>
-                                  {formatContextWindow(gm.contextLength)}
-                                </span>
-                              ) : null}
-                              {gm.supportsTools ? (
-                                <WrenchIcon className="size-3" aria-label={t("capTools")} />
-                              ) : null}
-                              {gm.supportsVision ? (
-                                <EyeIcon className="size-3" aria-label={t("capVision")} />
-                              ) : null}
-                              {gm.supportsReasoning ? (
-                                <BrainIcon className="size-3" aria-label={t("capReasoning")} />
-                              ) : null}
+                      {hasMeta ? (
+                        <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                          {gm.contextLength !== undefined ? (
+                            <span title={t("contextWindowLabel")}>
+                              {formatContextWindow(gm.contextLength)}
                             </span>
                           ) : null}
-                          <CheckIcon
-                            className={cn(
-                              "size-3.5 shrink-0 text-primary",
-                              isActive ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                        </ModelSelectorItem>
-                      )
-                    })}
-                  </ModelSelectorGroup>
-                </div>
-              ))
-            )}
-          </ModelSelectorList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+                          {gm.supportsTools ? (
+                            <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                          ) : null}
+                          {gm.supportsVision ? (
+                            <EyeIcon className="size-3" aria-label={t("capVision")} />
+                          ) : null}
+                          {gm.supportsReasoning ? (
+                            <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                          ) : null}
+                        </span>
+                      ) : null}
+                      <CheckIcon
+                        className={cn(
+                          "size-3.5 shrink-0 text-primary",
+                          isActive ? "opacity-100" : "opacity-0"
+                        )}
+                      />
+                    </ModelSelectorItem>
+                  )
+                })}
+              </ModelSelectorGroup>
+            </div>
+          ))
+        )}
+      </ModelSelectorList>
+    </ResponsivePicker>
   )
 }

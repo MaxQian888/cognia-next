@@ -9,6 +9,7 @@ import type {
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import type { ExternalAgentLifecycleFields } from "@/types/agent/external-agent-lifecycle"
+import type { ExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import type {
   ExternalAgentSpawnConfig,
   TerminalInfo,
@@ -98,6 +99,15 @@ export interface ExternalAgentState {
   isLoading: boolean
   /** Last error message */
   lastError: string | null
+  /**
+   * The most recent failure per agent, so a report can be drawn beside the
+   * agent it belongs to instead of as one banner above all of them.
+   *
+   * Runtime only. It is absent from `partialize` deliberately: a failure
+   * describes an attempt, and replaying yesterday's attempt as the current
+   * state of an agent is the same mistake a stored transport verdict made.
+   */
+  agentFailures: Record<string, ExternalAgentFailure>
 }
 
 /**
@@ -132,6 +142,10 @@ export interface ExternalAgentActions {
 
   // Connection status
   setConnectionStatus: (id: string, status: ExternalAgentConnectionStatus) => void
+  /** Record what just failed for one agent, replacing any earlier report. */
+  recordAgentFailure: (failure: ExternalAgentFailure) => void
+  /** Forget one agent's failure, or every agent's when the id is omitted. */
+  clearAgentFailure: (id?: string) => void
   getConnectionStatus: (id: string) => ExternalAgentConnectionStatus
   setAgentValidity: (id: string, snapshot: ExternalAgentValiditySnapshot) => void
   getAgentValidity: (id: string) => ExternalAgentValiditySnapshot | undefined

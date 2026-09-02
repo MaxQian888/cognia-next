@@ -20,4 +20,5 @@ export const initialState: ExternalAgentState = {
   terminalIds: [],
   isLoading: false,
   lastError: null,
+  agentFailures: {},
 }

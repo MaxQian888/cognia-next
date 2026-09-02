@@ -349,13 +349,39 @@ export const createExternalAgentActionsSlice = (
   // ========================================
 
   setConnectionStatus: (id: string, status: ExternalAgentConnectionStatus): void => {
-    set((state) => ({
-      connectionStatus: { ...state.connectionStatus, [id]: status },
-    }))
+    set((state) => {
+      // Idempotent on purpose. A store subscriber re-runs the agent projection
+      // whenever this map's identity changes, so writing a value that is
+      // already there kicks off a refresh that computes the same answer and
+      // writes again. Callers that poll (startup rehydration, a lifecycle
+      // listener replaying a settled state) are then free to say what they see
+      // as often as they like.
+      if (state.connectionStatus[id] === status) return state
+      return { connectionStatus: { ...state.connectionStatus, [id]: status } }
+    })
   },
 
   getConnectionStatus: (id: string): ExternalAgentConnectionStatus => {
     return get().connectionStatus[id] || "disconnected"
+  },
+
+  recordAgentFailure: (failure): void => {
+    set((state) => ({
+      agentFailures: { ...state.agentFailures, [failure.agentId]: failure },
+    }))
+  },
+
+  clearAgentFailure: (id): void => {
+    if (!id) {
+      set({ agentFailures: {} })
+      return
+    }
+    set((state) => {
+      if (!state.agentFailures[id]) return state
+      const next = { ...state.agentFailures }
+      delete next[id]
+      return { agentFailures: next }
+    })
   },
 
   setAgentValidity: (id, snapshot): void => {

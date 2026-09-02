@@ -1,12 +1,17 @@
 "use client"
 
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { KeyRound, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
+import { KeyRound, LogIn, RefreshCw, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
+import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { usePiAuthStatus } from "@/hooks/agent/use-pi-auth-status"
-import type { PiAuthProbeStatus } from "@/lib/ai/agent/external/pi-auth"
+import type { PiAuthProbeStatus, PiListedModel } from "@/lib/ai/agent/external/pi-auth"
+import { terminalAvailable } from "@/lib/terminal/pick-transport"
+import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 interface PiAuthStatusCardProps {
   agentId: string
@@ -47,9 +52,47 @@ const VARIANTS: Record<PiAuthProbeStatus, "default" | "outline" | "destructive">
  *    *type* (`api_key` / `oauth`); the flags that would print the secret itself
  *    are refused at the argv builder, not here.
  */
+/** Models grouped by provider, in listing order. */
+function groupModels(models: readonly PiListedModel[]): Array<[string, PiListedModel[]]> {
+  const groups = new Map<string, PiListedModel[]>()
+  for (const model of models) {
+    const list = groups.get(model.provider) ?? []
+    list.push(model)
+    groups.set(model.provider, list)
+  }
+  return [...groups.entries()]
+}
+
 export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) {
   const t = useTranslations("externalAgent.settings.piAuth")
   const { status, loading, available, refresh } = usePiAuthStatus(agentId, connected)
+  const cwd = useExternalAgentStore((s) => s.agents[agentId]?.process?.cwd ?? "")
+  const [signingIn, setSigningIn] = useState(false)
+  const [modelsOpen, setModelsOpen] = useState(false)
+  const groups = useMemo(() => groupModels(status.models), [status.models])
+  // Same gate the composer uses before handing an interactive command to the
+  // dock: a shell that is not reachable gets a disabled button that says why,
+  // never a silent nothing.
+  const canOpenTerminal = terminalAvailable()
+
+  /**
+   * Sign in where Pi keeps its credentials: in Pi. Cognia opens Pi's own TUI
+   * in the integrated terminal, and the user runs `/login <provider>` there.
+   * Cognia never types, reads or stores the credential (ADR-0119).
+   */
+  const openSignIn = async () => {
+    setSigningIn(true)
+    try {
+      await runInTerminalDock("pi", cwd, "")
+      toast.message(t("signInOpened"))
+    } catch (error) {
+      toast.error(
+        t("signInFailed", { reason: error instanceof Error ? error.message : String(error) })
+      )
+    } finally {
+      setSigningIn(false)
+    }
+  }
 
   if (!connected || !available) {
     return (
@@ -111,6 +154,16 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
                       {t(`authType.${verdict.authType}`)}
                     </Badge>
                   )}
+                  {verdict.evidence === "model_listing" && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px]"
+                      title={t("evidenceListingTitle")}
+                      data-testid="pi-auth-evidence-listing"
+                    >
+                      {t("evidenceListing")}
+                    </Badge>
+                  )}
                   <Badge variant={VARIANTS[verdict.status]} className="text-[10px]">
                     {t(`status.${verdict.status}`)}
                   </Badge>
@@ -127,6 +180,51 @@ export function PiAuthStatusCard({ agentId, connected }: PiAuthStatusCardProps) 
             {t("configureHint")}
           </p>
         )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs"
+          onClick={() => void openSignIn()}
+          disabled={!canOpenTerminal || signingIn}
+          data-testid="pi-auth-sign-in"
+          title={canOpenTerminal ? undefined : t("signInNeedsTerminal")}
+        >
+          <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
+          {t("signIn")}
+        </Button>
+        <span className="text-[11px] text-muted-foreground">
+          {canOpenTerminal ? t("signInHint") : t("signInNeedsTerminal")}
+        </span>
+      </div>
+
+      {status.listing === "ok" && status.models.length > 0 && (
+        <div className="space-y-1" data-testid="pi-auth-models">
+          <button
+            type="button"
+            className="text-xs font-medium text-muted-foreground hover:text-foreground"
+            onClick={() => setModelsOpen((open) => !open)}
+            aria-expanded={modelsOpen}
+            data-testid="pi-auth-models-toggle"
+          >
+            {t("modelsSummary", { count: status.models.length, providers: groups.length })}
+          </button>
+          {modelsOpen && (
+            <ul className="space-y-1">
+              {groups.map(([provider, models]) => (
+                <li key={provider} className="text-xs">
+                  <span className="font-medium">{provider}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    {models.map((model) => model.id).join(", ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   )
 }

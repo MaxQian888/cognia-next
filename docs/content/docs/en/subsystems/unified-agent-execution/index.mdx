@@ -51,6 +51,81 @@ tickets, budgets, recovery and audits key on.
   workflow node outputs, team dispatch results, and plugin meta.
 - Headless/managed installs prohibit the legacy completion fallback outright.
 
+## Where the process starts
+
+A stdio external agent needs a process table. Three runtimes can offer one, and
+for a long time only the first two were counted:
+
+| Runtime | How the child starts |
+| --- | --- |
+| Tauri desktop, headless brain, CLI | It spawns the agent itself. |
+| A companion (browser tab, phone) paired to a Host | The Host spawns it. `agentInvoke` routes `spawn_external_agent` and its siblings over the companion RPC plane. |
+| A browser with nothing paired | Nowhere. This is the only genuinely blocked case. |
+
+`supportsExternalAgents()` answers `isTauri() || isHeadlessHost()`, which is the
+first row alone, so every companion was refused with "the stdio transport
+requires the desktop (Tauri) runtime" about a Host that could have run it.
+`lib/ai/agent/external/process-plane.ts` is the three-state answer, and it
+returns a REASON rather than a boolean because four situations produce "no" and
+each needs different advice: nothing paired, a Host still handshaking, a Host
+too old to spawn, and a Host that has not granted this device Agent Control.
+
+That last one is not optional. `spawn_external_agent` is declared
+`capability: "process.spawn"`, which a paired device holds only through the
+separate Agent Control grant (`GrantKind::AgentControl`), so a client that
+checks the feature but not the grant offers a Run button the Host answers with
+403. A Host declares the plane as the `external-agent.process-plane` feature,
+per operation, so a build that ships spawn before detection is describable.
+
+## Which agent CLIs a host already has
+
+`external_agent_detect_runtimes` reads the machine that would run the child, in
+one call for the whole catalog, and the Add Agent picker badges each preset with
+the answer. It installs nothing: a runtime whose catalogued probe is
+`npx -y <package> --version` is reported as `package-runner` rather than
+downloaded, because presence there cannot be settled without a network install
+and drawing a badge is not worth one. The version string is parsed client-side
+by the catalogued parser; the certification verdict stays with
+`assessRuntimeVersion`.
+
+## Choosing an agent's model, and knowing it can run
+
+An agent answers "which models do you have" in two unrelated shapes, and a
+caller that understands one sees an empty list from half of them:
+
+| Shape | Who uses it |
+| --- | --- |
+| A `model`-category **config option** (`session/config_options`) | ACP, and what Pi's RPC adapter projects its `get_available_models` reply into |
+| **Session model state** (`session/new`'s `models`) | Older ACP agents that populate this and no config option |
+
+`lib/ai/agent/external/session-models.ts` reads both and, more importantly,
+resolves where a WRITE goes: a config option is the agent's own declared
+control, so it wins, and `session/set_model` is the fallback. That precedence
+already lived inside `AgentManager.applyModelToSession`, which runs when a
+session is created with a requested model. Two writers disagreeing about which
+call reaches the agent is how a picker changes nothing.
+
+Nothing used to ask. The only path that populated the list was a
+`config_options_update` the agent chose to push, so ACP agents worked by luck
+and Pi rendered no model row at all. `AgentManager.fetchSessionModelSurface` is
+the async twin the synchronous capabilities could not be (both report a
+promise-returning adapter as `unsupported`, which is correct for them), and
+`model-surface-cache` shares one fetch between the composer chip and the session
+panel, which mount together.
+
+The composer chip leads with the agent's models and keeps the configured
+providers underneath: a model configured in Cognia is still a legitimate choice
+for an agent that accepts one, and the reserved group id is what tells the
+handler to write through the agent rather than through a session override.
+
+Credentials are the other half of "can this run". `pi auth check --provider <id>
+--json --no-refresh` (ADR-0119) already ran on connect and was rendered only in
+the settings page, which is not where a runtime is chosen. It now shows as a
+badge on the runtime selector and the Manage Agents card, keeping the four
+answers apart: signed in, partly signed in, signed into nothing, and could not
+check. An unreadable probe is never drawn as unauthenticated, because Pi exits
+`1` both for missing credentials and for a malformed call.
+
 ## Wire shape
 
 The spec rides `SendOptions.execution` (`AgentExecutionSendSpec`) — secret
@@ -71,3 +146,7 @@ spec-less sends as `legacy_dispatch` telemetry.
 | Gateway (tickets, snapshot CAS, parity) | `crates/cognia-gateway/` |
 | Generic agent host | `sidecar/agent-host.mjs` (+ `claude-host.mjs` compatibility shim) |
 | Conformance suite | `tests/conformance/` (`pnpm test:conformance`) |
+| Where the process may start | `lib/ai/agent/external/process-plane.ts` |
+| Installed-runtime detection | `crates/cognia-external-agent/src/version_probe.rs`, `lib/ai/agent/external/installed-runtimes.ts` |
+| An agent's own models (read, write, cache) | `lib/ai/agent/external/session-models.ts`, `lib/ai/agent/external/model-surface-cache.ts` |
+| Credential state where the agent is chosen | `components/agent/external-agent/credential-status-badge.tsx` |

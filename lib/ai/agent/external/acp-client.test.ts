@@ -424,11 +424,13 @@ describe("AcpClientAdapter — unsupported transports and missing config", () =>
     }
   }
 
-  it("rejects stdio transport when not in Tauri runtime", async () => {
+  it("rejects stdio when no runtime here can start a process", async () => {
+    // Not "when not in Tauri": a browser paired to a Host reaches this path and
+    // succeeds, so the refusal names what is actually missing.
     const a = new AcpClientAdapter()
     await expect(
       a.connect(baseConfig({ transport: "stdio", process: { command: "x", args: [] } }))
-    ).rejects.toThrow(/Tauri/)
+    ).rejects.toThrow(/needs a runtime that can start a process/)
   })
 
   it("rejects unknown transports", async () => {

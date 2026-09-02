@@ -11,78 +11,76 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
-// Flatten Radix dropdown primitives so the content is always visible and
-// RadioItems are directly clickable in jsdom without pointer-event plumbing.
-jest.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  // Spreads the rest of the props (data-testid, data-labelled, …): the chip
-  // encodes its labelled/glyph state as data attributes, and a mock that
-  // dropped them would make those assertions untestable.
-  DropdownMenuTrigger: ({
+// Flatten the picker and cmdk so the panel is always rendered and its rows are
+// directly clickable in jsdom, without pointer-event plumbing or an open state.
+//
+// The rows keep the contract the assertions read: the row's own `data-testid`
+// from the component, `data-value` for the runtime key, `aria-disabled` for a
+// blocked lane, and `aria-current` for the one the turn will actually run on.
+// `aria-current` is deliberately NOT `aria-selected`: cmdk owns that one for
+// keyboard highlight.
+jest.mock("@/components/shared/responsive-picker", () => ({
+  ResponsivePicker: ({
+    trigger,
     children,
-    ...rest
   }: {
+    trigger: React.ReactNode
     children: React.ReactNode
-  } & React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...rest}>{children}</button>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({
-    children,
-    onSelect,
-    "data-testid": testId,
-  }: {
-    children: React.ReactNode
-    onSelect?: () => void
-    "data-testid"?: string
   }) => (
-    <button data-testid={testId ?? "menu-item"} onClick={() => onSelect?.()}>
-      {children}
-    </button>
+    <div>
+      {trigger}
+      <div data-testid="agent-runtime-panel">{children}</div>
+    </div>
   ),
-  DropdownMenuRadioGroup: ({
+  PickerCheck: ({ active }: { active: boolean }) =>
+    active ? <span data-testid="picker-check" /> : null,
+}))
+
+jest.mock("@/components/ui/command", () => ({
+  CommandInput: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
+    <input data-testid="runtime-search" {...props} />
+  ),
+  CommandList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CommandEmpty: () => null,
+  CommandGroup: ({
     children,
-    value,
-    onValueChange,
+    heading,
   }: {
     children: React.ReactNode
-    value: string
-    onValueChange: (v: string) => void
+    heading?: React.ReactNode
   }) => (
-    <div data-value={value} data-testid="radio-group" onClick={onValueChangeProbe(onValueChange)}>
+    <div>
+      {heading ? <div>{heading}</div> : null}
       {children}
     </div>
   ),
-  DropdownMenuRadioItem: ({
+  CommandSeparator: () => <hr />,
+  CommandItem: ({
     children,
-    value,
+    onSelect,
     disabled,
+    forceMount,
+    ...rest
   }: {
     children: React.ReactNode
-    value: string
+    onSelect?: () => void
     disabled?: boolean
-  }) => (
+    forceMount?: boolean
+  } & React.HTMLAttributes<HTMLDivElement>) => (
     <div
-      data-testid={`radio-item-${value}`}
-      role="menuitemradio"
-      aria-checked={false}
+      role="option"
+      aria-selected={false}
+      {...rest}
+      data-force-mount={forceMount ? "true" : undefined}
       aria-disabled={disabled ?? false}
-      data-value={value}
+      onClick={() => {
+        if (!disabled) onSelect?.()
+      }}
     >
       {children}
     </div>
   ),
 }))
-
-// Radix routes selection through the group; in the flattened mock the item that
-// was clicked carries the value, so bubble it up the same way.
-function onValueChangeProbe(onValueChange: (v: string) => void) {
-  return (event: React.MouseEvent<HTMLDivElement>) => {
-    const item = (event.target as HTMLElement).closest<HTMLElement>("[data-value]")
-    const value = item?.dataset.value
-    if (value) onValueChange(value)
-  }
-}
 
 jest.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -205,6 +203,19 @@ jest.mock("@/lib/agent/external-agent-selection", () => ({
   selectExternalAgent: (id: string | null) => mockSelectExternalAgent(id),
 }))
 
+// Selecting an agent also has to make the lane able to dispatch. The readiness
+// answer is what the chip reports on, so the test drives it directly.
+let readiness: { ok: boolean; reason?: string; detail?: string } = { ok: true }
+const mockEnsureReady = jest.fn(async (_id: string) => readiness)
+jest.mock("@/lib/agent/ensure-external-agent-ready", () => ({
+  ensureExternalAgentReady: (id: string) => mockEnsureReady(id),
+}))
+
+const mockToastError = jest.fn()
+jest.mock("@/components/ui/sonner", () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args) },
+}))
+
 function agent(id: string, name: string, enabled = true) {
   return { id, name, enabled, protocol: "acp" }
 }
@@ -221,6 +232,9 @@ beforeEach(() => {
   mockSetSessionRuntimeRef.mockClear()
   mockSelectExternalAgent.mockClear()
   mockSetExternalEnabled.mockClear()
+  mockEnsureReady.mockClear()
+  mockToastError.mockClear()
+  readiness = { ok: true }
 })
 
 /** The chip's own fallback effect landing on the default lane. */
@@ -229,16 +243,31 @@ function fellBackToBuiltin(): boolean {
 }
 
 describe("AgentRuntimeSelector — chip label", () => {
-  // The label is earned by being a choice. On the built-in runtime the trigger
-  // is a glyph: "Claude SDK" under every turn was the one value the chip can
-  // never be wrong about, and it cost the composer's status line ~100px it did
-  // not have. The wording moves into the accessible name, not out of reach.
-  it("wears a glyph on the built-in runtime and names it in the accessible name", () => {
-    render(<AgentRuntimeSelector />)
+  // The glyph is what a crowded row can afford, not what the built-in lane
+  // deserves. The wording is in the accessible name either way, so collapsing
+  // costs nothing to a screen reader.
+  it("wears a glyph on the built-in runtime only where the row is out of room", () => {
+    render(<AgentRuntimeSelector dense />)
     const trigger = screen.getByTestId("agent-runtime-trigger")
     expect(trigger).not.toHaveAttribute("data-labelled")
     expect(trigger).toHaveTextContent("")
     expect(trigger.getAttribute("aria-label")).toContain("cogniaAgent")
+  })
+
+  it("spells the built-in runtime out when the row has the width", () => {
+    render(<AgentRuntimeSelector />)
+    const trigger = screen.getByTestId("agent-runtime-trigger")
+    expect(trigger).toHaveAttribute("data-labelled", "true")
+    expect(trigger).toHaveTextContent("cogniaAgent")
+  })
+
+  it("keeps the agent's name at any width, because the name is the point", () => {
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector dense />)
+    const trigger = screen.getByTestId("agent-runtime-trigger")
+    expect(trigger).toHaveAttribute("data-labelled", "true")
+    expect(trigger).toHaveTextContent("Codex")
   })
 
   it("names the selected external agent instead of a generic 'external' label", () => {
@@ -262,12 +291,12 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
   it("lists each configured agent as a peer of the built-in runtime", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex"), a2: agent("a2", "Gemini") }
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-item-builtin")).toBeInTheDocument()
-    expect(screen.getByTestId("radio-item-external:a1")).toBeInTheDocument()
-    expect(screen.getByTestId("radio-item-external:a2")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-builtin")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-external-a1")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-external-a2")).toBeInTheDocument()
     // The old two-control split is gone: there is no bare "external" lane to
     // land on without an agent.
-    expect(screen.queryByTestId("radio-item-external")).toBeNull()
+    expect(screen.queryByTestId("runtime-external")).toBeNull()
   })
 
   // The defect this catalog exists for: the builtin row claimed the Anthropic
@@ -275,33 +304,70 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
   // the glyph-only chip means it is the ONLY wording a screen reader gets.
   it("names the engine that will really serve the turn", () => {
     const { rerender } = render(<AgentRuntimeSelector providerId="anthropic" />)
-    expect(screen.getByTestId("radio-item-builtin")).toHaveTextContent("engineClaudeAgentSdk")
+    expect(screen.getByTestId("runtime-builtin")).toHaveTextContent("engineClaudeAgentSdk")
 
     rerender(<AgentRuntimeSelector providerId="deepseek" />)
-    expect(screen.getByTestId("radio-item-builtin")).toHaveTextContent("engineAiSdk")
-    expect(screen.getByTestId("radio-item-builtin")).not.toHaveTextContent("engineClaudeAgentSdk")
+    expect(screen.getByTestId("runtime-builtin")).toHaveTextContent("engineAiSdk")
+    expect(screen.getByTestId("runtime-builtin")).not.toHaveTextContent("engineClaudeAgentSdk")
   })
 
   it("sorts agent rows by name", () => {
     externalAgentState.agents = { a1: agent("a1", "Zed"), a2: agent("a2", "Codex") }
     render(<AgentRuntimeSelector />)
-    const items = screen.getAllByRole("menuitemradio").map((el) => el.dataset.value)
+    const items = screen
+      .getAllByRole("option")
+      .map((el) => el.dataset.value)
+      .filter(Boolean)
     expect(items).toEqual(["builtin", "external:a2", "external:a1"])
   })
 
   it("selects the runtime AND the agent record in a single click", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    fireEvent.click(screen.getByTestId("radio-item-external:a1"))
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
     expect(mockSelectExternalAgent).toHaveBeenCalledWith("a1")
     expect(mockSetRuntimeRef).toHaveBeenCalledWith({ kind: "external", agentId: "a1" })
+  })
+
+  it("says so here when the agent it just picked cannot be reached", async () => {
+    // The report is recorded against the agent, and the only surface that
+    // draws those is the Manage Agents panel. This user is standing at the
+    // composer, so a silent failure is the first send coming back with a
+    // sentence about the manager's internals.
+    readiness = { ok: false, reason: "failed", detail: "spawn codex ENOENT" }
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockToastError).toHaveBeenCalledWith("failure.connect", {
+      description: "spawn codex ENOENT",
+    })
+  })
+
+  it("stays quiet when the agent connected, and when the lane is already moving", async () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    const { unmount } = render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
+    await Promise.resolve()
+    expect(mockToastError).not.toHaveBeenCalled()
+    unmount()
+
+    // A selection that outlived its agent is already being walked back to the
+    // built-in lane by the fallback effect, so a toast would be noise.
+    readiness = { ok: false, reason: "unknown-agent" }
+    render(<AgentRuntimeSelector />)
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockToastError).not.toHaveBeenCalled()
   })
 
   it("switches back to the built-in runtime without touching the agent record", () => {
     runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    fireEvent.click(screen.getByTestId("radio-item-builtin"))
+    fireEvent.click(screen.getByTestId("runtime-builtin"))
     expect(mockSetRuntimeRef).toHaveBeenCalledWith({ kind: "builtin" })
     expect(mockSelectExternalAgent).not.toHaveBeenCalled()
   })
@@ -309,14 +375,14 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
   it("disables a blocked agent and shows why, instead of hiding it", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex", false) }
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-item-external:a1")).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("runtime-external-a1")).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByText("Agent is disabled.")).toBeInTheDocument()
   })
 
   it("ignores a click on a blocked agent", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex", false) }
     render(<AgentRuntimeSelector />)
-    fireEvent.click(screen.getByTestId("radio-item-external:a1"))
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
     expect(mockSetRuntimeRef).not.toHaveBeenCalled()
     expect(mockSelectExternalAgent).not.toHaveBeenCalled()
   })
@@ -347,7 +413,7 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
 
     it("hides every agent row", () => {
       render(<AgentRuntimeSelector />)
-      expect(screen.queryByTestId("radio-item-external:a1")).toBeNull()
+      expect(screen.queryByTestId("runtime-external-a1")).toBeNull()
     })
 
     // Regression: this used to render the "nothing configured" sentence, which
@@ -374,7 +440,7 @@ describe("AgentRuntimeSelector — one dropdown, one choice", () => {
       }
       render(<AgentRuntimeSelector />)
       expect(screen.getByText("codex: command not found")).toBeInTheDocument()
-      expect(screen.getByTestId("radio-item-external:a1")).toHaveAttribute("aria-disabled", "false")
+      expect(screen.getByTestId("runtime-external-a1")).toHaveAttribute("aria-disabled", "false")
     })
 
     it("flags an agent waiting on sign-in", () => {
@@ -459,7 +525,7 @@ describe("AgentRuntimeSelector — invalid selection repair", () => {
     runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: { ...agent("a1", "My Plugin Agent"), protocol: "acme:rpc" } }
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-item-external:a1")).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByTestId("runtime-external-a1")).toHaveAttribute("aria-disabled", "true")
   })
 })
 
@@ -470,7 +536,7 @@ describe("AgentRuntimeSelector — the lane belongs to the session", () => {
   it("writes the session's own lane when it has one", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector sessionId="s1" />)
-    fireEvent.click(screen.getByTestId("radio-item-external:a1"))
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
     expect(mockSetSessionRuntimeRef).toHaveBeenCalledWith("s1", {
       kind: "external",
       agentId: "a1",
@@ -483,7 +549,7 @@ describe("AgentRuntimeSelector — the lane belongs to the session", () => {
   it("writes the app default when there is no session", () => {
     externalAgentState.agents = { a1: agent("a1", "Codex") }
     render(<AgentRuntimeSelector />)
-    fireEvent.click(screen.getByTestId("radio-item-external:a1"))
+    fireEvent.click(screen.getByTestId("runtime-external-a1"))
     expect(mockSetRuntimeRef).toHaveBeenCalledWith({ kind: "external", agentId: "a1" })
     expect(mockSetSessionRuntimeRef).not.toHaveBeenCalled()
   })
@@ -518,7 +584,7 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
   it("lists a ready configuration the host owns", () => {
     hostConfigsState.configs = [hostConfig("eac_1", "Pi on the box")]
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-item-host:eac_1")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-host:eac_1")).toBeInTheDocument()
     expect(screen.getByText("Pi on the box")).toBeInTheDocument()
   })
 
@@ -530,15 +596,15 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
       hostConfig("eac_bad", "Unready", { lifecycleStatus: "needs-credentials" }),
     ]
     render(<AgentRuntimeSelector />)
-    expect(screen.queryByTestId("radio-item-host:eac_off")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("radio-item-host:eac_bad")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("runtime-host:eac_off")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("runtime-host:eac_bad")).not.toBeInTheDocument()
   })
 
   it("contributes no rows when no host owns configurations", () => {
     hostConfigsState.configs = [hostConfig("eac_1", "Pi")]
     hostConfigsState.unavailable = "no-host"
     render(<AgentRuntimeSelector />)
-    expect(screen.queryByTestId("radio-item-host:eac_1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("runtime-host:eac_1")).not.toBeInTheDocument()
   })
 
   // The stamp is captured at selection time: it is what the host admits the
@@ -548,7 +614,7 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
       hostConfig("eac_1", "Pi", { revision: "eacr_7", lifecycleGeneration: 4 }),
     ]
     render(<AgentRuntimeSelector />)
-    fireEvent.click(screen.getByTestId("radio-item-host:eac_1"))
+    fireEvent.click(screen.getByTestId("runtime-host:eac_1"))
     expect(mockSetRuntimeRef).toHaveBeenCalledWith({
       kind: "host",
       configId: "eac_1",
@@ -581,7 +647,7 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
       name: "Pi",
     }
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-group")).toHaveAttribute("data-value", "host:eac_1")
+    expect(screen.getByTestId("runtime-host:eac_1")).toHaveAttribute("aria-current", "true")
   })
 
   // Without the host lane suppressing it, the local-agent fallback effect would
@@ -611,14 +677,82 @@ describe("AgentRuntimeSelector — host-owned agents", () => {
       name: "Gone",
     }
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-group")).not.toHaveAttribute("data-value", "host:eac_gone")
+    expect(screen.queryByTestId("runtime-host:eac_gone")).toBeNull()
+    // And the row that IS there must not inherit the selection.
+    expect(screen.getByTestId("runtime-host:eac_other")).not.toHaveAttribute("aria-current")
   })
 
   it("keeps local and host agents in separate groups", () => {
     externalAgentState.agents = { a1: agent("a1", "Local one") }
     hostConfigsState.configs = [hostConfig("eac_1", "Host one")]
     render(<AgentRuntimeSelector />)
-    expect(screen.getByTestId("radio-item-external:a1")).toBeInTheDocument()
-    expect(screen.getByTestId("radio-item-host:eac_1")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-external-a1")).toBeInTheDocument()
+    expect(screen.getByTestId("runtime-host:eac_1")).toBeInTheDocument()
+  })
+})
+
+describe("AgentRuntimeSelector — finding a runtime in a long list", () => {
+  function manyAgents(count: number) {
+    return Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`a${i}`, agent(`a${i}`, `Agent ${i}`)])
+    )
+  }
+
+  it("offers no filter while the whole list fits in view", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    // Built-in plus one agent. A search box here can only ever hide something.
+    expect(screen.queryByTestId("runtime-search")).toBeNull()
+  })
+
+  it("offers a filter once the list is long enough to scroll", () => {
+    externalAgentState.agents = manyAgents(6)
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("runtime-search")).toBeInTheDocument()
+  })
+
+  // A filter that matches no agent is exactly when the user needs the row that
+  // adds one, so the two actions must not be filterable away.
+  it("keeps the way out of an empty list mounted through any filter", () => {
+    externalAgentState.agents = manyAgents(6)
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("runtime-manage-agents")).toHaveAttribute("data-force-mount", "true")
+  })
+
+  it("keeps the enable-external action mounted too", () => {
+    externalAgentState.enabled = false
+    externalAgentState.agents = manyAgents(6)
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("runtime-enable-external")).toHaveAttribute(
+      "data-force-mount",
+      "true"
+    )
+  })
+})
+
+describe("AgentRuntimeSelector — which lane is active", () => {
+  // cmdk owns `aria-selected` for keyboard highlight, so a row that used it
+  // would claim to be the active lane merely because the arrow keys rested on
+  // it. `aria-current` is the one that means "this is what the turn runs on".
+  it("marks the active lane with aria-current, not aria-selected", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("runtime-builtin")).toHaveAttribute("aria-current", "true")
+    expect(screen.getByTestId("runtime-external-a1")).not.toHaveAttribute("aria-current")
+    expect(screen.getByTestId("runtime-builtin")).toHaveAttribute("aria-selected", "false")
+  })
+
+  it("moves the mark with the selection", () => {
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
+    externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getByTestId("runtime-external-a1")).toHaveAttribute("aria-current", "true")
+    expect(screen.getByTestId("runtime-builtin")).not.toHaveAttribute("aria-current")
+  })
+
+  it("ticks exactly one row", () => {
+    externalAgentState.agents = { a1: agent("a1", "Codex"), a2: agent("a2", "Gemini") }
+    render(<AgentRuntimeSelector />)
+    expect(screen.getAllByTestId("picker-check")).toHaveLength(1)
   })
 })

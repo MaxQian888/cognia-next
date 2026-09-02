@@ -468,6 +468,12 @@
       "userLabel": "用户 memory"
     },
     "modelPicker": {
+      "agentModelSwitchFailed": "该 agent 拒绝了这个模型：{reason}",
+      "agentModelsGroup": "Agent 提供的模型",
+      "agentModelsLoading": "正在询问 {agent} 有哪些模型。",
+      "agentNoModels": "{agent} 没有报告自己的模型。下面这些是在 Cognia 中配置的模型。",
+      "agentNoSession": "{agent} 已连接但没有打开任何会话，它的模型会在第一轮对话时出现。",
+      "agentNotConnected": "{agent} 尚未连接，因此还列不出它自己的模型。",
       "autoBadge": "自动",
       "autoBadgeHint": "已开启自动路由——每条提示按难度选择模型档位。",
       "autoEnableHint": "选择后为当前对话启用可靠性优先路由",

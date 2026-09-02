@@ -16,11 +16,14 @@
 
 import { useEffect, useReducer } from "react"
 import { useTranslations } from "next-intl"
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { hydrateAgentConfig } from "@/stores/agent/external-agent-store/selectors"
 import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-agent-configs"
-import { supportsExternalAgents } from "@/lib/ai/agent/external/agent-transport"
+import {
+  externalAgentProcessPlane,
+  PROCESS_PLANE_COMMANDS,
+} from "@/lib/ai/agent/external/process-plane"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 import { findRuntimeByKey, runtimeRefKey } from "@/lib/ai/agent/runtime-catalog/types"
 import { listAgentRuntimes } from "@/lib/ai/agent/runtime-catalog/catalog"
@@ -58,9 +61,21 @@ function makeWarningDescriber(t: (key: string) => string) {
   }
 }
 
-export function useAgentRuntimeCatalog(providerId?: string): AgentRuntimeCatalogState {
+/**
+ * @param sessionId The conversation whose lane is being described. Omitting it
+ * resolves against the app default, which is right for a composer that has no
+ * conversation yet and wrong everywhere else: the lane is per session, so a
+ * catalog resolved against the default reports the default's row as `selected`
+ * no matter what the session chose. That is what made the runtime chip refuse
+ * to move. The click wrote the session's ref, the radio group's value came back
+ * from the default, and the menu reopened on the row the user had just left.
+ */
+export function useAgentRuntimeCatalog(
+  providerId?: string,
+  sessionId?: string
+): AgentRuntimeCatalogState {
   const t = useTranslations("agentRuntime")
-  const runtimeRef = useAgentRuntimeStore((s) => s.runtimeRef)
+  const runtimeRef = useRuntimeRefForSession(sessionId)
   const externalEnabled = useExternalAgentStore((s) => s.enabled)
   const storedAgents = useExternalAgentStore((s) => s.agents)
   const agentValidity = useExternalAgentStore((s) => s.agentValidity)
@@ -80,7 +95,14 @@ export function useAgentRuntimeCatalog(providerId?: string): AgentRuntimeCatalog
     externalAgents: Object.values(storedAgents ?? {}).map(hydrateAgentConfig),
     agentValidity,
     hostConfigs: hostUnavailable ? [] : hostConfigs,
-    runtimeSupportsExternalAgents: supportsExternalAgents(),
+    // The verdict, not a boolean. `supportsExternalAgents()` answers yes or no
+    // and throws the reason away, and the reason is the whole difference
+    // between a row that says "grant this device Agent Control" and one that
+    // says "install the desktop app" about a Host that could have run it. It
+    // also carries `transient`, which is what stops the selector treating a
+    // Host still reporting its features as grounds to rewrite the user's
+    // chosen agent back to the built-in lane on every launch.
+    runtimeSupportsExternalAgents: externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn),
     describeWarning: makeWarningDescriber(t),
   })
 

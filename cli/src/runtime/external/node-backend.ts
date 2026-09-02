@@ -348,6 +348,13 @@ export class NodeExternalAgentBackend {
         const { verifyPiExtension } = await import("../../agent/tool-host/pi-extension")
         return verifyPiExtension() as T
       }
+      // Pi's RPC has no session listing, so the host reads Pi's own store
+      // (headers only). The desktop answer is `pi_sessions::list_pi_sessions`.
+      case "list_pi_sessions": {
+        const { listPiSessions } = await import("../../agent/tool-host/pi-sessions")
+        const cwd = typeof args.cwd === "string" && args.cwd.trim() ? args.cwd : undefined
+        return listPiSessions(cwd ? { cwd } : {}) as T
+      }
       // DeepSeek Harness is the one backend Cognia installs itself, so its
       // lifecycle is served here rather than by an external CLI on PATH. The
       // surface mirrors the Tauri commands exactly (facts -> stage -> finalize),

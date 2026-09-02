@@ -103,6 +103,41 @@ describe("listAgentRuntimes", () => {
     expect(rows[1].warning).toBe("needs sign-in")
   })
 
+  it("carries the plane's reason and its transient marker onto the row", () => {
+    // A Host still reporting its features becomes a Host that can spawn
+    // moments later, and the selector reads `blockTransient` to decide whether
+    // a block is settled enough to rewrite the user's chosen runtime. Handing
+    // the catalog a bare `false` threw both away, so a companion lost its
+    // agent selection on every launch and was told to install the desktop app.
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent()],
+      runtimeSupportsExternalAgents: { ok: false, reason: "manifest-missing" },
+    })
+    expect(rows[1].blockedReason).toMatch(/has not finished/i)
+    expect(rows[1].blockTransient).toBe(true)
+
+    const notGranted = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent()],
+      runtimeSupportsExternalAgents: { ok: false, reason: "not-granted" },
+    })
+    expect(notGranted[1].blockedReason).toMatch(/agent control/i)
+    expect(notGranted[1].blockTransient).toBeUndefined()
+  })
+
+  it("runs an agent through a paired host that can start the process", () => {
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent()],
+      runtimeSupportsExternalAgents: { ok: true, via: "remote" },
+    })
+    expect(rows[1].blockedReason).toBeUndefined()
+  })
+
   it("keeps host rows in their own group and only when ready and enabled", () => {
     const rows = listAgentRuntimes({
       ...base,

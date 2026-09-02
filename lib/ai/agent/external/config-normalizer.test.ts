@@ -122,6 +122,41 @@ describe("getExternalAgentExecutionBlock", () => {
     expect(block?.code).toBe("transport_blocked")
   })
 
+  it("runs a stdio agent through a paired host that can start the process", () => {
+    // The bug this replaced: a browser paired to a Host was told it needed the
+    // desktop app, about a Host that could have spawned the child immediately.
+    expect(getExternalAgentExecutionBlock(baseConfig(), { ok: true, via: "remote" })).toBeNull()
+  })
+
+  it("names the actual obstacle instead of blaming the runtime", () => {
+    const cases = [
+      ["not-granted", /agent control/i],
+      ["manifest-missing", /has not finished/i],
+      ["unsupported", /does not start/i],
+      ["no-host", /desktop app, or a paired host/i],
+    ] as const
+    for (const [reason, matcher] of cases) {
+      const block = getExternalAgentExecutionBlock(baseConfig(), { ok: false, reason })
+      expect(block?.code).toBe("transport_blocked")
+      expect(block?.reason).toMatch(matcher)
+    }
+  })
+
+  it("marks only the mid-handshake block as transient", () => {
+    // A Host still reporting its features becomes a Host that can spawn moments
+    // later, so a caller must not persist a decision from that verdict. The
+    // other three are settled until the user does something.
+    expect(
+      getExternalAgentExecutionBlock(baseConfig(), { ok: false, reason: "manifest-missing" })
+        ?.transient
+    ).toBe(true)
+    for (const reason of ["no-host", "unsupported", "not-granted"] as const) {
+      expect(getExternalAgentExecutionBlock(baseConfig(), { ok: false, reason })?.transient).toBe(
+        false
+      )
+    }
+  })
+
   it("returns null for a healthy executable acp config in Tauri runtime", () => {
     expect(getExternalAgentExecutionBlock(baseConfig(), true)).toBeNull()
   })

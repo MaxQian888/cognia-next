@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react"
 
-import { agentInvoke, supportsExternalAgents } from "@/lib/ai/agent/external/agent-transport"
+import {
+  agentInvoke,
+  runsExternalAgentProcessesLocally,
+} from "@/lib/ai/agent/external/agent-transport"
 import {
   buildDshChannelManifest,
   doctorDshRuntime,
@@ -83,7 +86,11 @@ function verdictFrom(facts: DshHostFacts, profileId: DshProfileId): DshDoctorRep
 }
 
 export function useDshRuntime(profileId: DshProfileId): UseDshRuntimeResult {
-  const supported = supportsExternalAgents()
+  // `dsh_runtime_facts` and its install/remove siblings are local-only
+  // commands, so a paired browser cannot answer them however capable its Host
+  // is. Gating on the wider predicate offered this card's Install button to a
+  // tab that could only ever get a transport-forbidden error back.
+  const supported = runsExternalAgentProcessesLocally()
   const [report, setReport] = useState<DshDoctorReport | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)

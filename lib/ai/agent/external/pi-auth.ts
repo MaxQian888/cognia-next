@@ -62,6 +62,43 @@ export interface PiAuthVerdict {
    * quietly start forwarding one if that ever changed.
    */
   unreadableReason?: "no_output" | "not_json" | "unknown_shape"
+  /**
+   * Where a `ready` came from. Absent means `pi auth check` said so. When it
+   * is `model_listing`, `auth check` could not even see the provider
+   * (`provider_not_found`: it is registered by an extension or a custom
+   * `models.json` that the auth subcommand does not load), and the evidence
+   * is that `--list-models` still offered its models, which Pi only does once
+   * that provider's credentials resolve.
+   */
+  evidence?: "auth_check" | "model_listing"
+}
+
+/**
+ * Cross-check one `auth check` verdict against the model listing.
+ *
+ * `pi auth check` only knows the providers Pi ships and the ones a
+ * `models.json` declares at CLI load; a provider an extension registers
+ * (`commandcode`, a corporate gateway) answers `provider_not_found` even while
+ * every one of its models works. The listing is the tie-breaker: Pi hides a
+ * provider's models from `--list-models` until its auth is configured, so a
+ * provider that is listed AND unknown to `auth check` is signed in — it was
+ * reported as "not signed in" before, which was the one wrong answer this
+ * diagnostic must never give. Nothing else is rewritten: a real
+ * `credentials_not_configured` is Pi's own word and stays.
+ */
+export function reconcilePiAuthVerdict(
+  verdict: PiAuthVerdict,
+  listedProviders: readonly string[]
+): PiAuthVerdict {
+  if (
+    verdict.status === "not_ready" &&
+    verdict.reason === "provider_not_found" &&
+    verdict.provider &&
+    listedProviders.includes(verdict.provider)
+  ) {
+    return { status: "ready", provider: verdict.provider, evidence: "model_listing" }
+  }
+  return verdict
 }
 
 /**
@@ -190,19 +227,56 @@ export type PiProviderListing =
    *  failed. Not the same as "no providers", and must not be rendered as one. */
   | { status: "unreadable" }
 
-export function parsePiModelProviders(stdout: string): PiProviderListing {
+/** One row of `pi --list-models`, as Pi prints it. */
+export interface PiListedModel {
+  provider: string
+  id: string
+  /** Pi's own abbreviations (`1M`, `200K`), kept verbatim for display. */
+  context?: string
+  maxOut?: string
+  thinking?: boolean
+  images?: boolean
+}
+
+export type PiModelListing = { status: "ok"; models: PiListedModel[] } | { status: "unreadable" }
+
+/**
+ * Every model Pi can run right now, parsed from `pi --list-models`.
+ *
+ * This is the session-less answer to "which models does Pi have": the RPC
+ * `get_available_models` needs a running session, and a picker opened before
+ * the first turn has none. Columns are read by header name so a renamed or
+ * added column moves nothing; only `provider` and `model` are required.
+ */
+export function parsePiModelListing(stdout: string): PiModelListing {
   const lines = stdout.split("\n").map((line) => line.trimEnd())
   const headerIndex = lines.findIndex((line) => /^\s*provider\s+model\b/.test(line))
   if (headerIndex < 0) return { status: "unreadable" }
+  const columns = lines[headerIndex].trim().split(/\s+/)
+  const col = (name: string) => columns.indexOf(name)
+  const yes = (value: string | undefined) =>
+    value === undefined ? undefined : value.toLowerCase() === "yes"
 
-  // Column-driven rather than positional: Pi pads to a fixed width today, but
-  // a new column would shift every index. The provider is the first field of
-  // each row, so splitting on runs of whitespace is enough and survives an
-  // added column, a renamed one, or a width change.
-  const providers = new Set<string>()
+  const models: PiListedModel[] = []
   for (const line of lines.slice(headerIndex + 1)) {
-    const first = line.trim().split(/\s+/)[0]
-    if (first) providers.add(first)
+    const fields = line.trim().split(/\s+/)
+    if (fields.length < 2 || !fields[0]) continue
+    const model: PiListedModel = { provider: fields[0], id: fields[1] }
+    const context = col("context") >= 0 ? fields[col("context")] : undefined
+    const maxOut = col("max-out") >= 0 ? fields[col("max-out")] : undefined
+    const thinking = col("thinking") >= 0 ? yes(fields[col("thinking")]) : undefined
+    const images = col("images") >= 0 ? yes(fields[col("images")]) : undefined
+    if (context) model.context = context
+    if (maxOut) model.maxOut = maxOut
+    if (thinking !== undefined) model.thinking = thinking
+    if (images !== undefined) model.images = images
+    models.push(model)
   }
-  return { status: "ok", providers: [...providers].sort() }
+  return { status: "ok", models }
+}
+
+export function parsePiModelProviders(stdout: string): PiProviderListing {
+  const listing = parsePiModelListing(stdout)
+  if (listing.status !== "ok") return { status: "unreadable" }
+  return { status: "ok", providers: [...new Set(listing.models.map((m) => m.provider))].sort() }
 }

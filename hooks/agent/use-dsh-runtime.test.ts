@@ -4,11 +4,11 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { buildDshChannelManifest } from "@/lib/ai/agent/external/dsh-runtime-install"
 
 const agentInvoke = jest.fn()
-const supportsExternalAgents = jest.fn(() => true)
+const runsLocally = jest.fn(() => true)
 
 jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
   agentInvoke: (...args: unknown[]) => agentInvoke(...args),
-  supportsExternalAgents: () => supportsExternalAgents(),
+  runsExternalAgentProcessesLocally: () => runsLocally(),
 }))
 
 const activeSessionsForRuntime = jest.fn((_runtimeId: string) => 0)
@@ -44,7 +44,7 @@ const UNHEALTHY = facts({ compositionDigest: "9".repeat(64) })
 
 beforeEach(() => {
   agentInvoke.mockReset()
-  supportsExternalAgents.mockReturnValue(true)
+  runsLocally.mockReturnValue(true)
   activeSessionsForRuntime.mockReturnValue(0)
 })
 
@@ -59,7 +59,7 @@ describe("useDshRuntime", () => {
   it("reports unsupported hosts without calling the transport", async () => {
     // Web and Capacitor have no runtime home to manage; offering Install there
     // would be a button that cannot work.
-    supportsExternalAgents.mockReturnValue(false)
+    runsLocally.mockReturnValue(false)
     const { result } = renderHook(() => useDshRuntime("cognia-sdk-readonly"))
     await waitFor(() => expect(result.current.supported).toBe(false))
     expect(agentInvoke).not.toHaveBeenCalled()

@@ -36,7 +36,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
-import { supportsExternalAgents } from "@/lib/ai/agent/external/agent-transport"
+import { runsExternalAgentProcessesLocally } from "@/lib/ai/agent/external/agent-transport"
 import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-messages"
 import { findRuntimeById, isUnpinnedLaunch } from "@/lib/ai/agent/external/runtime-catalog"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
@@ -94,7 +94,7 @@ async function defaultInspectRuntime(runtimeId: string): Promise<ExternalAgentRu
 
 export function RuntimeGovernancePanel({
   inspectRuntime = defaultInspectRuntime,
-  hostSupported = supportsExternalAgents(),
+  hostSupported = runsExternalAgentProcessesLocally(),
 }: RuntimeGovernancePanelProps = {}) {
   const t = useTranslations("externalAgent.runtimes")
   const tErrors = useTranslations("externalAgent.lifecycleErrors")

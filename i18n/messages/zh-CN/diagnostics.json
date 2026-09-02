@@ -404,7 +404,8 @@
     "selectLocalSurface": "选择一个可本地执行的入口以直接连接。",
     "switchToAcp": "将该智能体的协议切换为 ACP。",
     "useAllowedSandboxOrApproval": "改用此 Codex 受管配置允许的沙盒模式或审批策略。",
-    "useDesktopRuntime": "请以桌面端应用运行 Cognia——stdio 传输需要它。",
+    "startOnAProcessCapableRuntime": "在能启动进程的地方运行这个 agent：桌面端应用，或一台已配对的 Host。",
+    "grantAgentControlOnTheHost": "如果已配对 Host，请在该 Host 上为这台设备授予 Agent Control。",
     "useOfficialWorkflow": "请使用该产品自身的官方流程。",
     "useSupportedOperations": "请仅使用该端点支持的操作。"
   },

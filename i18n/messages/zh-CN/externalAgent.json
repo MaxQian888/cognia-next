@@ -77,6 +77,18 @@
   "commands": "命令",
   "commandsDescription": "此外部代理提供的斜杠命令",
   "commandsTooltip": "查看可用的代理命令",
+  "credential": {
+    "checking": "正在检查登录……",
+    "none": "未登录",
+    "partial": "{ready}/{total} 已登录",
+    "ready": "已登录",
+    "unreadable": "登录状态无法确认"
+  },
+  "detectionInstalled": "已安装",
+  "detectionInstalledWithVersion": "已安装 v{version}",
+  "detectionMissing": "未找到",
+  "detectionNotLocal": "远程运行时",
+  "detectionPackageRunner": "启动时下载",
   "disabled": "外部代理已禁用",
   "elicitation": {
     "decline": "拒绝",
@@ -91,6 +103,17 @@
   },
   "executionPlan": "执行计划",
   "externalAgents": "外部代理",
+  "failure": {
+    "causes": "它包裹的原因",
+    "connect": "无法连接",
+    "copied": "报告已复制",
+    "copy": "复制报告",
+    "disconnect": "无法断开",
+    "execute": "运行失败",
+    "retry": "重试",
+    "retrying": "正在重试",
+    "session": "会话操作失败"
+  },
   "hostConfigs": {
     "title": "宿主端智能体",
     "description": "存放在已配对宿主上的外部智能体。配置与运行都在宿主端，因此它能告诉你每一个是否已就绪。",
@@ -144,6 +167,15 @@
     "customProtocolComingSoon": "自定义协议（即将支持）",
     "defaultModel": "默认模型",
     "defaultModelHint": "可选。每轮对话默认使用的 \"provider/model\" 标识（如 anthropic/claude-sonnet-4-5），可被单轮覆盖。",
+    "detectionRetry": "重新检测",
+    "detectionRunning": "正在检测这台机器……",
+    "detectionUnavailable": {
+      "noHost": "这里没有可以列出已安装 agent 的运行时。",
+      "manifestMissing": "已配对的 Host 尚未报告完它支持的能力。",
+      "unsupported": "已配对的 Host 不提供已安装 agent 的列表。",
+      "notGranted": "这台设备无权向该 Host 询问它安装了什么。",
+      "failed": "已向 Host 询问，但没有得到回应。"
+    },
     "diagnostics": {
       "adapter": "适配器：{name}",
       "authMethods": "认证方式：{methods}",
@@ -208,9 +240,15 @@
     "noResumableSessions": "暂无可恢复的会话。",
     "noteLabel": "提示",
     "officialDocs": "官方文档",
-    "opencodeDesktopRuntimeWarning": "自动启动 OpenCode 服务器需要 Cognia 桌面运行时。Web 预览模式下请配置服务器地址以连接。",
+    "opencodeAutoSpawnNeedsAProcess": "自动启动 OpenCode 服务器需要启动一个本地进程。",
     "otherOfficialSurfaces": "其他官方接入面",
     "pluginProtocolContributed": "由插件提供",
+    "processPlaneWarning": {
+      "manifestMissing": "已配对的 Host 还没报完自己支持什么。连接完成后这条提示会自动消失。",
+      "noHost": "当前没有能启动进程的地方：请以桌面端应用打开 Cognia，或配对一台 Host 并选中它。",
+      "notGranted": "已配对的 Host 可以启动，但这台设备还没有在它上面获得 Agent Control 授权。",
+      "unsupported": "已配对的 Host 不为它的设备启动 agent 进程。"
+    },
     "protocolViaTransport": "{protocol}（{transport}）",
     "quickStartPreset": "快速预设",
     "refresh": "刷新",
@@ -227,7 +265,7 @@
     "serverPort": "服务器端口",
     "serverUsername": "服务器用户名",
     "sessions": "会话",
-    "stdioDesktopRuntimeWarning": "stdio 传输需要 Cognia 桌面运行时。Web 预览模式下无法启动该代理。",
+    "stdioNeedsAProcess": "stdio 需要启动一个本地进程。",
     "transportHttp": "HTTP",
     "transportSse": "Server-Sent Events",
     "transportStdioLocal": "stdio（本地）",
@@ -569,7 +607,15 @@
       "authType": {
         "api_key": "API 密钥",
         "oauth": "OAuth"
-      }
+      },
+      "signIn": "通过 Pi 登录",
+      "signInHint": "在终端中打开 Pi，在里面运行 /login 加提供方名称。Cognia 不会接触凭证。",
+      "signInNeedsTerminal": "登录需要集成终端，而当前宿主无法使用它。",
+      "signInOpened": "Pi 已在终端中打开。运行 /login 加提供方名称完成登录后，再重新检查。",
+      "signInFailed": "无法在终端中打开 Pi：{reason}",
+      "modelsSummary": "{providers} 个提供方，共 {count} 个模型",
+      "evidenceListing": "已列出",
+      "evidenceListingTitle": "Pi 的 auth check 不认识这个提供方（由扩展注册），但 Pi 列出了它的模型，而这只会在凭证可用时发生。"
     }
   },
   "statusConnected": "已连接",

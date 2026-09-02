@@ -13,6 +13,15 @@ import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
  * per-agent orchestration lives in `lib/ai/agent/external/rehydrate` so the
  * headless brain runs the identical logic (ADR-0059 T-A10); this component only
  * adds the React StrictMode-safe once-guard and the mount/unmount subscription.
+ *
+ * It also owns the connection-status projection for the whole session. The
+ * runtime manager knows what it connected, but the store's `connectionStatus`
+ * map is what the composer, the runtime selector and every other surface read,
+ * and the only listener that kept the map current used to live inside
+ * `useExternalAgent` — a hook mounted by three panels and by nothing else. So
+ * startup rehydration connected agents that the map never heard about, and an
+ * agent could be genuinely connected while every surface outside those panels
+ * reported it disconnected, until one of them was opened and refreshed.
  */
 export function ExternalAgentInitializer() {
   const hasInitialized = useRef(false)
@@ -33,9 +42,19 @@ export function ExternalAgentInitializer() {
       const manager = getExternalAgentManager()
       const persistedAgents = useExternalAgentStore.getState().getAllAgents()
       await Promise.all(
+        // `rehydrateExternalAgent` writes the startup status itself, on every
+        // one of its exits. This listener is for what happens after.
         persistedAgents.map((config) => rehydrateExternalAgent(config, manager, shouldContinue))
       )
     }
+
+    // Bound before the rehydration starts, so a transition that lands while an
+    // agent is still connecting is not missed.
+    const unbindLifecycle = getExternalAgentManager().addLifecycleListener((event) => {
+      if (!isActive) return
+      useExternalAgentStore.getState().setConnectionStatus(event.agentId, event.connectionStatus)
+    })
+
     void runStartup()
 
     // React to a plugin enabling its external-agent adapter mid-session: any
@@ -65,6 +84,7 @@ export function ExternalAgentInitializer() {
     return () => {
       isActive = false
       unsubscribe()
+      unbindLifecycle()
       setAcpDynamicMcpHostController(undefined)
     }
   }, [])

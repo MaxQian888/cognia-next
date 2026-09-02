@@ -1180,6 +1180,44 @@
       },
       "additionalProperties": false
     },
+    "DetectedRuntimesReport": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-external-agent/src/version_probe.rs DetectedRuntimesReport",
+      "description": "Which catalogued agent runtimes this Host already has. `resolution` is the only verdict here: `installed` means the command resolved and its catalogued `--version` was read, `missing` means it is on no PATH or install root, `package-runner` means it launches through npx and its presence cannot be established without a network install, `not-local` means the runtime has no local command at all. `versionOutput` is raw probe output; the version verdict is rendered by assessRuntimeVersion() in lib/ai/agent/external/runtime-version.ts.",
+      "required": ["runtimes"],
+      "properties": {
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtimeId", "resolution"],
+            "properties": {
+              "runtimeId": {
+                "type": "string"
+              },
+              "command": {
+                "type": ["string", "null"]
+              },
+              "resolution": {
+                "type": "string",
+                "enum": ["installed", "missing", "package-runner", "not-local"]
+              },
+              "executablePath": {
+                "type": ["string", "null"]
+              },
+              "versionOutput": {
+                "type": ["string", "null"]
+              },
+              "detail": {
+                "type": ["string", "null"]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "ExternalAgentConfigReconcileOutcome": {
       "type": "object",
       "required": ["configId", "from", "to", "changed"],
@@ -6714,6 +6752,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "external_agent_detect_runtimes": {
+      "$ref": "#/$defs/DetectedRuntimesReport"
     },
     "external_agent_list": {
       "$ref": "#/$defs/ExternalAgentSummaryList"

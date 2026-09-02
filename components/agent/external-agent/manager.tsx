@@ -24,7 +24,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  AlertCircle,
   ChevronDown,
   ExternalLink,
   Plus,
@@ -72,7 +71,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/sonner"
-import { cn, isTauri } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 
 import { useExternalAgent } from "@/hooks/agent"
 import { useAgentTraceAnalytics } from "@/hooks/agent-trace"
@@ -83,6 +82,10 @@ import { ExternalAgentElicitationDialog } from "./elicitation-dialog"
 import { ToolApprovalDialog, type ToolApprovalRequest } from "./tool-approval-dialog"
 import { TraceHealthBadge } from "./trace-health-badge"
 import { ConnectionStatusBadge } from "./connection-status-badge"
+import { AgentFailureNotice } from "./agent-failure-notice"
+import { useAgentConnectionStatus } from "@/hooks/agent/use-agent-connection-status"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { AgentCredentialBadge } from "./credential-status-badge"
 
 import type {
   AcpPermissionOption,
@@ -96,6 +99,8 @@ import {
   getExternalAgentExecutionBlockReason,
   isSupportedExternalAgentProtocol,
 } from "@/lib/ai/agent/external/config-normalizer"
+import type { ExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
+import { isEnvironmentScopedVerdict } from "@/lib/ai/agent/external/canonical-contract"
 import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import {
@@ -103,6 +108,13 @@ import {
   getRunnablePresets,
   type ExternalAgentPresetId,
 } from "@/lib/ai/agent/external/presets"
+import {
+  PROCESS_PLANE_COMMANDS,
+  type ProcessPlaneUnavailableReason,
+} from "@/lib/ai/agent/external/process-plane"
+import { useExternalAgentProcessPlane } from "@/hooks/agent/use-external-agent-process-plane"
+import { useInstalledAgentRuntimes } from "@/hooks/agent/use-installed-agent-runtimes"
+import { RuntimeDetectionBadge } from "./runtime-detection-badge"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
 import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
 import { ExternalAgentCapabilityMatrix } from "./capability-matrix"
@@ -149,28 +161,45 @@ interface AgentCardProps {
     validity?: ExternalAgentValiditySnapshot
   }
   isActive: boolean
+  /** The last failure for THIS agent, drawn in the row the user pressed. */
+  failure?: ExternalAgentFailure
   onConnect: () => void
   onDisconnect: () => void
   onRemove: () => void
   onSelect: () => void
+  onDismissFailure: () => void
 }
 
 function AgentCard({
   agent,
   isActive,
+  failure,
   onConnect,
   onDisconnect,
   onRemove,
   onSelect,
+  onDismissFailure,
 }: AgentCardProps) {
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
-  const { config, connectionStatus, validity } = agent
+  const { config, validity } = agent
+  // Read from the shared map rather than from the instance this component was
+  // handed. That instance is rebuilt asynchronously per hook, so it lagged
+  // behind every other surface for as long as the rebuild took.
+  const connectionStatus = useAgentConnectionStatus(config.id, agent.connectionStatus)
   const isConnected = connectionStatus === "connected"
+  const isConnecting = connectionStatus === "connecting"
+  // Subscribed, not read once. A Host still reporting its features blocks this
+  // agent and then stops blocking it a moment later, and the block disables
+  // the Connect button, which is the only other thing that could have brought
+  // this card back. Read from render alone the row stayed dead behind copy
+  // saying the state would clear on its own.
+  const processPlane = useExternalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
+  const effectiveValidity = validity && !isEnvironmentScopedVerdict(validity) ? validity : undefined
   const executionBlockReason =
-    (validity?.executable === false ? validity.blockingReason : null) ??
-    getExternalAgentExecutionBlockReason(config)
+    (effectiveValidity?.executable === false ? effectiveValidity.blockingReason : null) ??
+    getExternalAgentExecutionBlockReason(config, processPlane)
   const connectDisabled = !isConnected && !!executionBlockReason
   const ecosystem = validity?.ecosystem ?? getExternalAgentEcosystemReadiness(config)
 
@@ -202,6 +231,10 @@ function AgentCard({
                 withIcon
                 className="ml-auto shrink-0"
               />
+              {/* Connected and signed into nothing is a real state, and it used
+                  to be visible only in settings. Self-hides for an agent with
+                  no credential probe. */}
+              <AgentCredentialBadge agentId={config.id} className="shrink-0" />
             </div>
             <p className="truncate text-[11px] text-muted-foreground">
               {tManager("protocolViaTransport", {
@@ -264,6 +297,17 @@ function AgentCard({
             {executionBlockReason}
           </p>
         )}
+        {/* A block reason says the attempt cannot be made. A failure says one
+            was made and what came back. Both can be present, and they are not
+            the same sentence. */}
+        {failure && (
+          <AgentFailureNotice
+            failure={failure}
+            retrying={isConnecting}
+            onRetry={connectDisabled ? undefined : onConnect}
+            onDismiss={onDismissFailure}
+          />
+        )}
       </CardContent>
     </Card>
   )
@@ -320,6 +364,30 @@ function CollapsibleSection({
 // Add Agent Dialog
 // ============================================================================
 
+/**
+ * Reason code to message key. The codes are the plane's vocabulary (kebab, and
+ * wire-shaped); the keys are the catalogue's. Kept as a table so
+ * `manager.detection.test.tsx` can assert every code has a translation:
+ * `lint:i18n` cannot see through the template literal that resolves them.
+ */
+export const PLANE_WARNING_KEYS: Record<ProcessPlaneUnavailableReason, string> = {
+  "no-host": "noHost",
+  "manifest-missing": "manifestMissing",
+  unsupported: "unsupported",
+  "not-granted": "notGranted",
+}
+
+/**
+ * The same mapping for the detection line, plus the one state the plane cannot
+ * describe: it was reachable, it was asked, and it did not answer. Blaming that
+ * on the plane's `unsupported` accused a Host that had declared the operation.
+ */
+export const DETECTION_UNAVAILABLE_KEYS: Record<ProcessPlaneUnavailableReason | "failed", string> =
+  {
+    ...PLANE_WARNING_KEYS,
+    failed: "failed",
+  }
+
 interface AddAgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -330,7 +398,18 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
   const tSettings = useTranslations("externalAgent.settings")
   const tManager = useTranslations("externalAgent.manager")
   const tCommon = useTranslations("common")
-  const tauriRuntime = isTauri()
+  // Where the child would actually start. Not `isTauri()`: a browser paired to
+  // a Host runs stdio agents perfectly well, and telling that user to install
+  // the desktop app is advice about the wrong machine. Subscribed rather than
+  // sampled, because the mid-handshake answer says it will clear once the Host
+  // connects and there is no retry control on this banner to force the point.
+  const processPlane = useExternalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
+  const planeWarning = processPlane.ok
+    ? null
+    : tManager(`processPlaneWarning.${PLANE_WARNING_KEYS[processPlane.reason]}`)
+  // Only while the dialog is open: detection spawns `--version` reads on the
+  // host, and a closed dialog has nothing to render them into.
+  const detection = useInstalledAgentRuntimes(open)
   const [selectedPreset, setSelectedPreset] = useState<ExternalAgentPresetId | "">("")
   const [formData, setFormData] = useState<AddAgentFormData>(DEFAULT_ADD_AGENT_FORM_DATA)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -458,6 +537,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                           <span className="text-xs text-muted-foreground">
                             ({preset.tags.join(", ")})
                           </span>
+                          <RuntimeDetectionBadge detection={detection.forPreset(presetId)} />
                         </div>
                       </SelectItem>
                     )
@@ -474,6 +554,34 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     <Badge variant="outline" className="text-[10px]">
                       {currentPreset.supportTier}
                     </Badge>
+                  )}
+                  {selectedPreset && (
+                    <RuntimeDetectionBadge
+                      detection={detection.forPreset(selectedPreset)}
+                      showVersion
+                    />
+                  )}
+                  {detection.loading && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {tManager("detectionRunning")}
+                    </span>
+                  )}
+                  {/* An absent badge means "not asked", which reads as silence.
+                      Saying why, and offering the re-ask, is the difference
+                      between a missing answer and an unexplained blank. */}
+                  {!detection.loading && detection.unavailable && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      {tManager(
+                        `detectionUnavailable.${DETECTION_UNAVAILABLE_KEYS[detection.unavailable]}`
+                      )}
+                      <button
+                        type="button"
+                        className="underline underline-offset-2 hover:text-foreground"
+                        onClick={detection.refresh}
+                      >
+                        {tManager("detectionRetry")}
+                      </button>
+                    </span>
                   )}
                   {currentPreset.docsUrl && (
                     <a
@@ -619,9 +727,9 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                 </div>
                 {formData.autoSpawnServer ? (
                   <>
-                    {!tauriRuntime && (
+                    {planeWarning && (
                       <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                        {tManager("opencodeDesktopRuntimeWarning")}
+                        {tManager("opencodeAutoSpawnNeedsAProcess")} {planeWarning}
                       </div>
                     )}
                     <div className="grid gap-2">
@@ -707,9 +815,9 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
               </>
             ) : isStdio ? (
               <>
-                {!tauriRuntime && (
+                {planeWarning && (
                   <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                    {tManager("stdioDesktopRuntimeWarning")}
+                    {tManager("stdioNeedsAProcess")} {planeWarning}
                   </div>
                 )}
                 <div className="grid gap-2">
@@ -947,7 +1055,6 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     activeBenchmarkCapabilities,
     isExecuting,
     isLoading,
-    error,
     pendingPermission,
     pendingElicitation,
     availableCommands,
@@ -971,8 +1078,17 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     forkSession,
     resumeSession,
     refresh,
-    clearError,
   } = useExternalAgent()
+
+  // Read straight from the store rather than through the hook: the runtime
+  // selector connects the same agents, and a failure recorded there has to
+  // show here too. A copy held in this component would miss it.
+  const agentFailures = useExternalAgentStore((state) => state.agentFailures)
+  const clearAgentFailure = useExternalAgentStore((state) => state.clearAgentFailure)
+  const connectionStatuses = useExternalAgentStore((state) => state.connectionStatus)
+  // Same subscription the cards take: the session actions below are gated on
+  // this verdict, so a Host that finishes handshaking has to reach them too.
+  const panelProcessPlane = useExternalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)
 
   const handleAddAgent = useCallback(
     async (data: AddAgentFormData) => {
@@ -1070,11 +1186,13 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
       try {
         await connect(agentId)
         toast.success(tSettings("connected"))
-      } catch (err) {
-        toast.error(getErrorMessage(err, tSettings("connectionFailed")))
+      } catch {
+        // Deliberately silent. The failure is recorded against this agent and
+        // drawn in its row, and a toast saying the same thing in a corner was
+        // the copy that vanished first while the row it belonged to stayed.
       }
     },
-    [connect, tSettings, getErrorMessage]
+    [connect, tSettings]
   )
 
   const handleDisconnect = useCallback(
@@ -1107,7 +1225,15 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const handleCommandExecute = useCallback(
     async (command: string, args?: string) => {
       const prompt = args ? `${command} ${args}` : command
-      await execute(prompt)
+      try {
+        await execute(prompt)
+      } catch {
+        // `execute` records the failure against the agent before it rethrows,
+        // so the report is already on screen in that agent's row. Swallowing
+        // here is only about the rejection itself: `onExecute` is typed
+        // `=> void` and called fire-and-forget, so letting it escape makes an
+        // unhandled rejection out of a failure the user can already see.
+      }
     },
     [execute]
   )
@@ -1115,12 +1241,22 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
   const activeAgent = activeAgentId
     ? agents.find((agent) => agent.config.id === activeAgentId) || null
     : null
+  const effectiveActiveAgentValidity =
+    activeAgentValidity && !isEnvironmentScopedVerdict(activeAgentValidity)
+      ? activeAgentValidity
+      : undefined
   const activeAgentBlockedReason =
-    activeAgentValidity?.blockingReason ??
-    (activeAgent ? getExternalAgentExecutionBlockReason(activeAgent.config) : null)
+    effectiveActiveAgentValidity?.blockingReason ??
+    (activeAgent
+      ? getExternalAgentExecutionBlockReason(activeAgent.config, panelProcessPlane)
+      : null)
   const isActiveAgentExecutable =
-    activeAgentValidity?.executable ?? (activeAgentBlockedReason ? false : true)
-  const isActiveAgentConnected = activeAgent?.connectionStatus === "connected"
+    effectiveActiveAgentValidity?.executable ?? (activeAgentBlockedReason ? false : true)
+  // Same map, same reason: the session actions must not stay disabled because
+  // this panel's copy of the agent has not caught up yet.
+  const isActiveAgentConnected =
+    ((activeAgentId ? connectionStatuses[activeAgentId] : undefined) ??
+      activeAgent?.connectionStatus) === "connected"
   const listSupport = activeAgentValidity?.sessionExtensions["session/list"]
   const forkSupport = activeAgentValidity?.sessionExtensions["session/fork"]
   const resumeSupport = activeAgentValidity?.sessionExtensions["session/resume"]
@@ -1396,19 +1532,6 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
         </div>
       </div>
 
-      {/* Error Display */}
-      {error && (
-        <div className="flex items-center justify-between rounded-lg border border-destructive bg-destructive/10 p-3">
-          <div className="flex items-center gap-2 text-sm text-destructive">
-            <AlertCircle className="h-4 w-4" />
-            {error}
-          </div>
-          <Button variant="ghost" size="sm" onClick={clearError}>
-            {tCommon("dismiss")}
-          </Button>
-        </div>
-      )}
-
       <Separator className="shrink-0" />
 
       {/* Scrollable body — a single internal scroll region so the header stays
@@ -1435,10 +1558,12 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                   key={agent.config.id}
                   agent={agent}
                   isActive={activeAgentId === agent.config.id}
+                  failure={agentFailures[agent.config.id]}
                   onConnect={() => handleConnect(agent.config.id)}
                   onDisconnect={() => handleDisconnect(agent.config.id)}
                   onRemove={() => setRemoveConfirmId(agent.config.id)}
                   onSelect={() => setActiveAgent(agent.config.id)}
+                  onDismissFailure={() => clearAgentFailure(agent.config.id)}
                 />
               ))}
             </div>

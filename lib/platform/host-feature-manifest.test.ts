@@ -496,6 +496,35 @@ describe("external-agent.host-configs", () => {
   })
 })
 
+describe("external-agent.process-plane", () => {
+  it.each(["tauri", "headless"] as const)("advertises the spawn arms on %s", (platform) => {
+    expect(
+      buildLocalHostFeatureManifest({ platform }).features["external-agent.process-plane"]
+        ?.operations
+    ).toEqual(expect.arrayContaining(["spawn_external_agent", "kill_external_agent"]))
+  })
+
+  it("advertises runtime detection only where an arm answers it", () => {
+    // The desktop answers it natively. The headless brain's dispatch has no
+    // case for it, so advertising it there would let a companion past the gate
+    // this per-operation list exists to be, straight into an unknown command.
+    expect(
+      supportsHostFeatureOperation(
+        buildLocalHostFeatureManifest({ platform: "tauri" }),
+        "external-agent.process-plane",
+        "external_agent_detect_runtimes"
+      )
+    ).toBe(true)
+    expect(
+      supportsHostFeatureOperation(
+        buildLocalHostFeatureManifest({ platform: "headless" }),
+        "external-agent.process-plane",
+        "external_agent_detect_runtimes"
+      )
+    ).toBe(false)
+  })
+})
+
 describe("hostStateScope", () => {
   it("is absent unless the Host declares one", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "headless", hostId: "host-a" })

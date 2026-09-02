@@ -45,18 +45,23 @@ import {
   type PiAuthVerdict,
   type PiProviderListing,
 } from "./pi-auth"
+import { parsePiModelListing, type PiModelListing } from "./pi-auth"
 import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./pi-rpc-events"
 import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
 import { PI_TOOL_POLICY_ENV, encodePiToolPolicy, resolvePiToolPolicy } from "./pi-permission"
 import { PiRpcPeer, type PiFrameError } from "./pi-rpc-peer"
-import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import {
+  BaseProtocolAdapter,
+  type SessionCreateOptions,
+  type SessionListOptions,
+} from "./protocol-adapter"
 
 // ============================================================================
 // Version policy
 // ============================================================================
 
 /** The one version this integration is certified against (ADR-0119). */
-export const PI_CERTIFIED_VERSION = "0.84.1"
+export const PI_CERTIFIED_VERSION = "0.84.3"
 
 export type PiVersionVerdict =
   /** Exactly the certified version. */
@@ -250,6 +255,24 @@ export type PiExtensionVerdict =
   | { status: "unreadable"; path: string; detail: string }
   | { status: "tampered"; path: string; expected: string; actual: string }
   | { status: "unpinned"; path: string; sha256: string }
+
+/**
+ * One Pi session as the host found it on disk (`list_pi_sessions`).
+ *
+ * The adapter cannot read `~/.pi/agent/sessions/` itself — it runs in the
+ * renderer under static export — and Pi's RPC has no listing command
+ * (`switch_session` takes a path it expects you to already know). So the host
+ * reads each file's header line, the way Pi's own `SessionManager.list` does,
+ * and answers with ids only: the id is what `--session-id` needs to resume,
+ * and no absolute path has to cross a device boundary.
+ */
+export interface PiSessionRecord {
+  id: string
+  cwd?: string
+  name?: string
+  createdAt?: string
+  updatedAt?: string
+}
 
 /** Why a verdict refuses the session, phrased for the user. */
 export function piExtensionVerdictReason(verdict: PiExtensionVerdict): string {
@@ -489,10 +512,13 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     const exited = new Promise<void>((resolve) => {
       resolveExit = resolve
     })
-    // Started but deliberately NOT awaited before the spawn: the version probe
-    // has always subscribed to `exit` this way, and adding an await here shifts
-    // the spawn by a microtask against a real host's IPC. The bug worth fixing
-    // is the teardown, not the ordering — see the `finally`.
+    // Started but deliberately NOT awaited before the spawn. The `stdout`
+    // subscription above is the one that has to be live first, and awaiting it
+    // now also waits for the host to acknowledge the channel, which leaves the
+    // socket open: this `add` frame goes out on an open socket and is processed
+    // long before a spawned process can exit. Awaiting it as well would push
+    // the spawn another turn down the microtask queue, which is timing the
+    // adapter's callers are entitled not to have shift under them.
     const exitHandle = this.host.listen<{ agentId: string; code?: number | null }>(
       "external-agent://exit",
       (payload) => {
@@ -1334,6 +1360,57 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     if (!config) return { status: "unreadable" }
     const { stdout } = await this.runCliProbe(config, ["--list-models"], "models", 20000)
     return parsePiModelProviders(stdout)
+  }
+
+  /**
+   * Every model Pi can run, without a session.
+   *
+   * `get_available_models` is an RPC and needs a live process; a picker that
+   * opens before the first turn has none, and used to show nothing. This is
+   * the same `pi --list-models` the credential diagnostic reads, kept as one
+   * parse so both surfaces describe the same catalog.
+   */
+  async listAgentModels(): Promise<PiModelListing> {
+    const config = this._config
+    if (!config) return { status: "unreadable" }
+    const { stdout } = await this.runCliProbe(config, ["--list-models"], "models", 20000)
+    return parsePiModelListing(stdout)
+  }
+
+  /**
+   * Sessions Pi has stored for a working directory (stable-surface shape).
+   *
+   * Scoped to `options.cwd`, falling back to the configured process cwd, and
+   * to every directory when neither is set. Resume works on the id alone
+   * because `startSession` re-launches with `--session-id`.
+   */
+  async listSessions(options?: SessionListOptions): Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
+  > {
+    const cwd = options?.cwd ?? this._config?.process?.cwd
+    const records = await this.host.invoke<PiSessionRecord[] | null | undefined>(
+      "list_pi_sessions",
+      cwd ? { cwd } : {}
+    )
+    const list = Array.isArray(records) ? records : []
+    return list
+      .filter((record) => typeof record?.id === "string" && record.id.length > 0)
+      .map((record) => ({
+        sessionId: record.id,
+        ...(record.cwd ? { cwd: record.cwd } : {}),
+        ...(record.name ? { title: record.name } : {}),
+        ...(record.createdAt ? { createdAt: record.createdAt } : {}),
+        ...(record.updatedAt ? { updatedAt: record.updatedAt } : {}),
+      }))
+      .sort((a, b) =>
+        (b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? "")
+      )
   }
 
   async healthCheck(): Promise<boolean> {

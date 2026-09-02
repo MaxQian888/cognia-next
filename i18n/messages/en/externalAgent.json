@@ -77,6 +77,18 @@
   "commands": "Commands",
   "commandsDescription": "Slash commands provided by this external agent",
   "commandsTooltip": "View available agent commands",
+  "credential": {
+    "checking": "Checking sign-in...",
+    "none": "Not signed in",
+    "partial": "{ready}/{total} signed in",
+    "ready": "Signed in",
+    "unreadable": "Sign-in unknown"
+  },
+  "detectionInstalled": "Installed",
+  "detectionInstalledWithVersion": "Installed v{version}",
+  "detectionMissing": "Not found",
+  "detectionNotLocal": "Remote runtime",
+  "detectionPackageRunner": "Fetched on launch",
   "disabled": "External Agents Disabled",
   "elicitation": {
     "decline": "Decline",
@@ -91,6 +103,17 @@
   },
   "executionPlan": "Execution Plan",
   "externalAgents": "External Agents",
+  "failure": {
+    "causes": "What it was wrapping",
+    "connect": "Could not connect",
+    "copied": "Report copied",
+    "copy": "Copy the report",
+    "disconnect": "Could not disconnect",
+    "execute": "The run failed",
+    "retry": "Try again",
+    "retrying": "Trying again",
+    "session": "The session action failed"
+  },
   "hostConfigs": {
     "title": "Host-owned agents",
     "description": "External agents stored on the paired host. The host both keeps these configurations and runs them, so it can tell you whether each one is ready.",
@@ -144,6 +167,15 @@
     "customProtocolComingSoon": "Custom (coming soon)",
     "defaultModel": "Default model",
     "defaultModelHint": "Optional. \"provider/model\" id used for every turn unless overridden (e.g. anthropic/claude-sonnet-4-5).",
+    "detectionRetry": "Check again",
+    "detectionRunning": "Checking this machine...",
+    "detectionUnavailable": {
+      "noHost": "Nothing here can list installed agents.",
+      "manifestMissing": "The paired Host has not finished reporting what it supports.",
+      "unsupported": "The paired Host does not list installed agents.",
+      "notGranted": "This device may not ask the Host what it has installed.",
+      "failed": "The Host was asked and did not answer."
+    },
     "diagnostics": {
       "adapter": "Adapter: {name}",
       "authMethods": "Auth methods: {methods}",
@@ -208,9 +240,15 @@
     "noResumableSessions": "No resumable sessions yet.",
     "noteLabel": "Note",
     "officialDocs": "Official docs",
-    "opencodeDesktopRuntimeWarning": "Auto-spawning an OpenCode server requires the Cognia desktop runtime. Configure a server endpoint to connect from the web preview.",
+    "opencodeAutoSpawnNeedsAProcess": "Auto-spawning an OpenCode server starts a local process.",
     "otherOfficialSurfaces": "Other official surfaces",
     "pluginProtocolContributed": "Contributed by a plugin",
+    "processPlaneWarning": {
+      "manifestMissing": "The paired Host has not finished reporting what it supports. This should clear once it connects.",
+      "noHost": "Nothing here can start one: open Cognia as the desktop app, or pair a Host and select it.",
+      "notGranted": "The paired Host can, but this device has not been granted Agent Control on it.",
+      "unsupported": "The paired Host does not start agent processes for its devices."
+    },
     "protocolViaTransport": "{protocol} via {transport}",
     "quickStartPreset": "Quick-start preset",
     "refresh": "Refresh",
@@ -227,7 +265,7 @@
     "serverPort": "Server port",
     "serverUsername": "Server username",
     "sessions": "Sessions",
-    "stdioDesktopRuntimeWarning": "Stdio transport requires the Cognia desktop runtime. The agent will not be able to launch from the web preview.",
+    "stdioNeedsAProcess": "Stdio starts a local process.",
     "transportHttp": "HTTP",
     "transportSse": "Server-Sent Events",
     "transportStdioLocal": "stdio (local)",
@@ -569,7 +607,15 @@
       "authType": {
         "api_key": "API key",
         "oauth": "OAuth"
-      }
+      },
+      "signIn": "Sign in via Pi",
+      "signInHint": "Opens Pi in the terminal. Run /login followed by the provider name there. Cognia never sees the credential.",
+      "signInNeedsTerminal": "Signing in needs the integrated terminal, which this host cannot reach.",
+      "signInOpened": "Pi is open in the terminal. Run /login followed by the provider name, then re-check.",
+      "signInFailed": "Could not open Pi in the terminal: {reason}",
+      "modelsSummary": "{count} models across {providers} providers",
+      "evidenceListing": "Listed",
+      "evidenceListingTitle": "Pi's auth check does not know this provider (it is registered by an extension), but Pi lists its models, which it only does once credentials resolve."
     }
   },
   "statusConnected": "Connected",

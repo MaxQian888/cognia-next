@@ -348,7 +348,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "pi", "native", "preview"],
         docsUrl: "https://pi.dev/docs/latest/rpc",
         setupHint:
-          "Requires Pi 0.84.1 (`npm install -g @earendil-works/pi-coding-agent@0.84.1`) on PATH and Node.js >= 22.19.0. Pi owns its own provider credentials in ~/.pi — Cognia never reads or injects them. Newer Pi versions run but are reported as unverified.",
+          "Requires Pi 0.84.3 (`npm install -g @earendil-works/pi-coding-agent@0.84.3`) on PATH and Node.js >= 22.19.0. Pi owns its own provider credentials in ~/.pi — Cognia never reads or injects them. Newer Pi versions run but are reported as unverified.",
         limitationNote:
           "Preview surface. macOS and Linux only: external agents always run inside the strict sandbox and there is no unsandboxed fallback.",
         process: {

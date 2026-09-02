@@ -404,7 +404,8 @@
     "selectLocalSurface": "Pick a locally executable surface to connect to directly.",
     "switchToAcp": "Switch the agent's protocol to ACP.",
     "useAllowedSandboxOrApproval": "Choose a sandbox mode or approval policy this Codex's managed configuration permits.",
-    "useDesktopRuntime": "Run Cognia as the desktop app — stdio transport needs it.",
+    "startOnAProcessCapableRuntime": "Run this agent where a process can start: the desktop app, or a paired Host.",
+    "grantAgentControlOnTheHost": "If a Host is paired, grant this device Agent Control on it.",
     "useOfficialWorkflow": "Use this product's own official workflow for this surface.",
     "useSupportedOperations": "Stick to the operations this endpoint supports."
   },

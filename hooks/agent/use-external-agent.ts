@@ -63,6 +63,7 @@ import {
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
+import { describeExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 import {
   clearExternalAgentSelectionIfActive,
   selectExternalAgent,
@@ -371,6 +372,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const storeAddAgent = useExternalAgentStore((state) => state.addAgent)
   const storeRemoveAgent = useExternalAgentStore((state) => state.removeAgent)
   const storeSetConnectionStatus = useExternalAgentStore((state) => state.setConnectionStatus)
+  const storeRecordFailure = useExternalAgentStore((state) => state.recordAgentFailure)
+  const storeClearFailure = useExternalAgentStore((state) => state.clearAgentFailure)
   const storeSetAgentValidity = useExternalAgentStore((state) => state.setAgentValidity)
   const storeUpdateAgent = useExternalAgentStore((state) => state.updateAgent)
   const storeGetAgentValidity = useExternalAgentStore((state) => state.getAgentValidity)
@@ -673,6 +676,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
           (!activeAgentIdRef.current || activeAgentIdRef.current === event.agentId)
         ) {
           setError(getExternalAgentErrorMessage(event.lastError))
+          storeRecordFailure(
+            describeExternalAgentFailure(event.agentId, "connect", event.lastError)
+          )
         }
       })
     }
@@ -683,7 +689,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       isActive = false
       unsubscribe?.()
     }
-  }, [getManager])
+  }, [getManager, storeRecordFailure])
 
   useEffect(() => {
     const unsubscribe = useExternalAgentStore.subscribe((state, previousState) => {
@@ -861,6 +867,37 @@ export function useExternalAgent(): UseExternalAgentReturn {
     }
   }, [activeAgentId, activeSession, getManager])
 
+  // Ask the agent for its config options once a session exists.
+  //
+  // The subscription above only ever learns them from a `config_options_update`
+  // the agent chose to push. ACP agents push, so they worked; a pull-based
+  // adapter never does, and Pi therefore rendered no model row at all despite
+  // implementing `get_available_models`. The fetch is cached per (agent,
+  // session) in `model-surface-cache`, which is the same load the composer's
+  // model chip performs, so the two surfaces cost one round trip between them.
+  useEffect(() => {
+    const sessionId = activeSession?.id
+    if (!activeAgentId || !sessionId) return
+    let cancelled = false
+    void (async () => {
+      const [{ loadAgentModelSurface }, manager] = await Promise.all([
+        import("@/lib/ai/agent/external/model-surface-cache"),
+        getManager(),
+      ])
+      const result = await loadAgentModelSurface(activeAgentId, sessionId)
+      if (cancelled || result.status !== "ready") return
+      // The fetch wrote the raw options onto the session; read them back rather
+      // than reconstructing a list from the resolved surface, because the panel
+      // renders every category and the surface only carries models.
+      const options = manager.getSession(activeAgentId, sessionId)?.metadata?.configOptions as
+        AcpConfigOption[] | undefined
+      if (options?.length) setConfigOptions(options)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeAgentId, activeSession?.id, getManager])
+
   // Add a new agent
   const addAgent = useCallback(
     async (input: CreateExternalAgentInput): Promise<ExternalAgentInstance> => {
@@ -991,6 +1028,10 @@ export function useExternalAgent(): UseExternalAgentReturn {
     async (agentId: string): Promise<void> => {
       setIsLoading(true)
       setError(null)
+      // Cleared before the attempt, not after it. The previous report described
+      // an attempt that is over, and leaving it up while a new one runs is how
+      // a retry looks like it did nothing.
+      storeClearFailure(agentId)
 
       try {
         const targetConfig = useExternalAgentStore.getState().getAgent(agentId)
@@ -1008,6 +1049,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
         storeSetConnectionStatus(agentId, "connecting")
         const manager = await getManager()
+        // The manager only knows the agents startup rehydration handed it. One
+        // added since (or one whose rehydration bailed) is absent from its
+        // adapter map, and `connect` answers that with `Agent not found: <id>`,
+        // a sentence about the manager's internals that reaches the user as the
+        // reason their agent will not start. Registering here costs nothing
+        // when it is already known.
+        if (!manager.getAgent(agentId)) {
+          await manager.addAgent(targetConfig, { connect: false })
+        }
         await manager.connect(agentId)
         const updated = manager.getAgent(agentId)
         storeSetConnectionStatus(agentId, updated?.connectionStatus ?? "connected")
@@ -1019,6 +1069,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       } catch (err) {
         const message = getExternalAgentErrorMessage(err)
         setError(message)
+        storeRecordFailure(describeExternalAgentFailure(agentId, "connect", err))
         storeSetConnectionStatus(agentId, "error")
         getPluginEventHooks().dispatchExternalAgentError(agentId, message)
         throw err
@@ -1026,7 +1077,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setIsLoading(false)
       }
     },
-    [getManager, refresh, storeSetConnectionStatus]
+    [getManager, refresh, storeSetConnectionStatus, storeRecordFailure, storeClearFailure]
   )
 
   // Disconnect from an agent
@@ -1120,13 +1171,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
       } catch (err) {
         const message = getExternalAgentErrorMessage(err)
         setError(message)
+        storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
         throw err
       } finally {
         sessionMutationCountRef.current -= 1
         setIsLoading(false)
       }
     },
-    [getManager, activeAgentId]
+    [getManager, activeAgentId, storeRecordFailure]
   )
 
   // Close a session
@@ -1157,13 +1209,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
       } catch (err) {
         const message = getExternalAgentErrorMessage(err)
         setError(message)
+        storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
         throw err
       } finally {
         sessionMutationCountRef.current -= 1
         setIsLoading(false)
       }
     },
-    [getManager, activeAgentId, activeSession]
+    [getManager, activeAgentId, activeSession, storeRecordFailure]
   )
 
   const syncActiveAgentValidityFromRuntime = useCallback(
@@ -1510,6 +1563,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       } catch (err) {
         const message = getExternalAgentErrorMessage(err)
         setError(message)
+        storeRecordFailure(describeExternalAgentFailure(activeAgentId, "execute", err))
 
         // Dispatch external agent error hook
         getPluginEventHooks().dispatchExternalAgentError(activeAgentId, message)
@@ -1523,7 +1577,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         abortControllerRef.current = null
       }
     },
-    [getManager, activeAgentId, activeSession]
+    [getManager, activeAgentId, activeSession, storeRecordFailure]
   )
 
   // Execute with streaming
@@ -1607,6 +1661,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       } catch (err) {
         const message = getExternalAgentErrorMessage(err)
         setError(message)
+        storeRecordFailure(describeExternalAgentFailure(activeAgentId, "execute", err))
         throw err
       } finally {
         executionInProgressRef.current = false
@@ -1616,7 +1671,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         abortControllerRef.current = null
       }
     },
-    [getManager, activeAgentId, activeSession]
+    [getManager, activeAgentId, activeSession, storeRecordFailure]
   )
 
   // Cancel execution
@@ -1660,12 +1715,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
         } catch (err) {
           externalAgentLogger.error("Failed to respond to external agent permission", err)
           setError(getExternalAgentErrorMessage(err))
+          storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
         }
       }
 
       setPendingPermission(null)
     },
-    [getManager, activeAgentId, pendingPermission]
+    [getManager, activeAgentId, pendingPermission, storeRecordFailure]
   )
 
   /**
@@ -1692,12 +1748,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
         } catch (err) {
           externalAgentLogger.error("Failed to respond to external agent elicitation", err)
           setError(getExternalAgentErrorMessage(err))
+          storeRecordFailure(describeExternalAgentFailure(activeAgentId, "session", err))
         }
       }
 
       setPendingElicitation(null)
     },
-    [getManager, activeAgentId]
+    [getManager, activeAgentId, storeRecordFailure]
   )
 
   const setSessionMode = useCallback(

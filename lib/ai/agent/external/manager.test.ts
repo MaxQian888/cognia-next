@@ -39,6 +39,9 @@ jest.mock("@/lib/native/external-agent", () => ({
   acpTerminalRelease: jest.fn(),
   acpTerminalWaitForExit: jest.fn(),
 }))
+jest.mock("./installed-runtimes", () => ({
+  detectInstalledRuntimes: jest.fn(),
+}))
 jest.mock("@/lib/utils", () => ({
   ...jest.requireActual("@/lib/utils"),
   isTauri: jest.fn(() => true),
@@ -56,6 +59,15 @@ import {
   type ExternalAgentLifecycleEvent,
 } from "./manager"
 import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
+import {
+  __setModelSurfaceDepsForTests,
+  cachedAgentModelSurface,
+  forgetAgentModelSurface,
+  loadAgentModelSurface,
+} from "./model-surface-cache"
+import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
+import { detectInstalledRuntimes } from "./installed-runtimes"
+import { __setProcessPlaneDepsForTests } from "./process-plane"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -160,6 +172,9 @@ class MockAdapter {
   }
   getSessions() {
     return Array.from(this.sessions.values())
+  }
+  forgetSessions() {
+    this.sessions.clear()
   }
   async *prompt(
     _sessionId: string,
@@ -301,6 +316,191 @@ beforeEach(() => {
 afterEach(async () => {
   await ExternalAgentManager.getInstance({ healthCheckInterval: 0 }).dispose()
   ExternalAgentManager.resetInstance()
+})
+
+describe("paired-web runtime readiness", () => {
+  it("registers Pi from the Host inventory without calling Tauri invoke", async () => {
+    const restorePlane = __setProcessPlaneDepsForTests({
+      isRemoteHostActive: () => false,
+      hasLocalProcessTable: () => false,
+      getRuntimeSnapshot: () => ({
+        target: { id: "headless-1", kind: "companion", hostKind: "cloud", platform: "web" },
+        vaultState: "unlocked",
+        connectionState: "online",
+        host: {
+          compatible: true,
+          operations: ["spawn_external_agent", "external_agent_detect_runtimes"],
+          grants: ["process.spawn"],
+        },
+      }),
+    })
+    const localCheck = jest.mocked(checkExternalAgentCommandExists)
+    localCheck.mockRejectedValueOnce(
+      new TypeError("Cannot read properties of undefined (reading 'invoke')")
+    )
+    jest.mocked(detectInstalledRuntimes).mockResolvedValueOnce([
+      {
+        runtimeId: "pi",
+        command: "pi",
+        resolution: "installed",
+        executablePath: "/usr/local/bin/pi",
+        version: "0.84.1",
+        detail: null,
+      },
+    ])
+
+    try {
+      const manager = freshManager()
+      await expect(
+        manager.addAgent(
+          buildBaseConfig({
+            protocol: "pi-rpc",
+            transport: "stdio",
+            process: { command: "pi", args: ["--mode", "rpc"] },
+            metadata: { preset: "pi-rpc" },
+          }),
+          { connect: false }
+        )
+      ).resolves.toMatchObject({ config: { protocol: "pi-rpc" } })
+      expect(detectInstalledRuntimes).toHaveBeenCalledTimes(1)
+      expect(localCheck).not.toHaveBeenCalled()
+    } finally {
+      restorePlane()
+    }
+  })
+})
+
+describe("the session a model surface should describe", () => {
+  it("has nothing to describe before the agent opens one", () => {
+    // Connected with no session is ordinary right after connecting. Answering
+    // with some other agent's session, or with an id that does not exist, is
+    // how a picker ends up writing a model onto the wrong conversation.
+    const manager = freshManager()
+    expect(manager.resolveLiveSessionId("nobody")).toBeNull()
+    expect(manager.liveSessions("nobody")).toEqual([])
+  })
+
+  it("prefers the executing session over the most recent one", () => {
+    const manager = freshManager()
+    const sessions = [
+      { id: "old", status: "idle" },
+      { id: "running", status: "executing" },
+      { id: "newest", status: "idle" },
+    ]
+    jest
+      .spyOn(manager, "liveSessions")
+      .mockReturnValue(sessions as unknown as ReturnType<typeof manager.liveSessions>)
+    expect(manager.resolveLiveSessionId("a")).toBe("running")
+  })
+
+  it("falls back to the most recent when nothing is running", () => {
+    const manager = freshManager()
+    jest.spyOn(manager, "liveSessions").mockReturnValue([
+      { id: "old", status: "idle" },
+      { id: "newest", status: "idle" },
+    ] as unknown as ReturnType<typeof manager.liveSessions>)
+    expect(manager.resolveLiveSessionId("a")).toBe("newest")
+  })
+
+  it("resolves the session owned by one Cognia conversation, from the adapter", async () => {
+    // The adapter is the store that includes a session it opened itself, on a
+    // resume or a fork. Reading `instance.sessions` here disagreed with the
+    // reuse lookup in `execute`, which already read the adapter, so one could
+    // find the session while the other reported the agent had nothing open.
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    currentMock.sessions.set("external-a", {
+      id: "external-a",
+      status: "idle",
+      metadata: { cogniaSessionId: "chat-a" },
+    } as never)
+    currentMock.sessions.set("external-b", {
+      id: "external-b",
+      status: "executing",
+      metadata: { cogniaSessionId: "chat-b" },
+    } as never)
+    expect(manager.resolveConversationSessionId("agent-1", "chat-a")).toBe("external-a")
+    expect(manager.resolveConversationSessionId("agent-1", "chat-missing")).toBeNull()
+
+    // A session the manager never put in `instance.sessions` still resolves.
+    expect(manager.getAgent("agent-1")?.sessions.has("external-a")).toBe(false)
+  })
+
+  it("forgets sessions from a process that died, rather than reusing their ids", async () => {
+    // The ids name state inside an agent process. After it exits, a reconnect
+    // gets a fresh process, and handing one of the old ids back as a session
+    // to resume prompts an id the new process has never heard of.
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig(), { connect: false })
+    currentMock.sessions.set("external-a", {
+      id: "external-a",
+      status: "idle",
+      metadata: { cogniaSessionId: "chat-a" },
+    } as never)
+    currentMock.forgetSessions()
+    expect(manager.resolveConversationSessionId("agent-1", "chat-a")).toBeNull()
+    expect(manager.liveSessions("agent-1")).toEqual([])
+  })
+})
+
+describe("fetchSessionModelSurface (the async twin the sync capabilities could not be)", () => {
+  it("reports an agent with neither model source as unsupported", async () => {
+    const manager = freshManager()
+    await expect(manager.fetchSessionModelSurface("missing", "s")).resolves.toEqual({
+      status: "unsupported",
+    })
+  })
+})
+
+describe("the cached model surface follows the writes that change it", () => {
+  // The cache is a module singleton shared with the composer's chip and the
+  // session panel's config rows. Both write paths land in this class, so both
+  // have to drop it, or one surface keeps naming a model that is no longer set.
+  let restoreSurfaceDeps: (() => void) | undefined
+
+  beforeEach(() => {
+    // Stubbed so a load does not re-enter the manager under test.
+    restoreSurfaceDeps = __setModelSurfaceDepsForTests({
+      fetchSurface: async () => ({
+        status: "ok",
+        data: { choices: [], currentModelId: "m", write: { kind: "none" } },
+      }),
+    })
+  })
+
+  afterEach(() => {
+    restoreSurfaceDeps?.()
+    restoreSurfaceDeps = undefined
+    forgetAgentModelSurface()
+  })
+
+  it("drops the agent's surface when it disconnects", async () => {
+    const manager = freshManager()
+    await loadAgentModelSurface("gone", "s")
+    expect(cachedAgentModelSurface("gone", "s")).not.toBeNull()
+
+    await manager.disconnect("gone")
+
+    // Not just stale: the next connect rebuilds the session with empty
+    // metadata, so an entry answering from cache means nothing ever re-reads
+    // `metadata.configOptions` and the panel renders no rows at all.
+    expect(cachedAgentModelSurface("gone", "s")).toBeNull()
+  })
+
+  it("drops it when the settings panel writes a config option", async () => {
+    const manager = freshManager()
+    const setConfigOption = jest.fn(async () => [])
+    ;(manager as unknown as { adapters: Map<string, unknown> }).adapters.set("cfg", {
+      setConfigOption,
+    })
+    await loadAgentModelSurface("cfg", "s")
+    expect(cachedAgentModelSurface("cfg", "s")).not.toBeNull()
+
+    await manager.setConfigOption("cfg", "s", "model", "openai/gpt-5")
+
+    expect(setConfigOption).toHaveBeenCalledWith("s", "model", "openai/gpt-5")
+    expect(cachedAgentModelSurface("cfg", "s")).toBeNull()
+  })
 })
 
 describe("shouldReconcileExitToDisconnected (process-exit → instance sync)", () => {
@@ -730,6 +930,36 @@ describe("Session extensions: list/fork/resume", () => {
     currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "s_1", title: "t" }])
     const out = await m.listSessions("agent-1")
     expect(out).toHaveLength(1)
+  })
+
+  it("listSessions retries a persisted `unsupported` once the adapter has the method", async () => {
+    // The verdict is hydrated from the stored validity snapshot. An adapter
+    // that gained `listSessions` after the snapshot was written (Pi) must not
+    // stay blocked on a verdict about code that no longer runs.
+    const m = freshManager()
+    await m.addAgent(
+      buildBaseConfig({
+        validitySnapshot: {
+          executable: true,
+          checkedAt: new Date(),
+          source: "execution",
+          sessionExtensions: {
+            "session/list": {
+              state: "unsupported",
+              reasonCode: "extension_unsupported",
+              reason: "Agent does not support session listing",
+            },
+            "session/fork": { state: "unknown" },
+            "session/resume": { state: "unknown" },
+          },
+        },
+      } as never)
+    )
+    currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "s_1" }])
+    await expect(m.listSessions("agent-1")).resolves.toHaveLength(1)
+    expect(m.getAgent("agent-1")?.validity?.sessionExtensions["session/list"].state).toBe(
+      "supported"
+    )
   })
 
   it("listSessions forwards an ACP cwd filter and preserves workspace roots", async () => {

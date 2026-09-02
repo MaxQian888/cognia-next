@@ -8,9 +8,20 @@ import type { AgentRuntimeRef } from "@/lib/ai/agent/runtime-catalog/types"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }))
 
-const runtimeState = { runtimeRef: { kind: "builtin" } as AgentRuntimeRef }
+const runtimeState = {
+  runtimeRef: { kind: "builtin" } as AgentRuntimeRef,
+  sessionRuntimeRefs: {} as Record<string, AgentRuntimeRef>,
+}
 jest.mock("@/stores/agent", () => ({
   useAgentRuntimeStore: (selector: (s: typeof runtimeState) => unknown) => selector(runtimeState),
+}))
+// The real resolver: a session that chose a lane wins, everything else falls
+// back to the app default.
+jest.mock("@/stores/agent/agent-runtime-store", () => ({
+  useRuntimeRefForSession: (sessionId?: string) =>
+    sessionId && Object.hasOwn(runtimeState.sessionRuntimeRefs, sessionId)
+      ? runtimeState.sessionRuntimeRefs[sessionId]
+      : runtimeState.runtimeRef,
 }))
 
 const externalState = {
@@ -49,6 +60,7 @@ function agent(id: string, name: string, enabled = true) {
 
 beforeEach(() => {
   runtimeState.runtimeRef = { kind: "builtin" }
+  runtimeState.sessionRuntimeRefs = {}
   externalState.enabled = true
   externalState.agents = {}
   externalState.agentValidity = {}
@@ -67,6 +79,25 @@ describe("useAgentRuntimeCatalog", () => {
     externalState.agents = { a1: agent("a1", "Codex") }
     runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     const { result } = renderHook(() => useAgentRuntimeCatalog())
+    expect(result.current.selected?.name).toBe("Codex")
+  })
+
+  it("resolves against the SESSION's lane, not the app default", () => {
+    // The runtime chip writes the session's ref and reads `selected` back from
+    // here. Resolving against the default made the radio group answer with the
+    // row the user had just left, so the chip looked like it refused to move.
+    externalState.agents = { a1: agent("a1", "Codex") }
+    runtimeState.runtimeRef = { kind: "builtin" }
+    runtimeState.sessionRuntimeRefs = { "chat-1": { kind: "external", agentId: "a1" } }
+    const { result } = renderHook(() => useAgentRuntimeCatalog(undefined, "chat-1"))
+    expect(result.current.selected?.name).toBe("Codex")
+  })
+
+  it("falls back to the app default for a session that never chose one", () => {
+    externalState.agents = { a1: agent("a1", "Codex") }
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
+    runtimeState.sessionRuntimeRefs = {}
+    const { result } = renderHook(() => useAgentRuntimeCatalog(undefined, "chat-untouched"))
     expect(result.current.selected?.name).toBe("Codex")
   })
 

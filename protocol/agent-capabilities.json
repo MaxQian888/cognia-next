@@ -685,7 +685,7 @@
     },
     "pi-rpc": {
       "label": "Pi native `pi --mode rpc` JSONL command/event protocol",
-      "note": "Rows follow `pi-rpc-client.ts` / `pi-rpc-events.ts` (ADR-0119).",
+      "note": "Rows follow `pi-rpc-client.ts` / `pi-rpc-events.ts` (ADR-0119). Verified against Pi 0.84.3 `docs/rpc.md` and `docs/extensions.md`: tools run in parallel by default (sibling tool calls execute concurrently), `toolcall_delta` streams argument fragments, `set_auto_retry` / `auto_retry_start` / `auto_retry_end` cover rate limits, subagents exist only as an example extension (no protocol slot), and lifecycle hooks are Pi's own extension events.",
       "capabilities": {
         "streaming": {
           "level": "native",
@@ -704,12 +704,12 @@
           "evidence": "protocol-spec"
         },
         "tools.parallel": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "tools.fragmented-json": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "tools.results": {
           "level": "native",
@@ -756,8 +756,8 @@
           "reasonKey": "noProtocolSlot"
         },
         "rate-limit-handling": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "protocol-spec"
         },
         "upstream-errors": {
           "level": "native",
@@ -768,8 +768,9 @@
           "evidence": "protocol-spec"
         },
         "subagents.native": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
         },
         "steer": {
           "level": "native",
@@ -808,8 +809,9 @@
           "reasonKey": "noProtocolSlot"
         },
         "hooks.lifecycle": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
         },
         "input.elicitation": {
           "level": "native",

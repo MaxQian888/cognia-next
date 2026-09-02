@@ -11,5 +11,7 @@
   "label": "代理运行时",
   "lastCheckFailed": "上次检查失败 — 可能无法启动。",
   "needsAuth": "需要登录 — 请在“管理代理”中连接。",
-  "tooltip": "当前代理运行时：Cognia 自带运行时，或某个外部代理"
+  "tooltip": "当前代理运行时：Cognia 自带运行时，或某个外部代理",
+  "noMatches": "没有匹配的运行时。",
+  "searchPlaceholder": "筛选运行时"
 }

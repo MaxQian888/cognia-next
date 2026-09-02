@@ -237,6 +237,44 @@ describe("persist.migrate", () => {
     expect(out.agentValidity.b).toBeUndefined()
   })
 
+  it("drops a stored transport block, because it described the old runtime", () => {
+    // Written in a browser with no Host paired. The same profile opened after
+    // pairing one, or in the desktop app, would keep reporting that the agent
+    // needs the desktop app: nothing about the agent changed, so nothing
+    // rewrites the row, and the panel prefers a stored verdict to the live gate.
+    const base = {
+      checkedAt: new Date(),
+      source: "config" as const,
+      sessionExtensions: {
+        "session/list": { state: "unknown" },
+        "session/fork": { state: "unknown" },
+        "session/resume": { state: "unknown" },
+      },
+    }
+    const persisted = {
+      agents: { a: baseAgent({ id: "a" }), b: baseAgent({ id: "b" }) },
+      agentValidity: {
+        a: {
+          ...base,
+          executable: false,
+          blockingReasonCode: "transport_blocked",
+          blockingReason: "The stdio transport requires the desktop (Tauri) runtime.",
+          recoveryHints: ["useDesktopRuntime"],
+        },
+        b: {
+          ...base,
+          executable: false,
+          blockingReasonCode: "initialization_failed",
+        },
+      },
+    }
+    const out = persistOptions.migrate(persisted, 5) as ExternalAgentStore
+    expect(out.agentValidity.a).toBeUndefined()
+    // The agent-shaped verdict is untouched: a command that failed to start
+    // fails to start in any runtime.
+    expect(out.agentValidity.b).toBeDefined()
+  })
+
   it("preserves a previously-set chatFailurePolicy", () => {
     const persisted = {
       chatFailurePolicy: "strict",
@@ -270,5 +308,30 @@ describe("persist.partialize", () => {
     expect(out).not.toHaveProperty("terminals")
     expect(out).not.toHaveProperty("isLoading")
     expect(out).not.toHaveProperty("lastError")
+  })
+
+  it("never writes a transport block to storage in the first place", () => {
+    const snapshot = (code: ExternalAgentValiditySnapshot["blockingReasonCode"]) =>
+      ({
+        executable: false,
+        checkedAt: new Date(),
+        source: "config",
+        blockingReasonCode: code,
+        sessionExtensions: {
+          "session/list": { state: "unknown" },
+          "session/fork": { state: "unknown" },
+          "session/resume": { state: "unknown" },
+        },
+      }) as ExternalAgentValiditySnapshot
+    useExternalAgentStore.setState({
+      agentValidity: {
+        blocked: snapshot("transport_blocked"),
+        broken: snapshot("initialization_failed"),
+      },
+    })
+    const out = persistOptions.partialize(useExternalAgentStore.getState()) as {
+      agentValidity: Record<string, unknown>
+    }
+    expect(Object.keys(out.agentValidity)).toEqual(["broken"])
   })
 })

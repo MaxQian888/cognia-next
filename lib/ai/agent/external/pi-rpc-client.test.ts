@@ -37,14 +37,14 @@ describe("classifyPiVersion", () => {
   it("certifies exactly the pinned version", () => {
     expect(classifyPiVersion(PI_CERTIFIED_VERSION)).toEqual({
       status: "certified",
-      version: "0.84.1",
+      version: "0.84.3",
     })
-    expect(classifyPiVersion(" v0.84.1 ").status).toBe("certified")
+    expect(classifyPiVersion(" v0.84.3 ").status).toBe("certified")
   })
 
   it("allows a newer version but marks it unverified", () => {
     // A Pi upgrade must degrade to a warning, not an outage.
-    expect(classifyPiVersion("0.84.2").status).toBe("unverified")
+    expect(classifyPiVersion("0.84.4").status).toBe("unverified")
     expect(classifyPiVersion("0.85.0").status).toBe("unverified")
     expect(classifyPiVersion("1.0.0").status).toBe("unverified")
   })
@@ -112,7 +112,7 @@ describe("parsePiModel", () => {
 describe("extensionPolicyArgs", () => {
   /**
    * `--no-extensions` alone is NOT isolation: skills under ~/.agents/skills
-   * and Pi's inline extensions still load. Verified against 0.84.1.
+   * and Pi's inline extensions still load. Verified against 0.84.3.
    */
   it("isolates skills and prompt templates too, not just extensions", () => {
     expect(extensionPolicyArgs("isolated")).toEqual([
@@ -209,6 +209,10 @@ interface FakeHost extends PiRpcHost {
   }>
   sent: Array<{ agentId: string; message: string }>
   killed: string[]
+  /** Every `list_pi_sessions` host call, by its args. */
+  listSessionCalls: Array<Record<string, unknown>>
+  /** What the host answers `list_pi_sessions` with. */
+  setListedSessions(value: unknown): void
   emitStdout(agentId: string, text: string): void
   /**
    * Emit the way the Rust host does: one `external-agent://stdout` event per
@@ -284,6 +288,8 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
   } = options
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   const spawns: FakeHost["spawns"] = []
+  const listSessionCalls: Array<Record<string, unknown>> = []
+  let listedSessions: unknown = []
   const sent: FakeHost["sent"] = []
   const killed: string[] = []
 
@@ -310,7 +316,15 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
     spawns,
     sent,
     killed,
+    listSessionCalls,
+    setListedSessions(value: unknown) {
+      listedSessions = value
+    },
     async invoke<T>(name: string, args: Record<string, unknown>): Promise<T> {
+      if (name === "list_pi_sessions") {
+        listSessionCalls.push(args)
+        return listedSessions as T
+      }
       if (name === "resolve_pi_extension") {
         // A host that does not implement the command at all (an older CLI)
         // throws, exactly as `agentInvoke` would.
@@ -728,7 +742,7 @@ describe("PiRpcClientAdapter — sessions", () => {
     const session = await adapter.createSession({ cwd: "/w" })
     expect(session.metadata).toMatchObject({
       piSessionId: "sess-1",
-      piVersion: "0.84.1",
+      piVersion: "0.84.3",
       cwd: "/w",
     })
     expect(JSON.stringify(session.metadata)).not.toMatch(/\.jsonl/)
@@ -909,7 +923,7 @@ describe("isCogniaHandshake", () => {
   })
 
   /**
-   * Verified by running the bundled extension under real Pi 0.84.1: the wire
+   * Verified by running the bundled extension under real Pi 0.84.3: the wire
    * fields are `statusKey`/`statusText`, NOT `text`/`title`. Matching the
    * wrong field made the gate silently unsatisfiable.
    */
@@ -1681,5 +1695,57 @@ describe("PiRpcClientAdapter — resource limit", () => {
 
     host.emitStdout("agent-1:s1", JSON.stringify({ type: "agent_settled" }) + "\n")
     await running
+  })
+})
+
+describe("session listing and the session-less catalog", () => {
+  it("lists sessions through the host, newest first, scoped to the configured cwd", async () => {
+    const host = createFakeHost()
+    host.setListedSessions([
+      {
+        id: "old",
+        cwd: "/w",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      },
+      { id: "new", cwd: "/w", name: "Refactor", updatedAt: "2026-01-03T00:00:00Z" },
+      { id: "", cwd: "/w" },
+    ])
+    const adapter = await connected(host)
+    // No configured cwd on this agent: the host is asked for every directory.
+    const sessions = await adapter.listSessions()
+    expect(host.listSessionCalls).toEqual([{}])
+    expect(sessions.map((s) => s.sessionId)).toEqual(["new", "old"])
+    expect(sessions[0]).toMatchObject({ title: "Refactor", cwd: "/w" })
+    // An explicit cwd scopes the host call.
+    await adapter.listSessions({ cwd: "/elsewhere" })
+    expect(host.listSessionCalls[1]).toEqual({ cwd: "/elsewhere" })
+  })
+
+  it("lists models without a session via `pi --list-models`", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const pending = adapter.listAgentModels()
+    await Promise.resolve()
+    const probe = host.spawns.find((spawn) => spawn.args.includes("--list-models"))!
+    expect(probe).toBeDefined()
+    host.emitStdoutLines(
+      probe.id,
+      "provider  model  context  max-out  thinking  images\ndeepseek  deepseek-v4-pro  1M  384K  yes  no\n"
+    )
+    host.emitExit(probe.id, 0)
+    await expect(pending).resolves.toEqual({
+      status: "ok",
+      models: [
+        {
+          provider: "deepseek",
+          id: "deepseek-v4-pro",
+          context: "1M",
+          maxOut: "384K",
+          thinking: true,
+          images: false,
+        },
+      ],
+    })
   })
 })

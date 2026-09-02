@@ -42,6 +42,14 @@ export const HOST_FEATURE_IDS = [
   // remote external agents at all; falling back to sending a whole config per
   // turn is exactly the arrangement the store exists to replace.
   "external-agent.host-configs",
+  // The process plane itself: can this host START an external agent process
+  // for a client that has none? Separate from the store above because they are
+  // genuinely separable — a host can own the configurations while the client
+  // spawns locally (that is the desktop), and a browser can only ever be the
+  // second kind of caller. Its absence is what tells a companion that stdio is
+  // out of reach here, instead of the client guessing from `isTauri()` and
+  // telling every browser user to install the desktop app.
+  "external-agent.process-plane",
   // Pro IDE (ADR-0088). Its presence is what tells a companion that this host
   // can run a workbench at all, which nothing could discover before: the five
   // lifecycle commands were reachable over the wire while the manifest said
@@ -296,6 +304,31 @@ export function buildLocalHostFeatureManifest({
         "external_agent_run_turn",
         "external_agent_cancel_run",
         "external_agent_resolve_decision",
+      ],
+    }
+    // Starting the process. Named per operation like its neighbours: a host
+    // that can spawn but whose status arm predates this is describable, and the
+    // client gates the run on `spawn_external_agent` specifically.
+    features["external-agent.process-plane"] = {
+      version: 1,
+      operations: [
+        "spawn_external_agent",
+        "send_to_external_agent",
+        "kill_external_agent",
+        "get_external_agent_status",
+        // Not a spawn, but the same plane: a host that cannot start an agent
+        // has nothing useful to say about which agent binaries it has, and a
+        // client that cannot see this operation must not render a detection
+        // badge it has no way to fill in.
+        //
+        // Desktop only, because only the desktop answers it. The arm lives in
+        // `src-tauri/src/companion_api/rpc/native_tools.rs`. The headless
+        // brain's dispatch (`cli/src/runtime/external/node-backend.ts`) has no
+        // case for it and falls through to its unknown-command default, so
+        // naming it here for a headless host would let a companion past this
+        // very gate and straight into that error, which is the state the
+        // per-operation list exists to prevent.
+        ...(platform === "tauri" ? (["external_agent_detect_runtimes"] as const) : []),
       ],
     }
     // Lease-backed attach. Its presence is what tells a client that
