@@ -1433,8 +1433,26 @@ async fn accept_invitation_by_token(
     if invitation.revoked_at.is_some() || invitation.expires_at < now {
         return Err(Failure::Store(StoreError::InvitationUnavailable));
     }
+    // A resumed operation is bound to the invitation that opened it.
+    //
+    // Without this the operation id and the token decide different things: the
+    // id decides whether the redeemed check below runs, and the token decides
+    // which organization the identity-provider legs write to. A caller could
+    // leave one of its own operations pending (the retry the `Idp` failure
+    // explicitly invites), then replay it carrying somebody else's token, and
+    // be added to that organization at the identity provider with that
+    // invitation's role before the local `accept_invitation` refused. Checking
+    // the binding also means the payload recorded when the operation opened is
+    // what a retry is measured against, which is what its doc comment claims.
+    if let Some(operation) = &existing {
+        if operation.payload["invitationId"].as_str() != Some(invitation.id.as_str()) {
+            return Err(Failure::Store(StoreError::InvitationUnavailable));
+        }
+    }
     // A redeemed invitation is only acceptable as a resume of the operation
-    // that redeemed it, which the committed short-circuit above handles.
+    // that redeemed it: the committed short-circuit above handles the settled
+    // case, and the binding check above proves any surviving `existing` is the
+    // same invitation's own operation.
     if invitation.redeemed_at.is_some() && existing.is_none() {
         return Err(Failure::Store(StoreError::InvitationUnavailable));
     }
@@ -4339,6 +4357,87 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{minted}");
         assert_eq!(minted["userId"], user_id);
+    }
+
+    #[tokio::test]
+    async fn a_pending_operation_cannot_be_replayed_with_a_different_invitation() {
+        // The retry after an identity-provider failure is a documented, first
+        // class state, so a pending operation is ordinary. What must not
+        // follow is using it as a lever: the operation id decides whether the
+        // redeemed check runs, and the token decides which organization the
+        // Logto legs write to. Bound together, a replay carrying somebody
+        // else's token is refused before either leg fires.
+        let store = seeded_for_exchange();
+        store.add_org(ORG, "Acme");
+        store.add_org_member(ORG, ada().as_str(), OrgRole::Owner);
+        let logto = FakeLogtoManagement::new();
+
+        let mint = |role: &str| {
+            post(
+                &format!("/v1/orgs/{ORG}/invitations"),
+                &token_for(&ada()),
+                serde_json::json!({ "orgRole": role, "reason": "onboarding" }),
+            )
+        };
+        let (status, mine) = call(account_app(store.clone(), logto.clone()), mint("member")).await;
+        assert_eq!(status, StatusCode::CREATED, "{mine}");
+        let my_token = mine["token"].as_str().unwrap().to_owned();
+        let (status, other) = call(account_app(store.clone(), logto.clone()), mint("owner")).await;
+        assert_eq!(status, StatusCode::CREATED, "{other}");
+        let other_token = other["token"].as_str().unwrap().to_owned();
+
+        // Someone redeems the owner invitation, so its token is now spent.
+        let (status, spent) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-owner"),
+                serde_json::json!({ "operationId": "inv-owner", "token": other_token }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{spent}");
+
+        // Our own accept fails at the identity provider and stays pending.
+        logto.fail_next_add_user();
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-newbie"),
+                serde_json::json!({ "operationId": "inv-mine", "token": my_token }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+
+        // Replaying it with the spent owner token is refused, and nothing
+        // reached Logto on that call.
+        let before = logto.calls().len();
+        let (status, _) = call(
+            account_app(store.clone(), logto.clone()),
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-newbie"),
+                serde_json::json!({ "operationId": "inv-mine", "token": other_token }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(logto.calls().len(), before, "no identity-provider write");
+
+        // The operation still resumes with the token that opened it.
+        let (status, resumed) = call(
+            account_app(store, logto),
+            json_post(
+                "/v1/invitations/accept",
+                &subject_token("logto-newbie"),
+                serde_json::json!({ "operationId": "inv-mine", "token": my_token }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{resumed}");
+        assert_eq!(resumed["orgId"], ORG);
     }
 
     #[tokio::test]

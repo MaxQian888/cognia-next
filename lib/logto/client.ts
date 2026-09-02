@@ -33,6 +33,15 @@ export interface LogtoClientConfig {
   scopes?: string[]
   /** Optional Logto organization to scope the token to (→ cognia tenant). */
   organizationId?: string
+  /**
+   * Logto's `direct_sign_in` parameter, e.g. `social:github` or
+   * `social:feishu`: skip the universal sign-in page and start with that
+   * connector. The value comes from `GET /api/auth/config` discovery, never
+   * from a hard-coded connector id, because the identity-provider name is
+   * whatever the operator configured in the Logto console. When the connector
+   * is missing or disabled, Logto falls back to its standard page.
+   */
+  directSignIn?: string
 }
 
 export interface LogtoDrivers {
@@ -174,6 +183,8 @@ export async function loginToLogto(
 
   const extraTokenParams: Record<string, string> = { resource: config.resource }
   if (config.organizationId) extraTokenParams.organization_id = config.organizationId
+  const extraAuthParams: Record<string, string> = { resource: config.resource }
+  if (config.directSignIn) extraAuthParams.direct_sign_in = config.directSignIn
 
   const result = await runPkceAuthFlow({
     authorizeUrl: endpoints.authorizationEndpoint,
@@ -184,7 +195,7 @@ export async function loginToLogto(
     openUrl: drivers.openUrl,
     waitForCode: drivers.waitForCode,
     fetchImpl,
-    extraAuthParams: { resource: config.resource },
+    extraAuthParams,
     extraTokenParams,
   })
 

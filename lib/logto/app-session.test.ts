@@ -338,7 +338,7 @@ describe("signOutFromLogto", () => {
       { postLogoutRedirectUri: "https://app.test/bye" }
     )
     expect(revoke).toHaveBeenCalledTimes(1)
-    expect(revoke.mock.calls[0]![2]).toBe("access_token")
+    expect((revoke.mock.calls[0] as unknown[])[2]).toBe("access_token")
     expect(report.refreshTokenRevocation).toBeNull()
     expect(new URL(report.endSessionUrl!).searchParams.get("post_logout_redirect_uri")).toBe(
       "https://app.test/bye"

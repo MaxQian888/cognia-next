@@ -46,8 +46,20 @@ jest.mock("@/lib/companion/credential-book", () => ({
 jest.mock("@/lib/companion/host-removal", () => ({
   removeCompanionHost: (...args: unknown[]) => mockRemoveHost(...args),
 }))
+// A browser that lands on /pair?mode=recover has usually just lost this
+// binding, so the null case is the one worth exercising, not the exception.
+let runtimeContextMock: { accountId: string; targetId: string } | null = {
+  accountId: "local_acct_a",
+  targetId: "host-old",
+}
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
-  getActiveRuntimeTargetContext: () => ({ accountId: "local_acct_a", targetId: "host-old" }),
+  getActiveRuntimeTargetContext: () => runtimeContextMock,
+}))
+let activeAccountIdMock: string | null = "local_acct_a"
+jest.mock("@/stores/account/account-store", () => ({
+  ...jest.requireActual("@/stores/account/account-store"),
+  useAccountStore: (selector: (state: { activeAccountId: string | null }) => unknown) =>
+    selector({ activeAccountId: activeAccountIdMock }),
 }))
 jest.mock("@/lib/accounts/active-account-id", () => ({
   DEFAULT_LOCAL_ACCOUNT_ID: "local_acct_a",
@@ -244,6 +256,8 @@ jest.mock("next-intl", () => ({
 
 beforeEach(() => {
   platformMock = "mobile"
+  runtimeContextMock = { accountId: "local_acct_a", targetId: "host-old" }
+  activeAccountIdMock = "local_acct_a"
   delete process.env.NEXT_PUBLIC_COGNIA_SERVER_URL
   window.localStorage.clear()
   window.history.replaceState({}, "", "/pair")
@@ -407,6 +421,37 @@ describe("<PairOnboardingClient /> — coordinator", () => {
       expect.objectContaining({ hostId: "host-backup", force: true })
     )
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not switch: offline")
+  })
+
+  it("scopes the recovery list to the signed-in account when the binding is gone", async () => {
+    // The binding is exactly what a browser loses on the way to this screen.
+    // Listing the whole book instead would offer another local profile's
+    // hosts, and switchCompanionHost refuses those, because records are keyed
+    // by {hostId, accountNamespace}.
+    platformMock = "web"
+    runtimeContextMock = null
+    activeAccountIdMock = "local_acct_b"
+    window.history.replaceState({}, "", "/pair?mode=recover&state=offline")
+    mockListHosts.mockResolvedValueOnce([])
+
+    render(<PairOnboardingClient />)
+
+    await waitFor(() => expect(mockListHosts).toHaveBeenCalled())
+    expect(mockListHosts).toHaveBeenCalledWith("local_acct_b")
+  })
+
+  it("offers nothing to switch to when no account owns the pairings", async () => {
+    // Every button would be inert, so an empty list is the honest answer.
+    platformMock = "web"
+    runtimeContextMock = null
+    activeAccountIdMock = null
+    window.history.replaceState({}, "", "/pair?mode=recover&state=offline")
+
+    render(<PairOnboardingClient />)
+
+    await waitFor(() => expect(screen.getByTestId("pair-onboarding")).toBeInTheDocument())
+    expect(mockListHosts).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "recovery.switchTo" })).not.toBeInTheDocument()
   })
 
   it("reveals a manual escape when hydration stalls, and tapping it shows discover", async () => {

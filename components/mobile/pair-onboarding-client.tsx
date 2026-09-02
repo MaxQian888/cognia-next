@@ -52,6 +52,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { usePlatform } from "@/hooks/use-platform"
 import { DEFAULT_LOCAL_ACCOUNT_ID } from "@/lib/accounts/active-account-id"
+import { useAccountStore } from "@/stores/account/account-store"
 import { companionCredentialBook, type CompanionHostRecord } from "@/lib/companion/credential-book"
 import {
   pairAndActivateCompanionHost,
@@ -204,7 +205,21 @@ export function PairOnboardingClient() {
   // pairing" forever. We now reveal a "set up manually" affordance early and
   // hard-fall-through to the discover step as a backstop.
   const [hydrateSlow, setHydrateSlow] = useState(false)
+  // The one account the recovery screen speaks for. A phone always files its
+  // hosts under the local account. A browser reads its live binding first and
+  // falls back to the signed-in account, which outlives that binding. Both the
+  // list of switchable hosts and the switch itself resolve through this, so
+  // the screen can never offer a host it would then refuse.
+  const activeAccountId = useAccountStore((state) => state.activeAccountId)
+  const recoveryAccountId =
+    platform === "mobile"
+      ? DEFAULT_LOCAL_ACCOUNT_ID
+      : (getActiveRuntimeTargetContext()?.accountId ?? activeAccountId)
   const [recoveryHosts, setRecoveryHosts] = useState<CompanionHostRecord[]>([])
+  // Rows the switch button can actually act on. Reading through the account
+  // keeps a list fetched under a previous one from lingering on screen after
+  // the binding changes, without a second setState to clear it.
+  const switchableHosts = recoveryAccountId ? recoveryHosts : []
   const [pendingRecoveryHostId, setPendingRecoveryHostId] = useState<string | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   // Recently-paired servers (localStorage) — surfaced as the Discover step's
@@ -232,10 +247,20 @@ export function PairOnboardingClient() {
 
   useEffect(() => {
     if (pairParams.mode !== "recover") return
-    const accountId = platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : getActiveRuntimeTargetContext()?.accountId
-    if (!accountId) return
-    void companionCredentialBook().list(accountId).then(setRecoveryHosts).catch(() => setRecoveryHosts([]))
-  }, [pairParams.mode, platform])
+    // Scope the list to the same account the switch button will act as. A
+    // browser tab that lands here has usually just lost its runtime-target
+    // scope (the Host it was bound to went offline or refused), which is why
+    // the account store is the fallback: the binding is gone but the signed-in
+    // local account is not. Listing the whole book instead would offer another
+    // local profile's hosts, and `switchCompanionHost` refuses those, because
+    // records are keyed by `{hostId, accountNamespace}` precisely so two
+    // profiles on one browser never share a pairing.
+    if (!recoveryAccountId) return
+    void companionCredentialBook()
+      .list(recoveryAccountId)
+      .then(setRecoveryHosts)
+      .catch(() => setRecoveryHosts([]))
+  }, [pairParams.mode, recoveryAccountId])
 
   // Hydrate cache from storage on mount; if a config exists, jump to the
   // paired step and let the user verify before continuing to chat.
@@ -386,9 +411,7 @@ export function PairOnboardingClient() {
 
   const onRecoverySwitch = useCallback(
     async (hostId: string) => {
-      const accountId =
-        getActiveRuntimeTargetContext()?.accountId ??
-        (platform === "mobile" ? DEFAULT_LOCAL_ACCOUNT_ID : null)
+      const accountId = recoveryAccountId
       if (!accountId || pendingRecoveryHostId) return
       setPendingRecoveryHostId(hostId)
       setRecoveryError(null)
@@ -411,7 +434,7 @@ export function PairOnboardingClient() {
         setPendingRecoveryHostId(null)
       }
     },
-    [isWebHost, onPaired, pendingRecoveryHostId, platform, t]
+    [isWebHost, onPaired, pendingRecoveryHostId, recoveryAccountId, t]
   )
 
   // What the form is doing, reported by the step that owns the phase. Kept
@@ -505,7 +528,7 @@ export function PairOnboardingClient() {
           </p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
-          {recoveryHosts.map((host) => (
+          {switchableHosts.map((host) => (
             <Button
               key={host.hostId}
               type="button"
@@ -582,6 +605,7 @@ export function PairOnboardingClient() {
             autoScan={selection.autoScan}
             autoSubmit={selection.autoSubmit}
             webMode={isWebHost}
+            expectedFingerprint={pairParams.fingerprint ?? undefined}
             persistPairing={persistPairing}
             onPaired={onPaired}
             onBack={isWebHost ? undefined : onBackToDiscover}

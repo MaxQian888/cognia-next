@@ -99,6 +99,30 @@ describe("loginToLogto", () => {
     expect(tokenBody(fetchImpl).get("organization_id")).toBeNull()
   })
 
+  it("passes direct_sign_in on the authorize request only, when a social provider is chosen", async () => {
+    const fetchImpl = routingFetch()
+    const openUrl = jest.fn()
+    await loginToLogto(baseConfig({ directSignIn: "social:github" }), {
+      openUrl,
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl,
+    })
+    const authUrl = new URL((openUrl.mock.calls[0] as string[])[0])
+    expect(authUrl.searchParams.get("direct_sign_in")).toBe("social:github")
+    // The token exchange has no such parameter.
+    expect(tokenBody(fetchImpl).get("direct_sign_in")).toBeNull()
+
+    const plain = jest.fn()
+    await loginToLogto(baseConfig(), {
+      openUrl: plain,
+      waitForCode: jest.fn(async ({ state }: { state: string }) => ({ code: "c", state })),
+      fetchImpl: routingFetch(),
+    })
+    expect(
+      new URL((plain.mock.calls[0] as string[])[0]).searchParams.get("direct_sign_in")
+    ).toBeNull()
+  })
+
   it("defaults scopes to openid + offline_access when none are configured", async () => {
     const fetchImpl = routingFetch()
     const openUrl = jest.fn()
