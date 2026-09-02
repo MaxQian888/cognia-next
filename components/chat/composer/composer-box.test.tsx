@@ -24,6 +24,9 @@ jest.mock("../composer-chip-overlay", () => ({
     <div data-testid="composer-chip-overlay" data-hidden={hidden ? "true" : undefined} />
   ),
   TEXTAREA_TYPOGRAPHY: "",
+  // Real value, not "": the preview box reads it to stay at the textarea's
+  // size, and the test below asserts it lands.
+  OVERLAY_FONT_SIZE: "var(--composer-text-size, 0.875rem)",
 }))
 jest.mock("./composer-ghost-text", () => ({ ComposerGhostText: () => null }))
 jest.mock("./mobile-ghost-accept", () => ({ MobileGhostAccept: () => null }))
@@ -325,6 +328,16 @@ describe("ComposerBox — the preview owns the words", () => {
     render(<ComposerBox {...withPreview(true)} />)
     expect(screen.getByTestId("composer-chip-overlay")).toHaveAttribute("data-hidden", "true")
     expect(screen.getByTestId("composer-param-preview")).toHaveTextContent("review login now")
+  })
+
+  it("sizes the preview box like the textarea it stands in for", () => {
+    // The preview replaces the textarea in place, so `text-sm` alone is wrong
+    // wherever the iOS zoom guard is making the real textarea 16px: toggling
+    // preview on would reflow the very sentence it exists to show you.
+    render(<ComposerBox {...withPreview(true)} />)
+    expect(screen.getByTestId("composer-param-preview").style.fontSize).toBe(
+      "var(--composer-text-size, 0.875rem)"
+    )
   })
 
   it("paints the overlay again once the preview is off", () => {

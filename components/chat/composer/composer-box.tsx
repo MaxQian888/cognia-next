@@ -38,6 +38,7 @@ import type { PermissionMode } from "@/stores/chat/chat-store"
 
 import {
   ComposerChipOverlay,
+  OVERLAY_FONT_SIZE,
   TEXTAREA_TYPOGRAPHY,
   type ParamPillState,
 } from "../composer-chip-overlay"
@@ -432,7 +433,14 @@ export function ComposerBox({
               padEndClass
             )}
             data-testid="composer-param-preview"
-            style={{ maxHeight: `${maxHeightRem}rem`, overflowY: "auto" }}
+            // Same size as the textarea it stands in for, which on a coarse
+            // pointer is the zoom guard's 16px and not the `text-sm` above —
+            // otherwise toggling the preview reflowed the sentence.
+            style={{
+              fontSize: OVERLAY_FONT_SIZE,
+              maxHeight: `${maxHeightRem}rem`,
+              overflowY: "auto",
+            }}
           >
             {preview.text}
           </div>

@@ -1,6 +1,8 @@
 import { render } from "@testing-library/react"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { createRef } from "react"
-import { ComposerChipOverlay } from "./composer-chip-overlay"
+import { ComposerChipOverlay, OVERLAY_FONT_SIZE } from "./composer-chip-overlay"
 import { parseSegments, splitLinkSegments } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { LINK_MARKER } from "@/lib/chat/link-fold"
@@ -48,14 +50,46 @@ describe("ComposerChipOverlay", () => {
     expect(container.textContent).toContain("just a normal message")
   })
 
-  it("pins the inner layer to the textarea's iOS-guard font size so pills don't drift", () => {
-    // globals.css forces `textarea { font-size: max(16px,1rem) }` (unlayered),
-    // overriding text-sm on the real textarea. The overlay must match exactly or
-    // the pills drift further from the glyphs the more you type.
+  it("sizes the inner layer from the textarea's own size variable, not a pinned number", () => {
+    // The overlay paints the glyphs the transparent textarea still owns the
+    // caret for, so the two must be the SAME size. globals.css's iOS zoom guard
+    // makes that size 16px on a coarse pointer and `text-sm` elsewhere, so a
+    // hard-coded `max(16px, 1rem)` here was right on a phone and one glyph out
+    // per three characters on the desktop. `--composer-text-size` is declared
+    // in both regimes beside the guard; nothing else may be substituted here.
     const { getByTestId } = render(<ComposerChipOverlay value="/help" segments={segs("/help")} />)
     const layer = getByTestId("composer-chip-overlay").firstElementChild as HTMLElement
-    expect(layer.style.fontSize).toBe("max(16px, 1rem)")
+    expect(layer.style.fontSize).toBe(OVERLAY_FONT_SIZE)
+    expect(OVERLAY_FONT_SIZE).toBe("var(--composer-text-size, 0.875rem)")
     expect(layer.className).toContain("min-h-9")
+  })
+
+  it("resolves against a variable globals.css declares in BOTH pointer regimes", () => {
+    // Half of the contract lives in CSS: the variable has to exist outside the
+    // media query (the desktop answer) AND inside it (the zoom guard's 16px).
+    // Declared in only one, the overlay would fall back to `text-sm` on a phone
+    // where the textarea is 16px — the same drift, other way round.
+    const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8")
+    const guard = css.indexOf("@media (pointer: coarse), (hover: none) {")
+    expect(guard).toBeGreaterThan(-1)
+    expect(css.slice(0, guard)).toContain("--composer-text-size: var(--text-sm, 0.875rem)")
+    expect(css.slice(guard)).toContain("--composer-text-size: max(16px, 1rem)")
+  })
+
+  it("hands every mirror layer the same size, so none of them can drift alone", () => {
+    // The chip layer is not the only one aligned to the textarea: ghost text and
+    // the `!`-mode squiggles paint over the same glyphs. They import this
+    // constant rather than restating it, and this pins that they still do.
+    const sources = [
+      "components/chat/composer/composer-ghost-text.tsx",
+      "components/chat/composer/shell-diagnostic-overlay.tsx",
+      "components/chat/composer/composer-box.tsx",
+    ].map((rel) => readFileSync(join(process.cwd(), rel), "utf8"))
+    expect(sources).toHaveLength(3)
+    for (const src of sources) {
+      expect(src).toContain("OVERLAY_FONT_SIZE")
+      expect(src).not.toMatch(/fontSize:\s*"max\(16px/)
+    }
   })
 
   it("forwards a ref to the scroll-transform inner element", () => {

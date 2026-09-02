@@ -26,15 +26,24 @@ import type { RichSegment } from "@/lib/slash-commands/parse-segments"
 export const TEXTAREA_TYPOGRAPHY = "px-1 py-1.5 pe-10 text-sm leading-6"
 
 /**
- * The composer textarea's EFFECTIVE font size. A global, unlayered rule in
- * globals.css (`textarea, select { font-size: max(16px, 1rem) }`, the iOS
- * auto-zoom guard) overrides the `text-sm` in TEXTAREA_TYPOGRAPHY on the real
- * `<textarea>` — but NOT on these overlay `<div>`s. Applying the identical
- * expression as an inline style (which beats the class) keeps the overlays at
- * the textarea's true size so pills/ghost text line up glyph-for-glyph (a 14px
- * overlay over a 16px textarea drifts further the more you type).
+ * The composer textarea's EFFECTIVE font size, which is NOT the `text-sm` in
+ * TEXTAREA_TYPOGRAPHY on every shell.
+ *
+ * globals.css carries the iOS auto-zoom guard (`textarea, select { font-size:
+ * max(16px, 1rem) }`) unlayered, so where it applies it outranks `text-sm` on
+ * the real `<textarea>` — but never on these overlay `<div>`s, which are not
+ * form controls. The guard is scoped to `(pointer: coarse), (hover: none)`, so
+ * the textarea is 16px on a phone and 14px on a desktop, and an overlay pinned
+ * to either number alone is wrong on the other shell. `--composer-text-size` is
+ * declared beside the guard in both regimes and is the only thing that tracks
+ * it; the fallback is the desktop answer, for a stylesheet that never loaded.
+ *
+ * This is a caret bug, not a cosmetic one: the textarea's glyphs are
+ * transparent and these layers paint them, so a size mismatch leaves the caret
+ * (still owned by the textarea) drifting further from the painted text with
+ * every character — one full glyph in by the third one.
  */
-export const OVERLAY_FONT_SIZE = "max(16px, 1rem)"
+export const OVERLAY_FONT_SIZE = "var(--composer-text-size, 0.875rem)"
 
 /**
  * The other half of the alignment contract: the FAMILY.

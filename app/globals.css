@@ -3639,8 +3639,26 @@ html[data-reduce-motion="true"] .boot-preview__block {
  * declares it (`[--touch-control-min-h:2rem]`, or `0px` to opt out entirely)
  * is the only declaration in the cascade and wins from inside
  * `@layer utilities`. The zoom fix itself stays non-negotiable, which is the
- * whole point of it. */
+ * whole point of it.
+ *
+ * `--composer-text-size` republishes the size a `<textarea>` ACTUALLY renders
+ * at under each regime, because the composer paints its own glyphs. The
+ * textarea there is transparent and three mirror layers (chips, ghost text,
+ * shell squiggles) draw the text instead, so they have to be set at exactly the
+ * textarea's size or the caret — which the textarea still owns — drifts further
+ * from the painted glyphs with every character typed. They cannot read
+ * `text-sm` and stop there: on a coarse pointer the guard below overrides it,
+ * and an overlay `<div>` is not a form control, so the guard never reaches it.
+ * One variable, declared in both regimes right beside the rule it mirrors. */
+:root {
+  --composer-text-size: var(--text-sm, 0.875rem);
+}
+
 @media (pointer: coarse), (hover: none) {
+  :root {
+    --composer-text-size: max(16px, 1rem);
+  }
+
   input[type="text"],
   input[type="email"],
   input[type="number"],
