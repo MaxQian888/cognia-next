@@ -3205,11 +3205,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // safe only because `executeShell` threw "desktop app only" underneath it;
       // `runShellLine` runs anywhere a Host is, so an `isTauri()` gate would
       // send `!ssh host` from a paired browser down the capture path to block
-      // for the full 30s timeout. `terminalAvailable()` is the same predicate
-      // `useShellContext` resolves `hostReachable` from, so the two branches
-      // cannot disagree: no dock means no Host either, and the run below then
-      // refuses immediately with `noHost` instead of hanging.
-      if (terminalAvailable() && detectInteractiveCommand(cmd).interactive) {
+      // for the full 30s timeout.
+      //
+      // …and gated on a Host being reachable as well, because `terminalAvailable()`
+      // alone is NOT the predicate `useShellContext` answers with. It reports
+      // whether a terminal transport could be picked — true for any Capacitor
+      // shell and any browser with a companion target configured, paired or
+      // not — while `availability` is the negotiated verdict, which additionally
+      // requires the Host to advertise `terminal_exec` and grant it. An
+      // unpaired phone satisfies the first and fails the second, so `!ssh host`
+      // used to be handed to a dock with nothing behind it instead of getting
+      // the one message that names the fix. Reading the run verdict here is what
+      // actually makes the two branches unable to disagree: below, anything
+      // short of `full` refuses immediately and by name, and now so does this
+      // one. `full`, and not merely "not static-only", because
+      // `shell-unavailable` is a reachable Host too, one that does not have the
+      // configured shell. Routing that to the dock hands it a shell it cannot
+      // spawn, which is the same silent nothing this gate exists to stop, while
+      // the capture path refuses with `shell-unavailable` and names the shell.
+      const hostReachable = shell.availability === "full"
+      if (hostReachable && terminalAvailable() && detectInteractiveCommand(cmd).interactive) {
         try {
           await runInTerminalDock(cmd, cwd, session?.id ?? "")
           pushSystemMessage(tShell("interactiveRoutedToTerminal", { cmd }))

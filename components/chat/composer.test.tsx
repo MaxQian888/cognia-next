@@ -36,8 +36,15 @@ jest.mock("@/lib/terminal/pick-transport", () => ({
 }))
 // Interactive `!command` routing: control the desktop gate and stub the dock
 // spawn so a routed command doesn't hit the real terminal orchestrator.
-jest.mock("@/lib/tauri", () => ({
-  ...jest.requireActual("@/lib/tauri"),
+//
+// Mocked at `@/lib/platform/detect`, which is where `isTauri` is DEFINED —
+// `@/lib/tauri` only re-exports it, and so does everything else that asks. A
+// mock on the re-export left `useShellContext` (which imports the definition)
+// answering "no host" in the very cases these tests set up as a desktop, so
+// every `!` line refused before it could reach the exec. One process, one
+// answer.
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
   isTauri: jest.fn(() => false),
 }))
 jest.mock("@/lib/terminal/run-in-dock", () => ({
@@ -136,6 +143,8 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { usePlatform } from "@/hooks/use-platform"
 import { execTerminalCommand } from "@/lib/terminal/remote-api"
 import { isTauri } from "@/lib/tauri"
+import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
@@ -185,7 +194,36 @@ beforeEach(() => {
   // Default to non-desktop so `!command` uses the capture path unless a test
   // opts into desktop.
   ;(isTauri as jest.Mock).mockReturnValue(false)
+  // …and to a client with no Host at all, which is what a plain browser is.
+  // `setRuntimeSnapshot` (not `__resetRuntimeSnapshotForTesting`) because the
+  // reset helper also drops every listener, and the components under test
+  // subscribe to this store through `useSyncExternalStore`.
+  setRuntimeSnapshot({ target: null, vaultState: "unavailable", connectionState: "offline" })
 })
+
+/**
+ * Pair this client to a desktop Host, the way `!` mode meets one in the wild.
+ *
+ * `useShellContext` refuses to run anything until a Host is reachable, and for
+ * a browser that verdict is the negotiated manifest — not `terminalAvailable()`,
+ * which answers the looser question of whether a terminal dock could be shown.
+ * A test that stubs only the transport gets `no-host` and never reaches the
+ * exec, which is exactly how these cases went quietly red.
+ */
+function pairCompanionHost(): void {
+  setRuntimeSnapshot({
+    target: { id: "web-companion-test", kind: "companion", hostKind: "desktop", platform: "web" },
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: {
+      compatible: true,
+      operations: ["terminal_exec"],
+      // Read from the command manifest rather than spelled out, so a capability
+      // rename cannot quietly turn this back into an unpaired client.
+      grants: [getCommandDescriptor("terminal_exec")?.capability ?? "terminal.open"],
+    },
+  })
+}
 
 describe("Composer — data-hooks integration", () => {
   it("consumes a selection intent after draft hydration without overwriting typed text", async () => {
@@ -815,6 +853,9 @@ describe("Composer — effective cwd (workspace fallback)", () => {
   })
 
   it("runs a ! shell command in the active workspace root instead of erroring", async () => {
+    // A paired browser, not the desktop: ADR-0039 moved `!` onto the routed
+    // `terminal_exec` precisely so this client can run one at all.
+    pairCompanionHost()
     seedActiveWorkspace("/ws/root")
     const execMock = execTerminalCommand as jest.Mock
     execMock.mockClear()
@@ -909,7 +950,37 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     )
   })
 
+  it("refuses an interactive ! command with noHost rather than routing it to a dead dock", async () => {
+    // `terminalAvailable()` is true here (an unpaired Capacitor shell, or a
+    // browser with a companion target whose Host has not answered) while no
+    // Host is actually reachable. Handing `ssh` to the dock in that state
+    // spawns nothing and says nothing; the capture path below names the fix.
+    seedActiveWorkspace("/ws/root")
+    const routeMock = runInTerminalDock as jest.Mock
+    routeMock.mockClear()
+    const execMock = execTerminalCommand as jest.Mock
+    execMock.mockClear()
+    const ta = renderComposer()
+    await act(async () => {
+      fireEvent.change(ta, { target: { value: "!ssh example.com" } })
+    })
+    await act(async () => {
+      fireEvent.click(document.querySelector('button[aria-label="Send"]') as HTMLButtonElement)
+      await Promise.resolve()
+    })
+    await waitFor(() =>
+      expect(
+        composerReadSlice(useChatStore.getState(), "ses_42").messages.some(
+          (m) => m.role === "system"
+        )
+      ).toBe(true)
+    )
+    expect(routeMock).not.toHaveBeenCalled()
+    expect(execMock).not.toHaveBeenCalled()
+  })
+
   it("still prefers a per-session workingDir over the workspace root", async () => {
+    pairCompanionHost()
     seedActiveWorkspace("/ws/root")
     const execMock = execTerminalCommand as jest.Mock
     execMock.mockClear()

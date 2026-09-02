@@ -69,6 +69,8 @@ import {
   __resetHostCapabilitiesForTests,
   recordHostCapabilities,
 } from "@/lib/terminal/host-capabilities"
+import { setRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 function makeAdapter(): DataAdapter {
@@ -123,6 +125,38 @@ async function typeValue(ta: HTMLTextAreaElement, value: string, settleMs = 250)
 
 const rowTexts = () => screen.queryAllByRole("listitem").map((li) => li.textContent ?? "")
 
+/**
+ * Pair this client to a Host — the thing `!` mode actually asks about.
+ *
+ * `terminalAvailable()` below is a different question: whether a terminal
+ * transport could be picked at all. `useShellContext` answers the negotiated
+ * one, and for a browser that is the Host's manifest. Stubbing only the
+ * transport left every case here running as "no Host reachable", so the host
+ * completion sources were never consulted and Enter refused before it reached
+ * the exec — which is how ten of these went red without changing.
+ *
+ * The grant is read from the command manifest rather than spelled out, so a
+ * capability rename cannot quietly turn this back into an unpaired client.
+ */
+function pairCompanionHost(): void {
+  setRuntimeSnapshot({
+    target: { id: "web-companion-test", kind: "companion", hostKind: "desktop", platform: "web" },
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: {
+      compatible: true,
+      operations: ["terminal_exec", "terminal_list_path_executables", "terminal_complete_paths"],
+      grants: [getCommandDescriptor("terminal_exec")?.capability ?? "terminal.open"],
+    },
+  })
+}
+
+/** A standalone browser: no Host at all, on either predicate. */
+function unpairHost(): void {
+  setRuntimeSnapshot({ target: null, vaultState: "unavailable", connectionState: "offline" })
+  mockTerminalAvailable.mockReturnValue(false)
+}
+
 beforeEach(() => {
   useChatStore.getState().clear()
   useSettingsStore.setState({
@@ -137,6 +171,7 @@ beforeEach(() => {
     availableShells: [{ path: "/bin/zsh", kind: "zsh" }],
   })
   mockTerminalAvailable.mockReturnValue(true)
+  pairCompanionHost()
   mockListPathExecutables.mockReset().mockResolvedValue([])
   mockCompletePaths.mockReset().mockResolvedValue([])
   mockExec.mockClear()
@@ -246,7 +281,7 @@ describe("Composer — `!` completion", () => {
   })
 
   it("without a Host it still completes known CLIs, and refuses to run", async () => {
-    mockTerminalAvailable.mockReturnValue(false)
+    unpairHost()
     const ta = renderComposer()
     await typeValue(ta, "! git rem")
     await waitFor(() => expect(rowTexts().join(" ")).toContain("remote"))
