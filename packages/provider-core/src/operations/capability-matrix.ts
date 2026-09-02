@@ -137,6 +137,8 @@ export interface ProviderSurfaceFacts {
   realtime: boolean
   moderation: boolean
   files: boolean
+  /** Whether uploaded bytes can be read back (`files.content`). */
+  filesDownload: boolean
   vectorStores: boolean
   batches: boolean
   fineTuning: boolean
@@ -162,6 +164,7 @@ const NONE: ProviderSurfaceFacts = {
   realtime: false,
   moderation: false,
   files: false,
+  filesDownload: false,
   vectorStores: false,
   batches: false,
   fineTuning: false,
@@ -201,6 +204,7 @@ const OPENAI_FULL: ProviderSurfaceFacts = {
   realtime: true,
   moderation: true,
   files: true,
+  filesDownload: true,
   vectorStores: true,
   batches: true,
   fineTuning: true,
@@ -220,6 +224,7 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     modelsEndpoint: true,
     tokenCount: true,
     files: true,
+    filesDownload: true,
     batches: true,
     rateLimitHeaders: true,
     usageApi: true,
@@ -232,7 +237,9 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     video: true,
     speech: true,
     realtime: true,
+    // Gemini stores uploads for prompting only, bytes never come back.
     files: true,
+    filesDownload: false,
     vectorStores: true,
     batches: true,
     fineTuning: true,
@@ -271,6 +278,7 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     batches: true,
     fineTuning: true,
     files: true,
+    filesDownload: true,
   },
   github: { embeddings: true },
   glm4: {
@@ -278,26 +286,43 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     images: true,
     video: true,
     files: true,
+    filesDownload: true,
     batches: true,
     fineTuning: true,
     quota: true,
   },
-  groq: { speech: true, transcription: true, translation: true, batches: true, files: true },
+  groq: {
+    speech: true,
+    transcription: true,
+    translation: true,
+    batches: true,
+    files: true,
+    filesDownload: true,
+  },
   huggingface: { embeddings: true, images: true, speech: true, transcription: true, video: true },
   internlm: {},
   lepton: { images: true, speech: true },
   lingyi: {},
-  minimax: { embeddings: true, images: true, video: true, speech: true, files: true, quota: true },
+  minimax: {
+    embeddings: true,
+    images: true,
+    video: true,
+    speech: true,
+    files: true,
+    filesDownload: true,
+    quota: true,
+  },
   mistral: {
     embeddings: true,
     moderation: true,
     transcription: true,
     files: true,
+    filesDownload: true,
     batches: true,
     fineTuning: true,
   },
   modelscope: { embeddings: true },
-  moonshot: { files: true, balance: true, quota: true },
+  moonshot: { files: true, filesDownload: true, balance: true, quota: true },
   novita: { embeddings: true, images: true, video: true, speech: true, balance: true },
   nvidia: { embeddings: true, rerank: true },
   ohmygpt: { embeddings: true, images: true },
@@ -311,6 +336,7 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     speech: true,
     transcription: true,
     files: true,
+    filesDownload: true,
     batches: true,
   },
   replicate: { images: true, video: true, speech: true, transcription: true, fineTuning: true },
@@ -334,6 +360,7 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     speech: true,
     transcription: true,
     files: true,
+    filesDownload: true,
     batches: true,
     fineTuning: true,
   },
@@ -345,6 +372,7 @@ const VENDOR_FACTS: Record<string, Partial<ProviderSurfaceFacts>> = {
     images: true,
     video: true,
     files: true,
+    filesDownload: true,
     batches: true,
     fineTuning: true,
     quota: true,
@@ -478,9 +506,11 @@ export function staticOperationSupport(input: StaticSupportInput): StaticSupport
     case "files.upload":
     case "files.list":
     case "files.get":
-    case "files.content":
     case "files.delete":
       return when(facts.files, NATIVE, `${name} exposes no files API`)
+    case "files.content":
+      if (!facts.files) return NO(`${name} exposes no files API`)
+      return when(facts.filesDownload, NATIVE, `${name} never returns uploaded file bytes`)
     case "vector-stores.create":
     case "vector-stores.list":
     case "vector-stores.get":

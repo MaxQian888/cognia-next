@@ -33,8 +33,6 @@ export const PENDING_OPERATIONS: ReadonlySet<ProviderOperationId> = new Set<Prov
       id === "translation.create" ||
       id === "realtime.connect" ||
       (id.startsWith("videos.") && id !== "videos.generate") ||
-      id.startsWith("files.") ||
-      id.startsWith("vector-stores.") ||
       id.startsWith("batches.") ||
       id.startsWith("fine-tuning.")
   )

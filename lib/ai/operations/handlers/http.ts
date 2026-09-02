@@ -13,6 +13,8 @@ export interface ProviderHttpRequest {
   method?: "GET" | "POST" | "DELETE"
   path: string
   body?: unknown
+  /** A pre-encoded body (multipart/related and friends) with its own content type. */
+  rawBody?: { body: BodyInit; contentType: string }
   /** Override the provider base URL (some surfaces live on another host). */
   baseURL?: string
   headers?: Record<string, string>
@@ -21,8 +23,24 @@ export interface ProviderHttpRequest {
 }
 
 /** Auth header for the provider's protocol. Anthropic uses x-api-key. */
+/** Azure OpenAI resources take the key in `api-key`, whatever protocol the row says. */
+export function isAzureOpenAiHost(baseURL: string | undefined): boolean {
+  if (!baseURL) return false
+  try {
+    return new URL(baseURL).hostname.endsWith(".openai.azure.com")
+  } catch {
+    return false
+  }
+}
+
+/** REST bases for the vendors whose catalog entry carries none (the SDK knows them). */
+const DEFAULT_REST_BASES: Partial<Record<ResolvedProvider["protocol"], string>> = {
+  anthropic: "https://api.anthropic.com/v1",
+  google: "https://generativelanguage.googleapis.com/v1beta",
+}
+
 export function authHeaders(
-  provider: Pick<ResolvedProvider, "protocol" | "apiKey" | "headers">
+  provider: Pick<ResolvedProvider, "protocol" | "apiKey" | "headers"> & { baseURL?: string }
 ): Record<string, string> {
   const headers: Record<string, string> = { ...(provider.headers ?? {}) }
   if (provider.apiKey) {
@@ -31,7 +49,7 @@ export function authHeaders(
       headers["anthropic-version"] ??= "2023-06-01"
     } else if (provider.protocol === "google") {
       headers["x-goog-api-key"] = provider.apiKey
-    } else if (provider.protocol === "azure") {
+    } else if (provider.protocol === "azure" || isAzureOpenAiHost(provider.baseURL)) {
       headers["api-key"] = provider.apiKey
     } else {
       headers.authorization = `Bearer ${provider.apiKey}`
@@ -49,7 +67,7 @@ export function restBaseOf(
   provider: Pick<ResolvedProvider, "protocol" | "baseURL">,
   override?: string
 ): string | undefined {
-  const base = override ?? provider.baseURL
+  const base = override ?? provider.baseURL ?? DEFAULT_REST_BASES[provider.protocol]
   if (!base) return undefined
   if (provider.protocol === "anthropic" && !/\/v1\/?$/.test(base)) return joinUrl(base, "v1")
   return base
@@ -75,15 +93,24 @@ export async function providerRequest<T = unknown>(
     })
   }
   const doFetch = request.fetchImpl ?? proxyFetch
+  const hasBody = request.body !== undefined || request.rawBody !== undefined
   const headers: Record<string, string> = {
     ...authHeaders(provider),
-    ...(request.body !== undefined ? { "content-type": "application/json" } : {}),
+    ...(request.rawBody
+      ? { "content-type": request.rawBody.contentType }
+      : request.body !== undefined
+        ? { "content-type": "application/json" }
+        : {}),
     ...(request.headers ?? {}),
   }
   const response = await doFetch(joinUrl(baseURL, request.path), {
-    method: request.method ?? (request.body !== undefined ? "POST" : "GET"),
+    method: request.method ?? (hasBody ? "POST" : "GET"),
     headers,
-    ...(request.body !== undefined ? { body: JSON.stringify(request.body) } : {}),
+    ...(request.rawBody
+      ? { body: request.rawBody.body }
+      : request.body !== undefined
+        ? { body: JSON.stringify(request.body) }
+        : {}),
     ...(request.signal ? { signal: request.signal } : {}),
   })
   const text = await response.text()
