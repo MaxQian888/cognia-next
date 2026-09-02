@@ -311,3 +311,82 @@ it("routes decryption through Dexie.waitFor, and only when there is ciphertext",
     db.close()
   }
 })
+
+/**
+ * The crash this guards is real and was reachable from ordinary UI work: a
+ * `waitFor` established on a transaction that has already committed throws
+ * `InvalidStateError: … The transaction has finished` synchronously, out of the
+ * middleware, and the read that had already succeeded fails with it.
+ *
+ * The rows are in hand by then — decrypting them needs no transaction — so the
+ * only correct answer is to finish the read. Anything the CALLER still wants to
+ * do in that transaction is beyond saving either way, and Dexie reports that
+ * itself, by its right name.
+ */
+it("finishes the read when the transaction can no longer be held open", async () => {
+  activateAccountContentCipher(
+    await AccountContentCipher.createForTesting("acct_crypto", DATABASE_NAME)
+  )
+  const db = new CogniaDB(DATABASE_NAME, "encrypted-content-test")
+  await db.open()
+  await db.messages.put({
+    id: "msg_1",
+    sessionId: "session_1",
+    role: "user",
+    parts: [{ type: "text", text: "one" }],
+    createdAt: 100,
+  })
+
+  const waitFor = jest.spyOn(Dexie, "waitFor").mockImplementation(() => {
+    throw new DOMException(
+      "Failed to execute 'objectStore' on 'IDBTransaction': The transaction has finished.",
+      "InvalidStateError"
+    )
+  })
+  try {
+    await expect(db.messages.get("msg_1")).resolves.toMatchObject({
+      parts: [{ type: "text", text: "one" }],
+    })
+    await expect(
+      db.messages.where("sessionId").equals("session_1").toArray()
+    ).resolves.toMatchObject([{ parts: [{ type: "text", text: "one" }] }])
+    await expect(db.messages.bulkGet(["msg_1"])).resolves.toMatchObject([
+      { parts: [{ type: "text", text: "one" }] },
+    ])
+    // The cursor path is the one that cannot finish without the hold, so it
+    // fails by name instead of falling back. Iteration issues another request
+    // per row, and on a transaction that has already committed `continue()`
+    // throws from inside the cursor callback, where nothing is left to settle
+    // `each()`. Resuming there hung the caller for its full timeout. Failing
+    // reports the same finished transaction the other paths quietly survive.
+    await expect(
+      db.messages
+        .where("sessionId")
+        .equals("session_1")
+        .each(() => {})
+    ).rejects.toThrow(/transaction has finished/i)
+    // And the write path, which holds across the ENCRYPT instead. This one has
+    // a second job: the ciphertext must still be what lands, never the
+    // plaintext row the hold was supposed to protect.
+    await db.messages.put({
+      id: "msg_2",
+      sessionId: "session_1",
+      role: "user",
+      parts: [{ type: "text", text: "two" }],
+      createdAt: 200,
+    })
+    expect(waitFor).toHaveBeenCalled()
+  } finally {
+    waitFor.mockRestore()
+  }
+  await expect(db.messages.get("msg_2")).resolves.toMatchObject({
+    parts: [{ type: "text", text: "two" }],
+  })
+  const raw = new Dexie(DATABASE_NAME)
+  await raw.open()
+  const stored = (await raw.table("messages").get("msg_2")) as Record<string, unknown>
+  expect(stored.parts).toBeUndefined()
+  expect(stored.__cogniaEncryptedContent).toBeDefined()
+  raw.close()
+  db.close()
+})
