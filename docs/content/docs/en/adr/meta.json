@@ -162,6 +162,7 @@
     "0160-docker-machines-are-real-machines",
     "0161-agent-identity-runtime-and-host",
     "0162-sftp-is-shell-equivalent",
-    "0163-provider-operation-contract"
+    "0163-provider-operation-contract",
+    "0164-templates-squads-and-commands-are-portable-and-iterable"
   ]
 }
