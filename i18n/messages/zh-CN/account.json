@@ -391,5 +391,13 @@
     "received": "已收到邀请。登录后即可加入。",
     "invalid": "该链接没有携带有效的邀请令牌。",
     "continue": "继续"
+  },
+  "lockScreen": {
+    "greeting": {
+      "morning": "早上好",
+      "afternoon": "下午好",
+      "evening": "晚上好",
+      "night": "夜深了"
+    }
   }
 }

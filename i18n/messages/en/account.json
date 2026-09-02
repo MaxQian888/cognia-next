@@ -391,5 +391,13 @@
     "received": "Invitation received. Sign in to join.",
     "invalid": "That link does not carry a valid invitation token.",
     "continue": "Continue"
+  },
+  "lockScreen": {
+    "greeting": {
+      "morning": "Good morning",
+      "afternoon": "Good afternoon",
+      "evening": "Good evening",
+      "night": "Good night"
+    }
   }
 }

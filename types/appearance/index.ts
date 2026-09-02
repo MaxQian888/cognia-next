@@ -7,12 +7,14 @@ export * from "./cursor"
 export * from "./style-pack"
 export * from "./wallpaper-rotation"
 export * from "./daily-wallpaper"
+export * from "./lock-screen"
 import { DEFAULT_CURSOR, type CursorSettings } from "./cursor"
 // Value import; `style-pack.ts` only imports `DensityLevel` back as a type, so
 // the cycle is erased at compile time and never exists at runtime.
 import { DEFAULT_STYLE_PACK, type StylePackSettings } from "./style-pack"
 import { DEFAULT_WALLPAPER_ROTATION, type WallpaperRotationSettings } from "./wallpaper-rotation"
 import { DEFAULT_DAILY_WALLPAPER, type DailyWallpaperSettings } from "./daily-wallpaper"
+import { DEFAULT_LOCK_SCREEN, type LockScreenSettings } from "./lock-screen"
 
 /**
  * How the wallpaper raster is fitted into its surface.
@@ -208,6 +210,12 @@ export interface AppearanceSettingsSlice {
    * colour half: any pack composes with any theme. See `./style-pack.ts`.
    */
   stylePack?: StylePackSettings
+  /**
+   * Lock-screen appearance. Optional so rows written before it keep loading,
+   * and defaulted to the historical plain look so nobody's lock screen
+   * changes without them asking.
+   */
+  lockScreen?: LockScreenSettings
 }
 
 // ----------------------------------------------------------------------------
@@ -559,4 +567,5 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   componentStyles: {},
   cursor: DEFAULT_CURSOR,
   stylePack: DEFAULT_STYLE_PACK,
+  lockScreen: DEFAULT_LOCK_SCREEN,
 }

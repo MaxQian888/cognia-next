@@ -906,6 +906,18 @@ body[data-bg-arming="true"] [data-bg-target]::after {
 /* Failure shake, shared by the PIN pad and the pattern grid. Guarded at the
    call site with `motion-safe:`, so a user who asked for less motion gets the
    colour change and the message without the movement. */
+/* Ambient drift for the lock screen's aurora backdrop. Slow and low-contrast
+   on purpose: it sits behind a password field, so it must read as atmosphere
+   rather than as something to look at. */
+@keyframes cognia-aurora {
+  from {
+    transform: translate3d(-4%, -3%, 0) scale(1.05);
+  }
+  to {
+    transform: translate3d(4%, 3%, 0) scale(1.15);
+  }
+}
+
 @keyframes cognia-shake {
   0%,
   100% {

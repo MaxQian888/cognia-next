@@ -9,6 +9,8 @@ jest.mock("next-intl", () => ({
     t.has = () => true
     return t
   },
+  // The lock-screen backdrop formats its clock and date through next-intl.
+  useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }))
 jest.mock("next/navigation", () => ({ usePathname: () => "/" }))
 jest.mock("@/lib/pet/window-role", () => ({

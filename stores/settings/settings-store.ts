@@ -27,10 +27,12 @@ import type {
   ImportedThemeRecord,
   MonacoLinkSettings,
   Wallpaper,
+  LockScreenSettings,
 } from "@/types/appearance"
 import {
   DEFAULT_AUTOMODE,
   DEFAULT_BACKGROUND_SETTINGS,
+  DEFAULT_LOCK_SCREEN,
   DEFAULT_MONACO_LINK,
 } from "@/types/appearance"
 import type {
@@ -434,6 +436,7 @@ interface SettingsState {
   // ---------------------------------------------------------------------------
 
   background: BackgroundSettings
+  lockScreen: LockScreenSettings
   wallpapers: Wallpaper[]
   customCss: string
   customCssEnabled: boolean
@@ -446,6 +449,7 @@ interface SettingsState {
   importedVscodeThemes: ImportedThemeRecord[]
 
   setBackground: (patch: Partial<BackgroundSettings>) => Promise<void>
+  setLockScreen: (patch: Partial<LockScreenSettings>) => Promise<void>
   addWallpaper: (wallpaper: Wallpaper) => Promise<void>
   updateWallpaper: (id: string, patch: Partial<Wallpaper>) => Promise<void>
   deleteWallpaper: (id: string) => Promise<void>
@@ -624,6 +628,7 @@ interface FlatPluginFields {
   providerOnboardingDismissed: boolean
   onboardingDismissedAt: string | undefined
   background: BackgroundSettings
+  lockScreen: LockScreenSettings
   wallpapers: Wallpaper[]
   customCss: string
   customCssEnabled: boolean
@@ -663,6 +668,7 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
     providerOnboardingDismissed: s?.providerOnboardingDismissed ?? false,
     onboardingDismissedAt: s?.onboardingDismissedAt ?? undefined,
     background: { ...DEFAULT_BACKGROUND_SETTINGS, ...(s?.background ?? {}) },
+    lockScreen: { ...DEFAULT_LOCK_SCREEN, ...(s?.lockScreen ?? {}) },
     wallpapers: s?.wallpapers ?? [],
     customCss: s?.customCss ?? "",
     customCssEnabled: s?.customCssEnabled ?? false,
@@ -1826,6 +1832,17 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         ...patch,
       }
       const next = await saveSettings({ background: merged })
+      set({ settings: next })
+    },
+
+    setLockScreen: async (patch) => {
+      const cur = get().settings
+      const merged: LockScreenSettings = {
+        ...DEFAULT_LOCK_SCREEN,
+        ...(cur?.lockScreen ?? {}),
+        ...patch,
+      }
+      const next = await saveSettings({ lockScreen: merged })
       set({ settings: next })
     },
 

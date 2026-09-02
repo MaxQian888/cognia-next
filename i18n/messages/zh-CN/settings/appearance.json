@@ -1085,5 +1085,53 @@
     },
     "uploadHint": "把图片拖到这里或点击浏览",
     "uploading": "上传中…"
+  },
+  "lockScreen": {
+    "title": "锁屏",
+    "description": "应用锁定时的界面外观。解锁卡片始终保持独立的背景层，因此这里的任何设置都不会让它变得难以辨认。",
+    "backdropLabel": "背景",
+    "backdrop": {
+      "theme": "纯主题色",
+      "wallpaper": "跟随应用壁纸",
+      "pinned": "指定一张壁纸",
+      "solid": "纯色"
+    },
+    "pinnedLabel": "壁纸",
+    "pinnedPlaceholder": "选择一张壁纸",
+    "pinnedEmpty": "请先添加图片或渐变壁纸。",
+    "solidLabel": "颜色",
+    "blurLabel": "背景模糊",
+    "dimLabel": "背景压暗",
+    "dimHint": "压暗背景，保证解锁卡片清晰可读。",
+    "dimTooLow": "当前压暗程度较低，明亮的壁纸可能让解锁卡片难以辨认。",
+    "clockLabel": "时钟",
+    "clock": {
+      "none": "隐藏",
+      "time": "仅时间",
+      "timeAndDate": "时间与日期"
+    },
+    "hourCycleLabel": "小时制",
+    "hourCycle": {
+      "auto": "跟随语言",
+      "h12": "12 小时制",
+      "h23": "24 小时制"
+    },
+    "greetingLabel": "问候语",
+    "greeting": {
+      "none": "不显示",
+      "timeOfDay": "按时段",
+      "custom": "自定义文字"
+    },
+    "customGreetingLabel": "问候语文字",
+    "motionLabel": "氛围动效",
+    "motion": {
+      "none": "静止",
+      "drift": "缓慢漂移",
+      "aurora": "极光"
+    },
+    "respectMotionLabel": "尊重减少动态效果",
+    "respectMotionHint": "当系统要求减少动态效果时，让锁屏保持静止。",
+    "avatarLabel": "显示账户头像",
+    "avatarHint": "在共用或公共设备上，头像等于把姓名和面孔展示给任何路过的人。"
   }
 }

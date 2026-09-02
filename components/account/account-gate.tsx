@@ -13,6 +13,7 @@ import { PageLoading } from "@/components/ui/loading-states"
 import { isCapacitor } from "@/lib/tauri"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { downloadFile } from "@/lib/files/download"
+import { readLockScreenPreferences } from "@/lib/appearance/lock-screen-preferences"
 import { PASSWORD_MIN_LENGTH } from "@/lib/accounts/password-policy"
 import {
   selectActiveAccount,
@@ -46,6 +47,11 @@ export function AccountGate({ children }: AccountGateProps) {
   )
   const acknowledgeRecoveryKey = useAccountStore((state) => state.acknowledgeRecoveryKey)
   const activeAccount = useAccountStore(selectActiveAccount)
+  // The lock screen renders BEFORE the account database is open, so the
+  // appearance comes from the localStorage mirror rather than from the
+  // settings row, which is exactly the thing still locked. See
+  // `lib/appearance/lock-screen-preferences`.
+  const lockPreferences = useMemo(() => readLockScreenPreferences(), [])
 
   const displayNameId = useId()
   const passwordId = useId()
@@ -230,6 +236,8 @@ export function AccountGate({ children }: AccountGateProps) {
           onUnlock={unlockAccount}
           onRecoveryUnlock={unlockAccountWithRecoveryKey}
           onQuickUnlock={unlockAccountWithQuickMethod}
+          appearance={lockPreferences.settings}
+          activeWallpaperId={lockPreferences.activeWallpaperId}
           onResetLocalStorage={resetRefusedLocalDatabase}
         />
       </GateShell>

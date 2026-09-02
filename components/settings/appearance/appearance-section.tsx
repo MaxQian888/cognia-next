@@ -63,7 +63,7 @@ import {
   createPreviewDraftStore,
   usePreviewDraft,
 } from "./preview-draft-context"
-import { PersonalizationCard } from "../personalization-card"
+import { PersonalizationPanel } from "./panels/personalization-panel"
 import { cn } from "@/lib/utils"
 
 // Unchanged from the tabbed layout, so pre-merge deep links keep resolving
@@ -91,7 +91,7 @@ function renderPanel(panel: AppearancePanelId) {
     case "cursor":
       return <CursorTab />
     case "personalization":
-      return <PersonalizationCard />
+      return <PersonalizationPanel />
     case "a11y":
       return <A11yTab />
     case "advanced":

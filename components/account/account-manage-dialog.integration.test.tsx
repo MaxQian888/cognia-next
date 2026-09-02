@@ -17,6 +17,8 @@ import type { LocalAccountRecord } from "@/lib/accounts/account-types"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, string>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
+  // The lock-screen backdrop formats its clock and date through next-intl.
+  useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }))
 
 const noop = jest.fn()

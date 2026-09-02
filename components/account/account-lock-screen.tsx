@@ -66,6 +66,8 @@ import { cn } from "@/lib/utils"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { PasswordStrengthMeter } from "./password-strength-meter"
 import { QuickUnlockPanel } from "./quick-unlock/quick-unlock-panel"
+import { LockScreenBackdrop } from "./lock-screen-backdrop"
+import { DEFAULT_LOCK_SCREEN, type LockScreenSettings } from "@/types/appearance/lock-screen"
 import { isEnrollmentUsable, type QuickUnlockMethod } from "@/lib/accounts/quick-unlock/types"
 import type { QuickUnlockFailure } from "@/lib/accounts/quick-unlock/client"
 
@@ -127,6 +129,16 @@ export interface AccountLockScreenProps {
     method: QuickUnlockMethod,
     canonicalSecret: string
   ) => Promise<{ ok: boolean; reason?: QuickUnlockFailure }>
+  /**
+   * Lock-screen appearance. Absent falls back to the historical plain look,
+   * so a caller that does not pass it gets exactly what shipped before.
+   */
+  appearance?: LockScreenSettings
+  /**
+   * The wallpaper the app was last showing, for the `wallpaper` backdrop.
+   * Comes from the boot-safe mirror, not from the locked settings row.
+   */
+  activeWallpaperId?: string | null
   slowAfterMs?: number
   stuckAfterMs?: number
 }
@@ -140,6 +152,8 @@ export function AccountLockScreen({
   onRecoveryUnlock,
   supportsRecoveryKey,
   onQuickUnlock,
+  appearance,
+  activeWallpaperId = null,
   slowAfterMs = DEFAULT_SLOW_AFTER_MS,
   onResetLocalStorage,
   stuckAfterMs = DEFAULT_STUCK_AFTER_MS,
@@ -162,6 +176,7 @@ export function AccountLockScreen({
     accounts.find((candidate) => candidate.id === (activeAccountId ?? accounts[0]?.id))
       ?.quickUnlock ?? []
   ).filter(() => onQuickUnlock !== undefined)
+  const lockAppearance: LockScreenSettings = { ...DEFAULT_LOCK_SCREEN, ...(appearance ?? {}) }
   const [mode, setMode] = useState<Mode>(() =>
     quickEnrollments.some(isEnrollmentUsable) ? "quick" : "password"
   )
@@ -326,23 +341,27 @@ export function AccountLockScreen({
       data-testid="account-lock-screen"
       className="flex w-full max-w-sm flex-col gap-4"
     >
+      <LockScreenBackdrop settings={lockAppearance} activeWallpaperId={activeWallpaperId} />
+
       <header className="flex flex-col items-center gap-2 text-center">
-        <div className="relative">
-          <AvatarBadge
-            subject={{
-              name: account?.displayName ?? t("unknownAccount"),
-              avatarImageUrl: account?.avatarDataUrl,
-            }}
-            size={52}
-            textClassName="text-base font-medium"
-          />
-          <Surface
-            aria-hidden="true"
-            className="absolute -right-0.5 -bottom-0.5 flex size-5 items-center justify-center rounded-full border"
-          >
-            <LockKeyholeIcon className="size-3 text-muted-foreground" />
-          </Surface>
-        </div>
+        {lockAppearance.showAvatar && (
+          <div className="relative">
+            <AvatarBadge
+              subject={{
+                name: account?.displayName ?? t("unknownAccount"),
+                avatarImageUrl: account?.avatarDataUrl,
+              }}
+              size={52}
+              textClassName="text-base font-medium"
+            />
+            <Surface
+              aria-hidden="true"
+              className="absolute -right-0.5 -bottom-0.5 flex size-5 items-center justify-center rounded-full border"
+            >
+              <LockKeyholeIcon className="size-3 text-muted-foreground" />
+            </Surface>
+          </div>
+        )}
         <h1 className="text-lg font-semibold">
           {t("unlockTitle", { name: account?.displayName ?? t("unknownAccount") })}
         </h1>

@@ -9,6 +9,8 @@ import type { AccountSwitchController } from "./use-account-switch"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  // The lock-screen backdrop formats its clock and date through next-intl.
+  useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }))
 
 const beginMock = jest.fn<Promise<boolean>, [string]>()

@@ -1085,5 +1085,53 @@
     },
     "uploadHint": "Drop an image here or browse",
     "uploading": "Uploading…"
+  },
+  "lockScreen": {
+    "title": "Lock screen",
+    "description": "How the screen looks while the app is locked. The unlock card always keeps its own surface, so nothing here can make it harder to read.",
+    "backdropLabel": "Backdrop",
+    "backdrop": {
+      "theme": "Plain theme",
+      "wallpaper": "Follow the app wallpaper",
+      "pinned": "A specific wallpaper",
+      "solid": "Solid colour"
+    },
+    "pinnedLabel": "Wallpaper",
+    "pinnedPlaceholder": "Choose a wallpaper",
+    "pinnedEmpty": "Add an image or gradient wallpaper first.",
+    "solidLabel": "Colour",
+    "blurLabel": "Backdrop blur",
+    "dimLabel": "Backdrop dim",
+    "dimHint": "Darkens the backdrop so the unlock card stays readable.",
+    "dimTooLow": "A bright wallpaper may make the unlock card hard to read at this level.",
+    "clockLabel": "Clock",
+    "clock": {
+      "none": "Hidden",
+      "time": "Time",
+      "timeAndDate": "Time and date"
+    },
+    "hourCycleLabel": "Hour format",
+    "hourCycle": {
+      "auto": "Match language",
+      "h12": "12-hour",
+      "h23": "24-hour"
+    },
+    "greetingLabel": "Greeting",
+    "greeting": {
+      "none": "None",
+      "timeOfDay": "By time of day",
+      "custom": "Custom text"
+    },
+    "customGreetingLabel": "Greeting text",
+    "motionLabel": "Ambient motion",
+    "motion": {
+      "none": "Still",
+      "drift": "Slow drift",
+      "aurora": "Aurora"
+    },
+    "respectMotionLabel": "Respect reduced motion",
+    "respectMotionHint": "Hold the lock screen still when the system asks for less motion.",
+    "avatarLabel": "Show the account avatar",
+    "avatarHint": "On a shared or public machine, the avatar is a face and a name to anyone walking past."
   }
 }

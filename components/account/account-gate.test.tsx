@@ -9,6 +9,8 @@ import type { AccountStoreState } from "@/stores/account/account-store"
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, string>) =>
     values ? `${key}:${Object.values(values).join(",")}` : key,
+  // The lock-screen backdrop formats its clock and date through next-intl.
+  useFormatter: () => ({ dateTime: (value: Date) => value.toISOString() }),
 }))
 
 jest.mock("@/hooks/use-network-status", () => ({

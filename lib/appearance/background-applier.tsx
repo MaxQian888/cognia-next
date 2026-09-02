@@ -18,6 +18,8 @@ import { DEFAULT_WALLPAPER_ROTATION } from "@/types/appearance/wallpaper-rotatio
 import { withBuiltinPresets } from "@/lib/appearance/presets"
 import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import { useWallpaperRotation } from "@/hooks/appearance/use-wallpaper-rotation"
+import { writeLockScreenPreferences } from "@/lib/appearance/lock-screen-preferences"
+import { DEFAULT_LOCK_SCREEN } from "@/types/appearance/lock-screen"
 import { useDailyWallpaper } from "@/hooks/appearance/use-daily-wallpaper"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
@@ -57,6 +59,7 @@ export function BackgroundApplier(): null {
   const customCss = useSettingsStore((s) => s.customCss)
   const customCssEnabled = useSettingsStore((s) => s.customCssEnabled)
   const customCssScope = useSettingsStore((s) => s.customCssScope)
+  const lockScreen = useSettingsStore((s) => s.lockScreen)
 
   // The carousel timer and the daily-wallpaper scheduler. Both live here
   // rather than in initializers of their own so the whole background subsystem
@@ -118,6 +121,17 @@ export function BackgroundApplier(): null {
   useEffect(() => {
     applyUserCss(customCss, customCssEnabled, customCssScope)
   }, [customCss, customCssEnabled, customCssScope])
+
+  // Mirror the lock-screen appearance somewhere the LOCK SCREEN can read it.
+  // It renders before the account database is open, so the settings row that
+  // holds this is unreadable at exactly the moment it is needed. Written from
+  // here because this component only ever mounts inside the unlocked app.
+  useEffect(() => {
+    writeLockScreenPreferences({
+      settings: { ...DEFAULT_LOCK_SCREEN, ...(lockScreen ?? {}) },
+      activeWallpaperId: background.enabled ? background.activeId : null,
+    })
+  }, [lockScreen, background.enabled, background.activeId])
 
   return null
 }
