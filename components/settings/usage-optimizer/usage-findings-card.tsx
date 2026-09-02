@@ -12,8 +12,9 @@
  *   * Every finding carries the evidence it rests on. Four turns and four
  *     hundred turns must not look alike.
  *   * A `habit` or `info` finding shows no button, because there is nothing
- *     to click. Only a `fix` has a reversible action, and none ship yet, so
- *     the button is absent rather than present and inert.
+ *     to click. Only a `fix` carries a reversible action, and no detector
+ *     emits one yet (declared dormancy, pinned in `findings.test.ts`), so the
+ *     button is absent rather than present and inert.
  */
 
 import { useMemo, useState } from "react"

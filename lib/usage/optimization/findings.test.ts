@@ -200,3 +200,39 @@ describe("runDetectors", () => {
     expect(() => runDetectors({ rows: many(40, () => ({})), ...window })).not.toThrow()
   })
 })
+
+describe("declared dormancy: no detector emits an applicable fix yet", () => {
+  // The apply/undo machine in `actions.ts` is complete and reachable, but no
+  // shipped detector produces a `fix` finding, so nothing routes into it. That
+  // is deliberate: a one-click settings change should land with the detector
+  // that justifies it, not ahead of it. This test is the third axis of the
+  // dormancy rule (documented at the type, inert in the UI, pinned here), and
+  // it must be UPDATED, not deleted, by whoever adds the first fix.
+  const windows = [
+    { rows: many(120, () => ({})), fromMs: T0 - 30 * DAY, toMs: T0, resolve: flatPricing },
+    {
+      rows: [
+        row({ messageId: "a", runId: "r", turnId: "t1", attemptId: "1", at: T0, costUsd: 5 }),
+        row({ messageId: "b", runId: "r", turnId: "t1", attemptId: "2", at: T0 + 1, costUsd: 5 }),
+        row({ messageId: "c", runId: "r", turnId: "t2", attemptId: "1", at: T0 + 2, costUsd: 5 }),
+      ],
+      fromMs: T0 - 30 * DAY,
+      toMs: T0,
+      resolve: flatPricing,
+    },
+  ]
+
+  it("produces only habit and info findings", () => {
+    const seen = windows.flatMap((w) => runDetectors(w))
+    expect(seen.length).toBeGreaterThan(0)
+    for (const finding of seen) {
+      expect(finding.class).not.toBe("fix")
+      expect(finding.action).toBeUndefined()
+    }
+  })
+
+  it("scanned a non-empty set, so the assertion above means something", () => {
+    // A dormancy sweep that saw zero findings would pass vacuously.
+    expect(windows.flatMap((w) => runDetectors(w)).length).toBeGreaterThanOrEqual(2)
+  })
+})

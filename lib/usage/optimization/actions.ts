@@ -19,6 +19,13 @@
 // Repository files are NOT applied from here. They go through the Task
 // Workspace preview/apply/undo ledger, which already owns diff review and
 // rollback, and the action record just points at that run.
+//
+// DECLARED DORMANCY: this machine is complete and reachable, and no shipped
+// detector currently emits a `fix` finding, so nothing routes into it yet.
+// That is deliberate. A one-click settings change should land together with
+// the detector that justifies it, not ahead of it. The fact is pinned by
+// `findings.test.ts` ("declared dormancy"), which must be updated rather than
+// deleted by whoever adds the first fix.
 
 import type { SessionUsageRow } from "@/lib/db/session-usage"
 
