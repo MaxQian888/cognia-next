@@ -6,20 +6,44 @@
  * Surfaces both the eight built-in templates (seeded into the store via
  * `builtInTemplatesMap` in `initial-state.ts`) and any user-created templates,
  * with the same built-in / duplicate-to-fork / edit / delete UX used by
- * `teams-section.tsx` for character teams. The store already enforces the
- * built-in guards (deleteTemplate / updateTemplate refuse to mutate
- * `isBuiltIn: true` rows; importTemplates skips conflicts), so this panel is
- * a thin UI layer over the existing actions — no new store actions needed.
+ * `teams-section.tsx` for character teams. The store still owns CRUD: the
+ * built-in guards live there (deleteTemplate / updateTemplate refuse to mutate
+ * `isBuiltIn: true` rows), and the same registry serves
+ * `ctx.team.instantiateTemplate` for plugins.
  *
- * Picking "Use" instantiates a team via `createTeam` + `addTeammate` (mirroring
- * `app/agent-teams/page.tsx:onPickTemplate`) and routes to the workspace
- * via the static search-param route.
+ * The LIFECYCLE, though, is the unified template platform's. Picking "Use"
+ * goes through `service.preflight` and `service.instantiate` so the Squad it
+ * creates gets a `TemplateInstanceRecord`, which is the only thing that makes
+ * "update from template" and Detach expressible later on. It used to call the
+ * store writer directly, so no Squad in the app had lineage at all.
+ *
+ * A user row also carries what the platform knows about it (draft, published
+ * version, forked from) and the three actions that only exist there: Publish,
+ * which is what turns a private draft into something packageable, Export, and
+ * Fork. Plugin rows stay read-only, because the overlay registry is their
+ * source of truth and this panel is not it.
+ *
+ * Import is deliberately the platform's import, not the store's. The store had
+ * an `importTemplates` that took bare JSON with no signature, no manifest and
+ * no size bounds, and nothing ever called it. `service.importPackage` checks
+ * every one of those, so it replaced it rather than joining it.
  */
 
-import { useMemo, useState, useCallback } from "react"
+import { useMemo, useRef, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { CopyIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, UsersIcon } from "lucide-react"
+import {
+  CopyIcon,
+  DownloadIcon,
+  GitForkIcon,
+  PencilIcon,
+  PlayIcon,
+  PlusIcon,
+  Trash2Icon,
+  UploadIcon,
+  UploadCloudIcon,
+  UsersIcon,
+} from "lucide-react"
 import { nanoid } from "nanoid"
 
 import { Button } from "@/components/ui/button"
@@ -48,6 +72,11 @@ import {
 } from "@/components/ui/alert-dialog"
 import { toast } from "@/components/ui/sonner"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import {
+  TemplateExportDialog,
+  type TemplateExportRequest,
+} from "@/components/templates/template-export-dialog"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeamTemplate } from "@/types/agent/agent-team"
 import { createLogger } from "@cognia/logging"
@@ -57,8 +86,27 @@ import {
   type PluginAgentTeamTemplateWarning,
 } from "@/lib/plugin/registries/agent-team-template-registry"
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
-import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-template"
 import { publishSquadTemplateToPlatform } from "@/lib/agent-team/publish-template-to-platform"
+import { applySquadTemplate } from "@/lib/agent-team/apply-squad-template"
+import type { SquadTemplatePlatformStatus } from "@/lib/agent-team/squad-template-platform"
+import {
+  useSquadTemplatePlatformStatuses,
+  type SquadTemplateStatusRow,
+} from "@/hooks/squads/use-squad-template-platform-statuses"
+import { usePlatform } from "@/hooks/use-platform"
+import type { TemplateDefinitionEnvelope, TemplatePlatform } from "@/lib/templates/contracts"
+import { makeTemplateDraftId } from "@/lib/templates/draft-id"
+import { downloadTemplatePackage, templatePackageFilename } from "@/lib/templates/download-package"
+import type { InspectedTemplatePackage } from "@/lib/templates/package"
+import { getTemplateRuntime, type TemplateRuntime } from "@/lib/templates/runtime"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 
 const log = createLogger("settings.agent-teams")
 
@@ -73,10 +121,19 @@ const CATEGORIES: AgentTeamTemplate["category"][] = [
   "security",
 ]
 
-export function AgentTeamTemplatesSection() {
+export interface AgentTeamTemplatesSectionProps {
+  /** Injected in tests. Production resolves the singleton runtime. */
+  runtime?: TemplateRuntime
+}
+
+export function AgentTeamTemplatesSection({ runtime }: AgentTeamTemplatesSectionProps = {}) {
   const t = useTranslations("settings.agentTeams")
   const tCommon = useTranslations("common")
   const router = useRouter()
+  const platform = usePlatform()
+  const templatePlatform: TemplatePlatform =
+    platform === "mobile" ? "mobile" : platform === "web" ? "web" : "desktop"
+  const resolvedRuntime = useMemo(() => runtime ?? getTemplateRuntime(), [runtime])
 
   const templates = useAgentTeamStore((s) => s.templates)
   const createTeam = useAgentTeamStore((s) => s.createTeam)
@@ -88,6 +145,14 @@ export function AgentTeamTemplatesSection() {
 
   const [editing, setEditing] = useState<AgentTeamTemplate | null>(null)
   const [creating, setCreating] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [exportTarget, setExportTarget] = useState<
+    { origin: TemplateDefinitionEnvelope; releases: TemplateDefinitionEnvelope[] } | undefined
+  >(undefined)
+  const [pendingImport, setPendingImport] = useState<
+    { bytes: Uint8Array; inspected: InspectedTemplatePackage } | undefined
+  >(undefined)
+  const importRef = useRef<HTMLInputElement>(null)
 
   /**
    * Project a plugin-contributed `PluginAgentTeamTemplateDef` into the
@@ -130,17 +195,166 @@ export function AgentTeamTemplatesSection() {
     return { merged, pluginIndex }
   }, [templates])
 
+  /**
+   * The rows whose lifecycle belongs to this user.
+   *
+   * Built-ins are a per-boot overlay the app owns, and plugin rows belong to
+   * the registry that contributed them, so neither is publishable, exportable
+   * or forkable from here. Memoized because it is an effect dependency of the
+   * status read.
+   */
+  const ownedRows = useMemo<SquadTemplateStatusRow[]>(
+    () =>
+      sortedTemplates.merged
+        .filter((tpl) => !tpl.isBuiltIn && !sortedTemplates.pluginIndex.has(tpl.id))
+        .map((template) => ({ template })),
+    [sortedTemplates]
+  )
+  const statuses = useSquadTemplatePlatformStatuses(ownedRows, resolvedRuntime)
+
+  const fail = useCallback(
+    (error: unknown) => toast.error(error instanceof Error ? error.message : String(error)),
+    []
+  )
+
+  /**
+   * Use goes through the platform so the Squad records what it came from.
+   *
+   * `applySquadTemplate` falls back to the direct store writer only when the
+   * feature flag is off or the definition genuinely is not in the catalog, and
+   * the store actions are handed over for exactly that case.
+   */
   const handleUse = useCallback(
-    (template: AgentTeamTemplate) => {
-      const team = instantiateAgentTeamTemplate(template, {
-        createTeam,
-        addTeammate,
-        createTask,
+    async (template: AgentTeamTemplate, pluginSource?: string) => {
+      const result = await applySquadTemplate({
+        template,
+        ...(pluginSource ? { origin: { pluginSource } } : {}),
+        platform: templatePlatform,
+        actions: { createTeam, addTeammate, createTask },
+        runtime: resolvedRuntime,
       })
-      log.info("template_used", { templateId: template.id, teamId: team.id })
-      router.push(`/squads?id=${encodeURIComponent(team.id)}`)
+      log.info("template_used", {
+        templateId: template.id,
+        teamId: result.teamId,
+        via: result.via,
+      })
+      router.push(`/squads?id=${encodeURIComponent(result.teamId)}`)
     },
-    [addTeammate, createTask, createTeam, router]
+    [addTeammate, createTask, createTeam, resolvedRuntime, router, templatePlatform]
+  )
+
+  /**
+   * Publish the platform draft this template mirrors.
+   *
+   * `publish` refuses a bump that does not match its own suggestion, so the
+   * suggestion is fetched and shown by the save dialog in `SquadDeriveActions`.
+   * Here the gallery is publishing an existing draft rather than a fresh save,
+   * and the same rule applies: take the service's suggestion, do not invent a
+   * version.
+   */
+  const handlePublish = useCallback(
+    async (template: AgentTeamTemplate) => {
+      const status = statuses.byTemplateId[template.id]
+      if (!status?.draft) {
+        toast.error(t("publishUnavailable"))
+        return
+      }
+      const suggestion = await resolvedRuntime.service.getPublishSuggestion(status.definitionId)
+      const published = await resolvedRuntime.service.publish(status.definitionId, {
+        expectedRevision: status.draft.revision,
+        confirmedBump: suggestion.bump,
+      })
+      toast.success(t("publishedToast", { name: template.name, version: published.version }))
+      statuses.refresh()
+    },
+    [resolvedRuntime, statuses, t]
+  )
+
+  const handleOpenExport = useCallback(
+    async (template: AgentTeamTemplate) => {
+      const status = statuses.byTemplateId[template.id]
+      if (!status || status.state !== "published") {
+        toast.error(t("exportUnavailable"))
+        return
+      }
+      const releases = (await resolvedRuntime.repository.listReleases(status.definitionId)).filter(
+        (release) => release.version !== null && release.status !== "yanked"
+      )
+      const origin =
+        releases.find((release) => release.version === status.latestVersion) ?? releases[0]
+      if (!origin) {
+        toast.error(t("exportUnavailable"))
+        return
+      }
+      setExportTarget({ origin, releases })
+    },
+    [resolvedRuntime, statuses, t]
+  )
+
+  const runExport = useCallback(
+    async (request: TemplateExportRequest) => {
+      const exported = await resolvedRuntime.service.exportPackage(request)
+      downloadTemplatePackage(exported.bytes, templatePackageFilename(request.id, request.version))
+      setExportTarget(undefined)
+    },
+    [resolvedRuntime]
+  )
+
+  /**
+   * Fork lands in the platform library, NOT in this gallery.
+   *
+   * This panel lists store rows, and `fork` writes a platform draft under a new
+   * id with no store row behind it. Saying where it went is the honest answer:
+   * the alternative would be a second store write that no longer tracks the
+   * lineage `fork` just recorded.
+   */
+  const handleFork = useCallback(
+    async (template: AgentTeamTemplate) => {
+      const status = statuses.byTemplateId[template.id]
+      if (!status || status.state === "absent") {
+        toast.error(t("publishUnavailable"))
+        return
+      }
+      const forked = await resolvedRuntime.service.fork(status.definitionId, {
+        ...(status.latestVersion ? { version: status.latestVersion } : {}),
+        newId: makeTemplateDraftId("agentTeam", `${template.name} copy`),
+      })
+      toast.success(t("forkedToast", { id: forked.id }))
+      statuses.refresh()
+    },
+    [resolvedRuntime, statuses, t]
+  )
+
+  const inspectImport = useCallback(
+    async (file?: File) => {
+      if (!file) return
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      setPendingImport({ bytes, inspected: await resolvedRuntime.service.inspectPackage(bytes) })
+      if (importRef.current) importRef.current.value = ""
+    },
+    [resolvedRuntime]
+  )
+
+  const confirmImport = useCallback(async () => {
+    if (!pendingImport) return
+    await resolvedRuntime.service.importPackage(pendingImport.bytes, {
+      source: "file",
+      confirmed: true,
+    })
+    setPendingImport(undefined)
+    toast.success(t("importedToast", { count: pendingImport.inspected.definitions.length }))
+    statuses.refresh()
+  }, [pendingImport, resolvedRuntime, statuses, t])
+
+  /** Run an async action, report what happened, and never leave `busy` stuck. */
+  const guard = useCallback(
+    (fn: () => Promise<void>) => () => {
+      setBusy(true)
+      void fn()
+        .catch(fail)
+        .finally(() => setBusy(false))
+    },
+    [fail]
   )
 
   const handleDuplicate = useCallback(
@@ -186,17 +400,40 @@ export function AgentTeamTemplatesSection() {
           </Label>
           <p className="text-xs text-muted-foreground">{t("description")}</p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setEditing(null)
-            setCreating(true)
-          }}
-        >
-          <PlusIcon className="mr-2 size-4" />
-          {t("newTemplate")}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* The platform's import, with its signature, manifest and size
+              checks. The store's `importTemplates` took bare JSON with none of
+              them and had no caller at all. */}
+          <input
+            ref={importRef}
+            type="file"
+            accept=".cognia-template,application/zip"
+            className="hidden"
+            data-testid="agent-team-template-import-input"
+            onChange={(event) => guard(() => inspectImport(event.target.files?.[0]))()}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => importRef.current?.click()}
+            data-testid="agent-team-template-import"
+          >
+            <UploadIcon className="mr-2 size-4" />
+            {t("importPackage")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditing(null)
+              setCreating(true)
+            }}
+          >
+            <PlusIcon className="mr-2 size-4" />
+            {t("newTemplate")}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-2" data-testid="agent-team-templates-grid">
@@ -208,6 +445,11 @@ export function AgentTeamTemplatesSection() {
               template={tpl}
               pluginSource={pluginMeta?.pluginId}
               warnings={pluginMeta?.warnings}
+              platformStatus={statuses.byTemplateId[tpl.id]}
+              busy={busy}
+              onPublish={guard(() => handlePublish(tpl))}
+              onExport={guard(() => handleOpenExport(tpl))}
+              onFork={guard(() => handleFork(tpl))}
               editing={editing?.id === tpl.id}
               onEditStart={() => setEditing(tpl)}
               onEditCancel={() => setEditing(null)}
@@ -221,7 +463,7 @@ export function AgentTeamTemplatesSection() {
                 void publishSquadTemplateToPlatform({ ...tpl, ...patch })
                 toast.success(t("updatedToast", { name: patch.name ?? tpl.name }))
               }}
-              onUse={() => handleUse(tpl)}
+              onUse={guard(() => handleUse(tpl, pluginMeta?.pluginId))}
               onDuplicate={() => handleDuplicate(tpl)}
               onDelete={() => handleDelete(tpl)}
               tCommon={tCommon}
@@ -256,6 +498,70 @@ export function AgentTeamTemplatesSection() {
           }}
         />
       )}
+
+      {/* Reused whole. A package can bundle up to 256 releases, and the Studio
+          already has the picker for choosing which. */}
+      <TemplateExportDialog
+        {...(exportTarget ? { origin: exportTarget.origin } : {})}
+        releases={exportTarget?.releases ?? []}
+        onOpenChange={(open) => {
+          if (!open) setExportTarget(undefined)
+        }}
+        onExport={(request) => guard(() => runExport(request))()}
+      />
+
+      <Dialog
+        open={Boolean(pendingImport)}
+        onOpenChange={(open) => !open && setPendingImport(undefined)}
+      >
+        <DialogContent data-testid="agent-team-template-import-dialog">
+          <DialogHeader>
+            <DialogTitle>{t("importTitle")}</DialogTitle>
+            <DialogDescription>{t("importBody")}</DialogDescription>
+          </DialogHeader>
+          {pendingImport ? (
+            <div className="space-y-3 text-sm">
+              {/* Only the two trust levels the app cannot vouch for are
+                  alarming. A correctly signed package from a publisher this
+                  machine trusts is not the same thing as an unsigned one, and
+                  showing both the same way is how four trust levels stop
+                  meaning anything. */}
+              <Alert
+                variant={
+                  pendingImport.inspected.trust === "unsigned" ||
+                  pendingImport.inspected.trust === "signed-unknown"
+                    ? "destructive"
+                    : "default"
+                }
+                data-testid="agent-team-template-import-trust"
+                data-trust={pendingImport.inspected.trust}
+              >
+                <AlertTitle>{t(`importTrust.${pendingImport.inspected.trust}`)}</AlertTitle>
+                <AlertDescription>{t("importInert")}</AlertDescription>
+              </Alert>
+              <p>{pendingImport.inspected.manifest.name}</p>
+              <p>
+                {t("importDefinitionCount", {
+                  count: pendingImport.inspected.definitions.length,
+                })}
+              </p>
+              <p className="break-all font-mono text-xs">{pendingImport.inspected.fingerprint}</p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingImport(undefined)}>
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={guard(confirmImport)}
+              data-testid="agent-team-template-import-confirm"
+            >
+              {t("importConfirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -268,6 +574,12 @@ interface RowProps {
   pluginSource?: string
   /** Non-blocking dependency warnings stamped by `validateTemplateRequires`. */
   warnings?: readonly PluginAgentTeamTemplateWarning[]
+  /** What the unified platform holds for this row. Absent while it loads. */
+  platformStatus?: SquadTemplatePlatformStatus
+  busy?: boolean
+  onPublish: () => void
+  onExport: () => void
+  onFork: () => void
   editing: boolean
   onEditStart: () => void
   onEditCancel: () => void
@@ -283,6 +595,11 @@ function TemplateRow({
   template,
   pluginSource,
   warnings,
+  platformStatus,
+  busy = false,
+  onPublish,
+  onExport,
+  onFork,
   editing,
   onEditStart,
   onEditCancel,
@@ -300,6 +617,11 @@ function TemplateRow({
   // a tooltip so operators install the dependency plugin first.
   const isPluginSource = !!pluginSource
   const hasMissingDeps = (warnings?.length ?? 0) > 0
+  // Only the user's own rows have a lifecycle to offer. A built-in is a
+  // per-boot overlay the app owns, and a plugin row belongs to the registry
+  // that contributed it.
+  const owned = !template.isBuiltIn && !isPluginSource
+  const published = platformStatus?.state === "published"
   if (editing) {
     return (
       <TemplateEditor
@@ -354,6 +676,32 @@ function TemplateRow({
             <Badge variant="outline" className="text-[10px]">
               {template.category}
             </Badge>
+            {/* The row says what the platform holds, because "draft" and
+                "v1.2.0" are the difference between a template you can hand to
+                someone and one that only exists on this machine. */}
+            {owned && platformStatus ? (
+              <Badge
+                variant={published ? "secondary" : "outline"}
+                className="text-[10px]"
+                data-testid={`platform-status-${template.id}`}
+                data-state={platformStatus.state}
+              >
+                {published
+                  ? t("platformPublished", { version: platformStatus.latestVersion ?? "" })
+                  : platformStatus.state === "draft"
+                    ? t("platformDraft")
+                    : t("platformAbsent")}
+              </Badge>
+            ) : null}
+            {platformStatus?.derivedFrom ? (
+              <Badge
+                variant="outline"
+                className="text-[10px]"
+                data-testid={`fork-of-${template.id}`}
+              >
+                {t("forkOf", { id: platformStatus.derivedFrom.definitionId })}
+              </Badge>
+            ) : null}
           </div>
           {template.description && (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
@@ -406,6 +754,54 @@ function TemplateRow({
           >
             <CopyIcon className="size-3.5" />
           </Button>
+          {/* Rendered and disabled rather than hidden on a row that is not
+              ready: "this template has no version yet" and "this app cannot
+              publish" look identical once the button disappears, and only the
+              first is something a person can act on. */}
+          {owned ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={onPublish}
+                disabled={busy || platformStatus?.state !== "draft"}
+                title={platformStatus?.state === "draft" ? t("publish") : t("publishUnavailable")}
+                aria-label={t("publishAria", { name: template.name })}
+                data-testid={`publish-${template.id}`}
+              >
+                <UploadCloudIcon className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={onExport}
+                disabled={busy || !published}
+                title={published ? t("exportPackage") : t("exportUnavailable")}
+                aria-label={t("exportAria", { name: template.name })}
+                data-testid={`export-${template.id}`}
+              >
+                <DownloadIcon className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={onFork}
+                disabled={busy || !platformStatus || platformStatus.state === "absent"}
+                title={
+                  platformStatus && platformStatus.state !== "absent"
+                    ? t("fork")
+                    : t("publishUnavailable")
+                }
+                aria-label={t("forkAria", { name: template.name })}
+                data-testid={`fork-${template.id}`}
+              >
+                <GitForkIcon className="size-3.5" />
+              </Button>
+            </>
+          ) : null}
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button

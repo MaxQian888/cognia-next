@@ -20,19 +20,21 @@ jest.mock("@/lib/ai/agent/team/consensus-orchestrator", () => ({
 }))
 
 let mockConsensus: ConsensusRequest[] = []
-let mockTeammateId: string | null = "v1"
+let mockRoster: Array<{ id: string; name: string }> = [{ id: "v1", name: "Ada" }]
+let mockLeadId: string | undefined = "v1"
 
 jest.mock("@/stores/agent/agent-team-store", () => ({
   useAgentTeamStore: (selector: (state: unknown) => unknown) =>
     selector({
       consensus: {},
-      teams: {},
+      teams: { "team-42": { leadId: mockLeadId } },
+      teammates: {},
       activeTeamId: null,
-      selectedTeammateId: mockTeammateId,
     }),
 }))
 
 let namedTeamIds: (string | undefined)[] = []
+let rosterTeamIds: (string | undefined)[] = []
 jest.mock("@/stores/agent/agent-team-store/selectors", () => ({
   selectActiveTeamConsensus: () => mockConsensus,
   // Records what the panel asked for, so a test can prove it named its team
@@ -41,7 +43,10 @@ jest.mock("@/stores/agent/agent-team-store/selectors", () => ({
     namedTeamIds.push(teamId)
     return mockConsensus
   },
-  selectSelectedTeammateId: () => mockTeammateId,
+  selectTeamTeammates: (_state: unknown, teamId: string | undefined) => {
+    rosterTeamIds.push(teamId)
+    return mockRoster
+  },
 }))
 
 import { ConsensusPanel } from "./consensus-panel"
@@ -67,7 +72,9 @@ describe("ConsensusPanel", () => {
     cancelConsensusMock.mockReset()
     resolveConsensusMock.mockReset()
     mockConsensus = []
-    mockTeammateId = "v1"
+    mockRoster = [{ id: "v1", name: "Ada" }]
+    mockLeadId = "v1"
+    rosterTeamIds = []
   })
 
   it("shows the empty hint when there are no consensus rows", () => {
@@ -75,7 +82,7 @@ describe("ConsensusPanel", () => {
     expect(screen.getByText("empty")).toBeInTheDocument()
   })
 
-  it("renders an open consensus with vote buttons enabled when a teammate is selected", () => {
+  it("renders an open consensus with vote buttons enabled when the roster has a member", () => {
     mockConsensus = [makeConsensus()]
     render(<ConsensusPanel />)
     expect(screen.getByText("Pick a color")).toBeInTheDocument()
@@ -89,13 +96,35 @@ describe("ConsensusPanel", () => {
     })
   })
 
-  it("disables vote buttons when no teammate is selected", () => {
+  it("disables vote buttons — and says why — when the team has no members", () => {
     mockConsensus = [makeConsensus()]
-    mockTeammateId = null
+    mockRoster = []
+    mockLeadId = undefined
     render(<ConsensusPanel />)
     for (const btn of screen.getAllByText("vote")) {
       expect(btn.closest("button")).toBeDisabled()
     }
+    // Rendered rather than hidden: an absent control cannot say that the fix
+    // is to put someone on the team.
+    expect(screen.getByTestId("consensus-voter-picker")).toBeDisabled()
+  })
+
+  it("votes as the team lead by default and as whoever the picker names", () => {
+    mockConsensus = [makeConsensus()]
+    mockRoster = [
+      { id: "member", name: "Grace" },
+      { id: "lead", name: "Ada" },
+    ]
+    mockLeadId = "lead"
+    render(<ConsensusPanel teamId="team-42" />)
+    // The roster comes from the SAME team the rows did.
+    expect(rosterTeamIds).toEqual(["team-42"])
+    fireEvent.click(screen.getAllByText("vote")[0])
+    expect(castVoteMock).toHaveBeenCalledWith({
+      consensusId: "c1",
+      voterId: "lead",
+      optionIndex: 0,
+    })
   })
 
   it("shows the forceResolve button only for lead_override consensus", () => {

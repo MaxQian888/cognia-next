@@ -9,50 +9,18 @@ import {
   selectTeammates,
   selectTasks,
   selectMessages,
-  selectActiveTeamId,
-  selectSelectedTeammateId,
-  selectDisplayMode,
-  selectIsPanelOpen,
-  selectWorkspaceTab,
-  selectWorkspaceFocus,
-  selectWorkspaceDetailOpen,
   selectTemplates,
   selectDefaultConfig,
   selectConsensus,
   selectSharedMemory,
   selectDelegations,
   selectEvents,
-  selectTeamCount,
-  selectActiveTeam,
-  selectActiveTeamRoutingAssessment,
-  selectActiveTeamSelectedExecutionPattern,
-  selectActiveTeamExecutionReport,
-  selectActiveTeamGovernanceSummary,
-  selectActiveTeammates,
-  selectActiveTeamTeammatesByStatus,
-  selectActiveTeamIdleTeammates,
-  selectActiveTeamExecutingTeammates,
-  selectActiveTeamTasks,
-  selectActiveTeamTasksByStatus,
-  selectActiveTeamPendingTasks,
-  selectActiveTeamBlockedTasks,
-  selectActiveTeamCompletedTasks,
-  selectActiveTeamInProgressTasks,
-  selectActiveTeamTasksByAssignee,
-  selectActiveTeamUnassignedTasks,
-  selectActiveTeamMessages,
-  selectActiveTeamUnreadMessages,
-  selectTeamUnreadCount,
-  selectTotalUnreadCount,
-  selectActiveTeamMessagesByType,
-  selectActiveTeamStructuredMessages,
+  selectTeamTeammates,
   selectActiveTeamConsensus,
-  selectActiveTeamPendingConsensus,
-  selectActiveTeamSharedMemory,
-  selectActiveTeamSharedMemoryEntries,
+  selectTeamConsensus,
   selectActiveTeamDelegations,
+  selectTeamDelegations,
   selectActiveDelegations,
-  selectActiveTeamEvents,
   selectSharedMemoryEntriesForReader,
   isEntryReadableBy,
   OPERATOR_READER_ID,
@@ -88,9 +56,9 @@ describe("agent-team-store barrel", () => {
   it("re-exports useAgentTeamStore plus selectors", () => {
     expect(barrel.useAgentTeamStore).toBe(useAgentTeamStore)
     expect(typeof barrel.selectTeams).toBe("function")
-    expect(typeof barrel.selectActiveTeam).toBe("function")
-    expect(typeof barrel.selectTotalUnreadCount).toBe("function")
-    expect(typeof barrel.selectActiveTeamGovernanceSummary).toBe("function")
+    expect(typeof barrel.selectTeamTeammates).toBe("function")
+    expect(typeof barrel.selectTeamConsensus).toBe("function")
+    expect(typeof barrel.selectTeamDelegations).toBe("function")
   })
 })
 
@@ -106,74 +74,9 @@ describe("agent-team-store base selectors against empty initial state", () => {
     expect(selectSharedMemory(state)).toEqual({})
     expect(selectDelegations(state)).toEqual({})
     expect(selectEvents(state)).toEqual([])
-    expect(selectActiveTeamId(state)).toBeNull()
-    expect(selectSelectedTeammateId(state)).toBeNull()
-    expect(selectDisplayMode(state)).toBe("expanded")
-    expect(selectIsPanelOpen(state)).toBe(false)
-    expect(selectWorkspaceTab(state)).toBe("overview")
-    expect(selectWorkspaceFocus(state)).toEqual({
-      teammateId: null,
-      taskId: null,
-      messageId: null,
-    })
-    expect(selectWorkspaceDetailOpen(state)).toBe(true)
     expect(selectDefaultConfig(state)).toBeDefined()
     // builtInTemplates seeded into templates
     expect(Object.keys(selectTemplates(state)).length).toBeGreaterThan(0)
-  })
-})
-
-describe("agent-team-store derived selectors with no active team", () => {
-  const state = baseState()
-
-  it("returns empty/undefined collections", () => {
-    expect(selectTeamCount(state)).toBe(0)
-    expect(selectActiveTeam(state)).toBeUndefined()
-    expect(selectActiveTeamRoutingAssessment(state)).toBeUndefined()
-    expect(selectActiveTeamSelectedExecutionPattern(state)).toBeUndefined()
-    expect(selectActiveTeamExecutionReport(state)).toBeUndefined()
-    expect(selectActiveTeammates(state)).toEqual([])
-    expect(selectActiveTeamIdleTeammates(state)).toEqual([])
-    expect(selectActiveTeamExecutingTeammates(state)).toEqual([])
-    expect(selectActiveTeamTeammatesByStatus("idle")(state)).toEqual([])
-    expect(selectActiveTeamTasks(state)).toEqual([])
-    expect(selectActiveTeamPendingTasks(state)).toEqual([])
-    expect(selectActiveTeamBlockedTasks(state)).toEqual([])
-    expect(selectActiveTeamCompletedTasks(state)).toEqual([])
-    expect(selectActiveTeamInProgressTasks(state)).toEqual([])
-    expect(selectActiveTeamTasksByStatus("pending")(state)).toEqual([])
-    expect(selectActiveTeamTasksByAssignee("u-1")(state)).toEqual([])
-    expect(selectActiveTeamUnassignedTasks(state)).toEqual([])
-    expect(selectActiveTeamMessages(state)).toEqual([])
-    expect(selectActiveTeamUnreadMessages(state)).toEqual([])
-    expect(selectActiveTeamMessagesByType("direct")(state)).toEqual([])
-    expect(selectActiveTeamStructuredMessages(state)).toEqual([])
-    expect(selectActiveTeamConsensus(state)).toEqual([])
-    expect(selectActiveTeamPendingConsensus(state)).toEqual([])
-    expect(selectActiveTeamSharedMemory(state)).toEqual({})
-    expect(selectActiveTeamSharedMemoryEntries(state)).toEqual([])
-    expect(selectActiveTeamDelegations(state)).toEqual([])
-    expect(selectActiveTeamEvents(state)).toEqual([])
-  })
-
-  it("selectTeamUnreadCount returns 0 for unknown teams and selectTotalUnreadCount returns 0 in empty state", () => {
-    expect(selectTeamUnreadCount("missing")(state)).toBe(0)
-    expect(selectTotalUnreadCount(state)).toBe(0)
-  })
-
-  it("selectActiveTeamGovernanceSummary returns a defaulted summary when no team is active", () => {
-    const summary = selectActiveTeamGovernanceSummary(state)
-    expect(summary.checkpointCount).toBe(0)
-    expect(summary.approvalsRequested).toBe(0)
-    expect(summary.delegatedTasks).toBe(0)
-    expect(summary.blockedTasks).toBe(0)
-    expect(summary.completedTasks).toBe(0)
-    expect(summary.failedTasks).toBe(0)
-    expect(summary.nextActions).toEqual([])
-  })
-
-  it("selectActiveDelegations returns empty when no delegations", () => {
-    expect(selectActiveDelegations(state)).toEqual([])
   })
 })
 
@@ -361,138 +264,43 @@ describe("agent-team-store derived selectors with populated state", () => {
 
   const state = buildPopulatedState()
 
-  it("derives team-level selectors", () => {
-    expect(selectTeamCount(state)).toBe(1)
-    expect(selectActiveTeam(state)?.id).toBe("team-1")
-    expect(selectActiveTeamRoutingAssessment(state)?.recommendedPattern).toBe("manager_worker")
-    expect(selectActiveTeamSelectedExecutionPattern(state)).toBe("parallel_specialists")
-    expect(selectActiveTeamExecutionReport(state)?.id).toBe("r-1")
-
-    const summary = selectActiveTeamGovernanceSummary(state)
-    expect(summary.recommendedPattern).toBe("manager_worker")
-    expect(summary.activeExecutionPattern).toBe("manager_worker")
-    expect(summary.selectedExecutionPattern).toBe("parallel_specialists")
-    expect(summary.routingReason).toBe("ok")
-    expect(summary.confidence).toBe(0.8)
-    expect(summary.nextActions).toEqual(["next"])
-    expect(summary.traceSessionId).toBe("trace-1")
-    expect(summary.checkpointCount).toBe(1)
-    expect(summary.approvalsRequested).toBe(1)
-    expect(summary.delegatedTasks).toBe(1)
-    expect(summary.blockedTasks).toBe(1)
-    expect(summary.completedTasks).toBe(1)
-    expect(summary.failedTasks).toBe(0)
-  })
-
-  it("derives teammate selectors", () => {
-    expect(
-      selectActiveTeammates(state)
-        .map((t) => t.id)
-        .sort()
-    ).toEqual(["lead-1", "tm-1", "tm-2"])
-    expect(
-      selectActiveTeamIdleTeammates(state)
-        .map((t) => t.id)
-        .sort()
-    ).toEqual(["lead-1", "tm-2"])
-    expect(selectActiveTeamExecutingTeammates(state).map((t) => t.id)).toEqual(["tm-1"])
-    expect(selectActiveTeamTeammatesByStatus("executing")(state).map((t) => t.id)).toEqual(["tm-1"])
-  })
-
-  it("derives task selectors", () => {
-    expect(selectActiveTeamTasks(state).map((t) => t.id)).toEqual([
-      "task-1",
-      "task-2",
-      "task-3",
-      "task-4",
-      "task-5",
+  it("selectTeamTeammates returns the named team's roster in roster order", () => {
+    expect(selectTeamTeammates(state, "team-1").map((t) => t.id)).toEqual([
+      "lead-1",
+      "tm-1",
+      "tm-2",
     ])
-    expect(selectActiveTeamTasksByStatus("pending")(state).map((t) => t.id)).toEqual([
-      "task-1",
-      "task-5",
-    ])
-    expect(selectActiveTeamPendingTasks(state).map((t) => t.id)).toEqual(["task-1", "task-5"])
-    expect(selectActiveTeamBlockedTasks(state).map((t) => t.id)).toEqual(["task-2"])
-    expect(selectActiveTeamCompletedTasks(state).map((t) => t.id)).toEqual(["task-3"])
-    expect(selectActiveTeamInProgressTasks(state).map((t) => t.id)).toEqual(["task-4"])
+    // Unknown and absent team ids are the same answer: nothing, not a throw.
+    expect(selectTeamTeammates(state, "team-missing")).toEqual([])
+    expect(selectTeamTeammates(state, undefined)).toEqual([])
+  })
+
+  it("derives consensus and delegations for a NAMED team", () => {
     expect(
-      selectActiveTeamTasksByAssignee("tm-1")(state)
-        .map((t) => t.id)
+      selectTeamConsensus(state, "team-1")
+        .map((c) => c.id)
         .sort()
-    ).toEqual(["task-3", "task-4"])
-    expect(selectActiveTeamUnassignedTasks(state).map((t) => t.id)).toEqual(["task-1", "task-5"])
-  })
-
-  it("derives message selectors and unread counts", () => {
-    expect(selectActiveTeamMessages(state).map((m) => m.id)).toEqual(["msg-1", "msg-2", "msg-3"])
-    expect(selectActiveTeamUnreadMessages(state).map((m) => m.id)).toEqual(["msg-1", "msg-3"])
-    expect(selectActiveTeamMessagesByType("direct")(state).map((m) => m.id)).toEqual([
-      "msg-1",
-      "msg-3",
-    ])
-    expect(selectActiveTeamStructuredMessages(state).map((m) => m.id)).toEqual(["msg-3"])
-    expect(selectTeamUnreadCount("team-1")(state)).toBe(2)
-    expect(selectTotalUnreadCount(state)).toBe(2)
-  })
-
-  it("returns 0 from selectTeamUnreadCount when team has no messageIds or messages map empty", () => {
-    const partial: AgentTeamState = {
-      ...state,
-      teams: {
-        "team-2": { ...state.teams["team-1"], id: "team-2", messageIds: [] },
-      },
-    } as AgentTeamState
-    expect(selectTeamUnreadCount("team-2")(partial)).toBe(0)
-    // also exercise undefined messages map branch
-    const noMessages = { ...partial, messages: undefined as unknown as AgentTeamState["messages"] }
-    expect(selectTeamUnreadCount("team-2")(noMessages)).toBe(0)
-  })
-
-  it("selectTotalUnreadCount returns 0 when teams or messages map missing", () => {
+    ).toEqual(["c-1", "c-2"])
+    expect(selectTeamConsensus(state, "team-missing")).toEqual([])
     expect(
-      selectTotalUnreadCount({
-        ...state,
-        teams: undefined as unknown as AgentTeamState["teams"],
-      })
-    ).toBe(0)
-    expect(
-      selectTotalUnreadCount({
-        ...state,
-        messages: undefined as unknown as AgentTeamState["messages"],
-      })
-    ).toBe(0)
+      selectTeamDelegations(state, "team-1")
+        .map((d) => d.id)
+        .sort()
+    ).toEqual(["d-1", "d-2"])
+    expect(selectActiveDelegations(state).map((d) => d.id)).toEqual(["d-1"])
   })
 
-  it("selectTotalUnreadCount tolerates teams without messageIds", () => {
-    const team2 = {
-      ...state.teams["team-1"],
-      id: "team-2",
-      messageIds: undefined as unknown as string[],
-    }
-    const next: AgentTeamState = {
-      ...state,
-      teams: { ...state.teams, "team-2": team2 },
-    }
-    // Total unread still equals 2 because team-2 has no messages
-    expect(selectTotalUnreadCount(next)).toBe(2)
-  })
-
-  it("derives consensus / shared memory / delegations / events selectors", () => {
+  it("the activeTeamId fallbacks still resolve the last-created team", () => {
     expect(
       selectActiveTeamConsensus(state)
         .map((c) => c.id)
         .sort()
     ).toEqual(["c-1", "c-2"])
-    expect(selectActiveTeamPendingConsensus(state).map((c) => c.id)).toEqual(["c-1"])
-    expect(Object.keys(selectActiveTeamSharedMemory(state))).toEqual(["mem"])
-    expect(selectActiveTeamSharedMemoryEntries(state)).toHaveLength(1)
     expect(
       selectActiveTeamDelegations(state)
         .map((d) => d.id)
         .sort()
     ).toEqual(["d-1", "d-2"])
-    expect(selectActiveDelegations(state).map((d) => d.id)).toEqual(["d-1"])
-    expect(selectActiveTeamEvents(state).map((e) => e.type)).toEqual(["team_created"])
   })
 
   it("selectActiveTeamConsensus tolerates a team with no consensusIds", () => {
@@ -503,42 +311,6 @@ describe("agent-team-store derived selectors with populated state", () => {
       },
     } as unknown as AgentTeamState
     expect(selectActiveTeamConsensus(partial)).toEqual([])
-  })
-
-  it("selectActiveTeamGovernanceSummary falls back to executionReport.routingAssessment", () => {
-    const stateWithoutTeamRouting: AgentTeamState = {
-      ...state,
-      teams: {
-        "team-1": {
-          ...state.teams["team-1"],
-          routingAssessment: undefined,
-          selectedExecutionPattern: undefined,
-          executionReport: {
-            ...state.teams["team-1"].executionReport!,
-            routingAssessment: state.teams["team-1"].routingAssessment,
-          },
-        },
-      },
-    } as AgentTeamState
-    const summary = selectActiveTeamGovernanceSummary(stateWithoutTeamRouting)
-    expect(summary.recommendedPattern).toBe("manager_worker")
-    expect(summary.routingReason).toBe("ok")
-    expect(summary.confidence).toBe(0.8)
-  })
-
-  it("selectActiveTeamGovernanceSummary handles no executionReport at all", () => {
-    const stateWithoutReport: AgentTeamState = {
-      ...state,
-      teams: {
-        "team-1": {
-          ...state.teams["team-1"],
-          executionReport: undefined,
-        },
-      },
-    } as AgentTeamState
-    const summary = selectActiveTeamGovernanceSummary(stateWithoutReport)
-    expect(summary.checkpointCount).toBe(0)
-    expect(summary.nextActions).toEqual([])
   })
 })
 
@@ -613,16 +385,15 @@ describe("agent-team-store initial-state shape", () => {
     expect(initialState.sharedMemory).toEqual({})
     expect(initialState.delegations).toEqual({})
     expect(initialState.activeTeamId).toBeNull()
-    expect(initialState.selectedTeammateId).toBeNull()
+    // `displayMode` / `workspaceTab` are intentionally inert: persisted so an
+    // older build's blob round-trips, read and written by nothing. See the
+    // notes on their declarations in `types.ts`.
     expect(initialState.displayMode).toBe("expanded")
-    expect(initialState.isPanelOpen).toBe(false)
     expect(initialState.workspaceTab).toBe("overview")
-    expect(initialState.workspaceFocus).toEqual({
-      teammateId: null,
-      taskId: null,
-      messageId: null,
-    })
-    expect(initialState.workspaceDetailOpen).toBe(true)
+    expect("selectedTeammateId" in initialState).toBe(false)
+    expect("isPanelOpen" in initialState).toBe(false)
+    expect("workspaceFocus" in initialState).toBe(false)
+    expect("workspaceDetailOpen" in initialState).toBe(false)
     expect(initialState.defaultConfig.executionMode).toBeDefined()
     expect(Object.keys(initialState.templates).length).toBeGreaterThan(0)
   })
@@ -631,7 +402,9 @@ describe("agent-team-store initial-state shape", () => {
 describe("agent-team-store store-level config", () => {
   it("registers a localStorage persist key and partializes the right shape", () => {
     useAgentTeamStore.getState().reset()
-    useAgentTeamStore.getState().setDisplayMode("compact")
+    // `setDisplayMode` went with the retired workspace shell. The field is
+    // still persisted so an older blob round-trips, which is what this asserts.
+    useAgentTeamStore.setState({ displayMode: "compact" })
     const stored = window.localStorage.getItem("cognia-agent-teams")
     expect(stored).not.toBeNull()
     const parsed = JSON.parse(stored as string)

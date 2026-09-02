@@ -10,8 +10,6 @@ import {
   type AgentTeamConfig,
   type AgentTeamTemplate,
   type TeamDelegationRecord,
-  type TeamCapabilityBundle,
-  type TeammateCapabilityOverlay,
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
 import { assertNoNewRawTeammateCredentials } from "@/lib/ai/agent/team/execution-binding-resolver"
@@ -22,10 +20,6 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { DEFAULT_PROJECT_ID } from "@/lib/db/project-defaults"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
-import type {
-  CapabilityAuditWarning,
-  CapabilityAuditBucket,
-} from "@/lib/ai/agent/team/capability-audit"
 
 const agentTeamLogger = loggers.agent.child("team-store")
 
@@ -57,72 +51,92 @@ const removeId = (ids: string[], id: string): string[] =>
   ids.filter((existingId) => existingId !== id)
 
 /**
- * Group an audit's stale ids by capability bucket. Shared by the team and
- * teammate cleanup paths in `clearStaleCapabilityIds`.
+ * Force every still-running teammate of a team to `shutdown`.
+ *
+ * A module helper rather than a store action: its only caller is `deleteTeam`,
+ * which shuts the roster down before it drops the rows. It was a public action
+ * for the retired `/agent-teams/workspace` batch bar, and nothing outside this
+ * file has called it since ADR-0140 took that surface out.
  */
-function staleIdsByBucket(
-  warnings: CapabilityAuditWarning[]
-): Map<CapabilityAuditBucket, Set<string>> {
-  const byBucket = new Map<CapabilityAuditBucket, Set<string>>()
-  for (const w of warnings) {
-    const set = byBucket.get(w.bucket) ?? new Set<string>()
-    set.add(w.missingId)
-    byBucket.set(w.bucket, set)
+function shutDownTeammates(
+  state: AgentTeamState,
+  teamId: string
+): Partial<AgentTeamState> | AgentTeamState {
+  const team = state.teams[teamId]
+  if (!team) return state
+
+  const updatedTeammates = { ...state.teammates }
+  for (const id of team.teammateIds) {
+    const tm = updatedTeammates[id]
+    if (tm && tm.status !== "shutdown" && tm.status !== "completed" && tm.status !== "failed") {
+      updatedTeammates[id] = { ...tm, status: "shutdown", currentTaskId: undefined }
+    }
   }
-  return byBucket
+  return { teammates: updatedTeammates }
 }
 
-const BUNDLE_LIST_KEYS: ReadonlyArray<keyof TeamCapabilityBundle> = [
-  "mcpServerIds",
-  "skillIds",
-  "nativeAnthropicToolIds",
-  "characterPackIds",
-  "externalAgentPresetIds",
-  "subagentIds",
-  "a2uiTemplateIds",
-]
+/**
+ * Drop a team and everything keyed to it: roster, tasks, messages, consensus,
+ * shared memory, delegations and the persisted Editor session.
+ *
+ * Also a module helper for the same reason as `shutDownTeammates` — `deleteTeam`
+ * is the only caller. Keeping it on the public state surface after the
+ * workspace batch bar went would have left an unreferenced second way to
+ * delete a team, one that skips `deleteTeam`'s durable-runtime purge.
+ */
+function cleanUpTeam(
+  state: AgentTeamState,
+  teamId: string
+): Partial<AgentTeamState> | AgentTeamState {
+  const team = state.teams[teamId]
+  if (!team) return state
 
-/** Drop stale ids from a team-level capability bundle. Empty buckets are removed. */
-function stripStaleFromBundle(
-  bundle: TeamCapabilityBundle | undefined,
-  warnings: CapabilityAuditWarning[]
-): TeamCapabilityBundle {
-  const byBucket = staleIdsByBucket(warnings)
-  const next: TeamCapabilityBundle = { ...bundle }
-  for (const bucket of BUNDLE_LIST_KEYS) {
-    const staleSet = byBucket.get(bucket)
-    const current = next[bucket]
-    if (!staleSet || !current) continue
-    const filtered = current.filter((id) => !staleSet.has(id))
-    if (filtered.length > 0) next[bucket] = filtered
-    else delete next[bucket]
-  }
-  return next
-}
+  const { [teamId]: _, ...restTeams } = state.teams
 
-/** Drop stale ids from a teammate overlay's add/replace lists per bucket. */
-function stripStaleFromOverlay(
-  overlay: TeammateCapabilityOverlay | undefined,
-  warnings: CapabilityAuditWarning[]
-): TeammateCapabilityOverlay | undefined {
-  if (!overlay) return overlay
-  const byBucket = staleIdsByBucket(warnings)
-  const next: TeammateCapabilityOverlay = { ...overlay }
-  for (const bucket of BUNDLE_LIST_KEYS) {
-    const staleSet = byBucket.get(bucket)
-    const listOverlay = next[bucket]
-    if (!staleSet || !listOverlay) continue
-    const cleaned = { ...listOverlay }
-    if (cleaned.add) cleaned.add = cleaned.add.filter((id) => !staleSet.has(id))
-    if (cleaned.replace) cleaned.replace = cleaned.replace.filter((id) => !staleSet.has(id))
-    // Drop now-empty add/replace arrays, then the whole bucket if it carries
-    // no directive at all.
-    if (cleaned.add && cleaned.add.length === 0) delete cleaned.add
-    if (cleaned.replace && cleaned.replace.length === 0) delete cleaned.replace
-    if (!cleaned.add && !cleaned.remove && !cleaned.replace) delete next[bucket]
-    else next[bucket] = cleaned
+  const restTeammates = { ...state.teammates }
+  for (const id of team.teammateIds) {
+    delete restTeammates[id]
   }
-  return next
+
+  const restTasks = { ...state.tasks }
+  for (const id of team.taskIds) {
+    delete restTasks[id]
+  }
+
+  const restMessages = { ...state.messages }
+  for (const id of team.messageIds) {
+    delete restMessages[id]
+  }
+
+  // Clean consensus entries belonging to this team
+  const restConsensus = { ...state.consensus }
+  for (const [id, c] of Object.entries(restConsensus)) {
+    if (c.teamId === teamId) delete restConsensus[id]
+  }
+
+  // Clean shared memory for this team
+  const { [teamId]: _sm, ...restSharedMemory } = state.sharedMemory
+
+  // Clean delegations belonging to this team
+  const restDelegations = { ...state.delegations }
+  for (const [id, d] of Object.entries(restDelegations)) {
+    if (d.sourceTeamId === teamId) delete restDelegations[id]
+  }
+
+  // Drop the team's persisted project-Editor session.
+  const { [teamId]: _es, ...restEditorSession } = state.editorSession
+
+  return {
+    teams: restTeams,
+    teammates: restTeammates,
+    tasks: restTasks,
+    messages: restMessages,
+    consensus: restConsensus,
+    sharedMemory: restSharedMemory,
+    delegations: restDelegations,
+    editorSession: restEditorSession,
+    activeTeamId: state.activeTeamId === teamId ? null : state.activeTeamId,
+  }
 }
 
 export const createAgentTeamActionsSlice = (
@@ -326,51 +340,6 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
-  clearStaleCapabilityIds: (target, warnings) => {
-    set((state) => {
-      if ("teamId" in target) {
-        const team = state.teams[target.teamId]
-        if (!team) return state
-        const stale = warnings.filter(
-          (w) => w.scope.kind === "team" && w.scope.teamId === target.teamId
-        )
-        if (stale.length === 0) return state
-        const nextBundle = stripStaleFromBundle(team.config.capabilities, stale)
-        const nextConfig = { ...team.config, capabilities: nextBundle }
-        // A stale shared-memory adapter id is cleared from the config field.
-        if (stale.some((w) => w.bucket === "sharedMemoryAdapterId")) {
-          nextConfig.sharedMemoryAdapterId = undefined
-        }
-        return {
-          teams: {
-            ...state.teams,
-            [target.teamId]: { ...team, config: nextConfig },
-          },
-        }
-      }
-
-      const teammate = state.teammates[target.teammateId]
-      if (!teammate) return state
-      const stale = warnings.filter(
-        (w) => w.scope.kind === "teammate" && w.scope.teammateId === target.teammateId
-      )
-      if (stale.length === 0) return state
-      const nextOverlay = stripStaleFromOverlay(teammate.config.capabilities, stale)
-      const nextConfig = { ...teammate.config }
-      if (!nextOverlay || Object.keys(nextOverlay).length === 0) {
-        delete nextConfig.capabilities
-      } else {
-        nextConfig.capabilities = nextOverlay
-      }
-      return {
-        teammates: {
-          ...state.teammates,
-          [target.teammateId]: { ...teammate, config: nextConfig },
-        },
-      }
-    })
-  },
-
   updateTeamConfig: (teamId, config) => {
     set((state) => {
       const team = state.teams[teamId]
@@ -415,9 +384,9 @@ export const createAgentTeamActionsSlice = (
       .filter((tm) => tm && tm.role !== "lead" && !terminalStatuses.has(tm.status))
     if (activeMembers.length > 0) {
       // Shutdown active teammates first, then cleanup
-      get().shutdownAllTeammates(teamId)
+      set((current) => shutDownTeammates(current, teamId))
     }
-    get().cleanupTeam(teamId)
+    set((current) => cleanUpTeam(current, teamId))
     if (team.config.runtimeVersion === "durable-v2") {
       void import("@/lib/db/agent-team-runtime")
         .then(({ purgeAgentTeam }) => purgeAgentTeam(teamId))
@@ -641,32 +610,6 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
-  setTeammateStatus: (teammateId, status) => {
-    set((state) => {
-      const teammate = state.teammates[teammateId]
-      if (!teammate) return state
-      return {
-        teammates: {
-          ...state.teammates,
-          [teammateId]: { ...teammate, status, lastActiveAt: new Date() },
-        },
-      }
-    })
-  },
-
-  setTeammateProgress: (teammateId, progress) => {
-    set((state) => {
-      const teammate = state.teammates[teammateId]
-      if (!teammate) return state
-      return {
-        teammates: {
-          ...state.teammates,
-          [teammateId]: { ...teammate, progress: Math.min(100, Math.max(0, progress)) },
-        },
-      }
-    })
-  },
-
   // ====================================================================
   // Task CRUD
   // ====================================================================
@@ -881,28 +824,6 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
-  claimTask: (taskId, teammateId) => {
-    set((state) => {
-      const task = state.tasks[taskId]
-      if (!task || task.status !== "pending") return state
-      // Busy-check: reject if teammate is already executing a task (OCC pattern)
-      const teammate = state.teammates[teammateId]
-      if (teammate?.status === "executing" && teammate.currentTaskId) return state
-      return {
-        tasks: {
-          ...state.tasks,
-          [taskId]: { ...task, claimedBy: teammateId, status: "claimed" },
-        },
-        teammates: teammate
-          ? {
-              ...state.teammates,
-              [teammateId]: { ...teammate, currentTaskId: taskId },
-            }
-          : state.teammates,
-      }
-    })
-  },
-
   assignTask: (taskId, teammateId) => {
     set((state) => {
       const task = state.tasks[taskId]
@@ -1010,59 +931,6 @@ export const createAgentTeamActionsSlice = (
     return message
   },
 
-  upsertMessage: (message) => {
-    set((state) => {
-      const destinationTeam = state.teams[message.teamId]
-      if (!destinationTeam) {
-        agentTeamLogger.debug("upsertMessage: team not found", {
-          teamId: message.teamId,
-          messageId: message.id,
-        })
-        return state
-      }
-
-      const previousMessage = state.messages[message.id]
-      const previousTeam = previousMessage ? state.teams[previousMessage.teamId] : undefined
-
-      let teams = state.teams
-      if (previousMessage && previousMessage.teamId !== message.teamId && previousTeam) {
-        teams = {
-          ...teams,
-          [previousMessage.teamId]: {
-            ...previousTeam,
-            messageIds: removeId(previousTeam.messageIds, message.id),
-          },
-        }
-      }
-
-      const nextTeam = teams[message.teamId]
-      if (nextTeam) {
-        teams = {
-          ...teams,
-          [message.teamId]: {
-            ...nextTeam,
-            messageIds: ensureIdExactlyOnce(nextTeam.messageIds, message.id),
-          },
-        }
-      }
-
-      return {
-        messages: { ...state.messages, [message.id]: message },
-        teams,
-      }
-    })
-  },
-
-  markMessageRead: (messageId) => {
-    set((state) => {
-      const msg = state.messages[messageId]
-      if (!msg) return state
-      return {
-        messages: { ...state.messages, [messageId]: { ...msg, read: true } },
-      }
-    })
-  },
-
   removeMessage: (messageId) => {
     set((state) => {
       const msg = state.messages[messageId]
@@ -1080,40 +948,6 @@ export const createAgentTeamActionsSlice = (
           }
         : state.teams
       return { messages: nextMessages, teams: nextTeams }
-    })
-  },
-
-  markAllMessagesRead: (teammateId) => {
-    set((state) => {
-      const updated = { ...state.messages }
-      for (const [id, msg] of Object.entries(updated)) {
-        if (
-          !msg.read &&
-          (msg.recipientId === teammateId ||
-            (msg.type === "broadcast" && msg.senderId !== teammateId))
-        ) {
-          updated[id] = { ...msg, read: true }
-        }
-      }
-      return { messages: updated }
-    })
-  },
-
-  markTeamMessagesRead: (teamId) => {
-    set((state) => {
-      const team = state.teams[teamId]
-      if (!team || team.messageIds.length === 0) return state
-      let mutated = false
-      const updated = { ...state.messages }
-      for (const id of team.messageIds) {
-        const msg = updated[id]
-        if (msg && !msg.read) {
-          updated[id] = { ...msg, read: true }
-          mutated = true
-        }
-      }
-      if (!mutated) return state
-      return { messages: updated }
     })
   },
 
@@ -1238,118 +1072,11 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
-  importTemplates: (templates) => {
-    let imported = 0
-    set((state) => {
-      const updated = { ...state.templates }
-      for (const template of templates) {
-        const id = template.id || nanoid()
-        if (!updated[id] || !updated[id].isBuiltIn) {
-          updated[id] = { ...template, id, isBuiltIn: false }
-          imported++
-        }
-      }
-      return { templates: updated }
-    })
-    return imported
-  },
-
-  exportTemplates: () => {
-    const state = get()
-    return Object.values(state.templates).filter((t) => !t.isBuiltIn)
-  },
-
   // ====================================================================
   // UI State
   // ====================================================================
 
-  setActiveTeam: (teamId) =>
-    set((state) => {
-      if (!teamId) {
-        return {
-          activeTeamId: null,
-          selectedTeammateId: null,
-          workspaceFocus: {
-            ...state.workspaceFocus,
-            teammateId: null,
-          },
-        }
-      }
-
-      const team = state.teams[teamId]
-      if (!team) return state
-
-      const selectedTeammateId =
-        state.selectedTeammateId && team.teammateIds.includes(state.selectedTeammateId)
-          ? state.selectedTeammateId
-          : null
-
-      return {
-        activeTeamId: teamId,
-        selectedTeammateId,
-        workspaceFocus: {
-          ...state.workspaceFocus,
-          teammateId: selectedTeammateId,
-        },
-      }
-    }),
-  setSelectedTeammate: (teammateId) =>
-    set((state) => ({
-      selectedTeammateId: teammateId,
-      workspaceFocus: {
-        ...state.workspaceFocus,
-        teammateId,
-      },
-      workspaceDetailOpen: teammateId ? true : state.workspaceDetailOpen,
-    })),
-  setDisplayMode: (mode) => set({ displayMode: mode }),
-  setIsPanelOpen: (open) => set({ isPanelOpen: open }),
-  setWorkspaceTab: (tab) => set({ workspaceTab: tab }),
-
   setTasksView: (view) => set({ tasksView: view }),
-  setWorkspaceFocus: (focus) =>
-    set((state) => ({
-      workspaceFocus: {
-        ...state.workspaceFocus,
-        teammateId:
-          focus.teammateId === undefined ? state.workspaceFocus.teammateId : focus.teammateId,
-        taskId: focus.taskId === undefined ? state.workspaceFocus.taskId : focus.taskId,
-        messageId: focus.messageId === undefined ? state.workspaceFocus.messageId : focus.messageId,
-      },
-      selectedTeammateId:
-        focus.teammateId === undefined ? state.selectedTeammateId : focus.teammateId,
-      workspaceDetailOpen: true,
-    })),
-  setWorkspaceTeamFromRoute: (teamId) =>
-    set((state) => {
-      if (!teamId || !state.teams[teamId]) return state
-
-      const team = state.teams[teamId]
-      const nextSelectedTeammateId =
-        state.selectedTeammateId && team.teammateIds.includes(state.selectedTeammateId)
-          ? state.selectedTeammateId
-          : null
-
-      return {
-        activeTeamId: teamId,
-        selectedTeammateId: nextSelectedTeammateId,
-        workspaceFocus: {
-          ...state.workspaceFocus,
-          teammateId: nextSelectedTeammateId,
-        },
-      }
-    }),
-  closeAgentTeamWorkspaceDetail: () =>
-    set(() => ({
-      workspaceDetailOpen: false,
-      selectedTeammateId: null,
-      workspaceFocus: {
-        teammateId: null,
-        taskId: null,
-        messageId: null,
-      },
-    })),
-
   // ====================================================================
   // Selectors
   // ====================================================================
@@ -1387,114 +1114,9 @@ export const createAgentTeamActionsSlice = (
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
   },
 
-  getUnreadMessages: (teammateId) => {
-    return Object.values(get().messages).filter((msg) => {
-      if (msg.read) return false
-      if (msg.recipientId === teammateId) return true
-      if (msg.type === "broadcast" && msg.senderId !== teammateId) return true
-      return false
-    })
-  },
-
   getActiveTeam: () => {
     const { activeTeamId, teams } = get()
     return activeTeamId ? teams[activeTeamId] : undefined
-  },
-
-  // ====================================================================
-  // Batch Operations
-  // ====================================================================
-
-  cancelAllTasks: (teamId) => {
-    set((state) => {
-      const team = state.teams[teamId]
-      if (!team) return state
-
-      const updatedTasks = { ...state.tasks }
-      for (const taskId of team.taskIds) {
-        const task = updatedTasks[taskId]
-        if (
-          task &&
-          (task.status === "pending" ||
-            task.status === "in_progress" ||
-            task.status === "claimed" ||
-            task.status === "blocked")
-        ) {
-          updatedTasks[taskId] = { ...task, status: "cancelled", completedAt: new Date() }
-        }
-      }
-      return { tasks: updatedTasks }
-    })
-  },
-
-  shutdownAllTeammates: (teamId) => {
-    set((state) => {
-      const team = state.teams[teamId]
-      if (!team) return state
-
-      const updatedTeammates = { ...state.teammates }
-      for (const id of team.teammateIds) {
-        const tm = updatedTeammates[id]
-        if (tm && tm.status !== "shutdown" && tm.status !== "completed" && tm.status !== "failed") {
-          updatedTeammates[id] = { ...tm, status: "shutdown", currentTaskId: undefined }
-        }
-      }
-      return { teammates: updatedTeammates }
-    })
-  },
-
-  cleanupTeam: (teamId) => {
-    set((state) => {
-      const team = state.teams[teamId]
-      if (!team) return state
-
-      const { [teamId]: _, ...restTeams } = state.teams
-
-      const restTeammates = { ...state.teammates }
-      for (const id of team.teammateIds) {
-        delete restTeammates[id]
-      }
-
-      const restTasks = { ...state.tasks }
-      for (const id of team.taskIds) {
-        delete restTasks[id]
-      }
-
-      const restMessages = { ...state.messages }
-      for (const id of team.messageIds) {
-        delete restMessages[id]
-      }
-
-      // Clean consensus entries belonging to this team
-      const restConsensus = { ...state.consensus }
-      for (const [id, c] of Object.entries(restConsensus)) {
-        if (c.teamId === teamId) delete restConsensus[id]
-      }
-
-      // Clean shared memory for this team
-      const { [teamId]: _sm, ...restSharedMemory } = state.sharedMemory
-
-      // Clean delegations belonging to this team
-      const restDelegations = { ...state.delegations }
-      for (const [id, d] of Object.entries(restDelegations)) {
-        if (d.sourceTeamId === teamId) delete restDelegations[id]
-      }
-
-      // Drop the team's persisted project-Editor session.
-      const { [teamId]: _es, ...restEditorSession } = state.editorSession
-
-      return {
-        teams: restTeams,
-        teammates: restTeammates,
-        tasks: restTasks,
-        messages: restMessages,
-        consensus: restConsensus,
-        sharedMemory: restSharedMemory,
-        delegations: restDelegations,
-        editorSession: restEditorSession,
-        activeTeamId: state.activeTeamId === teamId ? null : state.activeTeamId,
-      }
-    })
   },
 
   // ====================================================================
@@ -1730,125 +1352,6 @@ export const createAgentTeamActionsSlice = (
         },
       }
     })
-  },
-
-  // ====================================================================
-  // Structured Messages
-  // ====================================================================
-
-  addStructuredMessage: (input) => {
-    const sender = get().teammates[input.senderId]
-    const recipient = input.recipientId ? get().teammates[input.recipientId] : undefined
-
-    // Derive message type from structured payload
-    const payloadTypeMap: Record<string, string> = {
-      shutdown_request: "shutdown",
-      shutdown_response: "shutdown",
-      plan_approval_request: "plan_approval",
-      plan_approval_response: "plan_approval",
-      idle_notification: "idle",
-      task_assignment: "task_assignment",
-      consensus_request: "consensus",
-      consensus_vote: "consensus",
-    }
-    const derivedType = payloadTypeMap[input.structuredPayload.type] || input.type || "system"
-
-    const message: AgentTeamMessage = {
-      id: nanoid(),
-      teamId: input.teamId,
-      type: derivedType as AgentTeamMessage["type"],
-      senderId: input.senderId,
-      senderName: sender?.name || "Unknown",
-      recipientId: input.recipientId,
-      recipientName: recipient?.name,
-      content: input.content,
-      taskId: input.taskId,
-      read: false,
-      timestamp: new Date(),
-      metadata: input.metadata,
-      structuredPayload: input.structuredPayload,
-    }
-
-    set((state) => {
-      const team = state.teams[input.teamId]
-      return {
-        messages: { ...state.messages, [message.id]: message },
-        ...(team
-          ? {
-              teams: {
-                ...state.teams,
-                [input.teamId]: {
-                  ...team,
-                  messageIds: [...team.messageIds, message.id],
-                },
-              },
-            }
-          : {}),
-      }
-    })
-
-    return message
-  },
-
-  // ====================================================================
-  // Lifecycle
-  // ====================================================================
-
-  requestTeammateShutdown: (teammateId, reason) => {
-    const teammate = get().teammates[teammateId]
-    if (!teammate) return
-    // Set status to shutdown
-    set((state) => ({
-      teammates: {
-        ...state.teammates,
-        [teammateId]: {
-          ...state.teammates[teammateId],
-          status: "shutdown" as const,
-          currentTaskId: undefined,
-        },
-      },
-    }))
-    // Send structured shutdown message via the team lead
-    const team = get().teams[teammate.teamId]
-    if (team) {
-      get().addStructuredMessage({
-        teamId: teammate.teamId,
-        senderId: team.leadId,
-        recipientId: teammateId,
-        content: reason || `Shutdown requested for ${teammate.name}`,
-        structuredPayload: { type: "shutdown_request", reason },
-      })
-    }
-  },
-
-  // ====================================================================
-  // Settings
-  // ====================================================================
-
-  updateDefaultConfig: (config) => {
-    const currentDefaultConfig = get().defaultConfig
-    const executionModeChanged =
-      config.executionMode !== undefined &&
-      config.executionMode !== currentDefaultConfig.executionMode
-    const legacyGovernanceChanged =
-      config.requirePlanApproval !== undefined || config.tokenBudget !== undefined
-
-    set((state) => ({
-      defaultConfig: normalizeAgentTeamConfig({
-        ...state.defaultConfig,
-        ...config,
-        preferredExecutionPattern:
-          executionModeChanged &&
-          config.preferredExecutionPattern === currentDefaultConfig.preferredExecutionPattern
-            ? undefined
-            : (config.preferredExecutionPattern ?? state.defaultConfig.preferredExecutionPattern),
-        governancePolicy:
-          legacyGovernanceChanged &&
-          config.governancePolicy === currentDefaultConfig.governancePolicy
-            ? undefined
-            : (config.governancePolicy ?? state.defaultConfig.governancePolicy),
-      }),
-    }))
   },
 
   // ====================================================================

@@ -334,6 +334,8 @@
     "title": "共识投票",
     "type": "类型：{type}",
     "vote": "投票",
+    "voteAs": "以谁的身份投票",
+    "voteAsEmpty": "该团队暂无可代为投票的成员",
     "voteCount": "{count} 票"
   },
   "createFromScratch": "从零创建",

@@ -334,6 +334,8 @@
     "title": "Consensus",
     "type": "Type: {type}",
     "vote": "Vote",
+    "voteAs": "Vote as",
+    "voteAsEmpty": "This team has no members to vote as",
     "voteCount": "{count} votes"
   },
   "createFromScratch": "From scratch",

@@ -12,11 +12,9 @@ import {
   type TeamCapabilityBundle,
   type TeammateCapabilityOverlay,
   type TeamStatus,
-  type TeammateStatus,
   type TeamTaskStatus,
   type TeamDisplayMode,
   type AgentTeamWorkspaceTab,
-  type AgentTeamWorkspaceFocus,
   type AgentTeamEditorSession,
   type TeamDelegationRecord,
   type TeamDelegationStatus,
@@ -28,9 +26,7 @@ import {
   type AddTeammateInput,
   type CreateTaskInput,
   type SendMessageInput,
-  type StructuredMessagePayload,
 } from "@/types/agent/agent-team"
-import type { CapabilityAuditWarning } from "@/lib/ai/agent/team/capability-audit"
 import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
 
 export interface AgentTeamState {
@@ -52,13 +48,25 @@ export interface AgentTeamState {
   lastAdapterSyncVersion: Record<string, Record<string, number>>
 
   // UI State
+  /**
+   * The most recently created team. Written by `createTeam` only — the
+   * `setActiveTeam` / `setWorkspaceTeamFromRoute` setters went with the
+   * `/agent-teams/workspace` route ADR-0140 retired. Still read by the two
+   * `selectActiveTeam*` selectors that have callers, as the last-resort
+   * fallback for a surface that names no team. Not persisted.
+   */
   activeTeamId: string | null
-  selectedTeammateId: string | null
+  /**
+   * INTENTIONALLY INERT (Working Rule 7). Persisted by
+   * `partializeAgentTeamState` and read by nothing: the workspace shell that
+   * owned the compact/expanded toggle was retired with
+   * `/agent-teams/workspace`, and its setter went with it. Kept declared so a
+   * blob written by an older build still rehydrates and round-trips instead of
+   * being dropped on the next save. Pinned by `store.test.ts`.
+   */
   displayMode: TeamDisplayMode
-  isPanelOpen: boolean
+  /** INTENTIONALLY INERT — see `displayMode`. Persisted, read by nothing. */
   workspaceTab: AgentTeamWorkspaceTab
-  workspaceFocus: AgentTeamWorkspaceFocus
-  workspaceDetailOpen: boolean
   /** Tasks tab presentation: flat list or kanban board. Persisted. */
   tasksView: "list" | "board"
   /**
@@ -81,16 +89,6 @@ export interface AgentTeamState {
    * the patch are preserved.
    */
   updateTeamCapabilities: (teamId: string, bundle: TeamCapabilityBundle) => void
-  /**
-   * Strip stale capability ids (those an audit flagged as unresolvable, e.g.
-   * after a contributing plugin was disabled) from a team's default bundle or
-   * a teammate's overlay. `target` selects the scope; `warnings` is the audit
-   * output from `lib/ai/agent/team/capability-audit.ts`.
-   */
-  clearStaleCapabilityIds: (
-    target: { teamId: string } | { teammateId: string },
-    warnings: CapabilityAuditWarning[]
-  ) => void
   deleteTeam: (teamId: string) => void
   /** Workspace isolation cascade: drop all teams/teammates/tasks for a project (templates kept). */
   purgeProject: (projectId: string) => void
@@ -110,8 +108,6 @@ export interface AgentTeamState {
     overlay: TeammateCapabilityOverlay | null
   ) => void
   removeTeammate: (teammateId: string) => void
-  setTeammateStatus: (teammateId: string, status: TeammateStatus) => void
-  setTeammateProgress: (teammateId: string, progress: number) => void
 
   // Task CRUD
   createTask: (input: CreateTaskInput) => AgentTeamTask
@@ -129,18 +125,13 @@ export interface AgentTeamState {
   moveTask: (taskId: string, to: TeamTaskStatus) => { ok: boolean; reason?: TaskMoveError }
   /** Same-column reorder: place the task at `targetIndex` and renumber. */
   reorderTask: (taskId: string, targetIndex: number) => void
-  claimTask: (taskId: string, teammateId: string) => void
   assignTask: (taskId: string, teammateId: string) => void
   addTaskComment: (input: AddTaskCommentInput) => AgentTaskComment | null
   attachTaskFile: (taskId: string, attachment: Omit<TaskCommentAttachment, "id">) => void
 
   // Messages
   addMessage: (input: SendMessageInput) => AgentTeamMessage
-  upsertMessage: (message: AgentTeamMessage) => void
   removeMessage: (messageId: string) => void
-  markMessageRead: (messageId: string) => void
-  markAllMessagesRead: (teammateId: string) => void
-  markTeamMessagesRead: (teamId: string) => void
 
   // Events
   addEvent: (event: AgentTeamEvent) => void
@@ -157,19 +148,9 @@ export interface AgentTeamState {
     category?: AgentTeamTemplate["category"]
   ) => AgentTeamTemplate | null
   updateTemplate: (templateId: string, updates: Partial<AgentTeamTemplate>) => void
-  importTemplates: (templates: AgentTeamTemplate[]) => number
-  exportTemplates: () => AgentTeamTemplate[]
 
   // UI State
-  setActiveTeam: (teamId: string | null) => void
-  setSelectedTeammate: (teammateId: string | null) => void
-  setDisplayMode: (mode: TeamDisplayMode) => void
-  setIsPanelOpen: (open: boolean) => void
-  setWorkspaceTab: (tab: AgentTeamWorkspaceTab) => void
   setTasksView: (view: "list" | "board") => void
-  setWorkspaceFocus: (focus: Partial<AgentTeamWorkspaceFocus>) => void
-  setWorkspaceTeamFromRoute: (teamId: string | null | undefined) => void
-  closeAgentTeamWorkspaceDetail: () => void
   // Selectors
   getTeam: (teamId: string) => AgentTeam | undefined
   getTeammate: (teammateId: string) => AgentTeammate | undefined
@@ -177,13 +158,7 @@ export interface AgentTeamState {
   getTeamTasks: (teamId: string) => AgentTeamTask[]
   getTaskComments: (taskId: string) => AgentTaskComment[]
   getTeamMessages: (teamId: string) => AgentTeamMessage[]
-  getUnreadMessages: (teammateId: string) => AgentTeamMessage[]
   getActiveTeam: () => AgentTeam | undefined
-
-  // Batch operations
-  cancelAllTasks: (teamId: string) => void
-  shutdownAllTeammates: (teamId: string) => void
-  cleanupTeam: (teamId: string) => void
 
   // Consensus
   upsertConsensus: (consensus: ConsensusRequest) => void
@@ -207,19 +182,18 @@ export interface AgentTeamState {
   clearTeamDelegations: (teamId: string) => void
 
   // Execution Reports
+  /**
+   * The only writers of `AgentTeam.executionReport`, which
+   * `lib/plugin/api/team-api.ts` exposes to plugins (`getRunStatus` /
+   * `getExecutionReport` / `getCheckpoints`) and `run-report-tab.tsx` renders.
+   * Neither has a production caller yet — the team runtime does not stamp a
+   * report — so the readers show nothing until it does. Kept rather than
+   * deleted with the rest of the retired workspace surface: dropping the only
+   * writers would make three live readers permanently unfillable, and
+   * `lib/plugin/api/team-api.test.ts` drives both.
+   */
   upsertExecutionReport: (teamId: string, report: TeamExecutionReport) => void
   addExecutionCheckpoint: (teamId: string, checkpoint: TeamExecutionCheckpoint) => void
-
-  // Structured Messages
-  addStructuredMessage: (
-    input: SendMessageInput & { structuredPayload: StructuredMessagePayload }
-  ) => AgentTeamMessage
-
-  // Lifecycle
-  requestTeammateShutdown: (teammateId: string, reason?: string) => void
-
-  // Settings
-  updateDefaultConfig: (config: Partial<AgentTeamConfig>) => void
 
   // Reset
   reset: () => void

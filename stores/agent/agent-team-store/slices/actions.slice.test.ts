@@ -10,7 +10,6 @@ import {
 import type {
   AgentTeammate,
   AgentTeamTask,
-  AgentTeamMessage,
   TeamExecutionReport,
   TeamExecutionCheckpoint,
   ConsensusRequest,
@@ -132,7 +131,7 @@ describe("useAgentTeamStore deleteTeam", () => {
       teamId: team.id,
       name: "Worker",
     })
-    useAgentTeamStore.getState().setTeammateStatus(tm.id, "executing")
+    useAgentTeamStore.getState().updateTeammate(tm.id, { status: "executing" })
     useAgentTeamStore.getState().deleteTeam(team.id)
     expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
     expect(useAgentTeamStore.getState().teammates[tm.id]).toBeUndefined()
@@ -159,7 +158,7 @@ describe("useAgentTeamStore editorSession", () => {
     expect(useAgentTeamStore.getState()).not.toHaveProperty("setEditorSession")
   })
 
-  it("cleanupTeam drops the deleted team's editor session", () => {
+  it("deleteTeam drops the deleted team's editor session", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "E", task: "t" })
     useAgentTeamStore.setState({
       editorSession: { [team.id]: { rootKey: "/proj", openPaths: [], activePath: null } },
@@ -448,34 +447,13 @@ describe("useAgentTeamStore Teammate CRUD", () => {
   it("removeTeammate falls back to teammate-only removal when team is missing", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
     const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    // Drop the team without using cleanupTeam (simulate corrupt state)
+    // Drop the team without going through deleteTeam (simulate corrupt state)
     useAgentTeamStore.setState((state) => {
       const { [team.id]: _t, ...rest } = state.teams
       return { teams: rest }
     })
     useAgentTeamStore.getState().removeTeammate(tm.id)
     expect(useAgentTeamStore.getState().teammates[tm.id]).toBeUndefined()
-  })
-
-  it("setTeammateStatus updates status and lastActiveAt; no-op for unknown id", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    useAgentTeamStore.getState().setTeammateStatus(tm.id, "executing")
-    expect(useAgentTeamStore.getState().teammates[tm.id].status).toBe("executing")
-    expect(useAgentTeamStore.getState().teammates[tm.id].lastActiveAt).toBeInstanceOf(Date)
-    useAgentTeamStore.getState().setTeammateStatus("missing", "executing")
-  })
-
-  it("setTeammateProgress clamps to [0,100] and is a no-op for unknown ids", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    useAgentTeamStore.getState().setTeammateProgress(tm.id, 200)
-    expect(useAgentTeamStore.getState().teammates[tm.id].progress).toBe(100)
-    useAgentTeamStore.getState().setTeammateProgress(tm.id, -10)
-    expect(useAgentTeamStore.getState().teammates[tm.id].progress).toBe(0)
-    useAgentTeamStore.getState().setTeammateProgress(tm.id, 50)
-    expect(useAgentTeamStore.getState().teammates[tm.id].progress).toBe(50)
-    useAgentTeamStore.getState().setTeammateProgress("missing", 50)
   })
 })
 
@@ -699,51 +677,6 @@ describe("useAgentTeamStore Task CRUD", () => {
     useAgentTeamStore.getState().setTaskStatus("missing", "completed")
   })
 
-  it("claimTask sets claimedBy and currentTaskId, but rejects when teammate is busy", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    const t = useAgentTeamStore
-      .getState()
-      .createTask({ teamId: team.id, title: "X", description: "" })
-    useAgentTeamStore.getState().claimTask(t.id, tm.id)
-    expect(useAgentTeamStore.getState().tasks[t.id].claimedBy).toBe(tm.id)
-    expect(useAgentTeamStore.getState().teammates[tm.id].currentTaskId).toBe(t.id)
-
-    // create another pending task and try to claim while busy
-    const t2 = useAgentTeamStore
-      .getState()
-      .createTask({ teamId: team.id, title: "Y", description: "" })
-    useAgentTeamStore.setState((s) => ({
-      teammates: {
-        ...s.teammates,
-        [tm.id]: { ...s.teammates[tm.id], status: "executing" },
-      },
-    }))
-    useAgentTeamStore.getState().claimTask(t2.id, tm.id)
-    expect(useAgentTeamStore.getState().tasks[t2.id].claimedBy).toBeUndefined()
-  })
-
-  it("claimTask is a no-op for non-pending tasks or unknown ids", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    const t = useAgentTeamStore
-      .getState()
-      .createTask({ teamId: team.id, title: "X", description: "" })
-    useAgentTeamStore.getState().setTaskStatus(t.id, "in_progress")
-    useAgentTeamStore.getState().claimTask(t.id, tm.id)
-    expect(useAgentTeamStore.getState().tasks[t.id].claimedBy).toBeUndefined()
-    useAgentTeamStore.getState().claimTask("missing", tm.id)
-  })
-
-  it("claimTask works even when teammate id is unknown (skips teammates branch)", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "" })
-    const t = useAgentTeamStore
-      .getState()
-      .createTask({ teamId: team.id, title: "X", description: "" })
-    useAgentTeamStore.getState().claimTask(t.id, "unknown-tm")
-    expect(useAgentTeamStore.getState().tasks[t.id].claimedBy).toBe("unknown-tm")
-  })
-
   it("assignTask updates assignedTo and is a no-op for unknown ids", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "" })
     const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
@@ -828,7 +761,10 @@ describe("useAgentTeamStore moveTask / reorderTask", () => {
       description: "",
       role: "teammate",
     })
-    state.claimTask(task.id, mate.id)
+    // `claimTask` went with the retired workspace batch surface; the runtime
+    // has always written the pair itself via `updateTask` / `updateTeammate`.
+    state.updateTask(task.id, { status: "claimed", claimedBy: mate.id })
+    state.updateTeammate(mate.id, { currentTaskId: task.id })
     expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("claimed")
     expect(useAgentTeamStore.getState().teammates[mate.id].currentTaskId).toBe(task.id)
 
@@ -847,7 +783,8 @@ describe("useAgentTeamStore moveTask / reorderTask", () => {
       description: "",
       role: "teammate",
     })
-    state.claimTask(task.id, mate.id)
+    state.updateTask(task.id, { status: "claimed", claimedBy: mate.id })
+    state.updateTeammate(mate.id, { currentTaskId: task.id })
     state.setTeamStatus(team.id, "executing")
     expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({
       ok: false,
@@ -940,43 +877,6 @@ describe("useAgentTeamStore Messages", () => {
     expect(useAgentTeamStore.getState().messages[m.id]).toBeDefined()
   })
 
-  it("upsertMessage replaces an existing message and ignores unknown teams", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
-    const m = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "a",
-    })
-    useAgentTeamStore.getState().upsertMessage({ ...m, content: "b" })
-    expect(useAgentTeamStore.getState().messages[m.id].content).toBe("b")
-
-    const ghost: AgentTeamMessage = {
-      id: "g",
-      teamId: "ghost",
-      type: "system",
-      senderId: "x",
-      senderName: "x",
-      content: "",
-      read: false,
-      timestamp: new Date(),
-    }
-    useAgentTeamStore.getState().upsertMessage(ghost)
-    expect(useAgentTeamStore.getState().messages["g"]).toBeUndefined()
-  })
-
-  it("upsertMessage moves a message across teams", () => {
-    const team1 = useAgentTeamStore.getState().createTeam({ name: "1", task: "" })
-    const team2 = useAgentTeamStore.getState().createTeam({ name: "2", task: "" })
-    const m = useAgentTeamStore.getState().addMessage({
-      teamId: team1.id,
-      senderId: team1.leadId,
-      content: "x",
-    })
-    useAgentTeamStore.getState().upsertMessage({ ...m, teamId: team2.id })
-    expect(useAgentTeamStore.getState().teams[team1.id].messageIds).not.toContain(m.id)
-    expect(useAgentTeamStore.getState().teams[team2.id].messageIds).toContain(m.id)
-  })
-
   it("removeMessage deletes the message and prunes it from team.messageIds", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
     const m = useAgentTeamStore.getState().addMessage({
@@ -994,81 +894,6 @@ describe("useAgentTeamStore Messages", () => {
     const before = useAgentTeamStore.getState().messages
     useAgentTeamStore.getState().removeMessage("ghost-id")
     expect(useAgentTeamStore.getState().messages).toEqual(before)
-  })
-
-  it("markMessageRead toggles read=true and is a no-op for unknown ids", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
-    const m = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "x",
-    })
-    useAgentTeamStore.getState().markMessageRead(m.id)
-    expect(useAgentTeamStore.getState().messages[m.id].read).toBe(true)
-    useAgentTeamStore.getState().markMessageRead("ghost")
-  })
-
-  it("markAllMessagesRead targets messages addressed to the teammate or broadcasts not from them", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
-    const recipient = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "R" })
-    const direct = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      recipientId: recipient.id,
-      content: "to you",
-    })
-    const broadcast = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "to all",
-    })
-    const myBroadcast = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: recipient.id,
-      content: "I posted",
-    })
-    useAgentTeamStore.getState().markAllMessagesRead(recipient.id)
-    expect(useAgentTeamStore.getState().messages[direct.id].read).toBe(true)
-    expect(useAgentTeamStore.getState().messages[broadcast.id].read).toBe(true)
-    // own broadcast should NOT be marked read
-    expect(useAgentTeamStore.getState().messages[myBroadcast.id].read).toBe(false)
-  })
-
-  it("markTeamMessagesRead marks all unread messages on a team as read", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
-    const m1 = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "1",
-    })
-    const m2 = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "2",
-    })
-    useAgentTeamStore.getState().markTeamMessagesRead(team.id)
-    expect(useAgentTeamStore.getState().messages[m1.id].read).toBe(true)
-    expect(useAgentTeamStore.getState().messages[m2.id].read).toBe(true)
-  })
-
-  it("markTeamMessagesRead is a no-op for unknown teams or empty messageIds", () => {
-    useAgentTeamStore.getState().markTeamMessagesRead("missing")
-    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
-    useAgentTeamStore.getState().markTeamMessagesRead(team.id)
-    // already noop because messageIds is []
-  })
-
-  it("markTeamMessagesRead returns state when nothing was unread", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "M", task: "" })
-    const m = useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "x",
-    })
-    useAgentTeamStore.getState().markMessageRead(m.id)
-    const beforeMessages = useAgentTeamStore.getState().messages
-    useAgentTeamStore.getState().markTeamMessagesRead(team.id)
-    expect(useAgentTeamStore.getState().messages).toBe(beforeMessages)
   })
 })
 
@@ -1226,130 +1051,6 @@ describe("useAgentTeamStore Templates", () => {
   it("saveAsTemplate returns null for unknown team ids", () => {
     expect(useAgentTeamStore.getState().saveAsTemplate("nope", "n", "review")).toBeNull()
   })
-
-  it("importTemplates / exportTemplates roundtrips user templates", () => {
-    const tpl: AgentTeamTemplate = {
-      id: "imp-1",
-      name: "Imported",
-      description: "x",
-      category: "general",
-      teammates: [],
-      isBuiltIn: false,
-    }
-    const count = useAgentTeamStore.getState().importTemplates([tpl, { ...tpl, id: "" }])
-    expect(count).toBe(2)
-    const exported = useAgentTeamStore.getState().exportTemplates()
-    expect(exported.every((t) => !t.isBuiltIn)).toBe(true)
-    expect(exported.map((t) => t.name)).toContain("Imported")
-  })
-
-  it("importTemplates does not overwrite built-in templates", () => {
-    const builtIn = Object.values(useAgentTeamStore.getState().templates).find((t) => t.isBuiltIn)!
-    const tpl: AgentTeamTemplate = {
-      ...builtIn,
-      id: builtIn.id,
-      name: "Replaced",
-      isBuiltIn: false,
-    }
-    const imported = useAgentTeamStore.getState().importTemplates([tpl])
-    expect(imported).toBe(0)
-    expect(useAgentTeamStore.getState().templates[builtIn.id].name).toBe(builtIn.name)
-  })
-})
-
-describe("useAgentTeamStore UI state", () => {
-  beforeEach(() => reset())
-
-  it("setActiveTeam clears workspace state when null", () => {
-    useAgentTeamStore.getState().setActiveTeam(null)
-    expect(useAgentTeamStore.getState().activeTeamId).toBeNull()
-    expect(useAgentTeamStore.getState().selectedTeammateId).toBeNull()
-  })
-
-  it("setActiveTeam ignores unknown teams", () => {
-    useAgentTeamStore.getState().setActiveTeam("ghost")
-    expect(useAgentTeamStore.getState().activeTeamId).toBeNull()
-  })
-
-  it("setActiveTeam preserves a still-valid selectedTeammateId", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "" })
-    useAgentTeamStore.setState({ selectedTeammateId: team.leadId })
-    useAgentTeamStore.getState().setActiveTeam(team.id)
-    expect(useAgentTeamStore.getState().selectedTeammateId).toBe(team.leadId)
-  })
-
-  it("setActiveTeam clears a stale selectedTeammateId", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "" })
-    useAgentTeamStore.setState({ selectedTeammateId: "stranger" })
-    useAgentTeamStore.getState().setActiveTeam(team.id)
-    expect(useAgentTeamStore.getState().selectedTeammateId).toBeNull()
-  })
-
-  it("setSelectedTeammate writes selection and forces detail open if id present", () => {
-    useAgentTeamStore.getState().setSelectedTeammate("tm-123")
-    expect(useAgentTeamStore.getState().selectedTeammateId).toBe("tm-123")
-    expect(useAgentTeamStore.getState().workspaceDetailOpen).toBe(true)
-  })
-
-  it("setSelectedTeammate(null) preserves the prior workspaceDetailOpen", () => {
-    useAgentTeamStore.setState({ workspaceDetailOpen: false })
-    useAgentTeamStore.getState().setSelectedTeammate(null)
-    expect(useAgentTeamStore.getState().workspaceDetailOpen).toBe(false)
-  })
-
-  it("setDisplayMode / setIsPanelOpen / setWorkspaceTab mutate UI flags", () => {
-    useAgentTeamStore.getState().setDisplayMode("compact")
-    useAgentTeamStore.getState().setIsPanelOpen(true)
-    useAgentTeamStore.getState().setWorkspaceTab("tasks")
-    expect(useAgentTeamStore.getState().displayMode).toBe("compact")
-    expect(useAgentTeamStore.getState().isPanelOpen).toBe(true)
-    expect(useAgentTeamStore.getState().workspaceTab).toBe("tasks")
-  })
-
-  it("setWorkspaceFocus merges partial focus and forces detail open", () => {
-    useAgentTeamStore.getState().setWorkspaceFocus({ teammateId: "x" })
-    expect(useAgentTeamStore.getState().workspaceFocus.teammateId).toBe("x")
-    expect(useAgentTeamStore.getState().workspaceDetailOpen).toBe(true)
-    useAgentTeamStore.getState().setWorkspaceFocus({ taskId: "t" })
-    expect(useAgentTeamStore.getState().workspaceFocus.taskId).toBe("t")
-    useAgentTeamStore.getState().setWorkspaceFocus({ messageId: "m" })
-    expect(useAgentTeamStore.getState().workspaceFocus.messageId).toBe("m")
-  })
-
-  it("setWorkspaceTeamFromRoute is a no-op for null/unknown teams", () => {
-    useAgentTeamStore.getState().setWorkspaceTeamFromRoute(null)
-    expect(useAgentTeamStore.getState().activeTeamId).toBeNull()
-    useAgentTeamStore.getState().setWorkspaceTeamFromRoute("ghost")
-    expect(useAgentTeamStore.getState().activeTeamId).toBeNull()
-  })
-
-  it("setWorkspaceTeamFromRoute hooks active team and a still-valid selection", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "" })
-    useAgentTeamStore.setState({ selectedTeammateId: team.leadId })
-    useAgentTeamStore.getState().setWorkspaceTeamFromRoute(team.id)
-    expect(useAgentTeamStore.getState().activeTeamId).toBe(team.id)
-    expect(useAgentTeamStore.getState().selectedTeammateId).toBe(team.leadId)
-  })
-
-  it("setWorkspaceTeamFromRoute drops a stale selectedTeammateId", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "" })
-    useAgentTeamStore.setState({ selectedTeammateId: "stranger" })
-    useAgentTeamStore.getState().setWorkspaceTeamFromRoute(team.id)
-    expect(useAgentTeamStore.getState().selectedTeammateId).toBeNull()
-  })
-
-  it("closeAgentTeamWorkspaceDetail clears focus and selection", () => {
-    useAgentTeamStore.setState({
-      workspaceDetailOpen: true,
-      selectedTeammateId: "x",
-      workspaceFocus: { teammateId: "x", taskId: "y", messageId: "z" },
-    })
-    useAgentTeamStore.getState().closeAgentTeamWorkspaceDetail()
-    const s = useAgentTeamStore.getState()
-    expect(s.workspaceDetailOpen).toBe(false)
-    expect(s.selectedTeammateId).toBeNull()
-    expect(s.workspaceFocus).toEqual({ teammateId: null, taskId: null, messageId: null })
-  })
 })
 
 describe("useAgentTeamStore inline selectors", () => {
@@ -1396,116 +1097,6 @@ describe("useAgentTeamStore inline selectors", () => {
 
   it("getActiveTeam returns undefined when no active team", () => {
     expect(useAgentTeamStore.getState().getActiveTeam()).toBeUndefined()
-  })
-
-  it("getUnreadMessages filters by recipient and broadcasts not from sender", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "G", task: "" })
-    const recipient = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "R" })
-    useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      recipientId: recipient.id,
-      content: "to you",
-    })
-    useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "to all",
-    })
-    useAgentTeamStore.getState().addMessage({
-      teamId: team.id,
-      senderId: recipient.id,
-      content: "I sent",
-    })
-    const unread = useAgentTeamStore.getState().getUnreadMessages(recipient.id)
-    expect(unread.map((m) => m.content).sort()).toEqual(["to all", "to you"])
-
-    // After marking read, gets nothing
-    for (const m of unread) {
-      useAgentTeamStore.getState().markMessageRead(m.id)
-    }
-    expect(useAgentTeamStore.getState().getUnreadMessages(recipient.id)).toEqual([])
-  })
-})
-
-describe("useAgentTeamStore batch operations", () => {
-  beforeEach(() => reset())
-
-  it("cancelAllTasks transitions live tasks to cancelled", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "B", task: "" })
-    const t1 = useAgentTeamStore
-      .getState()
-      .createTask({ teamId: team.id, title: "1", description: "" })
-    const t2 = useAgentTeamStore
-      .getState()
-      .createTask({ teamId: team.id, title: "2", description: "" })
-    useAgentTeamStore.getState().setTaskStatus(t2.id, "in_progress")
-    useAgentTeamStore.getState().cancelAllTasks(team.id)
-    expect(useAgentTeamStore.getState().tasks[t1.id].status).toBe("cancelled")
-    expect(useAgentTeamStore.getState().tasks[t2.id].status).toBe("cancelled")
-    useAgentTeamStore.getState().cancelAllTasks("ghost")
-  })
-
-  it("shutdownAllTeammates transitions live members to shutdown", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "S", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    useAgentTeamStore.getState().setTeammateStatus(tm.id, "executing")
-    useAgentTeamStore.getState().shutdownAllTeammates(team.id)
-    expect(useAgentTeamStore.getState().teammates[tm.id].status).toBe("shutdown")
-    useAgentTeamStore.getState().shutdownAllTeammates("ghost")
-  })
-
-  it("cleanupTeam removes all team-owned data", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "C", task: "" })
-    useAgentTeamStore.getState().createTask({ teamId: team.id, title: "x", description: "" })
-    useAgentTeamStore
-      .getState()
-      .addMessage({ teamId: team.id, senderId: team.leadId, content: "x" })
-    useAgentTeamStore.getState().upsertConsensus({
-      id: "c-1",
-      teamId: team.id,
-      initiatorId: team.leadId,
-      question: "?",
-      options: [],
-      type: "majority",
-      status: "open",
-      votes: [],
-      createdAt: new Date(),
-    })
-    useAgentTeamStore.getState().writeSharedMemory(team.id, "k", {
-      key: "k",
-      value: 1,
-      writtenBy: team.leadId,
-      writtenAt: new Date(),
-      version: 1,
-    } as SharedMemoryEntry)
-    useAgentTeamStore.getState().upsertDelegation({
-      id: "d-1",
-      sourceTeamId: team.id,
-      sourceTaskId: "x",
-      targetType: "team",
-      status: "active",
-      reason: "r",
-      manual: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as TeamDelegationRecord)
-    useAgentTeamStore.getState().setActiveTeam(team.id)
-    useAgentTeamStore.getState().cleanupTeam(team.id)
-    expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
-    expect(useAgentTeamStore.getState().activeTeamId).toBeNull()
-    expect(useAgentTeamStore.getState().consensus["c-1"]).toBeUndefined()
-    expect(useAgentTeamStore.getState().sharedMemory[team.id]).toBeUndefined()
-    expect(useAgentTeamStore.getState().delegations["d-1"]).toBeUndefined()
-    useAgentTeamStore.getState().cleanupTeam("ghost")
-  })
-
-  it("cleanupTeam does NOT clear activeTeamId when it points elsewhere", () => {
-    const team1 = useAgentTeamStore.getState().createTeam({ name: "1", task: "" })
-    const team2 = useAgentTeamStore.getState().createTeam({ name: "2", task: "" })
-    useAgentTeamStore.getState().setActiveTeam(team2.id)
-    useAgentTeamStore.getState().cleanupTeam(team1.id)
-    expect(useAgentTeamStore.getState().activeTeamId).toBe(team2.id)
   })
 })
 
@@ -1751,206 +1342,14 @@ describe("useAgentTeamStore Execution Reports", () => {
   })
 })
 
-describe("useAgentTeamStore structured messages and shutdown", () => {
+describe("useAgentTeamStore reset", () => {
   beforeEach(() => reset())
-
-  it("addStructuredMessage derives type from payload type and persists message", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "S", task: "" })
-    const m = useAgentTeamStore.getState().addStructuredMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "x",
-      structuredPayload: { type: "shutdown_request", reason: "r" },
-    })
-    expect(m.type).toBe("shutdown")
-    expect(useAgentTeamStore.getState().messages[m.id]).toBeDefined()
-    expect(useAgentTeamStore.getState().teams[team.id].messageIds).toContain(m.id)
-  })
-
-  it("addStructuredMessage falls back to provided type when payload type is not in map", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "S", task: "" })
-    const m = useAgentTeamStore.getState().addStructuredMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "x",
-      type: "system",
-      structuredPayload: { type: "task_assignment", taskId: "t-1" },
-    })
-    // map has task_assignment so it uses that
-    expect(m.type).toBe("task_assignment")
-  })
-
-  it("addStructuredMessage falls back to 'system' when payload type unmapped and no input.type", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "S", task: "" })
-    const m = useAgentTeamStore.getState().addStructuredMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      content: "x",
-      structuredPayload: {
-        type: "made_up" as unknown as "idle_notification",
-      } as never,
-    })
-    expect(m.type).toBe("system")
-  })
-
-  it("addStructuredMessage records the message even when team is missing", () => {
-    const m = useAgentTeamStore.getState().addStructuredMessage({
-      teamId: "ghost",
-      senderId: "x",
-      content: "y",
-      structuredPayload: { type: "idle_notification" },
-    })
-    expect(useAgentTeamStore.getState().messages[m.id]).toBeDefined()
-  })
-
-  it("addStructuredMessage labels recipient when known", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "S", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    const m = useAgentTeamStore.getState().addStructuredMessage({
-      teamId: team.id,
-      senderId: team.leadId,
-      recipientId: tm.id,
-      content: "x",
-      structuredPayload: { type: "idle_notification" },
-    })
-    expect(m.recipientName).toBe("W")
-    expect(m.senderName).toBeDefined()
-  })
-
-  it("requestTeammateShutdown sets status and emits a structured shutdown message", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "Sh", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    useAgentTeamStore.getState().requestTeammateShutdown(tm.id, "bye")
-    expect(useAgentTeamStore.getState().teammates[tm.id].status).toBe("shutdown")
-    const messages = Object.values(useAgentTeamStore.getState().messages)
-    expect(messages.some((m) => m.type === "shutdown")).toBe(true)
-  })
-
-  it("requestTeammateShutdown is a no-op for unknown ids", () => {
-    useAgentTeamStore.getState().requestTeammateShutdown("missing")
-  })
-
-  it("requestTeammateShutdown skips the structured message when teammate's team is missing", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "Sh", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
-    useAgentTeamStore.setState((state) => {
-      const { [team.id]: _t, ...rest } = state.teams
-      return { teams: rest }
-    })
-    useAgentTeamStore.getState().requestTeammateShutdown(tm.id, "no team")
-    // No structured shutdown message should exist for this teammate
-    const shutdownMsgs = Object.values(useAgentTeamStore.getState().messages).filter(
-      (m) => m.type === "shutdown" && m.recipientId === tm.id
-    )
-    expect(shutdownMsgs).toHaveLength(0)
-  })
-
-  it("requestTeammateShutdown emits a default content when no reason is given", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "Sh", task: "" })
-    const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "Worker" })
-    useAgentTeamStore.getState().requestTeammateShutdown(tm.id)
-    const shutdownMsg = Object.values(useAgentTeamStore.getState().messages).find(
-      (m) => m.type === "shutdown" && m.recipientId === tm.id
-    )
-    expect(shutdownMsg?.content).toContain("Shutdown requested")
-  })
-})
-
-describe("useAgentTeamStore default config / reset", () => {
-  beforeEach(() => reset())
-
-  it("updateDefaultConfig merges patches", () => {
-    useAgentTeamStore.getState().updateDefaultConfig({ maxConcurrentTeammates: 11 })
-    expect(useAgentTeamStore.getState().defaultConfig.maxConcurrentTeammates).toBe(11)
-  })
-
-  it("updateDefaultConfig clears preferredExecutionPattern when executionMode flips", () => {
-    useAgentTeamStore.getState().updateDefaultConfig({
-      executionMode: "autonomous",
-    })
-    expect(useAgentTeamStore.getState().defaultConfig.executionMode).toBe("autonomous")
-  })
-
-  it("updateDefaultConfig clears governancePolicy when legacy fields change", () => {
-    useAgentTeamStore.getState().updateDefaultConfig({
-      requirePlanApproval: !useAgentTeamStore.getState().defaultConfig.requirePlanApproval,
-    })
-    // governancePolicy is undefined or unchanged depending on normalization; assert the toggled field stuck
-    expect(useAgentTeamStore.getState().defaultConfig.requirePlanApproval).toBeDefined()
-  })
 
   it("reset restores initial state and built-in templates", () => {
     useAgentTeamStore.getState().createTeam({ name: "R", task: "" })
     useAgentTeamStore.getState().reset()
     expect(useAgentTeamStore.getState().teams).toEqual({})
     expect(Object.keys(useAgentTeamStore.getState().templates).length).toBeGreaterThan(0)
-  })
-})
-
-describe("useAgentTeamStore clearStaleCapabilityIds", () => {
-  beforeEach(() => reset())
-
-  it("strips flagged ids from a team-level bundle, dropping empty buckets", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "Stale", task: "t" })
-    useAgentTeamStore.getState().updateTeamCapabilities(team.id, {
-      skillIds: ["keep", "ghost"],
-      subagentIds: ["only-ghost"],
-    })
-    useAgentTeamStore.getState().clearStaleCapabilityIds({ teamId: team.id }, [
-      {
-        code: "missing-skill",
-        bucket: "skillIds",
-        missingId: "ghost",
-        scope: { kind: "team", teamId: team.id },
-      },
-      {
-        code: "missing-subagent",
-        bucket: "subagentIds",
-        missingId: "only-ghost",
-        scope: { kind: "team", teamId: team.id },
-      },
-    ])
-    const caps = useAgentTeamStore.getState().teams[team.id].config.capabilities
-    expect(caps?.skillIds).toEqual(["keep"])
-    expect(caps?.subagentIds).toBeUndefined() // emptied → dropped
-  })
-
-  it("strips flagged ids from a teammate overlay add/replace lists", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "Stale2", task: "t" })
-    const teammate = useAgentTeamStore
-      .getState()
-      .addTeammate({ teamId: team.id, name: "W", role: "teammate" })
-    useAgentTeamStore.getState().updateTeammateCapabilities(teammate.id, {
-      skillIds: { add: ["keep", "ghost"] },
-      characterPackIds: { replace: ["pack-ghost"] },
-    })
-    useAgentTeamStore.getState().clearStaleCapabilityIds({ teammateId: teammate.id }, [
-      {
-        code: "missing-skill",
-        bucket: "skillIds",
-        missingId: "ghost",
-        scope: { kind: "teammate", teamId: team.id, teammateId: teammate.id },
-      },
-      {
-        code: "missing-character-pack",
-        bucket: "characterPackIds",
-        missingId: "pack-ghost",
-        scope: { kind: "teammate", teamId: team.id, teammateId: teammate.id },
-      },
-    ])
-    const overlay = useAgentTeamStore.getState().teammates[teammate.id].config.capabilities
-    expect(overlay?.skillIds?.add).toEqual(["keep"])
-    // characterPackIds replace emptied → whole bucket dropped
-    expect(overlay?.characterPackIds).toBeUndefined()
-  })
-
-  it("is a no-op when no warning matches the target scope", () => {
-    const team = useAgentTeamStore.getState().createTeam({ name: "NoOp", task: "t" })
-    useAgentTeamStore.getState().updateTeamCapabilities(team.id, { skillIds: ["keep"] })
-    useAgentTeamStore.getState().clearStaleCapabilityIds({ teamId: team.id }, [])
-    expect(useAgentTeamStore.getState().teams[team.id].config.capabilities?.skillIds).toEqual([
-      "keep",
-    ])
   })
 })
 

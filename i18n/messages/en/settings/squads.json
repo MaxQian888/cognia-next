@@ -8,8 +8,12 @@
     "duplicateTitle": "Duplicate this squad",
     "duplicated": "Created {name}.",
     "nameLabel": "Name",
+    "publishFailed": "Could not publish: {error}",
+    "publishOption": "Publish it as a version too",
+    "publishOptionHint": "Only a published version can be bundled into a package, forked, or handed to someone else. A draft stays on this machine.",
     "saveAsTemplate": "Save as template",
     "templateBody": "A template keeps the roster shape and squad settings. It does not keep the lead's own configuration, the task list, or anything a run produced.",
+    "templatePublished": "Published {name} v{version}.",
     "templateSaved": "Saved {name} to your templates.",
     "templateTitle": "Save as a template",
     "title": "Reuse this squad",
@@ -45,5 +49,16 @@
     "static": {
       "templates": "Templates"
     }
+  },
+  "provenance": {
+    "createdFrom": "Created from {name} v{version}",
+    "createdFromDraft": "Created from {name}, an unreleased draft",
+    "description": "Squads made from a template keep a link to it, so a newer version can be taken later.",
+    "detached": "Detached. This Squad no longer follows the template.",
+    "loading": "Checking this Squad's lineage…",
+    "none": "This Squad has no template lineage. It was created directly, duplicated from another Squad, or made before lineage was recorded.",
+    "summary": "Updating replays the template's changes over this Squad. Detaching keeps the Squad and drops the link.",
+    "title": "Made from a template",
+    "updated": "Updated to v{version}."
   }
 }

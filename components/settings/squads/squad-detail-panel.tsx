@@ -33,6 +33,7 @@ import { ChevronRightIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { SquadDeriveActions } from "./squad-derive-actions"
+import { SquadTemplateProvenance } from "./squad-template-provenance"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -172,6 +173,12 @@ export function SquadDetailPanel({ squadId, onDeleted }: SquadDetailPanelProps) 
           completedTaskCount: taskStats.completed,
         }}
       />
+
+      {/* Where this Squad came from. Reads the `TemplateInstanceRecord` whose
+          resources name this team, which is the only link a template keeps to
+          what it produced, and offers the update / detach half of the
+          lifecycle ADR-0100 advertises. */}
+      <SquadTemplateProvenance squadId={squadId} className="rounded-md border p-3" />
 
       <SquadDeriveActions squadId={squadId} className="rounded-md border p-3" />
 

@@ -30,6 +30,7 @@ jest.mock("./settings-save-indicator", () => ({ markSettingsSaved: jest.fn() }))
 
 import { MemoryComposer } from "./memory-composer"
 import { SharedMemoryPiiError } from "@/lib/ai/agent/team/shared-memory-orchestrator"
+import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
 
 const team = { id: "team-1", teammateIds: [] } as unknown as AgentTeam
@@ -78,5 +79,39 @@ describe("MemoryComposer", () => {
     fireEvent.click(screen.getByText("submit"))
     expect(screen.getByText("piiBlocked")).toBeInTheDocument()
     expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * The "readable by" list used to come from `selectActiveTeammates`, which
+ * resolves through `activeTeamId` — a field only `createTeam` writes and that
+ * is not persisted. Opening the composer for one squad therefore listed a
+ * different squad's members, or none at all after a reload.
+ */
+describe("MemoryComposer readable-by roster", () => {
+  beforeEach(() => {
+    useAgentTeamStore.getState().reset()
+    mockPublishEntry.mockReset()
+  })
+
+  it("offers the members of the team it was opened for, not the store's last-created one", () => {
+    const store = useAgentTeamStore.getState()
+    const mine = store.createTeam({ name: "Mine", task: "" })
+    store.addTeammate({ teamId: mine.id, name: "Ada", description: "" })
+    // Created LAST, so it owns `activeTeamId`. Its member must not be offered.
+    const other = store.createTeam({ name: "Other", task: "" })
+    store.addTeammate({ teamId: other.id, name: "Grace", description: "" })
+
+    render(
+      <MemoryComposer
+        open
+        onOpenChange={jest.fn()}
+        team={useAgentTeamStore.getState().teams[mine.id]}
+        mode="create"
+      />
+    )
+
+    expect(screen.getByText("Ada")).toBeInTheDocument()
+    expect(screen.queryByText("Grace")).not.toBeInTheDocument()
   })
 })

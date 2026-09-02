@@ -8,8 +8,12 @@
     "duplicateTitle": "复制这个小队",
     "duplicated": "已创建 {name}。",
     "nameLabel": "名称",
+    "publishFailed": "发布失败：{error}",
+    "publishOption": "同时发布为一个版本",
+    "publishOptionHint": "只有已发布的版本才能打包、被复刻或分享给他人；草稿仅保存在本机。",
     "saveAsTemplate": "存为模板",
     "templateBody": "模板保留成员编制与小队设置，不保留队长自身的配置、任务列表，以及运行产生的任何内容。",
+    "templatePublished": "已发布 {name} v{version}。",
     "templateSaved": "已把 {name} 存入模板。",
     "templateTitle": "存为模板",
     "title": "复用这个小队",
@@ -45,5 +49,16 @@
     "static": {
       "templates": "模板"
     }
+  },
+  "provenance": {
+    "createdFrom": "由 {name} v{version} 创建",
+    "createdFromDraft": "由 {name}（未发布草稿）创建",
+    "description": "由模板创建的小队会保留与模板的关联，之后可以升级到新版本。",
+    "detached": "已断开关联，该小队不再跟随模板。",
+    "loading": "正在检查该小队的来源…",
+    "none": "该小队没有模板来源记录：它是直接创建的、从其他小队复制而来，或创建于记录来源之前。",
+    "summary": "升级会把模板的改动重放到该小队；断开关联会保留小队并移除链接。",
+    "title": "来自模板",
+    "updated": "已升级到 v{version}。"
   }
 }

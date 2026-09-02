@@ -8,10 +8,13 @@
  * dispatch through the consensus orchestrator so plugins listening on
  * `onConsensusVoted` / `onConsensusResolved` see the events.
  *
- * The vote-row interaction is keyed by `selectedTeammateId` — the operator
- * casts votes "as" the currently focused teammate (mirrors how the
- * workspace chat composer routes mentions). When no teammate is selected,
- * the vote buttons are disabled with a hint.
+ * A vote is cast AS someone, so the panel has to know who. It used to read
+ * `selectedTeammateId`, a field of the retired `/agent-teams/workspace` shell
+ * whose only writers went with it — so the picker was empty, every vote button
+ * was permanently disabled, and Coordination in `/agent-runs` could show a vote
+ * it could never answer. The panel now offers the roster of the team it is
+ * showing and defaults to that team's lead, which is who a human operator is
+ * standing in for anyway.
  */
 
 import { useMemo, useState } from "react"
@@ -23,14 +26,22 @@ import { VoteIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { ConsensusRequest } from "@/types/agent/agent-team"
 import type { AgentTeamState } from "@/stores/agent/agent-team-store/types"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import {
   selectActiveTeamConsensus,
   selectTeamConsensus,
-  selectSelectedTeammateId,
+  selectTeamTeammates,
 } from "@/stores/agent/agent-team-store/selectors"
 import {
   cancelConsensus,
@@ -93,7 +104,26 @@ export function ConsensusPanel({ teamId }: ConsensusPanelProps = {}) {
       teamId === undefined ? selectActiveTeamConsensus(state) : selectTeamConsensus(state, teamId)
     )
   )
-  const selectedTeammateId = useAgentTeamStore(selectSelectedTeammateId)
+  // The roster the votes are cast from. Resolved against the same team the
+  // rows came from, with the store's last-created team as the only fallback —
+  // the identical rule the consensus selector above follows.
+  const roster = useAgentTeamStore(
+    useShallow((state: AgentTeamState) =>
+      selectTeamTeammates(state, teamId ?? state.activeTeamId ?? undefined)
+    )
+  )
+  const leadId = useAgentTeamStore((state: AgentTeamState) =>
+    teamId ? state.teams[teamId]?.leadId : undefined
+  )
+
+  const [voterOverride, setVoterOverride] = useState<string | null>(null)
+  // Adjusted during render rather than in an effect: the roster can change
+  // under the panel (a teammate is removed mid-run), and an effect would let
+  // one paint show a voter who is no longer on the team.
+  const defaultVoterId = roster.find((tm) => tm.id === leadId)?.id ?? roster[0]?.id
+  const voterId =
+    voterOverride && roster.some((tm) => tm.id === voterOverride) ? voterOverride : defaultVoterId
+
   const [pendingResolve, setPendingResolve] = useState<{ id: string; lead: number } | null>(null)
 
   const ordered = useMemo(
@@ -111,6 +141,34 @@ export function ConsensusPanel({ teamId }: ConsensusPanelProps = {}) {
         {t("title")}
       </p>
       <p className="text-xs text-muted-foreground">{t("description")}</p>
+      {/* Rendered, not hidden, when the roster is empty: "there is nobody to
+          vote as" and "this panel has no voter concept" look identical once the
+          control disappears, and the first is the one an operator can fix. */}
+      <div className="flex items-center gap-2">
+        <Label htmlFor="consensus-voter" className="shrink-0 text-xs text-muted-foreground">
+          {t("voteAs")}
+        </Label>
+        <Select
+          value={voterId ?? ""}
+          onValueChange={setVoterOverride}
+          disabled={roster.length === 0}
+        >
+          <SelectTrigger
+            id="consensus-voter"
+            className="h-8 w-56"
+            data-testid="consensus-voter-picker"
+          >
+            <SelectValue placeholder={t("voteAsEmpty")} />
+          </SelectTrigger>
+          <SelectContent>
+            {roster.map((tm) => (
+              <SelectItem key={tm.id} value={tm.id}>
+                {tm.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       {ordered.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("empty")}</p>
       ) : (
@@ -145,13 +203,14 @@ export function ConsensusPanel({ teamId }: ConsensusPanelProps = {}) {
                             <Button
                               size="sm"
                               variant="ghost"
-                              disabled={!selectedTeammateId}
+                              disabled={!voterId}
+                              title={voterId ? undefined : t("voteAsEmpty")}
                               onClick={() => {
-                                if (!selectedTeammateId) return
+                                if (!voterId) return
                                 try {
                                   castVote({
                                     consensusId: row.id,
-                                    voterId: selectedTeammateId,
+                                    voterId,
                                     optionIndex: idx,
                                   })
                                 } catch (err) {

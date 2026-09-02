@@ -29,13 +29,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { selectActiveTeammates } from "@/stores/agent/agent-team-store/selectors"
+import { selectTeamTeammates } from "@/stores/agent/agent-team-store/selectors"
 import {
   publishEntry,
   SharedMemoryPiiError,
   OPERATOR_READER_ID,
 } from "@/lib/ai/agent/team/shared-memory-orchestrator"
 import type { AgentTeam, SharedMemoryEntry } from "@/types/agent/agent-team"
+import type { AgentTeamState } from "@/stores/agent/agent-team-store/types"
 import { markSettingsSaved } from "./settings-save-indicator"
 
 export interface MemoryComposerProps {
@@ -48,7 +49,16 @@ export interface MemoryComposerProps {
 
 export function MemoryComposer({ open, onOpenChange, team, mode, initial }: MemoryComposerProps) {
   const t = useTranslations("agentTeamsWorkspace.settings.memory.composer")
-  const teammates = useAgentTeamStore(useShallow(selectActiveTeammates))
+  // The roster of the team this composer was opened for, NOT
+  // `selectActiveTeammates`. That selector resolves through `activeTeamId`,
+  // which only `createTeam` writes and which is not persisted — so the
+  // "readable by" list showed whichever squad happened to be created last in
+  // this browser session, and nothing at all after a reload. Every entry
+  // written from here belongs to `team`, so the ACL has to offer `team`'s
+  // members.
+  const teammates = useAgentTeamStore(
+    useShallow((state: AgentTeamState) => selectTeamTeammates(state, team.id))
+  )
 
   const [key, setKey] = useState("")
   const [value, setValue] = useState("")

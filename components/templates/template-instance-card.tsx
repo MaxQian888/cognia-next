@@ -11,6 +11,7 @@
  * from a template could never be moved to a newer release of it.
  */
 
+import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +36,19 @@ export interface TemplateRebindTarget {
 
 export interface TemplateInstanceCardProps {
   instance: TemplateInstanceRecord
+  /**
+   * What to call this instance. Defaults to the raw definition id, which is
+   * the right answer in the Studio, where the id IS what the user selected.
+   * A host that already knows the human name of the thing (the Squad library
+   * says "Created from Parallel review v1.2.0") passes it instead of forking
+   * the card, so the lifecycle controls below stay in one place.
+   */
+  title?: string
+  /**
+   * Replaces the bare version line. Same reasoning as `title`: a host with a
+   * fuller sentence to say says it here rather than reimplementing the card.
+   */
+  summary?: ReactNode
   /** Released versions of the definition this instance came from, newest last. */
   availableVersions: string[]
   /**
@@ -51,6 +65,8 @@ export interface TemplateInstanceCardProps {
 
 export function TemplateInstanceCard({
   instance,
+  title,
+  summary,
   availableVersions,
   rebindTargets = [],
   onPlanUpdate,
@@ -75,10 +91,10 @@ export function TemplateInstanceCard({
   return (
     <Card data-testid={`template-instance-${instance.id}`}>
       <CardHeader>
-        <CardTitle className="text-base">{instance.source.definitionId}</CardTitle>
+        <CardTitle className="text-base">{title ?? instance.source.definitionId}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm text-muted-foreground">
-        <p>{current ?? t("status.draft")}</p>
+        {summary ?? <p>{current ?? t("status.draft")}</p>}
         <p>{t("instances.resources", { count: instance.resources.length })}</p>
         {detached ? <Badge variant="outline">{t("instances.detached")}</Badge> : null}
         {instance.sourceUnavailableAt ? (

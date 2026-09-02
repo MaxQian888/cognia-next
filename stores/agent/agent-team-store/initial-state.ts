@@ -8,7 +8,6 @@ import {
   type AgentTeamTemplate,
   type AgentTeamEvent,
   type TeamDisplayMode,
-  type AgentTeamWorkspaceFocus,
   type AgentTeamEditorSession,
   type ConsensusRequest,
   type SharedMemoryEntry,
@@ -33,18 +32,15 @@ export const initialState = {
   consensus: {} as Record<string, ConsensusRequest>,
   sharedMemory: {} as Record<string, Record<string, SharedMemoryEntry>>,
   delegations: {} as Record<string, TeamDelegationRecord>,
+  // Written by `createTeam`; read by the two `selectActiveTeam*` selectors
+  // that still have callers. See the note on `AgentTeamState.activeTeamId`.
   activeTeamId: null as string | null,
-  selectedTeammateId: null as string | null,
+  // `displayMode` / `workspaceTab` are INTENTIONALLY INERT: persisted so an
+  // older build's blob round-trips, read and written by nothing. See the
+  // notes on their declarations in `types.ts`.
   displayMode: "expanded" as TeamDisplayMode,
-  isPanelOpen: false,
   workspaceTab: "overview" as const,
   tasksView: "list" as const,
-  workspaceFocus: {
-    teammateId: null,
-    taskId: null,
-    messageId: null,
-  } as AgentTeamWorkspaceFocus,
-  workspaceDetailOpen: true,
   editorSession: {} as Record<string, AgentTeamEditorSession>,
   defaultConfig: { ...DEFAULT_TEAM_CONFIG },
   // Per-(teamId, adapterId) cursor of the last shared-memory version pulled
