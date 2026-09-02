@@ -164,6 +164,7 @@ interface SettingsState {
   setVectorToolEnabled: (enabled: boolean) => Promise<void>
   setSpawnTaskToolEnabled: (enabled: boolean) => Promise<void>
   setSessionMessagingToolEnabled: (enabled: boolean) => Promise<void>
+  setTemplateToolsEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -969,6 +970,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       const next = await saveSettings({
         selfInvokeTools: { ...current, sessionMessaging: enabled },
       })
+      set({ settings: next })
+    },
+
+    setTemplateToolsEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, templates: enabled } })
       set({ settings: next })
     },
 

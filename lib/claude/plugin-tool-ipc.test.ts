@@ -12,6 +12,7 @@ import {
   __setProjectHistoryToolDepsForTesting,
   __setSpawnTaskToolDepsForTesting,
   __setSessionPeerToolDepsForTesting,
+  __setTemplateToolDepsForTesting,
   handlePluginToolExec,
   type PluginToolExecRequest,
   type PluginToolResolver,
@@ -100,6 +101,47 @@ describe("handlePluginToolExec", () => {
     __setWebToolDepsForTesting(null)
     __setSpawnTaskToolDepsForTesting(null)
     __setSessionPeerToolDepsForTesting(null)
+    __setTemplateToolDepsForTesting(null)
+  })
+
+  it("routes the template and squad tools to the host runner before the plugin registry", async () => {
+    const execute = jest.fn().mockResolvedValue({ from: "plugin" })
+    __setPluginToolResolverForTesting({
+      getTool: () => ({ pluginId: "some-plugin", execute }),
+    })
+    const list = jest.fn(async () => [])
+    __setTemplateToolDepsForTesting(
+      () =>
+        ({
+          runtime: {
+            catalog: { query: () => [], get: () => undefined },
+            repository: {},
+            service: {},
+          },
+          platform: "web",
+          consent: async () => true,
+          chatTemplates: { list, get: async () => undefined },
+          squads: {
+            teams: () => ({}),
+            teammates: () => [],
+            templates: () => ({}),
+            createTeam: jest.fn(),
+            addTeammate: jest.fn(),
+            createTask: jest.fn(),
+            saveAsTemplate: () => null,
+          },
+          applySquadTemplate: async () => ({ teamId: "t", via: "legacy" }),
+          publishSquadTemplate: async () => undefined,
+        }) as never
+    )
+
+    const response = await handlePluginToolExec(
+      makeRequest({ name: "chat_template_list", args: {} })
+    )
+    expect(execute).not.toHaveBeenCalled()
+    expect(list).toHaveBeenCalled()
+    expect(response.error).toBeUndefined()
+    expect(response.result).toEqual({ ok: true, templates: [], total: 0, truncated: false })
   })
 
   it("resolves web_search before the plugin registry (supersedes the plugin)", async () => {

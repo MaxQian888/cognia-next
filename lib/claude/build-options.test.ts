@@ -5385,6 +5385,48 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / sessi
     expect(toolNames(opts)).toContain("SlashCommand")
   })
 
+  it("appends the template and squad tools only when selfInvokeTools.templates is on", async () => {
+    const off = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { skill: true } } as AppSettings,
+    })
+    expect(toolNames(off)).not.toContain("template_list")
+    expect(toolNames(off)).not.toContain("squad_apply_template")
+    expect(off.permissionRuleset?.template_instantiate).toBeUndefined()
+
+    const on = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { templates: true } } as AppSettings,
+    })
+    for (const name of [
+      "template_list",
+      "template_get",
+      "template_instantiate",
+      "chat_template_list",
+      "chat_template_get",
+      "squad_list",
+      "squad_apply_template",
+      "squad_save_as_template",
+    ]) {
+      expect(toolNames(on)).toContain(name)
+      expect(on.permissionRuleset?.[name]).toBe("allow")
+    }
+  })
+
+  it("withholds the template and squad tools from an IM-bound session", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        characterId: "c1",
+        platformBinding: { adapterId: "telegram" } as never,
+      }),
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { templates: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).not.toContain("template_list")
+    expect(opts.permissionRuleset?.template_list).toBeUndefined()
+  })
+
   it("appends spawn_task only when opted in and not on native mobile", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", characterId: "c1" }),

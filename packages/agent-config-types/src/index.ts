@@ -3320,6 +3320,16 @@ export interface AppSettings {
      * Receiver policy and permission checks remain authoritative. Default false.
      */
     sessionMessaging?: boolean
+    /**
+     * Expose the template platform, saved chat templates and Squads to the
+     * agent (`template_list` / `template_get` / `template_instantiate`,
+     * `chat_template_list` / `chat_template_get`, `squad_list` /
+     * `squad_apply_template` / `squad_save_as_template`). Reads are free.
+     * Every write asks the plugin consent broker first, the same prompt the
+     * plugin `ctx.templates` API answers to. Host-routed on desktop and web,
+     * withheld for IM-bound sessions. Default false.
+     */
+    templates?: boolean
   }
   /**
    * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).

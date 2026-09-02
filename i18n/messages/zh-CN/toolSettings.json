@@ -50,6 +50,8 @@
   "spawnTaskToolTitle": "派生任务",
   "teamCollabToolDesc": "让队友在团队运行期间协作——给同伴发消息、共享黑板、发起或参与共识投票、委派子任务。仅对 Agent 团队会话生效。",
   "teamCollabToolTitle": "团队协作工具",
+  "templateToolsDesc": "允许 Agent 浏览你的模板目录、已保存的会话模板与小队，并实例化模板或把小队存为模板。每次写入都会先征求你的同意，与插件使用的同一个确认提示。",
+  "templateToolsTitle": "模板与小队工具",
   "terminalRepl": "交互式 REPL",
   "terminalReplDesc": "Agent 私有的持久化 PTY 会话，由 node-pty 懒加载。适合需要跨多次写入保持状态的 REPL（python / sql / claude-code）。与 dock 中继路径正交 —— REPL 对用户不可见。",
   "title": "内置工具",

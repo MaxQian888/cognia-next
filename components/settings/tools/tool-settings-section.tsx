@@ -95,6 +95,7 @@ export function ToolSettingsSection() {
   const setVectorToolEnabled = useSettingsStore((s) => s.setVectorToolEnabled)
   const setSpawnTaskToolEnabled = useSettingsStore((s) => s.setSpawnTaskToolEnabled)
   const setSessionMessagingToolEnabled = useSettingsStore((s) => s.setSessionMessagingToolEnabled)
+  const setTemplateToolsEnabled = useSettingsStore((s) => s.setTemplateToolsEnabled)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
@@ -111,6 +112,7 @@ export function ToolSettingsSection() {
   const vectorToolEnabled = settings?.selfInvokeTools?.vector ?? false
   const spawnTaskToolEnabled = settings?.selfInvokeTools?.spawnTask ?? false
   const sessionMessagingToolEnabled = settings?.selfInvokeTools?.sessionMessaging ?? false
+  const templateToolsEnabled = settings?.selfInvokeTools?.templates ?? false
   const desktop = isTauri()
 
   return (
@@ -249,6 +251,19 @@ export function ToolSettingsSection() {
               checked={sessionMessagingToolEnabled}
               onCheckedChange={(next) => setSessionMessagingToolEnabled(next)}
               aria-label={t("toggleAriaLabel", { name: t("sessionMessagingToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("templateToolsTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {t("templateToolsDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={templateToolsEnabled}
+              onCheckedChange={(next) => setTemplateToolsEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("templateToolsTitle") })}
             />
           </div>
           <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">

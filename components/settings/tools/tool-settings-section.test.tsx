@@ -15,6 +15,7 @@ const setTeamCollaborationToolEnabled = jest.fn()
 const setVectorToolEnabled = jest.fn()
 const setSpawnTaskToolEnabled = jest.fn()
 const setSessionMessagingToolEnabled = jest.fn()
+const setTemplateToolsEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -60,6 +61,7 @@ const settingsState = {
   setVectorToolEnabled,
   setSpawnTaskToolEnabled,
   setSessionMessagingToolEnabled,
+  setTemplateToolsEnabled,
   toggleAlwaysAllow,
 }
 
@@ -146,6 +148,8 @@ describe("ToolSettingsSection", () => {
     expect(setSpawnTaskToolEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:sessionMessagingToolTitle"))
     expect(setSessionMessagingToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:templateToolsTitle"))
+    expect(setTemplateToolsEnabled).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByLabelText("toggleAriaLabel:teamCollabToolTitle"))
     expect(setTeamCollaborationToolEnabled).toHaveBeenCalledWith(true)
   })

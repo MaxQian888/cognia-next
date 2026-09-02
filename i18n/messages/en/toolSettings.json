@@ -50,6 +50,8 @@
   "spawnTaskToolTitle": "Spawn task",
   "teamCollabToolDesc": "Let teammates collaborate during a team run — message peers, share the blackboard, open or vote in a consensus, and delegate sub-tasks. Only applies to Agent Team sessions.",
   "teamCollabToolTitle": "Team collaboration tools",
+  "templateToolsDesc": "Let the agent browse your template catalog, saved chat templates and Squads, and instantiate a template or save a Squad as one. Every write asks you first, in the same consent prompt plugins use.",
+  "templateToolsTitle": "Template and Squad tools",
   "terminalRepl": "Interactive REPL",
   "terminalReplDesc": "Agent-private persistent PTY sessions backed by node-pty (lazy loaded). Use for stateful REPLs (python / sql / claude-code) where the agent needs to hold state across multiple writes. Orthogonal to the dock-relay path — REPL is invisible to the user.",
   "title": "Built-in tools",

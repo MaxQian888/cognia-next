@@ -894,6 +894,19 @@ describe("self-invocation tool toggles", () => {
     })
   })
 
+  it("persists the template tools flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setTemplateToolsEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, templates: true },
+    })
+  })
+
   it("turns the vector tool flag back off", async () => {
     useSettingsStore.setState({
       settings: baseSettings({ selfInvokeTools: { vector: true } }),

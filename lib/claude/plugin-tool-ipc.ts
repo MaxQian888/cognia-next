@@ -67,6 +67,12 @@ import {
   runArtifactBuiltinTool,
 } from "./artifact-builtin-tools"
 import {
+  isTemplateBuiltinTool,
+  resolveTemplateToolDeps as resolveProductionTemplateToolDeps,
+  runTemplateBuiltinTool,
+  type TemplateToolDeps,
+} from "./template-builtin-tools"
+import {
   isSpawnTaskBuiltinTool,
   runSpawnTaskBuiltinTool,
   type SpawnTaskToolRunDeps,
@@ -250,6 +256,21 @@ export function __setSlashToolDepsForTesting(
   fn: (() => Promise<SlashToolRunDeps> | SlashToolRunDeps) | null
 ): void {
   slashToolDepsOverride = fn
+}
+
+/** Resolver for the template / squad tools' host-side deps. Swappable for tests. */
+let templateToolDepsOverride: (() => Promise<TemplateToolDeps> | TemplateToolDeps) | null = null
+
+/** Inject template-tool deps (tests / CLI host). Pass `null` to restore. */
+export function __setTemplateToolDepsForTesting(
+  fn: (() => Promise<TemplateToolDeps> | TemplateToolDeps) | null
+): void {
+  templateToolDepsOverride = fn
+}
+
+async function resolveTemplateToolDeps(): Promise<TemplateToolDeps> {
+  if (templateToolDepsOverride) return templateToolDepsOverride()
+  return resolveProductionTemplateToolDeps()
 }
 
 async function resolveSlashToolDeps(): Promise<SlashToolRunDeps> {
@@ -677,6 +698,19 @@ export async function handlePluginToolExec(
     // a renderer singleton the .mjs sidecar cannot import. Before this the
     // declared `artifact_create` / `canvas_create` tools had a consumer on the
     // message-conversion side and no producer anywhere.
+    if (isTemplateBuiltinTool(request.name)) {
+      // Agent-facing templates, chat templates and squads (ADR-0164).
+      // Host-routed: the template catalog, the Dexie chat-template table and
+      // the agent-team store are renderer singletons. Every write inside asks
+      // the plugin consent broker first. Opt-in via selfInvokeTools.templates.
+      const result = await runTemplateBuiltinTool(
+        request.name,
+        request.args,
+        await resolveTemplateToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
     if (isArtifactBuiltinTool(request.name)) {
       const result = await runArtifactBuiltinTool(
         request.name,
