@@ -10,6 +10,23 @@ jest.mock("next-intl", () => ({
 const isTauriMock = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
+// The Capacity Dock card probes its native capabilities on mount. Left real,
+// that probe consumes this file's `invoke` mock queue and the ping-failure
+// assertions below silently lose a rejection. The dock has its own suite.
+jest.mock("@/lib/usage-dock/client", () => ({
+  usageDockCapabilities: jest.fn().mockResolvedValue({
+    positioning: false,
+    alwaysOnTop: false,
+    globalHover: false,
+    platform: "web",
+    blockedReason: "notDesktop",
+  }),
+  listUsageDockMonitors: jest.fn().mockResolvedValue([]),
+  setUsageDockPlacement: jest.fn().mockResolvedValue(undefined),
+  setUsageDockMonitor: jest.fn().mockResolvedValue(undefined),
+  setUsageDockScale: jest.fn().mockResolvedValue(1),
+}))
+
 const getCloseBehaviorMock = jest.fn().mockResolvedValue("ask")
 const setCloseBehaviorMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/close-behavior", () => ({

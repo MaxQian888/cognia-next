@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { TraySection } from "./tray-section"
+import { UsageDockCard } from "./usage-dock/usage-dock-card"
 import { TrayPanelSettings } from "./tray-panel/tray-panel-settings"
 import { SelectionToolbarSettings } from "./selection-toolbar-settings"
 
@@ -317,6 +318,12 @@ export function DesktopSection() {
       <section className="space-y-3 rounded-md border p-4">
         <TraySection />
       </section>
+
+      {/* The Capacity Dock is the second ambient surface (ADR-0165). It sits
+          under the tray because the tray is the one that always works: the
+          dock needs a compositor that lets an app place its own windows, and
+          the card says so when it does not. */}
+      <UsageDockCard />
 
       {/* Card-free by design (`SettingsStack`/`SettingsBlock`): the quick panel
           settings are a flat, hairline-separated stack, not another bordered

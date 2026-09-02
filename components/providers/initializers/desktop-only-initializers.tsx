@@ -148,6 +148,13 @@ const TrayPanelInitializer = dynamic(
   () => import("./tray-panel-initializer").then((m) => m.TrayPanelInitializer),
   { ssr: false }
 )
+// The Capacity Dock's main-window half (ADR-0165). Desktop-only because the
+// rail is a native overlay window: there is nothing for it to feed anywhere
+// else, and it self-gates on the dock being enabled on top of that.
+const UsageDockInitializer = dynamic(
+  () => import("./usage-dock-initializer").then((m) => m.UsageDockInitializer),
+  { ssr: false }
+)
 const SessionImportWatchInitializer = dynamic(
   () => import("./session-import-watch-initializer").then((m) => m.SessionImportWatchInitializer),
   { ssr: false }
@@ -201,6 +208,7 @@ export function DesktopOnlyInitializers() {
       <CrashReportDialog />
       <SelectionToolbarInitializer />
       <TrayPanelInitializer />
+      <UsageDockInitializer />
       <SessionImportWatchInitializer />
       <SitesInitializer />
     </>

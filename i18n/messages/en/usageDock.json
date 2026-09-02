@@ -1,0 +1,10 @@
+{
+  "detail": "{provider} · {amount}",
+  "detailPartial": "{provider} · {amount} · {count, plural, other {# unpriced}}",
+  "drag": "Move the dock",
+  "empty": "No spend yet today",
+  "loading": "Reading usage…",
+  "openFull": "Open full usage",
+  "row": "{provider}: {amount}",
+  "title": "Capacity Dock"
+}

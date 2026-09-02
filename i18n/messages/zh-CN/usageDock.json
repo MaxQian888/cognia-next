@@ -1,0 +1,10 @@
+{
+  "detail": "{provider} · {amount}",
+  "detailPartial": "{provider} · {amount} · {count, plural, other {# 项无价格}}",
+  "drag": "移动边栏",
+  "empty": "今天还没有花费",
+  "loading": "正在读取用量…",
+  "openFull": "查看完整用量",
+  "row": "{provider}：{amount}",
+  "title": "用量边栏"
+}

@@ -72,6 +72,14 @@ pub(crate) enum PetPanelRole {
     /// blur — sharing `Popup` would make each tray dismissal cancel an
     /// in-flight pet-popup reveal.
     TrayPanel,
+    /// The Capacity Dock edge rail (ADR-0165). NEVER key: it is a read-only
+    /// gauge strip with no text input, and taking the keyboard from whatever
+    /// the user is actually typing in would be a bug, not a feature.
+    ///
+    /// Its own role for the same reason as the others above: the generation /
+    /// open-intent / lifecycle statics are keyed BY ROLE, so borrowing the
+    /// island's would make closing one cancel an in-flight reveal of the other.
+    UsageDock,
 }
 
 static SPRITE_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -80,12 +88,14 @@ static ISLAND_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static SELECTION_TOOLBAR_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static RECORDER_CONTROLLER_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static TRAY_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+static USAGE_DOCK_PANEL_GENERATION: AtomicU64 = AtomicU64::new(0);
 static SPRITE_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static POPUP_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static ISLAND_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static SELECTION_TOOLBAR_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static RECORDER_CONTROLLER_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 static TRAY_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
+static USAGE_DOCK_PANEL_OPEN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 struct PanelLifecycle {
@@ -117,6 +127,10 @@ static TRAY_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
     destroying: false,
     in_flight_builds: 0,
 });
+static USAGE_DOCK_PANEL_LIFECYCLE: Mutex<PanelLifecycle> = Mutex::new(PanelLifecycle {
+    destroying: false,
+    in_flight_builds: 0,
+});
 
 fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
     match role {
@@ -126,6 +140,7 @@ fn panel_generation(role: PetPanelRole) -> &'static AtomicU64 {
         PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_GENERATION,
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_GENERATION,
         PetPanelRole::TrayPanel => &TRAY_PANEL_GENERATION,
+        PetPanelRole::UsageDock => &USAGE_DOCK_PANEL_GENERATION,
     }
 }
 
@@ -137,6 +152,7 @@ fn panel_open_intent(role: PetPanelRole) -> &'static AtomicBool {
         PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_OPEN,
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_OPEN,
         PetPanelRole::TrayPanel => &TRAY_PANEL_OPEN,
+        PetPanelRole::UsageDock => &USAGE_DOCK_PANEL_OPEN,
     }
 }
 
@@ -148,6 +164,7 @@ fn panel_lifecycle(role: PetPanelRole) -> &'static Mutex<PanelLifecycle> {
         PetPanelRole::SelectionToolbar => &SELECTION_TOOLBAR_PANEL_LIFECYCLE,
         PetPanelRole::RecorderController => &RECORDER_CONTROLLER_PANEL_LIFECYCLE,
         PetPanelRole::TrayPanel => &TRAY_PANEL_LIFECYCLE,
+        PetPanelRole::UsageDock => &USAGE_DOCK_PANEL_LIFECYCLE,
     }
 }
 
@@ -261,7 +278,12 @@ impl PetPanelRole {
             // `NSFloatingWindowLevel` — above normal windows, below the menu bar.
             // The selection toolbar anchors to a text selection inside another
             // app's window, so it has no reason to cover the menu bar.
-            PetPanelRole::Sprite | PetPanelRole::Popup | PetPanelRole::SelectionToolbar => 3,
+            // The dock sits at the floating level with the sprite: it hugs a
+            // screen edge and has no business covering the menu bar.
+            PetPanelRole::Sprite
+            | PetPanelRole::Popup
+            | PetPanelRole::SelectionToolbar
+            | PetPanelRole::UsageDock => 3,
             // `NSStatusWindowLevel` (25) — one above `NSMainMenuWindowLevel`
             // (24) so the top-hugging island draws over the menu bar instead
             // of hiding behind it. The recorder controller needs the same, so
@@ -394,11 +416,14 @@ pub(crate) fn apply_pet_panel_behavior<R: Runtime>(
     let style = StyleMask::empty().nonactivating_panel();
 
     let panel = match role {
-        PetPanelRole::Sprite => {
+        // Both roles that never take key share the sprite's panel class. The
+        // Capacity Dock is a read-only gauge rail, so taking the keyboard from
+        // whatever the user is actually typing in would be a bug.
+        PetPanelRole::Sprite | PetPanelRole::UsageDock => {
             debug_assert!(!role.can_become_key());
             window
                 .to_panel::<PetSpritePanel<R>>()
-                .map_err(|e| format!("pet sprite to_panel failed: {e:?}"))?
+                .map_err(|e| format!("non-key overlay to_panel failed: {e:?}"))?
         }
         // The island and the selection toolbar share the popup's panel class
         // (key-capable, non-activating); only their window level differs.

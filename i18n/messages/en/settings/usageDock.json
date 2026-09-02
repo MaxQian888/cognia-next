@@ -1,0 +1,31 @@
+{
+  "blocked": {
+    "waylandPositioning": "This Wayland session does not let applications place their own windows, so the Capacity Dock cannot run here. The tray usage readout still works.",
+    "notDesktop": "The Capacity Dock is a desktop overlay window and is unavailable in this shell. The tray usage readout still works."
+  },
+  "description": "A thin rail pinned to a screen edge, showing live spend per provider.",
+  "edge": "Screen edge",
+  "edges": {
+    "left": "Left",
+    "right": "Right",
+    "top": "Top",
+    "bottom": "Bottom",
+    "floating": "Floating"
+  },
+  "enabled": "Show the Capacity Dock",
+  "gauge": "Gauge measures",
+  "gaugeHint": "Budget compares each provider to the day's total. Plan quota shows account headroom.",
+  "gauges": {
+    "budget": "Share of today's spend",
+    "quota": "Plan quota"
+  },
+  "hideOnFullscreen": "Hide over full-screen apps",
+  "hideOnFullscreenHint": "Off by default, so the rail stays visible on every Space.",
+  "monitor": "Display",
+  "monitorPrimary": "Primary display",
+  "monitorUnnamed": "Display {index}",
+  "reset": "Reset dock settings",
+  "scale": "Size",
+  "startExpanded": "Start expanded",
+  "title": "Capacity Dock"
+}

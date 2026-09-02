@@ -205,6 +205,8 @@ mod voice_live;
 // ADR-0021 — native ephemeral-TURN provisioning (CSP-bypassing).
 mod turn_provision;
 mod twin;
+// ADR-0165 Phase 2 — the Capacity Dock edge rail.
+mod usage_dock;
 // ADR-0067 Phase 4 — extracted to `crates/cognia-vector`; re-aliased so
 // `crate::vector::{VectorState, VectorRegistry, commands::…}` resolve.
 pub use cognia_vector as vector;
@@ -871,6 +873,19 @@ pub fn run() {
             fleet::island_window::island_set_hide_on_fullscreen,
             fleet::island_window::island_debug_geometry,
             fleet::island_window::island_restore,
+            usage_dock::usage_dock_open,
+            usage_dock::usage_dock_close,
+            usage_dock::usage_dock_is_open,
+            usage_dock::usage_dock_reveal,
+            usage_dock::usage_dock_resize,
+            usage_dock::usage_dock_set_placement,
+            usage_dock::usage_dock_snap,
+            usage_dock::usage_dock_set_click_through,
+            usage_dock::usage_dock_list_monitors,
+            usage_dock::usage_dock_set_monitor,
+            usage_dock::usage_dock_get_config,
+            usage_dock::usage_dock_set_scale,
+            usage_dock::usage_dock_capabilities,
             tray::commands::tray_set_menu,
             tray::commands::tray_set_icon_state,
             tray::commands::tray_set_tooltip,

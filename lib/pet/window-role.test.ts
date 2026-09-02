@@ -9,6 +9,7 @@ import {
   PET_POPUP_WINDOW_LABEL,
   SELECTION_TOOLBAR_WINDOW_LABEL,
   PET_WINDOW_LABEL,
+  USAGE_DOCK_WINDOW_LABEL,
 } from "./window-role"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
@@ -133,5 +134,24 @@ describe("isMainAppWindow", () => {
   it("is false for the system selection toolbar window", () => {
     setTauri(true)
     expect(isMainAppWindow(() => SELECTION_TOOLBAR_WINDOW_LABEL)).toBe(false)
+  })
+})
+
+describe("the Capacity Dock window (ADR-0165)", () => {
+  beforeEach(() => setTauri(true))
+  afterEach(() => setTauri(false))
+
+  it("resolves its own role from the window label", () => {
+    expect(getPetWindowRole(() => USAGE_DOCK_WINDOW_LABEL)).toBe("usage-dock")
+  })
+
+  it("is a secondary overlay, so no controller or initializer mounts in it", () => {
+    expect(isSecondaryOverlayRole("usage-dock")).toBe(true)
+  })
+
+  it("is not the main app window", () => {
+    // Its capability file grants a handful of commands. Anything gated on
+    // `isMainAppWindow` would otherwise log denied-capability warnings there.
+    expect(isMainAppWindow(() => USAGE_DOCK_WINDOW_LABEL)).toBe(false)
   })
 })

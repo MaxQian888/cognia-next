@@ -36914,6 +36914,37 @@
         "title": "上限使用情况"
       }
     },
+    "usageDock": {
+      "blocked": {
+        "notDesktop": "用量边栏是桌面悬浮窗口，当前环境不支持。托盘用量读数仍可使用。",
+        "waylandPositioning": "当前 Wayland 会话不允许应用自行摆放窗口，用量边栏无法运行。托盘用量读数仍可使用。"
+      },
+      "description": "贴靠屏幕边缘的细长面板，按供应商实时展示花费。",
+      "edge": "贴靠边缘",
+      "edges": {
+        "bottom": "底部",
+        "floating": "浮动",
+        "left": "左侧",
+        "right": "右侧",
+        "top": "顶部"
+      },
+      "enabled": "显示用量边栏",
+      "gauge": "指示条含义",
+      "gaugeHint": "「今日花费占比」按当天总额对比各供应商，「套餐额度」显示账号剩余额度。",
+      "gauges": {
+        "budget": "今日花费占比",
+        "quota": "套餐额度"
+      },
+      "hideOnFullscreen": "全屏应用时隐藏",
+      "hideOnFullscreenHint": "默认关闭，边栏会在所有桌面空间保持可见。",
+      "monitor": "显示器",
+      "monitorPrimary": "主显示器",
+      "monitorUnnamed": "显示器 {index}",
+      "reset": "重置边栏设置",
+      "scale": "尺寸",
+      "startExpanded": "默认展开",
+      "title": "用量边栏"
+    },
     "workflow": {
       "fanout": {
         "adapterLabel": "适配器",
@@ -42128,6 +42159,16 @@
       "monthGlobal": "本月 · 全部提供商",
       "monthProvider": "本月 · {provider}"
     }
+  },
+  "usageDock": {
+    "detail": "{provider} · {amount}",
+    "detailPartial": "{provider} · {amount} · {count, plural, other {# 项无价格}}",
+    "drag": "移动边栏",
+    "empty": "今天还没有花费",
+    "loading": "正在读取用量…",
+    "openFull": "查看完整用量",
+    "row": "{provider}：{amount}",
+    "title": "用量边栏"
   },
   "webSearchToggle": {
     "searchFailed": "联网搜索失败：{message}",

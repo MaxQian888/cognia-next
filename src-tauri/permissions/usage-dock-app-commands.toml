@@ -1,0 +1,12 @@
+[[permission]]
+identifier = "allow-usage-dock-app-commands"
+description = "Enables the application commands invoked by the trusted local Capacity Dock overlay window."
+commands.allow = [
+  "usage_dock_close",
+  "usage_dock_get_config",
+  "usage_dock_resize",
+  "usage_dock_reveal",
+  "usage_dock_set_click_through",
+  "usage_dock_set_placement",
+  "usage_dock_snap",
+]

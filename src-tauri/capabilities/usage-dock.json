@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "usage-dock-window",
+  "description": "Least-privilege capabilities for the Capacity Dock usage overlay window.",
+  "windows": ["usage-dock"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit-to",
+    "core:webview:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-inner-size",
+    "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
+    "allow-usage-dock-app-commands"
+  ]
+}
