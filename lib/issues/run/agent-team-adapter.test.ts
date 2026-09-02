@@ -16,6 +16,7 @@ import {
   BUSY_TEAM_STATUSES,
   __setLoadedAgentTeamStoreForTesting,
   agentTeamWorkspaceHref,
+  AGENT_BRANCHES_HREF,
   collectDurableArtifacts,
   createAgentTeamRunAdapter,
   createDefaultAgentTeamRunAdapterDeps,
@@ -182,6 +183,7 @@ function makeDeps(over: Partial<AgentTeamRunAdapterDeps> = {}) {
 describe("helpers", () => {
   it("builds hrefs, maps priorities, knows the busy statuses", () => {
     expect(agentTeamWorkspaceHref("t 1")).toBe("/squads?id=t%201")
+    expect(AGENT_BRANCHES_HREF).toBe("/workspace?tab=environments")
     expect(issuePriorityToSubAgentPriority("urgent")).toBe("critical")
     expect(issuePriorityToSubAgentPriority("high")).toBe("high")
     expect(issuePriorityToSubAgentPriority("medium")).toBe("normal")
@@ -447,7 +449,10 @@ describe("collectDurableArtifacts", () => {
       { label: "Team workspace", href: "/squads?id=team-1" },
       { label: "PR #7", href: "https://gh/pr/7" },
       { label: "Layer 2", href: "https://gh/pr/x" },
-      { label: "Branch feat/x", href: "/squads?id=team-1&tab=worktrees" },
+      // Not `/squads?...&tab=worktrees`: `SQUAD_TABS` has no `worktrees`, so
+      // that link dropped its tab and landed on the fleet list. Agent branches
+      // live in `/workspace`'s Environments tab, which is real URL state.
+      { label: "Branch feat/x", href: AGENT_BRANCHES_HREF },
       { label: "Session (mate)", href: "/?session=sess-1" },
     ])
     // Without a task ref every child run counts.

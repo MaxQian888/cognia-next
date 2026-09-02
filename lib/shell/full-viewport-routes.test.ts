@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -10,18 +11,59 @@ import {
 
 import { FULL_VIEWPORT_ROUTE_PATTERNS, needsFullViewport } from "./full-viewport-routes"
 
+interface Exemption {
+  /** Why the feature-shell sweep does not apply to this route. */
+  reason: string
+  /**
+   * The compact body that replaces the shell, when there is one.
+   *
+   * Named rather than described, because "a mobile body replaces the shell" is
+   * only half an answer: it says the SHELL's `h-full` chain is out of play, not
+   * that the replacement needs no definite height of its own. The body is read
+   * below and has to prove it scrolls with the document.
+   */
+  mobileBody?: string
+}
+
 /**
  * Routes that reach `FeaturePageShell` but do NOT need a definite height, with
  * the reason. Each one has a compact branch of its own that never renders the
  * shell on a phone, so the shell's `h-full` chain is not in play there.
+ *
+ * An exemption is NOT a licence to stay out of the pattern list. `/templates`
+ * and `/discover` sat here with exactly this reason while their compact bodies
+ * were `flex h-full min-h-0` — the same collapse, one component further down.
+ * The test below reads each named body and only accepts the exemption when the
+ * body scrolls the document (`min-h-[100dvh]`); otherwise the route must be in
+ * `FULL_VIEWPORT_ROUTE_PATTERNS`.
  */
-const EXEMPT: Record<string, string> = {
-  issues: "IssuesMobileBody replaces the shell on the compact branch",
-  memory: "MemoryMobileBody replaces the shell on the compact branch",
-  templates: "TemplatesMobileBody replaces the shell on the compact branch",
-  goals: "GoalsMobileBody replaces the shell on the compact branch",
-  discover: "DiscoverMobileBody replaces the shell on the compact branch",
-  inbox: "redirect-only route",
+const EXEMPT: Record<string, Exemption> = {
+  issues: {
+    reason: "IssuesMobileBody replaces the shell on the compact branch",
+    mobileBody: "components/mobile/issues/issues-mobile-body.tsx",
+  },
+  memory: {
+    reason: "MemoryMobileBody replaces the shell on the compact branch",
+    mobileBody: "components/mobile/memory/memory-mobile-body.tsx",
+  },
+  templates: {
+    reason: "TemplatesMobileBody replaces the shell on the compact branch",
+    mobileBody: "components/mobile/templates/templates-mobile-body.tsx",
+  },
+  goals: {
+    reason: "GoalsMobileBody replaces the shell on the compact branch",
+    mobileBody: "components/mobile/goals/goals-mobile-body.tsx",
+  },
+  discover: {
+    reason: "DiscoverMobileBody replaces the shell on the compact branch",
+    mobileBody: "components/mobile/discover/discover-mobile-body.tsx",
+  },
+  inbox: { reason: "redirect-only route" },
+}
+
+/** The document-scrolling shape. Anything else needs a definite height. */
+function scrollsWithTheDocument(body: string): boolean {
+  return readFileSync(join(REPO_ROOT, body), "utf8").includes("min-h-[100dvh]")
 }
 
 describe("needsFullViewport", () => {
@@ -91,6 +133,33 @@ describe("full-viewport coverage", () => {
     const names = new Set(pages.map(routeSegment))
     const stale = Object.keys(EXEMPT).filter((name) => !names.has(name))
     expect(stale).toEqual([])
+    // A named body that has moved makes the check below read an empty file and
+    // silently pass, which is how this guard would rot into a no-op.
+    const missingBodies = Object.entries(EXEMPT)
+      .filter(([, exemption]) => exemption.mobileBody)
+      .filter(([, exemption]) => !existsSync(join(REPO_ROOT, exemption.mobileBody!)))
+      .map(([name]) => name)
+    expect(missingBodies).toEqual([])
+  })
+
+  /**
+   * The hole this closes. "A mobile body replaces the shell" excused
+   * `/templates` and `/discover` from the sweep above, but both bodies are
+   * `flex h-full min-h-0 flex-col` — the exact chain that collapses to zero
+   * under the wrapper's `min-h-[100dvh]`. The excuse only holds for a body that
+   * actually scrolls the document, which `MemoryMobileBody` and
+   * `GoalsMobileBody` do and those two did not.
+   */
+  it("only excuses a route whose compact body scrolls the document", () => {
+    const unexcused = Object.entries(EXEMPT)
+      .filter(([, exemption]) => exemption.mobileBody)
+      .filter(([name, exemption]) => {
+        if (scrollsWithTheDocument(exemption.mobileBody!)) return false
+        return !needsFullViewport(`/${name}`)
+      })
+      .map(([name]) => `/${name}`)
+
+    expect(unexcused).toEqual([])
   })
 
   /**

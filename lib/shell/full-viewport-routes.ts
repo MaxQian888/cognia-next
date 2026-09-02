@@ -13,8 +13,10 @@
  * list was hand-maintained inside the wrapper with no gate, so `/workspace`,
  * `/squads`, `/projects`, `/plugins` and `/twin` were all missing from it.
  *
- * Extracted here so `full-viewport-coverage.test.ts` can compare it against the
- * routes that actually reach `FeaturePageShell` rather than trusting a comment.
+ * Extracted here so the co-located `full-viewport-routes.test.ts` can compare
+ * it against the routes that actually reach `FeaturePageShell` rather than
+ * trusting a comment. (It named a `full-viewport-coverage.test.ts` that has
+ * never existed, which is a pointer nobody could follow.)
  */
 
 /**
@@ -42,6 +44,18 @@ export const FULL_VIEWPORT_ROUTE_PATTERNS: readonly string[] = [
   "/twin",
   "/browser",
   "/issues",
+  // Compact bodies that REPLACE the shell and still own the viewport.
+  // `TemplatesMobileBody` and `DiscoverMobileBody` are both `flex h-full
+  // min-h-0`, so the exemption from the feature-shell sweep was never an
+  // exemption from the height requirement: under `min-h-[100dvh]` that chain
+  // resolves to `auto` and the page is a blank strip. `MemoryMobileBody` and
+  // `GoalsMobileBody` are `min-h-[100dvh]` and genuinely scroll with the
+  // document, which is the only shape that needs nothing here.
+  "/templates",
+  "/discover",
+  // `/agent-runs` never reaches `FeaturePageShell` at all, so no sweep saw it,
+  // and its own root is `flex h-full min-h-0 w-full flex-1`.
+  "/agent-runs",
   // `DiagnosticsWorkspace` is `flex h-full min-h-0 min-w-0 flex-1`, and
   // `SourceControlMobileBody` is the same shape. Both are the collapse this
   // list exists to stop.

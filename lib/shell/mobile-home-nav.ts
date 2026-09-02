@@ -11,6 +11,7 @@
 import {
   BotIcon,
   CompassIcon,
+  FileArchiveIcon,
   InboxIcon,
   LayersIcon,
   PlusIcon,
@@ -40,6 +41,8 @@ export const MOBILE_QUICK_ACTION_ICONS: Record<string, LucideIcon> = {
   inbox: InboxIcon,
   twin: BotIcon,
   squads: Users2Icon,
+  // The same icon the Studio's own page header carries.
+  templates: FileArchiveIcon,
   fleet: LayersIcon,
   servers: ServerCogIcon,
   devices: SmartphoneIcon,
@@ -55,6 +58,10 @@ export const MOBILE_QUICK_ACTION_SPOT_ICONS: Record<string, MobileSpotIconName> 
   inbox: "chat",
   twin: "digital-twin",
   squads: "agent-teams",
+  // No template illustration exists in `MOBILE_SPOT_ICON_NAMES`, and every one
+  // that does is already spoken for. `skills` is the nearest true thing: a
+  // library of reusable, parameterised definitions.
+  templates: "skills",
   fleet: "device-sync",
   servers: "device-sync",
   devices: "device-sync",

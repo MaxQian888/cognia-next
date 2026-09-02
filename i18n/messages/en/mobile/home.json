@@ -10,7 +10,8 @@
     "twin": "Digital twin",
     "workflows": "Workflows",
     "devices": "Devices",
-    "squads": "Squads"
+    "squads": "Squads",
+    "templates": "Templates"
   },
   "activeRuns": {
     "empty": "No active runs",

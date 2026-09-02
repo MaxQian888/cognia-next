@@ -280,5 +280,7 @@
   "versionLabel": "Version",
   "webSearchRow": "Web search",
   "workflowsSettingsRow": "Workflow settings",
-  "workspaceRow": "Workspace"
+  "workspaceRow": "Workspace",
+  "chatTemplatesRow": "Chat templates",
+  "templatesRow": "Template catalog"
 }

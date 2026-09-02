@@ -37,6 +37,18 @@ describe("mobile-home-nav", () => {
     expect(active.map((i) => i.id)).toEqual(["newChat", "search"])
   })
 
+  /**
+   * `/templates` had a full phone body and no way in: no quick action, no `/me`
+   * row, no tab-bar prefix. A catalog reachable only by typing the URL is a
+   * feature that shipped switched off.
+   */
+  it("offers the template catalog as a quick action", () => {
+    const templates = getMobileQuickActionCatalog().find((item) => item.id === "templates")
+    expect(templates).toMatchObject({ kind: "route", route: "/templates", i18nKey: "templates" })
+    expect(templates?.Icon).toBeDefined()
+    expect(templates?.spotIcon).toBe("skills")
+  })
+
   it("default layout resolves to four active actions", () => {
     const catalog = getMobileQuickActionCatalog()
     const { active } = resolveMobileHomeLayout(catalog, DEFAULT_MOBILE_HOME_LAYOUT)

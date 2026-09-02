@@ -90,6 +90,16 @@ export function TemplatesMobileBody() {
   const [bindings, setBindings] = useState<Record<string, string>>({})
   const [plan, setPlan] = useState<TemplatePreflightPlan>()
   const [derivation, setDerivation] = useState<TemplateDerivation>()
+  /**
+   * The newer upstream release a fork could take, when there is one.
+   *
+   * Read here for the same reason the desktop inspector reads it: the lineage
+   * and the upstream lookup both live in the repository, and the envelope the
+   * selection carries deliberately does not know where it came from. The phone
+   * passed a hard-coded `undefined`, so every fork on a phone claimed to be up
+   * to date with an upstream it had never asked about.
+   */
+  const [upstream, setUpstream] = useState<TemplateDefinitionEnvelope>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [message, setMessage] = useState<string>()
@@ -97,7 +107,12 @@ export function TemplatesMobileBody() {
   // Reset the per-template working state when the selection changes. Adjusted
   // during render rather than in an effect, so no paint shows one template's
   // preflight against another's inputs.
-  const [inspectedId, setInspectedId] = useState(route.definitionId)
+  //
+  // Seeded `undefined` rather than with the current selection: seeded with it,
+  // a DEEP LINK arrived already "inspected" and the lineage below was never
+  // fetched, so `/templates?definition=…` opened a fork with no origin card at
+  // all while the same template tapped from the list had one.
+  const [inspectedId, setInspectedId] = useState<string | undefined>(undefined)
   if (route.definitionId !== inspectedId) {
     setInspectedId(route.definitionId)
     setBindings({})
@@ -105,11 +120,20 @@ export function TemplatesMobileBody() {
     setError(undefined)
     setMessage(undefined)
     setDerivation(undefined)
+    setUpstream(undefined)
     if (route.definitionId) {
-      void runtime.service
-        .getDerivation(route.definitionId)
-        .then(setDerivation)
-        .catch(() => setDerivation(undefined))
+      void Promise.all([
+        runtime.service.getDerivation(route.definitionId),
+        runtime.service.findUpstreamUpdate(route.definitionId),
+      ])
+        .then(([nextDerivation, nextUpstream]) => {
+          setDerivation(nextDerivation)
+          setUpstream(nextUpstream)
+        })
+        .catch(() => {
+          setDerivation(undefined)
+          setUpstream(undefined)
+        })
     }
   }
 
@@ -166,7 +190,16 @@ export function TemplatesMobileBody() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="templates-mobile-body">
+    // `data-bg-target` is what opts a subtree into the wallpaper layer
+    // (`app/globals.css`). `FeaturePageShell` owns the mark for every route
+    // that goes through it, and this body replaces the shell on the compact
+    // branch, so without it a user with a background set saw it everywhere
+    // except here. Same reasoning `squads-mobile-body.tsx` writes down.
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-bg-target="chat"
+      data-testid="templates-mobile-body"
+    >
       <div className="flex shrink-0 items-center gap-2 p-3">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -220,14 +253,25 @@ export function TemplatesMobileBody() {
               {selected.version ? `@${selected.version}` : ""}
             </p>
             {/* Read-only on a phone: the merge it offers lands in a draft
-                editor that only exists on the desktop. */}
+                editor that only exists on the desktop. Saying an update is
+                there and naming where it can be taken beats hiding the fact
+                that upstream has moved — which is what passing `undefined`
+                here did. */}
             <TemplateOriginCard
               derivation={derivation}
-              upstream={undefined}
+              upstream={upstream}
               onReviewUpdate={() => {}}
               onDetach={() => {}}
               readOnly
             />
+            {derivation && upstream ? (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="templates-mobile-upstream-desktop"
+              >
+                {t("mobile.reviewUpdateOnDesktop")}
+              </p>
+            ) : null}
             {instantiable ? (
               selected.inputs.map((input) => (
                 <TemplateBindingField

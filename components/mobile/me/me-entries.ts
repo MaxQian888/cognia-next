@@ -18,6 +18,7 @@ import {
   AppWindowIcon,
   BrainCircuitIcon,
   DramaIcon,
+  FileArchiveIcon,
   FileTextIcon,
   GraduationCapIcon,
   FolderTreeIcon,
@@ -490,6 +491,47 @@ export const ME_ENTRIES: MeEntry[] = [
       "团队",
       "智能体团队",
       "模板",
+    ],
+  },
+  {
+    // `/templates` shipped `TemplatesMobileBody`, a complete phone catalog, and
+    // nothing on a phone linked to it. No spot illustration: the sixteen in
+    // `MOBILE_SPOT_ICON_NAMES` are each spoken for by one row, and reusing one
+    // would break that pairing.
+    id: "templates",
+    icon: FileArchiveIcon,
+    labelKey: "templatesRow",
+    href: "/templates",
+    section: "connection",
+    keywords: [
+      "template",
+      "catalog",
+      "package",
+      "blueprint",
+      "模板",
+      "模板库",
+      "模板包",
+      "蓝图",
+    ],
+  },
+  {
+    // Saved chat messages with `{{parameter}}` slots — a different library from
+    // the unified template catalog above, kept as its own row for that reason.
+    id: "chat-templates",
+    icon: MessageSquareIcon,
+    labelKey: "chatTemplatesRow",
+    href: "/me/chat-templates",
+    section: "connection",
+    keywords: [
+      "chat template",
+      "prompt",
+      "parameter",
+      "snippet",
+      "saved message",
+      "对话模板",
+      "提示词",
+      "参数",
+      "常用语",
     ],
   },
   {

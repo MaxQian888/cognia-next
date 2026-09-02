@@ -160,6 +160,30 @@ describe("me-entries registry", () => {
     expect(byId("squads")?.pairedOnly).toBeUndefined()
   })
 
+  /**
+   * `/templates` had a full phone body and no entry point on a phone at all,
+   * and `/me/chat-templates` shipped its page the same way. The registry IS the
+   * reachability: a route with no row here is a page nothing links to.
+   */
+  it("routes the two template libraries", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("templates")).toMatchObject({
+      href: "/templates",
+      labelKey: "templatesRow",
+      section: "connection",
+    })
+    expect(byId("chat-templates")).toMatchObject({
+      href: "/me/chat-templates",
+      labelKey: "chatTemplatesRow",
+      section: "connection",
+    })
+    // Both locales — the search box is the only way to reach a row a user
+    // cannot see, and the two libraries must not answer each other's query.
+    expect(matchMeEntry(byId("templates") as MeEntry, "模板库", echo)).toBe(true)
+    expect(matchMeEntry(byId("chat-templates") as MeEntry, "prompt", echo)).toBe(true)
+    expect(matchMeEntry(byId("chat-templates") as MeEntry, "对话模板", echo)).toBe(true)
+  })
+
   it("surfaces the platform-agnostic desktop-parity sections", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
     expect(byId("characters")).toMatchObject({ href: "/me/characters", section: "connection" })

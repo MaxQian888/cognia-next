@@ -28,8 +28,9 @@
   "description": "Search, inspect, publish, import, and instantiate reusable Cognia templates.",
   "domains": {
     "a2ui": "Mini App",
-    "agentTeam": "Agent team",
+    "agentTeam": "Squad",
     "character": "Character",
+    "chatTemplate": "Chat template",
     "customMode": "Custom mode",
     "document": "Document",
     "goal": "Goal",
@@ -192,6 +193,7 @@
     }
   },
   "messages": {
+    "confined": "This template is now listed in this workspace only.",
     "deprecated": "Release deprecated.",
     "detached": "Instance detached from its template.",
     "draftCreated": "Template draft created.",
@@ -207,6 +209,7 @@
     "packageYanked": "Package yanked. Nothing new will be built on it.",
     "published": "Template version {version} published.",
     "rebound": "Instance rebound to its new source.",
+    "shared": "This template is now listed in every workspace.",
     "updated": "Instance updated to {version}.",
     "yanked": "Release yanked."
   },
@@ -262,6 +265,7 @@
   "mobile": {
     "authoringOnDesktop": "Publishing, exporting and editing a draft happen on the desktop app.",
     "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
+    "reviewUpdateOnDesktop": "Taking an upstream update happens in the desktop Studio.",
     "title": "Mobile template access"
   },
   "operations": {
@@ -327,6 +331,21 @@
     "noReasons": "No differences that change the version.",
     "title": "Publish this template",
     "unreleased": "unreleased"
+  },
+  "scopeControl": {
+    "blocked": {
+      "noWorkspace": "No workspace is active yet, so there is nothing to confine this to.",
+      "sharedSource": "Built-in, plugin and marketplace templates are shared by construction. Fork one to get a copy you can confine."
+    },
+    "choice": {
+      "shared": "All workspaces",
+      "workspace": "This workspace only"
+    },
+    "explain": {
+      "shared": "Every workspace lists it. A workspace can still hide it under Workspace → Capabilities.",
+      "workspace": "Only this workspace lists it. Exports and packages are unaffected."
+    },
+    "title": "Where this template lives"
   },
   "scopes": {
     "builtin": "Built-in",

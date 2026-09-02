@@ -6,6 +6,7 @@ let mockPlatform = "mobile"
 const mockSaveDraft = jest.fn()
 const mockDeleteDraft = jest.fn()
 const mockDeprecate = jest.fn()
+const mockSetDefinitionWorkspace = jest.fn()
 let mockPackages: Array<Record<string, unknown>> = []
 
 jest.mock("next-intl", () => ({
@@ -26,6 +27,12 @@ jest.mock("next/navigation", () => ({
   }),
 }))
 jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
+// Ownership decides who lists a definition, and global search ranks on a
+// synchronous snapshot of it, so the Studio retakes that snapshot after any
+// write that moves a template. Real, it reads Dexie.
+jest.mock("@/lib/global-search/providers/library", () => ({
+  refreshTemplateOwners: jest.fn(async () => undefined),
+}))
 let mockDerivation: Record<string, unknown> | undefined
 let mockUpstream: Record<string, unknown> | undefined
 jest.mock("@/hooks/use-template-catalog", () => ({
@@ -41,6 +48,7 @@ jest.mock("@/lib/templates/runtime", () => ({
       saveDraft: (...args: unknown[]) => mockSaveDraft(...args),
       deleteDraft: (...args: unknown[]) => mockDeleteDraft(...args),
       deprecate: (...args: unknown[]) => mockDeprecate(...args),
+      setDefinitionWorkspace: (...args: unknown[]) => mockSetDefinitionWorkspace(...args),
       // The inspector reads fork lineage from the repository on every
       // selection. Unforked is the default in this suite.
       getDerivation: async () => mockDerivation,
@@ -48,6 +56,8 @@ jest.mock("@/lib/templates/runtime", () => ({
     },
   }),
 }))
+
+import { useProjectStore } from "@/stores/project/project-store"
 
 import { TemplateStudio } from "./template-studio"
 
@@ -88,7 +98,9 @@ describe("TemplateStudio", () => {
     mockSaveDraft.mockReset()
     mockDeleteDraft.mockReset()
     mockDeprecate.mockReset()
+    mockSetDefinitionWorkspace.mockReset()
     mockPackages = []
+    useProjectStore.setState({ activeProjectId: null })
     window.history.replaceState({}, "", "/templates")
   })
 
@@ -443,6 +455,124 @@ describe("TemplateStudio", () => {
    * filter rather than an absent feature. Working Rule 7: the type says so, the
    * UI says so, and `lib/templates/dormancy.test.ts` pins the emptiness.
    */
+  /**
+   * `useTemplateRouteState` owned `tab` and `setTab` from the day the phone
+   * body landed and the Studio read neither: it was `defaultValue="library"`,
+   * so `/templates?tab=instances` opened the Library and the tab a user was on
+   * could not be sent to anyone.
+   */
+  describe("the open tab", () => {
+    it("opens the tab the URL names", async () => {
+      mockPlatform = "desktop"
+      window.history.replaceState({}, "", "/templates?tab=instances")
+      await act(async () => {
+        render(<TemplateStudio />)
+      })
+
+      expect(screen.getByRole("tab", { name: "tabs.instances" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    })
+
+    it("writes the tab a user picks back to the URL", async () => {
+      mockPlatform = "desktop"
+      await act(async () => {
+        render(<TemplateStudio />)
+      })
+
+      // Radix activates a tab on mousedown, which a synthetic click does not
+      // dispatch.
+      await act(async () => {
+        fireEvent.mouseDown(screen.getByRole("tab", { name: "tabs.packages" }))
+      })
+      expect(window.location.search).toContain("tab=packages")
+    })
+
+    it("drops the param again on the landing tab", async () => {
+      // `library` is the landing tab, so naming it in the URL would be noise.
+      mockPlatform = "desktop"
+      window.history.replaceState({}, "", "/templates?tab=packages")
+      await act(async () => {
+        render(<TemplateStudio />)
+      })
+
+      await act(async () => {
+        fireEvent.mouseDown(screen.getByRole("tab", { name: "tabs.library" }))
+      })
+      expect(window.location.search).not.toContain("tab=")
+    })
+  })
+
+  /**
+   * Selection was local state, so clicking a card changed nothing in the URL:
+   * a desktop selection could not be sent to anyone, and the same link opened
+   * on a phone and on a laptop meant two different things.
+   */
+  it("writes the desktop selection to ?definition=", async () => {
+    mockPlatform = "desktop"
+    catalogDefinitions = [draftDefinition()]
+    await act(async () => {
+      render(<TemplateStudio />)
+    })
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Notes"))
+    })
+    expect(window.location.search).toContain("definition=user.skill.notes")
+    expect(screen.getByText("user.skill.notes")).toBeInTheDocument()
+  })
+
+  /**
+   * `service.setDefinitionWorkspace` had no production caller, so a template
+   * could be confined to one workspace only at the moment it was forked and
+   * could never be shared again.
+   */
+  describe("the ownership control", () => {
+    it("confines a user-owned template to the active workspace", async () => {
+      mockPlatform = "desktop"
+      catalogDefinitions = [draftDefinition()]
+      mockSetDefinitionWorkspace.mockResolvedValue(undefined)
+      useProjectStore.setState({ activeProjectId: "ws_1" })
+      window.history.replaceState({}, "", "/templates?definition=user.skill.notes")
+      await act(async () => {
+        render(<TemplateStudio />)
+      })
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("template-scope-workspace"))
+      })
+      expect(mockSetDefinitionWorkspace).toHaveBeenCalledWith("user.skill.notes", "ws_1")
+      expect(screen.getByText("messages.confined")).toBeInTheDocument()
+    })
+
+    it("disables the control on a built-in rather than hiding it", async () => {
+      mockPlatform = "desktop"
+      catalogDefinitions = [
+        draftDefinition({
+          id: "builtin.skill.notes",
+          status: "published",
+          version: "1.0.0",
+          provenance: { source: "built-in", trust: "built-in" },
+        }),
+      ]
+      useProjectStore.setState({ activeProjectId: "ws_1" })
+      window.history.replaceState({}, "", "/templates?definition=builtin.skill.notes")
+      await act(async () => {
+        render(<TemplateStudio />)
+      })
+
+      expect(screen.getByTestId("template-scope-control")).toHaveAttribute(
+        "data-blocked",
+        "sharedSource"
+      )
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("template-scope-workspace"))
+      })
+      expect(mockSetDefinitionWorkspace).not.toHaveBeenCalled()
+    })
+  })
+
   it("labels the domain with nothing behind it inert rather than just empty", async () => {
     mockPlatform = "tauri"
     await act(async () => {

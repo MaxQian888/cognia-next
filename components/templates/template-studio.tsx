@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -21,8 +20,12 @@ import { toast } from "sonner"
 import { usePlatform } from "@/hooks/use-platform"
 import { refreshTemplateOwners } from "@/lib/global-search/providers/library"
 import { useScopedTemplateCatalog } from "@/hooks/templates/use-scoped-template-catalog"
-import { useTemplateRouteState } from "@/hooks/templates/use-template-route-state"
-import { TEMPLATE_SCOPE_TIERS } from "@/lib/templates/scope"
+import {
+  TEMPLATE_TABS,
+  useTemplateRouteState,
+  type TemplateTab,
+} from "@/hooks/templates/use-template-route-state"
+import { TEMPLATE_SCOPE_TIERS, type TemplateScopeTier } from "@/lib/templates/scope"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
   TemplateDefinitionEnvelope,
@@ -87,6 +90,7 @@ import { InstantiateConfirmDialog } from "./instantiate-confirm-dialog"
 import { TemplateInstanceCard } from "./template-instance-card"
 import { TemplateDerivedUpdateDialog } from "./template-derived-update-dialog"
 import { TemplateOriginCard } from "./template-origin-card"
+import { TemplateScopeControl } from "./template-scope-control"
 import { TemplateUpdateDialog } from "./template-update-dialog"
 
 /** Domains with a real adapter: these can be authored, published, instantiated. */
@@ -127,6 +131,7 @@ const INERT_DOMAINS = new Set<TemplateDomain>(["document"])
  */
 const EDITOR_ROUTES: Record<string, string> = {
   agentTeam: "/settings?section=squads",
+  chatTemplate: "/settings?section=chatTemplates",
   workflow: "/workflows",
   subagent: "/me/subagents",
   customMode: "/settings?section=agent-modes",
@@ -199,7 +204,7 @@ export function TemplateStudio() {
   // Scoped, not raw: a definition confined to another workspace is not this
   // workspace's to list, and one this workspace hid should not come back
   // because the Studio asked a different question than the phone did.
-  const { definitions, revision, tierOf, hiddenCount } = useScopedTemplateCatalog(
+  const { definitions, revision, tierOf, owners, hiddenCount } = useScopedTemplateCatalog(
     {
       text: query,
       platform: templatePlatform,
@@ -215,28 +220,47 @@ export function TemplateStudio() {
       allWorkspaceInstances || !activeWorkspaceId ? undefined : { projectId: activeWorkspaceId },
     [allWorkspaceInstances, activeWorkspaceId]
   )
-  // `?definition=` is how /agent-teams, the workflow settings tab and global
-  // search hand a template over. Reading it once inside a state initializer
-  // meant a second hand-off from an already-open Studio silently did nothing,
-  // and it touched `window` during render.
-  const searchParams = useSearchParams()
-  const requestedDefinitionId = searchParams.get("definition")
-  const [selectionKey, setSelectionKey] = useState<string | undefined>(
-    requestedDefinitionId ? `id:${requestedDefinitionId}` : undefined
-  )
-  const [lastRequestedId, setLastRequestedId] = useState(requestedDefinitionId)
-  if (requestedDefinitionId !== lastRequestedId) {
-    setLastRequestedId(requestedDefinitionId)
-    if (requestedDefinitionId) setSelectionKey(`id:${requestedDefinitionId}`)
-  }
+  /**
+   * WHICH template is selected lives in `?definition=`, the same param the
+   * phone body reads.
+   *
+   * `?definition=` is how /agent-teams, the workflow settings tab and global
+   * search hand a template over, and the Studio used to read it once through
+   * its own `useSearchParams` and then keep the answer in a local
+   * `selectionKey`. So clicking a card changed nothing in the URL: the desktop
+   * selection could not be sent to anyone, and a link opened on a phone and on
+   * a laptop meant two different things.
+   *
+   * WHICH ENVELOPE of that id is a second, narrower question the URL should not
+   * carry: one definition id holds a draft and every release published from it,
+   * and the row the user clicked is one of them. Pinned locally, and only while
+   * it still names the selected id — a stale pin from a previous selection
+   * simply stops applying, which is what keeps this from fighting the router's
+   * own re-render.
+   */
+  const selectedId = route.definitionId
+  const [pinnedEnvelope, setPinnedEnvelope] = useState<{ id: string; contentHash: string }>()
   const selected = useMemo(() => {
-    if (!selectionKey) return undefined
-    return selectionKey.startsWith("hash:")
-      ? definitions.find(
-          (definition) => definition.contentHash === selectionKey.slice("hash:".length)
-        )
-      : definitions.find((definition) => definition.id === selectionKey.slice("id:".length))
-  }, [definitions, selectionKey])
+    if (!selectedId) return undefined
+    const rows = definitions.filter((definition) => definition.id === selectedId)
+    const pinned =
+      pinnedEnvelope?.id === selectedId
+        ? rows.find((definition) => definition.contentHash === pinnedEnvelope.contentHash)
+        : undefined
+    return pinned ?? rows[0]
+  }, [definitions, selectedId, pinnedEnvelope])
+
+  /**
+   * Select a definition, and remember which of its envelopes was clicked.
+   *
+   * Not memoised: `useTemplateRouteState` returns a fresh object every render,
+   * so a `useCallback` over it would be a stable-looking identity that changes
+   * anyway.
+   */
+  const selectEnvelope = (definition: TemplateDefinitionEnvelope) => {
+    setPinnedEnvelope({ id: definition.id, contentHash: definition.contentHash })
+    route.setDefinitionId(definition.id)
+  }
   const [packages, setPackages] = useState<
     Awaited<ReturnType<typeof runtime.repository.listPackages>>
   >([])
@@ -295,16 +319,16 @@ export function TemplateStudio() {
    * state, not catalog state: the selection carries the envelope, and the
    * envelope deliberately does not know where it came from.
    */
-  const selectedId = selected?.id
+  const lineageId = selected?.id
   useEffect(() => {
     let active = true
     // The empty case resolves through the same promise rather than clearing
     // synchronously: a bare setState in an effect body cascades renders, and
     // the lint rule that catches it is there for exactly this shape.
-    const load = selectedId
+    const load = lineageId
       ? Promise.all([
-          runtime.service.getDerivation(selectedId),
-          runtime.service.findUpstreamUpdate(selectedId),
+          runtime.service.getDerivation(lineageId),
+          runtime.service.findUpstreamUpdate(lineageId),
         ])
       : Promise.resolve([undefined, undefined] as const)
     void load
@@ -321,7 +345,7 @@ export function TemplateStudio() {
     return () => {
       active = false
     }
-  }, [selectedId, originNonce, revision, runtime])
+  }, [lineageId, originNonce, revision, runtime])
 
   /**
    * Run an async handler and report what happened.
@@ -388,7 +412,8 @@ export function TemplateStudio() {
       ...(selected.version ? { version: selected.version } : {}),
       newId: makeTemplateDraftId(selected.domain, `${selected.metadata.name} copy`),
     })
-    setSelectionKey(`id:${forked.id}`)
+    route.setDefinitionId(forked.id)
+    setPinnedEnvelope(undefined)
     // Ownership can have changed, and global search reads a snapshot of it.
     await refreshTemplateOwners()
     setMessage(t("messages.forked", { id: forked.id }))
@@ -422,6 +447,24 @@ export function TemplateStudio() {
     setMessage(t("origin.detached"))
   }
 
+  /**
+   * Confine the selected definition to this workspace, or share it again.
+   *
+   * `service.setDefinitionWorkspace` shipped with no production caller, so the
+   * only moment a template could be confined was the instant it was forked, and
+   * nothing could ever undo that. Ownership is a local-row field, so this
+   * changes who LISTS the definition and touches neither the envelope nor its
+   * content hash.
+   */
+  const setDefinitionWorkspace = async (workspaceId: string | null) => {
+    if (!selected) return
+    await runtime.service.setDefinitionWorkspace(selected.id, workspaceId)
+    // Global search ranks on a synchronous snapshot of ownership, so it has to
+    // be retaken here for the same reason `forkSelected` retakes it.
+    await refreshTemplateOwners()
+    setMessage(t(workspaceId ? "messages.confined" : "messages.shared"))
+  }
+
   /** Withdraw a release. `deprecate` also had no caller. */
   const deprecateSelected = async (status: "deprecated" | "yanked") => {
     if (!selected?.version) return
@@ -429,8 +472,8 @@ export function TemplateStudio() {
     setMessage(t(`messages.${status}`))
   }
 
-  const selectDefinition = (contentHash: string) => {
-    setSelectionKey(`hash:${contentHash}`)
+  const selectDefinition = (definition: TemplateDefinitionEnvelope) => {
+    selectEnvelope(definition)
     setBindings({})
     setPlan(undefined)
     setInspectorOpen(true)
@@ -511,7 +554,7 @@ export function TemplateStudio() {
       confirmedBump: bump,
     })
     setPublishSuggestion(null)
-    setSelectionKey(`hash:${published.contentHash}`)
+    selectEnvelope(published)
     setMessage(t("messages.published", { version: published.version }))
   }
 
@@ -554,7 +597,11 @@ export function TemplateStudio() {
       },
       selected.revision
     )
-    setSelectionKey(`hash:${saved.contentHash}`)
+    // Follows the row that was actually written, id included: a revision clash
+    // forks the edit into a conflict draft under a NEW id, so keeping the old
+    // `?definition=` would leave the inspector on the row the user did not
+    // change.
+    selectEnvelope(saved)
     // A revision clash does not fail — `saveDraft` forks the edit into its own
     // conflict draft under a new id. Say so, rather than reporting a plain
     // success against a row the user is no longer looking at.
@@ -633,7 +680,8 @@ export function TemplateStudio() {
   const deleteSelectedDraft = async () => {
     if (!selected || (selected.status !== "draft" && selected.status !== "conflict")) return
     await runtime.service.deleteDraft(selected.id)
-    setSelectionKey(undefined)
+    route.setDefinitionId(undefined)
+    setPinnedEnvelope(undefined)
     setPlan(undefined)
     setMessage(t("messages.draftDeleted"))
   }
@@ -707,6 +755,12 @@ export function TemplateStudio() {
         setBindings={setBindings}
         plan={plan}
         mobile={platform === "mobile"}
+        tier={selected ? tierOf(selected) : undefined}
+        {...(selected && owners[selected.id] !== undefined
+          ? { ownerWorkspaceId: owners[selected.id] }
+          : {})}
+        activeWorkspaceId={activeWorkspaceId}
+        onSetWorkspace={(workspaceId) => guard(() => setDefinitionWorkspace(workspaceId))()}
         onPreflight={guard(runPreflight)}
         onInstantiate={guard(instantiate)}
         onPublish={guard(openPublish)}
@@ -760,13 +814,30 @@ export function TemplateStudio() {
             </Alert>
           ) : null}
 
-          <Tabs defaultValue="library" className="min-h-0 flex-1">
+          {/* Controlled by `?tab=`. `useTemplateRouteState` has owned `tab` and
+              `setTab` since the phone body landed and nothing read them: the
+              Studio was `defaultValue="library"`, so `/templates?tab=instances`
+              opened the Library and the tab a user was on could not be sent to
+              anyone. `FeaturePageShell` also renders its children through two
+              different trees and REMOUNTS the subtree at the breakpoint, which
+              is the second reason this cannot be component state. */}
+          <Tabs
+            value={route.tab}
+            onValueChange={(value) => {
+              if ((TEMPLATE_TABS as readonly string[]).includes(value)) {
+                route.setTab(value as TemplateTab)
+              }
+            }}
+            className="min-h-0 flex-1"
+          >
             <TabsList className="flex w-full justify-start overflow-x-auto">
-              <TabsTrigger value="library">{t("tabs.library")}</TabsTrigger>
-              <TabsTrigger value="drafts">{t("tabs.drafts")}</TabsTrigger>
-              <TabsTrigger value="published">{t("tabs.published")}</TabsTrigger>
-              <TabsTrigger value="packages">{t("tabs.packages")}</TabsTrigger>
-              <TabsTrigger value="instances">{t("tabs.instances")}</TabsTrigger>
+              {/* Rendered from the contract rather than hand-listed, so a tab
+                  added to `TEMPLATE_TABS` cannot ship without a trigger. */}
+              {TEMPLATE_TABS.map((tab) => (
+                <TabsTrigger key={tab} value={tab}>
+                  {t(`tabs.${tab}`)}
+                </TabsTrigger>
+              ))}
             </TabsList>
             {(["library", "drafts", "published"] as const).map((tab) => {
               const rows = definitions.filter((definition) => {
@@ -855,11 +926,11 @@ export function TemplateStudio() {
                         className={
                           selected?.contentHash === definition.contentHash ? "border-primary" : ""
                         }
-                        onClick={() => selectDefinition(definition.contentHash)}
+                        onClick={() => selectDefinition(definition)}
                         onKeyDown={(event) => {
                           if (event.key !== "Enter" && event.key !== " ") return
                           event.preventDefault()
-                          selectDefinition(definition.contentHash)
+                          selectDefinition(definition)
                         }}
                       >
                         <CardHeader className="pb-2">
@@ -1095,6 +1166,10 @@ function TemplateInspector({
   setBindings,
   plan,
   mobile,
+  tier,
+  ownerWorkspaceId,
+  activeWorkspaceId,
+  onSetWorkspace,
   onPreflight,
   onInstantiate,
   onPublish,
@@ -1115,6 +1190,12 @@ function TemplateInspector({
   setBindings(value: Record<string, string>): void
   plan?: TemplatePreflightPlan
   mobile: boolean
+  /** The selected definition's shelf, for the ownership control. */
+  tier?: TemplateScopeTier
+  /** The workspace that owns it today, absent when it is shared. */
+  ownerWorkspaceId?: string
+  activeWorkspaceId?: string | null
+  onSetWorkspace(workspaceId: string | null): void
   onPreflight(): void
   onInstantiate(): void
   onPublish(): void
@@ -1185,6 +1266,17 @@ function TemplateInspector({
           onDetach={onDetach}
           readOnly={mobile || readOnly}
         />
+        {/* Ownership, which is a different question from the fork lineage above
+            it: where this definition is LISTED, not where it came from.
+            Authoring is desktop-only, and so is this. */}
+        {!mobile && tier ? (
+          <TemplateScopeControl
+            tier={tier}
+            {...(ownerWorkspaceId !== undefined ? { ownerWorkspaceId } : {})}
+            activeWorkspaceId={activeWorkspaceId}
+            onChange={onSetWorkspace}
+          />
+        ) : null}
         {definition.inputs.map((input) => (
           <TemplateBindingField
             key={input.id}

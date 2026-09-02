@@ -89,6 +89,29 @@ describe("getContributionsForCapability", () => {
     expect(getContributionsForCapability(manifest, "workflow-template")).toEqual([{ id: "wf-a" }])
   })
 
+  /**
+   * `template-package` had a `PluginCapability`, a manifest field and a
+   * validator, but no case here — so a plugin that contributed template
+   * packages showed a bare tag chip and a count of zero, while its peers
+   * (`agent-team-template`, `workflow-template`) read "N templates".
+   */
+  it("counts template packages by their own manifest id and name", () => {
+    const manifest = {
+      templatePackages: [
+        { manifest: { id: "acme.pack", name: "ACME templates" }, definitions: [] },
+        // No name — the id stands alone, like every other surface here.
+        { manifest: { id: "bare.pack" }, definitions: [] },
+        // A package with no manifest id contributes nothing addressable.
+        { definitions: [] },
+      ],
+    }
+    expect(getContributionsForCapability(manifest, "template-package")).toEqual([
+      { id: "acme.pack", label: "ACME templates" },
+      { id: "bare.pack" },
+    ])
+    expect(getContributionsForCapability({}, "template-package")).toEqual([])
+  })
+
   it("keys fonts by family and scheduled tasks by name (no id field)", () => {
     expect(
       getContributionsForCapability({ fonts: [{ family: "Inter" }, { family: "Mono" }] }, "fonts")

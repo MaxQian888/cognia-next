@@ -280,5 +280,7 @@
   "versionLabel": "版本",
   "webSearchRow": "网络搜索",
   "workflowsSettingsRow": "工作流设置",
-  "workspaceRow": "工作区"
+  "workspaceRow": "工作区",
+  "chatTemplatesRow": "对话模板",
+  "templatesRow": "模板库"
 }

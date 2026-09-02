@@ -7,6 +7,7 @@ import {
   listTemplateMigrationJournal,
   putTemplateMigrationJournal,
 } from "@/lib/db/template-platform"
+import { resolveScopeProjectId } from "@/lib/db/project-scope"
 import { isUnifiedTemplatePlatformEnabled } from "@/lib/templates/feature-flags"
 import { refreshCatalogOnlyTemplateAdapters } from "@/lib/templates/catalog-only-adapters"
 import { refreshBuiltInTemplateOverlays } from "@/lib/templates/builtin-overlays"
@@ -41,6 +42,27 @@ export async function bootTemplatePlatform(): Promise<void> {
   // `belongs` predicate is synchronous by contract, so it reads a snapshot
   // rather than Dexie. Take it once the catalog is populated.
   await refreshTemplateOwners()
+
+  /*
+   * Give pre-isolation instances a workspace.
+   *
+   * `TemplateInstanceRecord.projectId` arrived after instances already existed,
+   * and the Instances tab filters on it, so every row written before the column
+   * simply stopped being listed — which reads as data loss, not as a filter.
+   * `backfillInstanceWorkspaces` was written for exactly that and had no
+   * caller anywhere in the app.
+   *
+   * Safe to run on every boot: it skips any instance that already has a
+   * `projectId`, so a second run fills nothing. It runs last because the
+   * migration above can mint instances of its own, and after them rather than
+   * before is the only order that catches those too.
+   *
+   * `resolveScopeProjectId` is the same resolver `createTemplateRuntime` hands
+   * the service, and it never returns null — it falls back to the Default
+   * workspace — so a backfilled row is always attributable.
+   */
+  const filled = await runtime.service.backfillInstanceWorkspaces(await resolveScopeProjectId())
+  if (filled > 0) log.info("template-platform: instance workspace backfill", { filled })
 }
 
 export function TemplatePlatformInitializer() {

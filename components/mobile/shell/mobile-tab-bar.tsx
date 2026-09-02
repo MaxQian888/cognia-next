@@ -51,7 +51,10 @@ export const MOBILE_TABS: TabSpec[] = [
     id: "discover",
     href: "/discover",
     icon: CompassIcon,
-    matchPrefixes: ["/discover", "/squads", "/twin"],
+    // `/templates` sits with `/squads` and `/twin`: a catalog of things to
+    // adopt, reached from Discover. Without the prefix the bar highlighted
+    // Chat while a template screen was open.
+    matchPrefixes: ["/discover", "/squads", "/twin", "/templates"],
   },
   {
     id: "me",

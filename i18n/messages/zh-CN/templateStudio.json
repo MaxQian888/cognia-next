@@ -28,8 +28,9 @@
   "description": "搜索、检查、发布、导入并实例化可复用的 Cognia 模板。",
   "domains": {
     "a2ui": "Mini App",
-    "agentTeam": "Agent 团队",
+    "agentTeam": "小队",
     "character": "角色",
+    "chatTemplate": "会话模板",
     "customMode": "自定义模式",
     "document": "文档",
     "goal": "目标",
@@ -192,6 +193,7 @@
     }
   },
   "messages": {
+    "confined": "该模板现在只在本工作区列出。",
     "deprecated": "该版本已弃用。",
     "detached": "实例已与模板脱钩。",
     "draftCreated": "模板草稿已创建。",
@@ -207,6 +209,7 @@
     "packageYanked": "包已撤回，不会再基于它创建新内容。",
     "published": "模板版本 {version} 已发布。",
     "rebound": "实例已重新绑定到新的来源。",
+    "shared": "该模板现在在所有工作区列出。",
     "updated": "实例已更新到 {version}。",
     "yanked": "该版本已撤回。"
   },
@@ -262,6 +265,7 @@
   "mobile": {
     "authoringOnDesktop": "发布、导出与草稿编辑在桌面端进行。",
     "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
+    "reviewUpdateOnDesktop": "合并上游更新需要在桌面端的模板工作台完成。",
     "title": "移动端模板访问"
   },
   "operations": {
@@ -327,6 +331,21 @@
     "noReasons": "没有会改变版本号的差异。",
     "title": "发布该模板",
     "unreleased": "尚未发布"
+  },
+  "scopeControl": {
+    "blocked": {
+      "noWorkspace": "当前还没有激活的工作区，无法限定归属。",
+      "sharedSource": "内置、插件与市场模板天然对所有工作区共享。复刻一份，副本才可以被限定。"
+    },
+    "choice": {
+      "shared": "所有工作区",
+      "workspace": "仅本工作区"
+    },
+    "explain": {
+      "shared": "所有工作区都会列出它。工作区仍可在「工作区 → 能力」中将其隐藏。",
+      "workspace": "只有本工作区会列出它。导出与打包不受影响。"
+    },
+    "title": "该模板归属于哪里"
   },
   "scopes": {
     "builtin": "内置",

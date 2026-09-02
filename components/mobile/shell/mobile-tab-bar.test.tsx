@@ -47,6 +47,11 @@ describe("pickActiveTabId", () => {
   it("matches discover for /squads", () => {
     expect(pickActiveTabId("/squads")).toBe("discover")
   })
+  // `/templates` had a full phone body and no tab-bar prefix, so opening it
+  // left the bar highlighting Chat — the shape a user reads as "I am lost".
+  it("matches discover for /templates", () => {
+    expect(pickActiveTabId("/templates")).toBe("discover")
+  })
   it("matches me for /settings/foo (longest prefix wins over /)", () => {
     expect(pickActiveTabId("/settings/connections")).toBe("me")
   })

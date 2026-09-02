@@ -43,6 +43,16 @@ export function agentTeamWorkspaceHref(teamId: string): string {
   return `/squads?id=${encodeURIComponent(teamId)}`
 }
 
+/**
+ * Where an agent branch left behind by a run can actually be seen.
+ *
+ * `AgentBranchesSection` is rendered by `/workspace`'s Environments tab, and
+ * `?tab=` is real URL state there. Branches outlive the worktrees they came
+ * from and are scoped to the repository rather than to one Squad, which is why
+ * this carries no team id.
+ */
+export const AGENT_BRANCHES_HREF = "/workspace?tab=environments"
+
 /** Team statuses during which the task snapshot is fixed. */
 export const BUSY_TEAM_STATUSES: ReadonlySet<AgentTeam["status"]> = new Set([
   "planning",
@@ -173,7 +183,15 @@ export async function collectDurableArtifacts(run: IssueRun): Promise<IssueRunAr
     if (child.branch) {
       artifacts.push({
         label: `Branch ${child.branch}`,
-        href: `${agentTeamWorkspaceHref(run.targetId)}&tab=worktrees`,
+        // `/squads?...&tab=worktrees` was a link to nowhere: `SQUAD_TABS` is
+        // `squads | runs | board`, so `useSquadRouteState` dropped the value
+        // and the console opened on its landing tab. ADR-0140 moved what a
+        // finished run leaves behind onto the workspace surface —
+        // `AgentBranchesSection` lives in `/workspace`'s Environments tab, and
+        // `RunOperationsTab` sends a reader to the same place. That tab IS
+        // addressable (`app/workspace/page.tsx` reads `?tab=`), which is what
+        // the phone's Source Control screen already links to.
+        href: AGENT_BRANCHES_HREF,
       })
     }
     if (child.sessionId) {
