@@ -31,6 +31,8 @@ export function authHeaders(
       headers["anthropic-version"] ??= "2023-06-01"
     } else if (provider.protocol === "google") {
       headers["x-goog-api-key"] = provider.apiKey
+    } else if (provider.protocol === "azure") {
+      headers["api-key"] = provider.apiKey
     } else {
       headers.authorization = `Bearer ${provider.apiKey}`
     }
@@ -40,6 +42,17 @@ export function authHeaders(
 
 export function joinUrl(baseURL: string, path: string): string {
   return `${baseURL.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
+}
+
+/** The base every REST path hangs off. The Anthropic wire lives under `/v1`. */
+export function restBaseOf(
+  provider: Pick<ResolvedProvider, "protocol" | "baseURL">,
+  override?: string
+): string | undefined {
+  const base = override ?? provider.baseURL
+  if (!base) return undefined
+  if (provider.protocol === "anthropic" && !/\/v1\/?$/.test(base)) return joinUrl(base, "v1")
+  return base
 }
 
 export interface ProviderHttpResponse<T = unknown> {
@@ -53,7 +66,7 @@ export async function providerRequest<T = unknown>(
   provider: Pick<ResolvedProvider, "protocol" | "apiKey" | "headers" | "baseURL">,
   request: ProviderHttpRequest
 ): Promise<ProviderHttpResponse<T>> {
-  const baseURL = request.baseURL ?? provider.baseURL
+  const baseURL = restBaseOf(provider, request.baseURL)
   if (!baseURL) {
     throw new ProviderOperationFailureError({
       code: "capability-unsupported",
@@ -92,4 +105,87 @@ export async function providerRequest<T = unknown>(
     })
   }
   return { status: response.status, headers: response.headers, json, text }
+}
+
+export interface ProviderUploadRequest {
+  path: string
+  /** Multipart fields. A `Blob` value is sent as a file part. */
+  form: FormData
+  baseURL?: string
+  headers?: Record<string, string>
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+/** A multipart upload with the same auth, base and failure mapping as `providerRequest`. */
+export async function providerUpload<T = unknown>(
+  provider: Pick<ResolvedProvider, "protocol" | "apiKey" | "headers" | "baseURL">,
+  request: ProviderUploadRequest
+): Promise<ProviderHttpResponse<T>> {
+  const baseURL = restBaseOf(provider, request.baseURL)
+  if (!baseURL) {
+    throw new ProviderOperationFailureError({
+      code: "capability-unsupported",
+      retryable: false,
+      message: "provider has no base URL to upload to",
+    })
+  }
+  const doFetch = request.fetchImpl ?? proxyFetch
+  // No content-type here: fetch sets the multipart boundary itself.
+  const response = await doFetch(joinUrl(baseURL, request.path), {
+    method: "POST",
+    headers: { ...authHeaders(provider), ...(request.headers ?? {}) },
+    body: request.form,
+    ...(request.signal ? { signal: request.signal } : {}),
+  })
+  const text = await response.text()
+  if (!response.ok) {
+    const failure = failureForStatus(response.status)
+    throw new ProviderOperationFailureError({
+      ...failure,
+      message: `${failure.message}: ${text.slice(0, 300)}`,
+    })
+  }
+  let json: T
+  try {
+    json = (text ? JSON.parse(text) : {}) as T
+  } catch {
+    throw new ProviderOperationFailureError({
+      code: "invalid-response",
+      retryable: false,
+      message: "provider returned a non-JSON body",
+    })
+  }
+  return { status: response.status, headers: response.headers, json, text }
+}
+
+/** A raw GET whose body is bytes, not JSON (file content, batch output). */
+export async function providerDownload(
+  provider: Pick<ResolvedProvider, "protocol" | "apiKey" | "headers" | "baseURL">,
+  request: Omit<ProviderHttpRequest, "body" | "method">
+): Promise<{ bytes: Uint8Array; mimeType?: string }> {
+  const baseURL = restBaseOf(provider, request.baseURL)
+  if (!baseURL) {
+    throw new ProviderOperationFailureError({
+      code: "capability-unsupported",
+      retryable: false,
+      message: "provider has no base URL to download from",
+    })
+  }
+  const doFetch = request.fetchImpl ?? proxyFetch
+  const response = await doFetch(joinUrl(baseURL, request.path), {
+    method: "GET",
+    headers: { ...authHeaders(provider), ...(request.headers ?? {}) },
+    ...(request.signal ? { signal: request.signal } : {}),
+  })
+  if (!response.ok) {
+    const failure = failureForStatus(response.status)
+    const text = await response.text()
+    throw new ProviderOperationFailureError({
+      ...failure,
+      message: `${failure.message}: ${text.slice(0, 300)}`,
+    })
+  }
+  const mimeType = response.headers.get("content-type") ?? undefined
+  return { bytes: new Uint8Array(await response.arrayBuffer()), ...(mimeType ? { mimeType } : {}) }
 }

@@ -256,4 +256,38 @@ describe("provider operation executor", () => {
     })
     expect(handler).toHaveBeenCalledTimes(1)
   })
+
+  it("pins through a handle carried only inside the input, the wire shape", async () => {
+    const { exec, registry } = executor({ credentialAffinity: () => "fp-current" })
+    const handler = jest.fn(async () => ({ id: "f", deleted: true }))
+    registry.register({
+      operationId: "files.delete",
+      providerMatch: { kind: "any" },
+      support: "native",
+      handler,
+    })
+    const handle = {
+      kind: "file" as const,
+      id: "file_1",
+      providerId: "openai",
+      deploymentRef: "dep",
+      accountRef: "acct",
+      credentialAffinity: "fp-current",
+    }
+    const ok = await exec.execute({
+      operationId: "files.delete",
+      scopes: ["provider:files"],
+      surface: "sidecar",
+      input: { handle },
+    })
+    expect(ok).toMatchObject({ ok: true, providerId: "openai" })
+    const rotated = await exec.execute({
+      operationId: "files.delete",
+      scopes: ["provider:files"],
+      surface: "sidecar",
+      input: { handle: { ...handle, credentialAffinity: "fp-old" } },
+    })
+    expect(rotated).toMatchObject({ ok: false, failure: { code: "authentication" } })
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
 })

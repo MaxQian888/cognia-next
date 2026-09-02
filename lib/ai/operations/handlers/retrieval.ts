@@ -1,24 +1,36 @@
 /**
- * `embeddings.create` and `rerank.create`. Embeddings always go through the
- * vendor's AI SDK embedding model. Rerank uses the SDK reranking model when
- * the vendor client has one and otherwise the `POST /rerank` wire shared by
- * the OpenAI-compatible rerank vendors (`{model, query, documents, top_n}` in,
- * `{results: [{index, relevance_score}]}` out).
+ * `embeddings.create` and `rerank.create`, in the contract shapes. Embeddings
+ * always go through the vendor's AI SDK embedding model. Rerank uses the SDK
+ * reranking model when the vendor client has one and otherwise the
+ * `POST /rerank` wire shared by the OpenAI-compatible rerank vendors
+ * (`{model, query, documents, top_n}` in, `{results: [{index,
+ * relevance_score}]}` out). `dimensions` rides `extra.providerOptions`,
+ * because each vendor spells it differently and the SDK forwards that map.
  */
+
+import type { z } from "zod"
+import type {
+  embeddingsCreateInput,
+  embeddingsCreateOutput,
+  rerankCreateInput,
+  rerankCreateOutput,
+} from "@cognia/provider-types"
 
 import type { ProviderOperationHandlerRegistration } from "../registry"
 import { embedManyGated, rerankGated, type EmbedManyArgs, type RerankArgs } from "./ai-sdk-surface"
 import { providerRequest } from "./http"
 import { providerSdkClient, requireModelFactory, requireModelId } from "./sdk-client"
 
-export interface EmbeddingsCreateInput {
-  model?: string
-  values: string[]
-}
+export type EmbeddingsCreateInput = z.infer<typeof embeddingsCreateInput>
+export type EmbeddingsCreateOutput = z.infer<typeof embeddingsCreateOutput>
+export type RerankCreateInput = z.infer<typeof rerankCreateInput>
+export type RerankCreateOutput = z.infer<typeof rerankCreateOutput>
 
-export interface EmbeddingsCreateOutput {
-  embeddings: number[][]
-  usage: { tokens: number }
+function providerOptionsOf(extra: Record<string, unknown> | undefined) {
+  const options = extra?.providerOptions
+  return options && typeof options === "object"
+    ? (options as NonNullable<EmbedManyArgs["providerOptions"]>)
+    : undefined
 }
 
 export const embeddingsCreateHandler: ProviderOperationHandlerRegistration<
@@ -36,31 +48,23 @@ export const embeddingsCreateHandler: ProviderOperationHandlerRegistration<
       ["embeddingModel", "textEmbeddingModel"],
       "embedding"
     )
+    const providerOptions = providerOptionsOf(request.input.extra)
     const result = await embedManyGated({
       model: make(requireModelId(provider, request.input.model)),
-      values: request.input.values,
+      values: request.input.input,
+      ...(providerOptions ? { providerOptions } : {}),
       ...(signal ? { abortSignal: signal } : {}),
     })
     return {
       embeddings: result.embeddings.map((embedding) => [...embedding]),
-      usage: { tokens: result.usage?.tokens ?? 0 },
+      usage: { totalTokens: result.usage?.tokens ?? 0 },
     }
   },
 }
 
-export interface RerankCreateInput {
-  model?: string
-  query: string
-  documents: string[]
-  topN?: number
-}
-
-export interface RerankCreateOutput {
-  ranking: Array<{ index: number; score: number }>
-}
-
 interface RerankWire {
   results?: Array<{ index: number; relevance_score?: number; score?: number }>
+  usage?: { total_tokens?: number }
 }
 
 export const rerankCreateHandler: ProviderOperationHandlerRegistration<
@@ -100,6 +104,9 @@ export const rerankCreateHandler: ProviderOperationHandlerRegistration<
         index: row.index,
         score: row.relevance_score ?? row.score ?? 0,
       })),
+      ...(json.usage?.total_tokens !== undefined
+        ? { usage: { totalTokens: json.usage.total_tokens } }
+        : {}),
     }
   },
 }

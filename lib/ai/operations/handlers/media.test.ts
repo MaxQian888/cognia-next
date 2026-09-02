@@ -5,19 +5,13 @@ jest.mock("./ai-sdk-surface", () => ({
   generateSpeechGated: jest.fn(),
   transcribeGated: jest.fn(),
 }))
-const surface = jest.requireMock("./ai-sdk-surface") as {
-  generateImageGated: jest.Mock
-  generateVideoGated: jest.Mock
-  generateSpeechGated: jest.Mock
-  transcribeGated: jest.Mock
-}
+const surface = jest.requireMock("./ai-sdk-surface") as Record<string, jest.Mock>
 jest.mock("@/lib/ai/media/provider-generation", () => ({
   IMAGE_GENERATION_PROVIDER_IDS: ["openai", "google"],
   generateProviderImage: jest.fn(),
   generateProviderVideo: jest.fn(),
 }))
 const media = jest.requireMock("@/lib/ai/media/provider-generation") as {
-  IMAGE_GENERATION_PROVIDER_IDS: never
   generateProviderImage: jest.Mock
   generateProviderVideo: jest.Mock
 }
@@ -27,7 +21,13 @@ jest.mock("@/lib/ai/media/video-generation-sdk", () => ({
 const client: Record<string, unknown> = {}
 jest.mock("@/lib/ai/provider-consumption", () => ({ createFeatureProviderClient: () => client }))
 
-import type { ProviderOperationId } from "@cognia/provider-types"
+import {
+  imagesGenerateOutput,
+  speechGenerateOutput,
+  transcriptionCreateOutput,
+  videosGenerateOutput,
+  type ProviderOperationId,
+} from "@cognia/provider-types"
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { providerJobRegistry } from "../job-handle"
@@ -76,33 +76,40 @@ describe("media handlers", () => {
       images: [{ base64: "aa", mediaType: "image/png" }],
     })
     const viaModule = registry.resolve("images.generate", "openai", "openai")!
-    await expect(
-      viaModule.handler(ctx("images.generate", { prompt: "cat", size: "1024x1024" }))
-    ).resolves.toEqual({ images: [{ base64: "aa", mimeType: "image/png" }] })
+    const output = await viaModule.handler(
+      ctx("images.generate", { model: "img", prompt: "cat", size: "1024x1024", extra: { seed: 7 } })
+    )
+    expect(imagesGenerateOutput.parse(output)).toEqual({
+      images: [{ base64: "aa", mimeType: "image/png" }],
+    })
     expect(media.generateProviderImage).toHaveBeenCalledWith(
       expect.objectContaining({
         snapshot: settings,
         providerId: "openai",
         prompt: "cat",
         size: "1024x1024",
+        seed: 7,
       })
     )
+    await expect(
+      viaModule.handler(ctx("images.generate", { model: "img", prompt: "cat", size: "big" }))
+    ).rejects.toThrow(/size must look like/)
 
     const other = { ...provider, providerId: "xyz-compatible" }
     const viaSdk = registry.resolve("images.generate", "xyz-compatible", "openai")!
     expect(viaSdk.providerMatch).toEqual({ kind: "any" })
-    await expect(viaSdk.handler(ctx("images.generate", { prompt: "cat" }, other))).rejects.toThrow(
-      /no image model factory/
-    )
+    await expect(
+      viaSdk.handler(ctx("images.generate", { model: "img", prompt: "cat" }, other))
+    ).rejects.toThrow(/no image model factory/)
     client.imageModel = (id: string) => ({ id })
     surface.generateImageGated.mockResolvedValueOnce({
       images: [{ base64: "bb", mediaType: "image/webp" }],
     })
-    await expect(viaSdk.handler(ctx("images.generate", { prompt: "cat" }, other))).resolves.toEqual(
-      {
-        images: [{ base64: "bb", mimeType: "image/webp" }],
-      }
-    )
+    await expect(
+      viaSdk.handler(ctx("images.generate", { model: "img", prompt: "cat" }, other))
+    ).resolves.toEqual({
+      images: [{ base64: "bb", mimeType: "image/webp" }],
+    })
   })
 
   it("records a generated video as a locally completed job under a pinned handle", async () => {
@@ -110,10 +117,15 @@ describe("media handlers", () => {
       videos: [{ base64: "vv", mediaType: "video/mp4" }],
     })
     const google = { ...provider, providerId: "google", protocol: "google" as const }
-    const output = await registry
+    const output = (await registry
       .resolve("videos.generate", "google", "google")!
-      .handler(ctx("videos.generate", { prompt: "dog", duration: 4 }, google))
-    const typed = output as {
+      .handler(
+        ctx(
+          "videos.generate",
+          { model: "veo", prompt: "dog", durationSeconds: 4, extra: { resolution: "1280x720" } },
+          google
+        )
+      )) as {
       handle: {
         kind: string
         providerId: string
@@ -122,14 +134,17 @@ describe("media handlers", () => {
       }
       status: string
     }
-    expect(typed.status).toBe("succeeded")
-    expect(typed.handle).toMatchObject({
+    expect(media.generateProviderVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ duration: 4, resolution: "1280x720", providerId: "google" })
+    )
+    expect(videosGenerateOutput.parse(output)).toMatchObject({ status: "succeeded" })
+    expect(output.handle).toMatchObject({
       kind: "video",
       providerId: "google",
       deploymentRef: "dep-1",
     })
-    expect(typed.handle.credentialAffinity).not.toContain("k")
-    const job = providerJobRegistry.get(typed.handle as never)
+    expect(output.handle.credentialAffinity).not.toContain("k")
+    const job = providerJobRegistry.get(output.handle as never)
     expect(job?.status).toBe("succeeded")
     expect(job?.content).toEqual({ base64: "vv", mimeType: "video/mp4" })
   })
@@ -139,11 +154,26 @@ describe("media handlers", () => {
     surface.generateSpeechGated.mockResolvedValueOnce({
       audio: { base64: "ss", mediaType: "audio/mpeg" },
     })
-    await expect(
-      speechGenerateHandler.handler(ctx("speech.generate", { text: "hi", voice: "alloy" }))
-    ).resolves.toEqual({ audio: { base64: "ss", mimeType: "audio/mpeg" } })
+    const speech = await speechGenerateHandler.handler(
+      ctx("speech.generate", {
+        model: "tts",
+        text: "hi",
+        voice: "alloy",
+        format: "mp3",
+        extra: { speed: 1.2 },
+      })
+    )
+    expect(speechGenerateOutput.parse(speech)).toEqual({
+      audio: { base64: "ss", mimeType: "audio/mpeg" },
+    })
     expect(surface.generateSpeechGated).toHaveBeenCalledWith(
-      expect.objectContaining({ model: { id: "configured" }, text: "hi", voice: "alloy" })
+      expect.objectContaining({
+        model: { id: "tts" },
+        text: "hi",
+        voice: "alloy",
+        outputFormat: "mp3",
+        speed: 1.2,
+      })
     )
 
     client.transcriptionModel = (id: string) => ({ id })
@@ -153,15 +183,13 @@ describe("media handlers", () => {
       durationInSeconds: 1.5,
       segments: [{ text: "hello", startSecond: 0, endSecond: 1.5 }],
     })
-    await expect(
-      transcriptionCreateHandler.handler(
-        ctx("transcription.create", { model: "w", audioBase64: "AAAA" })
-      )
-    ).resolves.toEqual({
+    const transcript = await transcriptionCreateHandler.handler(
+      ctx("transcription.create", { model: "w", audio: { base64: "AAAA", mimeType: "audio/wav" } })
+    )
+    expect(transcriptionCreateOutput.parse(transcript)).toEqual({
       text: "hello",
       language: "en",
-      durationInSeconds: 1.5,
-      segments: [{ text: "hello", startSecond: 0, endSecond: 1.5 }],
+      segments: [{ start: 0, end: 1.5, text: "hello" }],
     })
     expect(surface.transcribeGated).toHaveBeenCalledWith(expect.objectContaining({ audio: "AAAA" }))
   })

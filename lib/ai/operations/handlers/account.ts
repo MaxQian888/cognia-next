@@ -1,6 +1,6 @@
 /**
- * Account surfaces: `balance.read`, `quota.read`, `rate-limits.read`,
- * `usage.provider.read` and `usage.local.read`.
+ * Account surfaces in the contract shapes: `balance.read`, `quota.read`,
+ * `rate-limits.read`, `usage.provider.read` and `usage.local.read`.
  *
  * Balance and quota delegate to the subscription registries the settings
  * screens already use (`findBalanceAdapter`, `resolveLimitsSources`), so a
@@ -10,18 +10,51 @@
  * local usage reads the Dexie `sessionUsage` ledger this app writes.
  */
 
+import type { z } from "zod"
+import type {
+  balanceReadInput,
+  balanceReadOutput,
+  quotaReadInput,
+  quotaReadOutput,
+  rateLimitsReadInput,
+  rateLimitsReadOutput,
+  usageLocalReadInput,
+  usageLocalReadOutput,
+  usageProviderReadInput,
+  usageProviderReadOutput,
+} from "@cognia/provider-types"
 import type { BalanceQuery, BalanceSnapshot, LimitsMeter, ProviderId } from "@/types/subscription"
 import { getDb } from "@/lib/db/schema"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { failureForStatus } from "@/lib/provider-diagnostics/probe"
 import { findBalanceAdapter } from "@/lib/subscription/balance/registry"
 import { resolveLimitsSources } from "@/lib/subscription/limits/registry"
-import { aggregateByModel, type ModelUsageRow } from "@/lib/usage/session-analytics"
+import { aggregateByModel } from "@/lib/usage/session-analytics"
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { ProviderOperationFailureError } from "../failure"
 import type { ProviderOperationHandlerRegistration } from "../registry"
 import { providerRequest } from "./http"
+
+export type BalanceReadInput = z.infer<typeof balanceReadInput>
+export type QuotaReadInput = z.infer<typeof quotaReadInput>
+export type RateLimitsReadInput = z.infer<typeof rateLimitsReadInput>
+export type RateLimitsReadOutput = z.infer<typeof rateLimitsReadOutput>
+export type UsageProviderReadInput = z.infer<typeof usageProviderReadInput>
+export type UsageProviderReadOutput = z.infer<typeof usageProviderReadOutput>
+export type UsageLocalReadInput = z.infer<typeof usageLocalReadInput>
+export type UsageLocalReadOutput = z.infer<typeof usageLocalReadOutput>
+
+/** The contract balance plus the adapter's full snapshot for callers that want it. */
+export interface BalanceReadOutput extends z.infer<typeof balanceReadOutput> {
+  snapshot: BalanceSnapshot
+}
+
+/** The contract quota plus every meter the source reported. */
+export interface QuotaReadOutput extends z.infer<typeof quotaReadOutput> {
+  source: string
+  meters: LimitsMeter[]
+}
 
 const DAY_MS = 86_400_000
 
@@ -46,10 +79,15 @@ function requireToken(provider: ResolvedProvider): string {
 
 // ---- balance ----------------------------------------------------------------------
 
-export type BalanceReadOutput = BalanceSnapshot
+/** The contract's three balance kinds from an adapter snapshot. */
+export function balanceKindOf(snapshot: BalanceSnapshot): BalanceReadOutput["kind"] {
+  if (snapshot.kind === "credit") return "credits"
+  if (snapshot.kind === "usage") return "postpaid"
+  return "prepaid"
+}
 
 export const balanceReadHandler: ProviderOperationHandlerRegistration<
-  { deploymentRef?: string },
+  BalanceReadInput,
   BalanceReadOutput
 > = {
   operationId: "balance.read",
@@ -79,20 +117,64 @@ export const balanceReadHandler: ProviderOperationHandlerRegistration<
     })
     const body = await response.text()
     if (!response.ok) throw new ProviderOperationFailureError(failureForStatus(response.status))
-    return adapter.parse(response.status, body, query)
+    const snapshot = adapter.parse(response.status, body, query)
+    if (snapshot.error) {
+      throw new ProviderOperationFailureError({
+        code: "invalid-response",
+        retryable: true,
+        message: snapshot.error,
+      })
+    }
+    const amount = snapshot.remaining ?? snapshot.total ?? snapshot.used
+    if (amount === undefined) {
+      throw new ProviderOperationFailureError({
+        code: "invalid-response",
+        retryable: false,
+        message: `${adapter.key} reported no amount`,
+      })
+    }
+    return {
+      amount,
+      currency: snapshot.currency ?? snapshot.unit ?? "USD",
+      kind: balanceKindOf(snapshot),
+      capturedAt: snapshot.fetchedAt,
+      snapshot,
+    }
   },
 }
 
 // ---- quota ------------------------------------------------------------------------
 
-export interface QuotaReadOutput {
-  source: string
-  fetchedAt: number
+/** The contract quota from the meter that best describes the account. */
+export function quotaOf(
   meters: LimitsMeter[]
+): Omit<QuotaReadOutput, "capturedAt" | "source" | "meters"> {
+  const primary = meters.find((meter) => meter.kind === "window") ?? meters[0]
+  if (!primary) {
+    throw new ProviderOperationFailureError({
+      code: "invalid-response",
+      retryable: false,
+      message: "the quota source reported no meters",
+    })
+  }
+  if (primary.used !== undefined || primary.total !== undefined) {
+    return {
+      used: primary.used ?? 0,
+      ...(primary.total !== undefined ? { limit: primary.total } : {}),
+      unit: primary.unit ?? "units",
+      ...(primary.resetAt ? { resetsAt: primary.resetAt } : {}),
+    }
+  }
+  return {
+    used: primary.usedPct ?? 0,
+    limit: 100,
+    unit: "percent",
+    ...(primary.resetAt ? { resetsAt: primary.resetAt } : {}),
+  }
 }
 
 export const quotaReadHandler: ProviderOperationHandlerRegistration<
-  { deploymentRef?: string },
+  QuotaReadInput,
   QuotaReadOutput
 > = {
   operationId: "quota.read",
@@ -143,7 +225,12 @@ export const quotaReadHandler: ProviderOperationHandlerRegistration<
           message: limits.error,
         })
       }
-      return { source: source.key, fetchedAt: limits.fetchedAt, meters: limits.meters }
+      return {
+        ...quotaOf(limits.meters),
+        capturedAt: limits.fetchedAt,
+        source: source.key,
+        meters: limits.meters,
+      }
     }
     throw new ProviderOperationFailureError({
       code: "capability-unsupported",
@@ -155,19 +242,7 @@ export const quotaReadHandler: ProviderOperationHandlerRegistration<
 
 // ---- rate limits ------------------------------------------------------------------
 
-export interface RateLimitReading {
-  /** Meter name as the vendor spells it, e.g. `requests`, `tokens`, `input-tokens`. */
-  name: string
-  limit?: number
-  remaining?: number
-  /** Epoch ms when the window resets, when the vendor says. */
-  resetAt?: number
-}
-
-export interface RateLimitsReadOutput {
-  observedAt: number
-  limits: RateLimitReading[]
-}
+export type RateLimitReading = RateLimitsReadOutput["limits"][number]
 
 const ROLES = new Set(["limit", "remaining", "reset"])
 
@@ -203,8 +278,8 @@ export function parseRateLimitHeaders(headers: Headers, now: number): RateLimitR
     if (role === "reset") {
       const parsed = Date.parse(value)
       const ms = Number.isNaN(parsed) ? durationToMs(value) : undefined
-      if (!Number.isNaN(parsed)) reading.resetAt = parsed
-      else if (ms !== undefined) reading.resetAt = now + ms
+      if (!Number.isNaN(parsed)) reading.resetsAt = parsed
+      else if (ms !== undefined) reading.resetsAt = now + ms
     } else {
       const number = Number(value)
       if (!Number.isFinite(number)) return
@@ -217,7 +292,7 @@ export function parseRateLimitHeaders(headers: Headers, now: number): RateLimitR
 }
 
 export const rateLimitsReadHandler: ProviderOperationHandlerRegistration<
-  Record<string, never>,
+  RateLimitsReadInput,
   RateLimitsReadOutput
 > = {
   operationId: "rate-limits.read",
@@ -225,65 +300,39 @@ export const rateLimitsReadHandler: ProviderOperationHandlerRegistration<
   support: "derived",
   async handler({ provider, signal }) {
     const response = await providerRequest(provider, { path: "models", signal })
-    const observedAt = Date.now()
-    return { observedAt, limits: parseRateLimitHeaders(response.headers, observedAt) }
+    const capturedAt = Date.now()
+    return { capturedAt, limits: parseRateLimitHeaders(response.headers, capturedAt) }
   },
 }
 
 // ---- provider usage ---------------------------------------------------------------
 
-export interface UsageWindowInput {
-  /** Epoch ms, defaults to seven days ago. */
-  since?: number
-  /** Epoch ms, defaults to now. */
-  until?: number
-}
+type UsageRow = UsageProviderReadOutput["rows"][number]
 
-export interface UsageBucket {
-  start: number
-  end: number
-  inputTokens: number
-  outputTokens: number
-  requests?: number
-}
-
-export interface UsageReadOutput {
-  since: number
-  until: number
-  buckets: UsageBucket[]
-  totals: { inputTokens: number; outputTokens: number; requests: number }
-}
-
-function windowOf(input: UsageWindowInput | undefined, now = Date.now()) {
-  const until = input?.until ?? now
-  const since = input?.since ?? until - 7 * DAY_MS
-  if (since >= until) {
+function windowOf(input: { from?: number; to?: number } | undefined, now = Date.now()) {
+  const to = input?.to ?? now
+  const from = input?.from ?? to - 7 * DAY_MS
+  if (from >= to) {
     throw new ProviderOperationFailureError({
       code: "schema",
       retryable: false,
       message: "usage window must start before it ends",
     })
   }
-  return { since, until }
+  return { from, to }
 }
 
-function totalsOf(buckets: UsageBucket[]): UsageReadOutput["totals"] {
-  return buckets.reduce(
-    (sum, bucket) => ({
-      inputTokens: sum.inputTokens + bucket.inputTokens,
-      outputTokens: sum.outputTokens + bucket.outputTokens,
-      requests: sum.requests + (bucket.requests ?? 0),
-    }),
-    { inputTokens: 0, outputTokens: 0, requests: 0 }
-  )
+/** `YYYY-MM-DD` (UTC) of an instant. */
+export function dayOf(epochMs: number): string {
+  return new Date(epochMs).toISOString().slice(0, 10)
 }
 
 interface UsageEndpoint {
   providerId: string
   /** Absolute usage endpoint. Admin surfaces do not live under the inference base URL. */
   baseURL?: string
-  path(window: { since: number; until: number }): string
-  parse(json: unknown): UsageBucket[]
+  path(window: { from: number; to: number }): string
+  parse(json: unknown): Array<UsageRow & { start: number }>
 }
 
 function num(value: unknown): number {
@@ -298,23 +347,22 @@ function rows(json: unknown, key: string): Array<Record<string, unknown>> {
 /** OpenAI and Anthropic share the bucket-of-results shape, with different field names. */
 function bucketed(
   json: unknown,
-  fields: { start: string; end: string; input: string[]; output: string; requests?: string },
+  fields: { start: string; input: string[]; output: string },
   timeScale: number
-): UsageBucket[] {
+): Array<UsageRow & { start: number }> {
   return rows(json, "data").map((bucket) => {
     const results = Array.isArray(bucket.results)
       ? (bucket.results as Array<Record<string, unknown>>)
       : []
     const sum = (keys: string[]) =>
       results.reduce((acc, row) => acc + keys.reduce((inner, key) => inner + num(row[key]), 0), 0)
-    const at = (value: unknown) =>
-      typeof value === "string" ? Date.parse(value) : num(value) * timeScale
+    const raw = bucket[fields.start]
+    const start = typeof raw === "string" ? Date.parse(raw) : num(raw) * timeScale
     return {
-      start: at(bucket[fields.start]),
-      end: at(bucket[fields.end]),
+      start,
+      day: dayOf(start),
       inputTokens: sum(fields.input),
       outputTokens: sum([fields.output]),
-      ...(fields.requests ? { requests: sum([fields.requests]) } : {}),
     }
   })
 }
@@ -323,32 +371,25 @@ const USAGE_ENDPOINTS: UsageEndpoint[] = [
   {
     providerId: "openai",
     baseURL: "https://api.openai.com/v1",
-    path: ({ since, until }) =>
-      `organization/usage/completions?start_time=${Math.floor(since / 1000)}&end_time=${Math.floor(until / 1000)}&bucket_width=1d&limit=31`,
+    path: ({ from, to }) =>
+      `organization/usage/completions?start_time=${Math.floor(from / 1000)}&end_time=${Math.floor(to / 1000)}&bucket_width=1d&limit=31`,
     parse: (json) =>
       bucketed(
         json,
-        {
-          start: "start_time",
-          end: "end_time",
-          input: ["input_tokens"],
-          output: "output_tokens",
-          requests: "num_model_requests",
-        },
+        { start: "start_time", input: ["input_tokens"], output: "output_tokens" },
         1000
       ),
   },
   {
     providerId: "anthropic",
     baseURL: "https://api.anthropic.com/v1",
-    path: ({ since, until }) =>
-      `organizations/usage_report/messages?starting_at=${new Date(since).toISOString()}&ending_at=${new Date(until).toISOString()}&bucket_width=1d&limit=31`,
+    path: ({ from, to }) =>
+      `organizations/usage_report/messages?starting_at=${new Date(from).toISOString()}&ending_at=${new Date(to).toISOString()}&bucket_width=1d&limit=31`,
     parse: (json) =>
       bucketed(
         json,
         {
           start: "starting_at",
-          end: "ending_at",
           input: [
             "uncached_input_tokens",
             "cache_creation_input_tokens",
@@ -364,32 +405,28 @@ const USAGE_ENDPOINTS: UsageEndpoint[] = [
     baseURL: "https://openrouter.ai/api/v1",
     path: () => "activity",
     parse: (json) => {
-      const byDay = new Map<string, UsageBucket>()
+      const parsed: Array<UsageRow & { start: number }> = []
       for (const row of rows(json, "data")) {
-        const date = typeof row.date === "string" ? row.date : undefined
-        if (!date) continue
+        const date = typeof row.date === "string" ? row.date : ""
         const start = Date.parse(date)
         if (Number.isNaN(start)) continue
-        const bucket = byDay.get(date) ?? {
+        parsed.push({
           start,
-          end: start + DAY_MS,
-          inputTokens: 0,
-          outputTokens: 0,
-          requests: 0,
-        }
-        bucket.inputTokens += num(row.prompt_tokens)
-        bucket.outputTokens += num(row.completion_tokens)
-        bucket.requests = (bucket.requests ?? 0) + num(row.requests)
-        byDay.set(date, bucket)
+          day: dayOf(start),
+          ...(typeof row.model === "string" ? { model: row.model } : {}),
+          inputTokens: num(row.prompt_tokens),
+          outputTokens: num(row.completion_tokens),
+          costUsd: num(row.usage),
+        })
       }
-      return [...byDay.values()].sort((a, b) => a.start - b.start)
+      return parsed.sort((a, b) => a.start - b.start)
     },
   },
 ]
 
 function usageHandler(
   endpoint: UsageEndpoint
-): ProviderOperationHandlerRegistration<UsageWindowInput, UsageReadOutput> {
+): ProviderOperationHandlerRegistration<UsageProviderReadInput, UsageProviderReadOutput> {
   return {
     operationId: "usage.provider.read",
     providerMatch: { kind: "provider", providerId: endpoint.providerId },
@@ -401,51 +438,42 @@ function usageHandler(
         ...(endpoint.baseURL ? { baseURL: endpoint.baseURL } : {}),
         signal,
       })
-      const buckets = endpoint
+      const usageRows = endpoint
         .parse(json)
-        .filter((bucket) => bucket.end > window.since && bucket.start < window.until)
-      return { ...window, buckets, totals: totalsOf(buckets) }
+        .filter((row) => row.start + DAY_MS > window.from && row.start < window.to)
+        .map(({ start: _start, ...row }) => row)
+      return { rows: usageRows, capturedAt: Date.now() }
     },
   }
 }
 
 // ---- local usage ------------------------------------------------------------------
 
-export interface LocalUsageReadOutput {
-  since: number
-  until: number
-  turns: number
-  totals: { inputTokens: number; outputTokens: number; costUsd: number }
-  byModel: ModelUsageRow[]
-}
-
 export const usageLocalReadHandler: ProviderOperationHandlerRegistration<
-  UsageWindowInput,
-  LocalUsageReadOutput
+  UsageLocalReadInput,
+  UsageLocalReadOutput
 > = {
   operationId: "usage.local.read",
   providerMatch: { kind: "any" },
   support: "derived",
   async handler({ provider, request }) {
     const window = windowOf(request.input)
-    const rowsInWindow = await getDb()
+    const providerId = request.input?.providerId ?? provider.providerId
+    const ledger = await getDb()
       .sessionUsage.where("providerId")
-      .equals(provider.providerId)
-      .and((row) => row.at >= window.since && row.at < window.until)
+      .equals(providerId)
+      .and((row) => row.at >= window.from && row.at < window.to)
       .toArray()
-    const byModel = aggregateByModel(rowsInWindow)
+    // Every row carries the provider that served it, so attribution is exact.
     return {
-      ...window,
-      turns: rowsInWindow.length,
-      totals: byModel.reduce(
-        (sum, row) => ({
-          inputTokens: sum.inputTokens + row.inputTokens,
-          outputTokens: sum.outputTokens + row.outputTokens,
-          costUsd: sum.costUsd + row.costUsd,
-        }),
-        { inputTokens: 0, outputTokens: 0, costUsd: 0 }
-      ),
-      byModel,
+      rows: aggregateByModel(ledger).map((row) => ({
+        model: row.model,
+        providerId,
+        attribution: "exact" as const,
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        costUsd: row.costUsd,
+      })),
     }
   },
 }

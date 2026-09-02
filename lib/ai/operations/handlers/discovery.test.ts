@@ -12,11 +12,15 @@ const discovery = jest.requireMock("@cognia/provider-core/providers/model-discov
   discoverLocalProviderModels: jest.Mock
   discoverOpenAICompatibleModels: jest.Mock
 }
+jest.mock("@cognia/provider-core/providers/models-dev-sync", () => ({
+  getCatalogModelsForProvider: jest.fn(() => []),
+}))
 jest.mock("@/lib/claude/feature-call", () => ({ discoverBedrockModelsViaSidecar: jest.fn() }))
 const featureCall = jest.requireMock("@/lib/claude/feature-call") as {
   discoverBedrockModelsViaSidecar: jest.Mock
 }
 jest.mock("./http", () => ({ providerRequest: jest.fn() }))
+const http = jest.requireMock("./http") as { providerRequest: jest.Mock }
 jest.mock("../persistence", () => ({
   providerOperationPersistence: {
     readInventory: jest.fn(async () => undefined),
@@ -29,13 +33,18 @@ const persistence = (
     providerOperationPersistence: { readInventory: jest.Mock; writeInventory: jest.Mock }
   }
 ).providerOperationPersistence
-const http = jest.requireMock("./http") as { providerRequest: jest.Mock }
 
+import { modelsGetOutput, modelsListOutput } from "@cognia/provider-types"
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { getProviderOperationDescriptor } from "../manifest"
 import { ProviderOperationHandlerRegistry } from "../registry"
-import { DISCOVERY_HANDLERS, listProviderModels, modelsGetHandler } from "./discovery"
+import {
+  DISCOVERY_HANDLERS,
+  dominantSourceOf,
+  listProviderModels,
+  modelsGetHandler,
+} from "./discovery"
 
 const settings = { defaultProvider: undefined, providers: {}, customProviders: [] }
 function resolved(
@@ -72,8 +81,11 @@ describe("models.list", () => {
       baseURL: "https://host.example/v1",
       apiKey: "k",
     })
-    expect(output.source).toBe("remote")
-    expect(output.remoteLastFetchedAt).toBe(5)
+    expect(modelsListOutput.parse(output)).toMatchObject({
+      source: "remote-discovered",
+      freshness: "fresh",
+      fetchedAt: 5,
+    })
     expect(
       output.models.some((model) => model.id === "live-1" && model.source === "remote-discovered")
     ).toBe(true)
@@ -86,10 +98,11 @@ describe("models.list", () => {
       settings,
     })
     expect(http.providerRequest).not.toHaveBeenCalled()
-    expect(output.source).toBe("catalog")
+    expect(output.freshness).toBe("static")
+    expect(output.source).toBe("catalog-static")
   })
 
-  it("uses the vendor lister before the protocol one, and honours remote: false", async () => {
+  it("uses the vendor lister before the protocol one", async () => {
     discovery.discoverOpenRouterModels.mockResolvedValueOnce([{ id: "or/x" }])
     const output = await listProviderModels({
       provider: resolved("openrouter", "openai"),
@@ -98,13 +111,6 @@ describe("models.list", () => {
     expect(discovery.discoverOpenRouterModels).toHaveBeenCalledWith("k")
     expect(discovery.discoverOpenAICompatibleModels).not.toHaveBeenCalled()
     expect(output.models.map((model) => model.id)).toContain("or/x")
-
-    await listProviderModels({
-      provider: resolved("openrouter", "openai"),
-      settings,
-      remote: false,
-    })
-    expect(discovery.discoverOpenRouterModels).toHaveBeenCalledTimes(1)
   })
 
   it("lists anthropic and google over their own wires", async () => {
@@ -190,7 +196,7 @@ describe("models.list", () => {
       deploymentRef: "groq-main",
       now: 500,
     })
-    expect(refetched.source).toBe("remote")
+    expect(refetched.freshness).toBe("fresh")
     expect(persistence.writeInventory).toHaveBeenLastCalledWith(
       expect.objectContaining({
         id: "deployment:groq-main",
@@ -209,10 +215,22 @@ describe("models.list", () => {
       deploymentRef: "groq-main",
       now: 500,
     })
-    expect(cached.source).toBe("cached")
-    expect(cached.remoteLastFetchedAt).toBe(100)
+    expect(cached.freshness).toBe("stale")
+    expect(cached.source).toBe("remote-discovered")
+    expect(cached.fetchedAt).toBe(100)
     expect(cached.models.map((model) => model.id)).toContain("stored-1")
     expect(discovery.discoverOpenAICompatibleModels).toHaveBeenCalledTimes(1)
+
+    discovery.discoverOpenAICompatibleModels.mockResolvedValueOnce([{ id: "live-2" }])
+    await listProviderModels({
+      provider,
+      settings,
+      deploymentRef: "groq-main",
+      now: 500,
+      refresh: true,
+    })
+    expect(persistence.readInventory).toHaveBeenCalledTimes(2)
+    expect(discovery.discoverOpenAICompatibleModels).toHaveBeenCalledTimes(2)
 
     persistence.readInventory.mockResolvedValueOnce({
       ...stored,
@@ -230,6 +248,16 @@ describe("models.list", () => {
         availableUpstreamIds: [],
       })
     )
+  })
+
+  it("names the highest-authority layer as the listing source", () => {
+    const model = (mergedSources: string[]) => ({ id: "m", mergedSources }) as never
+    expect(dominantSourceOf([model(["catalog-static"])], true)).toBe("remote-discovered")
+    expect(dominantSourceOf([model(["catalog-static", "user-curated"])], false)).toBe(
+      "user-curated"
+    )
+    expect(dominantSourceOf([model(["catalog-static", "models-dev"])], false)).toBe("models-dev")
+    expect(dominantSourceOf([model(["catalog-static"])], false)).toBe("catalog-static")
   })
 
   it("merges a custom provider's curated models and answers models.get from the same listing", async () => {
@@ -253,9 +281,10 @@ describe("models.list", () => {
       },
     })
     const output = await modelsGetHandler.handler(ctx("curated-1"))
-    expect(output.model).toMatchObject({ id: "curated-1", source: "user-curated" })
-    await expect(modelsGetHandler.handler(ctx("missing"))).rejects.toMatchObject({
-      failure: { code: "model-unavailable" },
+    expect(modelsGetOutput.parse(output).model).toMatchObject({
+      id: "curated-1",
+      source: "user-curated",
     })
+    await expect(modelsGetHandler.handler(ctx("missing"))).resolves.toMatchObject({ model: null })
   })
 })

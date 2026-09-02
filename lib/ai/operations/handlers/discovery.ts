@@ -9,7 +9,15 @@
  * media-only vendors) never gets a remote call and answers from the catalog.
  */
 
-import type { ProviderModelCandidate } from "@cognia/provider-types"
+import type { z } from "zod"
+import type {
+  modelsGetInput,
+  modelsGetOutput,
+  modelsListInput,
+  modelsListOutput,
+  ProviderModelCandidate,
+  ProviderModelSource,
+} from "@cognia/provider-types"
 import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
 import { LOCAL_PROVIDER_NAMES, type LocalProviderName } from "@cognia/provider-types/local-provider"
 import { builtInProviderSurfaceFacts } from "@cognia/provider-core/operations/capability-matrix"
@@ -34,20 +42,23 @@ import type {
 } from "../registry"
 import { providerRequest } from "./http"
 
-export interface ModelsListInput {
-  /**
-   * `true` forces a live vendor listing, `false` answers from the catalog
-   * alone, and absent uses the stored listing of this deployment × account
-   * while it is fresh.
-   */
-  remote?: boolean
+export type ModelsListInput = z.infer<typeof modelsListInput>
+export type ModelsGetInput = z.infer<typeof modelsGetInput>
+
+/**
+ * The contract listing. `source` names the highest-authority layer that
+ * contributed, `freshness` says whether the vendor layer was fetched now
+ * (`fresh`), reused from the stored listing (`stale`) or absent (`static`),
+ * and `models` keeps each model's own provenance.
+ */
+export type ModelsListOutput = Omit<z.infer<typeof modelsListOutput>, "models"> & {
+  models: DiscoveredProviderModel[]
 }
 
-export interface ModelsListOutput {
-  models: DiscoveredProviderModel[]
-  /** Where the vendor layer came from: a live call, the stored listing, or nothing. */
-  source: "remote" | "cached" | "catalog"
-  remoteLastFetchedAt?: number
+export type ModelsGetOutput = Omit<z.infer<typeof modelsGetOutput>, "model"> & {
+  model: DiscoveredProviderModel | null
+  source: ModelsListOutput["source"]
+  freshness: ModelsListOutput["freshness"]
 }
 
 /** How long a stored listing answers before a live call is made again. */
@@ -202,7 +213,8 @@ export async function listProviderModels(input: {
   provider: ResolvedProvider
   settings: ProviderSettingsSnapshot
   deploymentRef?: string
-  remote?: boolean
+  /** `true` forces a live vendor listing, absent reuses a fresh stored one. */
+  refresh?: boolean
   signal?: AbortSignal
   now?: number
   persistence?: ProviderOperationPersistence
@@ -212,12 +224,12 @@ export async function listProviderModels(input: {
   const now = input.now ?? Date.now()
   const deploymentRef = input.deploymentRef ?? provider.providerId
   const accountRef = credentialAffinityOf(provider.apiKey)
-  const lister = input.remote === false ? undefined : remoteListerFor(provider)
+  const lister = remoteListerFor(provider)
 
   let remoteModels: ProviderModelCandidate[] | undefined
-  let source: ModelsListOutput["source"] = "catalog"
+  let freshness: ModelsListOutput["freshness"] = "static"
   let remoteLastFetchedAt: number | undefined
-  if (lister && input.remote === undefined) {
+  if (lister && !input.refresh) {
     // A listing taken under another account is never reused: a key rotation
     // or an organisation switch changes what the vendor lists.
     const stored = await persistence.readInventory(deploymentRef)
@@ -229,7 +241,7 @@ export async function listProviderModels(input: {
     ) {
       remoteModels = stored.models
       remoteLastFetchedAt = stored.checkedAt
-      source = "cached"
+      freshness = "stale"
     }
   }
   if (lister && !remoteModels) {
@@ -249,7 +261,7 @@ export async function listProviderModels(input: {
       throw error
     }
     remoteLastFetchedAt = now
-    source = "remote"
+    freshness = "fresh"
     await persistence.writeInventory({
       id: `deployment:${deploymentRef}`,
       deploymentRef,
@@ -274,9 +286,22 @@ export async function listProviderModels(input: {
   })
   return {
     models: snapshot.models,
-    source,
-    ...(remoteLastFetchedAt !== undefined ? { remoteLastFetchedAt } : {}),
+    source: dominantSourceOf(snapshot.models, remoteModels !== undefined),
+    freshness,
+    fetchedAt: remoteLastFetchedAt ?? now,
   }
+}
+
+/** The highest-authority layer that contributed to a listing. */
+export function dominantSourceOf(
+  models: readonly DiscoveredProviderModel[],
+  remoteContributed: boolean
+): ProviderModelSource {
+  if (remoteContributed) return "remote-discovered"
+  const present = new Set(models.flatMap((model) => model.mergedSources))
+  if (present.has("user-curated")) return "user-curated"
+  if (present.has("models-dev")) return "models-dev"
+  return "catalog-static"
 }
 
 function modelsListHandler(
@@ -292,20 +317,10 @@ function modelsListHandler(
         provider,
         settings,
         deploymentRef: request.deploymentRef,
-        remote: request.input?.remote,
+        refresh: request.input?.refresh,
         signal,
       }),
   }
-}
-
-export interface ModelsGetInput {
-  model: string
-  remote?: boolean
-}
-
-export interface ModelsGetOutput {
-  model: DiscoveredProviderModel
-  source: ModelsListOutput["source"]
 }
 
 export const modelsGetHandler: ProviderOperationHandlerRegistration<
@@ -320,18 +335,10 @@ export const modelsGetHandler: ProviderOperationHandlerRegistration<
       provider,
       settings,
       deploymentRef: request.deploymentRef,
-      remote: request.input.remote,
       signal,
     })
-    const model = listed.models.find((candidate) => candidate.id === request.input.model)
-    if (!model) {
-      throw new ProviderOperationFailureError({
-        code: "model-unavailable",
-        retryable: false,
-        message: `${provider.providerId} lists no model "${request.input.model}"`,
-      })
-    }
-    return { model, source: listed.source }
+    const model = listed.models.find((candidate) => candidate.id === request.input.model) ?? null
+    return { model, source: listed.source, freshness: listed.freshness }
   },
 }
 

@@ -2,11 +2,24 @@
  * `language.generate`, `language.stream`, `language.tools` and
  * `language.structured-output`, all through the gated AI SDK surface over
  * the same model handle the chat path builds (`createFeatureProviderModel`).
- * Structured output is registered as `translated` on the Anthropic and
- * Bedrock protocols, where the SDK emulates a schema through a tool call,
- * and `native` elsewhere.
+ * Inputs and outputs are the named contract schemas (`languageGenerateInput`
+ * and friends in `@cognia/provider-types`). Structured output is registered
+ * as `translated` on the Anthropic and Bedrock protocols, where the SDK
+ * emulates a schema through a tool call, and `native` elsewhere.
  */
 
+import type { z } from "zod"
+import type {
+  chatMessageSchema,
+  languageGenerateInput,
+  languageGenerateOutput,
+  languageStreamInput,
+  languageStreamOutput,
+  languageStructuredOutputInput,
+  languageStructuredOutputOutput,
+  languageToolsInput,
+  languageToolsOutput,
+} from "@cognia/provider-types"
 import { createFeatureProviderModel, type ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { ProviderOperationFailureError } from "../failure"
@@ -23,137 +36,156 @@ import {
 } from "./ai-sdk-surface"
 import { requireModelId } from "./sdk-client"
 
-export interface LanguageMessage {
-  role: "system" | "user" | "assistant"
-  content: string
-}
+export type LanguageGenerateInput = z.infer<typeof languageGenerateInput>
+export type LanguageGenerateOutput = z.infer<typeof languageGenerateOutput>
+export type LanguageStreamInput = z.infer<typeof languageStreamInput>
+export type LanguageToolsInput = z.infer<typeof languageToolsInput>
+export type LanguageToolsOutput = z.infer<typeof languageToolsOutput>
+export type LanguageStructuredOutputInput = z.infer<typeof languageStructuredOutputInput>
+export type LanguageStructuredOutputOutput = z.infer<typeof languageStructuredOutputOutput>
+export type ChatMessage = z.infer<typeof chatMessageSchema>
 
-export interface LanguageToolDefinition {
-  description?: string
-  inputSchema: Record<string, unknown>
-}
-
-export interface LanguageInput {
-  model?: string
-  prompt?: string
-  system?: string
-  messages?: LanguageMessage[]
-  maxOutputTokens?: number
-  temperature?: number
-  /** `language.tools` only: tool name to JSON-schema definition. */
-  tools?: Record<string, LanguageToolDefinition>
-  /** `language.structured-output` only: the JSON schema of the object. */
-  schema?: Record<string, unknown>
-}
-
-export interface LanguageUsage {
-  inputTokens: number
-  outputTokens: number
-}
-
-export interface LanguageToolCall {
-  toolCallId: string
-  toolName: string
-  input: unknown
-}
-
-export interface LanguageGenerateOutput {
-  text: string
-  finishReason: string
-  usage: LanguageUsage
-  toolCalls: LanguageToolCall[]
-}
-
-export interface LanguageStreamOutput {
+/** The contract's stream output plus the in-process stream itself. */
+export interface LanguageStreamOutput extends z.infer<typeof languageStreamOutput> {
+  /** Text deltas. Only reachable in-process, never over RPC. */
   textStream: AsyncIterable<string>
-  finished: Promise<Omit<LanguageGenerateOutput, "toolCalls">>
+  /** Resolves with the terminal aggregate, which is also written to `final`. */
+  completed: Promise<NonNullable<z.infer<typeof languageStreamOutput>["final"]>>
 }
 
-export interface LanguageStructuredOutput {
-  object: unknown
-  usage: LanguageUsage
+type FinishReason = NonNullable<LanguageGenerateOutput["finishReason"]>
+const FINISH_REASONS: ReadonlySet<string> = new Set([
+  "stop",
+  "length",
+  "tool-calls",
+  "content-filter",
+  "error",
+  "other",
+])
+
+export function finishReasonOf(value: string | undefined): FinishReason {
+  return value && FINISH_REASONS.has(value) ? (value as FinishReason) : "other"
 }
 
-type PromptArgs =
-  { prompt: string; system?: string } | { messages: PromptMessages; system?: string }
+function textOf(content: ChatMessage["content"]): string {
+  if (typeof content === "string") return content
+  return content
+    .map((block) => (typeof block.text === "string" ? block.text : ""))
+    .filter(Boolean)
+    .join("\n")
+}
 
-/** The prompt half of a call. A request must carry a prompt or messages. */
-export function promptArgsOf(input: LanguageInput): PromptArgs {
-  if (input.messages?.length) {
-    return {
-      messages: input.messages.map((message) => ({ role: message.role, content: message.content })),
-      ...(input.system ? { system: input.system } : {}),
+/** Contract messages to AI SDK model messages. Content blocks pass through as parts. */
+export function toModelMessages(messages: readonly ChatMessage[]): PromptMessages {
+  return messages.map((message) => {
+    switch (message.role) {
+      case "system":
+        return { role: "system", content: textOf(message.content) }
+      case "tool":
+        return {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: message.toolCallId ?? "",
+              toolName: message.name ?? "",
+              output:
+                typeof message.content === "string"
+                  ? { type: "text", value: message.content }
+                  : { type: "json", value: message.content },
+            },
+          ],
+        }
+      case "user":
+      case "assistant":
+        return { role: message.role, content: message.content } as PromptMessages[number]
     }
+  }) as PromptMessages
+}
+
+type CallArgs = Pick<
+  GenerateTextArgs,
+  "system" | "maxOutputTokens" | "temperature" | "topP" | "stopSequences"
+> & { messages: PromptMessages }
+
+function callArgsOf(input: LanguageGenerateInput): CallArgs {
+  if (input.messages.length === 0) {
+    throw new ProviderOperationFailureError({
+      code: "schema",
+      retryable: false,
+      message: "a language request needs at least one message",
+    })
   }
-  if (typeof input.prompt === "string" && input.prompt.length > 0) {
-    return { prompt: input.prompt, ...(input.system ? { system: input.system } : {}) }
+  return {
+    messages: toModelMessages(input.messages),
+    ...(input.system ? { system: input.system } : {}),
+    ...(input.maxOutputTokens !== undefined ? { maxOutputTokens: input.maxOutputTokens } : {}),
+    ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+    ...(input.topP !== undefined ? { topP: input.topP } : {}),
+    ...(input.stopSequences ? { stopSequences: input.stopSequences } : {}),
   }
-  throw new ProviderOperationFailureError({
-    code: "schema",
-    retryable: false,
-    message: "a language request needs a prompt or messages",
-  })
 }
 
 function usageOf(
-  usage: { inputTokens?: number; outputTokens?: number } | undefined
-): LanguageUsage {
-  return { inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0 }
-}
-
-function settingsOf(
-  input: LanguageInput
-): Pick<GenerateTextArgs, "maxOutputTokens" | "temperature"> {
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined
+) {
   return {
-    ...(input.maxOutputTokens !== undefined ? { maxOutputTokens: input.maxOutputTokens } : {}),
-    ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+    inputTokens: usage?.inputTokens ?? 0,
+    outputTokens: usage?.outputTokens ?? 0,
+    totalTokens: usage?.totalTokens ?? (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0),
   }
 }
 
-function modelFor(provider: ResolvedProvider, input: LanguageInput) {
+function modelFor(provider: ResolvedProvider, input: { model: string }) {
   const model = requireModelId(provider, input.model)
-  return createFeatureProviderModel({ ...provider, model })
+  return { model, handle: createFeatureProviderModel({ ...provider, model }) }
 }
 
-function toolsOf(input: LanguageInput): NonNullable<GenerateTextArgs["tools"]> {
-  const entries = Object.entries(input.tools ?? {})
-  if (entries.length === 0) {
+function toolsOf(input: LanguageToolsInput): NonNullable<GenerateTextArgs["tools"]> {
+  if (input.tools.length === 0) {
     throw new ProviderOperationFailureError({
       code: "schema",
       retryable: false,
       message: "language.tools needs at least one tool definition",
     })
   }
-  return Object.fromEntries(entries.map(([name, definition]) => [name, jsonSchemaTool(definition)]))
+  return Object.fromEntries(
+    input.tools.map((tool) => [
+      tool.name,
+      jsonSchemaTool({ description: tool.description, inputSchema: tool.inputSchema }),
+    ])
+  )
 }
 
 async function generate(
   provider: ResolvedProvider,
-  input: LanguageInput,
+  input: LanguageGenerateInput,
   signal: AbortSignal | undefined,
-  tools?: GenerateTextArgs["tools"]
+  tools?: { tools: GenerateTextArgs["tools"]; toolChoice?: LanguageToolsInput["toolChoice"] }
 ): Promise<LanguageGenerateOutput> {
+  const { model, handle } = modelFor(provider, input)
   const result = await generateTextGated({
-    model: modelFor(provider, input),
-    ...promptArgsOf(input),
-    ...settingsOf(input),
-    ...(tools ? { tools } : {}),
+    model: handle,
+    ...callArgsOf(input),
+    ...(tools ? { tools: tools.tools } : {}),
+    ...(tools?.toolChoice ? { toolChoice: tools.toolChoice } : {}),
     ...(signal ? { abortSignal: signal } : {}),
   })
   return {
+    model: result.response?.modelId ?? model,
     text: result.text,
-    finishReason: result.finishReason,
-    usage: usageOf(result.usage),
+    finishReason: finishReasonOf(result.finishReason),
     toolCalls: result.toolCalls.map((call) => ({
-      toolCallId: call.toolCallId,
-      toolName: call.toolName,
-      input: call.input,
+      id: call.toolCallId,
+      name: call.toolName,
+      input: (call.input ?? {}) as Record<string, unknown>,
     })),
+    usage: usageOf(result.usage),
   }
 }
 
 export const languageGenerateHandler: ProviderOperationHandlerRegistration<
-  LanguageInput,
+  LanguageGenerateInput,
   LanguageGenerateOutput
 > = {
   operationId: "language.generate",
@@ -163,71 +195,94 @@ export const languageGenerateHandler: ProviderOperationHandlerRegistration<
 }
 
 export const languageToolsHandler: ProviderOperationHandlerRegistration<
-  LanguageInput,
-  LanguageGenerateOutput
+  LanguageToolsInput,
+  LanguageToolsOutput
 > = {
   operationId: "language.tools",
   providerMatch: { kind: "any" },
   support: "native",
   async handler({ provider, request, signal }) {
-    return generate(provider, request.input, signal, toolsOf(request.input))
+    return generate(provider, request.input, signal, {
+      tools: toolsOf(request.input),
+      toolChoice: request.input.toolChoice,
+    })
   },
 }
 
+let streamCounter = 0
+
 export const languageStreamHandler: ProviderOperationHandlerRegistration<
-  LanguageInput,
+  LanguageStreamInput,
   LanguageStreamOutput
 > = {
   operationId: "language.stream",
   providerMatch: { kind: "any" },
   support: "native",
   async handler({ provider, request, signal }) {
+    const { model, handle } = modelFor(provider, request.input)
     const result = streamTextGated({
-      model: modelFor(provider, request.input),
-      ...promptArgsOf(request.input),
-      ...settingsOf(request.input),
+      model: handle,
+      ...callArgsOf(request.input),
       ...(signal ? { abortSignal: signal } : {}),
     })
-    const finished = Promise.all([result.text, result.finishReason, result.usage]).then(
-      ([text, finishReason, usage]) => ({ text, finishReason, usage: usageOf(usage) })
-    )
-    return { textStream: result.textStream, finished }
+    streamCounter += 1
+    const output: LanguageStreamOutput = {
+      streamId: `stream-${Date.now().toString(36)}-${streamCounter}`,
+      model,
+      textStream: result.textStream,
+      completed: Promise.all([result.text, result.finishReason, result.usage]).then(
+        ([text, finishReason, usage]) => {
+          const final = {
+            model,
+            text,
+            finishReason: finishReasonOf(finishReason),
+            usage: usageOf(usage),
+          }
+          output.final = final
+          return final
+        }
+      ),
+    }
+    return output
   },
 }
 
 function structuredOutputHandler(
   providerMatch: ProviderOperationHandlerRegistration["providerMatch"],
   support: "native" | "translated"
-): ProviderOperationHandlerRegistration<LanguageInput, LanguageStructuredOutput> {
+): ProviderOperationHandlerRegistration<
+  LanguageStructuredOutputInput,
+  LanguageStructuredOutputOutput
+> {
   return {
     operationId: "language.structured-output",
     providerMatch,
     support,
     async handler({ provider, request, signal }) {
-      if (!request.input.schema) {
-        throw new ProviderOperationFailureError({
-          code: "schema",
-          retryable: false,
-          message: "language.structured-output needs a JSON schema",
-        })
-      }
+      const { model, handle } = modelFor(provider, request.input)
       const result = await generateObjectGated({
-        model: modelFor(provider, request.input),
+        model: handle,
         schema: jsonSchemaOf(request.input.schema),
-        ...promptArgsOf(request.input),
-        ...settingsOf(request.input),
+        ...(request.input.schemaName ? { schemaName: request.input.schemaName } : {}),
+        ...callArgsOf(request.input),
         ...(signal ? { abortSignal: signal } : {}),
       } as GenerateObjectArgs)
-      return { object: result.object, usage: usageOf(result.usage) }
+      return {
+        model: result.response?.modelId ?? model,
+        text: JSON.stringify(result.object),
+        finishReason: finishReasonOf(result.finishReason),
+        usage: usageOf(result.usage),
+        object: result.object,
+      }
     },
   }
 }
 
-export const LANGUAGE_HANDLERS = [
+export const LANGUAGE_HANDLERS: ProviderOperationHandlerRegistration[] = [
   languageGenerateHandler,
   languageStreamHandler,
   languageToolsHandler,
   structuredOutputHandler({ kind: "protocol", protocol: "anthropic" }, "translated"),
   structuredOutputHandler({ kind: "protocol", protocol: "bedrock" }, "translated"),
   structuredOutputHandler({ kind: "any" }, "native"),
-]
+] as ProviderOperationHandlerRegistration[]

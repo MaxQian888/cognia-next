@@ -1,6 +1,6 @@
 /**
  * `images.generate`, `videos.generate`, `speech.generate` and
- * `transcription.create`.
+ * `transcription.create`, in the contract shapes.
  *
  * Image and video generation for the vendors the media module already
  * drives go through `generateProviderImage` / `generateProviderVideo`, so the
@@ -10,9 +10,22 @@
  * and a client without the factory fails typed as `capability-unsupported`.
  *
  * A generated video is registered as a locally completed job so `videos.get`
- * and `videos.content` can answer for it through the pinned handle.
+ * and `videos.content` can answer for it through the pinned handle. Vendor
+ * knobs the contract does not name (`n`, `seed`, `resolution`, `fps`) ride
+ * `extra`.
  */
 
+import type { z } from "zod"
+import type {
+  imagesGenerateInput,
+  imagesGenerateOutput,
+  speechGenerateInput,
+  speechGenerateOutput,
+  transcriptionCreateInput,
+  transcriptionCreateOutput,
+  videosGenerateInput,
+  videosGenerateOutput,
+} from "@cognia/provider-types"
 import {
   IMAGE_GENERATION_PROVIDER_IDS,
   generateProviderImage,
@@ -24,10 +37,11 @@ import {
   type VideoProviderId,
 } from "@/lib/ai/media/video-generation-sdk"
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
-import type { ProviderResourceHandle } from "@cognia/provider-types"
 
-import { makeResourceHandle, providerJobRegistry } from "../job-handle"
+import { ProviderOperationFailureError } from "../failure"
+import { providerJobRegistry } from "../job-handle"
 import type { ProviderOperationHandlerRegistration } from "../registry"
+import { handleFor } from "../resource-handle"
 import {
   generateImageGated,
   generateSpeechGated,
@@ -38,43 +52,65 @@ import {
   type GenerateVideoArgs,
   type TranscribeArgs,
 } from "./ai-sdk-surface"
+import { bytesRefOfGenerated, dataContentOf, type BytesRef } from "./bytes"
 import { providerSdkClient, requireModelFactory, requireModelId } from "./sdk-client"
 
-export interface GeneratedMediaFile {
-  base64: string
-  mimeType: string
+export type ImagesGenerateInput = z.infer<typeof imagesGenerateInput>
+export type ImagesGenerateOutput = z.infer<typeof imagesGenerateOutput>
+export type VideosGenerateInput = z.infer<typeof videosGenerateInput>
+export type SpeechGenerateInput = z.infer<typeof speechGenerateInput>
+export type SpeechGenerateOutput = z.infer<typeof speechGenerateOutput>
+export type TranscriptionCreateInput = z.infer<typeof transcriptionCreateInput>
+export type TranscriptionCreateOutput = z.infer<typeof transcriptionCreateOutput>
+
+/** The contract output plus the bytes, which the job registry also keeps. */
+export interface VideosGenerateOutput extends z.infer<typeof videosGenerateOutput> {
+  videos: BytesRef[]
 }
 
-interface GeneratedFileLike {
-  base64: string
-  mediaType: string
+type Size = `${number}x${number}`
+type Ratio = `${number}:${number}`
+
+function sizeOf(value: string | undefined): Size | undefined {
+  if (value === undefined) return undefined
+  if (!/^\d+x\d+$/.test(value)) {
+    throw new ProviderOperationFailureError({
+      code: "schema",
+      retryable: false,
+      message: `size must look like 1024x1024, got "${value}"`,
+    })
+  }
+  return value as Size
 }
 
-function fileOf(file: GeneratedFileLike): GeneratedMediaFile {
-  return { base64: file.base64, mimeType: file.mediaType }
+function ratioOf(value: string | undefined): Ratio | undefined {
+  if (value === undefined) return undefined
+  if (!/^\d+:\d+$/.test(value)) {
+    throw new ProviderOperationFailureError({
+      code: "schema",
+      retryable: false,
+      message: `aspectRatio must look like 16:9, got "${value}"`,
+    })
+  }
+  return value as Ratio
+}
+
+function numberExtra(extra: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = extra?.[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
 // ---- images ---------------------------------------------------------------------
 
-export interface ImagesGenerateInput {
-  model?: string
-  prompt: string
-  n?: number
-  size?: `${number}x${number}`
-  aspectRatio?: `${number}:${number}`
-  seed?: number
-}
-
-export interface ImagesGenerateOutput {
-  images: GeneratedMediaFile[]
-}
-
 function imageOptions(input: ImagesGenerateInput) {
+  const size = sizeOf(input.size)
+  const aspectRatio = ratioOf(input.aspectRatio)
+  const seed = numberExtra(input.extra, "seed")
   return {
     ...(input.n !== undefined ? { n: input.n } : {}),
-    ...(input.size ? { size: input.size } : {}),
-    ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
-    ...(input.seed !== undefined ? { seed: input.seed } : {}),
+    ...(size ? { size } : {}),
+    ...(aspectRatio ? { aspectRatio } : {}),
+    ...(seed !== undefined ? { seed } : {}),
   }
 }
 
@@ -90,11 +126,11 @@ function mediaModuleImageHandler(
         snapshot: settings,
         prompt: request.input.prompt,
         providerId,
-        ...(request.input.model ? { model: request.input.model } : {}),
+        model: request.input.model,
         ...imageOptions(request.input),
         ...(signal ? { abortSignal: signal } : {}),
       })
-      return { images: result.images.map(fileOf) }
+      return { images: result.images.map(bytesRefOfGenerated) }
     },
   }
 }
@@ -120,37 +156,26 @@ export const imagesGenerateSdkHandler: ProviderOperationHandlerRegistration<
       ...imageOptions(request.input),
       ...(signal ? { abortSignal: signal } : {}),
     })
-    return { images: result.images.map(fileOf) }
+    return { images: result.images.map(bytesRefOfGenerated) }
   },
 }
 
 // ---- videos ---------------------------------------------------------------------
 
-export interface VideosGenerateInput {
-  model?: string
-  prompt: string
-  n?: number
-  aspectRatio?: `${number}:${number}`
-  resolution?: `${number}x${number}`
-  duration?: number
-  fps?: number
-  seed?: number
-}
-
-export interface VideosGenerateOutput {
-  handle: ProviderResourceHandle
-  status: "succeeded"
-  videos: GeneratedMediaFile[]
-}
-
 function videoOptions(input: VideosGenerateInput) {
+  const aspectRatio = ratioOf(input.aspectRatio)
+  const resolution =
+    typeof input.extra?.resolution === "string" ? sizeOf(input.extra.resolution) : undefined
+  const n = numberExtra(input.extra, "n")
+  const fps = numberExtra(input.extra, "fps")
+  const seed = numberExtra(input.extra, "seed")
   return {
-    ...(input.n !== undefined ? { n: input.n } : {}),
-    ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
-    ...(input.resolution ? { resolution: input.resolution } : {}),
-    ...(input.duration !== undefined ? { duration: input.duration } : {}),
-    ...(input.fps !== undefined ? { fps: input.fps } : {}),
-    ...(input.seed !== undefined ? { seed: input.seed } : {}),
+    ...(n !== undefined ? { n } : {}),
+    ...(aspectRatio ? { aspectRatio } : {}),
+    ...(resolution ? { resolution } : {}),
+    ...(input.durationSeconds !== undefined ? { duration: input.durationSeconds } : {}),
+    ...(fps !== undefined ? { fps } : {}),
+    ...(seed !== undefined ? { seed } : {}),
   }
 }
 
@@ -158,15 +183,14 @@ function videoOptions(input: VideosGenerateInput) {
 export function recordLocalVideoJob(
   provider: ResolvedProvider,
   deploymentRef: string | undefined,
-  videos: GeneratedMediaFile[],
+  videos: BytesRef[],
   now = Date.now()
 ): VideosGenerateOutput {
-  const handle = makeResourceHandle({
+  const handle = handleFor({
     kind: "video",
     id: `local-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    providerId: provider.providerId,
+    owner: provider,
     deploymentRef,
-    apiKey: provider.apiKey,
     createdAt: now,
   })
   const first = videos[0]
@@ -193,11 +217,15 @@ function mediaModuleVideoHandler(
         snapshot: settings,
         prompt: request.input.prompt,
         providerId,
-        ...(request.input.model ? { model: request.input.model } : {}),
+        model: request.input.model,
         ...videoOptions(request.input),
         ...(signal ? { abortSignal: signal } : {}),
       })
-      return recordLocalVideoJob(provider, request.deploymentRef, result.videos.map(fileOf))
+      return recordLocalVideoJob(
+        provider,
+        request.deploymentRef,
+        result.videos.map(bytesRefOfGenerated)
+      )
     },
   }
 }
@@ -223,25 +251,15 @@ export const videosGenerateSdkHandler: ProviderOperationHandlerRegistration<
       ...videoOptions(request.input),
       ...(signal ? { abortSignal: signal } : {}),
     })
-    return recordLocalVideoJob(provider, request.deploymentRef, result.videos.map(fileOf))
+    return recordLocalVideoJob(
+      provider,
+      request.deploymentRef,
+      result.videos.map(bytesRefOfGenerated)
+    )
   },
 }
 
 // ---- speech ---------------------------------------------------------------------
-
-export interface SpeechGenerateInput {
-  model?: string
-  text: string
-  voice?: string
-  outputFormat?: string
-  instructions?: string
-  speed?: number
-  language?: string
-}
-
-export interface SpeechGenerateOutput {
-  audio: GeneratedMediaFile
-}
 
 export const speechGenerateHandler: ProviderOperationHandlerRegistration<
   SpeechGenerateInput,
@@ -259,34 +277,25 @@ export const speechGenerateHandler: ProviderOperationHandlerRegistration<
       "speech"
     )
     const input = request.input
+    const instructions =
+      typeof input.extra?.instructions === "string" ? input.extra.instructions : undefined
+    const language = typeof input.extra?.language === "string" ? input.extra.language : undefined
+    const speed = numberExtra(input.extra, "speed")
     const result = await generateSpeechGated({
       model: make(requireModelId(provider, input.model)),
       text: input.text,
       ...(input.voice ? { voice: input.voice } : {}),
-      ...(input.outputFormat ? { outputFormat: input.outputFormat } : {}),
-      ...(input.instructions ? { instructions: input.instructions } : {}),
-      ...(input.speed !== undefined ? { speed: input.speed } : {}),
-      ...(input.language ? { language: input.language } : {}),
+      ...(input.format ? { outputFormat: input.format } : {}),
+      ...(instructions ? { instructions } : {}),
+      ...(speed !== undefined ? { speed } : {}),
+      ...(language ? { language } : {}),
       ...(signal ? { abortSignal: signal } : {}),
     })
-    return { audio: fileOf(result.audio) }
+    return { audio: bytesRefOfGenerated(result.audio) }
   },
 }
 
 // ---- transcription --------------------------------------------------------------
-
-export interface TranscriptionCreateInput {
-  model?: string
-  /** Base64 audio bytes. */
-  audioBase64: string
-}
-
-export interface TranscriptionCreateOutput {
-  text: string
-  language?: string
-  durationInSeconds?: number
-  segments: Array<{ text: string; startSecond: number; endSecond: number }>
-}
 
 export const transcriptionCreateHandler: ProviderOperationHandlerRegistration<
   TranscriptionCreateInput,
@@ -305,19 +314,16 @@ export const transcriptionCreateHandler: ProviderOperationHandlerRegistration<
     )
     const result = await transcribeGated({
       model: make(requireModelId(provider, request.input.model)),
-      audio: request.input.audioBase64,
+      audio: dataContentOf(request.input.audio),
       ...(signal ? { abortSignal: signal } : {}),
     })
     return {
       text: result.text,
       ...(result.language ? { language: result.language } : {}),
-      ...(result.durationInSeconds !== undefined
-        ? { durationInSeconds: result.durationInSeconds }
-        : {}),
       segments: result.segments.map((segment) => ({
+        start: segment.startSecond,
+        end: segment.endSecond,
         text: segment.text,
-        startSecond: segment.startSecond,
-        endSecond: segment.endSecond,
       })),
     }
   },

@@ -38,7 +38,14 @@ jest.mock("@/lib/usage/session-analytics", () => ({
 jest.mock("./http", () => ({ providerRequest: jest.fn() }))
 const http = jest.requireMock("./http") as { providerRequest: jest.Mock }
 
-import type { ProviderOperationId } from "@cognia/provider-types"
+import {
+  balanceReadOutput,
+  quotaReadOutput,
+  rateLimitsReadOutput,
+  usageLocalReadOutput,
+  usageProviderReadOutput,
+  type ProviderOperationId,
+} from "@cognia/provider-types"
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { getProviderOperationDescriptor } from "../manifest"
@@ -46,8 +53,10 @@ import { ProviderOperationHandlerRegistry } from "../registry"
 import {
   ACCOUNT_HANDLERS,
   balanceReadHandler,
+  dayOf,
   durationToMs,
   parseRateLimitHeaders,
+  quotaOf,
   quotaReadHandler,
   rateLimitsReadHandler,
   registryProviderKey,
@@ -86,7 +95,7 @@ describe("account handlers", () => {
     expect(registryProviderKey("openrouter")).toBe("openrouter")
   })
 
-  it("reads a balance through the registry adapter and maps a non-2xx to a typed failure", async () => {
+  it("reads a balance through the registry adapter into the contract shape", async () => {
     const adapter = {
       key: "deepseek",
       matches: () => true,
@@ -100,11 +109,12 @@ describe("account handlers", () => {
         providerKey: "deepseek",
         accountId: "a",
         kind: "credit",
+        currency: "CNY",
         raw: {},
       })),
     }
     balance.findBalanceAdapter.mockReturnValue(adapter)
-    fetchMock.mockResolvedValueOnce(new Response('{"remaining":4}', { status: 200 }))
+    fetchMock.mockResolvedValueOnce(new Response('{"remaining":4,"total":10}', { status: 200 }))
     const output = await balanceReadHandler.handler(ctx("balance.read", {}))
     expect(balance.findBalanceAdapter).toHaveBeenCalledWith({
       providerKey: "deepseek",
@@ -114,7 +124,13 @@ describe("account handlers", () => {
       "https://api.deepseek.com/user/balance",
       expect.objectContaining({ headers: { authorization: "Bearer sk-secret" } })
     )
-    expect(output).toMatchObject({ remaining: 4, providerKey: "deepseek" })
+    expect(balanceReadOutput.parse(output)).toEqual({
+      amount: 4,
+      currency: "CNY",
+      kind: "credits",
+      capturedAt: 1,
+    })
+    expect(output.snapshot.total).toBe(10)
 
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 401 }))
     await expect(balanceReadHandler.handler(ctx("balance.read", {}))).rejects.toMatchObject({
@@ -126,7 +142,7 @@ describe("account handlers", () => {
     })
   })
 
-  it("walks the quota sources in order and returns the first snapshot", async () => {
+  it("walks the quota sources in order and projects the primary meter", async () => {
     const declined = { key: "first", matches: () => true, fetch: jest.fn(async () => null) }
     const answered = {
       key: "second",
@@ -136,7 +152,18 @@ describe("account handlers", () => {
         return {
           provider: "deepseek",
           fetchedAt: 7,
-          meters: [{ id: "session", kind: "window", usedPct: Number(body) }],
+          meters: [
+            {
+              id: "credit",
+              kind: "balance",
+              status: "ok",
+              usedPct: null,
+              used: 3,
+              total: 10,
+              unit: "USD",
+            },
+            { id: "session", kind: "window", status: "ok", usedPct: Number(body), resetAt: 99 },
+          ],
         }
       }),
     }
@@ -146,10 +173,23 @@ describe("account handlers", () => {
     expect(declined.fetch).toHaveBeenCalledWith(
       expect.objectContaining({ token: "sk-secret", providerKey: "deepseek" })
     )
-    expect(output).toEqual({
-      source: "second",
-      fetchedAt: 7,
-      meters: [{ id: "session", kind: "window", usedPct: 42 }],
+    expect(quotaReadOutput.parse(output)).toEqual({
+      used: 42,
+      limit: 100,
+      unit: "percent",
+      resetsAt: 99,
+      capturedAt: 7,
+    })
+    expect(output.source).toBe("second")
+    expect(output.meters).toHaveLength(2)
+    expect(
+      quotaOf([
+        { id: "c", kind: "balance", status: "ok", usedPct: null, used: 3, total: 10, unit: "USD" },
+      ])
+    ).toEqual({
+      used: 3,
+      limit: 10,
+      unit: "USD",
     })
 
     limits.resolveLimitsSources.mockReturnValue([])
@@ -168,7 +208,7 @@ describe("account handlers", () => {
       "content-type": "application/json",
     })
     expect(parseRateLimitHeaders(openai, now)).toEqual([
-      { name: "requests", limit: 500, remaining: 499, resetAt: now + 90_000 },
+      { name: "requests", limit: 500, remaining: 499, resetsAt: now + 90_000 },
       { name: "tokens", limit: 30000 },
     ])
     const anthropic = new Headers({
@@ -181,7 +221,7 @@ describe("account handlers", () => {
         name: "input-tokens",
         limit: 80000,
         remaining: 79000,
-        resetAt: Date.parse("2026-09-02T00:00:00Z"),
+        resetsAt: Date.parse("2026-09-02T00:00:00Z"),
       },
     ])
     expect(durationToMs("6m0s")).toBe(360_000)
@@ -200,10 +240,10 @@ describe("account handlers", () => {
       provider,
       expect.objectContaining({ path: "models" })
     )
-    expect(output.limits).toEqual([{ name: "requests", remaining: 9 }])
+    expect(rateLimitsReadOutput.parse(output).limits).toEqual([{ name: "requests", remaining: 9 }])
   })
 
-  it("binds provider usage per vendor to its admin endpoint and sums the buckets", async () => {
+  it("binds provider usage per vendor to its admin endpoint and answers daily rows", async () => {
     const registry = new ProviderOperationHandlerRegistry()
     for (const handler of ACCOUNT_HANDLERS) registry.register(handler)
     expect(registry.resolve("usage.provider.read", "deepseek", "openai")).toBeUndefined()
@@ -227,10 +267,10 @@ describe("account handlers", () => {
     const output = (await openai.handler(
       ctx(
         "usage.provider.read",
-        { since: 1_700_000_000_000, until: 1_700_200_000_000 },
+        { from: 1_700_000_000_000, to: 1_700_200_000_000 },
         { ...provider, providerId: "openai", protocol: "openai" }
       )
-    )) as { buckets: unknown[]; totals: unknown }
+    )) as { rows: unknown[] }
     expect(http.providerRequest).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -238,16 +278,9 @@ describe("account handlers", () => {
         path: expect.stringContaining("start_time=1700000000"),
       })
     )
-    expect(output.buckets).toEqual([
-      {
-        start: 1_700_000_000_000,
-        end: 1_700_086_400_000,
-        inputTokens: 10,
-        outputTokens: 5,
-        requests: 2,
-      },
+    expect(usageProviderReadOutput.parse(output).rows).toEqual([
+      { day: dayOf(1_700_000_000_000), inputTokens: 10, outputTokens: 5 },
     ])
-    expect(output.totals).toEqual({ inputTokens: 10, outputTokens: 5, requests: 2 })
   })
 
   it("reads local usage from the session ledger scoped to the provider and window", async () => {
@@ -257,13 +290,20 @@ describe("account handlers", () => {
       { providerId: "other", at: 50, model: "c", inputTokens: 100, outputTokens: 200 }
     )
     const output = await usageLocalReadHandler.handler(
-      ctx("usage.local.read", { since: 0, until: 100 })
+      ctx("usage.local.read", { from: 0, to: 100 })
     )
-    expect(output.turns).toBe(1)
-    expect(output.totals).toEqual({ inputTokens: 1, outputTokens: 2, costUsd: 0.5 })
-    expect(output.byModel.map((row) => row.model)).toEqual(["a"])
+    expect(usageLocalReadOutput.parse(output).rows).toEqual([
+      {
+        model: "a",
+        providerId: "deepseek-anthropic",
+        attribution: "exact",
+        inputTokens: 1,
+        outputTokens: 2,
+        costUsd: 0.5,
+      },
+    ])
     await expect(
-      usageLocalReadHandler.handler(ctx("usage.local.read", { since: 5, until: 5 }))
+      usageLocalReadHandler.handler(ctx("usage.local.read", { from: 5, to: 5 }))
     ).rejects.toMatchObject({
       failure: { code: "schema" },
     })

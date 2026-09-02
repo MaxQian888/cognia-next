@@ -9,6 +9,7 @@ const http = jest.requireMock("./http") as { providerRequest: jest.Mock }
 const client: Record<string, unknown> = {}
 jest.mock("@/lib/ai/provider-consumption", () => ({ createFeatureProviderClient: () => client }))
 
+import { embeddingsCreateOutput, rerankCreateOutput } from "@cognia/provider-types"
 import type { ResolvedProvider } from "@/lib/ai/provider-consumption"
 
 import { getProviderOperationDescriptor } from "../manifest"
@@ -32,7 +33,7 @@ describe("retrieval handlers", () => {
     for (const key of Object.keys(client)) delete client[key]
   })
 
-  it("embeds through the client's embedding factory and copies the vectors out", async () => {
+  it("embeds through the client's embedding factory and answers in the contract shape", async () => {
     client.embeddingModel = (id: string) => ({ id })
     surface.embedManyGated.mockResolvedValueOnce({ embeddings: [[1, 2]], usage: { tokens: 4 } })
     const output = await embeddingsCreateHandler.handler({
@@ -43,13 +44,24 @@ describe("retrieval handlers", () => {
         operationId: "embeddings.create",
         scopes: ["provider:invoke"],
         surface: "sidecar",
-        input: { model: "e", values: ["x"] },
+        input: {
+          model: "e",
+          input: ["x"],
+          extra: { providerOptions: { openai: { dimensions: 256 } } },
+        },
       },
     })
     expect(surface.embedManyGated).toHaveBeenCalledWith(
-      expect.objectContaining({ model: { id: "e" }, values: ["x"] })
+      expect.objectContaining({
+        model: { id: "e" },
+        values: ["x"],
+        providerOptions: { openai: { dimensions: 256 } },
+      })
     )
-    expect(output).toEqual({ embeddings: [[1, 2]], usage: { tokens: 4 } })
+    expect(embeddingsCreateOutput.parse(output)).toEqual({
+      embeddings: [[1, 2]],
+      usage: { totalTokens: 4 },
+    })
   })
 
   it("reranks through the SDK model when the client has one, else over the rerank wire", async () => {
@@ -76,10 +88,12 @@ describe("retrieval handlers", () => {
 
     delete client.rerankingModel
     http.providerRequest.mockResolvedValueOnce({
-      json: { results: [{ index: 0, relevance_score: 0.4 }] },
+      json: { results: [{ index: 0, relevance_score: 0.4 }], usage: { total_tokens: 7 } },
     })
-    await expect(rerankCreateHandler.handler(base)).resolves.toEqual({
+    const wire = await rerankCreateHandler.handler(base)
+    expect(rerankCreateOutput.parse(wire)).toEqual({
       ranking: [{ index: 0, score: 0.4 }],
+      usage: { totalTokens: 7 },
     })
     expect(http.providerRequest).toHaveBeenCalledWith(
       provider,

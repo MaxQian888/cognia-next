@@ -25,6 +25,7 @@ import type {
   ProviderOperationRequest,
   ProviderOperationResult,
   ProviderOperationSurface,
+  ProviderResourceHandle,
 } from "@cognia/provider-types"
 
 import {
@@ -95,6 +96,16 @@ function availabilityForNextAction(
     default:
       return "unavailable"
   }
+}
+
+function handleInInput(input: unknown): ProviderResourceHandle | undefined {
+  if (!input || typeof input !== "object") return undefined
+  const candidate = (input as { handle?: unknown }).handle
+  if (!candidate || typeof candidate !== "object") return undefined
+  const handle = candidate as Partial<ProviderResourceHandle>
+  return typeof handle.providerId === "string" && typeof handle.credentialAffinity === "string"
+    ? (handle as ProviderResourceHandle)
+    : undefined
 }
 
 export function createProviderOperationExecutor(
@@ -168,14 +179,17 @@ export function createProviderOperationExecutor(
       }
 
       // 4. provider
-      const pinned = descriptor.statefulHandle === "provider-pinned" && request.handle
-      const providerId = pinned ? request.handle!.providerId : request.providerId
-      if (pinned && request.providerId && request.providerId !== request.handle!.providerId) {
+      // The wire puts the handle inside `input` (`handleInput` in the named
+      // schemas), in-process callers may pass it on the request. Either pins.
+      const handle = request.handle ?? handleInInput(request.input)
+      const pinned = descriptor.statefulHandle === "provider-pinned" && handle ? handle : undefined
+      const providerId = pinned ? pinned.providerId : request.providerId
+      if (pinned && request.providerId && request.providerId !== pinned.providerId) {
         return fail(
           {
             code: "permission",
             retryable: false,
-            message: `resource handle belongs to provider "${request.handle!.providerId}", not "${request.providerId}"`,
+            message: `resource handle belongs to provider "${pinned.providerId}", not "${request.providerId}"`,
           },
           "unavailable"
         )
@@ -205,12 +219,12 @@ export function createProviderOperationExecutor(
       const provider = resolution
       if (pinned) {
         const affinity = affinityOf(provider)
-        if (affinity !== request.handle!.credentialAffinity) {
+        if (affinity !== pinned.credentialAffinity) {
           return fail(
             {
               code: "authentication",
               retryable: false,
-              message: `resource handle was created under a different credential (${request.handle!.credentialAffinity}); the current one is ${affinity}`,
+              message: `resource handle was created under a different credential (${pinned.credentialAffinity}); the current one is ${affinity}`,
             },
             "needs-auth",
             { providerId: provider.providerId }
