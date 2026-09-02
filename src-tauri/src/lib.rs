@@ -85,6 +85,7 @@ pub mod headless;
 mod hooks;
 // Background-job supervisor wiring (process-global, so the headless binary
 // shares it). Thin: the substrate itself lives in `crates/cognia-jobs`.
+mod account_quick_unlock;
 pub mod jobs;
 mod keyring_secrets;
 // ADR-0067 Tier C — extracted alongside `crash`, which dissolves the
@@ -668,6 +669,9 @@ pub fn run() {
             account_auth::account_password_create_verifier,
             account_auth::account_password_verify,
             account_auth::account_password_rotate,
+            account_quick_unlock::account_quick_unlock_create_verifier,
+            account_quick_unlock::account_quick_unlock_verify,
+            account_quick_unlock::account_quick_unlock_clear,
             account_auth::account_unbind_local,
             account_auth::account_bind_person,
             account_auth::account_unbind_person,

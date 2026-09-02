@@ -147,6 +147,63 @@ impl AccountSecuritySession {
         self.persist_throttle(&throttle)
     }
 
+    /// Assert that `account_id` is the account currently unlocked.
+    ///
+    /// Stronger than [`Self::assert_unlock_target`], which only refuses a
+    /// DIFFERENT account. Enrolling a quick-unlock method mints a new way into
+    /// an account, so it requires that account to be open right now, not
+    /// merely that no other one is.
+    pub fn assert_unlocked_account(&self, account_id: &str) -> Result<(), String> {
+        self.require_account(account_id).map(|_| ())
+    }
+
+    /// Throttle gate for a quick-unlock attempt.
+    ///
+    /// Shares the password throttle's storage and backoff, keyed separately so
+    /// PIN guesses cannot exhaust the password's allowance or vice versa. The
+    /// HARD attempt cap that makes a 20-bit secret defensible lives on the
+    /// enrollment record in the renderer. This is the floor underneath it, so
+    /// a caller that ignores the cap is still slowed rather than unbounded.
+    pub fn before_quick_attempt(&self, throttle_key: &str) -> Result<(), String> {
+        self.before_password_attempt(throttle_key, unix_time_secs())
+    }
+
+    /// Record a failed quick-unlock attempt.
+    pub fn record_quick_failure(&self, throttle_key: &str) -> Result<(), String> {
+        self.record_password_failure(throttle_key, unix_time_secs())
+    }
+
+    /// Record a successful quick-unlock attempt.
+    pub fn record_quick_success(&self, throttle_key: &str) -> Result<(), String> {
+        self.record_password_success(throttle_key)
+    }
+
+    /// Grant a quick unlock exactly the authority a password unlock grants.
+    ///
+    /// Takes the account's PASSWORD verifier, and binds the host with that
+    /// digest rather than with anything derived from the quick credential.
+    /// The companion host records which account plus verifier it serves, so a
+    /// quick unlock that bound a different digest would read as a different
+    /// credential and be refused as a binding mismatch. The password verifier
+    /// is not secret material and is not checked here: it names the account,
+    /// and the quick verifier is what was actually proven.
+    pub fn activate_quick_unlock(
+        &self,
+        account_id: &str,
+        password_verifier: &AccountPasswordVerifier,
+        plugin_state: &cognia_plugin_runtime::PluginRuntimeState,
+    ) -> Result<(), String> {
+        self.assert_unlock_target(account_id)?;
+        validate_verifier_metadata(password_verifier)?;
+        bind_host_to_account(account_id, password_verifier)?;
+        if let Err(error) = plugin_state.activate_account(account_id) {
+            crate::companion_api::host_identity::unbind_local_account();
+            return Err(error.to_string());
+        }
+        self.activate(account_id, verifier_digest_of(password_verifier));
+        Ok(())
+    }
+
     fn persist_throttle(
         &self,
         throttle: &HashMap<String, PasswordThrottleRecord>,
@@ -563,6 +620,15 @@ fn create_password_verifier_with_salt(
         hash: STANDARD_NO_PAD.encode(hash),
         params,
     })
+}
+
+/// The Argon2id cost every account credential is derived at.
+///
+/// Public so `account_quick_unlock` derives at the same cost. One definition
+/// means a future hardening bump cannot move the password and leave the PIN
+/// behind.
+pub fn default_kdf_params() -> AccountPasswordKdfParams {
+    default_params()
 }
 
 fn default_params() -> AccountPasswordKdfParams {
