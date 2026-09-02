@@ -21,7 +21,12 @@
       "title": "Title text"
     },
     "title": "Display",
-    "tooltipBase": "Tooltip text"
+    "tooltipBase": "Tooltip text",
+    "usageMetric": "Taskbar number",
+    "usageMetricHint": "What the menu bar, tooltip and quick panel lead with.",
+    "usagePeriod": "Window",
+    "usageScope": "Counted spend",
+    "usageScopeHint": "All coding tools reads other agents' local session files. Their spend is shown separately and never affects your Cognia budget."
   },
   "emptyPicker": "No commands available — install plugins or start a chat.",
   "hide": "Hide",

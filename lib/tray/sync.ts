@@ -189,7 +189,7 @@ export function useSyncTrayToRust(): void {
     if (!isTauri() || !hydrated) return
     const resilientT = makeResilientTrayTranslator(t)
     const usageText = display.showUsageInTooltip
-      ? usageTooltipFragment(snapshot.usage, Date.now())
+      ? usageTooltipFragment(snapshot.usage, Date.now(), display.usageMetric)
       : null
     const text = deriveTrayTooltip(snapshot, resilientT, tooltipKey, usageText)
     if (lastPushedTooltip.current === text) return
@@ -197,7 +197,7 @@ export function useSyncTrayToRust(): void {
     void invoke("tray_set_tooltip", { text }).catch((err) => {
       loggers.tray.warn("tray_set_tooltip failed", { error: String(err) })
     })
-  }, [snapshot, tooltipKey, hydrated, t, display.showUsageInTooltip])
+  }, [snapshot, tooltipKey, hydrated, t, display.showUsageInTooltip, display.usageMetric])
 
   // Taskbar-adjacent usage readout, two OS surfaces:
   //   - `title`: text next to the icon via `tray_set_title` (macOS menu bar,
@@ -205,7 +205,13 @@ export function useSyncTrayToRust(): void {
   //   - `iconBadge`: the readout rasterized onto the icon itself (works
   //     everywhere) — re-registers all four state icons so the badge
   //     survives idle/busy/error flips. Also owns the custom icon color.
-  const short = usageShortText(snapshot.usage)
+  //
+  // Which NUMBER either surface shows is `display.usageMetric` (ADR-0165):
+  // quota reads the pinned account's meter, spend/tokens/budget read the
+  // glance projection. Windows has no tray title, so a Windows install that
+  // picks `title` still gets nothing there — the icon badge is the fallback
+  // the settings card steers it to.
+  const short = usageShortText(snapshot.usage, display.usageMetric)
   const titleText = display.taskbarUsageMode === "title" && short ? short.text : null
   useEffect(() => {
     if (!isTauri() || !hydrated) return

@@ -61,8 +61,31 @@
   "usage": {
     "auto": "Auto (highest usage)",
     "empty": "No usage data yet",
+    "freshness": {
+      "fresh": "Up to date",
+      "stale": "Not scanned yet",
+      "partial": "Some tools could not be read"
+    },
+    "loading": "Reading usage…",
+    "metric": {
+      "spend": "Show spend",
+      "tokens": "Show tokens",
+      "quota": "Show plan quota",
+      "budget": "Show budget"
+    },
     "openSettings": "Subscription settings…",
+    "period": {
+      "today": "Today",
+      "week": "Last 7 days",
+      "month30": "Last 30 days",
+      "calendarMonth": "This month",
+      "quarter": "Last 90 days"
+    },
     "refresh": "Refresh usage",
+    "scope": {
+      "cognia": "This app only",
+      "allTools": "All coding tools"
+    },
     "title": "Subscription usage"
   }
 }

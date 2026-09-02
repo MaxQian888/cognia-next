@@ -6,6 +6,12 @@
 // and its node-env tests import this without dragging the subscription
 // stack along. The reactive half lives in `lib/tray/usage.ts`.
 
+import {
+  formatTaskbarUsage,
+  glanceSeverity,
+  type GlanceSeverity,
+} from "@/lib/usage/usage-glance-format"
+import type { UsageGlanceMetric } from "@/lib/usage/usage-glance"
 import type { LimitsMeter, ProviderLimits } from "@/types/subscription"
 import type { TrayUsageAccount, TrayUsageMeterSummary, TrayUsageSnapshot } from "./types"
 
@@ -150,27 +156,55 @@ export function formatAccountLine(account: TrayUsageAccount, now: number): strin
 }
 
 /**
+ * Severity of a glance projection, mapped onto the meter vocabulary the tray's
+ * badge colors already speak. Keeping one vocabulary is what stops the icon
+ * from meaning "95% of plan" in one configuration and "95% of budget" in
+ * another while painting the same amber.
+ */
+function glanceStatus(severity: GlanceSeverity): TrayUsageMeterSummary["status"] {
+  return severity
+}
+
+/**
  * The compact usage fragment appended to the OS tooltip
- * (`TrayDisplayPrefs.showUsageInTooltip`): the pinned/worst account's line,
- * or `null` when there is nothing to show yet.
+ * (`TrayDisplayPrefs.showUsageInTooltip`).
+ *
+ * For a spend or token metric this is the projection's own readout, because
+ * a per-account quota line cannot express "what I spent". For quota it stays
+ * the pinned/worst account line it has always been.
  */
 export function usageTooltipFragment(
   usage: TrayUsageSnapshot | null | undefined,
-  now: number
+  now: number,
+  metric: UsageGlanceMetric = "quota"
 ): string | null {
   if (!usage) return null
+  if (metric === "spend" || metric === "tokens" || metric === "budget") {
+    if (!usage.glance) return null
+    return formatTaskbarUsage(usage.glance, metric)
+  }
   const account = selectDisplayAccount(usage.accounts, usage.selectedKey)
   return account ? formatAccountLine(account, now) : null
 }
 
 /**
- * The shortest readout for the taskbar surfaces (icon badge / macOS title):
- * "42%" or "¥88.5" for the pinned/worst account, or `null` when unknown.
+ * The shortest readout for the taskbar surfaces (icon badge / macOS title).
+ *
+ * `quota` reads the pinned account's meter, exactly as before. Every other
+ * metric reads the glance projection, which already owns the rule that a
+ * partially-priced window renders as a lower bound and an entirely unpriced
+ * one renders as nothing at all rather than as a confident zero.
  */
 export function usageShortText(
-  usage: TrayUsageSnapshot | null | undefined
+  usage: TrayUsageSnapshot | null | undefined,
+  metric: UsageGlanceMetric = "quota"
 ): { text: string; status: TrayUsageMeterSummary["status"] } | null {
   if (!usage) return null
+  if (metric === "spend" || metric === "tokens" || metric === "budget") {
+    if (!usage.glance) return null
+    const text = formatTaskbarUsage(usage.glance, metric)
+    return text ? { text, status: glanceStatus(glanceSeverity(usage.glance)) } : null
+  }
   const account = selectDisplayAccount(usage.accounts, usage.selectedKey)
   if (!account?.worst) return null
   const text = formatMeterShort(account.worst)

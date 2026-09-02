@@ -70,7 +70,19 @@ describe("DEFAULT_TRAY_ITEMS", () => {
       usageAccountKey: null,
       usageRefreshMinutes: 15,
       iconColor: "#000000",
+      usageMetric: "quota",
+      usagePeriod: "today",
+      usageScope: "cognia",
     })
+  })
+
+  it("defaults the spend surfaces to the behaviour that existed before them", () => {
+    // Quota is what a configured taskbar readout already showed, and the
+    // Cognia scope is the one that performs no filesystem scanning. An upgrade
+    // must not change a single number the user was already looking at, nor
+    // start reading other tools' transcripts without being asked.
+    expect(DEFAULT_TRAY_DISPLAY.usageMetric).toBe("quota")
+    expect(DEFAULT_TRAY_DISPLAY.usageScope).toBe("cognia")
   })
 
   it("includes the desktop-pet toggle and click-through recovery entries", () => {

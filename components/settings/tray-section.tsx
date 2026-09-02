@@ -37,6 +37,15 @@ import { useTrayStore } from "@/lib/tray/store"
 import { useTrayUsage } from "@/lib/tray/usage"
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { listTrayItems } from "@/lib/tray/registry"
+import {
+  USAGE_GLANCE_METRICS,
+  USAGE_GLANCE_PERIODS,
+  USAGE_GLANCE_SCOPES,
+  type UsageGlanceMetric,
+  type UsageGlancePeriod,
+  type UsageGlanceScope,
+} from "@/lib/usage/usage-glance"
+import { PERIOD_LABEL_KEYS } from "@/lib/usage/usage-glance-format"
 import type { TrayMenuItem, TrayActionPayload, TrayTaskbarUsageMode } from "@/lib/tray/types"
 
 type Direction = -1 | 1
@@ -83,6 +92,18 @@ const REFRESH_MINUTE_CHOICES = [5, 15, 30, 60, 0] as const
 const TASKBAR_MODES: TrayTaskbarUsageMode[] = ["off", "iconBadge", "title"]
 
 /**
+ * i18n leaf per metric under `tray.usage.metric.*`. Settings offers all four,
+ * including `budget`, because this is the surface where the ceiling that makes
+ * it meaningful is configured. The tray menu deliberately offers only three.
+ */
+const METRIC_LABEL_LEAVES: Record<UsageGlanceMetric, string> = {
+  spend: "spend",
+  tokens: "tokens",
+  quota: "quota",
+  budget: "budget",
+}
+
+/**
  * Display customization: subscription-quota surfaces (menu section, tooltip
  * suffix, taskbar readout + pinned subscription + refresh cadence), tooltip
  * base text, and the tray icon color. Persisted via
@@ -91,16 +112,24 @@ const TASKBAR_MODES: TrayTaskbarUsageMode[] = ["off", "iconBadge", "title"]
  */
 function TrayDisplayCard() {
   const t = useTranslations("settings.tray.display")
+  // The metric / period / scope option labels are the SAME strings the tray
+  // menu renders, read from the same leaves, so the two surfaces cannot drift
+  // into describing one setting two ways.
+  const tTray = useTranslations("tray.usage")
   const display = useTrayStore((s) => s.display)
   const setDisplay = useTrayStore((s) => s.setDisplay)
   const tooltip = useTrayStore((s) => s.tooltip)
   const setTooltip = useTrayStore((s) => s.setTooltip)
   // Same feed the tray itself renders — seeds the subscription picker (and
   // fetches once on open, so the picker isn't empty on first visit).
-  const usage = useTrayUsage(true, 0)
+  const usage = useTrayUsage(true, 0, display)
   const accounts = usage?.accounts ?? []
 
   const anyCompactSurface = display.showUsageInTooltip || display.taskbarUsageMode !== "off"
+  // The window and the scope only mean something for a spend/token metric: a
+  // plan's quota window belongs to the provider, and external spend can never
+  // enter a quota reading at all.
+  const spendMetric = display.usageMetric !== "quota"
 
   return (
     <div className="space-y-4 rounded-md border bg-card p-4">
@@ -143,6 +172,77 @@ function TrayDisplayCard() {
             {TASKBAR_MODES.map((mode) => (
               <SelectItem key={mode} value={mode}>
                 {t(`taskbarModes.${mode}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label>{t("usageMetric")}</Label>
+          <p className="text-xs text-muted-foreground">{t("usageMetricHint")}</p>
+        </div>
+        <Select
+          value={display.usageMetric}
+          onValueChange={(v) => setDisplay({ usageMetric: v as UsageGlanceMetric })}
+        >
+          <SelectTrigger className="w-44" aria-label={t("usageMetric")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {USAGE_GLANCE_METRICS.map((metric) => (
+              <SelectItem key={metric} value={metric}>
+                {tTray(`metric.${METRIC_LABEL_LEAVES[metric]}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/*
+        Period and scope are rendered even under the quota metric, disabled
+        rather than hidden. Hiding them would collapse "this control does not
+        apply here" into "this control does not exist", and the user would have
+        no way to learn that switching to spend is what unlocks them.
+      */}
+      <div className="flex items-center justify-between gap-4">
+        <Label>{t("usagePeriod")}</Label>
+        <Select
+          value={display.usagePeriod}
+          disabled={!spendMetric}
+          onValueChange={(v) => setDisplay({ usagePeriod: v as UsageGlancePeriod })}
+        >
+          <SelectTrigger className="w-44" aria-label={t("usagePeriod")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {USAGE_GLANCE_PERIODS.map((period) => (
+              <SelectItem key={period} value={period}>
+                {tTray(`period.${PERIOD_LABEL_KEYS[period]}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label>{t("usageScope")}</Label>
+          <p className="text-xs text-muted-foreground">{t("usageScopeHint")}</p>
+        </div>
+        <Select
+          value={display.usageScope}
+          disabled={!spendMetric}
+          onValueChange={(v) => setDisplay({ usageScope: v as UsageGlanceScope })}
+        >
+          <SelectTrigger className="w-44" aria-label={t("usageScope")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {USAGE_GLANCE_SCOPES.map((scope) => (
+              <SelectItem key={scope} value={scope}>
+                {tTray(scope === "cognia" ? "scope.cognia" : "scope.allTools")}
               </SelectItem>
             ))}
           </SelectContent>

@@ -17,7 +17,21 @@ import { loggers } from "@cognia/logging"
 
 import { useTrayStore } from "./store"
 import { requestTrayUsageRefresh } from "./usage-refresh-bus"
-import { USAGE_REFRESH_COMMAND, USAGE_SELECT_COMMAND_PREFIX } from "./usage-section"
+import {
+  USAGE_METRIC_COMMAND_PREFIX,
+  USAGE_PERIOD_COMMAND_PREFIX,
+  USAGE_REFRESH_COMMAND,
+  USAGE_SCOPE_COMMAND_PREFIX,
+  USAGE_SELECT_COMMAND_PREFIX,
+} from "./usage-section"
+import {
+  USAGE_GLANCE_METRICS,
+  USAGE_GLANCE_PERIODS,
+  USAGE_GLANCE_SCOPES,
+  type UsageGlanceMetric,
+  type UsageGlancePeriod,
+  type UsageGlanceScope,
+} from "@/lib/usage/usage-glance"
 
 const hasCommand = (id: string) => getCommand(id) !== undefined
 
@@ -38,6 +52,31 @@ export function handleTrayUsageCommand(commandId: string): boolean {
     const key = commandId.slice(USAGE_SELECT_COMMAND_PREFIX.length)
     // Empty key = the "Auto" row → follow the worst-utilized account.
     useTrayStore.getState().setDisplay({ usageAccountKey: key.length > 0 ? key : null })
+    return true
+  }
+  // The three glance dimensions (ADR-0165). Each value is validated against
+  // its declared vocabulary before it reaches the store: these ids are built
+  // from persisted prefs and a stale menu could otherwise write a value no
+  // reader knows how to render.
+  if (commandId.startsWith(USAGE_METRIC_COMMAND_PREFIX)) {
+    const value = commandId.slice(USAGE_METRIC_COMMAND_PREFIX.length) as UsageGlanceMetric
+    if (USAGE_GLANCE_METRICS.includes(value)) {
+      useTrayStore.getState().setDisplay({ usageMetric: value })
+    }
+    return true
+  }
+  if (commandId.startsWith(USAGE_PERIOD_COMMAND_PREFIX)) {
+    const value = commandId.slice(USAGE_PERIOD_COMMAND_PREFIX.length) as UsageGlancePeriod
+    if (USAGE_GLANCE_PERIODS.includes(value)) {
+      useTrayStore.getState().setDisplay({ usagePeriod: value })
+    }
+    return true
+  }
+  if (commandId.startsWith(USAGE_SCOPE_COMMAND_PREFIX)) {
+    const value = commandId.slice(USAGE_SCOPE_COMMAND_PREFIX.length) as UsageGlanceScope
+    if (USAGE_GLANCE_SCOPES.includes(value)) {
+      useTrayStore.getState().setDisplay({ usageScope: value })
+    }
     return true
   }
   return false

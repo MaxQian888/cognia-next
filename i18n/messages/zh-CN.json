@@ -13688,10 +13688,8 @@
       "teams": "小队"
     },
     "board": {
-      "addIssue": "在「{status}」中新建议题",
       "agentsWorking": "{count, plural, =0 {0 个 Agent 在工作} other {# 个 Agent 在工作}}",
       "awaitingReview": "{count, plural, =0 {} other {# 个待评审}}",
-      "collapseColumn": "折叠{status}",
       "columnActions": "列操作",
       "denied": {
         "federated-read-only": "该议题归属于 {source}，无法在这里移动。",
@@ -13707,8 +13705,10 @@
         "pickedUp": "已从{column}拾起 {identifier}。"
       },
       "empty": "暂无议题",
-      "expandColumn": "展开{status}",
-      "runningCard": "有 Agent 正在处理这个议题"
+      "runningCard": "有 Agent 正在处理这个议题",
+      "addIssue": "在「{status}」中新建议题",
+      "collapseColumn": "折叠{status}",
+      "expandColumn": "展开{status}"
     },
     "bulk": {
       "addLabel": "添加标签",
@@ -36758,7 +36758,12 @@
           "title": "标题文字"
         },
         "title": "显示",
-        "tooltipBase": "悬浮提示文本"
+        "tooltipBase": "悬浮提示文本",
+        "usageMetric": "任务栏数值",
+        "usageMetricHint": "菜单栏、悬浮提示与快捷面板优先显示的内容。",
+        "usagePeriod": "统计区间",
+        "usageScope": "统计范围",
+        "usageScopeHint": "「全部编码工具」会读取其他 Agent 的本地会话文件。它们的花费单独展示，不会计入 Cognia 预算。"
       },
       "emptyPicker": "暂无可用命令——请安装插件或开启对话。",
       "hide": "隐藏",
@@ -41322,8 +41327,31 @@
     "usage": {
       "auto": "自动（用量最高）",
       "empty": "暂无额度数据",
+      "freshness": {
+        "fresh": "已是最新",
+        "partial": "部分工具无法读取",
+        "stale": "尚未扫描"
+      },
+      "loading": "正在读取用量…",
+      "metric": {
+        "budget": "显示预算",
+        "quota": "显示套餐额度",
+        "spend": "显示花费",
+        "tokens": "显示 Token"
+      },
       "openSettings": "订阅设置…",
+      "period": {
+        "calendarMonth": "本月",
+        "month30": "近 30 天",
+        "quarter": "近 90 天",
+        "today": "今天",
+        "week": "近 7 天"
+      },
       "refresh": "刷新额度",
+      "scope": {
+        "allTools": "全部编码工具",
+        "cognia": "仅本应用"
+      },
       "title": "订阅额度"
     }
   },
@@ -41375,7 +41403,18 @@
       "activeSession": "当前会话",
       "newSession": "新建会话"
     },
-    "title": "Cognia"
+    "title": "Cognia",
+    "usage": {
+      "loading": "正在读取用量…",
+      "meter": "预算已用",
+      "noPricing": "这些模型暂无价格数据",
+      "openFull": "查看完整用量",
+      "partialPricing": "{count, plural, other {# 轮无价格数据}}",
+      "refresh": "刷新",
+      "sparkline": "每日趋势",
+      "title": "用量",
+      "turns": "{count, plural, =0 {无对话轮次} other {# 轮}}"
+    }
   },
   "tts": {
     "nowPlaying": {

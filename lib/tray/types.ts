@@ -3,6 +3,12 @@
 // menu schema.
 
 import type { LimitsMeterKind, LimitsMeterStatus } from "@/types/subscription"
+import type {
+  UsageGlanceMetric,
+  UsageGlancePeriod,
+  UsageGlanceScope,
+  UsageGlanceSnapshotV1,
+} from "@/lib/usage/usage-glance"
 
 /**
  * Native window/app actions the tray can fire directly (Rust-handled).
@@ -188,10 +194,18 @@ export interface TrayUsageAccount {
 /** Aggregated usage snapshot flowing through `TrayStateSnapshot.usage`. */
 export interface TrayUsageSnapshot {
   accounts: TrayUsageAccount[]
-  /** Newest `fetchedAt` across accounts; `null` before the first refresh lands. */
+  /** Newest `fetchedAt` across accounts, or `null` before the first refresh. */
   fetchedAt: number | null
   /** The account pinned to compact surfaces, or `null` for "worst across all". */
   selectedKey: string | null
+  /**
+   * Spend/token projection (ADR-0165). Separate from `accounts` because the
+   * two answer different questions: `accounts` is "how much of my plan is
+   * left", this is "what have I spent". A tray configured for quota renders
+   * with this absent, which is what every install looks like before the user
+   * opts into a spend readout.
+   */
+  glance?: UsageGlanceSnapshotV1 | null
 }
 
 /** Where the compact usage readout surfaces outside the menu. */
@@ -202,6 +216,20 @@ export type TrayTaskbarUsageMode = "off" | "iconBadge" | "title"
  * `TRAY_DISPLAY_PREF` (`lib/tray/defaults.ts`) alongside the layout.
  */
 export interface TrayDisplayPrefs {
+  /**
+   * What the compact surfaces lead with. `quota` is the historical behaviour
+   * and stays the default, so an install that already enabled a taskbar
+   * readout keeps seeing the same number after upgrading.
+   */
+  usageMetric: UsageGlanceMetric
+  /** Window the spend/token metrics are summed over. Ignored by `quota`. */
+  usagePeriod: UsageGlancePeriod
+  /**
+   * Whose spend is counted. `cognia` is the default and the only scope that
+   * can move a budget. `all-tools` folds in the external index and is what
+   * turns on filesystem scanning, so it is never implied.
+   */
+  usageScope: UsageGlanceScope
   /** Expand the `tray.usage` placeholder into the subscription-quota section. */
   showUsageInMenu: boolean
   /** Append the compact usage readout to the OS tooltip. */

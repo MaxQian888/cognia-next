@@ -187,7 +187,7 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     isTauri() &&
     isMainAppWindow() &&
     (display.showUsageInMenu || display.showUsageInTooltip || display.taskbarUsageMode !== "off")
-  const usageData = useTrayUsage(usageEnabled, display.usageRefreshMinutes)
+  const usageData = useTrayUsage(usageEnabled, display.usageRefreshMinutes, display)
   const usage = useMemo(
     () => (usageData ? { ...usageData, selectedKey: display.usageAccountKey } : null),
     [usageData, display.usageAccountKey]

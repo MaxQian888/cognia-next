@@ -129,3 +129,33 @@ describe("dispatchShortcut", () => {
     await expect(dispatchShortcut("never.registered")).resolves.toBeUndefined()
   })
 })
+
+describe("handleTrayUsageCommand — glance dimensions (ADR-0165)", () => {
+  it("pins the metric", () => {
+    expect(handleTrayUsageCommand("tray.usage.metric:spend")).toBe(true)
+    expect(useTrayStore.getState().display.usageMetric).toBe("spend")
+  })
+
+  it("pins the period", () => {
+    expect(handleTrayUsageCommand("tray.usage.period:30d")).toBe(true)
+    expect(useTrayStore.getState().display.usagePeriod).toBe("30d")
+  })
+
+  it("pins the scope", () => {
+    expect(handleTrayUsageCommand("tray.usage.scope:all-tools")).toBe(true)
+    expect(useTrayStore.getState().display.usageScope).toBe("all-tools")
+  })
+
+  it("swallows a value outside the declared vocabulary without writing it", () => {
+    // These ids are built from persisted prefs, so a stale menu could send a
+    // value no reader knows how to render. Claiming the id and ignoring the
+    // value keeps the store on something every surface can paint.
+    const before = useTrayStore.getState().display.usageMetric
+    expect(handleTrayUsageCommand("tray.usage.metric:from-the-future")).toBe(true)
+    expect(useTrayStore.getState().display.usageMetric).toBe(before)
+  })
+
+  it("leaves unrelated commands to the registry", () => {
+    expect(handleTrayUsageCommand("some.other.command")).toBe(false)
+  })
+})

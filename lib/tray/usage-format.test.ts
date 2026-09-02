@@ -10,6 +10,7 @@ import {
   worstMeterOf,
 } from "./usage-format"
 
+import { buildUsageGlance, type UsageGlanceSnapshotV1 } from "@/lib/usage/usage-glance"
 import type { ProviderLimits } from "@/types/subscription"
 import type { TrayUsageAccount, TrayUsageMeterSummary } from "./types"
 
@@ -166,5 +167,77 @@ describe("usageTooltipFragment / usageShortText", () => {
     expect(usageTooltipFragment({ accounts: [], fetchedAt: null, selectedKey: null }, 0)).toBeNull()
     expect(usageShortText(null)).toBeNull()
     expect(usageShortText({ accounts: [], fetchedAt: null, selectedKey: null })).toBeNull()
+  })
+})
+
+/* ── ADR-0165: the metric-aware compact surfaces ───────────────────────── */
+
+describe("usageShortText / usageTooltipFragment across metrics", () => {
+  const withGlance = (over: Partial<UsageGlanceSnapshotV1> = {}): TrayUsageSnapshot => ({
+    accounts: [],
+    fetchedAt: 1,
+    selectedKey: null,
+    glance: {
+      ...buildUsageGlance({
+        rows: [],
+        query: { period: "7d", scope: "cognia", metric: "spend" },
+        now: 0,
+      }),
+      ...over,
+    },
+  })
+
+  it("reads the projection for a spend metric", () => {
+    const out = usageShortText(withGlance({ knownCostUsd: 4.2, turns: 1 }), "spend")
+    expect(out?.text).toBe("$4.2 / wk")
+  })
+
+  it("reads the projection for a token metric", () => {
+    const out = usageShortText(withGlance({ billableTokens: 2000, turns: 1 }), "tokens")
+    expect(out?.text).toBe("2k / wk")
+  })
+
+  it("shows nothing rather than a fake zero when nothing could be priced", () => {
+    expect(usageShortText(withGlance({ turns: 3, unpricedTurns: 3 }), "spend")).toBeNull()
+  })
+
+  it("shows nothing before the projection exists", () => {
+    expect(usageShortText({ accounts: [], fetchedAt: null, selectedKey: null }, "spend")).toBeNull()
+  })
+
+  it("colours the badge from the budget when one is configured", () => {
+    const out = usageShortText(
+      withGlance({
+        knownCostUsd: 4,
+        turns: 1,
+        budget: { ratio: 0.96, target: "*", period: "day", blocked: false },
+      }),
+      "spend"
+    )
+    expect(out?.status).toBe("crit")
+  })
+
+  it("stays on the account line for the quota metric", () => {
+    const snapshot: TrayUsageSnapshot = {
+      accounts: [
+        {
+          key: "anthropic:a",
+          provider: "anthropic",
+          accountLabel: "Pro",
+          worst: { id: "s", kind: "window", usedPct: 42, status: "warn", resetAt: null },
+          meters: [],
+        },
+      ],
+      fetchedAt: 1,
+      selectedKey: null,
+    }
+    expect(usageShortText(snapshot, "quota")).toEqual({ text: "42%", status: "warn" })
+    expect(usageTooltipFragment(snapshot, 0, "quota")).toBe("Pro · 42%")
+  })
+
+  it("puts the spend readout in the tooltip too", () => {
+    expect(usageTooltipFragment(withGlance({ knownCostUsd: 4.2, turns: 1 }), 0, "spend")).toBe(
+      "$4.2 / wk"
+    )
   })
 })

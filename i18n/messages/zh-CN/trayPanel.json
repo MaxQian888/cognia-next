@@ -46,5 +46,16 @@
     "activeSession": "当前会话",
     "newSession": "新建会话"
   },
-  "title": "Cognia"
+  "title": "Cognia",
+  "usage": {
+    "loading": "正在读取用量…",
+    "meter": "预算已用",
+    "noPricing": "这些模型暂无价格数据",
+    "openFull": "查看完整用量",
+    "partialPricing": "{count, plural, other {# 轮无价格数据}}",
+    "refresh": "刷新",
+    "sparkline": "每日趋势",
+    "title": "用量",
+    "turns": "{count, plural, =0 {无对话轮次} other {# 轮}}"
+  }
 }

@@ -236,4 +236,10 @@ export const DEFAULT_TRAY_DISPLAY: TrayDisplayPrefs = {
   usageAccountKey: null,
   usageRefreshMinutes: 15,
   iconColor: "#000000",
+  // ADR-0165 defaults preserve the pre-existing behaviour exactly: quota is
+  // what a configured taskbar readout showed before spend existed, and the
+  // Cognia scope is what does NOT scan the filesystem. Both are opt-in changes.
+  usageMetric: "quota",
+  usagePeriod: "today",
+  usageScope: "cognia",
 }

@@ -23,6 +23,7 @@ import { toast } from "sonner"
 
 import { startNewSession } from "@/lib/chat/start-session"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
+import { handleTrayUsageCommand } from "@/lib/tray/dispatcher"
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { isMainAppWindow } from "@/lib/pet/window-role"
 import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
@@ -110,6 +111,12 @@ export function TrayPanelInitializer() {
           await dispatchSlashCommand(effect.line)
           return
         case "command": {
+          // Tray-internal ids (usage refresh, metric/period/scope pins) never
+          // enter the unified command registry, because their rows are
+          // synthesized per menu build. Route them the same way the tray menu
+          // does before falling through to the registry, so the quick panel's
+          // Refresh button and the menu's Refresh row are literally one path.
+          if (handleTrayUsageCommand(effect.commandId)) return
           if (!getCommand(effect.commandId)) {
             throw new Error(tRef.current("errors.unknownCommand", { id: effect.commandId }))
           }

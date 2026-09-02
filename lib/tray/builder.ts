@@ -110,7 +110,7 @@ function transform(
         // usage data being present — before the first refresh lands (or on
         // web, or with every surface disabled) the submenu hides entirely.
         if (display?.showUsageInMenu === false || !snapshot.usage) return null
-        workingItems = buildUsageSection(snapshot.usage)
+        workingItems = buildUsageSection(snapshot.usage, Date.now(), display)
       }
       const children: TrayMenuItemDto[] = []
       for (const child of workingItems) {

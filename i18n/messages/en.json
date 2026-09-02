@@ -13688,10 +13688,8 @@
       "teams": "Squads"
     },
     "board": {
-      "addIssue": "Add issue to {status}",
       "agentsWorking": "{count, plural, =0 {0 agents working} one {# agent working} other {# agents working}}",
       "awaitingReview": "{count, plural, =0 {} one {# awaiting review} other {# awaiting review}}",
-      "collapseColumn": "Collapse {status}",
       "columnActions": "Column actions",
       "denied": {
         "federated-read-only": "This issue lives in {source} and cannot be moved from here.",
@@ -13707,8 +13705,10 @@
         "pickedUp": "Picked up {identifier} from {column}."
       },
       "empty": "No issues",
-      "expandColumn": "Expand {status}",
-      "runningCard": "An agent is working on this issue"
+      "runningCard": "An agent is working on this issue",
+      "addIssue": "Add issue to {status}",
+      "collapseColumn": "Collapse {status}",
+      "expandColumn": "Expand {status}"
     },
     "bulk": {
       "addLabel": "Add label",
@@ -36758,7 +36758,12 @@
           "title": "Title text"
         },
         "title": "Display",
-        "tooltipBase": "Tooltip text"
+        "tooltipBase": "Tooltip text",
+        "usageMetric": "Taskbar number",
+        "usageMetricHint": "What the menu bar, tooltip and quick panel lead with.",
+        "usagePeriod": "Window",
+        "usageScope": "Counted spend",
+        "usageScopeHint": "All coding tools reads other agents' local session files. Their spend is shown separately and never affects your Cognia budget."
       },
       "emptyPicker": "No commands available — install plugins or start a chat.",
       "hide": "Hide",
@@ -41322,8 +41327,31 @@
     "usage": {
       "auto": "Auto (highest usage)",
       "empty": "No usage data yet",
+      "freshness": {
+        "fresh": "Up to date",
+        "partial": "Some tools could not be read",
+        "stale": "Not scanned yet"
+      },
+      "loading": "Reading usage…",
+      "metric": {
+        "budget": "Show budget",
+        "quota": "Show plan quota",
+        "spend": "Show spend",
+        "tokens": "Show tokens"
+      },
       "openSettings": "Subscription settings…",
+      "period": {
+        "calendarMonth": "This month",
+        "month30": "Last 30 days",
+        "quarter": "Last 90 days",
+        "today": "Today",
+        "week": "Last 7 days"
+      },
       "refresh": "Refresh usage",
+      "scope": {
+        "allTools": "All coding tools",
+        "cognia": "This app only"
+      },
       "title": "Subscription usage"
     }
   },
@@ -41375,7 +41403,18 @@
       "activeSession": "Current conversation",
       "newSession": "New conversation"
     },
-    "title": "Cognia"
+    "title": "Cognia",
+    "usage": {
+      "loading": "Reading usage…",
+      "meter": "Budget used",
+      "noPricing": "No pricing for these models yet",
+      "openFull": "Open full usage",
+      "partialPricing": "{count, plural, one {# turn has no pricing} other {# turns have no pricing}}",
+      "refresh": "Refresh",
+      "sparkline": "Daily trend",
+      "title": "Usage",
+      "turns": "{count, plural, =0 {no turns} one {# turn} other {# turns}}"
+    }
   },
   "tts": {
     "nowPlaying": {

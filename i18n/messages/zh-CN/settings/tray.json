@@ -21,7 +21,12 @@
       "title": "标题文字"
     },
     "title": "显示",
-    "tooltipBase": "悬浮提示文本"
+    "tooltipBase": "悬浮提示文本",
+    "usageMetric": "任务栏数值",
+    "usageMetricHint": "菜单栏、悬浮提示与快捷面板优先显示的内容。",
+    "usagePeriod": "统计区间",
+    "usageScope": "统计范围",
+    "usageScopeHint": "「全部编码工具」会读取其他 Agent 的本地会话文件。它们的花费单独展示，不会计入 Cognia 预算。"
   },
   "emptyPicker": "暂无可用命令——请安装插件或开启对话。",
   "hide": "隐藏",

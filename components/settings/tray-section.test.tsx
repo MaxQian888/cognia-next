@@ -126,3 +126,43 @@ describe("TraySection", () => {
     expect(within(dialog).getByText("/clear")).toBeInTheDocument()
   })
 })
+
+describe("TraySection — usage glance dimensions (ADR-0165)", () => {
+  beforeEach(() => {
+    __resetTrayStoreForTesting()
+  })
+
+  it("renders a control for each of the three dimensions", () => {
+    render(<TraySection />)
+    expect(screen.getByLabelText("usageMetric")).toBeInTheDocument()
+    expect(screen.getByLabelText("usagePeriod")).toBeInTheDocument()
+    expect(screen.getByLabelText("usageScope")).toBeInTheDocument()
+  })
+
+  it("disables window and scope under the quota metric, rather than hiding them", () => {
+    // Hiding would collapse "does not apply here" into "does not exist", and
+    // the user would never learn that switching to spend unlocks them.
+    useTrayStore.getState().setDisplay({ usageMetric: "quota" })
+    render(<TraySection />)
+    expect(screen.getByLabelText("usagePeriod")).toBeDisabled()
+    expect(screen.getByLabelText("usageScope")).toBeDisabled()
+  })
+
+  it("enables window and scope once a spend metric is chosen", () => {
+    useTrayStore.getState().setDisplay({ usageMetric: "spend" })
+    render(<TraySection />)
+    expect(screen.getByLabelText("usagePeriod")).toBeEnabled()
+    expect(screen.getByLabelText("usageScope")).toBeEnabled()
+  })
+
+  it("starts on the pre-ADR-0165 behaviour: plan quota, this app only", () => {
+    render(<TraySection />)
+    expect(useTrayStore.getState().display.usageMetric).toBe("quota")
+    expect(useTrayStore.getState().display.usageScope).toBe("cognia")
+  })
+
+  it("warns that the all-tools scope reads other agents' local files", () => {
+    render(<TraySection />)
+    expect(screen.getByText("usageScopeHint")).toBeInTheDocument()
+  })
+})

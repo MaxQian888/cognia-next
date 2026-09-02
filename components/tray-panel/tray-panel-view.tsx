@@ -39,6 +39,7 @@ import { useTrayPanelStore } from "@/lib/tray-panel/store"
 import { defaultValuesFor } from "@/lib/tray-panel/template"
 import type { TrayPanelAction, TrayPanelFieldValue, TrayPanelValues } from "@/lib/tray-panel/types"
 import { defaultSnapshot } from "@/lib/tray/sync"
+import { USAGE_REFRESH_COMMAND } from "@/lib/tray/usage-section"
 import type { TrayStateSnapshot } from "@/lib/tray/types"
 import {
   closeTrayPanel,
@@ -54,9 +55,16 @@ import { showMainWindow } from "@/lib/tauri/pet-window"
 import { cn } from "@/lib/utils"
 
 import { TrayPanelFieldControl } from "./tray-panel-field-control"
+import { TrayPanelUsageSection } from "./tray-panel-usage-section"
 
 /** Extra px around the measured card so its shadow isn't clipped. */
 const SHADOW_MARGIN = 16
+
+/** Synthetic action id for the usage refresh button, so `busyId` can track it. */
+export const USAGE_REFRESH_ACTION_ID = "trayPanel.__usageRefresh"
+
+/** Where "Open full usage" lands in the main window. */
+export const USAGE_SETTINGS_PATH = "/settings?section=subscription"
 
 /** Seed every visible action's form with its declared defaults. */
 export function seedValues(actions: readonly TrayPanelAction[]): Record<string, TrayPanelValues> {
@@ -371,6 +379,41 @@ export function TrayPanelView() {
             </Button>
           </div>
         </header>
+
+        {/*
+          Spend readout (ADR-0165). The projection's presence IS the gate: the
+          main window only builds one when the tray leads with a spend metric,
+          so a quota-configured install sees the panel it has always had and
+          this component needs no second copy of that pref to stay in sync.
+          Both controls travel the same cross-window request path as every
+          other action, because this webview owns no Dexie and starts no scan.
+        */}
+        {snapshot.usage?.glance ? (
+          <TrayPanelUsageSection
+            glance={snapshot.usage.glance}
+            metric={snapshot.usage.glance.query.metric}
+            refreshing={busyId === USAGE_REFRESH_ACTION_ID}
+            onRefresh={() =>
+              void run({
+                id: USAGE_REFRESH_ACTION_ID,
+                label: t("usage.refresh"),
+                fields: [],
+                trigger: { kind: "manual" },
+                effect: { kind: "command", commandId: USAGE_REFRESH_COMMAND },
+                focusMainWindow: false,
+              })
+            }
+            onOpenFull={() =>
+              void run({
+                id: "trayPanel.__usageOpen",
+                label: t("usage.openFull"),
+                fields: [],
+                trigger: { kind: "manual" },
+                effect: { kind: "navigate", path: USAGE_SETTINGS_PATH },
+              })
+            }
+          />
+        ) : null}
 
         {primary ? (
           <section className="space-y-2.5 border-b px-3 py-3" data-testid="tray-panel-primary">

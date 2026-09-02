@@ -61,8 +61,31 @@
   "usage": {
     "auto": "自动（用量最高）",
     "empty": "暂无额度数据",
+    "freshness": {
+      "fresh": "已是最新",
+      "stale": "尚未扫描",
+      "partial": "部分工具无法读取"
+    },
+    "loading": "正在读取用量…",
+    "metric": {
+      "spend": "显示花费",
+      "tokens": "显示 Token",
+      "quota": "显示套餐额度",
+      "budget": "显示预算"
+    },
     "openSettings": "订阅设置…",
+    "period": {
+      "today": "今天",
+      "week": "近 7 天",
+      "month30": "近 30 天",
+      "calendarMonth": "本月",
+      "quarter": "近 90 天"
+    },
     "refresh": "刷新额度",
+    "scope": {
+      "cognia": "仅本应用",
+      "allTools": "全部编码工具"
+    },
     "title": "订阅额度"
   }
 }
