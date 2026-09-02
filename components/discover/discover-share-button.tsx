@@ -1,10 +1,14 @@
 "use client"
 
 /**
- * "Share via link" entry for the Discover inspector. Renders only for the four
- * portable definition kinds (character / skill / team / workflowTemplate);
- * returns null for everything else (config/credentials and personal twin data
- * are never publicly shareable).
+ * "Share via link" entry for the Discover inspector.
+ *
+ * Two routes. The four portable definition kinds (character / skill / team /
+ * workflowTemplate) are sanitized into a `SharedDiscoverDefinition` and shared
+ * as `discover-item`. Squad templates (`teamTemplate`) are template-platform
+ * releases, so they are shared whole as `template-definition`, which the
+ * recipient can hash-verify. Everything else renders nothing (config /
+ * credentials and personal twin data are never publicly shareable).
  *
  * Privacy gate: the sanitized definition is scanned with `hasNoLeakingPii`
  * BEFORE anything is encrypted/uploaded. Clean → opens `ShareLinkDialog`
@@ -28,16 +32,59 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
+import { TemplateDefinitionShareButton } from "@/components/share/template-definition-share-button"
+import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import { discoverItemPayload } from "@/lib/share/payload"
 import {
   buildSharedDefinition,
   definitionHasPii,
+  parseTeamTemplateDefinitionRef,
   redactSharedDefinition,
   type SharedDiscoverDefinition,
 } from "@/lib/share/discover-item"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
+/**
+ * Squad templates take the other route.
+ *
+ * They have no `SharedDiscoverDefinition` projection, because they are not a
+ * fifth hand-sanitized shape: they ARE template-platform releases, and the
+ * `template-definition` kind carries one whole, with a content hash the
+ * recipient can verify. Everything else keeps the sanitize-and-redact path.
+ */
 export function DiscoverShareButton({ item }: { item: DiscoverItem }) {
+  if (item.kind === "teamTemplate") return <TeamTemplateShareButton itemId={item.id} />
+  return <PortableDefinitionShareButton item={item} />
+}
+
+function TeamTemplateShareButton({ itemId }: { itemId: string }) {
+  const t = useTranslations("discover.share")
+  // The same snapshot the Discover query itself reads, so the row and the
+  // release behind it can never disagree about which envelope is current.
+  const { definitions } = useTemplateCatalog({ domain: "agentTeam" })
+  const definition = useMemo(() => {
+    const ref = parseTeamTemplateDefinitionRef(itemId)
+    if (!ref) return undefined
+    return definitions.find(
+      (candidate) => candidate.id === ref.definitionId && candidate.version === ref.version
+    )
+  }, [definitions, itemId])
+
+  if (!definition) {
+    return (
+      <div className="self-start" data-testid="discover-team-template-share">
+        <Button type="button" variant="outline" disabled>
+          <Link2Icon className="size-4" />
+          {t("action")}
+        </Button>
+        <p className="mt-1 text-xs text-muted-foreground">{t("teamTemplateUnavailable")}</p>
+      </div>
+    )
+  }
+  return <TemplateDefinitionShareButton definition={definition} className="self-start" />
+}
+
+function PortableDefinitionShareButton({ item }: { item: DiscoverItem }) {
   const t = useTranslations("discover.share")
   const locale = useLocale()
   const def = useMemo(

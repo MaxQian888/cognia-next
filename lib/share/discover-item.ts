@@ -167,6 +167,35 @@ export function buildSharedDefinition(
   }
 }
 
+/**
+ * Which catalog release a Discover `teamTemplate` row stands for.
+ *
+ * Squad templates are the one Discover kind with no `SharedDiscoverDefinition`
+ * projection: `buildSharedDefinition` returns null for them, so the inspector
+ * offered no share button at all. They are not a fifth sanitized shape though,
+ * they are template-platform releases already, so they share as
+ * `template-definition` instead. `hooks/discover/use-discover-query.ts` builds
+ * the row id as `${definition.id}@${version ?? \`draft:${revision}\`}`, and this
+ * reads it back.
+ *
+ * Null when the row did not come from the catalog at all. The legacy path
+ * (`BUILT_IN_TEAM_TEMPLATES` plus the plugin overlay, used only while the
+ * catalog holds no agentTeam definitions) mints bare ids with no `@`, and those
+ * name no release anyone could install.
+ *
+ * Definition ids may not contain `@` (`DEFINITION_ID` in
+ * `lib/templates/package.ts` allows `[a-z0-9._:-]`), so the split is unambiguous.
+ */
+export function parseTeamTemplateDefinitionRef(
+  itemId: string
+): { definitionId: string; version: string | null } | null {
+  const at = itemId.indexOf("@")
+  if (at <= 0 || at === itemId.length - 1) return null
+  const definitionId = itemId.slice(0, at)
+  const suffix = itemId.slice(at + 1)
+  return { definitionId, version: suffix.startsWith("draft:") ? null : suffix }
+}
+
 /** Stable JSON serialization used as the share payload body. */
 export function serializeSharedDefinition(def: SharedDiscoverDefinition): string {
   return JSON.stringify(def)

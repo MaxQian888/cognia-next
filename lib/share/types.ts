@@ -19,6 +19,11 @@ export type ShareKind =
   | "a2ui"
   | "discover-item"
   | "workflow-result"
+  // A published template release (`lib/share/template-definition.ts`). The
+  // receiver can prove the body with `verifyTemplateDefinitionHash`.
+  | "template-definition"
+  // A saved chat template (`lib/share/chat-template.ts`), launch spec demoted.
+  | "chat-template"
 
 export interface ShareProvenance {
   source: "digital-twin"

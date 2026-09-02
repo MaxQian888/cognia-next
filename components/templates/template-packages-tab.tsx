@@ -15,8 +15,11 @@
  *  - Verify cannot re-check the signature, because the repository stores the
  *    manifest and the definitions and not the zip. It re-resolves publisher
  *    trust against the ledger and re-hashes every stored release.
- *  - Re-export rebuilds the bytes unsigned. The private key never entered this
- *    app, so a signed package cannot come back out signed.
+ *  - Re-export rebuilds the bytes unsigned. This device can sign its OWN
+ *    packages (see the publisher identity block below), but it does not hold
+ *    the key that signed someone else's, and re-signing their bytes under a
+ *    local identity would be a forgery. So a signed package cannot come back
+ *    out signed.
  */
 
 import { useState } from "react"
@@ -46,6 +49,8 @@ import {
 import { TEMPLATE_FULL_DOMAINS, type TemplateDomain } from "@/lib/templates/contracts"
 import type { StoredTemplatePackage } from "@/lib/templates/repository"
 import type { TemplatePackageVerification } from "@/lib/templates/service"
+import { TemplatePublisherIdentityCard } from "./template-publisher-identity-card"
+import { TemplateTrustedPublishersCard } from "./template-trusted-publishers-card"
 
 export interface TemplatePackagesTabProps {
   packages: StoredTemplatePackage[]
@@ -56,6 +61,10 @@ export interface TemplatePackagesTabProps {
   onRemove(key: string): void
   onReexport(key: string): void
   onRollbackMigration(domain: TemplateDomain): void
+  /** Bumped by the Studio after an export created or rotated the signing key. */
+  publisherRefreshToken?: number
+  /** Bumped by the Studio after an import accepted a new publisher key. */
+  trustRefreshToken?: number
 }
 
 export function TemplatePackagesTab({
@@ -66,6 +75,8 @@ export function TemplatePackagesTab({
   onRemove,
   onReexport,
   onRollbackMigration,
+  publisherRefreshToken = 0,
+  trustRefreshToken = 0,
 }: TemplatePackagesTabProps) {
   const t = useTranslations("templateStudio")
   const [pendingRemoval, setPendingRemoval] = useState<StoredTemplatePackage>()
@@ -146,6 +157,14 @@ export function TemplatePackagesTab({
         {packages.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("packages.none")}</p>
         ) : null}
+      </div>
+
+      {/* Signing and trust are the two ends of one question, so they sit
+          together on the tab that already answers it: which key does this
+          device publish under, and whose keys does it accept. */}
+      <div className="grid gap-3 md:grid-cols-2">
+        <TemplatePublisherIdentityCard refreshToken={publisherRefreshToken} />
+        <TemplateTrustedPublishersCard refreshToken={trustRefreshToken} />
       </div>
 
       {/* Migration rollback lived behind a service method with no caller. It

@@ -79,6 +79,7 @@ import {
 } from "@/lib/chat/template/repo-templates"
 import { saveChatTemplateToRepository } from "@/lib/chat/template/repo-template-write"
 import { loadRepoChatTemplates } from "@/hooks/chat/use-repo-chat-templates"
+import { ChatTemplateShareButton } from "@/components/share/chat-template-share-button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
@@ -358,6 +359,12 @@ export function ChatTemplatesSection({ mobile = false }: ChatTemplatesSectionPro
                     <GitBranchIcon className="size-3.5" />
                     {t("saveToRepo")}
                   </Button>
+                  {/* The third destination. A file crosses to a machine you can
+                      reach, a checkout crosses to a team that has the clone, a
+                      link crosses to anyone. The launch spec is demoted before
+                      it goes, for the same reason a checkout's is demoted on
+                      the way in. */}
+                  <ChatTemplateShareButton template={row} />
                   <Button
                     variant="ghost"
                     size="icon"

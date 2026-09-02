@@ -4,6 +4,19 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// The signing key and the trust ledger both reach a store this suite has no
+// business owning; the tab's job here is only to MOUNT them.
+jest.mock("@/lib/templates/publisher-identity", () => ({
+  getPublisherIdentity: jest.fn(async () => null),
+  getOrCreatePublisherIdentity: jest.fn(),
+  rotatePublisherIdentity: jest.fn(),
+  publisherIdentityIsPersistent: jest.fn(() => true),
+}))
+jest.mock("@/lib/db/trusted-publishers", () => ({
+  listTrustedPublishers: jest.fn(async () => []),
+  revokePublisher: jest.fn(),
+}))
+
 import { TemplatePackagesTab } from "./template-packages-tab"
 import type { StoredTemplatePackage } from "@/lib/templates/repository"
 
@@ -107,5 +120,14 @@ describe("TemplatePackagesTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "packages.rollback" }))
     expect(handlers.onRollbackMigration).toHaveBeenCalledWith("skill")
+  })
+
+  // Signing and trust are the two ends of one question, and both surfaces were
+  // unreachable before: nothing in the app could produce a signature, and the
+  // trusted-publisher ledger had a writer and no reader.
+  it("mounts the publisher identity and trusted-publisher blocks", async () => {
+    renderTab()
+    expect(await screen.findByTestId("template-publisher-identity")).toBeInTheDocument()
+    expect(screen.getByTestId("template-trusted-publishers")).toBeInTheDocument()
   })
 })

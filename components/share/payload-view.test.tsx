@@ -2,6 +2,8 @@ import React from "react"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { PayloadView } from "./payload-view"
 import type { SharePayload } from "@/lib/share/types"
+import { createTemplateDefinition } from "@/lib/templates/contracts"
+import type { TemplateDefinitionEnvelope, TemplateJson } from "@/lib/templates/contracts"
 
 // jsdom doesn't implement object URLs; the backup card + image download need them.
 beforeAll(() => {
@@ -14,6 +16,23 @@ beforeAll(() => {
 
 function payload(over: Partial<SharePayload>): SharePayload {
   return { kind: "chat-text", mime: "text/plain", data: "", encoding: "utf8", ...over }
+}
+
+async function release(): Promise<TemplateDefinitionEnvelope> {
+  return createTemplateDefinition({
+    id: "skill.review",
+    domain: "skill",
+    status: "published",
+    revision: 1,
+    version: "1.0.0",
+    metadata: { name: "Review", description: "How we review" },
+    payload: { name: "Review", content: "Look at the diff" } as TemplateJson,
+    inputs: [{ id: "area", label: "Area", required: true, kind: "string" }],
+    dependencies: [],
+    capabilities: [],
+    compatibility: { platforms: ["desktop"] },
+    provenance: { source: "user", trust: "unsigned" },
+  }) as Promise<TemplateDefinitionEnvelope>
 }
 
 describe("PayloadView", () => {
@@ -255,5 +274,87 @@ describe("PayloadView", () => {
   it("shows the fallback when the discover-item JSON is malformed", () => {
     render(<PayloadView payload={payload({ kind: "discover-item", data: "not json" })} />)
     expect(screen.getByText("This shared item could not be loaded.")).toBeInTheDocument()
+  })
+  it("renders a shared template release with its kind, version, trust and inputs", async () => {
+    const definition = await release()
+    const data = JSON.stringify({ kind: "template-definition", definition })
+    render(<PayloadView payload={payload({ kind: "template-definition", data })} />)
+    expect(screen.getByTestId("share-template-definition")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Review" })).toBeInTheDocument()
+    expect(screen.getByText(/Skill/)).toBeInTheDocument()
+    expect(screen.getByText(/1\.0\.0/)).toBeInTheDocument()
+    expect(screen.getByText("Area")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByTestId("share-template-hash")).toHaveAttribute("data-state", "verified")
+    )
+  })
+
+  it("says so when a shared template's content hash does not match its body", async () => {
+    const definition = { ...(await release()), contentHash: "0".repeat(64) }
+    const data = JSON.stringify({ kind: "template-definition", definition })
+    render(<PayloadView payload={payload({ kind: "template-definition", data })} />)
+    await waitFor(() =>
+      expect(screen.getByTestId("share-template-hash")).toHaveAttribute("data-state", "mismatch")
+    )
+  })
+
+  it("offers Add to my library for a template only inside the app", async () => {
+    const data = JSON.stringify({ kind: "template-definition", definition: await release() })
+    const { rerender } = render(
+      <PayloadView payload={payload({ kind: "template-definition", data })} />
+    )
+    expect(screen.queryByTestId("share-add-to-library")).not.toBeInTheDocument()
+    rerender(<PayloadView payload={payload({ kind: "template-definition", data })} canImport />)
+    expect(screen.getByTestId("share-add-to-library")).toBeInTheDocument()
+  })
+
+  it("shows the fallback when the template payload is malformed", () => {
+    render(<PayloadView payload={payload({ kind: "template-definition", data: "not json" })} />)
+    expect(screen.getByText("This shared template could not be loaded.")).toBeInTheDocument()
+  })
+
+  it("renders a shared chat template with highlighted tokens and a params list", () => {
+    const data = JSON.stringify({
+      kind: "chat-template",
+      name: "Bug report",
+      body: "Report {{area}} on {{branch}}",
+      params: [{ id: "area", label: "Area", required: true, kind: "string" }],
+    })
+    render(<PayloadView payload={payload({ kind: "chat-template", data })} />)
+    expect(screen.getByTestId("share-chat-template")).toBeInTheDocument()
+    const tokens = screen.getAllByTestId("share-chat-template-token")
+    expect(tokens.map((node) => node.textContent)).toEqual(["{{area}}", "{{branch}}"])
+    expect(screen.getByTestId("share-chat-template-params")).toHaveTextContent("Area")
+  })
+
+  it("re-demotes a shared chat template's launch spec on the way in", () => {
+    const data = JSON.stringify({
+      kind: "chat-template",
+      name: "Bug report",
+      body: "hi",
+      params: [],
+      launchSpec: { permissionMode: "bypassPermissions", allowedTools: ["Bash"] },
+    })
+    render(<PayloadView payload={payload({ kind: "chat-template", data })} />)
+    // Nothing survived the demotion, so the setup note is not shown at all.
+    expect(screen.queryByText(/demoted before sharing/)).not.toBeInTheDocument()
+  })
+
+  it("offers Add to my library for a chat template only inside the app", () => {
+    const data = JSON.stringify({
+      kind: "chat-template",
+      name: "Bug report",
+      body: "hi",
+      params: [],
+    })
+    const { rerender } = render(<PayloadView payload={payload({ kind: "chat-template", data })} />)
+    expect(screen.queryByTestId("share-add-to-library")).not.toBeInTheDocument()
+    rerender(<PayloadView payload={payload({ kind: "chat-template", data })} canImport />)
+    expect(screen.getByTestId("share-add-to-library")).toBeInTheDocument()
+  })
+
+  it("shows the fallback when the chat-template payload is malformed", () => {
+    render(<PayloadView payload={payload({ kind: "chat-template", data: "not json" })} />)
+    expect(screen.getByText("This shared chat template could not be loaded.")).toBeInTheDocument()
   })
 })

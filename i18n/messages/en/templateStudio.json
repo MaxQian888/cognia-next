@@ -8,6 +8,7 @@
     "export": "Export",
     "fork": "Fork as draft",
     "import": "Import",
+    "importUrl": "Import from URL",
     "instantiate": "Create resources",
     "newDraft": "New draft",
     "openEditor": "Open editor",
@@ -60,10 +61,12 @@
     "confirm": "Export",
     "contents": "Contents ({count} selected)",
     "description": "A package can carry up to 256 releases. Pick everything the recipient will need.",
+    "noPublisherKey": "No publisher key on this device yet. Create one in the Packages tab to sign your exports.",
     "noReleases": "Nothing published yet.",
     "packageDescription": "Package description",
     "packageId": "Package id",
     "packageName": "Package name",
+    "signWithKey": "Sign with my publisher key",
     "title": "Export package"
   },
   "filters": {
@@ -83,7 +86,10 @@
     "definitionCount": "{count, plural, one {# definition} other {# definitions}}",
     "description": "Review this package before adding its inert definitions to your library.",
     "inert": "Importing does not create resources or run template content.",
-    "title": "Import template package"
+    "publisher": "Signed by {publisher}",
+    "publisherTrusted": "Publisher added to your trusted list.",
+    "title": "Import template package",
+    "trustPublisher": "Trust this publisher"
   },
   "inputKindNames": {
     "boolean": "Yes / no",
@@ -332,6 +338,21 @@
     "title": "Publish this template",
     "unreleased": "unreleased"
   },
+  "publisherIdentity": {
+    "cancel": "Cancel",
+    "copied": "Public key copied",
+    "copyFailed": "Could not copy the public key.",
+    "copyPublicKey": "Copy public key",
+    "create": "Create a publisher key",
+    "created": "Publisher key created",
+    "ephemeral": "This key is only held for the current session on this shell, so a package signed now cannot be signed under the same identity after a reload.",
+    "hint": "Packages you export can be signed with this key. Recipients see the fingerprint and decide whether to trust it.",
+    "rotate": "Rotate key",
+    "rotateDescription": "A new key pair replaces this one. Packages already signed keep verifying for whoever has the old key, but this device can never sign under it again, and recipients will be asked about the new key.",
+    "rotateTitle": "Rotate the publisher key?",
+    "rotated": "Publisher key rotated",
+    "title": "Publisher identity"
+  },
   "scopeControl": {
     "blocked": {
       "noWorkspace": "No workspace is active yet, so there is nothing to confine this to.",
@@ -376,6 +397,17 @@
     "unsigned": "Unsigned",
     "verified-publisher": "Verified publisher"
   },
+  "trustedPublishers": {
+    "cancel": "Cancel",
+    "empty": "No publishers trusted yet.",
+    "hint": "Keys you accepted when installing a signed package or plugin. Anything signed by these keys imports as verified.",
+    "revoke": "Untrust",
+    "revokeDescription": "Packages signed by {name} will ask again the next time one is imported.",
+    "revokeTitle": "Remove this publisher?",
+    "revoked": "Publisher removed",
+    "title": "Trusted publishers",
+    "unnamed": "Unnamed publisher"
+  },
   "updateDialog": {
     "cancel": "Cancel",
     "changes": "{count, plural, =1 {1 change} other {# changes}}",
@@ -392,5 +424,14 @@
     "takeUpstream": "Take theirs",
     "title": "Update this instance",
     "unresolved": "{count, plural, =1 {1 conflict still needs an answer} other {# conflicts still need an answer}}"
+  },
+  "urlImport": {
+    "cancel": "Cancel",
+    "description": "Fetch a package from a URL. It goes through the same inspection and confirmation as a file before anything is installed.",
+    "fetch": "Fetch",
+    "fetching": "Fetching…",
+    "title": "Import from URL",
+    "urlLabel": "Package URL",
+    "urlPlaceholder": "https://example.com/team.cognia-template"
   }
 }

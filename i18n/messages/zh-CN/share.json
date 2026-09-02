@@ -43,8 +43,10 @@
       "chat-json": "对话（JSON）",
       "chat-md": "对话（Markdown）",
       "chat-quote": "消息卡片",
+      "chat-template": "对话模板",
       "chat-text": "对话（文本）",
       "discover-item": "发现条目",
+      "template-definition": "模板发布版本",
       "usage-card": "使用量卡片",
       "workflow-png": "工作流图片"
     },
@@ -67,6 +69,13 @@
   "passphraseHelp": "对方需输入此口令才能打开链接。",
   "passphraseLabel": "额外口令（可选）",
   "passphrasePlaceholder": "单独告知对方，不会出现在链接里",
+  "pii": {
+    "body": "此内容可能包含个人信息（邮箱、电话、密钥）。可以先移除再公开分享，或直接分享原内容。",
+    "cancel": "取消",
+    "shareOriginal": "仍然分享",
+    "shareRedacted": "移除后继续",
+    "title": "发现可能的个人信息"
+  },
   "quoteCard": {
     "cardTitle": "Cognia 消息卡片",
     "description": "把这条消息生成可分享卡片，可下载为图片或发布加密链接。",
@@ -97,6 +106,14 @@
     "urlPlaceholder": "https://share.example.com"
   },
   "shareAction": "生成分享链接",
+  "templateShare": {
+    "piiBody": "此模板可能包含个人信息（邮箱、电话、密钥）。内容哈希覆盖了每一个字段，任何删减都会让接收方的校验失败。请先修改模板，或按现状分享。",
+    "refusal": {
+      "non-portable": "此模板仍携带凭据字段，因此不能发布为链接。",
+      "unpublished": "只有已发布的版本可以分享。请先发布一个版本。",
+      "withdrawn": "该版本已被弃用或撤回，因此不提供链接分享。"
+    }
+  },
   "themeGallery": {
     "label": "样式",
     "selected": "已选择",
@@ -110,15 +127,24 @@
   },
   "ttlLabel": "有效期",
   "view": {
-    "provenance": {
-      "digitalTwin": "由 Cognia 数字分身生成的 AI 内容"
-    },
     "a2uiReadonly": "只读预览",
+    "addToLibrary": "加入我的库",
+    "addToLibraryBusy": "正在加入…",
+    "addToLibraryDone": "已加入",
+    "addToLibraryFailed": "无法加入到你的库。",
     "appInvalid": "无法加载此分享的应用。",
     "appTitle": "分享的应用",
     "backupBody": "这是一个 cognia 备份包。下载后从「设置 → 数据」导入。",
     "backupTitle": "分享的备份",
     "brand": "Cognia",
+    "chatTemplate": {
+      "body": "消息内容",
+      "invalid": "无法加载这个共享的对话模板。",
+      "label": "对话模板",
+      "params": "参数",
+      "required": "必填",
+      "setupNote": "模板建议的会话配置在分享前已被降级：它只能收紧一次对话，不能放宽。"
+    },
     "conversationTitle": "分享的对话",
     "copyImage": "复制图片",
     "copyImageDone": "已复制",
@@ -163,6 +189,24 @@
     "preview": "预览",
     "previewClose": "关闭预览",
     "previewTitle": "预览",
+    "provenance": {
+      "digitalTwin": "由 Cognia 数字分身生成的 AI 内容"
+    },
+    "templateDefinition": {
+      "domain": "类型",
+      "hash": {
+        "checking": "正在校验内容哈希…",
+        "mismatch": "内容哈希与模板内容不一致。",
+        "verified": "内容哈希校验通过。"
+      },
+      "inputs": "输入项",
+      "invalid": "无法加载这个共享的模板。",
+      "label": "模板",
+      "note": "加入后会作为来自链接的未签名模板安装。",
+      "required": "必填",
+      "trustLabel": "信任级别",
+      "version": "版本"
+    },
     "unavailableBody": "它可能已过期、达到最大查看次数，或已被撤销。",
     "unavailableTitle": "该链接已不可用",
     "workflowAlt": "分享的工作流"

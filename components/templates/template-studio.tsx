@@ -14,6 +14,7 @@ import {
   Trash2Icon,
   UploadIcon,
   ChevronDownIcon,
+  LinkIcon,
   GitFork as GitForkIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -52,6 +53,9 @@ import type {
 import type { TemplateDerivation } from "@/lib/templates/repository"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { makeTemplateDraftId } from "@/lib/templates/draft-id"
+import { createPublisherSigner, publisherFingerprint } from "@/lib/templates/publisher-identity"
+import { trustPublisher } from "@/lib/db/trusted-publishers"
+import { TemplateDefinitionShareButton } from "@/components/share/template-definition-share-button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -92,6 +96,7 @@ import { TemplateDerivedUpdateDialog } from "./template-derived-update-dialog"
 import { TemplateOriginCard } from "./template-origin-card"
 import { TemplateScopeControl } from "./template-scope-control"
 import { TemplateUpdateDialog } from "./template-update-dialog"
+import { TemplateUrlImportDialog } from "./template-url-import-dialog"
 
 /** Domains with a real adapter: these can be authored, published, instantiated. */
 const FULL_DOMAINS: TemplateDomain[] = [...TEMPLATE_FULL_DOMAINS]
@@ -290,7 +295,22 @@ export function TemplateStudio() {
   const [pendingImport, setPendingImport] = useState<{
     bytes: Uint8Array
     inspected: InspectedTemplatePackage
+    /** Present only for a URL / link import, recorded as `provenance.sourceUrl`. */
+    sourceUrl?: string
   }>()
+  const [urlImportOpen, setUrlImportOpen] = useState(false)
+  /**
+   * Whether the user accepted this package's publisher key during THIS import.
+   *
+   * `inspected.trust` is computed from the manifest alone (`signed-unknown` for
+   * any signature), so it cannot notice a ledger write that happened after the
+   * inspection. The import itself re-resolves trust from the ledger, so what
+   * this flag changes is only what the dialog says while it is open.
+   */
+  const [publisherTrusted, setPublisherTrusted] = useState(false)
+  /** Bumped after a ledger write / key rotation so the Packages tab re-reads. */
+  const [trustLedgerNonce, setTrustLedgerNonce] = useState(0)
+  const [publisherKeyNonce, setPublisherKeyNonce] = useState(0)
   const [packageReports, setPackageReports] = useState<Record<string, TemplatePackageVerification>>(
     {}
   )
@@ -630,9 +650,23 @@ export function TemplateStudio() {
     [releases]
   )
 
+  /**
+   * Export, signed when the dialog asked for it.
+   *
+   * The signer is resolved HERE rather than in the dialog because
+   * `createPublisherSigner` creates the key on first use, and a form that
+   * writes a key just by being opened is a form that mints one every time
+   * somebody looks at the export options.
+   */
   const runExport = async (request: TemplateExportRequest) => {
-    const exported = await runtime.service.exportPackage(request)
+    const { sign, ...rest } = request
+    const signer = sign ? await createPublisherSigner() : undefined
+    const exported = await runtime.service.exportPackage({
+      ...rest,
+      ...(signer ? { signer } : {}),
+    })
     setExportOrigin(undefined)
+    if (signer) setPublisherKeyNonce((value) => value + 1)
     downloadPackage(exported.bytes, `${request.id}-${request.version}.cognia-template`)
   }
 
@@ -695,18 +729,57 @@ export function TemplateStudio() {
   const inspectImport = async (file?: File) => {
     if (!file) return
     const bytes = new Uint8Array(await file.arrayBuffer())
+    setPublisherTrusted(false)
     setPendingImport({ bytes, inspected: await runtime.service.inspectPackage(bytes) })
     if (importRef.current) importRef.current.value = ""
+  }
+
+  /**
+   * A package fetched from a URL joins the file picker's flow at the same
+   * point. Fetching is not accepting: the fingerprint dialog is where either
+   * one is accepted.
+   */
+  const inspectUrlImport = async (fetched: { bytes: Uint8Array; sourceUrl: string }) => {
+    setPublisherTrusted(false)
+    setPendingImport({
+      bytes: fetched.bytes,
+      inspected: await runtime.service.inspectPackage(fetched.bytes),
+      sourceUrl: fetched.sourceUrl,
+    })
   }
 
   const confirmImport = async () => {
     if (!pendingImport) return
     await runtime.service.importPackage(pendingImport.bytes, {
-      source: "file",
+      // A package the user fetched from an address is a link import, and the
+      // address is what makes it auditable afterwards.
+      source: pendingImport.sourceUrl ? "link" : "file",
       confirmed: true,
+      ...(pendingImport.sourceUrl ? { sourceUrl: pendingImport.sourceUrl } : {}),
     })
     setPendingImport(undefined)
     setMessage(t("messages.imported"))
+  }
+
+  /**
+   * Accept the key that signed this package.
+   *
+   * Writes the same `trustedPublishers` row the WASM plugin installer writes
+   * (base64 public key, SHA-256 of its raw bytes, the author name), so one
+   * author is one row whichever kind of artifact introduced them. After this
+   * the package resolves to `verified-publisher` on import and on every later
+   * Verify.
+   */
+  const trustImportPublisher = async () => {
+    const signature = pendingImport?.inspected.manifest.signature
+    if (!signature) return
+    await trustPublisher({
+      publicKey: signature.publicKey,
+      fingerprint: await publisherFingerprint(signature.publicKey),
+      ...(signature.publisher ? { authorName: signature.publisher } : {}),
+    })
+    setPublisherTrusted(true)
+    setTrustLedgerNonce((value) => value + 1)
   }
 
   const header = (
@@ -728,6 +801,14 @@ export function TemplateStudio() {
             <Button variant="outline" onClick={() => importRef.current?.click()}>
               <UploadIcon className="size-4" />
               {t("actions.import")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setUrlImportOpen(true)}
+              data-testid="template-import-url"
+            >
+              <LinkIcon className="size-4" />
+              {t("actions.importUrl")}
             </Button>
             <Button onClick={() => setCreateOpen(true)}>
               <PlusIcon className="size-4" />
@@ -984,6 +1065,8 @@ export function TemplateStudio() {
                 onRemove={(key) => guard(() => removePackage(key))()}
                 onReexport={(key) => guard(() => reexportPackage(key))()}
                 onRollbackMigration={(domain) => guard(() => rollbackMigration(domain))()}
+                publisherRefreshToken={publisherKeyNonce}
+                trustRefreshToken={trustLedgerNonce}
               />
             </TabsContent>
             <TabsContent value="instances" className="space-y-3">
@@ -1124,21 +1207,29 @@ export function TemplateStudio() {
                   anything. Only the two the app cannot vouch for are alarming. */}
               <Alert
                 variant={
-                  pendingImport.inspected.trust === "unsigned" ||
-                  pendingImport.inspected.trust === "signed-unknown"
+                  !publisherTrusted &&
+                  (pendingImport.inspected.trust === "unsigned" ||
+                    pendingImport.inspected.trust === "signed-unknown")
                     ? "destructive"
                     : "default"
                 }
                 data-testid="template-import-trust"
-                data-trust={pendingImport.inspected.trust}
+                data-trust={publisherTrusted ? "verified-publisher" : pendingImport.inspected.trust}
               >
-                {pendingImport.inspected.trust === "unsigned" ||
-                pendingImport.inspected.trust === "signed-unknown" ? (
+                {!publisherTrusted &&
+                (pendingImport.inspected.trust === "unsigned" ||
+                  pendingImport.inspected.trust === "signed-unknown") ? (
                   <AlertTriangleIcon />
                 ) : (
                   <CheckCircle2Icon />
                 )}
-                <AlertTitle>{t(`trust.${pendingImport.inspected.trust}`)}</AlertTitle>
+                <AlertTitle>
+                  {t(
+                    publisherTrusted
+                      ? "trust.verified-publisher"
+                      : `trust.${pendingImport.inspected.trust}`
+                  )}
+                </AlertTitle>
                 <AlertDescription>{t("import.inert")}</AlertDescription>
               </Alert>
               <p>{pendingImport.inspected.manifest.name}</p>
@@ -1146,6 +1237,40 @@ export function TemplateStudio() {
                 {t("import.definitionCount", { count: pendingImport.inspected.definitions.length })}
               </p>
               <p className="break-all font-mono text-xs">{pendingImport.inspected.fingerprint}</p>
+              {pendingImport.sourceUrl ? (
+                <p className="break-all font-mono text-xs text-muted-foreground">
+                  {pendingImport.sourceUrl}
+                </p>
+              ) : null}
+              {/* A signature this device has never seen is `signed-unknown`
+                  forever unless somebody can say "yes, that is the author".
+                  `trustedPublishers` had exactly one writer (the WASM plugin
+                  installer) and no reader, so a template package could be
+                  signed and still had nowhere to become trusted. */}
+              {pendingImport.inspected.trust === "signed-unknown" &&
+              pendingImport.inspected.manifest.signature &&
+              !publisherTrusted ? (
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">
+                    {t("import.publisher", {
+                      publisher: pendingImport.inspected.manifest.signature.publisher,
+                    })}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={guard(trustImportPublisher)}
+                    data-testid="template-trust-publisher"
+                  >
+                    {t("import.trustPublisher")}
+                  </Button>
+                </div>
+              ) : null}
+              {publisherTrusted ? (
+                <p className="text-xs text-muted-foreground" data-testid="template-publisher-added">
+                  {t("import.publisherTrusted")}
+                </p>
+              ) : null}
             </div>
           ) : null}
           <DialogFooter>
@@ -1156,6 +1281,12 @@ export function TemplateStudio() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TemplateUrlImportDialog
+        open={urlImportOpen}
+        onOpenChange={setUrlImportOpen}
+        onFetched={inspectUrlImport}
+      />
     </>
   )
 }
@@ -1257,6 +1388,16 @@ function TemplateInspector({
             {definition.version ? `@${definition.version}` : ""}
           </p>
           <p>{t("inspector.source", { source: definition.provenance.source })}</p>
+          {/* Where a link- or URL-sourced release actually came from.
+              `TemplateProvenance.sourceUrl` has been on the type since the
+              platform landed and nothing wrote it, so "source: link" could not
+              say WHICH link. Now that the import records it, the inspector is
+              where it gets read back. */}
+          {definition.provenance.sourceUrl ? (
+            <p className="break-all font-mono text-xs text-muted-foreground">
+              {definition.provenance.sourceUrl}
+            </p>
+          ) : null}
           <p>{t("inspector.hash", { hash: definition.contentHash })}</p>
         </div>
         <TemplateOriginCard
@@ -1324,6 +1465,12 @@ function TemplateInspector({
               <DownloadIcon className="size-4" />
               {t("actions.export")}
             </Button>
+          ) : null}
+          {/* Published releases only. A draft has no version, so there is
+              nothing stable for a recipient to install or cite, and the share
+              builder refuses one for exactly that reason. */}
+          {!mobile && definition.version && definition.status === "published" ? (
+            <TemplateDefinitionShareButton definition={definition} />
           ) : null}
           {/* `fork` and `deprecate` shipped with no caller anywhere in the app,
               so the only way to base a template on an existing one was to

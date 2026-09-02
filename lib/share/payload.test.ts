@@ -3,11 +3,15 @@ import {
   workflowImagePayload,
   backupPayload,
   a2uiPayload,
+  chatTemplatePayload,
   discoverItemPayload,
+  templateDefinitionPayload,
   usageCardPayload,
 } from "./payload"
 import { decodeBase64 } from "./encoding"
 import type { SharedCharacterDef } from "./discover-item"
+import type { SharedTemplateDefinition } from "./template-definition"
+import type { SharedChatTemplate } from "./chat-template"
 
 describe("chatExportPayload", () => {
   it("maps each export format to the right kind, utf8 encoding", () => {
@@ -104,6 +108,52 @@ describe("discoverItemPayload", () => {
       data: JSON.stringify(def),
       encoding: "utf8",
       title: "Researcher",
+    })
+  })
+})
+
+describe("templateDefinitionPayload", () => {
+  it("wraps a shared release as a utf8 template-definition payload", () => {
+    const shared = {
+      kind: "template-definition" as const,
+      definition: {
+        metadata: { name: "Review" },
+      } as unknown as SharedTemplateDefinition["definition"],
+    }
+    expect(templateDefinitionPayload(shared)).toEqual({
+      kind: "template-definition",
+      mime: "application/json",
+      data: JSON.stringify(shared),
+      encoding: "utf8",
+      title: "Review",
+    })
+  })
+
+  it("lets the caller override the title", () => {
+    const shared = {
+      kind: "template-definition" as const,
+      definition: {
+        metadata: { name: "Review" },
+      } as unknown as SharedTemplateDefinition["definition"],
+    }
+    expect(templateDefinitionPayload(shared, "Custom").title).toBe("Custom")
+  })
+})
+
+describe("chatTemplatePayload", () => {
+  it("wraps a shared chat template as a utf8 chat-template payload", () => {
+    const shared: SharedChatTemplate = {
+      kind: "chat-template",
+      name: "Bug report",
+      body: "Report {{area}}",
+      params: [],
+    }
+    expect(chatTemplatePayload(shared)).toEqual({
+      kind: "chat-template",
+      mime: "application/json",
+      data: JSON.stringify(shared),
+      encoding: "utf8",
+      title: "Bug report",
     })
   })
 })

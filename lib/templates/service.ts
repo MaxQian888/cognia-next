@@ -1,4 +1,5 @@
 import { sha256Hex } from "@/lib/share/hash"
+import { encodeBase64 } from "@/lib/share/encoding"
 import { TemplateCatalog } from "./catalog"
 import { interpolatableBindings, resolvedUpdatePayload } from "./adapters"
 import { diffPayload, mergePayload } from "./payload-diff"
@@ -24,8 +25,12 @@ import {
 import {
   exportTemplatePackage,
   inspectTemplatePackage,
+  templatePackageSignaturePayload,
   type ExportedTemplatePackage,
+  type ExportTemplatePackageInput,
   type InspectedTemplatePackage,
+  type TemplatePackageSignature,
+  type TemplatePackageSigner,
 } from "./package"
 import type {
   StoredTemplatePackage,
@@ -615,6 +620,15 @@ export class TemplateService {
    * package arrived nameless beyond its title and claimed no platform range at
    * all. `definitionIds` has always accepted a list, and the format allows 256
    * of them.
+   *
+   * `signer` fills `TemplatePackageSignature`, which the format has carried
+   * since it landed and which no caller ever supplied, so every package this
+   * app produced was unsigned. Signing is a second build rather than a callback
+   * into the archiver: the signature covers the manifest MINUS its own
+   * `signature` field, so the only way to sign what actually ships is to
+   * produce that manifest first and rebuild with the signature attached. Both
+   * builds are deterministic (fixed zip timestamps, sorted entries, canonical
+   * JSON), so the bytes that get signed are the bytes that get verified.
    */
   async exportPackage(input: {
     id: string
@@ -623,6 +637,7 @@ export class TemplateService {
     description?: string
     compatibility?: TemplateCompatibility
     definitionIds: Array<{ id: string; version: string }>
+    signer?: TemplatePackageSigner
   }): Promise<ExportedTemplatePackage> {
     if (input.definitionIds.length === 0) {
       throw new Error("Template package export needs at least one release")
@@ -635,7 +650,7 @@ export class TemplateService {
       }
       definitions.push(definition)
     }
-    return exportTemplatePackage({
+    const base: ExportTemplatePackageInput = {
       id: input.id,
       version: input.version,
       name: input.name,
@@ -655,7 +670,17 @@ export class TemplateService {
         : {}),
       entrypoints: definitions.map((definition) => definition.id),
       definitions,
-    })
+    }
+    const unsigned = await exportTemplatePackage(base)
+    if (!input.signer) return unsigned
+    const raw = await input.signer.sign(templatePackageSignaturePayload(unsigned.manifest))
+    const signature: TemplatePackageSignature = {
+      algorithm: "ed25519",
+      publisher: input.signer.publisher,
+      publicKey: input.signer.publicKey,
+      signature: encodeBase64(raw),
+    }
+    return exportTemplatePackage({ ...base, signature })
   }
 
   /**
@@ -751,9 +776,12 @@ export class TemplateService {
   /**
    * Rebuild the package bytes from what the repository still holds.
    *
-   * The signature cannot come back with them: the private key never entered
-   * this app, so a re-export is always unsigned even when the original was
-   * signed. Callers say so before handing the file over.
+   * The signature cannot come back with them. This device may well have a
+   * publisher key of its own now (`publisher-identity.ts`), but it is not the
+   * key that signed THIS package, and re-signing someone else's bytes under a
+   * local identity would be a forgery with extra steps. So no signer is passed
+   * and a re-export is always unsigned, even when the original was signed.
+   * Callers say so before handing the file over.
    */
   async reexportPackage(key: string): Promise<ExportedTemplatePackage> {
     const storedPackage = (await this.repository.listPackages()).find(
@@ -802,9 +830,23 @@ export class TemplateService {
     await this.hydrateCatalog()
   }
 
+  /**
+   * Install a package's releases from its bytes.
+   *
+   * `sourceUrl` is the address the bytes came from, and `TemplateProvenance`
+   * has always declared it. Nothing wrote it, so a release imported from a
+   * share link or a URL recorded `source: "link"` and then could not say WHICH
+   * link, which is the one thing that makes a link-sourced release auditable
+   * afterwards. Absent for a file the user picked off disk, where there is no
+   * address to record.
+   */
   async importPackage(
     bytes: Uint8Array,
-    input: { source: "file" | "link" | "plugin" | "marketplace"; confirmed: boolean }
+    input: {
+      source: "file" | "link" | "plugin" | "marketplace"
+      confirmed: boolean
+      sourceUrl?: string
+    }
   ): Promise<InspectedTemplatePackage> {
     const inspected = await inspectTemplatePackage(bytes)
     if (!input.confirmed) throw new Error("Template package import requires explicit confirmation")
@@ -827,6 +869,7 @@ export class TemplateService {
             ...definition.provenance,
             source: input.source === "marketplace" ? "marketplace" : input.source,
             packageId: inspected.manifest.id,
+            ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
             trust,
             signatureFingerprint: inspected.fingerprint,
           },

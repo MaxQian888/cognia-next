@@ -2,6 +2,7 @@ import {
   buildSharedDefinition,
   definitionHasPii,
   isShareableDiscoverItem,
+  parseTeamTemplateDefinitionRef,
   redactSharedDefinition,
   serializeSharedDefinition,
   type SharedCharacterDef,
@@ -210,5 +211,27 @@ describe("PII gate + redaction", () => {
   it("serializes to JSON", () => {
     const def: SharedCharacterDef = { kind: "character", name: "X", systemPrompt: "Y" }
     expect(JSON.parse(serializeSharedDefinition(def))).toEqual(def)
+  })
+})
+
+describe("parseTeamTemplateDefinitionRef", () => {
+  it("reads the definition id and version out of a catalog-backed row id", () => {
+    expect(parseTeamTemplateDefinitionRef("agentTeam.squad@1.2.0")).toEqual({
+      definitionId: "agentTeam.squad",
+      version: "1.2.0",
+    })
+  })
+
+  it("reports a draft row as versionless", () => {
+    expect(parseTeamTemplateDefinitionRef("agentTeam.squad@draft:4")).toEqual({
+      definitionId: "agentTeam.squad",
+      version: null,
+    })
+  })
+
+  it("returns null for a legacy built-in or plugin id with no release behind it", () => {
+    expect(parseTeamTemplateDefinitionRef("research-pod")).toBeNull()
+    expect(parseTeamTemplateDefinitionRef("@leading")).toBeNull()
+    expect(parseTeamTemplateDefinitionRef("trailing@")).toBeNull()
   })
 })

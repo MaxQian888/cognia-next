@@ -221,7 +221,8 @@
     "piiBody": "This item may contain personal info (emails, phone numbers, keys). Remove it before sharing publicly, or share the original anyway.",
     "piiTitle": "Possible personal info detected",
     "shareOriginal": "Share anyway",
-    "shareRedacted": "Remove and continue"
+    "shareRedacted": "Remove and continue",
+    "teamTemplateUnavailable": "This squad template has no published release behind it yet, so there is nothing to share."
   },
   "shellDesktop": "desktop",
   "shellMobile": "mobile",

@@ -29,17 +29,43 @@ import { A2UISurface } from "@/components/a2ui/a2ui-surface"
 import type { A2UIComponent, A2UISurfaceType } from "@/types/a2ui/schema"
 import type { SharePayload } from "@/lib/share/types"
 import type { SharedDiscoverDefinition } from "@/lib/share/discover-item"
+import { parseSharedTemplateDefinition } from "@/lib/share/template-definition"
+import { parseSharedChatTemplate } from "@/lib/share/chat-template"
+import {
+  TEMPLATE_CATALOG_ONLY_DOMAINS,
+  TEMPLATE_FULL_DOMAINS,
+  verifyTemplateDefinitionHash,
+} from "@/lib/templates/contracts"
+import type { TemplateTrust } from "@/lib/templates/contracts"
+import { listParamTokens } from "@/lib/chat/template/param-segments"
+import { Surface } from "@/components/surface/surface"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { useMessageDisplay } from "@/hooks/chat/use-message-display"
 
-export function PayloadView({ payload, className }: { payload: SharePayload; className?: string }) {
+export function PayloadView({
+  payload,
+  className,
+  canImport = false,
+}: {
+  payload: SharePayload
+  className?: string
+  /**
+   * Whether the reader has a library to add a shared item to.
+   *
+   * Off by default, which is what the owner's preview-before-publish wants (the
+   * template is already theirs) and what an anonymous visitor on the public
+   * host must get. The viewer route resolves it with
+   * `resolveShareViewerRunsInApp`.
+   */
+  canImport?: boolean
+}) {
   const hasTwinProvenance = payload.provenance?.some(
     (entry) => entry.source === "digital-twin" && entry.disclosure === "ai-generated"
   )
   return (
     <>
       {hasTwinProvenance ? <TwinDisclosure /> : null}
-      <PayloadBody payload={payload} className={className} />
+      <PayloadBody payload={payload} className={className} canImport={canImport} />
     </>
   )
 }
@@ -53,7 +79,15 @@ function TwinDisclosure() {
   )
 }
 
-function PayloadBody({ payload, className }: { payload: SharePayload; className?: string }) {
+function PayloadBody({
+  payload,
+  className,
+  canImport,
+}: {
+  payload: SharePayload
+  className?: string
+  canImport: boolean
+}) {
   switch (payload.kind) {
     case "chat-html":
     // Usage cards and message quote cards are self-contained static HTML —
@@ -83,8 +117,366 @@ function PayloadBody({ payload, className }: { payload: SharePayload; className?
       return <A2UIShareView payload={payload} className={className} />
     case "discover-item":
       return <DiscoverItemView payload={payload} className={className} />
+    case "template-definition":
+      return (
+        <TemplateDefinitionView payload={payload} className={className} canImport={canImport} />
+      )
+    case "chat-template":
+      return <ChatTemplateView payload={payload} className={className} canImport={canImport} />
   }
 }
+
+/**
+ * Domains the Studio has a label for.
+ *
+ * The share viewer borrows `templateStudio.domains.*` and `templateStudio.trust.*`
+ * rather than duplicating 17 labels under `share.view`: they name the same
+ * things, and two copies would drift the moment a domain is added. A payload
+ * naming a domain this build does not know falls back to the raw string instead
+ * of rendering a missing-key path.
+ */
+const KNOWN_TEMPLATE_DOMAINS = new Set<string>([
+  ...TEMPLATE_FULL_DOMAINS,
+  ...TEMPLATE_CATALOG_ONLY_DOMAINS,
+])
+
+const KNOWN_TEMPLATE_TRUST = new Set<string>([
+  "built-in",
+  "verified-publisher",
+  "signed-unknown",
+  "unsigned",
+] satisfies TemplateTrust[])
+
+/**
+ * The one button both importable kinds share.
+ *
+ * Rendered only when the reader has a library (`canImport`). The work is a
+ * thunk supplied by the caller so the heavy module (the template runtime, the
+ * Dexie table) is imported inside the click and never lands in the public
+ * viewer's bundle.
+ */
+function AddToLibraryButton({ run }: { run: () => Promise<void> }) {
+  const t = useTranslations("share.view")
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle")
+  const onClick = () => {
+    setState("busy")
+    void run().then(
+      () => setState("done"),
+      () => setState("error")
+    )
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={state === "busy" || state === "done"}
+        data-testid="share-add-to-library"
+        className={cn(ACTION_BUTTON_CLASS, "disabled:opacity-60")}
+      >
+        {state === "busy" ? t("addToLibraryBusy") : t("addToLibrary")}
+      </button>
+      {state === "done" ? (
+        <span className="text-xs text-muted-foreground">{t("addToLibraryDone")}</span>
+      ) : null}
+      {state === "error" ? (
+        <span className="text-xs text-destructive">{t("addToLibraryFailed")}</span>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * A published template release.
+ *
+ * The content hash is re-checked here rather than taken on faith: the body is
+ * exactly the ten fields `hashableDefinition` covers, so a receiver can prove
+ * that what they are reading is what the author published. A mismatch is SAID,
+ * not silently swallowed into "could not be loaded", because the two mean very
+ * different things to whoever sent the link.
+ */
+function TemplateDefinitionView({
+  payload,
+  className,
+  canImport,
+}: {
+  payload: SharePayload
+  className?: string
+  canImport: boolean
+}) {
+  const t = useTranslations("share.view")
+  const tStudio = useTranslations("templateStudio")
+  const shared = useMemo(() => parseSharedTemplateDefinition(payload.data), [payload.data])
+  const [hashState, setHashState] = useState<"checking" | "verified" | "mismatch">("checking")
+
+  const definition = shared?.definition
+  useEffect(() => {
+    if (!definition) return
+    let active = true
+    void verifyTemplateDefinitionHash(definition)
+      .then((ok) => {
+        if (active) setHashState(ok ? "verified" : "mismatch")
+      })
+      .catch(() => {
+        if (active) setHashState("mismatch")
+      })
+    return () => {
+      active = false
+    }
+  }, [definition])
+
+  if (!shared || !definition) {
+    return (
+      <div className={cn("mx-auto max-w-md text-center text-sm text-muted-foreground", className)}>
+        {t("templateDefinition.invalid")}
+      </div>
+    )
+  }
+
+  const addToLibrary = async () => {
+    const { installSharedTemplateDefinition } =
+      await import("@/lib/templates/install-shared-definition")
+    const { getTemplateRuntime } = await import("@/lib/templates/runtime")
+    await installSharedTemplateDefinition(
+      {
+        definition,
+        ...(typeof window === "undefined" ? {} : { sourceUrl: window.location.href }),
+      },
+      { service: getTemplateRuntime().service }
+    )
+  }
+
+  return (
+    <div
+      className={cn("mx-auto w-full max-w-3xl space-y-4", className)}
+      data-testid="share-template-definition"
+    >
+      <div>
+        <KindPill>{t("templateDefinition.label")}</KindPill>
+        <h1 className="mt-2 text-xl font-semibold text-foreground">{definition.metadata.name}</h1>
+        {definition.metadata.description ? (
+          <p className="mt-1 text-sm text-muted-foreground">{definition.metadata.description}</p>
+        ) : null}
+      </div>
+
+      <div className="space-y-1">
+        <DiscoverInline
+          label={t("templateDefinition.domain")}
+          value={
+            KNOWN_TEMPLATE_DOMAINS.has(definition.domain)
+              ? tStudio(`domains.${definition.domain}`)
+              : definition.domain
+          }
+        />
+        <DiscoverInline label={t("templateDefinition.version")} value={definition.version ?? ""} />
+        <DiscoverInline
+          label={t("templateDefinition.trustLabel")}
+          value={
+            KNOWN_TEMPLATE_TRUST.has(definition.provenance.trust ?? "")
+              ? tStudio(`trust.${definition.provenance.trust}`)
+              : tStudio("trust.unsigned")
+          }
+        />
+        <p
+          className={cn(
+            "text-sm",
+            hashState === "mismatch" ? "text-destructive" : "text-muted-foreground"
+          )}
+          data-testid="share-template-hash"
+          data-state={hashState}
+        >
+          {t(`templateDefinition.hash.${hashState}`)}
+        </p>
+      </div>
+
+      {definition.inputs.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t("templateDefinition.inputs")}
+          </p>
+          <ul className="space-y-1">
+            {definition.inputs.map((input) => (
+              <Surface
+                key={input.id}
+                asChild
+                layer="raised"
+                radius="control"
+                className="border border-border p-2 text-sm"
+              >
+                <li>
+                  <span className="font-medium text-foreground">{input.label || input.id}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{input.kind}</span>
+                  {input.required ? (
+                    <span className="ml-2 text-xs text-destructive">
+                      {t("templateDefinition.required")}
+                    </span>
+                  ) : null}
+                  {input.description ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{input.description}</p>
+                  ) : null}
+                </li>
+              </Surface>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <p className="text-xs italic text-muted-foreground">{t("templateDefinition.note")}</p>
+      {canImport ? <AddToLibraryButton run={addToLibrary} /> : null}
+    </div>
+  )
+}
+
+/**
+ * A saved chat template.
+ *
+ * The body is painted with its `{{parameter}}` tokens picked out by the same
+ * splitter the composer's chip overlay uses, so a reader sees which parts of
+ * the message they will be asked to fill in before they adopt it.
+ */
+function ChatTemplateView({
+  payload,
+  className,
+  canImport,
+}: {
+  payload: SharePayload
+  className?: string
+  canImport: boolean
+}) {
+  const t = useTranslations("share.view")
+  const shared = useMemo(() => parseSharedChatTemplate(payload.data), [payload.data])
+
+  if (!shared) {
+    return (
+      <div className={cn("mx-auto max-w-md text-center text-sm text-muted-foreground", className)}>
+        {t("chatTemplate.invalid")}
+      </div>
+    )
+  }
+
+  const addToLibrary = async () => {
+    const { installSharedChatTemplate } =
+      await import("@/lib/chat/template/install-shared-template")
+    await installSharedChatTemplate(shared)
+  }
+
+  return (
+    <div
+      className={cn("mx-auto w-full max-w-3xl space-y-4", className)}
+      data-testid="share-chat-template"
+    >
+      <div>
+        <KindPill>{t("chatTemplate.label")}</KindPill>
+        <h1 className="mt-2 text-xl font-semibold text-foreground">{shared.name}</h1>
+        {shared.description ? (
+          <p className="mt-1 text-sm text-muted-foreground">{shared.description}</p>
+        ) : null}
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-muted-foreground">{t("chatTemplate.body")}</p>
+        <Surface
+          asChild
+          layer="raised"
+          radius="panel"
+          className="overflow-auto border border-border p-3 text-sm text-foreground"
+        >
+          <pre className="whitespace-pre-wrap">
+            <TemplateBodyText body={shared.body} />
+          </pre>
+        </Surface>
+      </div>
+
+      {shared.params.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">{t("chatTemplate.params")}</p>
+          <ul className="space-y-1" data-testid="share-chat-template-params">
+            {shared.params.map((param) => (
+              <Surface
+                key={param.id}
+                asChild
+                layer="raised"
+                radius="control"
+                className="border border-border p-2 text-sm"
+              >
+                <li>
+                  <span className="font-mono text-xs text-foreground">{param.id}</span>
+                  <span className="ml-2 font-medium text-foreground">{param.label}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">{param.kind}</span>
+                  {param.required ? (
+                    <span className="ml-2 text-xs text-destructive">
+                      {t("chatTemplate.required")}
+                    </span>
+                  ) : null}
+                  {param.description ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{param.description}</p>
+                  ) : null}
+                </li>
+              </Surface>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {shared.launchSpec ? (
+        <p className="text-xs italic text-muted-foreground">{t("chatTemplate.setupNote")}</p>
+      ) : null}
+      {canImport ? <AddToLibraryButton run={addToLibrary} /> : null}
+    </div>
+  )
+}
+
+/** The body, with every `{{parameter}}` token picked out. */
+function TemplateBodyText({ body }: { body: string }) {
+  const parts = useMemo(() => {
+    const tokens = listParamTokens(body)
+    const out: Array<{ text: string; token: boolean }> = []
+    let cursor = 0
+    for (const token of tokens) {
+      if (token.start > cursor) out.push({ text: body.slice(cursor, token.start), token: false })
+      out.push({ text: token.raw, token: true })
+      cursor = token.end
+    }
+    if (cursor < body.length) out.push({ text: body.slice(cursor), token: false })
+    return out
+  }, [body])
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.token ? (
+          <mark
+            key={index}
+            className="rounded-control bg-primary/15 px-1 text-foreground"
+            data-testid="share-chat-template-token"
+          >
+            {part.text}
+          </mark>
+        ) : (
+          <span key={index}>{part.text}</span>
+        )
+      )}
+    </>
+  )
+}
+
+/**
+ * The kind chip every definition-shaped payload opens with.
+ *
+ * One class string rather than three identical ones: `discover-item`,
+ * `template-definition` and `chat-template` all label themselves the same way,
+ * and three copies is how the three drift apart.
+ */
+function KindPill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-block rounded-pill border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+/** The viewer's own outline-button look, shared by every action it offers. */
+const ACTION_BUTTON_CLASS =
+  "inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
 
 function MarkdownText({
   text,
@@ -145,9 +537,7 @@ function DiscoverItemView({ payload, className }: { payload: SharePayload; class
   return (
     <div className={cn("mx-auto w-full max-w-3xl space-y-4", className)}>
       <div>
-        <span className="inline-block rounded-pill border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {t(`discoverItem.kind.${def.kind}`)}
-        </span>
+        <KindPill>{t(`discoverItem.kind.${def.kind}`)}</KindPill>
         <h1 className="mt-2 text-xl font-semibold text-foreground">{def.name}</h1>
         {def.description ? (
           <p className="mt-1 text-sm text-muted-foreground">{def.description}</p>
@@ -317,16 +707,12 @@ function ImageView({
         <button
           type="button"
           onClick={() => downloadBlob(blob, filename)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          className={ACTION_BUTTON_CLASS}
         >
           <AnimatedActionIcon icon={AnimatedDownloadIcon} size={14} />
           {t("downloadImage")}
         </button>
-        <button
-          type="button"
-          onClick={() => void onCopy()}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted"
-        >
+        <button type="button" onClick={() => void onCopy()} className={ACTION_BUTTON_CLASS}>
           <CopyFeedbackIcon copied={copied} size={14} />
           {copied ? t("copyImageDone") : t("copyImage")}
         </button>

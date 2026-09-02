@@ -14,7 +14,7 @@
  * the repository by `{id, version}` and refuses a draft.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
@@ -32,6 +32,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
+import {
+  getPublisherIdentity,
+  type TemplatePublisherIdentity,
+} from "@/lib/templates/publisher-identity"
 
 export interface TemplateExportRequest {
   id: string
@@ -39,6 +43,14 @@ export interface TemplateExportRequest {
   name: string
   description?: string
   definitionIds: Array<{ id: string; version: string }>
+  /**
+   * Sign the manifest with this device's publisher key.
+   *
+   * The caller resolves the signer, because creating the key on first use is a
+   * write and this dialog is a form. Absent or false exports unsigned, which is
+   * what every export did before signing existed.
+   */
+  sign?: boolean
 }
 
 export interface TemplateExportDialogProps {
@@ -97,6 +109,25 @@ function ExportForm({
   const [packageName, setPackageName] = useState(origin.metadata.name)
   const [description, setDescription] = useState(origin.metadata.description ?? "")
   const [selected, setSelected] = useState<string[]>([releaseKey(origin)])
+  const [identity, setIdentity] = useState<TemplatePublisherIdentity | null>(null)
+  const [sign, setSign] = useState(false)
+
+  // Signing is on by default once a key exists, and off when one does not:
+  // ticking the box would then MINT a key as a side effect of an export, which
+  // is a decision that belongs to the Packages tab's identity block.
+  useEffect(() => {
+    let active = true
+    void getPublisherIdentity()
+      .then((next) => {
+        if (!active || !next) return
+        setIdentity(next)
+        setSign(true)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
 
   const grouped = useMemo(
     () =>
@@ -121,6 +152,7 @@ function ExportForm({
         id: definition.id,
         version: definition.version!,
       })),
+      ...(sign && identity ? { sign: true } : {}),
     })
   }
 
@@ -179,6 +211,34 @@ function ExportForm({
               <p className="text-xs text-muted-foreground">{t("noReleases")}</p>
             ) : null}
           </div>
+        </div>
+        {/* Signing, said plainly. `TemplatePackageSignature` has been on the
+            manifest format since it landed and nothing ever filled it in, so
+            every package this app produced arrived `unsigned` on the other
+            side. */}
+        <div className="space-y-1.5" data-testid="template-export-signing">
+          {identity ? (
+            <>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={sign}
+                  aria-label={t("signWithKey")}
+                  onCheckedChange={(checked) => setSign(checked === true)}
+                />
+                <span>{t("signWithKey")}</span>
+              </label>
+              <p
+                className="break-all pl-6 font-mono text-xs text-muted-foreground"
+                data-testid="template-export-fingerprint"
+              >
+                {identity.fingerprint}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-testid="template-export-no-key">
+              {t("noPublisherKey")}
+            </p>
+          )}
         </div>
       </div>
       <DialogFooter>

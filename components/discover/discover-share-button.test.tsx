@@ -8,6 +8,9 @@ import userEvent from "@testing-library/user-event"
 import { DiscoverShareButton } from "./discover-share-button"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 import type { Character } from "@cognia/agent-config-types"
+import { templateCatalog } from "@/lib/templates/catalog"
+import { createTemplateDefinition } from "@/lib/templates/contracts"
+import type { TemplateDefinitionEnvelope, TemplateJson } from "@/lib/templates/contracts"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -87,5 +90,65 @@ describe("DiscoverShareButton", () => {
     await user.click(screen.getByTestId("discover-share-button"))
     await user.click(screen.getByTestId("discover-share-cancel"))
     expect(screen.queryByTestId("stub-share-dialog")).not.toBeInTheDocument()
+  })
+
+  // Squad templates take the `template-definition` route: they are catalog
+  // releases already, so they carry a content hash the recipient can verify.
+  describe("squad templates", () => {
+    async function seedRelease(version: string | null, status = "published") {
+      const definition = (await createTemplateDefinition({
+        id: "agentTeam.pod",
+        domain: "agentTeam",
+        status: status as TemplateDefinitionEnvelope["status"],
+        revision: 1,
+        version,
+        metadata: { name: "Research pod" },
+        payload: { team: { name: "Research pod" }, teammates: [] } as TemplateJson,
+        inputs: [],
+        dependencies: [],
+        capabilities: [],
+        compatibility: { platforms: ["desktop"] },
+        provenance: { source: "user", trust: "unsigned" },
+      })) as TemplateDefinitionEnvelope
+      templateCatalog.replaceSource("test-squads", [definition])
+      return definition
+    }
+
+    afterEach(() => {
+      templateCatalog.removeSource("test-squads")
+    })
+
+    function teamTemplateItem(id: string): DiscoverItem {
+      return {
+        kind: "teamTemplate",
+        id,
+        data: { id, name: "Research pod", description: "", teammateCount: 0, isBuiltIn: false },
+      } as DiscoverItem
+    }
+
+    it("shares a published squad template as a template-definition payload", async () => {
+      await seedRelease("1.0.0")
+      const user = userEvent.setup()
+      render(<DiscoverShareButton item={teamTemplateItem("agentTeam.pod@1.0.0")} />)
+      await user.click(screen.getByTestId("template-share-button"))
+      const dialog = screen.getByTestId("stub-share-dialog")
+      expect(dialog.getAttribute("data-payload")).toContain("template-definition")
+      expect(dialog.getAttribute("data-payload")).toContain("Research pod")
+    })
+
+    it("refuses a draft squad template with a sentence rather than vanishing", async () => {
+      await seedRelease(null, "draft")
+      render(<DiscoverShareButton item={teamTemplateItem("agentTeam.pod@draft:1")} />)
+      const button = screen.getByTestId("template-share-button")
+      expect(button).toBeDisabled()
+      expect(button.getAttribute("data-refusal")).toBe("unpublished")
+    })
+
+    it("explains a legacy row that has no catalog release behind it", () => {
+      render(<DiscoverShareButton item={teamTemplateItem("research-pod")} />)
+      expect(screen.getByTestId("discover-team-template-share")).toHaveTextContent(
+        "teamTemplateUnavailable"
+      )
+    })
   })
 })

@@ -14,11 +14,22 @@ jest.mock("@/lib/share/load", () => ({
 }))
 
 jest.mock("@/components/share/payload-view", () => ({
-  PayloadView: ({ payload }: { payload: SharePayload }) => (
-    <div data-testid="payload">{payload.kind}</div>
+  PayloadView: ({ payload, canImport }: { payload: SharePayload; canImport?: boolean }) => (
+    <div data-testid="payload" data-can-import={String(canImport)}>
+      {payload.kind}
+    </div>
   ),
 }))
 
+jest.mock("@/lib/share/viewer-context", () => ({
+  resolveShareViewerRunsInApp: jest.fn(),
+}))
+
+import { resolveShareViewerRunsInApp } from "@/lib/share/viewer-context"
+
+const mockRunsInApp = resolveShareViewerRunsInApp as jest.MockedFunction<
+  typeof resolveShareViewerRunsInApp
+>
 const mockLoadShare = loadShare as jest.MockedFunction<typeof loadShare>
 const mockDecrypt = decryptEnvelope as jest.MockedFunction<typeof decryptEnvelope>
 
@@ -31,6 +42,7 @@ const PAYLOAD: SharePayload = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockRunsInApp.mockResolvedValue(false)
 })
 
 describe("ShareViewPage", () => {
@@ -72,5 +84,25 @@ describe("ShareViewPage", () => {
 
     await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
     expect(mockDecrypt).toHaveBeenCalledWith(envelope, "k", "hunter2")
+  })
+
+  // The importable kinds offer to write into the reader's own library, which
+  // only means anything where there IS one. The public deployment runs this
+  // exact route, so the answer is resolved rather than assumed.
+  it("passes the in-app verdict down to the payload view", async () => {
+    mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+    mockRunsInApp.mockResolvedValue(true)
+    render(<ShareViewPage />)
+    await waitFor(() =>
+      expect(screen.getByTestId("payload")).toHaveAttribute("data-can-import", "true")
+    )
+  })
+
+  it("defaults to no import, and stays there when the verdict cannot be resolved", async () => {
+    mockLoadShare.mockResolvedValue({ status: "ready", payload: PAYLOAD })
+    mockRunsInApp.mockRejectedValue(new Error("no settings"))
+    render(<ShareViewPage />)
+    await waitFor(() => expect(screen.getByTestId("payload")).toBeInTheDocument())
+    expect(screen.getByTestId("payload")).toHaveAttribute("data-can-import", "false")
   })
 })

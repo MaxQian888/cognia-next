@@ -407,6 +407,27 @@ describe("TemplateService package maintenance", () => {
     }
   }
 
+  it("records the address a link import came from, and nothing when there is none", async () => {
+    const { bytes } = await createSignedPackage()
+    const { repository, service } = makeService()
+    await service.importPackage(bytes, {
+      source: "link",
+      confirmed: true,
+      sourceUrl: "https://share.example/share/view?c=abc",
+    })
+    const linked = await repository.getRelease("skill.marketplace", "1.0.0")
+    expect(linked?.provenance).toMatchObject({
+      source: "link",
+      sourceUrl: "https://share.example/share/view?c=abc",
+    })
+
+    const plain = makeService()
+    await plain.service.importPackage(bytes, { source: "file", confirmed: true })
+    const filed = await plain.repository.getRelease("skill.marketplace", "1.0.0")
+    expect(filed?.provenance.source).toBe("file")
+    expect(filed?.provenance.sourceUrl).toBeUndefined()
+  })
+
   it("re-resolves publisher trust and confirms each release still hashes to its claim", async () => {
     const { service } = await importedPackage(true)
 
@@ -537,6 +558,77 @@ describe("TemplateService package maintenance", () => {
     await expect(
       service.exportPackage({ id: "a", version: "1.0.0", name: "A", definitionIds: [] })
     ).rejects.toThrow(/at least one release/)
+  })
+
+  it("signs the manifest when a signer is supplied, and the signature verifies", async () => {
+    const { service } = makeService()
+    await service.createDraft({
+      id: "user.skill.signed",
+      domain: "skill",
+      metadata: { name: "Signed" },
+      payload: { content: "x" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const released = await service.publish("user.skill.signed", {
+      expectedRevision: 1,
+      confirmedBump: "minor",
+    })
+
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])
+    const rawPublic = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey))
+    const exported = await service.exportPackage({
+      id: "com.example.signed",
+      version: "1.0.0",
+      name: "Signed bundle",
+      definitionIds: [{ id: released.id, version: released.version! }],
+      signer: {
+        publisher: "Acme",
+        publicKey: Buffer.from(rawPublic).toString("base64"),
+        sign: async (payload: Uint8Array) =>
+          new Uint8Array(
+            await crypto.subtle.sign(
+              "Ed25519",
+              pair.privateKey,
+              Uint8Array.from(payload) as unknown as BufferSource
+            )
+          ),
+      },
+    })
+
+    expect(exported.manifest.signature).toMatchObject({ algorithm: "ed25519", publisher: "Acme" })
+    // `inspectTemplatePackage` verifies the Ed25519 signature over the manifest
+    // minus its own `signature` field, so a package it accepts is proof the
+    // second build signed exactly what shipped.
+    const inspected = await service.inspectPackage(exported.bytes)
+    expect(inspected.trust).toBe("signed-unknown")
+  })
+
+  it("exports unsigned when no signer is supplied", async () => {
+    const { service } = makeService()
+    await service.createDraft({
+      id: "user.skill.unsigned",
+      domain: "skill",
+      metadata: { name: "Unsigned" },
+      payload: { content: "x" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+    })
+    const released = await service.publish("user.skill.unsigned", {
+      expectedRevision: 1,
+      confirmedBump: "minor",
+    })
+    const exported = await service.exportPackage({
+      id: "com.example.plain",
+      version: "1.0.0",
+      name: "Plain",
+      definitionIds: [{ id: released.id, version: released.version! }],
+    })
+    expect(exported.manifest.signature).toBeUndefined()
   })
 
   it("deletes a draft and leaves published releases alone", async () => {

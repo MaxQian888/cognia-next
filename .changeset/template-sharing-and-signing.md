@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Share templates by link, and sign the packages you export. Two new share kinds ride the existing zero-knowledge share pipeline: a published template release (which the recipient's viewer hash-verifies against its own content hash) and a saved chat template (credential-named parameters stripped, launch spec demoted so a link can only narrow a conversation, never widen it). Both offer "Add to my library" when the viewer is the app rather than the public share host. Squad templates in Discover finally get a share button, travelling as template releases, and a draft says why it cannot be shared. Share actions are on the Template Studio inspector for published releases and on every saved chat template in Settings. The Studio also gains a device publisher identity (Ed25519, private key in the OS keyring / SecureStorage / account vault) so exported packages can carry a real signature, a "Trust this publisher" action on import that finally writes the trusted-publisher ledger, a listing of that ledger with an untrust action, and "Import from URL" with an SSRF guard and the package size cap applied before anything is parsed.

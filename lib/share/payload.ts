@@ -6,6 +6,11 @@ import { encodeBase64 } from "./encoding"
 import type { SharePayload, ShareKind, ShareProvenance } from "./types"
 import type { SingleExportFormat } from "@/lib/export/single"
 import { serializeSharedDefinition, type SharedDiscoverDefinition } from "./discover-item"
+import {
+  serializeSharedTemplateDefinition,
+  type SharedTemplateDefinition,
+} from "./template-definition"
+import { serializeSharedChatTemplate, type SharedChatTemplate } from "./chat-template"
 
 const FORMAT_KIND: Record<SingleExportFormat, ShareKind> = {
   markdown: "chat-md",
@@ -76,5 +81,30 @@ export function discoverItemPayload(def: SharedDiscoverDefinition, title: string
     data: serializeSharedDefinition(def),
     encoding: "utf8",
     title,
+  }
+}
+
+/** A published template release, hash-verifiable by the receiver → payload. */
+export function templateDefinitionPayload(
+  shared: SharedTemplateDefinition,
+  title?: string
+): SharePayload {
+  return {
+    kind: "template-definition",
+    mime: "application/json",
+    data: serializeSharedTemplateDefinition(shared),
+    encoding: "utf8",
+    title: title ?? shared.definition.metadata.name,
+  }
+}
+
+/** A saved chat template with its launch spec already demoted → payload. */
+export function chatTemplatePayload(shared: SharedChatTemplate, title?: string): SharePayload {
+  return {
+    kind: "chat-template",
+    mime: "application/json",
+    data: serializeSharedChatTemplate(shared),
+    encoding: "utf8",
+    title: title ?? shared.name,
   }
 }

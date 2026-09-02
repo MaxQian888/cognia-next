@@ -8,6 +8,7 @@
     "export": "导出",
     "fork": "另存为草稿",
     "import": "导入",
+    "importUrl": "从链接导入",
     "instantiate": "创建资源",
     "newDraft": "新建草稿",
     "openEditor": "打开编辑器",
@@ -60,10 +61,12 @@
     "confirm": "导出",
     "contents": "内容（已选 {count} 项）",
     "description": "一个包最多可以携带 256 个发行版。把接收方需要的都选上。",
+    "noPublisherKey": "此设备还没有发布者密钥。可在「包」标签页创建一个，用于给导出的包签名。",
     "noReleases": "尚未发布任何内容。",
     "packageDescription": "包描述",
     "packageId": "包 ID",
     "packageName": "包名称",
+    "signWithKey": "使用我的发布者密钥签名",
     "title": "导出包"
   },
   "filters": {
@@ -83,7 +86,10 @@
     "definitionCount": "{count} 个定义",
     "description": "将惰性定义加入模板库前，请先检查该模板包。",
     "inert": "导入不会创建资源，也不会运行模板内容。",
-    "title": "导入模板包"
+    "publisher": "由 {publisher} 签名",
+    "publisherTrusted": "已将该发布者加入信任列表。",
+    "title": "导入模板包",
+    "trustPublisher": "信任该发布者"
   },
   "inputKindNames": {
     "boolean": "是 / 否",
@@ -332,6 +338,21 @@
     "title": "发布该模板",
     "unreleased": "尚未发布"
   },
+  "publisherIdentity": {
+    "cancel": "取消",
+    "copied": "已复制公钥",
+    "copyFailed": "无法复制公钥。",
+    "copyPublicKey": "复制公钥",
+    "create": "创建发布者密钥",
+    "created": "已创建发布者密钥",
+    "ephemeral": "在当前环境下这个密钥只保存在本次会话中，刷新之后就无法再用同一身份签名。",
+    "hint": "导出的包可以用这个密钥签名。接收方会看到指纹，并自行决定是否信任。",
+    "rotate": "轮换密钥",
+    "rotateDescription": "新的密钥对会替换当前这一对。已签名的包对持有旧公钥的人仍然可以验证，但本设备再也无法用旧密钥签名，接收方也会被重新询问是否信任新密钥。",
+    "rotateTitle": "要轮换发布者密钥吗？",
+    "rotated": "已轮换发布者密钥",
+    "title": "发布者身份"
+  },
   "scopeControl": {
     "blocked": {
       "noWorkspace": "当前还没有激活的工作区，无法限定归属。",
@@ -376,6 +397,17 @@
     "unsigned": "未签名",
     "verified-publisher": "已验证发布者"
   },
+  "trustedPublishers": {
+    "cancel": "取消",
+    "empty": "尚未信任任何发布者。",
+    "hint": "安装已签名的包或插件时你接受过的密钥。由这些密钥签名的内容会以「已验证」导入。",
+    "revoke": "取消信任",
+    "revokeDescription": "下次导入由 {name} 签名的包时会重新询问。",
+    "revokeTitle": "要移除该发布者吗？",
+    "revoked": "已移除该发布者",
+    "title": "受信任的发布者",
+    "unnamed": "未命名发布者"
+  },
   "updateDialog": {
     "cancel": "取消",
     "changes": "{count} 处变更",
@@ -392,5 +424,14 @@
     "takeUpstream": "采用上游",
     "title": "更新该实例",
     "unresolved": "还有 {count} 处冲突未裁决"
+  },
+  "urlImport": {
+    "cancel": "取消",
+    "description": "从链接获取一个模板包。它会与本地文件走同一套检查与确认流程，之后才会安装。",
+    "fetch": "获取",
+    "fetching": "获取中…",
+    "title": "从链接导入",
+    "urlLabel": "包链接",
+    "urlPlaceholder": "https://example.com/team.cognia-template"
   }
 }

@@ -1,11 +1,19 @@
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/lib/templates/publisher-identity", () => ({
+  getPublisherIdentity: jest.fn(async () => null),
+}))
+
 import { TemplateExportDialog } from "./template-export-dialog"
+import { getPublisherIdentity } from "@/lib/templates/publisher-identity"
 import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
+
+const identityMock = getPublisherIdentity as jest.Mock
 
 function release(id: string, name: string, version = "1.2.0"): TemplateDefinitionEnvelope {
   return {
@@ -93,5 +101,69 @@ describe("TemplateExportDialog", () => {
 
     fireEvent.click(screen.getByLabelText("user.skill.a@1.2.0"))
     expect(screen.getByRole("button", { name: "confirm" })).toBeDisabled()
+  })
+
+  it("says there is no publisher key, and exports unsigned, until one exists", async () => {
+    const origin = release("user.skill.a", "Alpha")
+    const onExport = jest.fn()
+    identityMock.mockResolvedValue(null)
+    render(
+      <TemplateExportDialog
+        origin={origin}
+        releases={[origin]}
+        onOpenChange={jest.fn()}
+        onExport={onExport}
+      />
+    )
+    expect(await screen.findByTestId("template-export-no-key")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("confirm"))
+    expect(onExport).toHaveBeenCalledWith(expect.not.objectContaining({ sign: true }))
+  })
+
+  it("signs by default once a key exists, and shows its fingerprint", async () => {
+    const origin = release("user.skill.a", "Alpha")
+    const onExport = jest.fn()
+    identityMock.mockResolvedValue({
+      publicKey: "cHVibGlj",
+      fingerprint: "d".repeat(64),
+      publisher: "Acme",
+      createdAt: 1,
+    })
+    render(
+      <TemplateExportDialog
+        origin={origin}
+        releases={[origin]}
+        onOpenChange={jest.fn()}
+        onExport={onExport}
+      />
+    )
+    expect(await screen.findByTestId("template-export-fingerprint")).toHaveTextContent(
+      "d".repeat(64)
+    )
+    fireEvent.click(screen.getByText("confirm"))
+    expect(onExport).toHaveBeenCalledWith(expect.objectContaining({ sign: true }))
+  })
+
+  it("lets the user untick signing", async () => {
+    const origin = release("user.skill.a", "Alpha")
+    const onExport = jest.fn()
+    identityMock.mockResolvedValue({
+      publicKey: "cHVibGlj",
+      fingerprint: "d".repeat(64),
+      publisher: "Acme",
+      createdAt: 1,
+    })
+    const user = userEvent.setup()
+    render(
+      <TemplateExportDialog
+        origin={origin}
+        releases={[origin]}
+        onOpenChange={jest.fn()}
+        onExport={onExport}
+      />
+    )
+    await user.click(await screen.findByLabelText("signWithKey"))
+    fireEvent.click(screen.getByText("confirm"))
+    expect(onExport).toHaveBeenCalledWith(expect.not.objectContaining({ sign: true }))
   })
 })

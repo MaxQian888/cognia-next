@@ -62,6 +62,23 @@ export interface TemplatePackageSignature {
   signature: string
 }
 
+/**
+ * What can produce a `TemplatePackageSignature` for a manifest.
+ *
+ * Declared here, next to the record it fills, so the service and the key store
+ * that implements it agree on one shape without the service having to import
+ * the key store (which reaches for `window` through the keyring backends and
+ * would drag the browser into the node test project).
+ */
+export interface TemplatePackageSigner {
+  /** Display name written into `signature.publisher`. */
+  publisher: string
+  /** Base64 raw 32-byte Ed25519 public key. */
+  publicKey: string
+  /** Raw 64-byte Ed25519 signature over `templatePackageSignaturePayload`. */
+  sign(payload: Uint8Array): Promise<Uint8Array>
+}
+
 export interface TemplatePackageManifest {
   schemaVersion: typeof TEMPLATE_PACKAGE_SCHEMA_VERSION
   apiVersion: typeof TEMPLATE_API_VERSION

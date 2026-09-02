@@ -221,7 +221,8 @@
     "piiBody": "该条目可能包含个人信息（邮箱、电话、密钥）。公开分享前请先移除，或仍按原文分享。",
     "piiTitle": "检测到可能的个人信息",
     "shareOriginal": "仍按原文分享",
-    "shareRedacted": "移除后继续"
+    "shareRedacted": "移除后继续",
+    "teamTemplateUnavailable": "这个小队模板背后还没有已发布的版本，因此无可分享。"
   },
   "shellDesktop": "桌面",
   "shellMobile": "移动",

@@ -43,8 +43,10 @@
       "chat-json": "Conversation (JSON)",
       "chat-md": "Conversation (Markdown)",
       "chat-quote": "Message card",
+      "chat-template": "Chat template",
       "chat-text": "Conversation (text)",
       "discover-item": "Discover item",
+      "template-definition": "Template release",
       "usage-card": "Usage card",
       "workflow-png": "Workflow image"
     },
@@ -67,6 +69,13 @@
   "passphraseHelp": "Recipients must enter this to open the link.",
   "passphraseLabel": "Extra passphrase (optional)",
   "passphrasePlaceholder": "Shared separately, never in the link",
+  "pii": {
+    "body": "This item may contain personal info (emails, phone numbers, keys). Remove it before sharing publicly, or share the original anyway.",
+    "cancel": "Cancel",
+    "shareOriginal": "Share anyway",
+    "shareRedacted": "Remove and continue",
+    "title": "Possible personal info detected"
+  },
   "quoteCard": {
     "cardTitle": "Cognia message card",
     "description": "Turn this message into a shareable card — download it as an image or publish an encrypted link.",
@@ -97,6 +106,14 @@
     "urlPlaceholder": "https://share.example.com"
   },
   "shareAction": "Share via link",
+  "templateShare": {
+    "piiBody": "This template may contain personal info (emails, phone numbers, keys). Its content hash covers every field, so nothing can be removed without breaking the check the recipient runs. Edit the template, or share it as it stands.",
+    "refusal": {
+      "non-portable": "This template still carries a credential field, so it cannot be published as a link.",
+      "unpublished": "Only a published release can be shared. Publish a version first.",
+      "withdrawn": "This release was deprecated or yanked, so it is not offered as a link."
+    }
+  },
   "themeGallery": {
     "label": "Style",
     "selected": "Selected",
@@ -110,15 +127,24 @@
   },
   "ttlLabel": "Expires",
   "view": {
-    "provenance": {
-      "digitalTwin": "AI-generated with a Cognia Digital Twin"
-    },
     "a2uiReadonly": "Read-only preview",
+    "addToLibrary": "Add to my library",
+    "addToLibraryBusy": "Adding…",
+    "addToLibraryDone": "Added",
+    "addToLibraryFailed": "Could not add this to your library.",
     "appInvalid": "This shared app could not be loaded.",
     "appTitle": "Shared app",
     "backupBody": "This is a cognia backup package. Download it, then import it from Settings → Data.",
     "backupTitle": "Shared backup",
     "brand": "Cognia",
+    "chatTemplate": {
+      "body": "Message",
+      "invalid": "This shared chat template could not be loaded.",
+      "label": "Chat template",
+      "params": "Parameters",
+      "required": "Required",
+      "setupNote": "The setup this template suggests was demoted before sharing: it can narrow a conversation, never widen one."
+    },
     "conversationTitle": "Shared conversation",
     "copyImage": "Copy image",
     "copyImageDone": "Copied",
@@ -163,6 +189,24 @@
     "preview": "Preview",
     "previewClose": "Close preview",
     "previewTitle": "Preview",
+    "provenance": {
+      "digitalTwin": "AI-generated with a Cognia Digital Twin"
+    },
+    "templateDefinition": {
+      "domain": "Kind",
+      "hash": {
+        "checking": "Checking the content hash…",
+        "mismatch": "The content hash does not match this template's contents.",
+        "verified": "Content hash verified."
+      },
+      "inputs": "Inputs",
+      "invalid": "This shared template could not be loaded.",
+      "label": "Template",
+      "note": "Adding this installs the release as an unsigned, link-sourced template.",
+      "required": "Required",
+      "trustLabel": "Trust",
+      "version": "Version"
+    },
     "unavailableBody": "It may have expired, been viewed the maximum number of times, or been revoked.",
     "unavailableTitle": "This link is no longer available",
     "workflowAlt": "Shared workflow"

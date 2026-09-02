@@ -25,6 +25,7 @@ import {
   type ShareLoadErrorReason,
 } from "@/lib/share/load"
 import { PayloadView } from "@/components/share/payload-view"
+import { resolveShareViewerRunsInApp } from "@/lib/share/viewer-context"
 
 const ERROR_KEY: Record<ShareLoadErrorReason, string> = {
   "not-a-link": "error.notLink",
@@ -40,6 +41,13 @@ export default function ShareViewPage() {
 export function ShareView() {
   const t = useTranslations("share.view")
   const [state, setState] = useState<ShareLoadState>({ status: "loading" })
+  /**
+   * Whether this page is the app's own copy of the viewer rather than the
+   * public deployment. Only the importable kinds read it, and it starts false
+   * so an anonymous visitor is never briefly offered a library they do not
+   * have.
+   */
+  const [canImport, setCanImport] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -48,6 +56,20 @@ export function ShareView() {
       const next = await loadShare(baseUrl, window.location.search, window.location.hash)
       if (active) setState(next)
     })()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void resolveShareViewerRunsInApp()
+      .then((inApp) => {
+        if (active) setCanImport(inApp)
+      })
+      .catch(() => {
+        if (active) setCanImport(false)
+      })
     return () => {
       active = false
     }
@@ -79,7 +101,7 @@ export function ShareView() {
           state.status === "ready" ? "items-start" : "items-center"
         )}
       >
-        <Body state={state} onState={setState} />
+        <Body state={state} onState={setState} canImport={canImport} />
       </main>
       <footer className="relative flex flex-col items-center gap-1 border-t border-border px-4 py-3 text-center text-xs text-muted-foreground">
         <span>{t("footer")}</span>
@@ -91,7 +113,15 @@ export function ShareView() {
   )
 }
 
-function Body({ state, onState }: { state: ShareLoadState; onState: (s: ShareLoadState) => void }) {
+function Body({
+  state,
+  onState,
+  canImport,
+}: {
+  state: ShareLoadState
+  onState: (s: ShareLoadState) => void
+  canImport: boolean
+}) {
   const t = useTranslations("share.view")
 
   switch (state.status) {
@@ -122,7 +152,7 @@ function Body({ state, onState }: { state: ShareLoadState; onState: (s: ShareLoa
         />
       )
     case "ready":
-      return <PayloadView payload={state.payload} className="w-full" />
+      return <PayloadView payload={state.payload} className="w-full" canImport={canImport} />
   }
 }
 
