@@ -4352,7 +4352,16 @@ fn is_git_root(workspace_root: &Path) -> bool {
         .workdir()
         .and_then(|path| path.canonicalize().ok())
         .is_some_and(|path| path == workspace_root);
-    workdir_matches && repository.head().is_ok()
+    workdir_matches && repository_is_worktree_capable(&repository)
+}
+
+/// Has this repository a commit to detach a worktree from?
+///
+/// Extracted so the single-root and the bundle paths share one answer. They
+/// used to decide separately, and only one of them was ever taught that an
+/// unborn HEAD cannot back `git worktree add --detach <path> HEAD`.
+fn repository_is_worktree_capable(repository: &git2::Repository) -> bool {
+    repository.head().is_ok()
 }
 
 fn clear_worktree_contents(execution_root: &Path) -> Result<(), String> {
@@ -4868,24 +4877,45 @@ fn inspect_bundle_root(
             source_root.display()
         ));
     }
+    // `is_ok()` on HEAD, not merely "a repository was discovered". The reason
+    // is the same one `is_git_root` records, and this is the second copy of the
+    // decision: a repository whose HEAD is unborn has no commit to detach from,
+    // so `git worktree add` cannot make an execution root here.
+    //
+    // The single-root path already refused it. This one did not, and a bundle
+    // is what a chat turn actually acquires, so the fix never reached the path
+    // that needed it. `ensure-default-workspace.ts` creates the workspace
+    // directory and `git init`s it without committing, which is precisely this
+    // state on a fresh install: the bundle claimed Git isolation, the worktree
+    // was never created, and the reconciliation sweep then found an Active
+    // managed workspace with no matching entry in `git worktree list`, marked
+    // it orphaned and moved it to `Conflict`. Every later turn in that
+    // conversation was refused with "managed workspace is not active", with no
+    // way back from the UI.
+    //
+    // Answering Shadow here is what the same directory would have received had
+    // `git init` never run, and it upgrades itself: the first commit makes
+    // later bundles real worktrees.
     if let Ok(repository) = git2::Repository::discover(&source_root) {
-        let repository_root = repository
-            .workdir()
-            .ok_or_else(|| "bundle roots cannot use bare Git repositories".to_string())?
-            .canonicalize()
-            .map_err(|error| format!("canonicalize bundle Git root: {error}"))?;
-        let git_common_dir = repository
-            .commondir()
-            .canonicalize()
-            .map_err(|error| format!("canonicalize bundle Git common dir: {error}"))?;
-        return Ok(InspectedBundleRoot {
-            logical_root_id: input.logical_root_id.clone(),
-            role: input.role,
-            source_root,
-            repository_root: Some(repository_root),
-            git_common_dir: Some(git_common_dir),
-            isolation: IsolationKind::GitWorktree,
-        });
+        if repository_is_worktree_capable(&repository) {
+            let repository_root = repository
+                .workdir()
+                .ok_or_else(|| "bundle roots cannot use bare Git repositories".to_string())?
+                .canonicalize()
+                .map_err(|error| format!("canonicalize bundle Git root: {error}"))?;
+            let git_common_dir = repository
+                .commondir()
+                .canonicalize()
+                .map_err(|error| format!("canonicalize bundle Git common dir: {error}"))?;
+            return Ok(InspectedBundleRoot {
+                logical_root_id: input.logical_root_id.clone(),
+                role: input.role,
+                source_root,
+                repository_root: Some(repository_root),
+                git_common_dir: Some(git_common_dir),
+                isolation: IsolationKind::GitWorktree,
+            });
+        }
     }
     Ok(InspectedBundleRoot {
         logical_root_id: input.logical_root_id.clone(),
@@ -5466,6 +5496,40 @@ mod tests {
     fn a_plain_directory_is_not_worktree_capable_either() {
         let plain = TempDir::new().unwrap();
         assert!(!is_git_root(&plain.path().canonicalize().unwrap()));
+    }
+
+    /// The bundle path had its own copy of the isolation decision, and only the
+    /// single-root one was ever taught about an unborn HEAD. A chat turn
+    /// acquires a BUNDLE, so the fix that shipped never reached the path that
+    /// needed it: the row was written `gitWorktree`, no worktree was created,
+    /// and reconciliation later moved the workspace to `Conflict`, which wedged
+    /// the conversation for good.
+    #[test]
+    fn a_bundle_root_over_an_uncommitted_repository_falls_back_to_shadow() {
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        let root = repository.path().canonicalize().unwrap();
+
+        let inspect = |root: &Path| {
+            inspect_bundle_root(&crate::WorkspaceBundleRootInput {
+                logical_root_id: "root-1".into(),
+                role: crate::WorkspaceRootRole::Primary,
+                source_root: root.to_string_lossy().into_owned(),
+            })
+            .expect("inspect")
+        };
+
+        let unborn = inspect(&root);
+        assert_eq!(unborn.isolation, IsolationKind::Shadow);
+        assert!(unborn.repository_root.is_none());
+        assert!(unborn.git_common_dir.is_none());
+
+        // It upgrades itself: the first commit makes later bundles real
+        // worktrees over the same directory.
+        seed_git_repository(&root);
+        let born = inspect(&root);
+        assert_eq!(born.isolation, IsolationKind::GitWorktree);
+        assert_eq!(born.repository_root.as_deref(), Some(root.as_path()));
     }
 
     fn provisioning_repository() -> TempDir {
