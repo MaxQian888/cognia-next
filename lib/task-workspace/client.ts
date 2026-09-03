@@ -3,7 +3,7 @@ import { onTauriEvent } from "@/lib/tauri"
 // included. A read carries no pending lease so it is passed through untouched,
 // and routing all of them one way means a write cannot be added later that
 // silently skips the lease. See `./user-action.ts`.
-import { approvalAwareTransport as transport } from "./user-action"
+import { approvalAwareTransport as transport, runWorkspaceUserAction } from "./user-action"
 import { recordTaskWorkspaceOutcome } from "@/lib/code-adoption/outcome"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
@@ -210,50 +210,58 @@ export function getWorkspaceBundleTurn(
 }
 
 /**
- * Does `active` belong to chat turn `chatRunId`?
+ * Settle the run this chat session currently holds.
  *
- * The legacy path's run id IS `runIdForTurn`. A bundle turn's is
- * `run:<session>:<n>:<workspace>` — the same turn with a per-workspace suffix,
- * because one turn owns one run per distinct physical workspace. Comparing only
- * `runId` therefore never matched a bundle, `settleTaskWorkspaceTurn` returned
- * null for every managed chat turn, and the run stayed `running` forever. The
- * next turn in that session was then refused with "pipeline workspace is
- * already active", permanently.
+ * `chatRunId` is accepted for the caller's convenience and deliberately NOT
+ * used to decide. It used to be: the guard compared `activeBySession[...]
+ * .runId` against `runIdForTurn(sessionId, chatRunId)`, and a bundle turn's run
+ * id is that same turn plus a per-workspace suffix, so the two never matched
+ * and this returned null for every managed chat turn. The run stayed `running`
+ * on the Host and the session's NEXT turn was refused, permanently, with
+ * "pipeline workspace is already active".
  *
- * `executionRunId` is the unsuffixed turn id both shapes carry, so it is the
- * identity to compare.
+ * Widening the comparison to `executionRunId` was not enough either: the chat
+ * store's per-session counter has already moved on by the time some settle
+ * edges fire, so the derived id disagreed again. Comparing at all was the
+ * mistake. `activeBySession[sessionId]` is BY CONSTRUCTION the one run this
+ * session has open, and this is only called on that session's own
+ * streaming-to-terminal edge, so there is nothing a second identity can
+ * usefully rule out. Absent entry means nothing to settle.
  */
-function activeRunBelongsToTurn(
-  active: { runId: string; executionRunId?: string } | undefined,
-  turnRunId: string
-): boolean {
-  if (!active) return false
-  return active.runId === turnRunId || active.executionRunId === turnRunId
-}
-
 export async function settleTaskWorkspaceTurn(
   sessionId: string,
   chatRunId: number,
   finalState: "ready" | "failed" | "cancelled" = "ready"
 ): Promise<ResourceChange[] | null> {
+  void chatRunId
   const active = useTaskWorkspaceStore.getState().activeBySession[sessionId]
-  if (!active || !activeRunBelongsToTurn(active, runIdForTurn(sessionId, chatRunId))) return null
+  if (!active) return null
   // A bundle turn is settled as a turn. Only its last activation survives in
   // `activeBySession`, so settling `active.runId` would release the primary
   // root and strand every additional one.
   const bundleTurnId = active.bundleTurnId
   if (bundleTurnId) {
-    const outcome = await settleWorkspaceBundleTurn(bundleTurnId, finalState).catch(() => null)
+    // Its own approval. This settle is driven by the chat status edge, not by
+    // `openWorkspaceBundleTurnLease`, so the turn scope that covered the rest of
+    // the turn is not open here and no one-shot lease is parked. Called bare,
+    // the Host answered `interactive_approval_required`, the `catch` below
+    // swallowed it, and the run stayed `running` after a turn that had
+    // completed perfectly — wedging the session's next turn.
+    const outcome = await runWorkspaceUserAction("task_workspace_bundle_turn_settle", () =>
+      settleWorkspaceBundleTurn(bundleTurnId, finalState)
+    ).catch(() => null)
     if (!outcome) return null
     const resources = outcome.runs.flatMap((settled) => settled.resources)
     useTaskWorkspaceStore.getState().reconcile(sessionId, resources)
     return resources
   }
   try {
-    const resources = await transport.call<ResourceChange[]>("task_workspace_settle", {
-      runId: active.runId,
-      finalState,
-    })
+    const resources = await runWorkspaceUserAction("task_workspace_settle", () =>
+      transport.call<ResourceChange[]>("task_workspace_settle", {
+        runId: active.runId,
+        finalState,
+      })
+    )
     if (active.executionRunId || active.traceSpanId) {
       await getTaskResourceSummary(active.runId)
         .then((summary) =>

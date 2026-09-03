@@ -10628,8 +10628,13 @@
           "example": ""
         },
         "finalState": {
-          "type": "object",
-          "additionalProperties": true
+          "type": "string",
+          "enum": [
+            "ready",
+            "failed",
+            "cancelled"
+          ],
+          "description": "The terminal RunState, exactly as `task_workspace_settle` takes it: the Rust arm deserializes this into `cognia_task_workspace::RunState`, which is a camelCase string. It was declared as an object here, so every settle of a bundle turn was refused 422 and the run stayed `running` after a turn that had completed, wedging the session's next turn."
         }
       },
       "additionalProperties": false

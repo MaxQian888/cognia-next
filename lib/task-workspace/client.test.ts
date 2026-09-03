@@ -1,6 +1,21 @@
 const call = jest.fn()
 const subscribe = jest.fn()
 const recordOutcome = jest.fn()
+const userAction = jest.fn(
+  (_command: string, operation: () => Promise<unknown>) => operation() as Promise<unknown>
+)
+
+// The real seam short-circuits on a native host and mints a lease on a
+// companion. Both are exercised in `user-action.test.ts`; here the point is
+// only that the settle goes THROUGH it rather than calling the Host bare.
+jest.mock("./user-action", () => {
+  const actual = jest.requireActual("./user-action")
+  return {
+    ...actual,
+    runWorkspaceUserAction: (...args: unknown[]) =>
+      userAction(...(args as [string, () => Promise<unknown>])),
+  }
+})
 
 jest.mock("@/lib/code-adoption/outcome", () => ({
   recordTaskWorkspaceOutcome: (...args: unknown[]) => recordOutcome(...args),
@@ -92,7 +107,10 @@ describe("task workspace client", () => {
     expect(call).toHaveBeenCalledTimes(1)
   })
 
-  it("settles only the matching active chat run", async () => {
+  // Settles the run the session actually has open. The caller's turn counter
+  // used to gate this and vetoed real settles, because a bundle run's id
+  // carries a per-workspace suffix and the counter had often already moved on.
+  it("settles the session's open chat run", async () => {
     useTaskWorkspaceStore.getState().activate({
       taskId: "task:message",
       runId: runIdForTurn("session", 3),
@@ -103,7 +121,6 @@ describe("task workspace client", () => {
     })
     call.mockResolvedValueOnce([]).mockResolvedValueOnce(null)
 
-    await expect(settleTaskWorkspaceTurn("session", 2)).resolves.toBeNull()
     await expect(settleTaskWorkspaceTurn("session", 3)).resolves.toEqual([])
     expect(call).toHaveBeenCalledWith("task_workspace_settle", {
       runId: runIdForTurn("session", 3),
@@ -625,7 +642,11 @@ describe("settling a bundle turn", () => {
     })
   })
 
-  it("still refuses a turn that is not the active one", async () => {
+  // The chat store's per-session counter has already moved on by the time some
+  // settle edges fire, so a derived turn id disagreed with the live run and the
+  // settle was skipped. `activeBySession` is by construction the one run this
+  // session has open, so the counter must not be able to veto it.
+  it("settles the session's open run whatever the caller's turn counter says", async () => {
     useTaskWorkspaceStore.getState().activate({
       taskId: "task-workspace:session",
       runId: `${runIdForTurn("session", 6)}:ws-a`,
@@ -636,8 +657,18 @@ describe("settling a bundle turn", () => {
       executionRoot: "/isolated/a",
       state: "running",
     })
+    call.mockResolvedValueOnce({ bundleTurnId: "turn-3", runs: [] })
 
-    await expect(settleTaskWorkspaceTurn("session", 7)).resolves.toBeNull()
+    await settleTaskWorkspaceTurn("session", 7)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_turn_settle", {
+      bundleTurnId: "turn-3",
+      finalState: "ready",
+    })
+  })
+
+  it("has nothing to settle for a session with no open run", async () => {
+    await expect(settleTaskWorkspaceTurn("session-with-none", 1)).resolves.toBeNull()
   })
 })
 
@@ -672,5 +703,76 @@ describe("the lookups that answer null", () => {
       expect(ref).toBe("#/$defs/NullableLegacyRecord")
     }
     expect(contract.$defs.NullableLegacyRecord.type).toEqual(["object", "null"])
+  })
+})
+
+describe("the settle carries its own approval", () => {
+  /**
+   * The settle is driven by the chat status edge, not by
+   * `openWorkspaceBundleTurnLease`, so the turn scope that covered the rest of
+   * the turn is closed by then and no one-shot lease is parked. Called bare it
+   * was answered `interactive_approval_required`, the `catch` swallowed the
+   * refusal, and the run stayed `running` after a turn that had completed
+   * perfectly, wedging the session's next turn.
+   */
+  it("wraps the bundle settle so a companion is not refused", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:approved",
+      runId: `${runIdForTurn("approved", 1)}:ws-a`,
+      executionRunId: runIdForTurn("approved", 1),
+      bundleTurnId: "turn-approved",
+      sessionId: "approved",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/a",
+      state: "running",
+    })
+    call.mockResolvedValueOnce({ bundleTurnId: "turn-approved", runs: [] })
+
+    await settleTaskWorkspaceTurn("approved", 1)
+
+    expect(userAction).toHaveBeenCalledWith(
+      "task_workspace_bundle_turn_settle",
+      expect.any(Function)
+    )
+  })
+
+  it("wraps the legacy settle for the same reason", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:legacy",
+      runId: runIdForTurn("legacy", 2),
+      sessionId: "legacy",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated",
+      state: "running",
+    })
+    call.mockResolvedValueOnce([]).mockResolvedValueOnce(null)
+
+    await settleTaskWorkspaceTurn("legacy", 2)
+
+    expect(userAction).toHaveBeenCalledWith("task_workspace_settle", expect.any(Function))
+  })
+})
+
+describe("the settle request contract", () => {
+  /**
+   * Both settles hand the Host a terminal `RunState`, which is a camelCase
+   * string on the wire. The bundle variant declared `finalState` as an object,
+   * so every settle of a bundle turn was refused 422 and the run stayed
+   * `running` after a turn that had completed, wedging the session's next turn.
+   */
+  it("declares finalState the same way for both settles", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const contract = JSON.parse(
+      readFileSync(join(process.cwd(), "protocol/companion-request-schemas.json"), "utf8")
+    ) as {
+      commands: Record<string, { properties: { finalState?: { type?: string; enum?: string[] } } }>
+    }
+
+    const legacy = contract.commands.task_workspace_settle.properties.finalState
+    const bundle = contract.commands.task_workspace_bundle_turn_settle.properties.finalState
+    expect(bundle?.type).toBe("string")
+    expect(bundle?.enum).toEqual(legacy?.enum)
+    expect(bundle?.enum).toEqual(["ready", "failed", "cancelled"])
   })
 })
