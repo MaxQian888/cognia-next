@@ -3656,6 +3656,17 @@
     }
   },
   "artifactPreview": {
+    "chartFindings": {
+      "extraSeriesDropped": "饼图只绘制一条 series，因此「{series}」未绘制。",
+      "lateSeries": "series「{series}」不在第一行，因此未绘制。",
+      "missingName": "{count, plural, other {有 # 行缺少 name，其标签为空}}。",
+      "noNumericSeries": "未找到数值型 series，没有可绘制的内容。",
+      "nonNumericValue": "series「{series}」有 {count, plural, other {# 个}}非数值，已绘制为断点。",
+      "scatterMissingXY": "{count, plural, other {有 # 行}}缺少数值型 x 与 y，未能绘点。",
+      "unknownType": "不支持图表类型「{type}」，已按折线图绘制。"
+    },
+    "chartNoticeSummary": "{count, plural, other {有 # 项未绘制}}",
+    "chartSeriesFallbackName": "数据",
     "failedToParseChart": "图表数据解析失败",
     "iframeLoadError": "加载预览 iframe 失败",
     "interactiveDroppedScripts": "{count, plural, =1 {已移除 1 个来自其他站点的脚本} other {已移除 # 个来自其他站点的脚本}}——artifact 预览无法访问网络。",

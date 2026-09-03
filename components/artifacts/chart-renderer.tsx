@@ -6,12 +6,12 @@
  * initial bundle.
  */
 
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { CHART_COLORS } from "@/lib/artifacts"
+import { CHART_COLORS, parseChartPayload } from "@/lib/artifacts"
 import { loggers } from "@cognia/logging"
 import type { ArtifactChartType, ChartDataPoint } from "@/types"
 import {
@@ -48,69 +48,76 @@ interface ChartRendererProps {
   chartData?: ChartDataPoint[]
 }
 
-export function ChartRenderer({
-  content,
-  chartType = "line",
-  chartData,
-  className,
-}: ChartRendererProps) {
+export function ChartRenderer({ content, chartType, chartData, className }: ChartRendererProps) {
   const t = useTranslations("artifactPreview")
 
-  const invalidChartFormatMsg = t("invalidChartFormat")
-  const failedToParseChartMsg = t("failedToParseChart")
+  // One place decides what a payload means: `lib/artifacts/chart-contract.ts`.
+  // The module returns codes, this component translates them, so the rules
+  // stay testable without a DOM and the Canvas preview can reuse them later.
+  const contract = useMemo(
+    () => parseChartPayload(content, { fallbackType: chartType, chartData }),
+    [content, chartType, chartData]
+  )
 
-  const { data, error, detectedType } = useMemo<{
-    data: ChartDataPoint[]
-    error: string | null
-    detectedType: string
-  }>(() => {
-    try {
-      if (chartData) {
-        return { data: chartData, error: null, detectedType: chartType }
-      }
-      const parsed = JSON.parse(content)
-      const nextType = typeof parsed?.type === "string" ? parsed.type : chartType
+  const fatal = contract.findings.find((finding) => finding.severity === "fatal")
+  const degraded = contract.findings.filter((finding) => finding.severity === "degraded")
 
-      if (Array.isArray(parsed)) {
-        return { data: parsed, error: null, detectedType: nextType }
-      }
-      if (parsed?.data && Array.isArray(parsed.data)) {
-        return { data: parsed.data, error: null, detectedType: nextType }
-      }
-      throw new Error(invalidChartFormatMsg)
-    } catch (err) {
-      loggers.ui.warn("artifacts.chart.parse-failed", {
-        error: err,
-        contentLength: content.length,
-      })
-      return {
-        data: [],
-        error: err instanceof Error ? err.message : failedToParseChartMsg,
-        detectedType: chartType,
-      }
-    }
-  }, [content, chartData, chartType, invalidChartFormatMsg, failedToParseChartMsg])
+  useEffect(() => {
+    if (!fatal) return
+    loggers.ui.warn("artifacts.chart.parse-failed", {
+      error: fatal.code,
+      contentLength: content.length,
+    })
+  }, [fatal, content.length])
 
-  if (error) {
+  if (fatal) {
     return (
       <Alert variant="destructive" className={cn("m-4", className)}>
         <AlertCircle className="h-4 w-4" />
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription>
+          {fatal.code === "invalidJson" ? t("failedToParseChart") : t("invalidChartFormat")}
+        </AlertDescription>
       </Alert>
     )
   }
 
-  if (data.length === 0) {
+  // Every rule the payload bent, said out loud. Deliberately `role="status"`
+  // and not `components/ui/alert`, which hardcodes an assertive `role="alert"`:
+  // this annotates a chart that still drew, it does not replace it.
+  const notice =
+    degraded.length > 0 ? (
+      <div
+        data-testid="chart-contract-notice"
+        role="status"
+        className="border-b bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+      >
+        <details>
+          <summary className="cursor-pointer">
+            {t("chartNoticeSummary", { count: degraded.length })}
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {degraded.map((finding) => (
+              <li key={`${finding.code}:${JSON.stringify(finding.params ?? {})}`}>
+                {t(`chartFindings.${finding.code}`, finding.params)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      </div>
+    ) : null
+
+  if (!contract.drawable) {
     return (
-      <div className={cn("flex items-center justify-center p-8 text-muted-foreground", className)}>
-        {t("noChartData")}
+      <div className={cn("flex h-full flex-col", className)}>
+        {notice}
+        <div className="flex flex-1 items-center justify-center p-8 text-muted-foreground">
+          {t("noChartData")}
+        </div>
       </div>
     )
   }
 
-  const numericKeys = Object.keys(data[0] || {}).filter(
-    (key) => key !== "name" && typeof data[0][key] === "number"
-  )
+  const { data, chartType: detectedType, series: numericKeys, valueKey } = contract
 
   const renderChart = () => {
     switch (detectedType) {
@@ -134,7 +141,7 @@ export function ChartRenderer({
           <PieChart>
             <Pie
               data={data}
-              dataKey="value"
+              dataKey={valueKey ?? "value"}
               nameKey="name"
               cx="50%"
               cy="50%"
@@ -180,7 +187,7 @@ export function ChartRenderer({
             <YAxis dataKey="y" type="number" name="Y" />
             <Tooltip cursor={{ strokeDasharray: "3 3" }} />
             <Legend />
-            <Scatter name="Data" data={data} fill={CHART_COLORS[0]} />
+            <Scatter name={t("chartSeriesFallbackName")} data={data} fill={CHART_COLORS[0]} />
           </ScatterChart>
         )
 
@@ -228,17 +235,22 @@ export function ChartRenderer({
     }
   }
 
+  // The notice takes rows off the top and the chart gives them up, rather than
+  // overlaying it. Same shape `artifact-preview.tsx` uses for its own bars.
   return (
-    <div className={cn("h-[300px] w-full p-4", className)}>
-      <ResponsiveContainer
-        width="100%"
-        height="100%"
-        minWidth={1}
-        minHeight={1}
-        initialDimension={{ width: 320, height: 300 }}
-      >
-        {renderChart()}
-      </ResponsiveContainer>
+    <div className={cn("flex h-[300px] w-full flex-col", className)}>
+      {notice}
+      <div className="min-h-0 flex-1 p-4">
+        <ResponsiveContainer
+          width="100%"
+          height="100%"
+          minWidth={1}
+          minHeight={1}
+          initialDimension={{ width: 320, height: 300 }}
+        >
+          {renderChart()}
+        </ResponsiveContainer>
+      </div>
     </div>
   )
 }

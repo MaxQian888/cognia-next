@@ -1,4 +1,6 @@
-import { parseChartPayload } from "./chart-contract"
+import enMessages from "@/i18n/messages/en/artifactPreview.json"
+import zhMessages from "@/i18n/messages/zh-CN/artifactPreview.json"
+import { CHART_FINDING_CODES, FATAL_CHART_FINDING_CODES, parseChartPayload } from "./chart-contract"
 
 const codes = (payload: string, options?: Parameters<typeof parseChartPayload>[1]) =>
   parseChartPayload(payload, options).findings.map((finding) => finding.code)
@@ -188,5 +190,26 @@ describe("parseChartPayload", () => {
     })
     expect(codes(payload)).toEqual(codes(payload))
     expect(codes(payload)).toEqual(["unknownType", "lateSeries", "missingName", "nonNumericValue"])
+  })
+
+  describe("every finding can be shown to a user", () => {
+    // `lint:i18n` does not follow a dynamic key, so nothing else stops a new
+    // code from reaching the screen as the literal string
+    // "chartFindings.someNewCode".
+    const degraded = CHART_FINDING_CODES.filter((code) => !FATAL_CHART_FINDING_CODES.includes(code))
+
+    it.each(degraded)("has English copy for %s", (code) => {
+      expect((enMessages.chartFindings as Record<string, string>)[code]).toBeTruthy()
+    })
+
+    it.each(degraded)("has Chinese copy for %s", (code) => {
+      expect((zhMessages.chartFindings as Record<string, string>)[code]).toBeTruthy()
+    })
+
+    it("keeps the two catalogues in step", () => {
+      expect(Object.keys(enMessages.chartFindings).sort()).toEqual(
+        Object.keys(zhMessages.chartFindings).sort()
+      )
+    })
   })
 })

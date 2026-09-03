@@ -55,6 +55,29 @@ export type ChartFindingCode =
   /** Nothing numeric to plot. */
   | "noNumericSeries"
 
+/**
+ * Every code, so a catalogue test can prove each one has copy. `lint:i18n`
+ * cannot see `t(`chartFindings.${code}`)`, so without this list a new code
+ * ships as a raw key on screen.
+ */
+export const CHART_FINDING_CODES: readonly ChartFindingCode[] = [
+  "invalidJson",
+  "unsupportedShape",
+  "unknownType",
+  "lateSeries",
+  "missingName",
+  "nonNumericValue",
+  "scatterMissingXY",
+  "extraSeriesDropped",
+  "noNumericSeries",
+] as const
+
+/** The two the renderer answers with a destructive alert, not the notice. */
+export const FATAL_CHART_FINDING_CODES: readonly ChartFindingCode[] = [
+  "invalidJson",
+  "unsupportedShape",
+] as const
+
 export interface ChartFinding {
   code: ChartFindingCode
   /** `fatal` replaces the chart. `degraded` annotates it and still draws. */

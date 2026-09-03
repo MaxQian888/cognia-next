@@ -21,6 +21,25 @@ jest.mock("recharts", () => {
           : children}
       </div>
     ),
+    // Recharts paints no SVG under jsdom, so the rendered tree cannot prove
+    // which key a Pie sliced by. Surface the props that decide it instead:
+    // `dataKey` IS the contract these tests are about.
+    // ...and the chart container too, because the real one resolves its
+    // children by recharts-internal identity and silently drops a stand-in.
+    PieChart: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+    ScatterChart: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+    Pie: Object.assign(
+      ({ dataKey, children }: { dataKey?: string; children?: React.ReactNode }) => (
+        <div data-testid="pie" data-datakey={String(dataKey)}>
+          {children}
+        </div>
+      ),
+      { displayName: "Pie" }
+    ),
+    Scatter: Object.assign(
+      ({ name }: { name?: string }) => <div data-testid="scatter" data-name={name} />,
+      { displayName: "Scatter" }
+    ),
   }
 })
 
@@ -98,4 +117,75 @@ describe("ChartRenderer", () => {
       expect(screen.queryByRole("alert")).toBeNull()
     }
   )
+  describe("the chart contract, said out loud", () => {
+    it("draws a pie whose series is not called `value`", () => {
+      // This payload used to render a completely blank pie: the Pie hardcoded
+      // dataKey="value". Every fixture above uses `value`, which is exactly
+      // why the suite could not catch it.
+      render(
+        <ChartRenderer
+          chartType="pie"
+          content={JSON.stringify({
+            type: "pie",
+            data: [
+              { name: "Chrome", share: 62 },
+              { name: "Safari", share: 21 },
+            ],
+          })}
+        />
+      )
+      expect(screen.getByTestId("pie")).toHaveAttribute("data-datakey", "share")
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    })
+
+    it("annotates a bent rule without replacing the chart", () => {
+      const { container } = render(
+        <ChartRenderer
+          content={JSON.stringify({
+            type: "histogram",
+            data: [
+              { name: "Jan", value: 1 },
+              { name: "Feb", value: 2 },
+            ],
+          })}
+        />
+      )
+      expect(screen.getByTestId("chart-contract-notice")).toHaveAttribute("role", "status")
+      expect(screen.getByText("chartFindings.unknownType")).toBeInTheDocument()
+      // Still a chart. The notice is non-blocking by construction.
+      expect(container.querySelector(".recharts-wrapper")).toBeInTheDocument()
+    })
+
+    it("never escalates a bent rule into an assertive alert", () => {
+      render(
+        <ChartRenderer
+          content={JSON.stringify({
+            type: "line",
+            data: [
+              { name: "Jan", revenue: 1 },
+              { name: "Feb", revenue: 2, cost: 3 },
+            ],
+          })}
+        />
+      )
+      expect(screen.getByText("chartFindings.lateSeries")).toBeInTheDocument()
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    })
+
+    it("shows the empty state and the reason together", () => {
+      render(<ChartRenderer content={JSON.stringify([{ name: "a" }])} />)
+      expect(screen.getByText("noChartData")).toBeInTheDocument()
+      expect(screen.getByText("chartFindings.noNumericSeries")).toBeInTheDocument()
+    })
+
+    it("names the scatter series from i18n rather than a literal", () => {
+      render(
+        <ChartRenderer
+          chartType="scatter"
+          content={JSON.stringify({ type: "scatter", data: [{ x: 1, y: 2 }] })}
+        />
+      )
+      expect(screen.getByTestId("scatter")).toHaveAttribute("data-name", "chartSeriesFallbackName")
+    })
+  })
 })
