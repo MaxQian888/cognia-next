@@ -51,8 +51,8 @@ jest.mock("@/lib/task-workspace/client", () => ({
 jest.mock("./workspace-environment-list", () => ({
   WorkspaceEnvironmentList: () => <section data-testid="workspace-environments-stub" />,
 }))
-jest.mock("@/components/source-control/source-control-panel", () => ({
-  SourceControlPanel: () => <section data-testid="workspace-source-control-stub" />,
+jest.mock("./workspace-capabilities", () => ({
+  WorkspaceCapabilities: () => <section data-testid="workspace-capabilities-stub" />,
 }))
 
 let projectsResult: unknown[] = []
@@ -130,13 +130,29 @@ describe("WorkspaceOverview", () => {
     expect(screen.getByTestId("workspace-overview")).toBeInTheDocument()
   })
 
-  it("switches between Overview, Environments, and Source Control", async () => {
+  it("switches between Overview, Environments and Capabilities", async () => {
     const user = userEvent.setup()
     render(<ControlledOverview />)
     await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
     expect(screen.getByTestId("workspace-environments-stub")).toBeInTheDocument()
-    await user.click(screen.getByRole("tab", { name: "workspace.sourceControl" }))
-    expect(screen.getByTestId("workspace-source-control-stub")).toBeInTheDocument()
+    // Capabilities labels itself through a SCOPED translator, so the intl mock
+    // renders its name as the bare key "tab". Positional is the stable read.
+    await user.click(screen.getAllByRole("tab")[2] as HTMLElement)
+    expect(screen.getByTestId("workspace-capabilities-stub")).toBeInTheDocument()
+  })
+
+  /**
+   * Source Control left this page: mounting the whole panel here put a
+   * `FeaturePageHeader` inside a `FeaturePageShell`, and bound a
+   * one-repository panel to a page that can own several roots. Removing a
+   * surface without leaving its entry point behind is how a feature becomes
+   * unreachable, so the strip keeps a link.
+   */
+  it("links out to Source Control instead of mounting it", () => {
+    render(<ControlledOverview />)
+    expect(screen.queryByRole("tab", { name: "workspace.sourceControl" })).not.toBeInTheDocument()
+    const link = screen.getByTestId("workspace-source-control-link")
+    expect(link).toHaveAttribute("href", "/source-control")
   })
 
   it("counts only unstarted and started issues as open", () => {
@@ -284,8 +300,8 @@ describe("WorkspaceOverview tab addressing", () => {
     const user = userEvent.setup()
     const onTabChange = jest.fn()
     render(<WorkspaceOverview tab="overview" onTabChange={onTabChange} />)
-    await user.click(screen.getByRole("tab", { name: "workspace.sourceControl" }))
-    expect(onTabChange).toHaveBeenCalledWith("source-control")
+    await user.click(screen.getAllByRole("tab")[2] as HTMLElement)
+    expect(onTabChange).toHaveBeenCalledWith("capabilities")
     // And it did NOT switch on its own. FeaturePageShell remounts this subtree
     // when the breakpoint resolves, so an internally-owned tab snaps back.
     expect(screen.getByTestId("workspace-overview")).toHaveAttribute("data-state", "active")

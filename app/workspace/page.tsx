@@ -19,7 +19,7 @@
  * reader sits inside `<Suspense>`. Same idiom as `app/squads/page.tsx`.
  */
 
-import { Suspense, useCallback } from "react"
+import { Suspense, useCallback, useEffect } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import {
@@ -35,6 +35,13 @@ function WorkspacePageInner() {
   const raw = searchParams?.get("tab") ?? null
   const tab: WorkspaceTab =
     raw && (WORKSPACE_TABS as readonly string[]).includes(raw) ? (raw as WorkspaceTab) : "overview"
+
+  // `?tab=source-control` used to mount the whole panel inside this page. It
+  // is its own route now, and an old link must land there rather than silently
+  // falling back to Overview.
+  useEffect(() => {
+    if (raw === "source-control") router.replace("/source-control")
+  }, [raw, router])
 
   const setTab = useCallback(
     (next: WorkspaceTab) => {

@@ -33,6 +33,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ArrowUpRightIcon,
   ChevronsUpDownIcon,
   FolderIcon,
   SettingsIcon,
@@ -51,7 +52,6 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ProjectEnvironmentManager } from "@/components/settings/project-environment-manager"
-import { SourceControlPanel } from "@/components/source-control/source-control-panel"
 import { listWorkspaceEnvironments } from "@/lib/task-workspace/client"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listIssues } from "@/lib/db/issues"
@@ -76,13 +76,16 @@ function normalizePath(path: string): string {
   return p
 }
 
-/** The four views, in the order the strip renders them. */
-export const WORKSPACE_TABS = [
-  "overview",
-  "environments",
-  "capabilities",
-  "source-control",
-] as const
+/**
+ * The three views, in the order the strip renders them.
+ *
+ * `source-control` used to be a fourth, mounting the whole `SourceControlPanel`
+ * inside this page. That put a `FeaturePageHeader` inside a `FeaturePageShell`,
+ * and it bound a one-repository panel to a page whose entire thesis is the
+ * workspace as the unit of work (ADR-0144), which can own several roots. It is
+ * a link now. `app/workspace/page.tsx` redirects the old deep link.
+ */
+export const WORKSPACE_TABS = ["overview", "environments", "capabilities"] as const
 export type WorkspaceTab = (typeof WORKSPACE_TABS)[number]
 
 export interface WorkspaceOverviewProps {
@@ -260,7 +263,21 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
           <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
           <TabsTrigger value="environments">{t("workspace.environments")}</TabsTrigger>
           <TabsTrigger value="capabilities">{tCapabilities("tab")}</TabsTrigger>
-          <TabsTrigger value="source-control">{t("workspace.sourceControl")}</TabsTrigger>
+          {/* Not a tab: it leaves the page. Rendered in the strip anyway,
+              because removing a surface without leaving its entry point behind
+              is how a feature becomes unreachable. */}
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+            data-testid="workspace-source-control-link"
+          >
+            <Link href="/source-control">
+              {t("workspace.sourceControl")}
+              <ArrowUpRightIcon aria-hidden className="size-3" />
+            </Link>
+          </Button>
         </TabsList>
 
         <TabsContent
@@ -463,14 +480,6 @@ export function WorkspaceOverview({ tab = "overview", onTabChange }: WorkspaceOv
         <TabsContent value="capabilities" className="mt-0">
           {/* Deltas only. The definitions stay in Settings. See the component. */}
           <WorkspaceCapabilities workspaceId={workspaceId} />
-        </TabsContent>
-
-        <TabsContent
-          value="source-control"
-          className="mt-0 min-h-0 flex-1 overflow-hidden rounded-panel border"
-          data-testid="workspace-source-control"
-        >
-          <SourceControlPanel />
         </TabsContent>
       </Tabs>
       <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
