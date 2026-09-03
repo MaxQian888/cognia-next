@@ -1671,6 +1671,14 @@
       "received": "Invitation received. Sign in to join.",
       "title": "Invitation"
     },
+    "lockScreen": {
+      "greeting": {
+        "afternoon": "Good afternoon",
+        "evening": "Good evening",
+        "morning": "Good morning",
+        "night": "Good night"
+      }
+    },
     "manage": {
       "activeAccountLabel": "Current account",
       "activeBadge": "Active",
@@ -1754,87 +1762,87 @@
     "quickUnlock": {
       "attemptsLeft": "{count, plural, =0 {No attempts left} =1 {1 attempt left before this method is disabled} other {# attempts left before this method is disabled}}",
       "failure": {
-        "wrong-secret": "That did not match. Try again.",
+        "failed": "Something went wrong. Try again, or use your password.",
         "locked-out": "This method is disabled. Use your password.",
         "not-enrolled": "This method is not set up on this device.",
         "unavailable": "This method is not available here.",
-        "failed": "Something went wrong. Try again, or use your password."
+        "wrong-secret": "That did not match. Try again."
       },
       "lockedOut": "{method} is disabled after too many attempts. Unlock with your password to turn it back on.",
       "method": {
-        "pin": "PIN",
+        "passkey": "Passkey",
         "pattern": "Pattern",
-        "passkey": "Passkey"
+        "pin": "PIN"
       },
       "methodLabel": "Unlock method",
       "panelLabel": "Quick unlock",
       "passkeyAction": "Unlock with passkey",
       "passkeyFailure": {
-        "unsupported": "This device cannot use passkeys.",
-        "no-prf": "This passkey cannot unlock the app. Use your password.",
         "cancelled": "Cancelled.",
+        "failed": "The passkey check failed. Try again, or use your password.",
         "no-credential": "No passkey was offered.",
-        "failed": "The passkey check failed. Try again, or use your password."
+        "no-prf": "This passkey cannot unlock the app. Use your password.",
+        "unsupported": "This device cannot use passkeys."
       },
       "passkeyWaiting": "Waiting for your authenticator…",
       "pattern": {
+        "clear": "Start over",
         "label": "Unlock pattern",
         "node": "Node {index}",
         "progress": "{count, plural, =0 {Draw your pattern. At least {min} points.} other {# of at least {min} points.}}",
-        "clear": "Start over",
         "submit": "Unlock"
       },
       "pin": {
-        "label": "PIN keypad",
-        "entered": "{count, plural, =0 {No digits entered} =1 {1 digit entered} other {# digits entered}}",
-        "clear": "Clear",
         "backspace": "Delete last digit",
+        "clear": "Clear",
+        "entered": "{count, plural, =0 {No digits entered} =1 {1 digit entered} other {# digits entered}}",
+        "label": "PIN keypad",
         "submit": "Unlock"
       },
-      "usePassword": "Use password instead",
+      "policy": {
+        "pattern-out-of-range": "That pattern is not valid.",
+        "pattern-repeats-node": "A pattern cannot reuse a point.",
+        "pattern-too-long": "That pattern is too long.",
+        "pattern-too-short": "That pattern is too short.",
+        "pattern-too-simple": "That pattern is too easy to guess. Avoid straight lines and the outline of the square.",
+        "pin-not-numeric": "A PIN can only contain digits.",
+        "pin-too-long": "That PIN is too long.",
+        "pin-too-short": "That PIN is too short.",
+        "pin-too-simple": "That PIN is too easy to guess. Avoid repeats and runs like 123456."
+      },
       "settings": {
-        "title": "Quick unlock",
-        "description": "Add a faster way to unlock this account on this device. Your password still works, and is the only one that can recover the account.",
-        "none": "No quick unlock is set up on this device.",
         "active": "Ready",
+        "add": "Add {method}",
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "continue": "Continue",
+        "description": "Add a faster way to unlock this account on this device. Your password still works, and is the only one that can recover the account.",
+        "enrollFailed": "Could not set that up. Check your password and try again.",
         "lockedOut": "Disabled after too many attempts",
+        "none": "No quick unlock is set up on this device.",
+        "passkeyAction": "Create passkey",
+        "passkeyFailure": {
+          "cancelled": "Cancelled.",
+          "failed": "The passkey could not be created. Try again.",
+          "no-credential": "No passkey was created.",
+          "no-prf": "This authenticator cannot derive an unlock key, so it will not work here. Try another passkey.",
+          "unsupported": "This device cannot use passkeys."
+        },
+        "passkeyPrompt": "Your device will ask you to confirm.",
+        "passwordHint": "Required to add, replace or re-enable a method. Adding one creates a new way into this account.",
+        "passwordLabel": "Account password",
+        "patternConfirm": "Draw the same pattern again.",
+        "patternDraw": "Draw a pattern.",
+        "patternMismatch": "Those did not match. Start again.",
+        "pinConfirm": "Enter the same PIN again.",
+        "pinEnter": "Choose a PIN.",
+        "pinMismatch": "Those did not match. Start again.",
         "reenable": "Re-enable",
         "remove": "Remove {method}",
-        "add": "Add {method}",
         "replace": "Replace {method}",
-        "cancel": "Cancel",
-        "continue": "Continue",
-        "confirm": "Confirm",
-        "passwordLabel": "Account password",
-        "passwordHint": "Required to add, replace or re-enable a method. Adding one creates a new way into this account.",
-        "pinEnter": "Choose a PIN.",
-        "pinConfirm": "Enter the same PIN again.",
-        "pinMismatch": "Those did not match. Start again.",
-        "patternDraw": "Draw a pattern.",
-        "patternConfirm": "Draw the same pattern again.",
-        "patternMismatch": "Those did not match. Start again.",
-        "passkeyPrompt": "Your device will ask you to confirm.",
-        "passkeyAction": "Create passkey",
-        "enrollFailed": "Could not set that up. Check your password and try again.",
-        "passkeyFailure": {
-          "unsupported": "This device cannot use passkeys.",
-          "no-prf": "This authenticator cannot derive an unlock key, so it will not work here. Try another passkey.",
-          "cancelled": "Cancelled.",
-          "no-credential": "No passkey was created.",
-          "failed": "The passkey could not be created. Try again."
-        }
+        "title": "Quick unlock"
       },
-      "policy": {
-        "pin-too-short": "That PIN is too short.",
-        "pin-too-long": "That PIN is too long.",
-        "pin-not-numeric": "A PIN can only contain digits.",
-        "pin-too-simple": "That PIN is too easy to guess. Avoid repeats and runs like 123456.",
-        "pattern-too-short": "That pattern is too short.",
-        "pattern-too-long": "That pattern is too long.",
-        "pattern-repeats-node": "A pattern cannot reuse a point.",
-        "pattern-out-of-range": "That pattern is not valid.",
-        "pattern-too-simple": "That pattern is too easy to guess. Avoid straight lines and the outline of the square."
-      }
+      "usePassword": "Use password instead"
     },
     "runtimeTarget": {
       "active": "Active",
@@ -1861,14 +1869,6 @@
       "operationFailed": "Local account operation failed.",
       "switchPasswordLabel": "Password",
       "switchPasswordPlaceholder": "Password"
-    },
-    "lockScreen": {
-      "greeting": {
-        "morning": "Good morning",
-        "afternoon": "Good afternoon",
-        "evening": "Good evening",
-        "night": "Good night"
-      }
     }
   },
   "agentComposition": {
@@ -8025,6 +8025,10 @@
       "hint": "Narrow the list, then tap Done.",
       "title": "Filter and sort"
     },
+    "families": {
+      "refine": "Narrow the list",
+      "scope": "Where and who"
+    },
     "filters": {
       "label": "Filters",
       "options": {
@@ -8521,6 +8525,7 @@
         "agent": "Agent",
         "label": "Row details",
         "model": "Model",
+        "none": "None",
         "provider": "Provider",
         "workspace": "Workspace"
       },
@@ -8531,6 +8536,7 @@
       "newFolder": "New folder",
       "newFolderName": "New folder",
       "openSessions": "Open sessions",
+      "pinSidebar": "Keep open",
       "renameFolder": "Rename folder",
       "resizeHandle": "Resize sidebar",
       "searchAria": "Search conversations",
@@ -8603,6 +8609,7 @@
       "canvas": "Canvas",
       "createTeam": "Create team",
       "customize": {
+        "behaviour": "Behaviour",
         "description": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
         "dragHint": "Drag to reorder",
         "hidden": "Hidden",
@@ -8611,16 +8618,23 @@
         "more": "In More menu",
         "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
         "moveToMore": "Move to More",
+        "peek": "Reveal on edge hover",
+        "peekHint": "While the list is collapsed, resting the pointer on the seam floats it back over the conversation.",
         "pin": "Pin to rail",
         "pinItem": "Pin item",
         "pinned": "Pinned",
         "pinnedEmpty": "No pinned items — everything is in the More menu.",
         "restoreDefaults": "Restore defaults",
+        "searchButton": "Search rests as a button",
+        "searchButtonHint": "The search field opens into the row when you use it, and folds back to an icon when you are done.",
         "showItem": "Show",
         "side": "Rail position",
         "sideLeft": "Left",
         "sideRight": "Right",
-        "title": "Customize sidebar"
+        "title": "Customize sidebar",
+        "width": "Width",
+        "widthReset": "Reset",
+        "widthValue": "{width}px"
       },
       "devices": "Devices",
       "directMessages": "Chats",
@@ -8990,6 +9004,22 @@
     "shellLayoutNotice": {
       "description": "Panel toggles, theme, zoom and language now live in the Views menu in the title bar. The pet, OCR and clipboard buttons moved there too. Press ⌘B to show or hide the conversation list.",
       "title": "Layout simplified"
+    },
+    "sidebarUser": {
+      "lock": "Lock Cognia",
+      "lockFailed": "Cognia could not be locked.",
+      "manageAccounts": "Profiles",
+      "menuAria": "Account menu for {name}",
+      "noProfile": "No profile",
+      "petFailed": "The desktop pet could not be opened.",
+      "settings": "Settings",
+      "showPet": "Desktop pet",
+      "signIn": "Sign in to Cognia Cloud",
+      "standingCloud": "Cognia Cloud",
+      "standingLocal": "On this device",
+      "standingOrg": "Organization member",
+      "usage": "Usage",
+      "usageLeft": "{percent}% left"
     },
     "statusBar": {
       "awaitingApproval": "Awaiting approval",
@@ -13798,10 +13828,7 @@
         "pickedUp": "Picked up {identifier} from {column}."
       },
       "empty": "No issues",
-      "runningCard": "An agent is working on this issue",
-      "addIssue": "Add issue to {status}",
-      "collapseColumn": "Collapse {status}",
-      "expandColumn": "Expand {status}"
+      "runningCard": "An agent is working on this issue"
     },
     "bulk": {
       "addLabel": "Add label",
@@ -27578,6 +27605,32 @@
       },
       "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
       "nav": {
+        "groups": {
+          "behaviorGroup": "Behavior",
+          "runtimeGroup": "Runtime"
+        },
+        "items": {
+          "a2ui": {
+            "description": "Bridge tools for agent-driven mini-apps",
+            "label": "A2UI bridge"
+          },
+          "defaults": {
+            "description": "Model, permissions, prompts, and response behavior",
+            "label": "Defaults"
+          },
+          "permissions": {
+            "description": "Tool access, approval rules, and automatic decisions",
+            "label": "Permissions & tools"
+          },
+          "sessions": {
+            "description": "Stored chats and native SDK sessions",
+            "label": "Sessions"
+          },
+          "sidecar": {
+            "description": "Status, capabilities, and SDK diagnostics",
+            "label": "Sidecar"
+          }
+        },
         "mobileTrigger": "Sections",
         "title": "Agent runtime settings"
       },
@@ -28410,6 +28463,54 @@
         "importTitle": "Import from VSCode",
         "packsTitle": "Theme packs"
       },
+      "lockScreen": {
+        "avatarHint": "On a shared or public machine, the avatar is a face and a name to anyone walking past.",
+        "avatarLabel": "Show the account avatar",
+        "backdrop": {
+          "pinned": "A specific wallpaper",
+          "solid": "Solid colour",
+          "theme": "Plain theme",
+          "wallpaper": "Follow the app wallpaper"
+        },
+        "backdropLabel": "Backdrop",
+        "blurLabel": "Backdrop blur",
+        "clock": {
+          "none": "Hidden",
+          "time": "Time",
+          "timeAndDate": "Time and date"
+        },
+        "clockLabel": "Clock",
+        "customGreetingLabel": "Greeting text",
+        "description": "How the screen looks while the app is locked. The unlock card always keeps its own surface, so nothing here can make it harder to read.",
+        "dimHint": "Darkens the backdrop so the unlock card stays readable.",
+        "dimLabel": "Backdrop dim",
+        "dimTooLow": "A bright wallpaper may make the unlock card hard to read at this level.",
+        "greeting": {
+          "custom": "Custom text",
+          "none": "None",
+          "timeOfDay": "By time of day"
+        },
+        "greetingLabel": "Greeting",
+        "hourCycle": {
+          "auto": "Match language",
+          "h12": "12-hour",
+          "h23": "24-hour"
+        },
+        "hourCycleLabel": "Hour format",
+        "motion": {
+          "aurora": "Aurora",
+          "drift": "Slow drift",
+          "none": "Still"
+        },
+        "motionLabel": "Ambient motion",
+        "pinnedEmpty": "Add an image or gradient wallpaper first.",
+        "pinnedLabel": "Wallpaper",
+        "pinnedPlaceholder": "Choose a wallpaper",
+        "respectMotionHint": "Hold the lock screen still when the system asks for less motion.",
+        "respectMotionLabel": "Respect reduced motion",
+        "solidLabel": "Colour",
+        "title": "Lock screen"
+      },
       "messageDisplay": {
         "actions": {
           "all": "All actions",
@@ -28765,6 +28866,76 @@
         },
         "blurLabel": "Blur",
         "browse": "Browse files",
+        "daily": {
+          "autoApplyHint": "Make each new image the active wallpaper as it arrives.",
+          "autoApplyLabel": "Apply automatically",
+          "bing": {
+            "marketAuto": "Match app language",
+            "marketLabel": "Region",
+            "resolution": {
+              "1080p": "1080p (smaller)",
+              "uhd": "4K (several MB per day)"
+            },
+            "resolutionLabel": "Resolution"
+          },
+          "custom": {
+            "baseUrlHint": "Prepended when the response returns a relative image path.",
+            "baseUrlLabel": "Base URL (optional)",
+            "imagePathHint": "Where the image URL sits in the response, for example images.0.url",
+            "imagePathLabel": "Path to the image URL",
+            "kind": {
+              "image": "The URL is the image",
+              "json": "The URL returns JSON"
+            },
+            "kindLabel": "Response type",
+            "titlePathLabel": "Path to the title (optional)",
+            "urlLabel": "Endpoint"
+          },
+          "enableAria": "Enable daily wallpaper",
+          "error": {
+            "bad-response": "The source replied with something this app could not read.",
+            "blocked-host": "That address is not allowed. Private, local and metadata addresses are refused.",
+            "network": "Could not reach the source. It will retry shortly.",
+            "no-image": "The response contained no image URL.",
+            "no-transport": "This build has no way to make network requests.",
+            "not-an-image": "What came back was not an image.",
+            "rate-limited": "The source is rate limiting requests. Try again later, or add your own API key.",
+            "storage-failed": "The image could not be saved to this device.",
+            "too-large": "The image was larger than the 12 MB limit.",
+            "unsupported-media": "Today's entry is not an image, so there is nothing to apply."
+          },
+          "fetchNow": "Fetch now",
+          "fetching": "Fetching…",
+          "hint": "Fetch a new background image on a schedule.",
+          "keepHint": "Older fetched wallpapers are deleted. Your own uploads are never touched.",
+          "keepLabel": "Keep",
+          "lastFetched": "Last updated {when}",
+          "nasa": {
+            "apiKeyHint": "Without a key, requests share a low public rate limit with every other DEMO_KEY caller. A free key from api.nasa.gov removes that.",
+            "apiKeyLabel": "API key",
+            "apiKeyPlaceholder": "Optional, uses DEMO_KEY",
+            "preferHdHint": "Higher quality, often 3-6 MB per day.",
+            "preferHdLabel": "Prefer the HD image"
+          },
+          "networkNotice": "This is the only appearance setting that contacts the internet. Nothing is fetched until you turn it on, and only the source you pick below is contacted.",
+          "neverFetched": "Not fetched yet.",
+          "provider": {
+            "bing": "Bing image of the day",
+            "custom": "Custom URL",
+            "nasaApod": "NASA Astronomy Picture of the Day"
+          },
+          "providerHint": {
+            "bing": "Bing's public homepage image. No account or key needed.",
+            "custom": "Your own endpoint. It may not point at a private or local address.",
+            "nasaApod": "NASA's daily astronomy image. Works without a key, at a shared rate limit."
+          },
+          "providerLabel": "Source",
+          "refreshLabel": "Check every",
+          "refreshOption": "{hours, plural, =1 {1 hour} other {# hours}}",
+          "title": "Daily wallpaper",
+          "wifiOnlyHint": "Hold the download when the system reports cellular or data-saver.",
+          "wifiOnlyLabel": "Skip on metered connections"
+        },
         "deleteLabel": "Delete wallpaper",
         "description": "Apply an image, gradient, or solid color as the background. Built-in presets are pre-loaded; uploads stay on your device.",
         "dropHint": "Drop an image here, or click below",
@@ -28838,6 +29009,64 @@
         "positionTile": "Tile",
         "readabilityHint": "How much of the wallpaper reaches the text in front of it.",
         "readabilityTitle": "Readability",
+        "rotation": {
+          "degraded": {
+            "reduced-motion": "Reduced motion is on, so wallpapers change instantly. Turn off “Respect reduced motion” below to keep the animation.",
+            "scrim": "The readability scrim needs the same layer a crossfade does, so this plays as a fade. Raise opacity above 50% to get the full transition back."
+          },
+          "direction": {
+            "down": "Downwards",
+            "left": "Leftwards",
+            "right": "Rightwards",
+            "up": "Upwards"
+          },
+          "directionLabel": "Direction",
+          "durationLabel": "Duration",
+          "durationValue": "{ms} ms",
+          "easing": {
+            "ease": "Ease",
+            "easeIn": "Ease in",
+            "easeInOut": "Ease in and out",
+            "easeOut": "Ease out",
+            "linear": "Linear"
+          },
+          "easingLabel": "Easing",
+          "enableAria": "Enable wallpaper rotation",
+          "hint": "Cycle the background through several wallpapers instead of one.",
+          "intervalLabel": "Every",
+          "intervalOption": "{minutes, plural, =1 {1 minute} other {# minutes}}",
+          "needsTwo": "Add a second image or gradient wallpaper before rotation has anywhere to go.",
+          "order": {
+            "sequential": "In order",
+            "shuffle": "Shuffle"
+          },
+          "orderLabel": "Order",
+          "pauseHiddenHint": "Hold the timer while the window is in the background.",
+          "pauseHiddenLabel": "Pause when hidden",
+          "playlistAllHint": "{count, plural, =0 {No wallpapers are eligible yet.} =1 {Every eligible wallpaper (1).} other {Every eligible wallpaper (#).}}",
+          "playlistLabel": "In rotation",
+          "playlistSomeHint": "{count, plural, =0 {Nothing selected, so rotation has nowhere to go.} =1 {1 wallpaper selected.} other {# wallpapers selected.}}",
+          "playlistUseAll": "Use all",
+          "reducedMotionHint": "Change wallpapers instantly when the system asks for less motion.",
+          "reducedMotionLabel": "Respect reduced motion",
+          "title": "Rotation",
+          "transition": {
+            "crossfade": "Crossfade",
+            "dissolve": "Dissolve",
+            "fade": "Fade",
+            "kenBurns": "Ken Burns",
+            "none": "Instant",
+            "slide": "Slide",
+            "zoom": "Zoom"
+          },
+          "transitionLabel": "Transition",
+          "trigger": {
+            "daily": "Once a day",
+            "interval": "On a timer",
+            "launch": "Each time the app starts"
+          },
+          "triggerLabel": "Advance"
+        },
         "scope": {
           "all": {
             "desc": "Everything including sidebar",
@@ -28884,183 +29113,7 @@
           "savedOnDesktop": "This wallpaper's image lives in the desktop app's files. Open it there, or delete the entry to tidy up the gallery."
         },
         "uploadHint": "Drop an image here or browse",
-        "uploading": "Uploading…",
-        "rotation": {
-          "title": "Rotation",
-          "hint": "Cycle the background through several wallpapers instead of one.",
-          "enableAria": "Enable wallpaper rotation",
-          "needsTwo": "Add a second image or gradient wallpaper before rotation has anywhere to go.",
-          "triggerLabel": "Advance",
-          "trigger": {
-            "interval": "On a timer",
-            "daily": "Once a day",
-            "launch": "Each time the app starts"
-          },
-          "intervalLabel": "Every",
-          "intervalOption": "{minutes, plural, =1 {1 minute} other {# minutes}}",
-          "orderLabel": "Order",
-          "order": {
-            "sequential": "In order",
-            "shuffle": "Shuffle"
-          },
-          "transitionLabel": "Transition",
-          "transition": {
-            "none": "Instant",
-            "fade": "Fade",
-            "crossfade": "Crossfade",
-            "dissolve": "Dissolve",
-            "slide": "Slide",
-            "zoom": "Zoom",
-            "kenBurns": "Ken Burns"
-          },
-          "directionLabel": "Direction",
-          "direction": {
-            "left": "Leftwards",
-            "right": "Rightwards",
-            "up": "Upwards",
-            "down": "Downwards"
-          },
-          "easingLabel": "Easing",
-          "easing": {
-            "linear": "Linear",
-            "ease": "Ease",
-            "easeIn": "Ease in",
-            "easeOut": "Ease out",
-            "easeInOut": "Ease in and out"
-          },
-          "durationLabel": "Duration",
-          "durationValue": "{ms} ms",
-          "degraded": {
-            "reduced-motion": "Reduced motion is on, so wallpapers change instantly. Turn off “Respect reduced motion” below to keep the animation.",
-            "scrim": "The readability scrim needs the same layer a crossfade does, so this plays as a fade. Raise opacity above 50% to get the full transition back."
-          },
-          "playlistLabel": "In rotation",
-          "playlistUseAll": "Use all",
-          "playlistAllHint": "{count, plural, =0 {No wallpapers are eligible yet.} =1 {Every eligible wallpaper (1).} other {Every eligible wallpaper (#).}}",
-          "playlistSomeHint": "{count, plural, =0 {Nothing selected, so rotation has nowhere to go.} =1 {1 wallpaper selected.} other {# wallpapers selected.}}",
-          "pauseHiddenLabel": "Pause when hidden",
-          "pauseHiddenHint": "Hold the timer while the window is in the background.",
-          "reducedMotionLabel": "Respect reduced motion",
-          "reducedMotionHint": "Change wallpapers instantly when the system asks for less motion."
-        },
-        "daily": {
-          "title": "Daily wallpaper",
-          "hint": "Fetch a new background image on a schedule.",
-          "enableAria": "Enable daily wallpaper",
-          "networkNotice": "This is the only appearance setting that contacts the internet. Nothing is fetched until you turn it on, and only the source you pick below is contacted.",
-          "providerLabel": "Source",
-          "provider": {
-            "bing": "Bing image of the day",
-            "nasaApod": "NASA Astronomy Picture of the Day",
-            "custom": "Custom URL"
-          },
-          "providerHint": {
-            "bing": "Bing's public homepage image. No account or key needed.",
-            "nasaApod": "NASA's daily astronomy image. Works without a key, at a shared rate limit.",
-            "custom": "Your own endpoint. It may not point at a private or local address."
-          },
-          "bing": {
-            "marketLabel": "Region",
-            "marketAuto": "Match app language",
-            "resolutionLabel": "Resolution",
-            "resolution": {
-              "1080p": "1080p (smaller)",
-              "uhd": "4K (several MB per day)"
-            }
-          },
-          "nasa": {
-            "apiKeyLabel": "API key",
-            "apiKeyPlaceholder": "Optional, uses DEMO_KEY",
-            "apiKeyHint": "Without a key, requests share a low public rate limit with every other DEMO_KEY caller. A free key from api.nasa.gov removes that.",
-            "preferHdLabel": "Prefer the HD image",
-            "preferHdHint": "Higher quality, often 3-6 MB per day."
-          },
-          "custom": {
-            "urlLabel": "Endpoint",
-            "kindLabel": "Response type",
-            "kind": {
-              "image": "The URL is the image",
-              "json": "The URL returns JSON"
-            },
-            "imagePathLabel": "Path to the image URL",
-            "imagePathHint": "Where the image URL sits in the response, for example images.0.url",
-            "titlePathLabel": "Path to the title (optional)",
-            "baseUrlLabel": "Base URL (optional)",
-            "baseUrlHint": "Prepended when the response returns a relative image path."
-          },
-          "refreshLabel": "Check every",
-          "refreshOption": "{hours, plural, =1 {1 hour} other {# hours}}",
-          "keepLabel": "Keep",
-          "keepHint": "Older fetched wallpapers are deleted. Your own uploads are never touched.",
-          "autoApplyLabel": "Apply automatically",
-          "autoApplyHint": "Make each new image the active wallpaper as it arrives.",
-          "wifiOnlyLabel": "Skip on metered connections",
-          "wifiOnlyHint": "Hold the download when the system reports cellular or data-saver.",
-          "fetchNow": "Fetch now",
-          "fetching": "Fetching…",
-          "lastFetched": "Last updated {when}",
-          "neverFetched": "Not fetched yet.",
-          "error": {
-            "network": "Could not reach the source. It will retry shortly.",
-            "blocked-host": "That address is not allowed. Private, local and metadata addresses are refused.",
-            "bad-response": "The source replied with something this app could not read.",
-            "no-image": "The response contained no image URL.",
-            "not-an-image": "What came back was not an image.",
-            "too-large": "The image was larger than the 12 MB limit.",
-            "rate-limited": "The source is rate limiting requests. Try again later, or add your own API key.",
-            "unsupported-media": "Today's entry is not an image, so there is nothing to apply.",
-            "storage-failed": "The image could not be saved to this device.",
-            "no-transport": "This build has no way to make network requests."
-          }
-        }
-      },
-      "lockScreen": {
-        "title": "Lock screen",
-        "description": "How the screen looks while the app is locked. The unlock card always keeps its own surface, so nothing here can make it harder to read.",
-        "backdropLabel": "Backdrop",
-        "backdrop": {
-          "theme": "Plain theme",
-          "wallpaper": "Follow the app wallpaper",
-          "pinned": "A specific wallpaper",
-          "solid": "Solid colour"
-        },
-        "pinnedLabel": "Wallpaper",
-        "pinnedPlaceholder": "Choose a wallpaper",
-        "pinnedEmpty": "Add an image or gradient wallpaper first.",
-        "solidLabel": "Colour",
-        "blurLabel": "Backdrop blur",
-        "dimLabel": "Backdrop dim",
-        "dimHint": "Darkens the backdrop so the unlock card stays readable.",
-        "dimTooLow": "A bright wallpaper may make the unlock card hard to read at this level.",
-        "clockLabel": "Clock",
-        "clock": {
-          "none": "Hidden",
-          "time": "Time",
-          "timeAndDate": "Time and date"
-        },
-        "hourCycleLabel": "Hour format",
-        "hourCycle": {
-          "auto": "Match language",
-          "h12": "12-hour",
-          "h23": "24-hour"
-        },
-        "greetingLabel": "Greeting",
-        "greeting": {
-          "none": "None",
-          "timeOfDay": "By time of day",
-          "custom": "Custom text"
-        },
-        "customGreetingLabel": "Greeting text",
-        "motionLabel": "Ambient motion",
-        "motion": {
-          "none": "Still",
-          "drift": "Slow drift",
-          "aurora": "Aurora"
-        },
-        "respectMotionLabel": "Respect reduced motion",
-        "respectMotionHint": "Hold the lock screen still when the system asks for less motion.",
-        "avatarLabel": "Show the account avatar",
-        "avatarHint": "On a shared or public machine, the avatar is a face and a name to anyone walking past."
+        "uploading": "Uploading…"
       }
     },
     "artifacts": {

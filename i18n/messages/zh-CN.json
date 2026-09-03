@@ -1671,6 +1671,14 @@
       "received": "已收到邀请。登录后即可加入。",
       "title": "邀请"
     },
+    "lockScreen": {
+      "greeting": {
+        "afternoon": "下午好",
+        "evening": "晚上好",
+        "morning": "早上好",
+        "night": "夜深了"
+      }
+    },
     "manage": {
       "activeAccountLabel": "当前账户",
       "activeBadge": "当前",
@@ -1754,87 +1762,87 @@
     "quickUnlock": {
       "attemptsLeft": "{count, plural, =0 {已无剩余次数} other {还剩 # 次机会，用尽后该方式将被停用}}",
       "failure": {
-        "wrong-secret": "不匹配，请重试。",
+        "failed": "出错了。请重试，或改用密码。",
         "locked-out": "该方式已停用，请使用密码。",
         "not-enrolled": "本设备未设置该方式。",
         "unavailable": "此处无法使用该方式。",
-        "failed": "出错了。请重试，或改用密码。"
+        "wrong-secret": "不匹配，请重试。"
       },
       "lockedOut": "{method} 因尝试次数过多已停用。使用密码解锁后可重新启用。",
       "method": {
-        "pin": "PIN 码",
+        "passkey": "通行密钥",
         "pattern": "图案",
-        "passkey": "通行密钥"
+        "pin": "PIN 码"
       },
       "methodLabel": "解锁方式",
       "panelLabel": "快速解锁",
       "passkeyAction": "使用通行密钥解锁",
       "passkeyFailure": {
-        "unsupported": "此设备不支持通行密钥。",
-        "no-prf": "该通行密钥无法用于解锁本应用，请使用密码。",
         "cancelled": "已取消。",
+        "failed": "通行密钥校验失败。请重试，或改用密码。",
         "no-credential": "未提供通行密钥。",
-        "failed": "通行密钥校验失败。请重试，或改用密码。"
+        "no-prf": "该通行密钥无法用于解锁本应用，请使用密码。",
+        "unsupported": "此设备不支持通行密钥。"
       },
       "passkeyWaiting": "等待身份验证器…",
       "pattern": {
+        "clear": "重新绘制",
         "label": "解锁图案",
         "node": "第 {index} 个点",
         "progress": "{count, plural, =0 {绘制你的图案，至少 {min} 个点。} other {已连 # 个点，至少需要 {min} 个。}}",
-        "clear": "重新绘制",
         "submit": "解锁"
       },
       "pin": {
-        "label": "PIN 数字键盘",
-        "entered": "{count, plural, =0 {尚未输入} other {已输入 # 位}}",
-        "clear": "清空",
         "backspace": "删除最后一位",
+        "clear": "清空",
+        "entered": "{count, plural, =0 {尚未输入} other {已输入 # 位}}",
+        "label": "PIN 数字键盘",
         "submit": "解锁"
       },
-      "usePassword": "改用密码",
+      "policy": {
+        "pattern-out-of-range": "该图案无效。",
+        "pattern-repeats-node": "图案不能重复经过同一个点。",
+        "pattern-too-long": "图案太长。",
+        "pattern-too-short": "图案太短。",
+        "pattern-too-simple": "这个图案太容易猜到。避免直线和沿正方形边缘的走法。",
+        "pin-not-numeric": "PIN 码只能包含数字。",
+        "pin-too-long": "PIN 码太长。",
+        "pin-too-short": "PIN 码太短。",
+        "pin-too-simple": "这个 PIN 码太容易猜到。避免重复数字和 123456 这类连续数字。"
+      },
       "settings": {
-        "title": "快速解锁",
-        "description": "在本设备上添加更快的解锁方式。密码依然可用，并且只有密码能找回账户。",
-        "none": "本设备尚未设置快速解锁。",
         "active": "可用",
+        "add": "添加{method}",
+        "cancel": "取消",
+        "confirm": "确认",
+        "continue": "继续",
+        "description": "在本设备上添加更快的解锁方式。密码依然可用，并且只有密码能找回账户。",
+        "enrollFailed": "设置失败。请检查密码后重试。",
         "lockedOut": "尝试次数过多，已停用",
+        "none": "本设备尚未设置快速解锁。",
+        "passkeyAction": "创建通行密钥",
+        "passkeyFailure": {
+          "cancelled": "已取消。",
+          "failed": "通行密钥创建失败，请重试。",
+          "no-credential": "未创建通行密钥。",
+          "no-prf": "该身份验证器无法派生解锁密钥，因此在这里不可用。请换一个通行密钥。",
+          "unsupported": "此设备不支持通行密钥。"
+        },
+        "passkeyPrompt": "设备将要求你确认。",
+        "passwordHint": "添加、更换或重新启用时需要验证。添加一种方式等于为本账户新增一个入口。",
+        "passwordLabel": "账户密码",
+        "patternConfirm": "再次绘制相同的图案。",
+        "patternDraw": "绘制一个图案。",
+        "patternMismatch": "两次绘制不一致，请重新开始。",
+        "pinConfirm": "再次输入相同的 PIN 码。",
+        "pinEnter": "设置一个 PIN 码。",
+        "pinMismatch": "两次输入不一致，请重新开始。",
         "reenable": "重新启用",
         "remove": "移除{method}",
-        "add": "添加{method}",
         "replace": "更换{method}",
-        "cancel": "取消",
-        "continue": "继续",
-        "confirm": "确认",
-        "passwordLabel": "账户密码",
-        "passwordHint": "添加、更换或重新启用时需要验证。添加一种方式等于为本账户新增一个入口。",
-        "pinEnter": "设置一个 PIN 码。",
-        "pinConfirm": "再次输入相同的 PIN 码。",
-        "pinMismatch": "两次输入不一致，请重新开始。",
-        "patternDraw": "绘制一个图案。",
-        "patternConfirm": "再次绘制相同的图案。",
-        "patternMismatch": "两次绘制不一致，请重新开始。",
-        "passkeyPrompt": "设备将要求你确认。",
-        "passkeyAction": "创建通行密钥",
-        "enrollFailed": "设置失败。请检查密码后重试。",
-        "passkeyFailure": {
-          "unsupported": "此设备不支持通行密钥。",
-          "no-prf": "该身份验证器无法派生解锁密钥，因此在这里不可用。请换一个通行密钥。",
-          "cancelled": "已取消。",
-          "no-credential": "未创建通行密钥。",
-          "failed": "通行密钥创建失败，请重试。"
-        }
+        "title": "快速解锁"
       },
-      "policy": {
-        "pin-too-short": "PIN 码太短。",
-        "pin-too-long": "PIN 码太长。",
-        "pin-not-numeric": "PIN 码只能包含数字。",
-        "pin-too-simple": "这个 PIN 码太容易猜到。避免重复数字和 123456 这类连续数字。",
-        "pattern-too-short": "图案太短。",
-        "pattern-too-long": "图案太长。",
-        "pattern-repeats-node": "图案不能重复经过同一个点。",
-        "pattern-out-of-range": "该图案无效。",
-        "pattern-too-simple": "这个图案太容易猜到。避免直线和沿正方形边缘的走法。"
-      }
+      "usePassword": "改用密码"
     },
     "runtimeTarget": {
       "active": "当前",
@@ -1861,14 +1869,6 @@
       "operationFailed": "本地账户操作失败。",
       "switchPasswordLabel": "密码",
       "switchPasswordPlaceholder": "密码"
-    },
-    "lockScreen": {
-      "greeting": {
-        "morning": "早上好",
-        "afternoon": "下午好",
-        "evening": "晚上好",
-        "night": "夜深了"
-      }
     }
   },
   "agentComposition": {
@@ -8025,6 +8025,10 @@
       "hint": "缩小列表范围后点击「完成」。",
       "title": "筛选与排序"
     },
+    "families": {
+      "refine": "缩小范围",
+      "scope": "归属与来源"
+    },
     "filters": {
       "label": "筛选",
       "options": {
@@ -8521,6 +8525,7 @@
         "agent": "Agent",
         "label": "行详情",
         "model": "模型",
+        "none": "无",
         "provider": "提供商",
         "workspace": "工作区"
       },
@@ -8531,6 +8536,7 @@
       "newFolder": "新建文件夹",
       "newFolderName": "新建文件夹",
       "openSessions": "打开会话列表",
+      "pinSidebar": "固定",
       "renameFolder": "重命名文件夹",
       "resizeHandle": "调整侧边栏宽度",
       "searchAria": "搜索对话",
@@ -8603,6 +8609,7 @@
       "canvas": "画布",
       "createTeam": "创建团队",
       "customize": {
+        "behaviour": "行为",
         "description": "把常用项固定到导航栏，其余收进「更多」菜单。可拖拽排序，或隐藏从不使用的项。",
         "dragHint": "拖拽以排序",
         "hidden": "已隐藏",
@@ -8611,16 +8618,23 @@
         "more": "更多菜单中",
         "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
         "moveToMore": "移至更多",
+        "peek": "边缘悬停时展开",
+        "peekHint": "列表折叠后，把指针停在接缝上即可让它浮回对话之上。",
         "pin": "固定到导航栏",
         "pinItem": "固定项目",
         "pinned": "已固定",
         "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
         "restoreDefaults": "恢复默认",
+        "searchButton": "搜索以按钮形态停靠",
+        "searchButtonHint": "使用时搜索框会展开占满整行，用完后收回成一个图标。",
         "showItem": "显示",
         "side": "导航栏位置",
         "sideLeft": "左侧",
         "sideRight": "右侧",
-        "title": "自定义侧边栏"
+        "title": "自定义侧边栏",
+        "width": "宽度",
+        "widthReset": "恢复默认",
+        "widthValue": "{width}px"
       },
       "devices": "设备",
       "directMessages": "对话",
@@ -8990,6 +9004,22 @@
     "shellLayoutNotice": {
       "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
       "title": "布局已简化"
+    },
+    "sidebarUser": {
+      "lock": "锁定 Cognia",
+      "lockFailed": "无法锁定 Cognia。",
+      "manageAccounts": "配置档案",
+      "menuAria": "{name} 的账户菜单",
+      "noProfile": "尚未创建档案",
+      "petFailed": "无法打开桌面宠物。",
+      "settings": "设置",
+      "showPet": "桌面宠物",
+      "signIn": "登录 Cognia 云",
+      "standingCloud": "Cognia 云",
+      "standingLocal": "仅本机",
+      "standingOrg": "组织成员",
+      "usage": "用量",
+      "usageLeft": "剩余 {percent}%"
     },
     "statusBar": {
       "awaitingApproval": "等待批准",
@@ -13798,10 +13828,7 @@
         "pickedUp": "已从{column}拾起 {identifier}。"
       },
       "empty": "暂无议题",
-      "runningCard": "有 Agent 正在处理这个议题",
-      "addIssue": "在「{status}」中新建议题",
-      "collapseColumn": "折叠{status}",
-      "expandColumn": "展开{status}"
+      "runningCard": "有 Agent 正在处理这个议题"
     },
     "bulk": {
       "addLabel": "添加标签",
@@ -27578,6 +27605,32 @@
       },
       "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
       "nav": {
+        "groups": {
+          "behaviorGroup": "行为",
+          "runtimeGroup": "运行时"
+        },
+        "items": {
+          "a2ui": {
+            "description": "供智能体驱动小应用的桥接工具",
+            "label": "A2UI 桥接"
+          },
+          "defaults": {
+            "description": "模型、权限、提示词与回复行为",
+            "label": "默认值"
+          },
+          "permissions": {
+            "description": "工具访问、审批规则与自动判定",
+            "label": "权限与工具"
+          },
+          "sessions": {
+            "description": "已存储的聊天与原生 SDK 会话",
+            "label": "会话"
+          },
+          "sidecar": {
+            "description": "状态、能力与 SDK 诊断",
+            "label": "侧载诊断"
+          }
+        },
         "mobileTrigger": "分区",
         "title": "智能体运行时设置"
       },
@@ -28410,6 +28463,54 @@
         "importTitle": "从 VSCode 导入",
         "packsTitle": "主题包"
       },
+      "lockScreen": {
+        "avatarHint": "在共用或公共设备上，头像等于把姓名和面孔展示给任何路过的人。",
+        "avatarLabel": "显示账户头像",
+        "backdrop": {
+          "pinned": "指定一张壁纸",
+          "solid": "纯色",
+          "theme": "纯主题色",
+          "wallpaper": "跟随应用壁纸"
+        },
+        "backdropLabel": "背景",
+        "blurLabel": "背景模糊",
+        "clock": {
+          "none": "隐藏",
+          "time": "仅时间",
+          "timeAndDate": "时间与日期"
+        },
+        "clockLabel": "时钟",
+        "customGreetingLabel": "问候语文字",
+        "description": "应用锁定时的界面外观。解锁卡片始终保持独立的背景层，因此这里的任何设置都不会让它变得难以辨认。",
+        "dimHint": "压暗背景，保证解锁卡片清晰可读。",
+        "dimLabel": "背景压暗",
+        "dimTooLow": "当前压暗程度较低，明亮的壁纸可能让解锁卡片难以辨认。",
+        "greeting": {
+          "custom": "自定义文字",
+          "none": "不显示",
+          "timeOfDay": "按时段"
+        },
+        "greetingLabel": "问候语",
+        "hourCycle": {
+          "auto": "跟随语言",
+          "h12": "12 小时制",
+          "h23": "24 小时制"
+        },
+        "hourCycleLabel": "小时制",
+        "motion": {
+          "aurora": "极光",
+          "drift": "缓慢漂移",
+          "none": "静止"
+        },
+        "motionLabel": "氛围动效",
+        "pinnedEmpty": "请先添加图片或渐变壁纸。",
+        "pinnedLabel": "壁纸",
+        "pinnedPlaceholder": "选择一张壁纸",
+        "respectMotionHint": "当系统要求减少动态效果时，让锁屏保持静止。",
+        "respectMotionLabel": "尊重减少动态效果",
+        "solidLabel": "颜色",
+        "title": "锁屏"
+      },
       "messageDisplay": {
         "actions": {
           "all": "全部操作",
@@ -28765,6 +28866,76 @@
         },
         "blurLabel": "模糊",
         "browse": "浏览文件",
+        "daily": {
+          "autoApplyHint": "每次取到新图后立即设为当前壁纸。",
+          "autoApplyLabel": "自动应用",
+          "bing": {
+            "marketAuto": "跟随应用语言",
+            "marketLabel": "地区",
+            "resolution": {
+              "1080p": "1080p（体积较小）",
+              "uhd": "4K（每天数 MB）"
+            },
+            "resolutionLabel": "分辨率"
+          },
+          "custom": {
+            "baseUrlHint": "当响应返回相对路径时，会拼接到前面。",
+            "baseUrlLabel": "基础地址（可选）",
+            "imagePathHint": "图片 URL 在响应中的位置，例如 images.0.url",
+            "imagePathLabel": "图片地址所在路径",
+            "kind": {
+              "image": "该地址本身就是图片",
+              "json": "该地址返回 JSON"
+            },
+            "kindLabel": "响应类型",
+            "titlePathLabel": "标题所在路径（可选）",
+            "urlLabel": "接口地址"
+          },
+          "enableAria": "启用每日壁纸",
+          "error": {
+            "bad-response": "来源返回了应用无法解析的内容。",
+            "blocked-host": "该地址不被允许。内网、本机与元数据地址会被拒绝。",
+            "network": "无法连接到该来源，稍后会自动重试。",
+            "no-image": "响应中没有图片地址。",
+            "no-transport": "当前构建没有可用的网络传输方式。",
+            "not-an-image": "返回的内容不是图片。",
+            "rate-limited": "来源正在限流。请稍后重试，或填入你自己的 API 密钥。",
+            "storage-failed": "图片无法保存到本设备。",
+            "too-large": "图片超过了 12 MB 的上限。",
+            "unsupported-media": "今天的内容不是图片，因此没有可应用的壁纸。"
+          },
+          "fetchNow": "立即获取",
+          "fetching": "获取中…",
+          "hint": "按计划自动获取一张新的背景图。",
+          "keepHint": "较旧的自动获取壁纸会被删除，你自己上传的壁纸不受影响。",
+          "keepLabel": "保留数量",
+          "lastFetched": "上次更新于 {when}",
+          "nasa": {
+            "apiKeyHint": "不填密钥时，请求会与其他所有 DEMO_KEY 调用方共享一个很低的公共限额。在 api.nasa.gov 免费申请一个即可解除。",
+            "apiKeyLabel": "API 密钥",
+            "apiKeyPlaceholder": "可留空，将使用 DEMO_KEY",
+            "preferHdHint": "画质更好，但每天通常 3-6 MB。",
+            "preferHdLabel": "优先使用高清原图"
+          },
+          "networkNotice": "这是外观设置中唯一会联网的功能。开启前不会发起任何请求，且只会访问你在下方选择的来源。",
+          "neverFetched": "尚未获取过。",
+          "provider": {
+            "bing": "Bing 每日一图",
+            "custom": "自定义 URL",
+            "nasaApod": "NASA 每日天文图"
+          },
+          "providerHint": {
+            "bing": "Bing 公开的首页图片，无需账号或密钥。",
+            "custom": "你自己的接口。不允许指向内网或本机地址。",
+            "nasaApod": "NASA 每日天文图。不填密钥也能用，但共享较低的公共限额。"
+          },
+          "providerLabel": "来源",
+          "refreshLabel": "检查间隔",
+          "refreshOption": "{hours, plural, other {# 小时}}",
+          "title": "每日壁纸",
+          "wifiOnlyHint": "当系统报告为蜂窝网络或省流量模式时暂缓下载。",
+          "wifiOnlyLabel": "计费网络下跳过"
+        },
         "deleteLabel": "删除壁纸",
         "description": "把图片、渐变或纯色用作背景。内置预设已自带，上传的文件保留在本机。",
         "dropHint": "把图片拖到这里，或点击下方按钮",
@@ -28838,6 +29009,64 @@
         "positionTile": "平铺",
         "readabilityHint": "决定壁纸有多少会透到前景文字背后。",
         "readabilityTitle": "可读性",
+        "rotation": {
+          "degraded": {
+            "reduced-motion": "系统已开启「减少动态效果」，因此壁纸会直接切换。关闭下方的「尊重减少动态效果」即可保留动画。",
+            "scrim": "可读性遮罩与交叉淡化需要同一个图层，因此这里退化为淡入淡出。把不透明度调到 50% 以上即可恢复完整效果。"
+          },
+          "direction": {
+            "down": "向下",
+            "left": "向左",
+            "right": "向右",
+            "up": "向上"
+          },
+          "directionLabel": "方向",
+          "durationLabel": "时长",
+          "durationValue": "{ms} 毫秒",
+          "easing": {
+            "ease": "标准",
+            "easeIn": "缓入",
+            "easeInOut": "缓入缓出",
+            "easeOut": "缓出",
+            "linear": "线性"
+          },
+          "easingLabel": "缓动曲线",
+          "enableAria": "启用壁纸轮播",
+          "hint": "让背景在多张壁纸之间循环，而不是固定一张。",
+          "intervalLabel": "间隔",
+          "intervalOption": "{minutes, plural, other {# 分钟}}",
+          "needsTwo": "再添加一张图片或渐变壁纸，轮播才有可切换的对象。",
+          "order": {
+            "sequential": "按顺序",
+            "shuffle": "随机"
+          },
+          "orderLabel": "顺序",
+          "pauseHiddenHint": "窗口切到后台时暂停计时。",
+          "pauseHiddenLabel": "隐藏时暂停",
+          "playlistAllHint": "{count, plural, =0 {目前没有符合条件的壁纸。} other {全部符合条件的壁纸（# 张）。}}",
+          "playlistLabel": "参与轮播",
+          "playlistSomeHint": "{count, plural, =0 {未选择任何壁纸，轮播无处可去。} other {已选择 # 张壁纸。}}",
+          "playlistUseAll": "全部使用",
+          "reducedMotionHint": "当系统要求减少动态效果时，直接切换壁纸。",
+          "reducedMotionLabel": "尊重减少动态效果",
+          "title": "轮播",
+          "transition": {
+            "crossfade": "交叉淡化",
+            "dissolve": "溶解",
+            "fade": "淡入淡出",
+            "kenBurns": "缓慢平移（Ken Burns）",
+            "none": "立即切换",
+            "slide": "滑动",
+            "zoom": "缩放"
+          },
+          "transitionLabel": "切换效果",
+          "trigger": {
+            "daily": "每天一次",
+            "interval": "按定时器",
+            "launch": "每次启动应用"
+          },
+          "triggerLabel": "切换时机"
+        },
         "scope": {
           "all": {
             "desc": "包含侧栏在内的全部界面",
@@ -28884,183 +29113,7 @@
           "savedOnDesktop": "这张壁纸的图片保存在桌面端的文件里。请在桌面端使用，或删除该条目来整理图库。"
         },
         "uploadHint": "把图片拖到这里或点击浏览",
-        "uploading": "上传中…",
-        "rotation": {
-          "title": "轮播",
-          "hint": "让背景在多张壁纸之间循环，而不是固定一张。",
-          "enableAria": "启用壁纸轮播",
-          "needsTwo": "再添加一张图片或渐变壁纸，轮播才有可切换的对象。",
-          "triggerLabel": "切换时机",
-          "trigger": {
-            "interval": "按定时器",
-            "daily": "每天一次",
-            "launch": "每次启动应用"
-          },
-          "intervalLabel": "间隔",
-          "intervalOption": "{minutes, plural, other {# 分钟}}",
-          "orderLabel": "顺序",
-          "order": {
-            "sequential": "按顺序",
-            "shuffle": "随机"
-          },
-          "transitionLabel": "切换效果",
-          "transition": {
-            "none": "立即切换",
-            "fade": "淡入淡出",
-            "crossfade": "交叉淡化",
-            "dissolve": "溶解",
-            "slide": "滑动",
-            "zoom": "缩放",
-            "kenBurns": "缓慢平移（Ken Burns）"
-          },
-          "directionLabel": "方向",
-          "direction": {
-            "left": "向左",
-            "right": "向右",
-            "up": "向上",
-            "down": "向下"
-          },
-          "easingLabel": "缓动曲线",
-          "easing": {
-            "linear": "线性",
-            "ease": "标准",
-            "easeIn": "缓入",
-            "easeOut": "缓出",
-            "easeInOut": "缓入缓出"
-          },
-          "durationLabel": "时长",
-          "durationValue": "{ms} 毫秒",
-          "degraded": {
-            "reduced-motion": "系统已开启「减少动态效果」，因此壁纸会直接切换。关闭下方的「尊重减少动态效果」即可保留动画。",
-            "scrim": "可读性遮罩与交叉淡化需要同一个图层，因此这里退化为淡入淡出。把不透明度调到 50% 以上即可恢复完整效果。"
-          },
-          "playlistLabel": "参与轮播",
-          "playlistUseAll": "全部使用",
-          "playlistAllHint": "{count, plural, =0 {目前没有符合条件的壁纸。} other {全部符合条件的壁纸（# 张）。}}",
-          "playlistSomeHint": "{count, plural, =0 {未选择任何壁纸，轮播无处可去。} other {已选择 # 张壁纸。}}",
-          "pauseHiddenLabel": "隐藏时暂停",
-          "pauseHiddenHint": "窗口切到后台时暂停计时。",
-          "reducedMotionLabel": "尊重减少动态效果",
-          "reducedMotionHint": "当系统要求减少动态效果时，直接切换壁纸。"
-        },
-        "daily": {
-          "title": "每日壁纸",
-          "hint": "按计划自动获取一张新的背景图。",
-          "enableAria": "启用每日壁纸",
-          "networkNotice": "这是外观设置中唯一会联网的功能。开启前不会发起任何请求，且只会访问你在下方选择的来源。",
-          "providerLabel": "来源",
-          "provider": {
-            "bing": "Bing 每日一图",
-            "nasaApod": "NASA 每日天文图",
-            "custom": "自定义 URL"
-          },
-          "providerHint": {
-            "bing": "Bing 公开的首页图片，无需账号或密钥。",
-            "nasaApod": "NASA 每日天文图。不填密钥也能用，但共享较低的公共限额。",
-            "custom": "你自己的接口。不允许指向内网或本机地址。"
-          },
-          "bing": {
-            "marketLabel": "地区",
-            "marketAuto": "跟随应用语言",
-            "resolutionLabel": "分辨率",
-            "resolution": {
-              "1080p": "1080p（体积较小）",
-              "uhd": "4K（每天数 MB）"
-            }
-          },
-          "nasa": {
-            "apiKeyLabel": "API 密钥",
-            "apiKeyPlaceholder": "可留空，将使用 DEMO_KEY",
-            "apiKeyHint": "不填密钥时，请求会与其他所有 DEMO_KEY 调用方共享一个很低的公共限额。在 api.nasa.gov 免费申请一个即可解除。",
-            "preferHdLabel": "优先使用高清原图",
-            "preferHdHint": "画质更好，但每天通常 3-6 MB。"
-          },
-          "custom": {
-            "urlLabel": "接口地址",
-            "kindLabel": "响应类型",
-            "kind": {
-              "image": "该地址本身就是图片",
-              "json": "该地址返回 JSON"
-            },
-            "imagePathLabel": "图片地址所在路径",
-            "imagePathHint": "图片 URL 在响应中的位置，例如 images.0.url",
-            "titlePathLabel": "标题所在路径（可选）",
-            "baseUrlLabel": "基础地址（可选）",
-            "baseUrlHint": "当响应返回相对路径时，会拼接到前面。"
-          },
-          "refreshLabel": "检查间隔",
-          "refreshOption": "{hours, plural, other {# 小时}}",
-          "keepLabel": "保留数量",
-          "keepHint": "较旧的自动获取壁纸会被删除，你自己上传的壁纸不受影响。",
-          "autoApplyLabel": "自动应用",
-          "autoApplyHint": "每次取到新图后立即设为当前壁纸。",
-          "wifiOnlyLabel": "计费网络下跳过",
-          "wifiOnlyHint": "当系统报告为蜂窝网络或省流量模式时暂缓下载。",
-          "fetchNow": "立即获取",
-          "fetching": "获取中…",
-          "lastFetched": "上次更新于 {when}",
-          "neverFetched": "尚未获取过。",
-          "error": {
-            "network": "无法连接到该来源，稍后会自动重试。",
-            "blocked-host": "该地址不被允许。内网、本机与元数据地址会被拒绝。",
-            "bad-response": "来源返回了应用无法解析的内容。",
-            "no-image": "响应中没有图片地址。",
-            "not-an-image": "返回的内容不是图片。",
-            "too-large": "图片超过了 12 MB 的上限。",
-            "rate-limited": "来源正在限流。请稍后重试，或填入你自己的 API 密钥。",
-            "unsupported-media": "今天的内容不是图片，因此没有可应用的壁纸。",
-            "storage-failed": "图片无法保存到本设备。",
-            "no-transport": "当前构建没有可用的网络传输方式。"
-          }
-        }
-      },
-      "lockScreen": {
-        "title": "锁屏",
-        "description": "应用锁定时的界面外观。解锁卡片始终保持独立的背景层，因此这里的任何设置都不会让它变得难以辨认。",
-        "backdropLabel": "背景",
-        "backdrop": {
-          "theme": "纯主题色",
-          "wallpaper": "跟随应用壁纸",
-          "pinned": "指定一张壁纸",
-          "solid": "纯色"
-        },
-        "pinnedLabel": "壁纸",
-        "pinnedPlaceholder": "选择一张壁纸",
-        "pinnedEmpty": "请先添加图片或渐变壁纸。",
-        "solidLabel": "颜色",
-        "blurLabel": "背景模糊",
-        "dimLabel": "背景压暗",
-        "dimHint": "压暗背景，保证解锁卡片清晰可读。",
-        "dimTooLow": "当前压暗程度较低，明亮的壁纸可能让解锁卡片难以辨认。",
-        "clockLabel": "时钟",
-        "clock": {
-          "none": "隐藏",
-          "time": "仅时间",
-          "timeAndDate": "时间与日期"
-        },
-        "hourCycleLabel": "小时制",
-        "hourCycle": {
-          "auto": "跟随语言",
-          "h12": "12 小时制",
-          "h23": "24 小时制"
-        },
-        "greetingLabel": "问候语",
-        "greeting": {
-          "none": "不显示",
-          "timeOfDay": "按时段",
-          "custom": "自定义文字"
-        },
-        "customGreetingLabel": "问候语文字",
-        "motionLabel": "氛围动效",
-        "motion": {
-          "none": "静止",
-          "drift": "缓慢漂移",
-          "aurora": "极光"
-        },
-        "respectMotionLabel": "尊重减少动态效果",
-        "respectMotionHint": "当系统要求减少动态效果时，让锁屏保持静止。",
-        "avatarLabel": "显示账户头像",
-        "avatarHint": "在共用或公共设备上，头像等于把姓名和面孔展示给任何路过的人。"
+        "uploading": "上传中…"
       }
     },
     "artifacts": {
