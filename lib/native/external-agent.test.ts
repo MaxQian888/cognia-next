@@ -550,3 +550,51 @@ describe("high-level helpers", () => {
     })
   })
 })
+
+describe("the spawn request contract accepts every field the config carries", () => {
+  /**
+   * `protocol/companion-request-schemas.json` is hand-written, gates the body
+   * before it reaches the Host, and is `additionalProperties: false`. A field
+   * the TypeScript config declares and the schema omits is a 422 for a spawn
+   * the Host would have accepted, and it shows up on companions only: the
+   * desktop passes the same object straight through Tauri with no validation.
+   *
+   * That is exactly how `framing` broke Pi. It is the one runtime that sets
+   * `"raw"`, so every Pi session from a paired browser was refused while the
+   * desktop ran it perfectly.
+   */
+  it("declares each ExternalAgentSpawnConfig property", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const contract = JSON.parse(
+      readFileSync(join(process.cwd(), "protocol/companion-request-schemas.json"), "utf8")
+    ) as {
+      commands: Record<string, { properties: { config: { properties: Record<string, unknown> } } }>
+    }
+    const declared = Object.keys(
+      contract.commands.spawn_external_agent.properties.config.properties
+    )
+
+    // The field list of `ExternalAgentSpawnConfig` (lib/native/external-agent.ts)
+    // and of the Rust struct it serializes into
+    // (crates/cognia-external-agent/src/process.rs).
+    expect([...declared].sort()).toEqual(["args", "command", "cwd", "env", "framing", "id"])
+  })
+
+  it("admits both framings, because the two hosts must offer the same choice", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const contract = JSON.parse(
+      readFileSync(join(process.cwd(), "protocol/companion-request-schemas.json"), "utf8")
+    ) as {
+      commands: Record<
+        string,
+        { properties: { config: { properties: { framing: { enum: string[] } } } } }
+      >
+    }
+
+    expect(
+      contract.commands.spawn_external_agent.properties.config.properties.framing.enum
+    ).toEqual(["line", "raw"])
+  })
+})

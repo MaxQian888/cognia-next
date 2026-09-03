@@ -67644,6 +67644,17 @@ paths:
                       type:
                         - string
                         - "null"
+                    framing:
+                      type: string
+                      enum:
+                        - line
+                        - raw
+                      description: "How stdout is delivered. `line` is the default every ACP, Codex and OpenCode adapter uses. `pi-rpc` is the
+                        only caller that sets `raw`, because Pi's JSONL frames are delimited by the newline BYTE and its
+                        adapter owns a strict codec with frame ceilings that pre-split lines would move out of reach.
+                        Omitting it here made this whole object `additionalProperties: false` against a struct that has
+                        the field, so every Pi session from a paired client was refused 422 while the desktop, which
+                        never validates, worked."
                   additionalProperties: false
               additionalProperties: false
       responses:
@@ -69622,10 +69633,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type:
+                  - object
+                  - "null"
                 additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
+                x-cognia-opaque-reason: "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace
+                  getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written
+                  around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to
+                  acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a
+                  `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset
+                  or GC."
                 x-cognia-schema-owner: task-workspaces
         "202":
           description: Command is still running under the durable operation ledger.
@@ -69727,10 +69744,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type:
+                  - object
+                  - "null"
                 additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
+                x-cognia-opaque-reason: "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace
+                  getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written
+                  around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to
+                  acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a
+                  `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset
+                  or GC."
                 x-cognia-schema-owner: task-workspaces
         "202":
           description: Command is still running under the durable operation ledger.
@@ -70055,10 +70078,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type:
+                  - object
+                  - "null"
                 additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
+                x-cognia-opaque-reason: "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace
+                  getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written
+                  around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to
+                  acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a
+                  `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset
+                  or GC."
                 x-cognia-schema-owner: task-workspaces
         "202":
           description: Command is still running under the durable operation ledger.
@@ -70488,10 +70517,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type:
+                  - object
+                  - "null"
                 additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
+                x-cognia-opaque-reason: "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace
+                  getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written
+                  around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to
+                  acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a
+                  `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset
+                  or GC."
                 x-cognia-schema-owner: task-workspaces
         "202":
           description: Command is still running under the durable operation ledger.
@@ -71153,10 +71188,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type:
+                  - object
+                  - "null"
                 additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
+                x-cognia-opaque-reason: "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace
+                  getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written
+                  around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to
+                  acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a
+                  `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset
+                  or GC."
                 x-cognia-schema-owner: task-workspaces
         "202":
           description: Command is still running under the durable operation ledger.
@@ -72581,10 +72622,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                type:
+                  - object
+                  - "null"
                 additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
+                x-cognia-opaque-reason: "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace
+                  getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written
+                  around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to
+                  acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a
+                  `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset
+                  or GC."
                 x-cognia-schema-owner: task-workspaces
         "202":
           description: Command is still running under the durable operation ledger.

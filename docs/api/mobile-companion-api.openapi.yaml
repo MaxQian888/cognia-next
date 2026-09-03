@@ -52482,6 +52482,17 @@ paths:
                       type:
                         - string
                         - "null"
+                    framing:
+                      type: string
+                      enum:
+                        - line
+                        - raw
+                      description: "How stdout is delivered. `line` is the default every ACP, Codex and OpenCode adapter uses. `pi-rpc` is the
+                        only caller that sets `raw`, because Pi's JSONL frames are delimited by the newline BYTE and its
+                        adapter owns a strict codec with frame ceilings that pre-split lines would move out of reach.
+                        Omitting it here made this whole object `additionalProperties: false` against a struct that has
+                        the field, so every Pi session from a paired client was refused 422 while the desktop, which
+                        never validates, worked."
                   additionalProperties: false
               additionalProperties: false
       responses:

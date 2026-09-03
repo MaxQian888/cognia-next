@@ -153,6 +153,21 @@ pub struct ValidatedSpawn {
 #[derive(Debug, Clone)]
 pub struct SpawnPolicy {
     workspaces_dir: PathBuf,
+    /// Where THIS host materializes managed working copies, when it does.
+    ///
+    /// A managed run does not execute in the workspaces root. Task Workspace
+    /// creates an isolated working copy under
+    /// `<data_dir>/task-workspaces/executions/...` and hands the agent that
+    /// path, so confining spawns to `workspaces_dir` alone meant the host
+    /// provisioned a working copy and then refused to run anything in it:
+    /// "managed execution" and "external agents" could not be used together at
+    /// all on a headless deployment.
+    ///
+    /// This is not a widening. The directory is created BY the host, for one
+    /// run, from a source root the policy already admitted. A remote client
+    /// cannot name a path here that the host did not just make for it, and
+    /// nothing outside the executions tree becomes reachable.
+    managed_execution_dir: Option<PathBuf>,
     smoke_agent_enabled: bool,
 }
 
@@ -160,13 +175,22 @@ impl SpawnPolicy {
     pub fn new(workspaces_dir: PathBuf, smoke_agent_enabled: bool) -> Self {
         Self {
             workspaces_dir,
+            managed_execution_dir: None,
             smoke_agent_enabled,
         }
     }
 
+    /// Also admit this host's own managed execution roots. See
+    /// [`Self::managed_execution_dir`].
+    pub fn with_managed_execution_dir(mut self, dir: PathBuf) -> Self {
+        self.managed_execution_dir = Some(dir);
+        self
+    }
+
     /// Standard construction: workspaces root from `COGNIA_WORKSPACES_DIR`
     /// (default `<data_dir>/workspaces`), smoke stub gated on
-    /// `COGNIA_SMOKE_AGENT=1`.
+    /// `COGNIA_SMOKE_AGENT=1`, and the managed execution root this same
+    /// `data_dir` gives `TaskWorkspaceService::open`.
     pub fn from_env(data_dir: &Path) -> Self {
         let workspaces_dir = std::env::var(WORKSPACES_DIR_ENV)
             .ok()
@@ -177,6 +201,7 @@ impl SpawnPolicy {
             .map(|v| v == "1")
             .unwrap_or(false);
         Self::new(workspaces_dir, smoke)
+            .with_managed_execution_dir(data_dir.join("task-workspaces").join("executions"))
     }
 
     /// The server-owned workspaces directory every confined path resolves
@@ -335,14 +360,23 @@ impl SpawnPolicy {
                 requested.display()
             ))
         })?;
-        if !canonical.starts_with(&root) {
-            return Err(PolicyViolation(format!(
-                "cwd {:?} escapes the workspaces root {:?}",
-                canonical.display(),
-                root.display()
-            )));
+        if canonical.starts_with(&root) {
+            return Ok(canonical.display().to_string());
         }
-        Ok(canonical.display().to_string())
+        // The host's own managed working copies. Canonicalized the same way, so
+        // a symlink cannot point at this root from outside it.
+        if let Some(managed) = self.managed_execution_dir.as_ref() {
+            if let Ok(managed_root) = managed.canonicalize() {
+                if canonical.starts_with(&managed_root) {
+                    return Ok(canonical.display().to_string());
+                }
+            }
+        }
+        Err(PolicyViolation(format!(
+            "cwd {:?} escapes the workspaces root {:?}",
+            canonical.display(),
+            root.display()
+        )))
     }
 }
 
@@ -916,5 +950,67 @@ mod tests {
                 .canonicalize()
                 .expect("workspaces root is created on demand")
         );
+    }
+
+    /// The contradiction this closes: Task Workspace materializes a managed
+    /// working copy under `<data_dir>/task-workspaces/executions/...` and hands
+    /// the agent that path, while the policy admitted only the workspaces root.
+    /// The host provisioned a working copy and then refused to run in it.
+    #[test]
+    fn a_managed_execution_root_is_admitted_and_nothing_beside_it_is() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let workspaces = data.path().join("workspaces");
+        let executions = data.path().join("task-workspaces").join("executions");
+        let run_root = executions.join("bundle-a").join("workspace-a");
+        std::fs::create_dir_all(&run_root).expect("mkdir run root");
+        let sibling = data.path().join("task-workspaces").join("blobs");
+        std::fs::create_dir_all(&sibling).expect("mkdir sibling");
+
+        let policy = SpawnPolicy::new(workspaces, false).with_managed_execution_dir(executions);
+
+        assert!(policy
+            .validate_cwd(Some(run_root.to_str().expect("utf8")))
+            .is_ok());
+        // Only the executions tree. A neighbouring directory under the same
+        // service dir is still outside the policy.
+        assert!(policy
+            .validate_cwd(Some(sibling.to_str().expect("utf8")))
+            .is_err());
+    }
+
+    #[test]
+    fn a_policy_with_no_managed_root_still_refuses_everything_outside_workspaces() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let outside = data.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).expect("mkdir");
+
+        let policy = SpawnPolicy::new(data.path().join("workspaces"), false);
+
+        assert!(policy
+            .validate_cwd(Some(outside.to_str().expect("utf8")))
+            .is_err());
+    }
+
+    /// `from_env` is the production constructor, and it is the only place that
+    /// knows the data dir both features are derived from. If it stopped wiring
+    /// the managed root, every managed run on a headless Host would be denied
+    /// again with nothing else changing.
+    #[test]
+    fn from_env_wires_the_managed_execution_root_beside_the_workspaces_root() {
+        let data = tempfile::tempdir().expect("tempdir");
+        let run_root = data
+            .path()
+            .join("task-workspaces")
+            .join("executions")
+            .join("bundle-b")
+            .join("workspace-b");
+        std::fs::create_dir_all(&run_root).expect("mkdir run root");
+        std::env::remove_var(WORKSPACES_DIR_ENV);
+
+        let policy = SpawnPolicy::from_env(data.path());
+
+        assert!(policy
+            .validate_cwd(Some(run_root.to_str().expect("utf8")))
+            .is_ok());
     }
 }

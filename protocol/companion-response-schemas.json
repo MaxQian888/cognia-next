@@ -2905,6 +2905,11 @@
       "additionalProperties": true,
       "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain."
     },
+    "NullableLegacyRecord": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "x-cognia-opaque-reason": "As LegacyRecord, for a lookup that answers null when the record is gone. Six task-workspace getters are declared `T | null` in TypeScript and return `Option` in Rust, and the client is written around that: `getWorkspaceBundle` returning null is how `ensureSessionExecutionBundle` learns to acquire a fresh bundle. Typing them as a bare object turned that ordinary, recoverable answer into a `contract_output_violation` 500 - which is what every companion hit after a host-side workspace reset or GC."
+    },
     "LegacyResult": {
       "type": ["object", "array", "string", "number", "boolean", "null"],
       "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
@@ -7980,10 +7985,10 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "task_workspace_bundle_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableLegacyRecord"
     },
     "task_workspace_bundle_handoff_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableLegacyRecord"
     },
     "task_workspace_bundle_handoff_retry": {
       "$ref": "#/$defs/LegacyRecord"
@@ -7992,7 +7997,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "task_workspace_bundle_handoff_undo_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableLegacyRecord"
     },
     "task_workspace_bundle_list": {
       "$ref": "#/$defs/LegacyList"
@@ -8004,7 +8009,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "task_workspace_bundle_turn_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableLegacyRecord"
     },
     "task_workspace_bundle_turn_settle": {
       "$ref": "#/$defs/LegacyRecord"
@@ -8022,7 +8027,7 @@
       "$ref": "#/$defs/LegacyResult"
     },
     "task_workspace_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableLegacyRecord"
     },
     "task_workspace_get_patch_set": {
       "$ref": "#/$defs/LegacyResult"
@@ -8061,7 +8066,7 @@
       "$ref": "#/$defs/NullResult"
     },
     "task_workspace_managed_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/NullableLegacyRecord"
     },
     "task_workspace_managed_list": {
       "$ref": "#/$defs/LegacyList"
