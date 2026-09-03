@@ -54,7 +54,12 @@ test("isManifestFresh rejects a version bump, a missing file, and a tampered fil
   const react = Buffer.from("react-bundle")
   const jsx = Buffer.from("jsx-bundle")
   const shell = Buffer.from("shell-bundle")
-  const expected = { schema: 1, reactVersion: "19.2.8", babelVersion: "8.0.4" }
+  const expected = {
+    schema: 1,
+    reactVersion: "19.2.8",
+    babelVersion: "8.0.4",
+    shellEntrySha: "abc123",
+  }
   const manifest = buildManifest({
     ...expected,
     outputs: {
@@ -88,6 +93,11 @@ test("isManifestFresh rejects a version bump, a missing file, and a tampered fil
     ),
     false,
     "an edited output must rebuild"
+  )
+  assert.equal(
+    isManifestFresh(manifest, { ...expected, shellEntrySha: "def456" }, present),
+    false,
+    "an edited shell entry source must rebuild"
   )
   assert.equal(isManifestFresh(null, expected, present), false)
   assert.equal(isManifestFresh({ schema: 2 }, expected, present), false)
@@ -144,4 +154,17 @@ test("the committed shell bundle carries no eval and installs itself", (t) => {
   assert.ok(!source.includes("new Function"))
   assert.ok(source.includes("createObjectURL"))
   assert.ok(source.includes("artifact-shell-ready"))
+})
+
+test("buildManifest carries the shell entry digest so a source edit is visible", () => {
+  // The sentinel used to watch only dependency versions and OUTPUT hashes, so
+  // editing lib/artifacts/runtime/artifact-shell-entry.ts left the committed
+  // bundle stale while the build reported "already fresh".
+  const manifest = buildManifest({
+    reactVersion: "19.2.8",
+    babelVersion: "8.0.4",
+    shellEntrySha: "deadbeef",
+    outputs: { [ARTIFACT_SHELL_FILE]: Buffer.from("shell") },
+  })
+  assert.equal(manifest.shellEntrySha, "deadbeef")
 })

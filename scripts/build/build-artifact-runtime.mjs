@@ -47,6 +47,15 @@ export const ARTIFACT_SHELL_FILE = "artifact-shell.js"
 export const MANIFEST_FILE = "manifest.json"
 
 /**
+ * The shell bundle's own source. It has to be hashed into the manifest because
+ * the freshness check otherwise only watches react/babel versions and the
+ * OUTPUT hashes, so editing this file left the committed bundle stale and the
+ * build cheerfully reported "already fresh". That is not hypothetical: the
+ * capture-snapshot handler was written, tested, and silently not shipped.
+ */
+export const ARTIFACT_SHELL_SOURCE = "lib/artifacts/runtime/artifact-shell-entry.ts"
+
+/**
  * Entry source for the React bundle. `import * as ns` then unwrapping
  * `ns.default` covers both interop shapes — react@19 is CJS, so esbuild hands
  * back a namespace with a `default`, while a future ESM build would not.
@@ -152,6 +161,7 @@ export function isManifestFresh(manifest, expected, readFile) {
   if (manifest.schema !== expected.schema) return false
   if (manifest.reactVersion !== expected.reactVersion) return false
   if (manifest.babelVersion !== expected.babelVersion) return false
+  if (manifest.shellEntrySha !== expected.shellEntrySha) return false
   const files = manifest.files
   if (!files || typeof files !== "object") return false
   for (const name of [REACT_RUNTIME_FILE, JSX_TRANSFORM_FILE, ARTIFACT_SHELL_FILE]) {
@@ -165,12 +175,12 @@ export function isManifestFresh(manifest, expected, readFile) {
   return true
 }
 
-export function buildManifest({ reactVersion, babelVersion, outputs }) {
+export function buildManifest({ reactVersion, babelVersion, shellEntrySha, outputs }) {
   const files = {}
   for (const [name, bytes] of Object.entries(outputs)) {
     files[name] = { bytes: bytes.length, sha256: sha256(bytes) }
   }
-  return { schema: 1, reactVersion, babelVersion, files }
+  return { schema: 1, reactVersion, babelVersion, shellEntrySha, files }
 }
 
 function readJson(file) {
@@ -199,7 +209,19 @@ async function main() {
     return
   }
 
-  const expected = { schema: 1, reactVersion: reactPkg.version, babelVersion: babelPkg.version }
+  let shellEntrySha
+  try {
+    shellEntrySha = sha256(fs.readFileSync(path.resolve(ROOT, ARTIFACT_SHELL_SOURCE)))
+  } catch {
+    console.log("[artifact-runtime] skip: shell entry source missing")
+    return
+  }
+  const expected = {
+    schema: 1,
+    reactVersion: reactPkg.version,
+    babelVersion: babelPkg.version,
+    shellEntrySha,
+  }
   if (isManifestFresh(readJson(MANIFEST_PATH), expected, readOutput)) {
     console.log(`[artifact-runtime] skip: ${OUT_DIR} already fresh`)
     return

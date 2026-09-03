@@ -260,3 +260,70 @@ describe("theme variables over the parent-context channel", () => {
     dispose()
   })
 })
+
+describe("capture-snapshot", () => {
+  const scopeWith = (posted: unknown[], inbox: { listener?: (e: MessageEvent) => void }) =>
+    ({
+      document,
+      parent: { postMessage: (message: unknown) => posted.push(message) },
+      addEventListener: (_t: "message", h: (event: MessageEvent) => void) => {
+        inbox.listener = h
+      },
+      URL: { createObjectURL: () => "blob:x", revokeObjectURL: () => undefined },
+      Blob,
+    }) as unknown as ArtifactShellScope
+
+  it("answers with a static snapshot of what the frame drew", () => {
+    // Rasterising cannot happen in here: a sandboxed `allow-scripts` document
+    // is opaque-origin and cannot read its own child iframe, which is exactly
+    // what html2canvas needs. So the frame hands out markup and the parent
+    // renders it.
+    document.body.innerHTML = '<div id="root"><h1 style="color:#334">Drawn</h1></div>'
+    document.head.querySelectorAll("script").forEach((tag) => tag.remove())
+    const posted: unknown[] = []
+    const inbox: { listener?: (e: MessageEvent) => void } = {}
+    const dispose = installArtifactShellRuntime(scopeWith(posted, inbox))
+
+    inbox.listener?.({ data: { type: "capture-snapshot", requestId: "req-1" } } as MessageEvent)
+
+    const reply = posted.find(
+      (m) => (m as { type?: string }).type === "artifact-capture-result"
+    ) as { requestId: string; html: string; width: number; height: number }
+    expect(reply.requestId).toBe("req-1")
+    expect(reply.html).toContain("<!DOCTYPE html>")
+    expect(reply.html).toContain("Drawn")
+    expect(reply.html).toContain('style="color:#334"')
+    expect(reply.width).toBeGreaterThan(0)
+    expect(reply.height).toBeGreaterThan(0)
+    dispose()
+  })
+
+  it("addresses a failure to the request instead of the preview", () => {
+    // A generic `artifact-preview-error` would leave the caller waiting for a
+    // timeout rather than telling it why the capture failed.
+    document.body.innerHTML = '<div id="root"></div>'
+    const posted: unknown[] = []
+    const inbox: { listener?: (e: MessageEvent) => void } = {}
+    const scope = scopeWith(posted, inbox)
+    const dispose = installArtifactShellRuntime(scope)
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, "documentElement")
+    Object.defineProperty(document, "documentElement", {
+      configurable: true,
+      get() {
+        throw new Error("serialisation blew up")
+      },
+    })
+    try {
+      inbox.listener?.({ data: { type: "capture-snapshot", requestId: "req-2" } } as MessageEvent)
+    } finally {
+      delete (document as unknown as Record<string, unknown>).documentElement
+      if (original) Object.defineProperty(Document.prototype, "documentElement", original)
+    }
+    expect(posted).toContainEqual({
+      type: "artifact-capture-error",
+      requestId: "req-2",
+      message: "serialisation blew up",
+    })
+    dispose()
+  })
+})

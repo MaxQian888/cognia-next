@@ -42,6 +42,7 @@ export type ArtifactShellInboundMessage =
   | { type: "render-component"; code: string; isModule?: boolean }
   | { type: "run-scripts"; scripts: ArtifactShellScript[] }
   | { type: "artifact-preview-parent-context"; themeVariables?: Record<string, string> }
+  | { type: "capture-snapshot"; requestId: string }
 
 interface ArtifactRoot {
   render(node: unknown): void
@@ -259,6 +260,23 @@ export function installArtifactShellRuntime(scope: ArtifactShellScope): () => vo
         )
         return
       }
+      if (data.type === "capture-snapshot") {
+        // Rasterising happens in the PARENT, not here. html2canvas clones the
+        // document into a child iframe and reads it back, and a sandboxed
+        // `allow-scripts` document has an opaque origin, so it cannot read its
+        // OWN about:blank child. Verified, not assumed. What the frame CAN do
+        // is hand out a static snapshot of what it drew, which the parent then
+        // renders in the same-origin capture frame it already uses for `html`.
+        const snapshot = `<!DOCTYPE html>${doc.documentElement.outerHTML}`
+        post({
+          type: "artifact-capture-result",
+          requestId: data.requestId,
+          html: snapshot,
+          width: Math.max(doc.documentElement.scrollWidth, doc.body?.scrollWidth ?? 0, 1),
+          height: Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0, 1),
+        })
+        return
+      }
       if (data.type === "run-scripts") {
         const scripts = Array.isArray(data.scripts) ? data.scripts : []
         if (scripts.length === 0) {
@@ -275,7 +293,15 @@ export function installArtifactShellRuntime(scope: ArtifactShellScope): () => vo
         })
       }
     } catch (error) {
-      fail(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      // A capture is a request/response pair. Answering it with the generic
+      // preview error would leave the caller waiting for its timeout instead of
+      // getting a reason, so the reply is addressed to the request.
+      if (data.type === "capture-snapshot") {
+        post({ type: "artifact-capture-error", requestId: data.requestId, message })
+        return
+      }
+      fail(message)
     }
   }
 

@@ -2,6 +2,7 @@
   "schema": 1,
   "reactVersion": "19.2.8",
   "babelVersion": "8.0.4",
+  "shellEntrySha": "baa731a826ff303f6adc9fba36f8869f52771c519bbc496b1e96cd9e60e9ec8d",
   "files": {
     "react-runtime.js": {
       "bytes": 192680,
@@ -12,8 +13,8 @@
       "sha256": "a8b723044ca8e3f526ff7e4b269797d10eaf0e742087d4ba4e49e953d0adefd7"
     },
     "artifact-shell.js": {
-      "bytes": 3096,
-      "sha256": "f67ff99c6c6a1880ebeff2a70e625ce9de44b65322c8e47371a88f17f7b85473"
+      "bytes": 3680,
+      "sha256": "93c68e8b0742cc75f3167bcd04aa00a8e81889298ed136f5c64bf4b0c0118bf4"
     }
   }
 }
