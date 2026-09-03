@@ -146,7 +146,8 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const t = useTranslations("artifactPreview")
   const iframeRef = useRef<HTMLIFrameElement>(null)
   // Mirrors `error` for the capturer, which is a long-lived closure and would
-  // otherwise read a stale value from the render it was created in.
+  // otherwise read a stale value from the render it was created in. Written by
+  // `setError` below, so the two can never disagree.
   const errorRef = useRef<string | null>(null)
   // `chart` / `mermaid` / `math` draw as live React in this tree, so the only
   // way to rasterise them is to hand html2canvas the mounted node. Registering
@@ -169,7 +170,14 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     DIAGRAM_DESIGN_THEME_DEFAULTS
   )
   const diagramThemeVariablesRef = useRef(diagramThemeVariables)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setErrorState] = useState<string | null>(null)
+  // The ref moves with the state, not one commit behind it. The capturer is a
+  // long-lived closure and has to see a failure the instant it happens, or an
+  // export racing the failure would serialise an empty frame into a blank PNG.
+  const setError = useCallback((next: string | null) => {
+    errorRef.current = next
+    setErrorState(next)
+  }, [])
   const [key, setKey] = useState(0)
   /** Which `key` generation `lastRenderedRef` describes. */
   const lastRenderedKeyRef = useRef(0)
@@ -279,12 +287,6 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     diagramThemeVariablesRef.current = diagramThemeVariables
   }, [diagramThemeVariables])
 
-  // The capturer is a long-lived closure, so it reads the failure through a ref
-  // rather than the `error` of the render that created it.
-  useEffect(() => {
-    errorRef.current = error
-  }, [error])
-
   // `useTranslations()` hands back a fresh function on every render. Anything
   // that reads it from an effect dependency list therefore re-runs on every
   // render — which, for the async runtime effect below, is an endless
@@ -382,7 +384,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
     return () => {
       cancelled = true
     }
-  }, [artifact.id, artifact.type, needsRuntime])
+  }, [setError, artifact.id, artifact.type, needsRuntime])
 
   // Compiled once per (artifact, content) and read back when the frame reports
   // ready — the markup goes into `srcdoc`, the scripts go over postMessage.
@@ -423,7 +425,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       setIsLoading(false)
       setError(err instanceof Error ? err.message : tRef.current("previewError"))
     }
-  }, [artifact.content, artifact.id, frameMode])
+  }, [setError, artifact.content, artifact.id, frameMode])
 
   useEffect(() => {
     if (!needsIframe) return
@@ -565,6 +567,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       clearTimeout(timer)
     }
   }, [
+    setError,
     artifact.id,
     artifact.content,
     artifact.metadata?.rendererProfile,
@@ -647,6 +650,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
       if (shellDeadlineRef.current) clearTimeout(shellDeadlineRef.current)
     }
   }, [
+    setError,
     artifact.id,
     artifact.type,
     pushScriptedContent,
