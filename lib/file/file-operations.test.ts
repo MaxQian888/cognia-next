@@ -213,3 +213,47 @@ describe("file-operations in the browser", () => {
     await expect(statFile("/a.txt")).rejects.toThrow("HTTP 404")
   })
 })
+
+describe("Tauri fs capability grants", () => {
+  /**
+   * Every `@tauri-apps/plugin-fs` command this module calls needs its own ACL
+   * permission in `src-tauri/capabilities/default.json`. An ungranted command
+   * does not fail loudly: it rejects, and each caller here has a `catch` that
+   * turns the rejection into "false" or "[]".
+   *
+   * `exists` and `read_dir` were both missing. `walkFiles`
+   * (`lib/session-import/fs.ts`) swallows the readDir rejection and returns an
+   * empty array, so every desktop directory walk reported "nothing found"
+   * rather than "not allowed": the ADR-0062 session scan found no sessions and
+   * the ADR-0107 subagent migration found no agents. `probeVendors`
+   * (`lib/agent-migration/probe.ts`) has `.catch(() => false)` around `exists`,
+   * so its directory probe was always false, and Pi, which publishes no config
+   * file for the other probe to read, could never be detected as installed.
+   *
+   * This list is the contract. Adding a plugin-fs call here without adding its
+   * permission fails this test instead of silently doing nothing at runtime.
+   */
+  const REQUIRED_FS_PERMISSIONS = [
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-remove",
+    "fs:allow-copy-file",
+    "fs:allow-rename",
+    "fs:allow-mkdir",
+    "fs:allow-stat",
+    "fs:allow-exists",
+    "fs:allow-read-dir",
+  ]
+
+  it.each(REQUIRED_FS_PERMISSIONS)("grants %s", async (permission) => {
+    const capability = (await import("@/src-tauri/capabilities/default.json")) as unknown as {
+      default: { permissions: Array<string | { identifier: string }> }
+    }
+    const granted = capability.default.permissions.map((entry) =>
+      typeof entry === "string" ? entry : entry.identifier
+    )
+    expect(granted).toContain(permission)
+  })
+})
