@@ -315,3 +315,52 @@ describe("SessionImportDialog", () => {
     })
   })
 })
+
+describe("narrow-screen layout contract", () => {
+  /**
+   * The regression these pin.
+   *
+   * `components/ui/dialog.tsx` sizes itself with
+   * `w-full max-w-[calc(100%-2rem)] ... sm:max-w-lg`. Passing an UNPREFIXED
+   * `max-w-*` in `className` makes twMerge drop the base's
+   * `max-w-[calc(100%-2rem)]`, which is the only thing giving a phone its side
+   * gutter, while `sm:max-w-lg` still wins above 640px. So the override this
+   * dialog carried was a mobile regression and a desktop no-op at once. Only a
+   * `sm:` prefixed cap is safe.
+   *
+   * The body also had no scroll container. The `done` state renders one
+   * fidelity card per imported session with no bound at all, so a 30-session
+   * import pushed the footer off the screen with no way to reach it.
+   *
+   * jsdom does no layout, so these assert the class contract rather than
+   * pixels. They are a guardrail against re-introducing the same override, not
+   * proof that the dialog renders correctly.
+   */
+  const open = () => {
+    setHook({})
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    return document.querySelector("[data-slot=dialog-content]")
+  }
+
+  it("caps its width only above the mobile breakpoint", () => {
+    const content = open()
+    expect(content?.className).toMatch(/sm:max-w-/)
+    expect(content?.className).not.toMatch(/(^|\s)max-w-(?!\[)/)
+  })
+
+  it("bounds its height and lays out as a column so the body can shrink", () => {
+    const content = open()
+    expect(content?.className).toMatch(/max-h-\[85dvh\]/)
+    expect(content?.className).toMatch(/(^|\s)flex(\s|$)/)
+    expect(content?.className).toMatch(/flex-col/)
+  })
+
+  it("puts the body in a scroll container between a pinned header and footer", () => {
+    open()
+    const scroller = document.querySelector("[data-slot=scroll-area]")
+    expect(scroller).not.toBeNull()
+    expect(scroller?.className).toMatch(/min-h-0/)
+    expect(scroller?.className).toMatch(/flex-1/)
+  })
+})

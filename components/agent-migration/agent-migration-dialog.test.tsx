@@ -1,5 +1,35 @@
+import * as ReactForMock from "react"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+
+// Render shadcn Select as a native <select> so the existing `selectOptions`
+// assertion keeps driving the real value change. Mirrors
+// `components/settings/appearance/components/usage-display-card.test.tsx`.
+jest.mock("@/components/ui/select", () => ({
+  Select: ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value: string
+    onValueChange: (v: string) => void
+    children: React.ReactNode
+  }) =>
+    ReactForMock.createElement(
+      "select",
+      {
+        "aria-label": "Conflict handling",
+        value,
+        onChange: (e: { target: { value: string } }) => onValueChange(e.target.value),
+      },
+      children
+    ),
+  SelectTrigger: () => null,
+  SelectValue: () => null,
+  SelectContent: ({ children }: { children: React.ReactNode }) => children,
+  SelectItem: ({ value, children }: { value: string; children: React.ReactNode }) =>
+    ReactForMock.createElement("option", { value }, children),
+}))
 
 const probeVendors = jest.fn()
 const buildMigrationPreview = jest.fn()
@@ -217,5 +247,56 @@ describe("AgentMigrationDialog", () => {
 
     expect(await screen.findByText("This item could not be imported.")).toBeInTheDocument()
     expect(screen.queryByText("raw database detail")).not.toBeInTheDocument()
+  })
+})
+
+describe("narrow-screen layout contract", () => {
+  /**
+   * The regression these pin.
+   *
+   * `components/ui/dialog.tsx` sizes itself with
+   * `w-full max-w-[calc(100%-2rem)] ... sm:max-w-lg`. Passing an UNPREFIXED
+   * `max-w-*` in `className` makes twMerge drop the base's
+   * `max-w-[calc(100%-2rem)]`, which is the only thing giving a phone its side
+   * gutter, while `sm:max-w-lg` still wins above 640px. So the override was a
+   * mobile regression and a desktop no-op at the same time. Only a `sm:`
+   * prefixed cap is safe.
+   *
+   * The body also had no scroll container, so a long list pushed the footer off
+   * the screen with no way to reach it.
+   *
+   * jsdom does no layout, so these assert the class contract rather than
+   * pixels. They are a guardrail against re-introducing the same override, not
+   * proof that the dialog renders correctly.
+   */
+  const contentClass = () => document.querySelector("[data-slot=dialog-content]")?.className ?? ""
+
+  async function openDialog() {
+    const { AgentMigrationDialog } = await import("./agent-migration-dialog")
+    const user = userEvent.setup()
+    render(<AgentMigrationDialog trigger={<button>Open migration</button>} />)
+    await user.click(screen.getByRole("button", { name: "Open migration" }))
+    await waitFor(() => expect(probeVendors).toHaveBeenCalled())
+  }
+
+  it("caps its width only above the mobile breakpoint", async () => {
+    await openDialog()
+    expect(contentClass()).toMatch(/sm:max-w-/)
+    expect(contentClass()).not.toMatch(/(^|\s)max-w-(?!\[)/)
+  })
+
+  it("bounds its height and lays out as a column so the body can shrink", async () => {
+    await openDialog()
+    expect(contentClass()).toMatch(/max-h-\[85dvh\]/)
+    expect(contentClass()).toMatch(/(^|\s)flex(\s|$)/)
+    expect(contentClass()).toMatch(/flex-col/)
+  })
+
+  it("puts the body in a scroll container between a pinned header and footer", async () => {
+    await openDialog()
+    const scroller = document.querySelector("[data-slot=scroll-area]")
+    expect(scroller).not.toBeNull()
+    expect(scroller?.className).toMatch(/min-h-0/)
+    expect(scroller?.className).toMatch(/flex-1/)
   })
 })
