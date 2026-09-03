@@ -16,8 +16,9 @@
  * absence the user cannot act on.
  */
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2, RefreshCw, ServerCog, Trash2 } from "lucide-react"
+import { Loader2, RefreshCw, ServerCog, Trash2, Upload } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,8 +26,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { Switch } from "@/components/ui/switch"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-agent-configs"
+import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import { selectAgents } from "@/stores/agent/external-agent-store/selectors"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 import type { HostConfigsUnavailableReason } from "@/lib/ai/agent/external/remote-host-configs"
 
@@ -98,8 +107,19 @@ function HostConfigRow({
 
 export function HostExternalAgentConfigs() {
   const t = useTranslations("externalAgent.hostConfigs")
-  const { configs, loading, unavailable, error, reconcile, setEnabled, remove, busy } =
+  const { configs, loading, unavailable, error, reconcile, setEnabled, remove, copyLocal, busy } =
     useHostExternalAgentConfigs()
+  const localAgents = useExternalAgentStore(selectAgents)
+
+  // Only agents the host does not already have. Matching on name rather than
+  // id because the host mints its own `configId` on import, so a copied agent
+  // never carries the local one back.
+  const copyable = useMemo(() => {
+    const taken = new Set(
+      configs.map((record) => record.config.name).filter((name): name is string => Boolean(name))
+    )
+    return Object.values(localAgents).filter((agent) => agent.name && !taken.has(agent.name))
+  }, [configs, localAgents])
 
   return (
     <Card>
@@ -132,10 +152,35 @@ export function HostExternalAgentConfigs() {
               <span className="text-muted-foreground text-sm">
                 {t("count", { count: configs.length })}
               </span>
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => void reconcile()}>
-                <RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />
-                {t("recheck")}
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* Disabled rather than hidden when there is nothing to copy:
+                    the empty state names this action, and a control that
+                    vanishes makes the sentence look like a lie. */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={busy || copyable.length === 0}>
+                      <Upload className="size-4" />
+                      {t("copyLocal")}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {copyable.map((agent) => (
+                      <DropdownMenuItem key={agent.id} onSelect={() => void copyLocal(agent)}>
+                        {agent.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void reconcile()}
+                >
+                  <RefreshCw className={busy ? "size-4 animate-spin" : "size-4"} />
+                  {t("recheck")}
+                </Button>
+              </div>
             </div>
             {error ? <p className="text-destructive text-sm">{error}</p> : null}
             {configs.length === 0 ? (

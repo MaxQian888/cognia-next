@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   HOST_CONFIG_COMMANDS,
   HostConfigsUnsupportedError,
+  createRemoteHostConfig,
   deleteRemoteHostConfig,
   hostConfigsAvailability,
   listRemoteHostConfigs,
@@ -27,6 +28,7 @@ import {
   type HostConfigsUnavailableReason,
 } from "@/lib/ai/agent/external/remote-host-configs"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
+import type { StoredExternalAgentConfig } from "@/stores/agent/external-agent-store/types"
 
 export interface HostExternalAgentConfigsState {
   configs: ExternalAgentConfigRecord[]
@@ -39,6 +41,17 @@ export interface HostExternalAgentConfigsState {
   reconcile: () => Promise<void>
   setEnabled: (record: ExternalAgentConfigRecord, enabled: boolean) => Promise<void>
   remove: (record: ExternalAgentConfigRecord) => Promise<void>
+  /**
+   * Copy a locally-configured agent onto the host.
+   *
+   * The panel's empty state has always told the user to do this and there was
+   * no control behind the sentence: `createRemoteHostConfig` shipped with the
+   * client and had no caller, so a browser could configure an agent it could
+   * never run and select it in chat anyway, which failed the turn with
+   * `Agent not found`. `fromImport` is what makes the host strip the keyring
+   * references and consents that only mean something on the sending machine.
+   */
+  copyLocal: (config: StoredExternalAgentConfig) => Promise<void>
   /** True while any write is in flight; the panel disables its controls. */
   busy: boolean
 }
@@ -131,6 +144,12 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
 
   const reconcile = useCallback(() => mutate(() => reconcileRemoteHostConfigs()), [mutate])
 
+  const copyLocal = useCallback(
+    (config: StoredExternalAgentConfig) =>
+      mutate(() => createRemoteHostConfig(config, { fromImport: true })),
+    [mutate]
+  )
+
   return useMemo(
     () => ({
       configs,
@@ -141,8 +160,9 @@ export function useHostExternalAgentConfigs(): HostExternalAgentConfigsState {
       reconcile,
       setEnabled,
       remove,
+      copyLocal,
       busy,
     }),
-    [configs, loading, unavailable, error, refresh, reconcile, setEnabled, remove, busy]
+    [configs, loading, unavailable, error, refresh, reconcile, setEnabled, remove, copyLocal, busy]
   )
 }

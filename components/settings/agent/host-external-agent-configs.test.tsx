@@ -15,6 +15,13 @@ jest.mock("@/hooks/agent/use-host-external-agent-configs", () => ({
   useHostExternalAgentConfigs: () => state.current,
 }))
 
+const localAgents: { current: Record<string, { id: string; name: string }> } = { current: {} }
+
+jest.mock("@/stores/agent/external-agent-store", () => ({
+  useExternalAgentStore: (selector: (state: unknown) => unknown) =>
+    selector({ agents: localAgents.current }),
+}))
+
 function record(over: Partial<ExternalAgentConfigRecord> = {}): ExternalAgentConfigRecord {
   return {
     configId: "eac_1",
@@ -41,9 +48,14 @@ function setState(over: Partial<HostExternalAgentConfigsState> = {}) {
     reconcile: jest.fn(async () => {}),
     setEnabled: jest.fn(async () => {}),
     remove: jest.fn(async () => {}),
+    copyLocal: jest.fn(async () => {}),
     ...over,
   }
 }
+
+beforeEach(() => {
+  localAgents.current = {}
+})
 
 describe("HostExternalAgentConfigs", () => {
   it("lists the host's configurations", () => {
@@ -154,5 +166,40 @@ describe("HostExternalAgentConfigs", () => {
     setState({ configs: [record({ config: {} as never })] })
     render(<HostExternalAgentConfigs />)
     expect(screen.getByText("eac_1")).toBeInTheDocument()
+  })
+})
+
+describe("copying a local agent to the host", () => {
+  // The empty state has always told the user to copy one across. Until this
+  // control existed, that sentence named an action with nothing behind it.
+  it("offers every local agent the host does not already have", async () => {
+    localAgents.current = {
+      "local-1": { id: "local-1", name: "Pi (native RPC)" },
+      "local-2": { id: "local-2", name: "Pi" },
+    }
+    const copyLocal = jest.fn(async () => {})
+    setState({ configs: [record({ config: { name: "Pi" } as never })], copyLocal })
+    render(<HostExternalAgentConfigs />)
+
+    await userEvent.click(screen.getByRole("button", { name: /Copy from this device/i }))
+
+    // "Pi" is already on the host, so only the other one is offered.
+    expect(screen.getByRole("menuitem", { name: "Pi (native RPC)" })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Pi" })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("menuitem", { name: "Pi (native RPC)" }))
+    await waitFor(() =>
+      expect(copyLocal).toHaveBeenCalledWith({ id: "local-1", name: "Pi (native RPC)" })
+    )
+  })
+
+  // Disabled rather than hidden: the empty state names this action, and a
+  // control that vanishes makes the sentence look like a lie.
+  it("stays visible and disabled when there is nothing left to copy", () => {
+    localAgents.current = { "local-1": { id: "local-1", name: "Pi" } }
+    setState({ configs: [record({ config: { name: "Pi" } as never })] })
+    render(<HostExternalAgentConfigs />)
+
+    expect(screen.getByRole("button", { name: /Copy from this device/i })).toBeDisabled()
   })
 })

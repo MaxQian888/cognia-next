@@ -138,3 +138,43 @@ describe("useHostExternalAgentConfigs", () => {
     expect(calls.map((c) => c.command)).toContain(HOST_CONFIG_COMMANDS.reconcile)
   })
 })
+
+describe("copyLocal", () => {
+  // `createRemoteHostConfig` shipped with no caller, so the panel's own empty
+  // state ("copy a local agent across") named an action nothing implemented.
+  it("imports the local configuration onto the host and re-reads the list", async () => {
+    setup({}, (command) =>
+      command === HOST_CONFIG_COMMANDS.list ? { configs: [] } : { config: record() }
+    )
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.copyLocal({ id: "local-1", name: "Pi" } as never)
+    })
+
+    const create = calls.find((entry) => entry.command === HOST_CONFIG_COMMANDS.create)
+    // `fromImport` is what makes the host strip credentials and consents that
+    // only mean something on the sending machine.
+    expect(create?.payload).toMatchObject({
+      fromImport: true,
+      config: { id: "local-1", name: "Pi" },
+    })
+    expect(calls.filter((entry) => entry.command === HOST_CONFIG_COMMANDS.list)).toHaveLength(2)
+  })
+
+  it("surfaces a refusal instead of leaving the panel looking successful", async () => {
+    setup({}, (command) => {
+      if (command === HOST_CONFIG_COMMANDS.list) return { configs: [] }
+      throw new Error("host refused the import")
+    })
+    const { result } = renderHook(() => useHostExternalAgentConfigs())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await result.current.copyLocal({ id: "local-1", name: "Pi" } as never)
+    })
+
+    expect(result.current.error).toBe("host refused the import")
+  })
+})

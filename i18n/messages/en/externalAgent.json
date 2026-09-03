@@ -120,6 +120,7 @@
     "loading": "Loading host configurations…",
     "count": "{count, plural, =0 {No configurations} other {# configurations}}",
     "recheck": "Re-check readiness",
+    "copyLocal": "Copy from this device",
     "revision": "Revision {seq}",
     "toggleLabel": "Enable {name}",
     "deleteLabel": "Delete {name}",

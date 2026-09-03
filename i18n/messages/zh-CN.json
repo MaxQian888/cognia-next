@@ -11540,6 +11540,7 @@
       "session": "会话操作失败"
     },
     "hostConfigs": {
+      "copyLocal": "从本机复制",
       "count": "{count, plural, =0 {暂无配置} other {# 个配置}}",
       "deleteLabel": "删除 {name}",
       "description": "存放在已配对宿主上的外部智能体。配置与运行都在宿主端，因此它能告诉你每一个是否已就绪。",
