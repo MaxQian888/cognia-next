@@ -66,6 +66,23 @@ pub enum GitError {
     #[error("merge conflict: {0}")]
     MergeConflict(Detail),
 
+    /// `git switch` / `git checkout` refusing a branch another worktree holds.
+    ///
+    /// Its own variant rather than `CommandFailed` because it is the one git
+    /// refusal a caller can act on without the user resolving anything: the
+    /// branch exists and is fine, it simply lives elsewhere, so the answer is
+    /// to go there.
+    #[error("branch is checked out in another worktree: {0}")]
+    BranchCheckedOutElsewhere(Detail),
+
+    /// `git branch -d` refusing a branch with unmerged commits.
+    ///
+    /// Distinct so a caller can offer the `-D` escalation as a question. As
+    /// `CommandFailed` it read as a dead end, and the only way past it was to
+    /// leave the app.
+    #[error("branch is not fully merged: {0}")]
+    BranchNotFullyMerged(Detail),
+
     #[error("authentication required: {0}")]
     AuthRequired(Detail),
 

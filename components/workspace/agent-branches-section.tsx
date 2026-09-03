@@ -36,6 +36,7 @@ import { ConsoleSection } from "@/components/surface/console-section"
 import { Button } from "@/components/ui/button"
 import { CompareRefsSheet } from "@/components/source-control/compare-refs-sheet"
 import { useWorkspaceCommandGate } from "@/hooks/workspace/use-workspace-command-gate"
+import { AGENT_BRANCH_PREFIX as AGENT_PREFIX } from "@/lib/git/branch-placement"
 import {
   gitBranches,
   gitCheckoutBranch,
@@ -47,8 +48,14 @@ import { createLogger } from "@cognia/logging"
 
 const log = createLogger("workspace.agentBranches")
 
-/** The prefix every isolated run's branch carries. */
-export const AGENT_BRANCH_PREFIX = "agent/"
+/**
+ * The prefix every isolated run's branch carries.
+ *
+ * Re-exported rather than declared: `lib/git/branch-placement` owns it now, so
+ * the branch picker's agent badge and this reclaim list cannot drift apart on
+ * what counts as an agent branch.
+ */
+export { AGENT_BRANCH_PREFIX } from "@/lib/git/branch-placement"
 
 export interface AgentBranchesSectionProps {
   /** The repository to read. Absent while the workspace has no root yet. */
@@ -67,7 +74,7 @@ export function AgentBranchesSection({ rootDir }: AgentBranchesSectionProps) {
     setLoading(true)
     try {
       const all = await gitBranches(rootDir)
-      setBranches(all.filter((branch) => branch.name.startsWith(AGENT_BRANCH_PREFIX)))
+      setBranches(all.filter((branch) => branch.name.startsWith(AGENT_PREFIX)))
     } catch (err) {
       // A directory that is not a git repository is the ordinary case for a
       // workspace root, not a failure worth an alert.

@@ -21658,31 +21658,31 @@
       "title": "插件请求权限"
     },
     "conversionReport": {
-      "title": "转换报告",
-      "source": "识别到的来源：{source}",
-      "sources": {
-        "cognia": "Cognia",
-        "claude-code": "Claude Code",
-        "codex": "Codex",
-        "gemini-cli": "Gemini CLI"
-      },
+      "counts": "已转换 {converted} 项能力，{warnings} 条警告，{blocking} 项阻塞",
       "fidelity": {
+        "contextual": "近似",
         "native-exact": "原生",
         "structured": "结构化",
-        "contextual": "近似",
         "unsupported": "不支持"
       },
       "fidelityHint": {
+        "contextual": "行为是依据来源的声明重建的，并非逐项对应翻译。",
         "native-exact": "这已经是 Cognia 原生插件，无需转换。",
         "structured": "清单及其贡献项可以完整迁移，与宿主强相关的部分列在下方。",
-        "contextual": "行为是依据来源的声明重建的，并非逐项对应翻译。",
         "unsupported": "这个插件无法在不丢失行为的前提下转换。"
       },
-      "counts": "已转换 {converted} 项能力，{warnings} 条警告，{blocking} 项阻塞",
-      "noIssues": "全部内容都已迁移。",
       "issueBlocking": "阻塞 · {capability}",
       "issueWarning": "警告 · {capability}",
-      "more": "还有 {count} 条"
+      "more": "还有 {count} 条",
+      "noIssues": "全部内容都已迁移。",
+      "source": "识别到的来源：{source}",
+      "sources": {
+        "claude-code": "Claude Code",
+        "codex": "Codex",
+        "cognia": "Cognia",
+        "gemini-cli": "Gemini CLI"
+      },
+      "title": "转换报告"
     },
     "deepLink": {
       "routing": "正在打开……"
@@ -39099,15 +39099,24 @@
       "uncommitted": "未提交"
     },
     "branches": {
+      "agentBranch": "隔离运行留下的分支",
       "create": "创建分支",
+      "createTracking": "建立本地跟踪分支",
       "delete": "删除分支",
       "detached": "游离 HEAD",
       "empty": "未找到分支",
+      "forceDeleteAction": "仍然删除",
+      "forceDeleteDescription": "“{name}” 上有尚未合入任何地方的提交，删除将丢失它们。",
+      "forceDeleteTitle": "删除未合并的分支？",
+      "inWorktree": "在 {name}",
       "newName": "新分支名称",
+      "noUpstream": "无上游",
+      "openWorktree": "打开 {name}",
       "remote": "远程",
       "rename": "重命名分支",
       "renameTo": "将当前分支重命名为…",
       "search": "搜索分支…",
+      "stackParent": "基于 {name}",
       "switch": "切换分支"
     },
     "clone": {

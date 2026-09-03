@@ -36,15 +36,24 @@
     "uncommitted": "Uncommitted"
   },
   "branches": {
+    "agentBranch": "Cut by an isolated agent run",
     "create": "Create Branch",
+    "createTracking": "Create a local branch tracking this",
     "delete": "Delete Branch",
     "detached": "Detached HEAD",
     "empty": "No branches found",
+    "forceDeleteAction": "Delete anyway",
+    "forceDeleteDescription": "“{name}” has commits that are not merged anywhere else. Deleting it discards them.",
+    "forceDeleteTitle": "Delete an unmerged branch?",
+    "inWorktree": "In {name}",
     "newName": "New branch name",
+    "noUpstream": "No upstream",
+    "openWorktree": "Open {name}",
     "remote": "remote",
     "rename": "Rename Branch",
     "renameTo": "Rename current branch to…",
     "search": "Search branches…",
+    "stackParent": "on {name}",
     "switch": "Switch Branch"
   },
   "clone": {

@@ -238,6 +238,10 @@ export type GitErrorKind =
   | "notFound"
   | "dirtyWorkingTree"
   | "mergeConflict"
+  /** Git refused to move a branch a second worktree already holds. */
+  | "branchCheckedOutElsewhere"
+  /** `branch -d` refused an unmerged branch. `-D` is the escalation. */
+  | "branchNotFullyMerged"
   | "authRequired"
   | "identityRequired"
   | "networkFailed"

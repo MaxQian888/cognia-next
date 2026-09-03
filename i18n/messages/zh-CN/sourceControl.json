@@ -36,15 +36,24 @@
     "uncommitted": "未提交"
   },
   "branches": {
+    "agentBranch": "隔离运行留下的分支",
     "create": "创建分支",
+    "createTracking": "建立本地跟踪分支",
     "delete": "删除分支",
     "detached": "游离 HEAD",
     "empty": "未找到分支",
+    "forceDeleteAction": "仍然删除",
+    "forceDeleteDescription": "“{name}” 上有尚未合入任何地方的提交，删除将丢失它们。",
+    "forceDeleteTitle": "删除未合并的分支？",
+    "inWorktree": "在 {name}",
     "newName": "新分支名称",
+    "noUpstream": "无上游",
+    "openWorktree": "打开 {name}",
     "remote": "远程",
     "rename": "重命名分支",
     "renameTo": "将当前分支重命名为…",
     "search": "搜索分支…",
+    "stackParent": "基于 {name}",
     "switch": "切换分支"
   },
   "clone": {

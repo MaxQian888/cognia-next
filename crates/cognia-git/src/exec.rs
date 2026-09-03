@@ -83,6 +83,19 @@ pub fn classify_failure(stderr: &str) -> GitError {
     {
         return GitError::AuthRequired(detail);
     }
+    // Before the conflict branch, though neither string contains "conflict":
+    // these are refusals about WHERE a branch lives, and a caller can act on
+    // them directly. `git switch` says "already used by worktree at", the
+    // `checkout` fallback says "already checked out at".
+    if s.contains("already used by worktree")
+        || s.contains("is already checked out at")
+        || s.contains("already checked out at")
+    {
+        return GitError::BranchCheckedOutElsewhere(detail);
+    }
+    if s.contains("is not fully merged") {
+        return GitError::BranchNotFullyMerged(detail);
+    }
     if s.contains("conflict") || s.contains("would be overwritten by merge") {
         return GitError::MergeConflict(detail);
     }
@@ -106,6 +119,9 @@ pub fn classify_failure(stderr: &str) -> GitError {
     if s.contains("local changes")
         || s.contains("overwritten by checkout")
         || s.contains("please commit your changes or stash")
+        // `worktree remove` refusing a dirty worktree. Same shape as the
+        // others here: work would be lost, and `--force` is the way past.
+        || s.contains("contains modified or untracked files")
     {
         return GitError::DirtyWorkingTree(detail);
     }
@@ -263,6 +279,55 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `git switch` and the `git checkout` fallback word this differently, and
+    /// `branch.rs::checkout` can emit either, so both must classify.
+    #[test]
+    fn classifies_a_branch_held_by_another_worktree() {
+        assert!(matches!(
+            classify_failure("fatal: 'feature' is already used by worktree at '/repo/wt/feature'"),
+            GitError::BranchCheckedOutElsewhere(_)
+        ));
+        assert!(matches!(
+            classify_failure("fatal: 'feature' is already checked out at '/repo/wt/feature'"),
+            GitError::BranchCheckedOutElsewhere(_)
+        ));
+    }
+
+    #[test]
+    fn classifies_an_unmerged_branch_delete() {
+        assert!(matches!(
+            classify_failure("error: the branch 'feature' is not fully merged."),
+            GitError::BranchNotFullyMerged(_)
+        ));
+    }
+
+    /// `worktree remove` on a dirty tree is the same class of refusal as a
+    /// dirty checkout: work would be lost, and `--force` is the way past.
+    #[test]
+    fn classifies_a_dirty_worktree_removal() {
+        assert!(matches!(
+            classify_failure(
+                "fatal: '/repo/wt/a' contains modified or untracked files, use --force to delete it"
+            ),
+            GitError::DirtyWorkingTree(_)
+        ));
+    }
+
+    /// The new arms sit above the conflict branch. A real merge conflict must
+    /// still reach `MergeConflict`, and a plain failure must still fall
+    /// through to `CommandFailed`.
+    #[test]
+    fn the_new_arms_do_not_shadow_the_existing_ones() {
+        assert!(matches!(
+            classify_failure("CONFLICT (content): Merge conflict in a.txt"),
+            GitError::MergeConflict(_)
+        ));
+        assert!(matches!(
+            classify_failure("fatal: something else entirely"),
+            GitError::CommandFailed(_)
+        ));
+    }
 
     #[test]
     fn redact_strips_credentialed_https_url() {

@@ -21658,31 +21658,31 @@
       "title": "Plugin requesting permission"
     },
     "conversionReport": {
-      "title": "Conversion report",
-      "source": "Detected source: {source}",
-      "sources": {
-        "cognia": "Cognia",
-        "claude-code": "Claude Code",
-        "codex": "Codex",
-        "gemini-cli": "Gemini CLI"
-      },
+      "counts": "{converted, plural, =0 {Nothing converted} =1 {1 capability converted} other {# capabilities converted}}, {warnings, plural, =0 {no warnings} =1 {1 warning} other {# warnings}}, {blocking, plural, =0 {nothing blocking} =1 {1 blocker} other {# blockers}}",
       "fidelity": {
+        "contextual": "Contextual",
         "native-exact": "Native",
         "structured": "Structured",
-        "contextual": "Contextual",
         "unsupported": "Unsupported"
       },
       "fidelityHint": {
+        "contextual": "Behaviour is rebuilt from what the source declared, not translated one-to-one.",
         "native-exact": "Native Cognia plugin; no conversion required.",
         "structured": "The manifest and its contributions carry over. Anything host-specific is listed below.",
-        "contextual": "Behaviour is rebuilt from what the source declared, not translated one-to-one.",
         "unsupported": "This plugin cannot be converted without losing behaviour."
       },
-      "counts": "{converted, plural, =0 {Nothing converted} =1 {1 capability converted} other {# capabilities converted}}, {warnings, plural, =0 {no warnings} =1 {1 warning} other {# warnings}}, {blocking, plural, =0 {nothing blocking} =1 {1 blocker} other {# blockers}}",
-      "noIssues": "Everything carried over.",
       "issueBlocking": "Blocked · {capability}",
       "issueWarning": "Warning · {capability}",
-      "more": "{count, plural, =1 {and 1 more} other {and # more}}"
+      "more": "{count, plural, =1 {and 1 more} other {and # more}}",
+      "noIssues": "Everything carried over.",
+      "source": "Detected source: {source}",
+      "sources": {
+        "claude-code": "Claude Code",
+        "codex": "Codex",
+        "cognia": "Cognia",
+        "gemini-cli": "Gemini CLI"
+      },
+      "title": "Conversion report"
     },
     "deepLink": {
       "routing": "Opening…"
@@ -39099,15 +39099,24 @@
       "uncommitted": "Uncommitted"
     },
     "branches": {
+      "agentBranch": "Cut by an isolated agent run",
       "create": "Create Branch",
+      "createTracking": "Create a local branch tracking this",
       "delete": "Delete Branch",
       "detached": "Detached HEAD",
       "empty": "No branches found",
+      "forceDeleteAction": "Delete anyway",
+      "forceDeleteDescription": "“{name}” has commits that are not merged anywhere else. Deleting it discards them.",
+      "forceDeleteTitle": "Delete an unmerged branch?",
+      "inWorktree": "In {name}",
       "newName": "New branch name",
+      "noUpstream": "No upstream",
+      "openWorktree": "Open {name}",
       "remote": "remote",
       "rename": "Rename Branch",
       "renameTo": "Rename current branch to…",
       "search": "Search branches…",
+      "stackParent": "on {name}",
       "switch": "Switch Branch"
     },
     "clone": {

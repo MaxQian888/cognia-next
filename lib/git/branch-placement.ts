@@ -11,6 +11,7 @@
  */
 
 import type { GitBranch } from "@/types/git"
+import { gitTargetFromRemote, parseGitTarget } from "@/lib/git/target"
 
 /** Where a branch is checked out, if anywhere. */
 export type BranchPlacement =
@@ -112,4 +113,20 @@ export function stackParentIndex(
   pairs: readonly (readonly [string, string])[]
 ): ReadonlyMap<string, string> {
   return new Map(pairs.map(([child, parent]) => [child, parent]))
+}
+
+/**
+ * The value to hand `setRootDir` to bind the panel to a worktree.
+ *
+ * On a desktop host a worktree path is already the coordinate system the
+ * panel speaks, so it passes through. Over a companion the panel's `rootDir`
+ * is an opaque `git-workspace:<id>` target while worktree paths arrive
+ * workspace-relative, so the path has to be re-wrapped against the same
+ * workspace or the panel binds to nothing.
+ */
+export function worktreeTargetFor(currentRootDir: string, worktreePath: string): string {
+  const target = parseGitTarget(currentRootDir)
+  return target.kind === "remote"
+    ? gitTargetFromRemote(target.workspaceId, worktreePath)
+    : worktreePath
 }

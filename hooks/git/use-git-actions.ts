@@ -54,6 +54,7 @@ import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import {
   asGitError,
   type ConflictSide,
+  type GitErrorKind,
   type GitErrorPayload,
   type GitResetMode,
   type RebaseTodoEntry,
@@ -117,6 +118,27 @@ export interface UseGitActionsResult {
   interactiveRebase: (base: string, entries: RebaseTodoEntry[]) => Promise<GitActionResult>
 }
 
+/**
+ * Failures the caller turns into a next step, so this hook must not also toast
+ * them. A toast beside an open dialog says the same thing twice and reads as
+ * two separate failures.
+ *
+ *  - `identityRequired` opens the identity dialog (`commit-box`).
+ *  - `branchCheckedOutElsewhere` becomes "open that worktree": the branch is
+ *    fine, it just lives elsewhere.
+ *  - `branchNotFullyMerged` becomes the force-delete confirmation.
+ *
+ * NOTE: `kind` survives only on the desktop. `companion_api/rpc/source_control`
+ * flattens every git failure with `RpcError::internal(e.to_string())`, so
+ * `asGitError` answers null over a paired transport and these paths fall back
+ * to the toast. Tracked separately from this hook.
+ */
+const CALLER_HANDLED_ERRORS: ReadonlySet<GitErrorKind> = new Set<GitErrorKind>([
+  "identityRequired",
+  "branchCheckedOutElsewhere",
+  "branchNotFullyMerged",
+])
+
 export type GitActionResult = GitErrorPayload | null
 
 export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult {
@@ -156,7 +178,7 @@ export function useGitActions(refresh: () => Promise<void>): UseGitActionsResult
           }
           const message = payload.detail ?? payload.kind
           setError(op, message)
-          if (payload.kind !== "identityRequired") {
+          if (!CALLER_HANDLED_ERRORS.has(payload.kind)) {
             const key = OP_ERROR_KEY[op] ?? "generic"
             toast.error(t(`errors.${key}`, { message }))
           }
