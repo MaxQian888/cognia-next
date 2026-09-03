@@ -5953,7 +5953,7 @@
       "operation": "write",
       "capability": "agent.run",
       "risk": "high",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
       "summary": "claude_plugin_tool_response (agent.run)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
@@ -6118,7 +6118,7 @@
       "operation": "write",
       "capability": "agent.run",
       "risk": "high",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
       "summary": "claude_protocol_adapter_message (agent.run)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
@@ -6808,7 +6808,7 @@
       "operation": "write",
       "capability": "agent.run",
       "risk": "high",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
       "summary": "claude_tool_result_decision (agent.run)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
@@ -46751,5 +46751,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "22726dca2536e9a505244877f425bc98183b01f8fd9f07d73abbebd3e4c60ab3"
+  "catalogHash": "24d1e3d34b57aed8aac12ca946f7b90b405b8ecf4249cf0dcb9d535ae6e80fe3"
 }

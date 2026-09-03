@@ -23,6 +23,14 @@ jest.mock("@/stores/remote-host/remote-host-store", () => ({
   activeHostSupportsFeature: (feature: unknown, operation?: unknown) =>
     mockActiveHostSupportsFeature(feature, operation),
 }))
+// Defaults to "not driving another host", which is what a desktop with its own
+// sidecar and a browser paired to a headless host both are. The ADR-0082
+// compatibility check only applies to the third case, and the tests that mean
+// it say so.
+const mockIsRemoteHostActive = jest.fn(() => false)
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => mockIsRemoteHostActive(),
+}))
 
 import { PluginToolDispatchProvider } from "./plugin-tool-dispatch-provider"
 import {
@@ -54,6 +62,7 @@ describe("PluginToolDispatchProvider", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockActiveHostSupportsFeature.mockReturnValue(true)
+    mockIsRemoteHostActive.mockReturnValue(false)
   })
 
   it("runs handlePluginToolExec and writes the response when an event arrives", async () => {
@@ -134,6 +143,7 @@ describe("PluginToolDispatchProvider", () => {
     let captured:
       ((req: PluginToolExecEvent & { remoteExecutionContext?: object }) => void) | null = null
     mockActiveHostSupportsFeature.mockReturnValue(false)
+    mockIsRemoteHostActive.mockReturnValue(true)
     mockSubscribe.mockImplementation(
       async (
         handler: (request: PluginToolExecEvent & { remoteExecutionContext?: object }) => void
@@ -173,6 +183,61 @@ describe("PluginToolDispatchProvider", () => {
       }),
       context
     )
+  })
+
+  // The regression this file used to hide: `activeHostSupportsFeature` was
+  // mocked true, a value production could not produce, so the success path was
+  // green while every companion refused every remote tool call and hung the
+  // turn. A browser paired to a headless host is not driving another host, and
+  // the frame only reached it because the host addressed it there.
+  it("runs a remote plugin tool for the host this client belongs to", async () => {
+    let captured:
+      ((req: PluginToolExecEvent & { remoteExecutionContext?: object }) => void) | null = null
+    mockIsRemoteHostActive.mockReturnValue(false)
+    // Nothing advertises anything: the remote-host store is empty on a browser,
+    // which is exactly the state that used to refuse.
+    mockActiveHostSupportsFeature.mockReturnValue(false)
+    mockSubscribe.mockImplementation(
+      async (
+        handler: (request: PluginToolExecEvent & { remoteExecutionContext?: object }) => void
+      ) => {
+        captured = handler
+        return () => {}
+      }
+    )
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "request-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    const response = {
+      type: "plugin_tool_response",
+      sessionId: "s1",
+      toolUseId: "t1",
+      result: "ok",
+    }
+    mockHandle.mockResolvedValue(response)
+    mockSend.mockResolvedValue(undefined)
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await Promise.resolve()
+    captured!({
+      type: "plugin_tool_exec",
+      sessionId: "s1",
+      toolUseId: "t1",
+      name: "x",
+      args: {},
+      remoteExecutionContext: context,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockHandle).toHaveBeenCalledWith(expect.objectContaining({ toolUseId: "t1" }))
+    await waitFor(() => expect(mockSend).toHaveBeenCalledWith(response, context))
   })
 
   it("unsubscribes on unmount", async () => {
@@ -236,6 +301,7 @@ describe("PluginToolDispatchProvider", () => {
         }) => void)
       | null = null
     mockActiveHostSupportsFeature.mockReturnValue(false)
+    mockIsRemoteHostActive.mockReturnValue(true)
     mockSubscribeProtocolExec.mockImplementation(async (handler) => {
       execHandler = handler
       return () => {}

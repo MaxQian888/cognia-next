@@ -23,8 +23,8 @@ import {
   subscribeProtocolAdapterCancel,
   sendProtocolAdapterMessage,
 } from "@/lib/claude/ipc"
+import { canProxyRemoteToolCall } from "@/lib/claude/controller-tool-proxy"
 import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
-import { activeHostSupportsFeature } from "@/stores/remote-host/remote-host-store"
 import { loggers } from "@cognia/logging"
 
 export function PluginToolDispatchProvider({ children }: { children: React.ReactNode }) {
@@ -33,10 +33,7 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
     let unlisten: (() => void) | null = null
 
     void subscribePluginToolExec((req) => {
-      if (
-        req.remoteExecutionContext &&
-        !activeHostSupportsFeature("claude.controller-tool-proxy", "plugin_tool_exec")
-      ) {
+      if (req.remoteExecutionContext && !canProxyRemoteToolCall("plugin_tool_exec")) {
         void sendPluginToolResponse(
           {
             type: "plugin_tool_response",
@@ -135,10 +132,7 @@ export function PluginToolDispatchProvider({ children }: { children: React.React
     const executions = new Map<string, ReturnType<typeof dispatchProtocolAdapterExec>>()
 
     void subscribeProtocolAdapterExec((req) => {
-      if (
-        req.remoteExecutionContext &&
-        !activeHostSupportsFeature("claude.controller-tool-proxy", "protocol_adapter_exec")
-      ) {
+      if (req.remoteExecutionContext && !canProxyRemoteToolCall("protocol_adapter_exec")) {
         void sendProtocolAdapterMessage(
           {
             type: "protocol_adapter_error",

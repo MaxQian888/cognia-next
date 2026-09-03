@@ -223,7 +223,15 @@ describe("host feature manifest", () => {
       operations: ["skills_catalog_get", "skills_load_registry", "skills_scan_native"],
     })
     expect(manifest.features["skills.atomic-install"]).toBeUndefined()
-    expect(manifest.features["claude.controller-tool-proxy"]).toBeUndefined()
+    // Every host that runs the sidecar can ask a client to execute a
+    // renderer-owned tool, so the desktop advertises it too. Only the three
+    // round-trips whose answer is remotely reachable are named: adding
+    // `plugin_hook_exec` here would tell a client to run a hook whose response
+    // command still 404s.
+    expect(manifest.features["claude.controller-tool-proxy"]).toEqual({
+      version: 1,
+      operations: ["plugin_tool_exec", "tool_result_review", "protocol_adapter_exec"],
+    })
     expect(manifest.features["external-bridge.lifecycle"]).toBeUndefined()
     expect(manifest.features["external-bridge.managed-relay"]).toBeUndefined()
     expect(manifest.features["external-bridge.direct-tls"]).toBeUndefined()

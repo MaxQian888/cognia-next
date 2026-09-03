@@ -11609,7 +11609,7 @@ paths:
       tags:
         - rpc-dispatch
       summary: claude_plugin_tool_response (agent.run)
-      description: "Device-reachable write command. Risk: high; approval: interactive."
+      description: "Device-reachable write command. Risk: high; approval: none."
       x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -11698,9 +11698,6 @@ paths:
                       type: integer
                       minimum: 0
                   additionalProperties: false
-                adminLease:
-                  type: string
-                  minLength: 1
               additionalProperties: false
               allOf:
                 - anyOf:
@@ -11718,8 +11715,6 @@ paths:
                         - remote_execution_context
                     - required:
                         - remoteExecutionContext
-              required:
-                - adminLease
       responses:
         "200":
           description: Command completed.
@@ -11820,7 +11815,7 @@ paths:
       tags:
         - rpc-dispatch
       summary: claude_protocol_adapter_message (agent.run)
-      description: "Device-reachable write command. Risk: high; approval: interactive."
+      description: "Device-reachable write command. Risk: high; approval: none."
       x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -11833,7 +11828,6 @@ paths:
               type: object
               required:
                 - message
-                - adminLease
               properties:
                 message:
                   type: object
@@ -11909,9 +11903,6 @@ paths:
                   additionalProperties: false
                 sessionId:
                   type: string
-                adminLease:
-                  type: string
-                  minLength: 1
               additionalProperties: false
               allOf:
                 - anyOf:
@@ -13154,7 +13145,7 @@ paths:
       tags:
         - rpc-dispatch
       summary: claude_tool_result_decision (agent.run)
-      description: "Device-reachable write command. Risk: high; approval: interactive."
+      description: "Device-reachable write command. Risk: high; approval: none."
       x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -13241,9 +13232,6 @@ paths:
                       type: integer
                       minimum: 0
                   additionalProperties: false
-                adminLease:
-                  type: string
-                  minLength: 1
               additionalProperties: false
               allOf:
                 - anyOf:
@@ -13261,8 +13249,6 @@ paths:
                         - remote_execution_context
                     - required:
                         - remoteExecutionContext
-              required:
-                - adminLease
       responses:
         "200":
           description: Command completed.

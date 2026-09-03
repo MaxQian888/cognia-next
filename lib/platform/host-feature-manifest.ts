@@ -255,6 +255,29 @@ export function buildLocalHostFeatureManifest({
     }
   }
   if (platform === "tauri" || platform === "headless") {
+    // The renderer round-trips. A host that runs the sidecar asks whichever
+    // client started the turn to execute the tools that live in a renderer
+    // (plugin tools, artifacts, `web_fetch`, `ask_user`, `dispatch_agent`) and
+    // waits for the answer, so the ability to proxy is a property of running
+    // the sidecar at all, not of any one shell.
+    //
+    // Declared late, and this is why it was worth declaring rather than
+    // deleting: `HOST_FEATURE_IDS` has carried the id since the round-trip
+    // shipped, but no platform ever emitted a descriptor, so
+    // `supportsHostFeatureOperation` answered false everywhere and the only
+    // consumer refused every remote-context tool call it was handed. The id
+    // existed, the signal did not.
+    //
+    // The operations are the round-trip EVENTS, because that is what a caller
+    // holds when it has to decide whether to run one. Only the three whose
+    // answer can actually get back are listed: `plugin_hook_exec` is left out
+    // because `claude_plugin_hook_response` is still `target: "client"` with
+    // `transports: ["internal"]`, so a paired client's answer would 404. Naming
+    // it here would be the same mistake this comment is about.
+    features["claude.controller-tool-proxy"] = {
+      version: 1,
+      operations: ["plugin_tool_exec", "tool_result_review", "protocol_adapter_exec"],
+    }
     features["workflow.execution"] = {
       version: 1,
       operations: [
