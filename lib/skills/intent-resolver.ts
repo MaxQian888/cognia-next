@@ -17,10 +17,10 @@ export function inferBuiltInSkillIntents(prompt: string | undefined): string[] {
     intents.add("chart")
   }
   if (
-    /\b(diagram|flowchart|sequence diagram|architecture figure|process map|state machine|entity relationship)\b/.test(
+    /\b(diagram|flowchart|sequence diagram|architecture figure|process map|state machine|entity relationship|mermaid|mind ?map|gantt|org chart)\b/.test(
       text
     ) ||
-    /(架构图|流程图|时序图|状态机图|关系图|实体关系图)/.test(text)
+    /(架构图|流程图|时序图|状态机图|关系图|实体关系图|思维导图|甘特图|泳道图|象限图)/.test(text)
   ) {
     intents.add("diagram")
   }
