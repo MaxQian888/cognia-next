@@ -41,6 +41,8 @@ interface Harness {
     removed: string[]
     permissions: Array<{ agentId: string; sessionId: string; response: unknown }>
     elicitations: Array<{ agentId: string; response: unknown }>
+    /** The options each `execute` was called with, in order. */
+    executed: Array<Record<string, unknown>>
   }
   /** Drives the turn the manager is "running". */
   emit: (event: ExternalAgentEvent) => void
