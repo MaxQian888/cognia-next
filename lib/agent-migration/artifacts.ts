@@ -57,22 +57,26 @@ export interface ArtifactApplyDeps {
 async function scanSubagents(
   vendor: MigrationVendor
 ): Promise<{ drafts: SubagentImportDraft[]; warnings: string[] }> {
-  const [{ resolveVendorRoots }, { joinPath }, { realSessionFs, walkFiles }, importers] =
-    await Promise.all([
-      import("@/lib/agent-roots"),
-      import("@/lib/claude/instructions/paths"),
-      import("@/lib/session-import/fs"),
-      import("@/lib/claude/subagent-importers"),
-    ])
+  const [
+    { resolveVendorRoots },
+    { joinPath },
+    { realSessionFs, walkFiles },
+    importers,
+    { configRootKeyForMigrationVendor, subagentSourceIdForMigrationVendor },
+  ] = await Promise.all([
+    import("@/lib/agent-roots"),
+    import("@/lib/claude/instructions/paths"),
+    import("@/lib/session-import/fs"),
+    import("@/lib/claude/subagent-importers"),
+    import("@/lib/agent-ecosystem/catalog"),
+  ])
   const roots = await resolveVendorRoots()
-  const base =
-    vendor === "claude-code"
-      ? roots.claudeConfigDir
-      : vendor === "codex"
-        ? roots.codexHome
-        : vendor === "pi"
-          ? roots.piAgentDir
-          : roots.opencodeConfigDir
+  // `configRootKey`, not the probe roots. OpenCode keeps config and history in
+  // different directories, and the ladder this replaced fell through to
+  // `opencodeConfigDir` for every non-Claude, non-Codex, non-Pi vendor, which
+  // was correct only because OpenCode happened to be the sole remaining case.
+  const rootKey = configRootKeyForMigrationVendor(vendor)
+  const base = rootKey ? ((roots as Record<string, string | undefined>)[rootKey] ?? "") : ""
   if (!base) return { drafts: [], warnings: ["Source root is unavailable."] }
   const dir = joinPath(base, "agents")
   const fs = realSessionFs()
@@ -90,7 +94,15 @@ async function scanSubagents(
       warnings.push(`${path}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
-  const adapter = importers.getSubagentAdapter(vendor === "codex" ? "codex-cli" : vendor)
+  // Codex's importer is registered as `codex-cli`. That one-character
+  // difference used to live in a ternary here.
+  const sourceId = subagentSourceIdForMigrationVendor(vendor)
+  if (!sourceId) {
+    return { drafts: [], warnings: [`No subagent importer is registered for ${vendor}.`] }
+  }
+  const adapter = importers.getSubagentAdapter(
+    sourceId as Parameters<typeof importers.getSubagentAdapter>[0]
+  )
   const parsed = adapter.parse({ files, rootDir: dir })
   return {
     drafts: parsed.drafts,

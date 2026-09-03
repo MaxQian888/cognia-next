@@ -46,4 +46,38 @@ describe("probeVendors", () => {
     })
     expect(result.find((r) => r.vendor === "pi")?.installed).toBe(false)
   })
+
+  it("prefers OpenCode's data dir over its config dir, and falls back to it", async () => {
+    // The ordering used to be an `||` in a hand-written map. It now comes from
+    // the ecosystem catalog's `probeRootKeys`, so this pins that the order
+    // survived the move: data dir first, config dir only when it is empty.
+    const probed: string[] = []
+    const run = async (opencodeDataDir: string, opencodeConfigDir: string) => {
+      probed.length = 0
+      return probeVendors({
+        roots: async () => ({
+          claudeConfigDir: "",
+          codexHome: "",
+          opencodeConfigDir,
+          opencodeDataDir,
+          piAgentDir: "",
+          piSessionDir: "",
+          geminiDir: "",
+          continueDir: "",
+        }),
+        exists: async (path) => {
+          probed.push(path)
+          return true
+        },
+        readAgentConfig: async () => ({ exists: false, path: null }),
+      })
+    }
+
+    await run("/opencode-data", "/opencode-config")
+    expect(probed).toContain("/opencode-data")
+    expect(probed).not.toContain("/opencode-config")
+
+    await run("", "/opencode-config")
+    expect(probed).toContain("/opencode-config")
+  })
 })
