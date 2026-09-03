@@ -2,6 +2,8 @@ import React from "react"
 import { render, waitFor } from "@testing-library/react"
 
 import { VirtualizedTranscript } from "./VirtualizedTranscript"
+import { RenderPrefsProvider } from "../render/context"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import type { Cell } from "../state/types"
 
 describe("VirtualizedTranscript", () => {
@@ -115,6 +117,36 @@ describe("VirtualizedTranscript", () => {
     expect(text).toContain("✗")
     expect(text).toContain("» Bash pnpm test")
     expect(text).toContain("↳ boom")
+  })
+
+  it("applies the transcript render preferences to a committed cell", () => {
+    const cell: Cell = {
+      id: "r",
+      kind: "tool",
+      callKey: "r",
+      toolName: "read",
+      input: { file_path: "demo.ts" },
+      status: "done",
+      collapsed: false,
+      result: Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n"),
+    }
+    const { container } = render(
+      <RenderPrefsProvider prefs={{ ...RENDER_DEFAULTS, toolResultMaxLines: 2 }}>
+        <VirtualizedTranscript
+          cells={[cell]}
+          width={80}
+          top={0}
+          viewportRows={40}
+          verbose={false}
+        />
+      </RenderPrefsProvider>
+    )
+    const text = container.textContent ?? ""
+    // The preferences used to stop at the Ink card path, so this renderer showed
+    // every line, un-numbered, however the settings panel was set.
+    expect(text).toContain("1 │ line 1")
+    expect(text).toContain("+6 more lines hidden")
+    expect(text).not.toContain("line 8")
   })
 
   it("reserves the terminal auto-wrap column so the next row keeps its first character", async () => {

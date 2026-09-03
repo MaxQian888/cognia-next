@@ -49,6 +49,23 @@ describe("TerminalBlock", () => {
     ])
   })
 
+  it("keeps an explicit colour distinct from a same-styled neighbour", () => {
+    const lines = wrapTerminalSpans(
+      [
+        { text: "ab", style: "muted" },
+        { text: "cd", style: "muted", color: "blue" },
+        { text: "ef", style: "muted" },
+      ],
+      80
+    )
+    // Without the colour in the merge test these three fold into one grey run.
+    expect(lines[0].spans).toEqual([
+      { text: "ab", style: "muted" },
+      { text: "cd", style: "muted", color: "blue" },
+      { text: "ef", style: "muted" },
+    ])
+  })
+
   it("breaks a row on a newline inside a span, blank rows included", () => {
     const lines = wrapTerminalSpans([{ text: "a\n\nb", style: "plain" }], 80)
     expect(lines.map((line) => line.plain)).toEqual(["a", "", "b"])

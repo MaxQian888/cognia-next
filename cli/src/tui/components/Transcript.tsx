@@ -12,8 +12,10 @@ import { Box, Static, Text, measureElement, type DOMElement } from "ink"
 
 import { CellView } from "./CellView"
 import { useTheme } from "../theme/context"
+import { useRenderPrefs } from "../render/context"
 import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
 import type { Cell, ToolCell } from "../state/types"
+import type { ResolvedRenderConfig } from "../../config/schema"
 import { cellToTerminalBlock } from "../render/cell-terminal-block"
 
 /** Reports its measured row-height for the find cursor's row map. Wraps a cell
@@ -61,13 +63,22 @@ export function limitReplayCells(
   cells: Cell[],
   maxRows: number,
   width: number,
-  verbose: boolean
+  verbose: boolean,
+  prefs?: ResolvedRenderConfig
 ): Cell[] {
   if (maxRows === 0) return cells
   let rows = 0
   let start = cells.length
   while (start > 0) {
-    const next = cellToTerminalBlock(cells[start - 1], { width, verbose }).rowCount + 1
+    // Measured with the SAME preferences the cards render under, or a capped
+    // result would be budgeted at its full height and the replay would come up
+    // short of the rows it actually paints.
+    const next =
+      cellToTerminalBlock(cells[start - 1], {
+        width,
+        verbose,
+        ...(prefs ? { prefs } : {}),
+      }).rowCount + 1
     if (rows > 0 && rows + next > maxRows) break
     rows += next
     start -= 1
@@ -122,6 +133,7 @@ function TranscriptImpl({
   columns?: number
 }) {
   const theme = useTheme()
+  const prefs = useRenderPrefs()
   const renderCell = (cell: Cell) => {
     const focused = cell.id === focusedCellId
     const body = <CellView cell={applyVerbose(cell, verbose)} columns={columns} />
@@ -172,7 +184,8 @@ function TranscriptImpl({
     )
   }
 
-  const replayCells = epoch > 0 ? limitReplayCells(cells, replayMaxRows, columns, verbose) : cells
+  const replayCells =
+    epoch > 0 ? limitReplayCells(cells, replayMaxRows, columns, verbose, prefs) : cells
   const rows: Row[] = header
     ? [{ id: HEADER_ID }, ...replayCells.map((cell) => ({ id: cell.id, cell }))]
     : replayCells.map((cell) => ({ id: cell.id, cell }))

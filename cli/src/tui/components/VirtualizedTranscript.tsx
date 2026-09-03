@@ -9,6 +9,7 @@ import { buildTerminalBlock } from "../render/terminal-block"
 import type { TerminalBlock, TerminalStyle } from "../render/terminal-block"
 import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
 import { useTheme } from "../theme/context"
+import { useRenderPrefs } from "../render/context"
 import { recordBlockCacheStats, recordRenderDuration } from "../runtime/render-diagnostics"
 
 const blockCache = new TerminalBlockCache()
@@ -45,11 +46,13 @@ function BlockView({ block }: { block: TerminalBlock }) {
             : line.spans.map((span, spanIndex) => (
                 <Text
                   key={spanIndex}
-                  color={colors[span.style]}
+                  // An explicit colour comes from a syntax highlighter and wins
+                  // over the semantic style token (and its dimming with it).
+                  color={span.color ?? colors[span.style]}
                   bold={span.bold}
                   italic={span.italic}
                   underline={span.underline}
-                  dimColor={span.style === "muted"}
+                  dimColor={span.style === "muted" && !span.color}
                 >
                   {span.text}
                 </Text>
@@ -76,6 +79,7 @@ function VirtualizedTranscriptBody({
   onMetrics?: (metrics: readonly VirtualBlockMetric[]) => void
 }) {
   const theme = useTheme()
+  const prefs = useRenderPrefs()
   // Never paint a transcript line into the terminal's final column. A line
   // whose last grapheme lands there arms the terminal's deferred auto-wrap;
   // Ink then positions the following row and the terminal consumes/overwrites
@@ -110,13 +114,14 @@ function VirtualizedTranscriptBody({
                 id: run.cell.id,
                 width: safeWidth,
                 theme: JSON.stringify(theme),
-                preferences: verbose ? "verbose" : "compact",
+                preferences: `${verbose ? "verbose" : "compact"}:${JSON.stringify(prefs)}`,
                 revision: revisionOf(run.cell),
               },
-              () => cellToTerminalBlock(run.cell, { width: safeWidth, verbose })
+              () =>
+                cellToTerminalBlock(run.cell, { width: safeWidth, verbose, prefs, palette: theme })
             )
       ),
-    [cells, safeWidth, theme, verbose]
+    [cells, safeWidth, theme, verbose, prefs]
   )
   const index = React.useMemo(
     () => buildVirtualBlockIndex(blocks.map((block) => ({ id: block.id, rows: block.rowCount }))),

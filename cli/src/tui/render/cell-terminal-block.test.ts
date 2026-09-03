@@ -1,5 +1,10 @@
 /** @jest-environment node */
-import { cellToTerminalBlock, TerminalBlockCache } from "./cell-terminal-block"
+import {
+  cellToTerminalBlock,
+  TerminalBlockCache,
+  VERBATIM_RENDER_PREFS,
+} from "./cell-terminal-block"
+import { RENDER_DEFAULTS } from "../../config/schema"
 import type { Cell } from "../state/types"
 
 describe("cellToTerminalBlock", () => {
@@ -149,6 +154,73 @@ describe("cellToTerminalBlock", () => {
     const body = block.lines.find((line) => line.plain.includes("code"))
     expect(body?.spans.some((span) => span.style === "code")).toBe(true)
     expect(body?.spans.some((span) => span.style === "accent" && span.underline)).toBe(true)
+  })
+
+  it("honours the transcript render preferences the Ink cards already obeyed", () => {
+    const cell: Cell = {
+      id: "r",
+      kind: "tool",
+      callKey: "r",
+      toolName: "read",
+      input: { file_path: "demo.ts" },
+      status: "done",
+      collapsed: false,
+      result: Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n"),
+    }
+    const numbered = cellToTerminalBlock(cell, {
+      width: 80,
+      verbose: false,
+      prefs: { ...RENDER_DEFAULTS, toolResultMaxLines: 3 },
+    })
+    expect(numbered.plainText).toContain("1 │ line 1")
+    expect(numbered.plainText).toContain("+9 more lines hidden")
+    expect(numbered.plainText).not.toContain("line 12")
+
+    const plain = cellToTerminalBlock(cell, {
+      width: 80,
+      verbose: false,
+      prefs: { ...RENDER_DEFAULTS, fileLineNumbers: false },
+    })
+    expect(plain.plainText).toContain("line 1")
+    expect(plain.plainText).not.toContain("1 │ line 1")
+  })
+
+  it("redirects an oversized result to the pager instead of flooding the viewport", () => {
+    const cell: Cell = {
+      id: "big",
+      kind: "tool",
+      callKey: "big",
+      toolName: "bash",
+      input: { command: "cat huge.log" },
+      status: "done",
+      collapsed: false,
+      result: Array.from({ length: 400 }, (_, i) => `row ${i}`).join("\n"),
+    }
+    const block = cellToTerminalBlock(cell, { width: 80, verbose: false, prefs: RENDER_DEFAULTS })
+    expect(block.plainText).toContain("400 lines total")
+    expect(block.plainText).toContain("/expand")
+    expect(block.rowCount).toBeLessThan(30)
+  })
+
+  it("renders verbatim for the pager: no cap, no gutter", () => {
+    const cell: Cell = {
+      id: "v",
+      kind: "tool",
+      callKey: "v",
+      toolName: "read",
+      input: { file_path: "demo.ts" },
+      status: "done",
+      collapsed: false,
+      result: Array.from({ length: 300 }, (_, i) => `row ${i}`).join("\n"),
+    }
+    const block = cellToTerminalBlock(cell, {
+      width: 80,
+      verbose: true,
+      prefs: VERBATIM_RENDER_PREFS,
+    })
+    expect(block.plainText).toContain("row 299")
+    expect(block.plainText).not.toContain("/expand")
+    expect(block.plainText).not.toContain("1 │ ")
   })
 
   it("keeps streaming and extended fence fallbacks copyable and safe", () => {

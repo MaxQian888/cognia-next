@@ -7,8 +7,9 @@
  */
 import { tokenizeCached } from "../markdown/render-cache"
 import type { DiffLine, MdLine, MdSpan } from "../markdown/types"
-import { formatEditDiff } from "../markdown/diff"
-import { resultToText } from "../format/result-render"
+import { diffFilePath, formatEditDiff } from "../markdown/diff"
+import { highlightLine, langFromPath, paletteCodeTheme } from "../markdown/highlight"
+import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
 import {
   isDiffTool,
   resultPreview,
@@ -25,6 +26,9 @@ import {
   type ToolResultDescriptor,
 } from "../format/tool-result"
 import { isContextTool } from "../format/context-group"
+import { ansiToSpans } from "./ansi-spans"
+import { RENDER_DEFAULTS, type ResolvedRenderConfig } from "../../config/schema"
+import type { ThemePalette } from "../theme/palette"
 import {
   isSubagentTool,
   subagentDispatchCount,
@@ -87,7 +91,11 @@ function inlineSpans(spans: MdSpan[]): TerminalSpan[] {
 const HEADING_STYLE: Record<number, TerminalStyle> = { 1: "accent", 2: "warning", 3: "success" }
 
 /** One markdown line as styled spans, without a trailing row break. */
-function markdownLineSpans(line: MdLine): TerminalSpan[] {
+function markdownLineSpans(
+  line: MdLine,
+  highlight: boolean,
+  palette: ThemePalette | undefined
+): TerminalSpan[] {
   switch (line.kind) {
     case "heading": {
       const style = HEADING_STYLE[line.level] ?? "muted"
@@ -104,7 +112,12 @@ function markdownLineSpans(line: MdLine): TerminalSpan[] {
       return [
         ...(line.first ? [seg(`╭─ ${line.lang || "code"}`, "muted"), BREAK] : []),
         seg("│ ", "muted"),
-        seg(line.text, "code"),
+        ...(highlight && line.lang
+          ? ansiToSpans(
+              highlightLine(line.text, line.lang, palette ? paletteCodeTheme(palette) : undefined),
+              "code"
+            )
+          : [seg(line.text, "code")]),
         ...(line.last ? [BREAK, seg("╰─", "muted")] : []),
       ]
     case "blockquote":
@@ -137,8 +150,14 @@ function markdownLineSpans(line: MdLine): TerminalSpan[] {
 }
 
 /** A whole markdown document as styled spans, one row break between lines. */
-function markdownSpans(raw: string): TerminalSpan[] {
-  const lines = tokenizeCached(sanitizeTerminalText(raw)).map(markdownLineSpans)
+function markdownSpans(
+  raw: string,
+  highlight = false,
+  palette: ThemePalette | undefined = undefined
+): TerminalSpan[] {
+  const lines = tokenizeCached(sanitizeTerminalText(raw)).map((line) =>
+    markdownLineSpans(line, highlight, palette)
+  )
   return lines.flatMap((spans, index) => (index === 0 ? spans : [BREAK, ...spans]))
 }
 
@@ -148,6 +167,72 @@ function safeResult(result: unknown): string {
   } catch {
     return "[unavailable tool result]"
   }
+}
+
+/** How a cell is rendered: the terminal width, the global expand-all toggle, and
+ * the user's transcript render preferences. The preferences used to stop at the
+ * Ink card path, so `toolResultMaxLines`, `pagerThresholdLines`, `fileLineNumbers`
+ * and `syntaxHighlightInline` did nothing in the fullscreen layout that this
+ * renderer paints, which is the default one. */
+/**
+ * Preferences for a surface that must show the transcript VERBATIM: the
+ * `/transcript` pager and every export. No cap, no pager fallback, no line
+ * numbers or colour, because the output is read (and copied) as source rather
+ * than skimmed in a viewport.
+ */
+export const VERBATIM_RENDER_PREFS: ResolvedRenderConfig = {
+  ...RENDER_DEFAULTS,
+  toolResultMaxLines: Number.MAX_SAFE_INTEGER,
+  pagerThresholdLines: Number.MAX_SAFE_INTEGER,
+  syntaxHighlightInline: false,
+  fileLineNumbers: false,
+}
+
+export interface CellRenderOptions {
+  width: number
+  verbose: boolean
+  prefs?: ResolvedRenderConfig
+  /** Palette for theme-aware syntax colours, matching the Ink card path. */
+  palette?: ThemePalette
+}
+
+/**
+ * An expanded tool result as styled rows: syntax-highlighted per the render
+ * preferences, optionally line-numbered, capped, each row under the body rule.
+ * A result past `pagerThresholdLines` collapses to a short preview plus the
+ * "/expand" hint instead of flooding the transcript, exactly as the card does.
+ */
+function resultBodySpans(
+  cell: ToolCell,
+  prefs: ResolvedRenderConfig,
+  palette: ThemePalette | undefined
+): TerminalSpan[] {
+  const text = safeResult(cell.result)
+  if (!text) return []
+  const totalLines = text.split("\n").length
+  const tooBig = totalLines > prefs.pagerThresholdLines
+  const maxLines = tooBig ? Math.min(prefs.toolResultMaxLines, 20) : prefs.toolResultMaxLines
+  const rendered = renderResultLines(text, {
+    ...(toolResultLang(cell.toolName, cell.input)
+      ? { lang: toolResultLang(cell.toolName, cell.input) }
+      : {}),
+    highlight: prefs.syntaxHighlightInline,
+    lineNumbers: prefs.fileLineNumbers,
+    ...(palette ? { palette } : {}),
+    maxLines,
+  })
+  const out: TerminalSpan[] = []
+  rendered.lines.forEach((line, index) => {
+    if (index > 0) out.push(BREAK)
+    out.push(seg(RULE, "muted"), ...ansiToSpans(line, "muted"))
+  })
+  const note = tooBig
+    ? `${totalLines} lines total, open the full output with /expand`
+    : rendered.hiddenLines > 0
+      ? `+${rendered.hiddenLines} more line${rendered.hiddenLines === 1 ? "" : "s"} hidden, /expand`
+      : ""
+  if (note) out.push(BREAK, seg(`${RULE}\u2026 ${note}`, "warning"))
+  return out
 }
 
 function contentPartText(cell: Extract<Cell, { kind: "content-part" }>): {
@@ -249,7 +334,11 @@ function ruled(text: string): string {
 /** A parsed diff as styled rows: the sign column carries the add/remove colour,
  * the body stays neutral so it reads as code. Same gutter the Ink `DiffView`
  * draws, so a diff occupies the same rows in both renderers. */
-function diffSpans(diff: DiffLine[]): TerminalSpan[] {
+function diffSpans(
+  diff: DiffLine[],
+  lang: string | undefined,
+  palette: ThemePalette | undefined
+): TerminalSpan[] {
   return diff.flatMap((line, index) => {
     const signStyle: TerminalStyle =
       line.kind === "add" ? "success" : line.kind === "del" ? "danger" : "muted"
@@ -258,12 +347,23 @@ function diffSpans(diff: DiffLine[]): TerminalSpan[] {
         ? "    "
         : `${(line.oldNo ?? "").toString().padStart(3)} ${(line.newNo ?? "").toString().padStart(3)} `
     const marker = line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "
+    // The sign column carries the add/remove colour so the body can keep its own
+    // syntax highlight, exactly the split the Ink `DiffView` draws.
+    const body: TerminalSpan[] =
+      line.kind === "meta"
+        ? [seg(line.text, "muted")]
+        : lang
+          ? ansiToSpans(
+              highlightLine(line.text, lang, palette ? paletteCodeTheme(palette) : undefined),
+              "code"
+            )
+          : [seg(line.text, "code")]
     return [
       ...(index === 0 ? [] : [BREAK]),
       seg(RULE, "muted"),
       seg(gutter, signStyle),
       seg(marker, signStyle, { bold: true }),
-      seg(line.text, line.kind === "meta" ? "muted" : "code"),
+      ...body,
     ]
   })
 }
@@ -311,7 +411,12 @@ function detailSpans(cell: ToolCell): TerminalSpan[] {
 
 /** A tool cell: header row, then the diff or the result body when expanded, or
  * a single previewed line when it is not. */
-function toolSpans(cell: ToolCell, verbose: boolean): TerminalSpan[] {
+function toolSpans(
+  cell: ToolCell,
+  verbose: boolean,
+  prefs: ResolvedRenderConfig,
+  palette: ThemePalette | undefined
+): TerminalSpan[] {
   const expanded = verbose || !cell.collapsed
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
   const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
@@ -321,12 +426,15 @@ function toolSpans(cell: ToolCell, verbose: boolean): TerminalSpan[] {
   const collapsible = diff.length === 0 && hasUsefulResult
   const out = toolHeaderSpans(cell, expanded, collapsible)
   if (diff.length > 0) {
-    out.push(BREAK, ...diffSpans(diff))
+    const lang = prefs.syntaxHighlightInline
+      ? langFromPath(diffFilePath(cell.input) ?? "")
+      : undefined
+    out.push(BREAK, ...diffSpans(diff, lang, palette))
     return out
   }
   if (!hasUsefulResult) return out
   if (expanded) {
-    out.push(BREAK, seg(ruled(safeResult(cell.result)), "muted"))
+    out.push(BREAK, ...resultBodySpans(cell, prefs, palette))
     return out
   }
   out.push(...detailSpans(cell))
@@ -335,7 +443,12 @@ function toolSpans(cell: ToolCell, verbose: boolean): TerminalSpan[] {
 
 /** A sub-agent dispatch: the same data as a tool cell, framed as a delegated
  * agent (marker, name, dispatch count, status) the way the Ink card frames it. */
-function subagentSpans(cell: ToolCell, verbose: boolean): TerminalSpan[] {
+function subagentSpans(
+  cell: ToolCell,
+  verbose: boolean,
+  prefs: ResolvedRenderConfig,
+  palette: ThemePalette | undefined
+): TerminalSpan[] {
   const expanded = verbose || !cell.collapsed
   const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
   const dispatches = subagentDispatchCount(cell.input)
@@ -353,24 +466,33 @@ function subagentSpans(cell: ToolCell, verbose: boolean): TerminalSpan[] {
   if (task) out.push(BREAK, seg(`  ${task}`, "muted"))
   if (!hasUsefulResult) return out
   if (expanded) {
-    out.push(BREAK, seg(ruled(safeResult(cell.result)), "muted"))
+    out.push(BREAK, ...resultBodySpans(cell, prefs, palette))
     return out
   }
   out.push(...detailSpans(cell))
   return out
 }
 
-function cellSpans(cell: Cell, verbose: boolean): { spans: TerminalSpan[]; target?: string } {
+function cellSpans(
+  cell: Cell,
+  verbose: boolean,
+  prefs: ResolvedRenderConfig,
+  palette: ThemePalette | undefined
+): { spans: TerminalSpan[]; target?: string } {
   switch (cell.kind) {
     case "user":
       return { spans: [seg("› ", "accent", { bold: true }), seg(cell.text, "plain")] }
     case "assistant":
-      return { spans: markdownSpans(cell.raw) }
+      return { spans: markdownSpans(cell.raw, prefs.syntaxHighlightInline, palette) }
     case "thinking":
       return {
         spans:
           verbose || !cell.collapsed
-            ? [seg("▾ ∴ thinking", "muted"), BREAK, ...markdownSpans(cell.text)]
+            ? [
+                seg("▾ ∴ thinking", "muted"),
+                BREAK,
+                ...markdownSpans(cell.text, prefs.syntaxHighlightInline, palette),
+              ]
             : [seg("▸ ∴ thinking", "muted")],
       }
     case "commentary":
@@ -378,14 +500,14 @@ function cellSpans(cell: Cell, verbose: boolean): { spans: TerminalSpan[]; targe
         spans: [
           seg(`${cell.done ? "◆" : "◇"} commentary`, "accent"),
           BREAK,
-          ...markdownSpans(cell.text),
+          ...markdownSpans(cell.text, prefs.syntaxHighlightInline, palette),
         ],
       }
     case "tool":
       return {
         spans: isSubagentTool(cell.toolName)
-          ? subagentSpans(cell, verbose)
-          : toolSpans(cell, verbose),
+          ? subagentSpans(cell, verbose, prefs, palette)
+          : toolSpans(cell, verbose, prefs, palette),
       }
     case "todo":
       return {
@@ -470,11 +592,13 @@ function cellSpans(cell: Cell, verbose: boolean): { spans: TerminalSpan[]; targe
   }
 }
 
-export function cellToTerminalBlock(
-  cell: Cell,
-  options: { width: number; verbose: boolean }
-): TerminalBlock {
-  const rendered = cellSpans(cell, options.verbose)
+export function cellToTerminalBlock(cell: Cell, options: CellRenderOptions): TerminalBlock {
+  const rendered = cellSpans(
+    cell,
+    options.verbose,
+    options.prefs ?? RENDER_DEFAULTS,
+    options.palette
+  )
   return buildTerminalBlock({
     id: cell.id,
     spans: [...rendered.spans, BREAK],

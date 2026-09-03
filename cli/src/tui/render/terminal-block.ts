@@ -5,6 +5,9 @@ export type TerminalStyle = "plain" | "muted" | "accent" | "success" | "warning"
 export interface TerminalSpan {
   text: string
   style: TerminalStyle
+  /** An explicit colour that wins over `style`, for runs whose colour comes from
+   * a syntax highlighter rather than from the theme's semantic tokens. */
+  color?: string
   bold?: boolean
   italic?: boolean
   underline?: boolean
@@ -142,6 +145,7 @@ export function wrapTerminalSpans(spans: TerminalSpan[], width: number): Termina
 function sameStyle(a: TerminalSpan, b: TerminalSpan): boolean {
   return (
     a.style === b.style &&
+    a.color === b.color &&
     Boolean(a.bold) === Boolean(b.bold) &&
     Boolean(a.italic) === Boolean(b.italic) &&
     Boolean(a.underline) === Boolean(b.underline)
