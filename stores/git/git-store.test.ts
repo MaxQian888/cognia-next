@@ -165,7 +165,16 @@ describe("git-store", () => {
       })
       s.setLoadingStatus(true)
       s.setBranches([
-        { name: "main", isCurrent: true, isRemote: false, upstream: null, ahead: 0, behind: 0 },
+        {
+          name: "main",
+          isCurrent: true,
+          isRemote: false,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          checkedOutIn: "/r",
+          checkoutLocked: false,
+        },
       ])
       s.setStashes([{ index: 0, message: "m", branch: "main" }])
       s.setConflicts(conflicts)

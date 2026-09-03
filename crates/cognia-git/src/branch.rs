@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::error::{GitError, Result};
 use super::exec;
 use super::read::open_repo;
-use super::types::GitBranch;
+use super::types::{GitBranch, GitWorktree};
 
 /// List local + remote branches with upstream tracking and ahead/behind.
 pub fn list_branches(repo_path: &str) -> Result<Vec<GitBranch>> {
@@ -54,6 +54,12 @@ fn list_for(repo: &Repository) -> Result<Vec<GitBranch>> {
             upstream,
             ahead,
             behind,
+            // Filled by `annotate_placements`. libgit2 has no cheap view of
+            // the worktree list, and this walk stays sync so `git_branches`
+            // keeps running on `spawn_blocking` without spawning a subprocess
+            // per watcher tick.
+            checked_out_in: None,
+            checkout_locked: false,
         });
     }
     // Local branches first, current at the very top, then alphabetical.
@@ -64,6 +70,42 @@ fn list_for(repo: &Repository) -> Result<Vec<GitBranch>> {
             .then(a.name.cmp(&b.name))
     });
     Ok(out)
+}
+
+/// Fill each branch's `checked_out_in` / `checkout_locked` from the worktree
+/// list.
+///
+/// Split out from [`list_for`] and kept pure so the placement rule is
+/// testable without a repository on disk, and so the sync libgit2 walk stays
+/// free of the subprocess `git worktree list` needs.
+///
+/// A worktree in detached HEAD has no branch and therefore claims none. A
+/// branch named by two worktrees cannot exist (git enforces it), so first
+/// match wins without ambiguity.
+pub fn annotate_placements(branches: Vec<GitBranch>, worktrees: &[GitWorktree]) -> Vec<GitBranch> {
+    if worktrees.is_empty() {
+        return branches;
+    }
+    let by_branch: std::collections::HashMap<&str, &GitWorktree> = worktrees
+        .iter()
+        .filter_map(|wt| wt.branch.as_deref().map(|b| (b, wt)))
+        .collect();
+
+    branches
+        .into_iter()
+        .map(|mut branch| {
+            // A remote-tracking ref is never what a worktree checks out; the
+            // lookup would only ever match by accident of naming.
+            if branch.is_remote {
+                return branch;
+            }
+            if let Some(wt) = by_branch.get(branch.name.as_str()) {
+                branch.checked_out_in = Some(wt.path.clone());
+                branch.checkout_locked = wt.locked;
+            }
+            branch
+        })
+        .collect()
 }
 
 /// `git switch <name>` (falls back to `checkout` on very old git).
@@ -255,6 +297,88 @@ mod tests {
                 .unwrap();
         }
         (tmp, repo)
+    }
+
+    fn branch(name: &str, is_remote: bool) -> GitBranch {
+        GitBranch {
+            name: name.to_string(),
+            is_current: false,
+            is_remote,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            checked_out_in: None,
+            checkout_locked: false,
+        }
+    }
+
+    fn worktree(path: &str, branch: Option<&str>, locked: bool) -> GitWorktree {
+        GitWorktree {
+            path: path.to_string(),
+            branch: branch.map(str::to_string),
+            head: Some("a1b2c3d".to_string()),
+            locked,
+            lock_reason: locked.then(|| "cognia:workspace-a".to_string()),
+            prunable: false,
+            prune_reason: None,
+            is_main: false,
+        }
+    }
+
+    #[test]
+    fn places_a_branch_in_the_worktree_holding_it() {
+        let out = annotate_placements(
+            vec![branch("dev", false), branch("feature", false)],
+            &[worktree("/repo/wt/feature", Some("feature"), false)],
+        );
+        assert_eq!(out[0].checked_out_in, None, "dev is held by no worktree");
+        assert_eq!(out[1].checked_out_in.as_deref(), Some("/repo/wt/feature"));
+        assert!(!out[1].checkout_locked);
+    }
+
+    /// A `cognia:<workspaceId>` lock means the managed-worktree Registry owns
+    /// the row, so the UI must not offer to remove it.
+    #[test]
+    fn carries_the_lock_through_to_the_branch() {
+        let out = annotate_placements(
+            vec![branch("agent/run_a/alice/t1", false)],
+            &[worktree("/repo/wt/run-a", Some("agent/run_a/alice/t1"), true)],
+        );
+        assert_eq!(out[0].checked_out_in.as_deref(), Some("/repo/wt/run-a"));
+        assert!(out[0].checkout_locked);
+    }
+
+    /// The managed path is `worktree add --detach`, which cuts no branch. Such
+    /// a worktree must claim nothing, or an unrelated branch inherits its path.
+    #[test]
+    fn a_detached_worktree_claims_no_branch() {
+        let out = annotate_placements(
+            vec![branch("dev", false)],
+            &[worktree("/repo/wt/detached", None, false)],
+        );
+        assert_eq!(out[0].checked_out_in, None);
+    }
+
+    /// A worktree checks out a local branch or a detached HEAD, never
+    /// `origin/x`. Without the guard, a remote whose short name collides with
+    /// a worktree's branch would be reported as checked out.
+    #[test]
+    fn a_remote_ref_is_never_placed() {
+        let out = annotate_placements(
+            vec![branch("origin/feature", true)],
+            &[worktree("/repo/wt/f", Some("origin/feature"), false)],
+        );
+        assert_eq!(out[0].checked_out_in, None);
+    }
+
+    /// `git_branches` passes `unwrap_or_default()` here when the worktree read
+    /// fails, so the empty case must degrade to "placement unknown" rather
+    /// than to a lie or a panic.
+    #[test]
+    fn an_empty_worktree_list_leaves_every_branch_unplaced() {
+        let input = vec![branch("dev", false), branch("origin/dev", true)];
+        let out = annotate_placements(input.clone(), &[]);
+        assert_eq!(out, input);
     }
 
     #[test]

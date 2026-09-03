@@ -1727,7 +1727,16 @@
     "GitBranch": {
       "type": "object",
       "x-cognia-wire-source": "cognia-git::types::GitBranch",
-      "required": ["name", "isCurrent", "isRemote", "upstream", "ahead", "behind"],
+      "required": [
+        "name",
+        "isCurrent",
+        "isRemote",
+        "upstream",
+        "ahead",
+        "behind",
+        "checkedOutIn",
+        "checkoutLocked"
+      ],
       "properties": {
         "name": {
           "type": "string"
@@ -1746,6 +1755,12 @@
         },
         "behind": {
           "type": "integer"
+        },
+        "checkedOutIn": {
+          "type": ["string", "null"]
+        },
+        "checkoutLocked": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

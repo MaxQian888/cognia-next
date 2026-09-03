@@ -165,9 +165,20 @@ pub async fn git_blame(
     blame::blame(&repo_path, &path, rev.as_deref()).await
 }
 
+/// List branches, each knowing which worktree (if any) has it checked out.
+///
+/// Two reads rather than one because they need different machinery: the
+/// branch walk is libgit2 and sync, the worktree list is a subprocess and
+/// async. `unwrap_or_default` on the second is deliberate: a git too old for
+/// `worktree list --porcelain -z`, or a repository whose worktree bookkeeping
+/// is unreadable, should cost the placement annotation, not the branch list
+/// the whole panel is built on.
 #[tauri::command]
 pub async fn git_branches(repo_path: String) -> Result<Vec<GitBranch>, GitError> {
-    blocking("git_branches", move || branch::list_branches(&repo_path)).await
+    let walk_path = repo_path.clone();
+    let branches = blocking("git_branches", move || branch::list_branches(&walk_path)).await?;
+    let worktrees = worktree::list(&repo_path).await.unwrap_or_default();
+    Ok(branch::annotate_placements(branches, &worktrees))
 }
 
 #[tauri::command]

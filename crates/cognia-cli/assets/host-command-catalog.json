@@ -15537,7 +15537,9 @@
             "isRemote",
             "upstream",
             "ahead",
-            "behind"
+            "behind",
+            "checkedOutIn",
+            "checkoutLocked"
           ],
           "properties": {
             "name": {
@@ -15560,6 +15562,15 @@
             },
             "behind": {
               "type": "integer"
+            },
+            "checkedOutIn": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "checkoutLocked": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false
@@ -46863,5 +46874,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "836d4823fbf61fa0946773af3dffe762558d7ff94d0ff371076be9b35aeb7a3f"
+  "catalogHash": "4d9cd24c6710a5898079e0a53724f5af0d627ff79f8436af6a41ead02fca545f"
 }

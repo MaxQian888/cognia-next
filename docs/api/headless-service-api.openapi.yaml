@@ -29444,6 +29444,8 @@ paths:
                     - upstream
                     - ahead
                     - behind
+                    - checkedOutIn
+                    - checkoutLocked
                   properties:
                     name:
                       type: string
@@ -29459,6 +29461,12 @@ paths:
                       type: integer
                     behind:
                       type: integer
+                    checkedOutIn:
+                      type:
+                        - string
+                        - "null"
+                    checkoutLocked:
+                      type: boolean
                   additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.

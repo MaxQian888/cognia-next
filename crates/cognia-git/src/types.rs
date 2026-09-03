@@ -119,6 +119,25 @@ pub struct GitBranch {
     pub upstream: Option<String>,
     pub ahead: usize,
     pub behind: usize,
+    /// Working directory of the worktree that has this branch checked out, or
+    /// `None` when no worktree holds it.
+    ///
+    /// Git refuses to check out a branch a second worktree already has, and
+    /// this application creates those worktrees itself for isolated runs
+    /// (ADR-0111), so a caller that cannot see the placement offers a checkout
+    /// it knows will fail. The main checkout fills this too, alongside
+    /// `is_current`, so "where does this branch live" has one answer rather
+    /// than two half-answers.
+    ///
+    /// Always `None` for a remote-tracking ref: a worktree checks out a local
+    /// branch or a detached HEAD, never `origin/x`.
+    pub checked_out_in: Option<String>,
+    /// Whether that worktree is protected by `git worktree lock`.
+    ///
+    /// A Cognia-managed row carries `cognia:<workspaceId>` as its lock reason
+    /// and is owned by the Registry, so removal is refused. Meaningless, and
+    /// always `false`, when `checked_out_in` is `None`.
+    pub checkout_locked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

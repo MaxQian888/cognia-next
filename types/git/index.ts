@@ -71,6 +71,26 @@ export interface GitBranch {
   upstream: string | null
   ahead: number
   behind: number
+  /**
+   * Working directory of the worktree holding this branch, or `null` when no
+   * worktree has it checked out.
+   *
+   * Git refuses to check out a branch a second worktree already holds, and
+   * this app creates those worktrees itself for isolated runs (ADR-0111), so
+   * a picker that cannot see the placement offers a checkout it knows will
+   * fail. The main checkout fills this too, beside `isCurrent`.
+   *
+   * `null` on remote-tracking refs, and `null` when the host's git could not
+   * report its worktrees, which reads as "placement unknown" rather than
+   * "definitely free" (`git_branches` degrades rather than failing).
+   */
+  checkedOutIn: string | null
+  /**
+   * Whether that worktree is `git worktree lock`ed. A Cognia-managed row is
+   * locked with `cognia:<workspaceId>` and owned by the Registry, so removal
+   * is refused. Always `false` when `checkedOutIn` is `null`.
+   */
+  checkoutLocked: boolean
 }
 
 export interface GitStashEntry {
