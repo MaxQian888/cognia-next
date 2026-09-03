@@ -13,8 +13,6 @@ import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
 import { MAX_INTERVAL_MS, MIN_INTERVAL_MS } from "@/lib/loop/interval"
 import type { CreateScheduledTaskInput, ScheduledTask, TaskExecution } from "@/types/scheduler"
 
-const MAX_AGENT_TASKS_PER_SESSION = 8
-
 export interface ScheduleTaskInput {
   sessionId: string
   prompt: string
@@ -72,6 +70,8 @@ interface SchedulerPort {
 
 interface SchedulingDeps {
   scheduler?: SchedulerPort
+  /** Injected in tests. Defaults to the real policy gate. */
+  authorize?: typeof import("@/lib/scheduler/write-authority").authorizeTaskWrite
   getSession?: (sessionId: string) => Promise<
     | {
         id: string
@@ -157,23 +157,34 @@ export async function scheduleTaskCore(
 
   try {
     const scheduler = deps.scheduler ?? getTaskScheduler()
-    const tasks = await scheduler.getAllTasks()
-    const ownedCount = tasks.filter((task) => isOwnedByAgentSession(task, input.sessionId)).length
-    if (ownedCount >= MAX_AGENT_TASKS_PER_SESSION) {
-      return {
-        ok: false,
-        error: `agent session task quota reached (${MAX_AGENT_TASKS_PER_SESSION})`,
-      }
-    }
 
     const session = await resolveSession(input.sessionId, deps)
     if (!session) return { ok: false, error: `session not found: ${input.sessionId}` }
     const binding = session.platformBinding
     const isImBound = Boolean(binding?.adapterId && binding?.conversationKey)
+
+    // The user's own policy decides, not a constant in this file. This used to
+    // enforce a hardcoded quota of 8 per session that no setting could reach,
+    // while `SchedulerPermissionPolicy.maxTasksPerSource` sat unenforced.
+    const { authorizeTaskWrite, verdictNeedsConfirmation } =
+      await import("@/lib/scheduler/write-authority")
+    const taskType = isImBound ? "connection:scheduled:digest" : "chat"
+    const verdict = await (deps.authorize ?? authorizeTaskWrite)({
+      taskType,
+      source: "agent",
+      sessionId: input.sessionId,
+    })
+    if (!verdict.allowed) return { ok: false, error: verdict.message }
+    if (verdictNeedsConfirmation(verdict)) {
+      // These tools have no confirmation surface. Saying so is the honest
+      // answer: the assistant can relay it, and the user can add the task from
+      // the scheduler panel where a confirmation dialog exists.
+      return { ok: false, error: verdict.message }
+    }
     const task = await scheduler.createTask({
       name: taskName(input),
       description: `Created by agent session ${input.sessionId}`,
-      type: isImBound ? "connection:scheduled:digest" : "chat",
+      type: taskType,
       trigger,
       payload: isImBound
         ? {

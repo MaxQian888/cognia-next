@@ -19,6 +19,16 @@ jest.mock("@/stores/scheduler/scheduler-store", () => ({
   useSchedulerStore: { getState: () => state },
 }))
 
+// Creation is gated on the user's SchedulerPermissionPolicy, whose default
+// refuses a plugin write. The gate has its own suite in
+// `lib/scheduler/write-authority.test.ts`; here it is stubbed so these tests
+// stay about the pass-through contract. `assertTaskWriteAllowed` is stubbed
+// per-test where the refusal itself is the subject.
+const assertTaskWriteAllowed = jest.fn(async () => undefined)
+jest.mock("@/lib/scheduler/write-authority", () => ({
+  assertTaskWriteAllowed: (...args: unknown[]) => assertTaskWriteAllowed(...(args as [])),
+}))
+
 import {
   createUserScheduledTask,
   createUserSchedulerAPI,
@@ -34,9 +44,21 @@ beforeEach(() => {
   state.createTask.mockClear()
   state.deleteTask.mockClear()
   state.runTaskNow.mockClear()
+  assertTaskWriteAllowed.mockClear()
+  assertTaskWriteAllowed.mockResolvedValue(undefined)
 })
 
 describe("plugin scheduler-tasks API", () => {
+  it("refuses a create the user's policy does not permit", async () => {
+    // This module used to tell authors in a comment that they "MUST consult"
+    // the policy first, and do nothing to make that true.
+    assertTaskWriteAllowed.mockRejectedValue(new Error("Agents are not allowed"))
+    await expect(
+      createUserScheduledTask({ name: "n", type: "chat", trigger: { type: "once" } } as never)
+    ).rejects.toThrow("Agents are not allowed")
+    expect(state.createTask).not.toHaveBeenCalled()
+  })
+
   it("mounts the same operations on the context facade", async () => {
     const api = createUserSchedulerAPI()
     await api.getPolicy()

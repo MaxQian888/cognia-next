@@ -76,10 +76,34 @@ export async function listUserScheduledTasks(): Promise<ScheduledTask[]> {
   return (await store()).tasks
 }
 
-/** Create a task. Returns `null` when the store refuses the write. */
+/**
+ * Create a task on the user's schedule.
+ *
+ * The policy is ENFORCED here, not merely documented. This function used to
+ * carry a comment telling plugin authors they "MUST consult" the policy first
+ * while doing nothing to make that true, which meant a plugin could put
+ * anything on the user's schedule regardless of what they had configured.
+ *
+ * A write that needs the user's confirmation is refused rather than performed:
+ * a plugin has no confirmation surface here, and deciding on the user's behalf
+ * is the thing the setting exists to prevent. The thrown message names the
+ * scheduler panel as the place to do it instead.
+ *
+ * Returns `null` when the store refuses the write. Throws when the POLICY
+ * refuses it, because a plugin author needs to know the difference between
+ * "that did not persist" and "the user does not permit this".
+ */
 export async function createUserScheduledTask(
   input: CreateScheduledTaskInput
 ): Promise<ScheduledTask | null> {
+  const { assertTaskWriteAllowed } = await import("@/lib/scheduler/write-authority")
+  const creator = input.createdBy
+  await assertTaskWriteAllowed({
+    taskType: input.type,
+    source: creator?.kind ?? "plugin",
+    sessionId: creator?.sessionId,
+    pluginId: creator?.pluginId,
+  })
   return (await store()).createTask(input)
 }
 

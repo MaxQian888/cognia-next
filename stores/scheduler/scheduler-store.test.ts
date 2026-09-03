@@ -150,6 +150,16 @@ jest.mock("@/lib/scheduler/scheduler-host-target", () => ({
   },
 }))
 
+// Creation now passes the user's SchedulerPermissionPolicy gate. Its own suite
+// is `lib/scheduler/write-authority.test.ts`; here it is stubbed so these tests
+// stay about the store, and so the refusal path can be driven directly.
+const authorizeTaskWrite = jest.fn(async () => ({ allowed: true }) as unknown)
+jest.mock("@/lib/scheduler/write-authority", () => ({
+  authorizeTaskWrite: (...args: unknown[]) => authorizeTaskWrite(...(args as [])),
+  verdictNeedsConfirmation: (verdict: { allowed?: boolean; requiresConfirmation?: boolean }) =>
+    Boolean(verdict?.allowed && verdict?.requiresConfirmation),
+}))
+
 jest.mock("@/lib/scheduler/executors/plugin-executor", () => ({
   cancelPluginTaskExecution: jest.fn().mockReturnValue(true),
   getActivePluginTaskCount: jest.fn().mockReturnValue(2),
@@ -672,6 +682,84 @@ describe("useSchedulerStore", () => {
         })
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+    })
+
+    it("asks the policy who is writing, using the task's own creator record", async () => {
+      const { result } = renderHook(() => useSchedulerStore())
+      await act(async () => {
+        await result.current.createTask({
+          name: "t",
+          type: "chat",
+          trigger: { type: "cron", cronExpression: "0 9 * * *" },
+          createdBy: { kind: "agent", sessionId: "s-42" },
+        })
+      })
+      expect(authorizeTaskWrite).toHaveBeenCalledWith(
+        expect.objectContaining({ taskType: "chat", source: "agent", sessionId: "s-42" })
+      )
+    })
+
+    it("treats an unattributed write as the user's own", async () => {
+      // `createdBy` defaults to `{ kind: "user" }` in the serializer, so the
+      // question of who is asking has to default the same way. Anything else
+      // would gate the create sheet.
+      const { result } = renderHook(() => useSchedulerStore())
+      await act(async () => {
+        await result.current.createTask({
+          name: "t",
+          type: "workflow",
+          trigger: { type: "cron", cronExpression: "0 9 * * *" },
+        })
+      })
+      expect(authorizeTaskWrite).toHaveBeenCalledWith(expect.objectContaining({ source: "user" }))
+    })
+
+    it("does not write, and surfaces why, when the policy refuses", async () => {
+      authorizeTaskWrite.mockResolvedValueOnce({
+        allowed: false,
+        reason: "agent-auto-create-disabled",
+        message: "Agents are not allowed to add to your schedule on their own.",
+      })
+      const { result } = renderHook(() => useSchedulerStore())
+
+      let created: unknown
+      await act(async () => {
+        created = await result.current.createTask({
+          name: "t",
+          type: "chat",
+          trigger: { type: "cron", cronExpression: "0 9 * * *" },
+          createdBy: { kind: "agent", sessionId: "s-42" },
+        })
+      })
+
+      expect(created).toBeNull()
+      expect(mockScheduler.createTask).not.toHaveBeenCalled()
+      expect(result.current.error).toContain("not allowed")
+    })
+
+    it("does not guess the user's answer when the policy wants a confirmation", async () => {
+      // This store cannot show a dialog. Writing anyway would defeat the whole
+      // point of `confirmationRequired`.
+      authorizeTaskWrite.mockResolvedValueOnce({
+        allowed: true,
+        requiresConfirmation: true,
+        reason: "confirmation-required",
+        message: 'Scheduling a "goal" task needs your confirmation.',
+      })
+      const { result } = renderHook(() => useSchedulerStore())
+
+      let created: unknown
+      await act(async () => {
+        created = await result.current.createTask({
+          name: "t",
+          type: "goal",
+          trigger: { type: "cron", cronExpression: "0 9 * * *" },
+          createdBy: { kind: "agent", sessionId: "s-42" },
+        })
+      })
+
+      expect(created).toBeNull()
+      expect(mockScheduler.createTask).not.toHaveBeenCalled()
     })
   })
 
@@ -1469,54 +1557,10 @@ describe("useSchedulerStore", () => {
       expect(result.current.permissionPolicy.maxTasksPerSource).toBeGreaterThan(0)
     })
 
-    it("checkPermission allows any user-source request", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      expect(result.current.checkPermission("script", "user")).toEqual({ allowed: true })
-    })
-
-    it("checkPermission blocks script tasks when disabled in policy", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      act(() => {
-        result.current.updatePermissionPolicy({ scriptTasksEnabled: false })
-      })
-      const verdict = result.current.checkPermission("script", "plugin")
-      expect(verdict.allowed).toBe(false)
-      expect(verdict.reason).toContain("Script tasks")
-    })
-
-    it("checkPermission enforces the per-source task count limit", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      act(() => {
-        result.current.updatePermissionPolicy({ maxTasksPerSource: 1 })
-        result.current.setTasks([sampleTask({ id: "a" }), sampleTask({ id: "b" })])
-      })
-      const verdict = result.current.checkPermission("workflow", "plugin")
-      expect(verdict.allowed).toBe(false)
-      expect(verdict.reason).toContain("Maximum task limit")
-    })
-
-    it("checkPermission blocks agent-source tasks that require confirmation when auto-create is off", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      // Default policy has agentAutoCreate=false and confirmationRequired includes 'agent'
-      const verdict = result.current.checkPermission("agent", "agent")
-      expect(verdict.allowed).toBe(false)
-      expect(verdict.reason).toContain("confirmation")
-    })
-
-    it("checkPermission allows agent-source tasks not in confirmationRequired", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      const verdict = result.current.checkPermission("workflow", "agent")
-      expect(verdict).toEqual({ allowed: true })
-    })
-
-    it("checkPermission allows agent-source tasks when agentAutoCreate is true", () => {
-      const { result } = renderHook(() => useSchedulerStore())
-      act(() => {
-        result.current.updatePermissionPolicy({ agentAutoCreate: true })
-      })
-      const verdict = result.current.checkPermission("agent", "agent")
-      expect(verdict).toEqual({ allowed: true })
-    })
+    // `checkPermission` was deleted along with its tests. It had no production
+    // callers, so these cases asserted an unenforced policy and made it look
+    // verified. The real gate is `lib/scheduler/write-authority.ts`, which has
+    // its own suite, and `createTask` above now goes through it.
   })
 
   describe("System status", () => {

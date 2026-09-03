@@ -36,6 +36,11 @@ function deps(seed: ScheduledTask[] = []) {
       deleteTask: jest.fn().mockResolvedValue(true),
     },
     getSession: jest.fn().mockResolvedValue({ id: "session-1" }),
+    // These tools are gated on the user's SchedulerPermissionPolicy, whose
+    // default (`agentAutoCreate: false`) refuses. The gate has its own suite in
+    // `lib/scheduler/write-authority.test.ts`; here it is stubbed to the
+    // permissive answer so these tests stay about the tools.
+    authorize: jest.fn().mockResolvedValue({ allowed: true }),
   }
 }
 
@@ -71,6 +76,45 @@ describe("agent scheduler handlers", () => {
         payload: { sessionId: "session-1", prompt: "run a check" },
       })
     )
+  })
+
+  it("relays the policy's refusal instead of scheduling", async () => {
+    // The tools used to enforce a hardcoded quota of 8 per session that no
+    // setting could reach, while the user's own policy went unread.
+    const port = deps()
+    port.authorize.mockResolvedValue({
+      allowed: false,
+      reason: "agent-auto-create-disabled",
+      message: "Agents are not allowed to add to your schedule on their own.",
+    })
+
+    const result = await scheduleTaskCore(
+      { sessionId: "session-1", prompt: "run a check", intervalMs: 60_000 },
+      port
+    )
+
+    expect(result).toEqual({ ok: false, error: expect.stringContaining("not allowed") })
+    expect(port.scheduler.createTask).not.toHaveBeenCalled()
+  })
+
+  it("refuses rather than deciding, when the policy wants the user to confirm", async () => {
+    // These tools have no confirmation surface. Guessing the user's answer is
+    // the one thing the setting exists to prevent.
+    const port = deps()
+    port.authorize.mockResolvedValue({
+      allowed: true,
+      requiresConfirmation: true,
+      reason: "confirmation-required",
+      message: 'Scheduling a "chat" task needs your confirmation.',
+    })
+
+    const result = await scheduleTaskCore(
+      { sessionId: "session-1", prompt: "run a check", intervalMs: 60_000 },
+      port
+    )
+
+    expect(result.ok).toBe(false)
+    expect(port.scheduler.createTask).not.toHaveBeenCalled()
   })
 
   it("uses the connector digest executor for an IM-bound session", async () => {

@@ -140,10 +140,12 @@ interface SchedulerActions {
   /** Hydrate {@link permissionPolicy} from `AppSettings`. Idempotent. */
   loadPermissionPolicy: () => Promise<void>
   updatePermissionPolicy: (update: Partial<SchedulerPermissionPolicy>) => void
-  checkPermission: (
-    taskType: ScheduledTaskType,
-    source: TaskCreationSource
-  ) => { allowed: boolean; reason?: string }
+  // There is deliberately no `checkPermission` here. The one that used to live
+  // on this store had zero production callers while carrying tests, which made
+  // an unenforced policy look verified. Enforcement is
+  // `lib/scheduler/write-authority.ts`, which every write path calls, counts
+  // per source off an index, and can answer "needs confirmation" as well as
+  // yes/no.
 
   // System Status
   setSchedulerStatus: (status: SchedulerStatus) => void
@@ -223,6 +225,38 @@ export const useSchedulerStore = create<SchedulerStore>()(
       createTask: async (input) => {
         set({ isLoading: true, error: null })
         try {
+          // The policy gate. Everything reaching this store from an agent, a
+          // plugin, or a subsystem passes here; a person in the UI is never
+          // gated. `createdBy` defaults to `{ kind: "user" }` in the
+          // serializer, and the same default applies to the question of who is
+          // asking, so an unattributed write is treated as the user's own.
+          const { authorizeTaskWrite, verdictNeedsConfirmation } =
+            await import("@/lib/scheduler/write-authority")
+          const creator = input.createdBy
+          const verdict = await authorizeTaskWrite({
+            taskType: input.type,
+            source: creator?.kind ?? "user",
+            sessionId: creator?.sessionId,
+            pluginId: creator?.pluginId,
+          })
+          if (!verdict.allowed) {
+            set({ error: verdict.message })
+            log.warn("SchedulerStore: create refused by policy", {
+              type: input.type,
+              reason: verdict.reason,
+            })
+            return null
+          }
+          if (verdictNeedsConfirmation(verdict)) {
+            // The store cannot show a dialog, and guessing the user's answer is
+            // the one thing this gate exists to prevent. Callers that CAN ask
+            // (the create sheet, the built-in skills' confirm card) resolve the
+            // confirmation first and then write as `user`.
+            set({ error: verdict.message })
+            log.warn("SchedulerStore: create needs confirmation", { type: input.type })
+            return null
+          }
+
           const task = await getSchedulerDataSource().createTask(input)
 
           if (task) {
@@ -736,39 +770,6 @@ export const useSchedulerStore = create<SchedulerStore>()(
           .catch((error) => {
             log.error("scheduler.permissionPolicy.persistFailed", { error })
           })
-      },
-
-      checkPermission: (taskType, source) => {
-        const policy = get().permissionPolicy
-
-        // User source is always allowed
-        if (source === "user") return { allowed: true }
-
-        // Check if script tasks are disabled
-        if (taskType === "script" && !policy.scriptTasksEnabled) {
-          return { allowed: false, reason: "Script tasks are disabled in permission policy" }
-        }
-
-        // Check task count limit per source
-        const sourceTaskCount = get().tasks.filter(() => true).length // all tasks (no per-source tracking yet)
-        if (sourceTaskCount >= policy.maxTasksPerSource) {
-          return {
-            allowed: false,
-            reason: `Maximum task limit (${policy.maxTasksPerSource}) reached`,
-          }
-        }
-
-        // Agent source: check agentAutoCreate
-        if (source === "agent" && !policy.agentAutoCreate) {
-          if (policy.confirmationRequired.includes(taskType)) {
-            return {
-              allowed: false,
-              reason: "Agent task creation requires user confirmation for this task type",
-            }
-          }
-        }
-
-        return { allowed: true }
       },
 
       // ========== System Status ==========
