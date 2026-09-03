@@ -564,3 +564,113 @@ describe("task workspace client", () => {
     })
   })
 })
+
+describe("settling a bundle turn", () => {
+  // The defect: a bundle turn's run id is `run:<session>:<n>:<workspace>`, and
+  // the guard compared it against the unsuffixed `runIdForTurn`. It never
+  // matched, so no managed chat turn ever settled, the run stayed `running`,
+  // and the session's NEXT turn was refused with "pipeline workspace is already
+  // active" for good.
+  it("recognises a turn whose run id carries a per-workspace suffix", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:session",
+      runId: `${runIdForTurn("session", 4)}:ws-a`,
+      executionRunId: runIdForTurn("session", 4),
+      bundleTurnId: "turn-1",
+      sessionId: "session",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/a",
+      state: "running",
+    })
+    call.mockResolvedValueOnce({
+      bundleTurnId: "turn-1",
+      runs: [{ runId: `${runIdForTurn("session", 4)}:ws-a`, resources: [] }],
+    })
+
+    await expect(settleTaskWorkspaceTurn("session", 4, "failed")).resolves.toEqual([])
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_turn_settle", {
+      bundleTurnId: "turn-1",
+      finalState: "failed",
+    })
+  })
+
+  // One turn owns one run per distinct physical workspace, and only the last
+  // activation survives in `activeBySession`. Settling that run alone would
+  // strand every additional root's run.
+  it("settles the turn rather than the one run it happens to be holding", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:session",
+      runId: `${runIdForTurn("session", 5)}:ws-primary`,
+      executionRunId: runIdForTurn("session", 5),
+      bundleTurnId: "turn-2",
+      sessionId: "session",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/primary",
+      state: "running",
+    })
+    call.mockResolvedValueOnce({
+      bundleTurnId: "turn-2",
+      runs: [
+        { runId: `${runIdForTurn("session", 5)}:ws-a`, resources: [] },
+        { runId: `${runIdForTurn("session", 5)}:ws-b`, resources: [] },
+      ],
+    })
+
+    await settleTaskWorkspaceTurn("session", 5)
+
+    expect(call).not.toHaveBeenCalledWith("task_workspace_settle", expect.anything())
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_turn_settle", {
+      bundleTurnId: "turn-2",
+      finalState: "ready",
+    })
+  })
+
+  it("still refuses a turn that is not the active one", async () => {
+    useTaskWorkspaceStore.getState().activate({
+      taskId: "task-workspace:session",
+      runId: `${runIdForTurn("session", 6)}:ws-a`,
+      executionRunId: runIdForTurn("session", 6),
+      bundleTurnId: "turn-3",
+      sessionId: "session",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/a",
+      state: "running",
+    })
+
+    await expect(settleTaskWorkspaceTurn("session", 7)).resolves.toBeNull()
+  })
+})
+
+describe("the lookups that answer null", () => {
+  /**
+   * Six task-workspace getters are `T | null` in TypeScript and `Option` in
+   * Rust, and the client is built around that: `getWorkspaceBundle` answering
+   * null is exactly how `ensureSessionExecutionBundle` learns to acquire a
+   * fresh bundle. Typing them as a bare object in the response contract turned
+   * that ordinary answer into a `contract_output_violation` 500, which every
+   * companion hit after a host-side workspace reset or GC.
+   */
+  it("keeps null in the response contract for every nullable getter", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const contract = JSON.parse(
+      readFileSync(join(process.cwd(), "protocol/companion-response-schemas.json"), "utf8")
+    ) as {
+      $defs: Record<string, { type?: unknown }>
+      commands: Record<string, { $ref?: string }>
+    }
+
+    for (const command of [
+      "task_workspace_bundle_get",
+      "task_workspace_get",
+      "task_workspace_managed_get",
+      "task_workspace_bundle_turn_get",
+      "task_workspace_bundle_handoff_get",
+      "task_workspace_bundle_handoff_undo_get",
+    ]) {
+      const ref = contract.commands[command]?.$ref
+      expect(ref).toBe("#/$defs/NullableLegacyRecord")
+    }
+    expect(contract.$defs.NullableLegacyRecord.type).toEqual(["object", "null"])
+  })
+})

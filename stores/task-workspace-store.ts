@@ -18,6 +18,15 @@ export interface ActiveTaskRun {
   traceId?: string
   traceSpanId?: string
   surface?: string
+  /**
+   * The bundle turn this run belongs to, when it came from one.
+   *
+   * A bundle turn owns one run per distinct physical workspace, and only the
+   * last activation survives in `activeBySession`. Settling that one run would
+   * leave every additional root's run `running` forever, so the settle path
+   * needs the turn, not the run it happens to be holding.
+   */
+  bundleTurnId?: string
 }
 
 interface TaskWorkspaceStore {

@@ -140,6 +140,7 @@ export async function beginWorkspaceBundleTurn(
         workspaceRoot: request.run.workspaceRoot,
         executionRoot: run.executionRoot,
         state: run.state,
+        bundleTurnId: turn.bundleTurnId,
         ...(request.run.executionRunId ? { executionRunId: request.run.executionRunId } : {}),
         ...(request.run.traceId ? { traceId: request.run.traceId } : {}),
         ...(request.run.traceSpanId ? { traceSpanId: request.run.traceSpanId } : {}),
@@ -208,13 +209,46 @@ export function getWorkspaceBundleTurn(
   return transport.call("task_workspace_bundle_turn_get", { bundleTurnId })
 }
 
+/**
+ * Does `active` belong to chat turn `chatRunId`?
+ *
+ * The legacy path's run id IS `runIdForTurn`. A bundle turn's is
+ * `run:<session>:<n>:<workspace>` — the same turn with a per-workspace suffix,
+ * because one turn owns one run per distinct physical workspace. Comparing only
+ * `runId` therefore never matched a bundle, `settleTaskWorkspaceTurn` returned
+ * null for every managed chat turn, and the run stayed `running` forever. The
+ * next turn in that session was then refused with "pipeline workspace is
+ * already active", permanently.
+ *
+ * `executionRunId` is the unsuffixed turn id both shapes carry, so it is the
+ * identity to compare.
+ */
+function activeRunBelongsToTurn(
+  active: { runId: string; executionRunId?: string } | undefined,
+  turnRunId: string
+): boolean {
+  if (!active) return false
+  return active.runId === turnRunId || active.executionRunId === turnRunId
+}
+
 export async function settleTaskWorkspaceTurn(
   sessionId: string,
   chatRunId: number,
   finalState: "ready" | "failed" | "cancelled" = "ready"
 ): Promise<ResourceChange[] | null> {
   const active = useTaskWorkspaceStore.getState().activeBySession[sessionId]
-  if (!active || active.runId !== runIdForTurn(sessionId, chatRunId)) return null
+  if (!active || !activeRunBelongsToTurn(active, runIdForTurn(sessionId, chatRunId))) return null
+  // A bundle turn is settled as a turn. Only its last activation survives in
+  // `activeBySession`, so settling `active.runId` would release the primary
+  // root and strand every additional one.
+  const bundleTurnId = active.bundleTurnId
+  if (bundleTurnId) {
+    const outcome = await settleWorkspaceBundleTurn(bundleTurnId, finalState).catch(() => null)
+    if (!outcome) return null
+    const resources = outcome.runs.flatMap((settled) => settled.resources)
+    useTaskWorkspaceStore.getState().reconcile(sessionId, resources)
+    return resources
+  }
   try {
     const resources = await transport.call<ResourceChange[]>("task_workspace_settle", {
       runId: active.runId,

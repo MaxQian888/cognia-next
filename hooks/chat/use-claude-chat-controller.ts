@@ -1753,15 +1753,37 @@ export function useClaudeChat() {
               })
             })().catch(() => null)
           : null
-        const bundleTurnLease =
-          executionContext?.location === "managedWorktree" && managedBundle && bundlePrimaryRootId
-            ? await openWorkspaceBundleTurnLease(managedBundle, bundlePrimaryRootId, taskEnvelope)
-            : legacyBundle
-              ? await openWorkspaceBundleTurnLease(legacyBundle, "primary", {
-                  ...taskEnvelope,
-                  base: { kind: "workingState" },
-                })
-              : null
+        // Caught, unlike every other await in this block, because a throw here
+        // escaped the send entirely: the composer's own catch logged it, the
+        // session stayed `streaming` forever, and the status edge that settles
+        // the turn's workspace run therefore never fired. The run stayed
+        // `running` on the Host and the session's NEXT turn was refused for
+        // good with "pipeline workspace is already active". A refusal both
+        // settles the turn and puts the reason on screen.
+        let bundleTurnLease: Awaited<ReturnType<typeof openWorkspaceBundleTurnLease>> = null
+        try {
+          bundleTurnLease =
+            executionContext?.location === "managedWorktree" && managedBundle && bundlePrimaryRootId
+              ? await openWorkspaceBundleTurnLease(managedBundle, bundlePrimaryRootId, taskEnvelope)
+              : legacyBundle
+                ? await openWorkspaceBundleTurnLease(legacyBundle, "primary", {
+                    ...taskEnvelope,
+                    base: { kind: "workingState" },
+                  })
+                : null
+        } catch (error) {
+          console.error("workspace turn lease failed", error)
+          await refuseTurn({
+            errorCode: "task_workspace_unavailable",
+            finishRun: true,
+            diagnostic: createDiagnostic("workspaceUnavailable", {
+              source: "chat",
+              message: error instanceof Error ? error.message : String(error),
+              meta: { sessionId },
+            }),
+          })
+          return
+        }
         const taskLease = bundleTurnLease
         if (
           !taskLease &&

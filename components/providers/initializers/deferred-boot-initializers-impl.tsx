@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 
+import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initializer"
 import { DesktopNetworkRuntimeInitializer } from "./desktop-network-runtime-initializer"
 import { ExecutionControlInitializer } from "./execution-control-initializer"
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
@@ -48,6 +49,18 @@ export function DeferredBootInitializersImpl() {
       <GatewayProvider />
       {/* No ordering dependency: a registration-only dispatch table. */}
       <ExecutionControlInitializer />
+      {/*
+        Settling a turn's managed working copy is a chat obligation, not a
+        workflow one. This subscriber is what calls `settleTaskWorkspaceTurn` on
+        the status edge, and it used to live only in the workflow-automation
+        chunk, which `/workflows`, `/scheduler`, `/goals` and `/a2ui` request
+        and the chat route never does. So no chat turn released its run: the
+        run stayed `running`, and the session's NEXT turn was refused for good
+        with "pipeline workspace is already active". It is idempotent and
+        subscribes once, so the workflow chunk keeping its own copy costs
+        nothing.
+      */}
+      <CodeAdoptionTrackerInitializer />
     </>
   )
 }

@@ -14,6 +14,9 @@ jest.mock("./remote-notification-initializer", () => ({
 jest.mock("@/components/providers/gateway-provider", () => ({
   GatewayProvider: () => <span data-boot="gateway" />,
 }))
+jest.mock("./code-adoption-tracker-initializer", () => ({
+  CodeAdoptionTrackerInitializer: () => <span data-boot="code-adoption" />,
+}))
 const recoverDirectRuns = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/execution/direct-chat-run", () => ({
   recoverStaleDirectChatExecutionRuns: () => recoverDirectRuns(),
@@ -37,8 +40,26 @@ describe("DeferredBootInitializersImpl", () => {
     // read; without it they degrade to a bare `fetch` the packaged shell's CSP
     // blocks). The rest preserves the pre-deferral layout order so a dropped
     // child is caught here.
-    expect(order).toEqual(["provider-core", "routing", "remote-notifications", "gateway"])
+    expect(order).toEqual([
+      "provider-core",
+      "routing",
+      "remote-notifications",
+      "gateway",
+      "code-adoption",
+    ])
     expect(mockMarkReady).toHaveBeenCalledWith("core-chat")
     expect(recoverDirectRuns).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Settling a turn's managed working copy is a chat obligation. This
+   * subscriber used to live only in the workflow-automation chunk, which
+   * `/workflows`, `/scheduler`, `/goals` and `/a2ui` request and the chat route
+   * never does. No chat turn released its run, and the session's next turn was
+   * refused for good with "pipeline workspace is already active".
+   */
+  it("mounts the turn-settle subscriber, because chat is what opens the run", () => {
+    const { container } = render(<DeferredBootInitializersImpl />)
+    expect(container.querySelector('[data-boot="code-adoption"]')).not.toBeNull()
   })
 })
