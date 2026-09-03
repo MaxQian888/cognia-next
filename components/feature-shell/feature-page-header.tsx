@@ -215,7 +215,21 @@ export function FeaturePageHeader({
           isCompact ? "min-h-[var(--chrome-h)] py-1" : "min-h-[var(--chrome-h-tall)] py-2"
         )}
       >
-        {breadcrumb ? <div className="shrink-0">{breadcrumb}</div> : null}
+        {breadcrumb ? (
+          <div
+            // Same contract as the two navigation slots and `controls`. This
+            // was the fourth slot and the only one that could neither shrink
+            // nor scroll: the header is `overflow-hidden` and `actions` is
+            // `shrink-0`, so a breadcrumb that refuses to give way pushes the
+            // actions past the edge, where they are clipped rather than
+            // wrapped. Source Control fills this slot with a root switcher AND
+            // a root chip, and lost buttons off its right edge for it.
+            className="flex min-w-0 shrink items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            data-slot="feature-header-breadcrumb"
+          >
+            {breadcrumb}
+          </div>
+        ) : null}
 
         {icon ? (
           <span

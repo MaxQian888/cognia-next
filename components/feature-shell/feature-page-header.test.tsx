@@ -233,4 +233,18 @@ test("every navigation and control slot can scroll its own overflow", () => {
     .closest("[data-slot='feature-header-inline-navigation']")
   expect(inline).toHaveClass("overflow-x-auto")
   expect(inline).not.toHaveClass("shrink-0")
+
+  // The fourth slot. It was `shrink-0` while `actions` beside it is also
+  // `shrink-0`, so on a narrow pane the two competed and the actions lost.
+  rerender(
+    <TooltipProvider>
+      <FeaturePageHeader title="Source Control" breadcrumb={<button>Root</button>} />
+    </TooltipProvider>
+  )
+  const breadcrumb = screen
+    .getByRole("button", { name: "Root" })
+    .closest("[data-slot='feature-header-breadcrumb']")
+  expect(breadcrumb).not.toBeNull()
+  expect(breadcrumb).toHaveClass("overflow-x-auto")
+  expect(breadcrumb).not.toHaveClass("shrink-0")
 })
