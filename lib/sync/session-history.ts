@@ -16,10 +16,19 @@ interface SessionHistoryPage {
   next_offset?: number
 }
 
+/**
+ * Who holds this conversation's history, decided once per session.
+ *
+ * - `timeline`: the host projects it as bounded pages (ADR-0027).
+ * - `legacy`: the host has it but cannot page it, so it was drained here.
+ * - `local`: the host has never seen this session. A paired browser runs the
+ *   full app and creates its own conversations, so this is the ordinary case
+ *   for anything started in the browser rather than synced down from the host.
+ */
 export interface SessionHistoryHydration {
   applied: number
   total: number
-  mode: "timeline" | "legacy"
+  mode: "timeline" | "legacy" | "local"
 }
 
 const hydrated = new Map<string, SessionHistoryHydration["mode"]>()
@@ -88,6 +97,17 @@ function isMethodNotFound(error: unknown): boolean {
   )
 }
 
+function isSessionNotFound(error: unknown): boolean {
+  const record = error && typeof error === "object" ? (error as Record<string, unknown>) : undefined
+  if (record?.code === "SESSION_NOT_FOUND") return true
+  // Hosts predating the code-preserving RPC envelope answered
+  // `internal_error` with the protocol code as the message.
+  return (
+    (error instanceof Error ? error.message : String(record?.message ?? "")).trim() ===
+    "SESSION_NOT_FOUND"
+  )
+}
+
 async function negotiateAndHydrate(
   transport: Transport,
   sessionId: string,
@@ -96,8 +116,7 @@ async function negotiateAndHydrate(
   try {
     const capability = await transport.call<{ version?: unknown }>("transcript_capabilities", {})
     if (capability?.version === 1) {
-      publishMode(sessionId, "timeline")
-      return { applied: 0, total: 0, mode: "timeline" }
+      return negotiateTimelineOwnership(transport, sessionId)
     }
     throw new Error("invalid transcript capability response")
   } catch (error) {
@@ -107,6 +126,38 @@ async function negotiateAndHydrate(
     if (!isMethodNotFound(error)) throw error
   }
   return drainSessionHistory(transport, sessionId, pageSize)
+}
+
+/**
+ * Speaking the protocol and holding this conversation are two different facts,
+ * and only the second one decides which surface may render it.
+ *
+ * The capability handshake answers the first. Reading it as the second handed
+ * every conversation to the host's projection, including the ones this browser
+ * created and the host has never stored: the pane then rendered whatever the
+ * host said about a session it did not have, which was a refusal, while the
+ * complete transcript sat unread in local Dexie.
+ *
+ * One newest turn is enough to settle it, and asking before the surface mounts
+ * keeps a locally owned conversation from painting an error card first.
+ */
+async function negotiateTimelineOwnership(
+  transport: Transport,
+  sessionId: string
+): Promise<SessionHistoryHydration> {
+  try {
+    await transport.call("session_timeline", {
+      session_id: sessionId,
+      direction: "backward",
+      limit: 1,
+    })
+  } catch (error) {
+    if (!isSessionNotFound(error)) throw error
+    publishMode(sessionId, "local")
+    return { applied: 0, total: 0, mode: "local" }
+  }
+  publishMode(sessionId, "timeline")
+  return { applied: 0, total: 0, mode: "timeline" }
 }
 
 async function drainSessionHistory(

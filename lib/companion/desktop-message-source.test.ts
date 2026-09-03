@@ -677,6 +677,31 @@ describe("transcript bridge projections", () => {
     } as never)
   })
 
+  // A paired browser owns the conversations it starts, so a session this brain
+  // has never stored is not a malformed request. Answering `INVALID_PARAMS`
+  // gave the client nothing to act on and it rendered the refusal instead of
+  // its own transcript.
+  it("names an unknown session absent rather than malformed", async () => {
+    await expect(readTranscriptTimeline({ sessionId: "never-here" })).rejects.toMatchObject({
+      code: "SESSION_NOT_FOUND",
+    })
+  })
+
+  it("still refuses a session it holds but does not expose on this channel", async () => {
+    await getDb().sessions.put({
+      id: "embedded",
+      title: "Embedded",
+      kind: "workflow-editor",
+      visibility: "embedded",
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    await expect(readTranscriptTimeline({ sessionId: "embedded" })).rejects.toMatchObject({
+      code: "INVALID_PARAMS",
+    })
+  })
+
   it("reads newest turns through the index and binds the backward cursor to revision", async () => {
     await getDb().messages.bulkPut(
       Array.from({ length: 6 }, (_, index) => ({

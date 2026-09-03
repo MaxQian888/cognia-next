@@ -433,7 +433,7 @@ pub(super) async fn dispatch(
             let dp = pick_data_plane(state)?;
             dp.session_timeline(session_id, direction, cursor, limit)
                 .await
-                .map_err(RpcError::internal)
+                .map_err(RpcError::transcript)
         }
 
         "session_turn_messages" => {
@@ -453,7 +453,7 @@ pub(super) async fn dispatch(
                 limit,
             )
             .await
-            .map_err(RpcError::internal)
+            .map_err(RpcError::transcript)
         }
 
         "message_send" => {

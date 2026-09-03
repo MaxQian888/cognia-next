@@ -90,15 +90,58 @@ describe("hydrateSessionHistory", () => {
   })
 
   it("does not hydrate full history when transcript V1 is available", async () => {
-    const legacyCall = jest.fn()
-    const transport = createTransport(legacyCall, { version: 1 })
+    const hostCall = jest.fn(async () => ({ items: [], revision: 0, hasMore: false }))
+    const transport = createTransport(hostCall, { version: 1 })
 
     await expect(hydrateSessionHistory(transport, "s1")).resolves.toEqual({
       applied: 0,
       total: 0,
       mode: "timeline",
     })
-    expect(legacyCall).not.toHaveBeenCalled()
+    // One newest turn settles ownership; the legacy pager is never entered.
+    expect(hostCall.mock.calls).toEqual([
+      ["session_timeline", { session_id: "s1", direction: "backward", limit: 1 }],
+    ])
+  })
+
+  // The defect: capability was read as ownership, so a conversation this
+  // browser created was handed to the host's projection. The host answered
+  // that it had no such session and the pane rendered that refusal instead of
+  // the transcript sitting in local Dexie.
+  it("keeps a session the host has never seen on the local transcript", async () => {
+    const hostCall = jest.fn(async () => {
+      throw Object.assign(new Error("SESSION_NOT_FOUND"), { code: "SESSION_NOT_FOUND" })
+    })
+    const transport = createTransport(hostCall, { version: 1 })
+
+    await expect(hydrateSessionHistory(transport, "s1")).resolves.toEqual({
+      applied: 0,
+      total: 0,
+      mode: "local",
+    })
+    expect(hostCall).toHaveBeenCalledTimes(1)
+  })
+
+  // Hosts predating the code-preserving RPC envelope flatten every transcript
+  // error into `internal_error` and carry the real code in the message.
+  it("reads the protocol code from the message when the envelope drops it", async () => {
+    const hostCall = jest.fn(async () => {
+      throw Object.assign(new Error("SESSION_NOT_FOUND"), { code: "internal_error" })
+    })
+
+    await expect(
+      hydrateSessionHistory(createTransport(hostCall, { version: 1 }), "s1")
+    ).resolves.toEqual({ applied: 0, total: 0, mode: "local" })
+  })
+
+  it("leaves any other timeline refusal visible rather than guessing an owner", async () => {
+    const hostCall = jest.fn(async () => {
+      throw Object.assign(new Error("INVALID_PARAMS"), { code: "INVALID_PARAMS" })
+    })
+
+    await expect(
+      hydrateSessionHistory(createTransport(hostCall, { version: 1 }), "s1")
+    ).rejects.toThrow("INVALID_PARAMS")
   })
 
   it("does not downgrade network failures to a legacy full-history read", async () => {

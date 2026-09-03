@@ -13,6 +13,8 @@ export type TranscriptMediaVariant = "thumbnail" | "canonical"
 export type TranscriptDirection = "backward" | "forward"
 export type TranscriptErrorCode =
   | "INVALID_PARAMS"
+  /** This host does not hold the named session; it is not a malformed request. */
+  | "SESSION_NOT_FOUND"
   | "TRANSCRIPT_STALE"
   | "TURN_NOT_FOUND"
   | "TURN_NOT_COMPLETED"

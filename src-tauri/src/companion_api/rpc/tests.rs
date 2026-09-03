@@ -151,6 +151,38 @@ fn bridge_transport_failures_keep_the_public_retryable_error_contract() {
     assert_eq!(error.code, "internal_error");
 }
 
+/// Every client branch that recovers from a transcript refusal reads
+/// `error.code`. Flattened into `internal_error` those branches were
+/// unreachable over the companion transport, so a stale cursor never
+/// reconciled and a session the host does not hold looked like a server fault.
+#[test]
+fn transcript_refusals_publish_their_protocol_code() {
+    for detail in [
+        "INVALID_PARAMS",
+        "SESSION_NOT_FOUND",
+        "TRANSCRIPT_STALE",
+        "TURN_NOT_FOUND",
+        "TURN_NOT_COMPLETED",
+        "MEDIA_NOT_FOUND",
+    ] {
+        let (status, Json(error)) = RpcError::transcript(detail.to_string());
+        assert_eq!(error.code, detail);
+        assert!(!error.retryable);
+        // Never 404: that is this endpoint's "no such command", and a client
+        // reading it as protocol absence would drain full history instead.
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    let (status, Json(error)) = RpcError::transcript("TRANSCRIPT_STORE_ERROR".to_string());
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(error.code, "TRANSCRIPT_STORE_ERROR");
+    assert!(error.retryable);
+
+    let (status, Json(error)) = RpcError::transcript("brain rejected the request".to_string());
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(error.code, "internal_error");
+}
+
 /// Moved here from external_agent::exec_backend when the crate was
 /// extracted (ADR-0067): the round trip needs the companion EventBus,
 /// which the crate can no longer see.

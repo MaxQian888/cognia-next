@@ -629,7 +629,12 @@ async function transcriptRevision(sessionId: string): Promise<{
   activeBranchByGroup?: Record<string, string>
 }> {
   const session = await getDb().sessions.get(sessionId)
-  if (!session || !isSessionExposed(session, "external-connector")) {
+  // Absence and refusal are different answers. A browser paired to this host
+  // owns the conversations it starts here, so a session this brain has never
+  // seen is not a client bug: it is the client's own transcript, and saying
+  // so is what lets it render its copy instead of an error card.
+  if (!session) throw transcriptError("SESSION_NOT_FOUND")
+  if (!isSessionExposed(session, "external-connector")) {
     throw transcriptError("INVALID_PARAMS")
   }
   await assertSharedSessionRead(session)

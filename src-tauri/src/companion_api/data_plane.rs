@@ -397,9 +397,17 @@ fn decode_cursor<T: DeserializeOwned>(value: &str) -> Result<T, String> {
     serde_json::from_slice(&bytes).map_err(|_| "INVALID_PARAMS".to_string())
 }
 
+/// A session this store has never held is not a malformed request.
+///
+/// Both are refusals, but a client acts on them differently: malformed params
+/// are a bug to surface, while an absent session means this Host is simply not
+/// where that transcript lives, and a client that owns its own copy should
+/// render that instead of an error. Folded into `INVALID_PARAMS` the two were
+/// indistinguishable, so the second case had no recovery.
 fn store_session_revision_error(error: StoreError) -> String {
     match error {
-        StoreError::NotFound(_) | StoreError::InvalidInput(_) => "INVALID_PARAMS".to_string(),
+        StoreError::NotFound(_) => "SESSION_NOT_FOUND".to_string(),
+        StoreError::InvalidInput(_) => "INVALID_PARAMS".to_string(),
         StoreError::Sqlite(_) => "TRANSCRIPT_STORE_ERROR".to_string(),
     }
 }
@@ -742,6 +750,18 @@ mod tests {
             rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
             push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
+    }
+
+    #[test]
+    fn absent_and_malformed_sessions_get_different_transcript_codes() {
+        assert_eq!(
+            store_session_revision_error(StoreError::NotFound("s1".into())),
+            "SESSION_NOT_FOUND"
+        );
+        assert_eq!(
+            store_session_revision_error(StoreError::InvalidInput("bad".into())),
+            "INVALID_PARAMS"
+        );
     }
 
     #[tokio::test]

@@ -251,6 +251,40 @@ impl RpcError {
         )
     }
 
+    /// The transcript protocol's own error vocabulary
+    /// (`TranscriptErrorCode`), published as the RPC `code`.
+    ///
+    /// Both transcript planes answer with one of these strings, and every
+    /// client branch that acts on one of them (reconcile after a revision
+    /// bump, re-anchor a moved turn, fall back to a locally owned transcript)
+    /// reads `error.code`. Routed through [`Self::internal`] they all arrived
+    /// as `internal_error` with the real code buried in the message, so those
+    /// branches were unreachable over the companion transport and a client
+    /// could only surface the failure verbatim.
+    ///
+    /// The status stays 400 rather than a more specific 404 or 409: `404` is
+    /// how this endpoint says "no such command", which is exactly the
+    /// downgrade signal a transcript client must not confuse with "no such
+    /// session".
+    pub(super) fn transcript(detail: String) -> (StatusCode, Json<Self>) {
+        match detail.as_str() {
+            "INVALID_PARAMS"
+            | "SESSION_NOT_FOUND"
+            | "TRANSCRIPT_STALE"
+            | "TURN_NOT_FOUND"
+            | "TURN_NOT_COMPLETED"
+            | "MEDIA_NOT_FOUND" => (
+                StatusCode::BAD_REQUEST,
+                Json(Self::new(detail.clone(), detail)),
+            ),
+            "TRANSCRIPT_STORE_ERROR" => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(Self::new(detail.clone(), detail).retryable()),
+            ),
+            _ => Self::internal(detail),
+        }
+    }
+
     #[cfg(test)]
     fn idempotency_conflict() -> (StatusCode, Json<Self>) {
         (
