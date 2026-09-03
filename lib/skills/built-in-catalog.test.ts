@@ -53,6 +53,20 @@ describe("built-in skills catalog", () => {
     expect(entry.content).toMatch(/`x` and\s+`y`\*\* as numbers/)
   })
 
+  it("teaches both structural routes, not only the HTML one", () => {
+    const entry = getCatalogSkill("diagram-design")!
+    // The mermaid surface had no contract anywhere in the repo, yet it is the
+    // default for structural content and the only one that survives an IM
+    // thread, where this skill is not even delivered.
+    expect(entry.content).toContain("Quote every label")
+    expect(entry.content).toContain("%%{init}%%")
+    expect(entry.content).toContain("8,000")
+    // `-beta` is load-bearing: those grammars do not parse without it.
+    expect(entry.content).toContain("radar-beta")
+    // The HTML route stays the deliverable route, and still names its tool.
+    expect(entry.content).toContain('artifact_create` with `type: "html"')
+  })
+
   it("publishes an orthogonal delivery and activation contract for every skill", () => {
     expect(
       Object.fromEntries(BUILT_IN_SKILL_CATALOG.map((entry) => [entry.id, entry.delivery]))

@@ -29,12 +29,58 @@ Create a single self-contained HTML Artifact with inline SVG. The result should 
 
 This Cognia adaptation is based on `cathrynlavery/diagram-design` at commit `8827b277395988877ba997b714b43513f764b569`. See `references/UPSTREAM_LICENSE.txt` and `references/THIRD_PARTY_LICENSES.md`.
 
-## Required output contract
+## Pick the route before the grammar
+
+Two routes. The routing section of your system prompt says which one this
+channel has.
+
+**Mermaid, inline in the reply, is the default.** A fenced block tagged
+`mermaid` renders in place, needs no dock, re-themes itself with the app, and
+is the only structural route that survives every channel. Reach for it unless
+the composition itself is the deliverable.
+
+**HTML with inline SVG in an artifact, when the composition is the point.** A
+figure the reader will export or present, a layout Mermaid has no grammar for,
+or a density Mermaid's auto-layout will not hold. This route needs
+`artifact_create`. Where that tool is absent, draw the Mermaid version rather
+than prose, and never a fenced HTML block: unlike a chart payload, whether an
+HTML fence gets lifted into the dock depends on a per-user setting you cannot
+see, so Mermaid is the only route that is certain to reach the reader.
+
+### The Mermaid contract
+
+- **Tag the fence exactly `mermaid`.** The renderer matches that one word.
+- **Grammars this build renders:** `flowchart` / `graph`, `sequenceDiagram`,
+  `classDiagram`, `stateDiagram-v2`, `erDiagram`, `journey`, `gantt`, `pie`,
+  `gitGraph`, `mindmap`, `timeline`, `quadrantChart`, `requirementDiagram`,
+  `C4Context`, `kanban`, `treemap`, `xychart`, `sankey`, `block`,
+  `architecture`, `packet`, `info`, `ishikawa`, `eventmodeling`, and
+  `radar-beta`, `venn-beta`, `swimlane-beta`, `wardley-beta`, `cynefin-beta`,
+  `treeView-beta`, `railroad-beta`. Those last seven parse **only** with the
+  `-beta` suffix.
+- **Quote every label containing punctuation:** `A["Auth (v2)"]`. An unquoted
+  `(`, `:` or `[` is the most common parse failure, and a failure renders an
+  error card containing your source instead of a diagram.
+- **Set no colours and no `%%{init}%%` block.** The host re-renders the diagram
+  against its own theme on every light/dark flip, so a pinned palette reads
+  fine when you author it and is unreadable in the other theme. This is the
+  same trap `chart-design` names for the chart palette.
+- **HTML labels work** (`<br/>`, `<b>`). The renderer sanitizes the emitted
+  SVG, so scripts, event handlers and remote references are stripped.
+- **Keep one diagram under about 8,000 characters.** Past that the host stops
+  auto-rendering and shows the source with a button instead. Roughly fifteen
+  nodes is the legibility ceiling long before that.
+- **Write every label in the user's current language.**
+- **Expect a dock card as well.** In-app, a Mermaid block of three or more
+  lines is also lifted into the dock as its own artifact, so the reader gets
+  the inline diagram and an exportable card. That is expected. Never emit a
+  second copy yourself.
+
+## The HTML + SVG contract
 
 Call `artifact_create` with `type: "html"`, a useful title, `language: "html"`,
 and one complete HTML document as `content`. Do not write a workspace file and
-do not bypass a missing artifact tool with a fenced block. If artifact authoring
-is unavailable, use an inline Mermaid diagram or concise prose instead.
+do not bypass a missing artifact tool with a fenced block.
 
 The document must:
 
