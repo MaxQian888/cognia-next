@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Rhodes Operations command emblem</title>
+  <desc id="desc">An original angular command tower and signal beacon emblem.</desc>
+  <g fill="none" fill-rule="evenodd">
+    <path fill="#14181B" d="M128 18l20 32-8 17 18 22-9 17 34 29-9 20 35 31-29 48H76l-29-48 35-31-9-20 34-29-9-17 18-22-8-17 20-32z"/>
+    <path fill="#F4F1E8" d="M128 42l8 14-8 17-8-17 8-14zm-10 39h20v70h-20V81zm-15 35l15 11v31l-31 28H65l38-70zm50 0l38 70h-22l-31-28v-31l15-11z"/>
+    <path fill="#F59E0B" d="M121 19h14v22h-14V19zm-41 39l10-10 18 18-10 10-18-18zm86-10l10 10-18 18-10-10 18-18zM94 184h68l-11 14h-46l-11-14z"/>
+    <path fill="#71848F" d="M108 151h40l-20 20-20-20z"/>
+    <path stroke="#F4F1E8" stroke-width="8" d="M82 190l46 46 46-46"/>
+    <path stroke="#F59E0B" stroke-width="6" d="M101 204l27 27 27-27"/>
+    <circle cx="128" cy="59" r="6" fill="#F59E0B"/>
+  </g>
+</svg>

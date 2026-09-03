@@ -1,0 +1,429 @@
+{
+  "id": "cognia-arknights-theme",
+  "name": "Arknights: Rhodes Operations (Unofficial)",
+  "version": "1.0.0",
+  "description": "An original, highly customizable tactical-industrial appearance pack inspired by Arknights. Includes complete light and dark palettes, generated wallpapers, density profiles, and one-click theme packs.",
+  "type": "frontend",
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-arknights-theme/assets/command-emblem.svg",
+  "screenshots": [
+    "/plugins/cognia-arknights-theme/assets/lemuen-rain-transit.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/reed-flame-shadow-field-clinic.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/necrass-moonlit-memorial.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/exusiai-new-covenant-dawn-platform.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/leizi-thunderbringer-storm-pavilion.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/wisadel-londinium-rooftop.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/lappland-decadenza-opera.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/kaltsit-esperanta-containment-hangar.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/hoshiguma-breacher-night-stall.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/yu-courtyard-kitchen.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/blaze-igniting-spark-maintenance.webp",
+    "/plugins/cognia-arknights-theme/assets/operations-deck-dark.webp",
+    "/plugins/cognia-arknights-theme/assets/operations-deck-light.webp"
+  ],
+  "keywords": ["arknights", "anime", "tactical", "industrial", "theme", "wallpaper"],
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Appearance contributions require an interactive shell."
+    }
+  },
+  "themes": [
+    {
+      "id": "rhodes-operations-dark",
+      "name": "Rhodes Operations · Dark",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#101316",
+        "--foreground": "#F3F1EA",
+        "--card": "#181C20",
+        "--card-foreground": "#F3F1EA",
+        "--popover": "#1D2227",
+        "--popover-foreground": "#F3F1EA",
+        "--muted": "#22282E",
+        "--muted-foreground": "#B7C0C7",
+        "--border": "#3A4249",
+        "--input": "#2B3238",
+        "--ring": "#F5A524",
+        "--primary": "#F5A524",
+        "--primary-foreground": "#171006",
+        "--secondary": "#303840",
+        "--secondary-foreground": "#F3F1EA",
+        "--accent": "#DCE4E8",
+        "--accent-foreground": "#14181B",
+        "--brand-action": "#58C6D5",
+        "--brand-approval": "#F5A524",
+        "--brand-wash": "#182429",
+        "--destructive": "#FF725E",
+        "--destructive-foreground": "#1B0805",
+        "--success": "#72C78A",
+        "--success-foreground": "#08140B",
+        "--warning": "#F5A524",
+        "--warning-foreground": "#171006",
+        "--info": "#70B7D6",
+        "--info-foreground": "#07131A",
+        "--sidebar": "#0B0E10",
+        "--sidebar-foreground": "#E7E8E4",
+        "--sidebar-primary": "#F5A524",
+        "--sidebar-primary-foreground": "#171006",
+        "--sidebar-accent": "#252B30",
+        "--sidebar-accent-foreground": "#F3F1EA",
+        "--sidebar-border": "#30373D",
+        "--sidebar-ring": "#F5A524",
+        "--chart-1": "#F5A524",
+        "--chart-2": "#58C6D5",
+        "--chart-3": "#91A6B4",
+        "--chart-4": "#A890D3",
+        "--chart-5": "#E46F61",
+        "--wf-trigger": "#72C78A",
+        "--wf-action": "#70B7D6",
+        "--wf-ai": "#A890D3",
+        "--wf-flow": "#F5A524",
+        "--wf-data": "#E9826F",
+        "--wf-io": "#58C6D5",
+        "--wf-annotation": "#91A0AA",
+        "--wf-status-idle": "#91A0AA",
+        "--wf-status-running": "#F5A524",
+        "--wf-status-succeeded": "#72C78A",
+        "--wf-status-failed": "#FF725E",
+        "--wf-status-skipped": "#68737C",
+        "--wf-status-waiting": "#70B7D6",
+        "--effort-ultra": "#F5A524",
+        "--effort-ultra-muted": "#4D391E"
+      }
+    },
+    {
+      "id": "rhodes-operations-light",
+      "name": "Rhodes Operations · Light",
+      "isDark": false,
+      "cssVariables": {
+        "--background": "#F2F0E9",
+        "--foreground": "#171A1D",
+        "--card": "#FCFBF7",
+        "--card-foreground": "#171A1D",
+        "--popover": "#FFFFFF",
+        "--popover-foreground": "#171A1D",
+        "--muted": "#E3E2DC",
+        "--muted-foreground": "#4E5A62",
+        "--border": "#B8BEC1",
+        "--input": "#D4D7D6",
+        "--ring": "#8A4700",
+        "--primary": "#8A4700",
+        "--primary-foreground": "#FFFFFF",
+        "--secondary": "#D9DFE1",
+        "--secondary-foreground": "#1A2024",
+        "--accent": "#304653",
+        "--accent-foreground": "#FFFFFF",
+        "--brand-action": "#086D7A",
+        "--brand-approval": "#8A4700",
+        "--brand-wash": "#E3ECEB",
+        "--destructive": "#A93427",
+        "--destructive-foreground": "#FFFFFF",
+        "--success": "#237A3B",
+        "--success-foreground": "#FFFFFF",
+        "--warning": "#8A5200",
+        "--warning-foreground": "#FFFFFF",
+        "--info": "#176987",
+        "--info-foreground": "#FFFFFF",
+        "--sidebar": "#E5E5DF",
+        "--sidebar-foreground": "#202428",
+        "--sidebar-primary": "#8A4700",
+        "--sidebar-primary-foreground": "#FFFFFF",
+        "--sidebar-accent": "#CDD4D6",
+        "--sidebar-accent-foreground": "#1A2024",
+        "--sidebar-border": "#B8BEC1",
+        "--sidebar-ring": "#8A4700",
+        "--chart-1": "#8A4700",
+        "--chart-2": "#086D7A",
+        "--chart-3": "#476674",
+        "--chart-4": "#68548F",
+        "--chart-5": "#A93427",
+        "--wf-trigger": "#237A3B",
+        "--wf-action": "#176987",
+        "--wf-ai": "#68548F",
+        "--wf-flow": "#8A5200",
+        "--wf-data": "#A93427",
+        "--wf-io": "#086D7A",
+        "--wf-annotation": "#59666D",
+        "--wf-status-idle": "#59666D",
+        "--wf-status-running": "#8A5200",
+        "--wf-status-succeeded": "#237A3B",
+        "--wf-status-failed": "#A93427",
+        "--wf-status-skipped": "#747C80",
+        "--wf-status-waiting": "#176987",
+        "--effort-ultra": "#8A4700",
+        "--effort-ultra-muted": "#E2D3C0"
+      }
+    }
+  ],
+  "wallpapers": [
+    {
+      "id": "lemuen-rain-transit",
+      "name": "Lemuen · Rain Transit",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/lemuen-rain-transit.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "reed-flame-shadow-field-clinic",
+      "name": "焰影苇草 · 雨夜诊所",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/reed-flame-shadow-field-clinic.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "necrass-moonlit-memorial",
+      "name": "死芒 · 月下静水",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/necrass-moonlit-memorial.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "exusiai-new-covenant-dawn-platform",
+      "name": "新约能天使 · 黎明站台",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/exusiai-new-covenant-dawn-platform.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "leizi-thunderbringer-storm-pavilion",
+      "name": "司霆惊蛰 · 山雨将至",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/leizi-thunderbringer-storm-pavilion.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "wisadel-londinium-rooftop",
+      "name": "维什戴尔 · 雨后伦蒂尼姆",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/wisadel-londinium-rooftop.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "lappland-decadenza-opera",
+      "name": "荒芜拉普兰德 · 月下歌剧院",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/lappland-decadenza-opera.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "kaltsit-esperanta-containment-hangar",
+      "name": "凯尔希·思衡托 · 收容机库",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/kaltsit-esperanta-containment-hangar.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "hoshiguma-breacher-night-stall",
+      "name": "斩业星熊 · 龙门夜摊",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/hoshiguma-breacher-night-stall.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "yu-courtyard-kitchen",
+      "name": "余 · 灶火余温",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/yu-courtyard-kitchen.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "blaze-igniting-spark-maintenance",
+      "name": "烛煌 · 黎明检修",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/blaze-igniting-spark-maintenance.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "operations-deck-dark",
+      "name": "Operations Deck · Night",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operations-deck-dark.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "operations-deck-light",
+      "name": "Operations Deck · Day",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operations-deck-light.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "contingency-grid",
+      "name": "Contingency Grid",
+      "source": {
+        "kind": "gradient",
+        "css": "linear-gradient(112deg, transparent 0 48%, rgba(245,165,36,.07) 48% 48.3%, transparent 48.3% 100%), radial-gradient(circle at 82% 18%, rgba(245,165,36,.18) 0 1px, transparent 2px), linear-gradient(145deg, #090B0D 0%, #161B20 58%, #20272C 100%)"
+      }
+    },
+    {
+      "id": "medical-briefing",
+      "name": "Medical Briefing",
+      "source": {
+        "kind": "gradient",
+        "css": "linear-gradient(125deg, transparent 0 64%, rgba(8,109,122,.08) 64% 64.4%, transparent 64.4% 100%), radial-gradient(circle at 18% 22%, rgba(245,165,36,.16), transparent 25%), linear-gradient(150deg, #FAF9F4 0%, #E7EBEA 60%, #D7E0E2 100%)"
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "rhodes-command",
+      "vars": {
+        "--density-spacing": "0.75rem",
+        "--density-input-height": "2.25rem",
+        "--density-row-padding": "0.45rem",
+        "--density-gap": "0.625rem",
+        "--density-line-height": "1.45"
+      }
+    },
+    {
+      "name": "rhodes-field",
+      "vars": {
+        "--density-spacing": "1rem",
+        "--density-input-height": "2.5rem",
+        "--density-row-padding": "0.625rem",
+        "--density-gap": "0.875rem",
+        "--density-line-height": "1.6"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "lemuen-rain-transit",
+      "name": "LEMUEN // Rain Transit",
+      "description": "A quiet Laterano night scene with Lemuen, low-motion surfaces, and spacious field density for unobtrusive reading.",
+      "preview": {
+        "light": "/plugins/cognia-arknights-theme/assets/lemuen-rain-transit.webp",
+        "dark": "/plugins/cognia-arknights-theme/assets/lemuen-rain-transit.webp"
+      },
+      "applies": {
+        "themeId": "rhodes-operations-dark",
+        "wallpaperId": "lemuen-rain-transit",
+        "density": "rhodes-field",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "night-watch",
+      "name": "RHODES // Night Watch",
+      "description": "Graphite command surfaces, amber signals, generated night operations wallpaper, and compact tactical density.",
+      "preview": {
+        "light": "/plugins/cognia-arknights-theme/assets/operations-deck-dark.webp",
+        "dark": "/plugins/cognia-arknights-theme/assets/operations-deck-dark.webp"
+      },
+      "applies": {
+        "themeId": "rhodes-operations-dark",
+        "wallpaperId": "operations-deck-dark",
+        "density": "rhodes-command",
+        "radius": 0.25,
+        "motionSpeed": 1
+      }
+    },
+    {
+      "id": "field-briefing",
+      "name": "RHODES // Field Briefing",
+      "description": "Pale clinical surfaces, slate navigation, generated daylight wallpaper, and a spacious briefing layout.",
+      "preview": {
+        "light": "/plugins/cognia-arknights-theme/assets/operations-deck-light.webp",
+        "dark": "/plugins/cognia-arknights-theme/assets/operations-deck-light.webp"
+      },
+      "applies": {
+        "themeId": "rhodes-operations-light",
+        "wallpaperId": "operations-deck-light",
+        "density": "rhodes-field",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "contingency",
+      "name": "CONTINGENCY // Black",
+      "description": "A zero-radius high-tempo command profile with the dark grid wallpaper and full tactical color ramp.",
+      "applies": {
+        "themeId": "rhodes-operations-dark",
+        "wallpaperId": "contingency-grid",
+        "density": "rhodes-command",
+        "radius": 0,
+        "motionSpeed": 1.5
+      }
+    },
+    {
+      "id": "medical",
+      "name": "MEDICAL // Quiet Shift",
+      "description": "Low-motion light surfaces with a calm briefing gradient and roomy field density.",
+      "applies": {
+        "themeId": "rhodes-operations-light",
+        "wallpaperId": "medical-briefing",
+        "density": "rhodes-field",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    }
+  ]
+}

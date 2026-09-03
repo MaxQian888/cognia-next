@@ -19,6 +19,7 @@ describe("browser-builtin-registry", () => {
       "cognia-anime-effort",
       "cognia-anthropic-skills",
       "cognia-appearance-demo",
+      "cognia-arknights-theme",
       "cognia-backend-refactor",
       "cognia-browser-tools",
       "cognia-builtin-characters",

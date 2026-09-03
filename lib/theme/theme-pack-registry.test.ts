@@ -7,6 +7,7 @@ import {
   registerThemePack,
   subscribeThemePackRegistry,
   unregisterThemePack,
+  themePackPreviewSrc,
   unregisterThemePacksByPlugin,
 } from "./theme-pack-registry"
 import type { PluginThemePackContribution } from "@/types/plugin/plugin"
@@ -127,5 +128,44 @@ describe("subscribe", () => {
     registerThemePack({ pluginId: "p1", pack: packFixture("x") })
     const c = listThemePacks()
     expect(c).not.toBe(a)
+  })
+})
+
+describe("themePackPreviewSrc", () => {
+  it("loads bytes the manifest already carries", () => {
+    expect(themePackPreviewSrc("demo", "data:image/webp;base64,AAAA")).toBe(
+      "data:image/webp;base64,AAAA"
+    )
+  })
+
+  it("loads the plugin's own public mirror, encoded id and all", () => {
+    expect(themePackPreviewSrc("demo", "/plugins/demo/assets/deck.webp")).toBe(
+      "/plugins/demo/assets/deck.webp"
+    )
+    expect(themePackPreviewSrc("a b", "/plugins/a%20b/x.png")).toBe("/plugins/a%20b/x.png")
+  })
+
+  it("drops anything that would reach off this machine", () => {
+    // The whole point: opening the Appearance tab is not consent to a request.
+    expect(themePackPreviewSrc("demo", "https://tracker.example/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "http://tracker.example/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "//tracker.example/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "blob:https://x/y")).toBeUndefined()
+  })
+
+  it("drops a peer plugin's mirror and any walk back out of its own", () => {
+    expect(themePackPreviewSrc("demo", "/plugins/other/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "/plugins/demo/../other/p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "/plugins/demo/..\\other\\p.png")).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "/plugins/demo/")).toBeUndefined()
+  })
+
+  it("drops a data URL that is not an image", () => {
+    expect(themePackPreviewSrc("demo", "data:text/html,<script>")).toBeUndefined()
+  })
+
+  it("has nothing to say about an absent preview", () => {
+    expect(themePackPreviewSrc("demo", undefined)).toBeUndefined()
+    expect(themePackPreviewSrc("demo", "   ")).toBeUndefined()
   })
 })

@@ -82,6 +82,7 @@ function applyThemeId(
   const pt = deps.pluginThemes.find(
     (p) =>
       p.id === themeId ||
+      p.id === `${pack.pluginId}.${themeId}` ||
       p.id === `${pack.pluginId}:${themeId}` ||
       (p.pluginId === pack.pluginId && p.name === themeId)
   )

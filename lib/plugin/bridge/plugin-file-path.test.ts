@@ -15,6 +15,7 @@ jest.mock("@tauri-apps/api/core", () => ({
 import {
   isUnsafeRelativePath,
   joinPluginPath,
+  publicBuiltinAssetUrl,
   readContainedPluginAsset,
   readContainedPluginFile,
 } from "./plugin-file-path"
@@ -77,6 +78,35 @@ describe("plugin-file-path", () => {
       pluginPath: "/plugins/demo",
       entry: "assets/image.png",
     })
+  })
+
+  it("maps browser-builtin assets to their static public URL", async () => {
+    expect(publicBuiltinAssetUrl("cognia-rhodes", "assets/field deck.webp")).toBe(
+      "/plugins/cognia-rhodes/assets/field%20deck.webp"
+    )
+    await expect(
+      readContainedPluginAsset(
+        "cognia-rhodes",
+        "builtin://cognia-rhodes",
+        "assets/field deck.webp",
+        "image/webp"
+      )
+    ).resolves.toBe("/plugins/cognia-rhodes/assets/field%20deck.webp")
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
+  it("uses the public URL for a built-in asset inside Tauri too", async () => {
+    mockIsTauri.mockReturnValue(true)
+
+    await expect(
+      readContainedPluginAsset(
+        "cognia-rhodes",
+        "builtin://cognia-rhodes",
+        "assets/wallpaper.webp",
+        "image/webp"
+      )
+    ).resolves.toBe("/plugins/cognia-rhodes/assets/wallpaper.webp")
+    expect(mockInvoke).not.toHaveBeenCalled()
   })
 
   it("rejects unsafe binary asset paths before native invocation", async () => {

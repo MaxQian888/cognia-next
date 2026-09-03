@@ -34,7 +34,8 @@ describe("applyThemePack", () => {
   it("clones a plugin theme into a CustomTheme and activates it", () => {
     const pluginThemes: PluginTheme[] = [
       {
-        id: "midnight",
+        // The themes bridge namespaces contribution ids with a dot.
+        id: "demo.midnight",
         name: "Midnight",
         colors: COLORS,
         isDark: true,
@@ -52,7 +53,7 @@ describe("applyThemePack", () => {
   it("reuses an existing clone instead of creating a duplicate", () => {
     const pluginThemes: PluginTheme[] = [
       {
-        id: "midnight",
+        id: "demo.midnight",
         name: "Midnight",
         colors: COLORS,
         isDark: true,
@@ -69,6 +70,24 @@ describe("applyThemePack", () => {
     applyThemePack(makePack({ themeId: "midnight" }), deps)
     expect(deps.createCustomTheme).not.toHaveBeenCalled()
     expect(deps.setActiveCustomTheme).toHaveBeenCalledWith("ct_existing")
+  })
+
+  it("keeps accepting the legacy colon-namespaced plugin theme id", () => {
+    const pluginThemes: PluginTheme[] = [
+      {
+        id: "demo:midnight",
+        name: "Midnight",
+        colors: COLORS,
+        isDark: true,
+        pluginId: "demo",
+        variables: {},
+      },
+    ]
+    const deps = makeDeps({ pluginThemes })
+
+    expect(applyThemePack(makePack({ themeId: "midnight" }), deps).applied).toContain(
+      "theme:plugin"
+    )
   })
 
   it("skips an unresolved themeId", () => {

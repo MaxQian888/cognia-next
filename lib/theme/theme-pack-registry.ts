@@ -19,6 +19,40 @@ export interface RegisteredThemePack extends PluginThemePackContribution {
   pluginName?: string
 }
 
+/**
+ * The preview a pack's card may load, or `undefined` for one it must not.
+ *
+ * `preview` is plugin-authored text, and a card that hands it straight to an
+ * `<img src>` will fetch whatever it says. An `https://` value there turns
+ * opening the Appearance tab into an outbound request nobody agreed to: the
+ * user's address, their user agent and the fact that this pack is installed,
+ * once per render. Every other plugin-owned binary in this app is read through
+ * the containment boundary (`readContainedPluginAsset`), and a preview image is
+ * the same kind of thing.
+ *
+ * So exactly two forms load. A `data:image/…` URL is bytes the manifest already
+ * carries. A path under `/plugins/<pluginId>/` is the plugin's own public
+ * mirror, which is the shape `publicBuiltinAssetUrl` builds. Everything else is
+ * dropped and the card simply draws without an image: a remote host, a `blob:`,
+ * a peer plugin's mirror, or a traversal back out of one.
+ */
+export function themePackPreviewSrc(
+  pluginId: string,
+  candidate: string | undefined
+): string | undefined {
+  const value = candidate?.trim()
+  if (!value) return undefined
+  if (/^data:image\/[a-z0-9.+-]+[;,]/i.test(value)) return value
+  const mirror = `/plugins/${encodeURIComponent(pluginId)}/`
+  if (!value.startsWith(mirror)) return undefined
+  // A `..` anywhere past the prefix walks back out of the plugin's own folder,
+  // which is the one thing the prefix check alone would let through.
+  const rest = value.slice(mirror.length)
+  if (rest.length === 0) return undefined
+  if (rest.split(/[/\\]/).includes("..")) return undefined
+  return value
+}
+
 const registry = new Map<string, RegisteredThemePack>()
 const listeners = new Set<() => void>()
 let snapshot: RegisteredThemePack[] | null = null

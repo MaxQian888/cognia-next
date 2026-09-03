@@ -21,6 +21,7 @@ import backendRefactorManifest from "@/plugins/cognia-backend-refactor/plugin.js
 import workModeManifest from "@/plugins/cognia-work-mode/plugin.json"
 import zhihuContentPipelineManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
 import appearanceDemoManifest from "@/plugins/cognia-appearance-demo/plugin.json"
+import arknightsThemeManifest from "@/plugins/cognia-arknights-theme/plugin.json"
 import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
 import schedulerToolsManifest from "@/plugins/cognia-scheduler-tools/plugin.json"
 import goalInsightsManifest from "@/plugins/cognia-goal-insights/plugin.json"
@@ -61,6 +62,7 @@ import backendRefactorModule from "@/plugins/cognia-backend-refactor/src/index"
 import workModeModule from "@/plugins/cognia-work-mode/src/index"
 import zhihuContentPipelineModule from "@/plugins/zhihu-content-pipeline/src/index"
 import appearanceDemoModule from "@/plugins/cognia-appearance-demo/src/index"
+import arknightsThemeModule from "@/plugins/cognia-arknights-theme/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
 import schedulerToolsModule from "@/plugins/cognia-scheduler-tools/src/index"
 import goalInsightsModule from "@/plugins/cognia-goal-insights/src/index"
@@ -296,6 +298,12 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-appearance-demo",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(appearanceDemoModule),
+  },
+  {
+    manifest: builtinManifest(arknightsThemeManifest, arknightsThemeModule),
+    path: "builtin://cognia-arknights-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(arknightsThemeModule),
   },
   {
     manifest: builtinManifest(schedulingDemoManifest, schedulingDemoModule),

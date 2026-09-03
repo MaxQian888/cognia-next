@@ -7,6 +7,7 @@
 // registered on enable but unreachable.
 
 import { useSyncExternalStore } from "react"
+import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -15,6 +16,7 @@ import { useSettingsStore } from "@/stores/settings"
 import {
   listThemePacks,
   subscribeThemePackRegistry,
+  themePackPreviewSrc,
   type RegisteredThemePack,
 } from "@/lib/theme/theme-pack-registry"
 import {
@@ -30,6 +32,7 @@ const EMPTY_THEMES: PluginTheme[] = []
 
 export function ThemePackTab() {
   const t = useTranslations("settings.appearance.themePack")
+  const { resolvedTheme } = useTheme()
   const packs = useSyncExternalStore(subscribeThemePackRegistry, listThemePacks, () => EMPTY_PACKS)
   const pluginThemes = useSyncExternalStore(
     subscribeThemeRegistry,
@@ -73,29 +76,58 @@ export function ThemePackTab() {
           className="grid gap-3"
           style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
         >
-          {packs.map((pack) => (
-            <Card key={`${pack.pluginId}.${pack.id}`} className="flex flex-col gap-2 p-3">
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">{pack.name}</p>
-                {pack.pluginName && (
-                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {pack.pluginName}
-                  </p>
-                )}
-                {pack.description && (
-                  <p className="text-xs text-muted-foreground">{pack.description}</p>
-                )}
-              </div>
-              <Button
-                size="sm"
-                className="mt-auto self-start"
-                onClick={() => onApply(pack)}
-                aria-label={`${t("apply")}: ${pack.name}`}
+          {packs.map((pack) => {
+            // Through the same boundary every other plugin binary goes through:
+            // a manifest string is not a URL this page may fetch on sight
+            // (`themePackPreviewSrc`). Resolved per variant so a pack whose one
+            // rejected preview has a usable twin still shows the twin.
+            const light = themePackPreviewSrc(pack.pluginId, pack.preview?.light)
+            const dark = themePackPreviewSrc(pack.pluginId, pack.preview?.dark)
+            const preview = resolvedTheme === "light" ? (light ?? dark) : (dark ?? light)
+
+            return (
+              <Card
+                key={`${pack.pluginId}.${pack.id}`}
+                className="flex min-w-0 flex-col overflow-hidden"
               >
-                {t("apply")}
-              </Button>
-            </Card>
-          ))}
+                {preview && (
+                  <div className="relative aspect-[16/7] overflow-hidden border-b bg-muted">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- plugin previews can be data URLs or runtime-resolved asset URLs in a static export */}
+                    <img
+                      src={preview}
+                      alt=""
+                      aria-hidden
+                      loading="lazy"
+                      className="size-full object-cover transition-transform duration-300 hover:scale-[1.02] motion-reduce:transition-none"
+                      data-testid={`theme-pack-preview-${pack.id}`}
+                    />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                  </div>
+                )}
+                <div className="flex flex-1 flex-col gap-2 p-3">
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium">{pack.name}</p>
+                    {pack.pluginName && (
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {pack.pluginName}
+                      </p>
+                    )}
+                    {pack.description && (
+                      <p className="text-xs text-muted-foreground">{pack.description}</p>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    className="mt-auto self-start"
+                    onClick={() => onApply(pack)}
+                    aria-label={`${t("apply")}: ${pack.name}`}
+                  >
+                    {t("apply")}
+                  </Button>
+                </div>
+              </Card>
+            )
+          })}
         </div>
       )}
     </div>

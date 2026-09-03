@@ -18,6 +18,22 @@ export function joinPluginPath(baseDir: string, relative: string): string {
   return resolvePluginPath(baseDir, relative)
 }
 
+/**
+ * Browser built-ins live in the JavaScript bundle, so their binary assets
+ * cannot be read from the synthetic `builtin://` install root. Public assets
+ * mirror the plugin directory under `/plugins/<pluginId>/`; segment encoding
+ * keeps the returned URL loadable without relaxing the traversal guard.
+ */
+export function publicBuiltinAssetUrl(pluginId: string, relative: string): string {
+  const encodedPath = relative
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/")
+  return `/plugins/${encodeURIComponent(pluginId)}/${encodedPath}`
+}
+
 /** Read a plugin-owned asset through the native no-follow boundary when available. */
 export async function readContainedPluginFile(
   pluginId: string,
@@ -48,7 +64,11 @@ export async function readContainedPluginAsset(
   if (isUnsafeRelativePath(relative)) {
     throw new Error(`unsafe plugin path "${relative}"`)
   }
-  if (isTauri() && !baseDir.startsWith("builtin://")) {
+  if (baseDir.startsWith("builtin://")) {
+    return publicBuiltinAssetUrl(pluginId, relative)
+  }
+  // No `builtin://` re-check: the early return above already took that branch.
+  if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core")
     const base64 = await invoke<string>("plugin_read_entry_base64", {
       pluginId,
