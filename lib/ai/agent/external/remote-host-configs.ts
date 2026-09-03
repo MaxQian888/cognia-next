@@ -195,13 +195,20 @@ export async function callHostConfigCommand<T>(
 const call = callHostConfigCommand
 
 /**
- * Mutating the host-owned configuration is always a direct user action. Mint
- * the short-lived approval at that boundary and use it immediately; a lease
- * must never be parked in a durable queue where it can expire before dispatch.
- * Local authority goes through the service plane and does not need a device
- * lease.
+ * Every `approval: "interactive"` command on this feature: the configuration
+ * writes, and the two that start a run.
+ *
+ * All of them are a direct user action, so the short-lived approval is minted
+ * at that boundary and used immediately; a lease must never be parked in a
+ * durable queue where it can expire before dispatch. Local authority goes
+ * through the service plane and does not need a device lease.
+ *
+ * Exported because the run plane is a separate module by concern and must not
+ * reach the host through an ungated path: `callHostConfigCommand` checks the
+ * handshake but attaches nothing, and the host refuses an interactive command
+ * that arrives without a lease.
  */
-async function callHostConfigWriteCommand<T>(
+export async function callApprovedHostConfigCommand<T>(
   operation: HostConfigCommand,
   payload: Record<string, unknown> = {}
 ): Promise<T> {
@@ -240,7 +247,7 @@ export async function createRemoteHostConfig(
   config: Partial<StoredExternalAgentConfig>,
   options: { fromImport?: boolean } = {}
 ): Promise<ExternalAgentConfigRecord> {
-  const result = await callHostConfigWriteCommand<{ config: ExternalAgentConfigRecord }>(
+  const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.create,
     {
       config,
@@ -255,7 +262,7 @@ export async function updateRemoteHostConfig(input: {
   expectedRevision: string
   patch: Partial<StoredExternalAgentConfig>
 }): Promise<ExternalAgentConfigRecord> {
-  const result = await callHostConfigWriteCommand<{ config: ExternalAgentConfigRecord }>(
+  const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.update,
     input as unknown as Record<string, unknown>
   )
@@ -263,7 +270,7 @@ export async function updateRemoteHostConfig(input: {
 }
 
 export async function deleteRemoteHostConfig(configId: string): Promise<ExternalAgentConfigRecord> {
-  const result = await callHostConfigWriteCommand<{ config: ExternalAgentConfigRecord }>(
+  const result = await callApprovedHostConfigCommand<{ config: ExternalAgentConfigRecord }>(
     HOST_CONFIG_COMMANDS.delete,
     { configId }
   )
@@ -278,7 +285,7 @@ export interface RemoteReconcileOutcome {
 }
 
 export async function reconcileRemoteHostConfigs(): Promise<RemoteReconcileOutcome[]> {
-  const result = await callHostConfigWriteCommand<{ outcomes: RemoteReconcileOutcome[] }>(
+  const result = await callApprovedHostConfigCommand<{ outcomes: RemoteReconcileOutcome[] }>(
     HOST_CONFIG_COMMANDS.reconcile
   )
   return result.outcomes ?? []
@@ -300,7 +307,7 @@ export async function admitRemoteExternalRun(
   runId: string,
   stamp: ExternalAgentConfigStamp
 ): Promise<RemoteRunAdmission> {
-  const result = await call<{
+  const result = await callApprovedHostConfigCommand<{
     admitted: boolean
     record?: ExternalAgentConfigRecord
     refusal?: RunAdmissionRefusal

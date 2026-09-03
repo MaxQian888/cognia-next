@@ -272,6 +272,19 @@ describe("run admission", () => {
     expect(result.admitted).toBe(false)
   })
 
+  // Admission is `interactive` like every sibling write. It was declared
+  // `signed-policy` and called bare, so a paired browser could never get past
+  // it: the host answered "an active host policy is required" and nothing in
+  // the product mints a host policy.
+  it("carries an approval lease when a paired client admits a run", async () => {
+    setup({ hasLocalAuthority: () => false }, { admitted: true, record: { configId: "eac_1" } })
+
+    await admitRemoteExternalRun("run-1", stamp)
+
+    expect(leaseOperations).toEqual([[HOST_CONFIG_COMMANDS.admit]])
+    expect(calls[0].payload).toEqual({ runId: "run-1", stamp, adminLease: "lease-1" })
+  })
+
   it("releases the lease", async () => {
     setup({ hasLocalAuthority: () => true }, { released: true })
     await releaseRemoteExternalRun("run-1")

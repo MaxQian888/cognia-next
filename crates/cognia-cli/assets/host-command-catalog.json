@@ -12020,7 +12020,7 @@
       "operation": "side-effect",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_admit_run (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -13003,7 +13003,7 @@
       "operation": "side-effect",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "interactive",
       "idempotency": "required",
       "summary": "external_agent_run_turn (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -46841,5 +46841,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "7090a9b7e7fac318ea6032d30246bd2e6c8dea46311cf869c89cc92ad453168e"
+  "catalogHash": "2c3f8876b33353a5ae04f5e668f2c3ca85454ad36278071c1f771735a1d365fa"
 }

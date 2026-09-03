@@ -22,7 +22,11 @@ import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-conf
 
 import type { RunAdmissionRefusal } from "./run-admission"
 import { EXTERNAL_RUN_EVENT_TOPIC, type RemoteRunFrame } from "./remote-run-service"
-import { HOST_CONFIG_COMMANDS, callHostConfigCommand } from "./remote-host-configs"
+import {
+  HOST_CONFIG_COMMANDS,
+  callApprovedHostConfigCommand,
+  callHostConfigCommand,
+} from "./remote-host-configs"
 
 export { EXTERNAL_RUN_EVENT_TOPIC }
 export type { RemoteRunFrame }
@@ -98,7 +102,11 @@ export async function startRemoteExternalTurn(input: {
   prompt: string
   externalSessionId?: string
 }): Promise<RemoteTurnStart> {
-  const result = await callHostConfigCommand<{
+  // Starting a turn is an interactive approval, like the configuration writes
+  // beside it. `callHostConfigCommand` checks the handshake but attaches no
+  // lease, and the host refuses an interactive command that arrives without
+  // one, so this is the only call shape that can actually start a run.
+  const result = await callApprovedHostConfigCommand<{
     started: boolean
     runId?: string
     agentId?: string

@@ -111,6 +111,40 @@ describe("host support", () => {
     ).rejects.toBeInstanceOf(HostConfigsUnsupportedError)
     expect(calls).toEqual([])
   })
+
+  // The defect: the run plane was declared `signed-policy`, a gate no client
+  // can satisfy, and the call carried nothing. Picking a host-owned agent in
+  // the composer answered 428 "an active host policy is required" for as long
+  // as the feature had existed. It is `interactive` now, like every sibling
+  // write, and the lease has to ride along or the host refuses it again.
+  it("carries an approval lease when a paired client starts the turn", async () => {
+    const leaseOperations: string[][] = []
+    restoreDeps?.()
+    restoreDeps = __setRemoteHostConfigDepsForTests({
+      hasLocalAuthority: () => false,
+      isRemoteHostActive: () => false,
+      getRuntimeSnapshot: (() => ({
+        host: { compatible: true, operations: Object.values(REMOTE_RUN_COMMANDS) },
+      })) as never,
+      issueAdminLease: async (operations) => {
+        leaseOperations.push(operations)
+        return { token: "lease-run", operations, expiresAt: Date.now() + 60_000 }
+      },
+    })
+    reply = { started: true, runId: "run-1", agentId: "pi" }
+
+    await expect(
+      startRemoteExternalTurn({
+        runId: "run-1",
+        chatSessionId: "chat-1",
+        stamp: { configId: "eac_1", revision: "eacr_1", lifecycleGeneration: 1 },
+        prompt: "hi",
+      })
+    ).resolves.toEqual({ started: true, runId: "run-1", agentId: "pi" })
+
+    expect(leaseOperations).toEqual([[REMOTE_RUN_COMMANDS.run]])
+    expect(calls[0].payload).toMatchObject({ adminLease: "lease-run" })
+  })
 })
 
 describe("subscribing", () => {

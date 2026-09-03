@@ -1808,6 +1808,47 @@
         "additionalProperties": false
       }
     },
+    "external_agent_admit_run": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "stamp",
+          "adminLease"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "external_agent_config_create": {
       "inputSchemaSource": "contract",
       "inputSchema": {
@@ -1885,6 +1926,61 @@
           },
           "patch": {
             "type": "object"
+          },
+          "adminLease": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "external_agent_run_turn": {
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "chatSessionId",
+          "stamp",
+          "prompt",
+          "adminLease"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "chatSessionId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "externalSessionId": {
+            "type": "string"
+          },
+          "callerDeviceId": {
+            "type": "string"
+          },
+          "stamp": {
+            "type": "object",
+            "required": [
+              "configId",
+              "revision",
+              "lifecycleGeneration"
+            ],
+            "properties": {
+              "configId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "lifecycleGeneration": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
           },
           "adminLease": {
             "type": "string",
