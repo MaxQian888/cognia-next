@@ -494,6 +494,119 @@ describe("browser Vault lifecycle", () => {
   })
 })
 
+// The leaf's own rules live in `lib/accounts/dev-session-unlock.test.ts`. What
+// these pin is the wiring, which is the half this repo keeps shipping dormant:
+// a remembered secret is worth nothing unless `load()` actually consults it,
+// and worse than nothing if `lock()` does not erase it.
+describe("development session unlock", () => {
+  beforeEach(() => {
+    mockIsTauri = false
+  })
+
+  it("re-opens the Vault on the next boot instead of asking again", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+
+    const first = makeStore()
+    await first.getState().load()
+    await first.getState().unlockAccount(browserAccount.id, "secret")
+
+    // A reload is a brand new store over the same sessionStorage.
+    const reloaded = makeStore()
+    await reloaded.getState().load()
+
+    expect(reloaded.getState().unlockedAccountId).toBe(browserAccount.id)
+    expect(reloaded.getState().locked).toBe(false)
+    expect(mockUnlockBrowserVault).toHaveBeenLastCalledWith(browserAccount.id, "secret")
+  })
+
+  it("stays locked after an explicit lock, which is what makes the lock mean anything", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+
+    const first = makeStore()
+    await first.getState().load()
+    await first.getState().unlockAccount(browserAccount.id, "secret")
+    await first.getState().lock()
+
+    const reloaded = makeStore()
+    await reloaded.getState().load()
+
+    expect(reloaded.getState().unlockedAccountId).toBeNull()
+    expect(reloaded.getState().locked).toBe(true)
+  })
+
+  it("falls back to the gate when the remembered secret no longer opens the Vault", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+
+    const first = makeStore()
+    await first.getState().load()
+    await first.getState().unlockAccount(browserAccount.id, "secret")
+
+    mockUnlockBrowserVault.mockRejectedValueOnce(new Error("wrong password"))
+    const reloaded = makeStore()
+    await expect(reloaded.getState().load()).resolves.toBeUndefined()
+
+    expect(reloaded.getState().locked).toBe(true)
+    // And the stale secret is gone, so the next boot does not retry it.
+    const again = makeStore()
+    await again.getState().load()
+    expect(again.getState().locked).toBe(true)
+  })
+
+  it("never provisions a Vault, so first-run setup stays a deliberate choice", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+
+    const first = makeStore()
+    await first.getState().load()
+    await first.getState().unlockAccount(browserAccount.id, "secret")
+
+    mockProvisionBrowserVault.mockClear()
+    mockBrowserVaultExists.mockResolvedValue(false)
+    const reloaded = makeStore()
+    await reloaded.getState().load()
+
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+    expect(reloaded.getState().locked).toBe(true)
+  })
+
+  it("remembers the password typed during account creation", async () => {
+    const store = makeStore()
+    await store
+      .getState()
+      .createAccount({ id: "acct_browser", displayName: "Browser", password: "secret" })
+
+    mockListAccounts.mockResolvedValue([account("acct_browser", "Browser")])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_browser" })
+    const reloaded = makeStore()
+    await reloaded.getState().load()
+
+    expect(reloaded.getState().unlockedAccountId).toBe("acct_browser")
+  })
+
+  it("does not resume on the desktop, where the password also binds the keyring", async () => {
+    const browserAccount = account("acct_browser", "Browser")
+    mockListAccounts.mockResolvedValue([browserAccount])
+    mockGetState.mockResolvedValue({ activeAccountId: browserAccount.id })
+
+    const first = makeStore()
+    await first.getState().load()
+    await first.getState().unlockAccount(browserAccount.id, "secret")
+
+    mockIsTauri = true
+    const reloaded = makeStore()
+    await reloaded.getState().load()
+
+    expect(reloaded.getState().locked).toBe(true)
+  })
+})
+
 describe("account store create and unlock", () => {
   it("creates the first account, migrates legacy data when present, and unlocks that database", async () => {
     mockLegacyDatabaseExists.mockResolvedValue(true)

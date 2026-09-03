@@ -25,6 +25,11 @@ import {
 } from "@/lib/accounts/password-client"
 import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
 import {
+  forgetDevSessionUnlock,
+  readDevSessionUnlock,
+  rememberDevSessionUnlock,
+} from "@/lib/accounts/dev-session-unlock"
+import {
   clearQuickUnlockDeviceMaterial,
   enrollQuickUnlock,
   removeQuickUnlock,
@@ -338,7 +343,17 @@ export function createAccountStore(
       await dependencies.prepareDatabase()
     }
 
-    const activateUnlockedAccount = async (accountId: string): Promise<void> => {
+    /**
+     * `rememberSecret` is the password the caller just proved, handed down so
+     * the dev-only session resume can reuse it after an HMR reload. It is
+     * stored only once the whole activation has succeeded, and only in a
+     * development browser build. Callers that already unlocked from a
+     * remembered secret pass nothing.
+     */
+    const activateUnlockedAccount = async (
+      accountId: string,
+      rememberSecret?: string
+    ): Promise<void> => {
       const previousUnlockedAccountId = get().unlockedAccountId
       if (previousUnlockedAccountId && previousUnlockedAccountId !== accountId) {
         await dependencies.teardownPluginRuntime(previousUnlockedAccountId)
@@ -369,7 +384,39 @@ export function createAccountStore(
         error: null,
         accountRevision: state.accountRevision + 1,
       }))
+      if (rememberSecret) rememberDevSessionUnlock(accountId, rememberSecret)
       publishUnlockStage(accountId, "ready")
+    }
+
+    /**
+     * Re-open the vault from a secret this tab already used successfully.
+     *
+     * Returns the unlocked account id, or null to leave the gate up. Every
+     * failure path is silent and forgets the secret rather than throwing: a
+     * stale or wrong remembered value must degrade to "type your password",
+     * never to a boot that cannot settle. See `lib/accounts/dev-session-unlock.ts`.
+     */
+    const resumeDevSessionUnlock = async (
+      accounts: LocalAccountRecord[],
+      activeAccountId: string | null
+    ): Promise<string | null> => {
+      if (!activeAccountId) return null
+      if (!accounts.some((account) => account.id === activeAccountId)) return null
+      const password = readDevSessionUnlock(activeAccountId)
+      if (!password) return null
+      try {
+        if (!(await browserVaultExists(activeAccountId))) {
+          forgetDevSessionUnlock(activeAccountId)
+          return null
+        }
+        await unlockBrowserVault(activeAccountId, password)
+        await activateUnlockedAccount(activeAccountId)
+        return activeAccountId
+      } catch {
+        forgetDevSessionUnlock(activeAccountId)
+        publishUnlockStage(activeAccountId, "failed")
+        return null
+      }
     }
 
     return {
@@ -402,13 +449,18 @@ export function createAccountStore(
             }
             await activateUnlockedAccount(e2eAutoUnlockAccountId)
           }
+          // Dev convenience, one tab, one typed password. Never provisions a
+          // vault: a remembered secret may only re-open a vault that already
+          // exists, so first-run account creation stays a deliberate choice.
+          const unlockedAccountId =
+            e2eAutoUnlockAccountId ?? (await resumeDevSessionUnlock(accounts, activeAccountId))
           set((state) => ({
             accounts,
             activeAccountId,
-            unlockedAccountId: e2eAutoUnlockAccountId,
+            unlockedAccountId,
             loaded: true,
             loading: false,
-            locked: computeLocked(accounts, activeAccountId, e2eAutoUnlockAccountId),
+            locked: computeLocked(accounts, activeAccountId, unlockedAccountId),
             error: null,
             accountRevision: state.accountRevision,
           }))
@@ -497,6 +549,11 @@ export function createAccountStore(
               target?.id ?? (isCapacitor() ? "mobile-companion" : "local-host")
             )
             await dependencies.activateAccountLocalState(account.id)
+            // Creation leaves the account unlocked without going through
+            // `activateUnlockedAccount`, so the dev resume has to be seeded
+            // here too. Without it the very first navigation after first-run
+            // setup asks for the password that was typed seconds earlier.
+            rememberDevSessionUnlock(account.id, input.password)
           }
 
           return account
@@ -527,7 +584,7 @@ export function createAccountStore(
               set({ pendingRecoveryKey: recoveryKey })
             }
           }
-          await activateUnlockedAccount(account.id)
+          await activateUnlockedAccount(account.id, password)
         } catch (error) {
           if (nativeAccountActivated) {
             const rollbackFailures = await rollbackNativeAccountActivation(accountId)
@@ -677,7 +734,7 @@ export function createAccountStore(
             passwordVerifier
           )
           set((state) => ({ accounts: upsertAccount(state.accounts, updated) }))
-          await activateUnlockedAccount(account.id)
+          await activateUnlockedAccount(account.id, newPassword)
         } catch (error) {
           publishUnlockStage(accountId, "failed")
           throw setFailure(asUnlockError(error))
@@ -718,7 +775,7 @@ export function createAccountStore(
               set({ pendingRecoveryKey: recoveryKey })
             }
           }
-          await activateUnlockedAccount(account.id)
+          await activateUnlockedAccount(account.id, password)
         } catch (error) {
           if (nativeAccountActivated) {
             const rollbackFailures = await rollbackNativeAccountActivation(accountId)
@@ -985,6 +1042,12 @@ export function createAccountStore(
             failures.push(error)
           }
         }
+
+        // First, and outside `attempt`: a lock that left the remembered dev
+        // secret behind would be undone by the very next boot, which is the one
+        // outcome a lock must never produce. Clearing storage cannot throw in a
+        // way the helper does not already swallow.
+        forgetDevSessionUnlock()
 
         await attempt(() => dependencies.stopRuntimeSubscriptions())
         if (unlockedAccountId) {
