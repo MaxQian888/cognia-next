@@ -54,6 +54,13 @@ fn is_relevant_git_internal(rest: &str) -> bool {
         || rest == "REVERT_HEAD"
         || rest.starts_with("refs/")
         || rest.starts_with("logs/")
+        // Worktree bookkeeping. `worktree add --detach` is the managed path
+        // (ADR-0111) and cuts no branch, so it writes nothing under `refs/`;
+        // `lock`, `unlock` and `prune` never do either. Without this clause
+        // the whole worktree lifecycle was invisible to the panel, and a
+        // branch's `checkedOutIn` went stale exactly when the app itself
+        // changed it.
+        || rest.starts_with("worktrees/")
 }
 
 /// Decide whether a changed path should trigger a refresh.
@@ -190,6 +197,18 @@ mod tests {
         assert!(is_relevant_git_internal("logs/HEAD"));
         assert!(!is_relevant_git_internal("objects/ab/cdef"));
         assert!(!is_relevant_git_internal("COMMIT_EDITMSG"));
+    }
+
+    /// `worktree add --detach` / `lock` / `unlock` / `prune` touch nothing but
+    /// `.git/worktrees/<id>/`, so without these the panel never learns that a
+    /// branch changed hands.
+    #[test]
+    fn worktree_bookkeeping_is_relevant() {
+        assert!(is_relevant_git_internal("worktrees/run-a/HEAD"));
+        assert!(is_relevant_git_internal("worktrees/run-a/locked"));
+        assert!(is_relevant_git_internal("worktrees/run-a/gitdir"));
+        // Still scoped: the directory prefix must not swallow unrelated names.
+        assert!(!is_relevant_git_internal("worktrees-backup/x"));
     }
 
     #[test]
