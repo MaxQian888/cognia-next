@@ -10756,13 +10756,13 @@
     },
     {
       "name": "resolve_pi_extension",
-      "target": "client",
-      "operation": "side-effect",
-      "capability": "client.local",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
       "risk": "low",
       "approval": "none",
-      "idempotency": "required",
-      "transports": ["internal"],
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },

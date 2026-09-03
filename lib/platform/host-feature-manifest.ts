@@ -380,6 +380,12 @@ export function buildLocalHostFeatureManifest({
         // very gate and straight into that error, which is the state the
         // per-operation list exists to prevent.
         ...(platform === "tauri" ? (["external_agent_detect_runtimes"] as const) : []),
+        // Is the bundled Cognia Pi extension the one Cognia shipped? On both
+        // hosts, because both answer it and both can run Pi. Pi ships no
+        // permission prompts of its own, so a client that cannot get this
+        // verdict must refuse the session rather than start one whose native
+        // `edit`/`write`/`bash` tools nothing intercepts.
+        "resolve_pi_extension",
       ],
     }
     // Lease-backed attach. Its presence is what tells a client that

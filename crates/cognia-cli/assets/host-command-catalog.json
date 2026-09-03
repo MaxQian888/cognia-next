@@ -293,6 +293,11 @@
       "category": "extensions"
     },
     {
+      "id": "resolve",
+      "title": "Resolve",
+      "category": "agents"
+    },
+    {
       "id": "retrieval",
       "title": "Retrieval",
       "category": "knowledge"
@@ -30297,6 +30302,61 @@
       "outputTyped": true
     },
     {
+      "name": "resolve_pi_extension",
+      "category": "agents",
+      "resource": "resolve",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "resolve_pi_extension (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "src-tauri/src/pi_extension.rs PiExtensionVerdict",
+        "description": "Whether the bundled Cognia Pi extension on this Host is the one Cognia shipped. Pi ships no permission prompts of its own, so the extension that applies Cognia's matrix to its native read/edit/write/bash tools is a precondition for a session, not a diagnostic. Every refusing status is reported distinctly because \"never shipped\", \"tampered\" and \"unpinned\" are different sentences to whoever has to fix it.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "missing",
+              "unreadable",
+              "tampered",
+              "unpinned"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "actual": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "retrieval_profile_dek_export",
       "category": "knowledge",
       "resource": "retrieval",
@@ -46751,5 +46811,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "24d1e3d34b57aed8aac12ca946f7b90b405b8ecf4249cf0dcb9d535ae6e80fe3"
+  "catalogHash": "2ef5748979b2f3ee045b0c6e46e4a488e2e1dfec2dda2dec31bbaf2f7f576a0d"
 }

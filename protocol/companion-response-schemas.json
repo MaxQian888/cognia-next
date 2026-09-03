@@ -6005,6 +6005,24 @@
       },
       "additionalProperties": false
     },
+    "PiExtensionVerdict": {
+      "type": "object",
+      "x-cognia-wire-source": "src-tauri/src/pi_extension.rs PiExtensionVerdict",
+      "description": "Whether the bundled Cognia Pi extension on this Host is the one Cognia shipped. Pi ships no permission prompts of its own, so the extension that applies Cognia's matrix to its native read/edit/write/bash tools is a precondition for a session, not a diagnostic. Every refusing status is reported distinctly because \"never shipped\", \"tampered\" and \"unpinned\" are different sentences to whoever has to fix it.",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "missing", "unreadable", "tampered", "unpinned"]
+        },
+        "path": { "type": "string" },
+        "sha256": { "type": "string" },
+        "detail": { "type": "string" },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "WorkspaceRootsReport": {
       "type": "object",
       "x-cognia-wire-source": "crates/cognia-files/src/files.rs WorkspaceRootsReport",
@@ -6755,6 +6773,9 @@
     },
     "external_agent_detect_runtimes": {
       "$ref": "#/$defs/DetectedRuntimesReport"
+    },
+    "resolve_pi_extension": {
+      "$ref": "#/$defs/PiExtensionVerdict"
     },
     "external_agent_list": {
       "$ref": "#/$defs/ExternalAgentSummaryList"

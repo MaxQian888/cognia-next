@@ -9278,6 +9278,9 @@
       },
       "additionalProperties": false
     },
+    "resolve_pi_extension": {
+      "type": "object"
+    },
     "retrieval_profile_dek_export": {
       "type": "object",
       "required": [

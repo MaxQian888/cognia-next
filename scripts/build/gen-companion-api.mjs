@@ -543,7 +543,7 @@ const HOST_CATEGORIES = [
     description: "Agent runtimes, Claude sessions, teams, fleet controls, and goals.",
     skill: "cognia-host-agents",
     pattern:
-      /^(agent_|claude_|codex_app_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|fleet_|team_|goal_)/,
+      /^(agent_|claude_|codex_app_|external_agent_|spawn_external_agent$|send_to_external_agent$|kill_external_agent$|get_external_agent_status$|resolve_pi_extension$|fleet_|team_|goal_)/,
   },
   {
     id: "tasks",

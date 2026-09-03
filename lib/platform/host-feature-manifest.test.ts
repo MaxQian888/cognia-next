@@ -632,3 +632,18 @@ describe("workspace.task-workspace", () => {
     expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(manifest)))).not.toBeNull()
   })
 })
+
+describe("resolve_pi_extension", () => {
+  // Classified `target: "client"` it never reached a Host from a browser: the
+  // adapter swallowed the transport refusal, the verdict stayed undefined, and
+  // every Pi session on a companion was refused as unverified while the Host
+  // that would run it held a perfectly good extension.
+  it("is advertised by both hosts, because both run the Pi process", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["external-agent.process-plane"]
+          ?.operations
+      ).toContain("resolve_pi_extension")
+    }
+  })
+})

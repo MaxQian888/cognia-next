@@ -123,6 +123,41 @@ pub fn resolve_pi_extension(app: AppHandle) -> Result<PiExtensionVerdict, String
     Ok(verify_in_sidecar_dir(&dir))
 }
 
+/// The sidecar directory a headless Host ships its assets in.
+///
+/// `COGNIA_SIDECAR_SCRIPT` names the host entry, so its parent is the
+/// directory, and the checkout fallback matches `resolve_sidecar_script_path`
+/// in `bin/cognia-server.rs` so a hand-run `serve` finds it too. Kept beside
+/// the verifier rather than reaching into the binary, because a library arm
+/// cannot call into a `bin` target.
+pub fn headless_sidecar_dir() -> Option<PathBuf> {
+    if let Ok(raw) = std::env::var("COGNIA_SIDECAR_SCRIPT") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            if let Some(parent) = Path::new(trimmed).parent() {
+                return Some(parent.to_path_buf());
+            }
+        }
+    }
+    let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("sidecar");
+    checkout.is_dir().then_some(checkout)
+}
+
+/// The verdict for whichever host is answering.
+///
+/// The Pi adapter runs in a renderer and asks its host this question. A browser
+/// paired to a Host is that renderer, and it has no filesystem at all, so the
+/// question has to reach the machine the Pi process will actually run on. That
+/// is why this is host-neutral rather than a second desktop-only path.
+pub fn verify_for_host(sidecar_dir: Option<PathBuf>) -> PiExtensionVerdict {
+    match sidecar_dir {
+        Some(dir) => verify_in_sidecar_dir(&dir),
+        None => PiExtensionVerdict::Missing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +267,47 @@ mod tests {
 
         let missing = serde_json::to_value(PiExtensionVerdict::Missing).expect("serialize");
         assert_eq!(missing["status"], "missing");
+    }
+
+    /// The reason this became host-neutral: a browser paired to a Host is the
+    /// renderer that asks, and it has no filesystem at all. Answering
+    /// `Missing` for "we could not find a sidecar directory" keeps the refusal
+    /// honest instead of reporting a verified extension nobody looked at.
+    #[test]
+    fn a_host_with_no_sidecar_directory_reports_missing() {
+        assert_eq!(verify_for_host(None), PiExtensionVerdict::Missing);
+    }
+
+    #[test]
+    fn a_host_with_a_sidecar_directory_gets_that_directory_s_verdict() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        write(tmp.path(), "cognia-pi-extension.ts", "export default {}\n");
+        write(
+            tmp.path(),
+            "integrity.json",
+            &format!(
+                "{{\"sha256\":\"{}\"}}",
+                digest_bytes(b"export default {}\n")
+            ),
+        );
+
+        assert!(matches!(
+            verify_for_host(Some(tmp.path().to_path_buf())),
+            PiExtensionVerdict::Ok { .. }
+        ));
+    }
+
+    #[test]
+    fn the_headless_sidecar_directory_is_the_host_script_s_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("agent-host.mjs");
+        std::fs::write(&script, "").expect("write");
+        // Serialised with the other env-reading test by construction: this is
+        // the only one that sets it, and it clears it before returning.
+        std::env::set_var("COGNIA_SIDECAR_SCRIPT", &script);
+        let resolved = headless_sidecar_dir();
+        std::env::remove_var("COGNIA_SIDECAR_SCRIPT");
+
+        assert_eq!(resolved.as_deref(), Some(tmp.path()));
     }
 }

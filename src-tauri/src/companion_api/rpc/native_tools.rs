@@ -11,6 +11,11 @@ pub(super) const COMMANDS: &[&str] = &[
     // answers here rather than riding the generic renderer bridge the
     // `external_agent_config_*` arms use: the browser asking has no PATH.
     "external_agent_detect_runtimes",
+    // Is the bundled Cognia Pi extension the one Cognia shipped? The adapter
+    // that asks runs in a renderer, and a browser paired to a Host has no
+    // filesystem at all, so the question has to reach the machine the Pi
+    // process runs on.
+    "resolve_pi_extension",
     "skills_scan_native",
     "skills_load_registry",
     "skills_install_native",
@@ -70,6 +75,26 @@ pub(super) async fn dispatch(
         // desktop-only about the arms, only about two of the backends.
         "external_agent_detect_runtimes" => {
             to_json(crate::external_agent::version_probe::detect_runtimes().await)
+        }
+
+        // Pi ships no permission prompts of its own, so the extension that
+        // applies Cognia's matrix to its native `edit`/`write`/`bash` tools is
+        // a precondition for a session, not a diagnostic. Classified
+        // `target: "client"` it never reached a Host from a browser: the
+        // adapter's own `resolveExtension` swallowed the transport refusal, the
+        // verdict stayed undefined, and every Pi session on a companion was
+        // refused with "has not been verified on this host" while the Host that
+        // would run it held a perfectly good extension.
+        "resolve_pi_extension" => {
+            let sidecar_dir = match &host {
+                super::super::dispatch_host::DispatchHost::Tauri(app) => {
+                    crate::claude::sidecar::sidecar_dir(app).ok()
+                }
+                super::super::dispatch_host::DispatchHost::Headless(_) => {
+                    crate::pi_extension::headless_sidecar_dir()
+                }
+            };
+            to_json(crate::pi_extension::verify_for_host(sidecar_dir))
         }
 
         "ocr_list_native_backends" => {
