@@ -37915,6 +37915,10 @@ paths:
                     - path
                     - branch
                     - head
+                    - locked
+                    - lockReason
+                    - prunable
+                    - pruneReason
                     - isMain
                   properties:
                     path:
@@ -37924,6 +37928,18 @@ paths:
                         - string
                         - "null"
                     head:
+                      type:
+                        - string
+                        - "null"
+                    locked:
+                      type: boolean
+                    lockReason:
+                      type:
+                        - string
+                        - "null"
+                    prunable:
+                      type: boolean
+                    pruneReason:
                       type:
                         - string
                         - "null"

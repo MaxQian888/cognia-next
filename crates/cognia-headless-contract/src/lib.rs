@@ -380,6 +380,71 @@ mod tests {
             .is_ok());
     }
 
+    /// `git_worktree_list` must accept every field `GitWorktree` serialises.
+    ///
+    /// The schema declared four of them (`path`, `branch`, `head`, `isMain`)
+    /// under `additionalProperties: false`, while `cognia-git::types::GitWorktree`
+    /// has serialised eight since ADR-0111 gave the managed-worktree Registry
+    /// its ownership fields. There is no `skip_serializing_if` on any of them,
+    /// so EVERY response carried the four undeclared keys and
+    /// `remote_execution::execute` turned the command into a 500
+    /// `contract_output_violation` on every companion. The desktop never saw
+    /// it because Tauri `invoke` bypasses this plane.
+    #[test]
+    fn embedded_catalog_accepts_every_worktree_field_rust_serialises() {
+        let contract = HeadlessContract::embedded().expect("embedded contract");
+
+        // A Cognia-managed worktree: locked with an owner reason, on a branch.
+        let managed = json!([{
+            "path": "/repo/.cognia/worktrees/run-a",
+            "branch": "agent/run_a/alice/t1",
+            "head": "a1b2c3d4",
+            "locked": true,
+            "lockReason": "cognia:workspace-a",
+            "prunable": false,
+            "pruneReason": null,
+            "isMain": false,
+        }]);
+        assert!(contract.validate_output("git_worktree_list", &managed).is_ok());
+
+        // The main worktree, plus a detached/prunable row: the Options are
+        // explicit nulls, never absent.
+        let mixed = json!([
+            {
+                "path": "/repo",
+                "branch": "dev",
+                "head": "deadbeef",
+                "locked": false,
+                "lockReason": null,
+                "prunable": false,
+                "pruneReason": null,
+                "isMain": true,
+            },
+            {
+                "path": "/repo/.cognia/worktrees/gone",
+                "branch": null,
+                "head": null,
+                "locked": false,
+                "lockReason": null,
+                "prunable": true,
+                "pruneReason": "gitdir file points to non-existent location",
+                "isMain": false,
+            },
+        ]);
+        assert!(contract.validate_output("git_worktree_list", &mixed).is_ok());
+
+        // The pre-fix shape is now the one that fails: a row missing the
+        // ownership fields is not what any arm sends, and accepting it would
+        // let the schema drift back.
+        let truncated = json!([{
+            "path": "/repo",
+            "branch": "dev",
+            "head": "deadbeef",
+            "isMain": true,
+        }]);
+        assert!(contract.validate_output("git_worktree_list", &truncated).is_err());
+    }
+
     #[test]
     fn embedded_catalog_accepts_both_session_list_data_planes() {
         let contract = HeadlessContract::embedded().expect("embedded contract");

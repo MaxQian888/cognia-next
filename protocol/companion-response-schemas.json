@@ -2318,7 +2318,16 @@
     "GitWorktree": {
       "type": "object",
       "x-cognia-wire-source": "cognia-git::types::GitWorktree",
-      "required": ["path", "branch", "head", "isMain"],
+      "required": [
+        "path",
+        "branch",
+        "head",
+        "locked",
+        "lockReason",
+        "prunable",
+        "pruneReason",
+        "isMain"
+      ],
       "properties": {
         "path": {
           "type": "string"
@@ -2327,6 +2336,18 @@
           "type": ["string", "null"]
         },
         "head": {
+          "type": ["string", "null"]
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "lockReason": {
+          "type": ["string", "null"]
+        },
+        "prunable": {
+          "type": "boolean"
+        },
+        "pruneReason": {
           "type": ["string", "null"]
         },
         "isMain": {

@@ -19438,6 +19438,10 @@
             "path",
             "branch",
             "head",
+            "locked",
+            "lockReason",
+            "prunable",
+            "pruneReason",
             "isMain"
           ],
           "properties": {
@@ -19451,6 +19455,24 @@
               ]
             },
             "head": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "locked": {
+              "type": "boolean"
+            },
+            "lockReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prunable": {
+              "type": "boolean"
+            },
+            "pruneReason": {
               "type": [
                 "string",
                 "null"
@@ -46841,5 +46863,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "2c3f8876b33353a5ae04f5e668f2c3ca85454ad36278071c1f771735a1d365fa"
+  "catalogHash": "836d4823fbf61fa0946773af3dffe762558d7ff94d0ff371076be9b35aeb7a3f"
 }
