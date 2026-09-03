@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { resolveBunTextUtils, stringWidth, truncateToWidth } from "./width"
+import { fitToWidth, resolveBunTextUtils, stringWidth, truncateToWidth } from "./width"
 
 describe("resolveBunTextUtils", () => {
   it("selects only callable Bun capabilities", () => {
@@ -95,5 +95,35 @@ describe("truncateToWidth", () => {
   it("collapses to a bare ellipsis when max <= 1", () => {
     expect(truncateToWidth("hello", 1)).toBe("…")
     expect(truncateToWidth("hello", 0)).toBe("…")
+  })
+})
+
+describe("fitToWidth", () => {
+  it("pads a short label out to the column", () => {
+    expect(fitToWidth("ok", 5)).toBe("ok   ")
+  })
+
+  it("cuts a label that would overflow the column, so the next column holds", () => {
+    expect(fitToWidth("Desktop notifications on completion", 12)).toBe("Desktop not…")
+    expect(stringWidth(fitToWidth("Desktop notifications on completion", 12))).toBe(12)
+  })
+
+  it("measures in display columns, so a CJK label fills the column exactly", () => {
+    // Four wide glyphs are eight columns: two of padding remain, not six.
+    expect(fitToWidth("模型名称", 10)).toBe("模型名称  ")
+    expect(stringWidth(fitToWidth("模型名称", 10))).toBe(10)
+  })
+
+  it("never emits a column wider than asked, whatever the input", () => {
+    for (const sample of ["", "a", "hello world", "模型名称", "混合 mixed 宽度"]) {
+      for (const width of [1, 4, 8, 12]) {
+        expect(stringWidth(fitToWidth(sample, width))).toBeLessThanOrEqual(width)
+      }
+    }
+  })
+
+  it("is empty for a zero or negative column", () => {
+    expect(fitToWidth("hello", 0)).toBe("")
+    expect(fitToWidth("hello", -3)).toBe("")
   })
 })

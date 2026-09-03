@@ -15,6 +15,7 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
+import { fitToWidth, stringWidth } from "../../markdown/width"
 import { OverlayFooter } from "../OverlayFooter"
 import { usePanelClick } from "../../input/use-panel-click"
 import { SUBAGENT_MODELS_FOOTER, type SubagentModelRow } from "../../runtime/subagent-models-model"
@@ -69,7 +70,10 @@ export function SubagentModelsPanel({
   const overrides = rows.filter((r) => r.source === "override").length
   const win = windowList(rows.length, safeIndex, maxRows)
   const visible = rows.slice(win.start, win.end)
-  const labelWidth = Math.min(24, Math.max(0, ...rows.map((r) => r.name.length)))
+  // Agent names come from user-authored markdown, so they routinely run past
+  // the cap. The column has to cut at it rather than pad to it, or one long
+  // name shifts every provider/model cell on its row out of the column.
+  const labelWidth = Math.min(24, Math.max(0, ...rows.map((r) => stringWidth(r.name))))
 
   // The focused row renders an extra description line below it, so the rendered
   // rows aren't 1:1 with items. Account for that one inserted line when mapping a
@@ -140,7 +144,7 @@ export function SubagentModelsPanel({
                 <Box>
                   <Text color={focused ? theme.accent : undefined} bold={focused}>
                     {focused ? "❯ " : "  "}
-                    {row.name.padEnd(labelWidth)}
+                    {fitToWidth(row.name, labelWidth)}
                     {"  "}
                   </Text>
                   <Text color={theme.muted}>{row.provider} / </Text>

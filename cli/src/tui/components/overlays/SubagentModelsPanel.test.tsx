@@ -148,3 +148,31 @@ describe("SubagentModelsPanel", () => {
     expect(container.textContent ?? "").toContain("no subagents found")
   })
 })
+
+describe("name column", () => {
+  beforeEach(() => {
+    __resetInk()
+    mockPos.mockReturnValue(null)
+  })
+
+  it("cuts a name at the column cap so the provider/model cells stay in column", () => {
+    // Agent names come from user-authored markdown under .cognia/agents/, so
+    // nothing bounds them. Padding a 37-column name into a 24-column column
+    // used to shift this row's whole right-hand side out of line.
+    const long: SubagentModelRow[] = [
+      { ...rows[0], id: "long", name: "database-migration-and-schema-auditor" },
+      rows[1],
+    ]
+    const { container } = wrap({ rows: long })
+    const text = container.textContent ?? ""
+    expect(text).toContain("database-migration-and-…")
+    expect(text).not.toContain("database-migration-and-schema-auditor")
+  })
+
+  it("still pads a short name out to the column", () => {
+    const { container } = wrap({ rows: [{ ...rows[0], name: "ci" }, rows[1]] })
+    // "reviewer" is the longest name, so the column is eight wide and "ci"
+    // carries six trailing spaces before the provider cell.
+    expect(container.textContent ?? "").toContain("ci      ")
+  })
+})

@@ -435,7 +435,7 @@ export function settingsSections(
       },
       {
         id: "streamReveal",
-        label: "Typewriter reveal of streamed replies",
+        label: "Typewriter reveal",
         value: onOff(render.streamReveal),
         control: {
           type: "boolean",
@@ -469,7 +469,7 @@ export function settingsSections(
       },
       {
         id: "desktopNotifications",
-        label: "Desktop notifications on completion (needs bell on)",
+        label: "Desktop notifications",
         value: onOff(config.notify === true && config.desktopNotifications !== false),
         control: {
           type: "boolean",

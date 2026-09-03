@@ -10,8 +10,10 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
+// `util/disk`'s formatter, not the one in `crash-log-discovery`: `disk.freeBytes`
+// is optional (statfs can fail), and only this one renders that as "?" rather
+// than "NaN undefined". Both agree on every defined byte count.
 import { formatBytes } from "../../../util/disk"
-import { formatBytes } from "../../runtime/crash-log-discovery"
 import type { CrashReportItem, DoctorReport } from "../../state/types"
 
 const STATUS = {

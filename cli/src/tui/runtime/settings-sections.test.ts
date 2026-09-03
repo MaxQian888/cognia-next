@@ -564,3 +564,17 @@ describe("built-in tool rows cover the whole catalog", () => {
     expect(missing).toEqual([])
   })
 })
+
+describe("label column budget", () => {
+  // SettingsOverlay lays labels into a 34-column column and cuts anything wider,
+  // so a label past the cap loses its tail on screen. The cut is a guard; a
+  // shipped label reaching it is a regression in the label text, not the panel.
+  const LABEL_COLUMN = 34
+
+  it("keeps every shipped label inside the panel's label column", () => {
+    const labels = settingsSections(cfg()).flatMap((s) => s.rows.map((r) => r.label))
+    expect(labels.length).toBeGreaterThan(0)
+    const tooWide = labels.filter((label) => label.length > LABEL_COLUMN)
+    expect(tooWide).toEqual([])
+  })
+})

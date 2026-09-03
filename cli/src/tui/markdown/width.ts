@@ -169,3 +169,21 @@ export function truncateToWidth(text: string, max: number): string {
   }
   return out + "…"
 }
+
+/**
+ * Lay `text` into a fixed column exactly `width` display columns wide, cutting
+ * with an ellipsis when it overflows and padding with spaces when it falls
+ * short.
+ *
+ * `String.prototype.padEnd` cannot do this job for a terminal column. It counts
+ * UTF-16 code units, so a CJK label lands a column short per character, and it
+ * only ever pads, so a label longer than the column is emitted at full length
+ * and shoves everything to its right. A panel that sizes its column with
+ * `Math.min(cap, longest)` and then pads is therefore only aligned while every
+ * label happens to be under the cap.
+ */
+export function fitToWidth(text: string, width: number): string {
+  if (width <= 0) return ""
+  const cut = truncateToWidth(text, width)
+  return cut + " ".repeat(Math.max(0, width - stringWidth(cut)))
+}

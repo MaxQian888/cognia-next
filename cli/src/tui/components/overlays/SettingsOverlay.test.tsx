@@ -168,3 +168,43 @@ describe("SettingsOverlay", () => {
     expect(onReset).not.toHaveBeenCalled()
   })
 })
+
+describe("label column", () => {
+  beforeEach(() => __resetInk())
+
+  it("cuts a label at the column cap so the value column cannot be pushed right", () => {
+    const long: SettingsSectionView[] = [
+      {
+        id: "appearance",
+        title: "Appearance",
+        rows: [
+          { id: "short", label: "Theme", value: "dark", control: { type: "readonly" } },
+          {
+            id: "long",
+            // 40 columns: over the 34-column cap. `padEnd` would emit it whole
+            // and shove this row's value four columns past every other row's.
+            label: "A settings label that runs past the cap",
+            value: "on",
+            control: { type: "readonly" },
+          },
+        ],
+      },
+    ]
+    const { container } = render(
+      <SettingsOverlay
+        sections={long}
+        section={0}
+        index={0}
+        onMoveRow={() => undefined}
+        onSwitchSection={() => undefined}
+        onAdjust={() => undefined}
+        onToggle={() => undefined}
+        onActivate={() => undefined}
+        onClose={() => undefined}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("A settings label that runs past t…")
+    expect(text).not.toContain("A settings label that runs past the cap")
+  })
+})

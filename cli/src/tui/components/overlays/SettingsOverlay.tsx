@@ -16,6 +16,7 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
+import { fitToWidth, stringWidth } from "../../markdown/width"
 import { OverlayFooter } from "../OverlayFooter"
 import type { SettingsRow, SettingsSectionView } from "../../runtime/settings-sections"
 
@@ -122,8 +123,11 @@ export function SettingsOverlay({
 
   const win = windowList(rows.length, index, maxRows ?? rows.length)
   const visible = rows.slice(win.start, win.end)
-  // Pad labels to a common width so the value column aligns.
-  const labelWidth = Math.min(34, Math.max(0, ...rows.map((r) => r.label.length)))
+  // Lay labels into a common column so the value column aligns. The cap has to
+  // cut, not just pad: shipped labels run past 34 columns ("Desktop
+  // notifications on completion (needs bell on)"), and a label emitted at full
+  // length pushes its own value right and breaks the column for every row.
+  const labelWidth = Math.min(34, Math.max(0, ...rows.map((r) => stringWidth(r.label))))
 
   return (
     <Box
@@ -155,7 +159,7 @@ export function SettingsOverlay({
           <Box key={row.id}>
             <Text color={focused ? theme.accent : undefined} bold={focused}>
               {focused ? "❯ " : "  "}
-              {row.label.padEnd(labelWidth)}
+              {fitToWidth(row.label, labelWidth)}
               {"  "}
             </Text>
             {/* A row the active backend cannot honour shows "unavailable"
