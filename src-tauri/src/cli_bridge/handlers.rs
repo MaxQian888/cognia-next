@@ -1511,7 +1511,9 @@ pub async fn provider_execute(
     match crate::companion_api::remote_execution::execute(&shared, execution).await {
         Ok(crate::companion_api::remote_execution::ExecutionOutcome::Completed {
             result, ..
-        }) => Json(json!({ "ok": true, "command": request.name, "result": result })).into_response(),
+        }) => {
+            Json(json!({ "ok": true, "command": request.name, "result": result })).into_response()
+        }
         Ok(crate::companion_api::remote_execution::ExecutionOutcome::Accepted {
             operation_id,
             ..
@@ -1551,7 +1553,9 @@ pub async fn gateway_route_ticket(
         );
     };
     match super::provider_admin::mint_bridge_ticket(&gateway, request) {
-        Ok(minted) => Json(super::provider_admin::bridge_ticket_payload(&minted, port)).into_response(),
+        Ok(minted) => {
+            Json(super::provider_admin::bridge_ticket_payload(&minted, port)).into_response()
+        }
         Err((status, message)) => err_response(status, &message),
     }
 }

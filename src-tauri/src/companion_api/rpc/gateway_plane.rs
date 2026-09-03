@@ -212,9 +212,11 @@ pub(super) async fn dispatch(
             })?
         }
 
-        "gateway_list_route_tickets" => with_gateway(state, host, |gateway, _| {
-            serde_json::json!({ "tickets": gateway.list_route_tickets() })
-        }),
+        "gateway_list_route_tickets" => with_gateway(
+            state,
+            host,
+            |gateway, _| serde_json::json!({ "tickets": gateway.list_route_tickets() }),
+        ),
 
         "gateway_revoke_route_ticket" => {
             let ticket_id: String = required(&args, "ticketId")?;

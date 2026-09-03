@@ -67,7 +67,10 @@ fn parse_header(line: &str) -> Option<(String, Option<String>, Option<String>)> 
     if id.is_empty() {
         return None;
     }
-    let cwd = value.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
+    let cwd = value
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let created = value
         .get("timestamp")
         .and_then(|v| v.as_str())
@@ -198,7 +201,12 @@ mod tests {
             "moved.jsonl",
             &[r#"{"type":"session","id":"id-m","cwd":"/w/other"}"#],
         );
-        write(tmp.path(), cwd, "junk.jsonl", &[r#"{"type":"message","id":"n"}"#]);
+        write(
+            tmp.path(),
+            cwd,
+            "junk.jsonl",
+            &[r#"{"type":"message","id":"n"}"#],
+        );
         write(
             tmp.path(),
             "/w/other",

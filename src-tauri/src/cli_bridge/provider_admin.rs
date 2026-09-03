@@ -13,7 +13,9 @@
 //! Everything here is testable without a Tauri app.
 
 use axum::http::StatusCode;
-use cognia_gateway::route_ticket::{MintRequest, MintedTicket, TicketAffinity, TicketBudget, TicketOperation};
+use cognia_gateway::route_ticket::{
+    MintRequest, MintedTicket, TicketAffinity, TicketBudget, TicketOperation,
+};
 use cognia_gateway::GatewayState;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -207,7 +209,9 @@ pub fn mint_bridge_ticket(
     gateway.mint_route_ticket(mint).map_err(|error| {
         let status = match error {
             cognia_gateway::route_ticket::TicketError::WidenedRemint { .. } => StatusCode::CONFLICT,
-            cognia_gateway::route_ticket::TicketError::NoSnapshot => StatusCode::SERVICE_UNAVAILABLE,
+            cognia_gateway::route_ticket::TicketError::NoSnapshot => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             _ => StatusCode::BAD_REQUEST,
         };
         (status, error.to_string())
@@ -256,8 +260,14 @@ mod tests {
             authorize_provider_command("no_such_command").unwrap_err(),
             ProviderAdminReject::NotExposed
         );
-        assert_eq!(ProviderAdminReject::NotExposed.status(), StatusCode::FORBIDDEN);
-        assert_eq!(ProviderAdminReject::NotExposed.code(), "command_not_exposed");
+        assert_eq!(
+            ProviderAdminReject::NotExposed.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ProviderAdminReject::NotExposed.code(),
+            "command_not_exposed"
+        );
     }
 
     #[test]
@@ -295,7 +305,8 @@ mod tests {
     #[test]
     fn gateway_route_ticket_without_snapshot_is_503() {
         let gateway = GatewayState::new();
-        let (status, message) = mint_bridge_ticket(&gateway, ticket_request("glm-4.6")).unwrap_err();
+        let (status, message) =
+            mint_bridge_ticket(&gateway, ticket_request("glm-4.6")).unwrap_err();
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert!(message.contains("no routing snapshot"), "{message}");
     }
@@ -321,8 +332,14 @@ mod tests {
 
         let minted = mint_bridge_ticket(&gateway, ticket_request("claude-opus-5")).unwrap();
         assert_eq!(minted.ticket.candidates.len(), 1);
-        assert_eq!(minted.ticket.model_bindings["haiku"], "claude-haiku-4-5-20251001");
-        assert_eq!(minted.ticket.credential_affinity, TicketAffinity::SessionSticky);
+        assert_eq!(
+            minted.ticket.model_bindings["haiku"],
+            "claude-haiku-4-5-20251001"
+        );
+        assert_eq!(
+            minted.ticket.credential_affinity,
+            TicketAffinity::SessionSticky
+        );
         assert!(!minted.ticket.allow_auth_failover);
         assert_eq!(
             minted.ticket.operations,
