@@ -32991,6 +32991,8 @@
       "webOnlyHintBefore": "Available in the desktop build only. Run ",
       "webOnlyHintCode": "pnpm tauri dev"
     },
+    "desktopOnlySectionBody": "This section administers the desktop app on the machine it runs on: its window chrome, that device's own pairing, or work that has not moved off the local shell yet. Pairing a host does not open it; open Cognia on the machine you want to configure.",
+    "desktopOnlySectionTitle": "Desktop app only",
     "developer": {
       "lsp": {
         "description": "When enabled, the VS Code extension LSP binary policy lets unsigned servers spawn after one in-session consent prompt instead of refusing them outright. Useful when developing your own .vsix.",

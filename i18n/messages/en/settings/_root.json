@@ -4,6 +4,8 @@
   "customModes": "Custom Agent Modes",
   "customModesDesc": "Create and manage custom agent modes with specific tools, prompts, and behaviors.",
   "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
+  "desktopOnlySectionBody": "This section administers the desktop app on the machine it runs on: its window chrome, that device's own pairing, or work that has not moved off the local shell yet. Pairing a host does not open it; open Cognia on the machine you want to configure.",
+  "desktopOnlySectionTitle": "Desktop app only",
   "groupAi": "AI Core",
   "groupData": "Data",
   "groupExtensions": "Extensions",

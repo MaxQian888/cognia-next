@@ -49,7 +49,70 @@ describe("useHostProfile", () => {
     process.env.NEXT_PUBLIC_COGNIA_SERVER_URL = "https://cloud.example.com"
     expect(renderHook(() => useHostProfile()).result.current).toBe("cloud-companion")
   })
+
+  it("resolves cloud-companion from a host paired in the remote-host registry", () => {
+    writePairedRemoteHost()
+    expect(renderHook(() => useHostProfile()).result.current).toBe("cloud-companion")
+  })
+
+  it("re-reads when a host is activated in this session", () => {
+    // The old no-op subscribe froze the first answer, so a browser that paired
+    // without reloading kept reporting "no host" to every mounted surface.
+    const view = renderHook(() => useHostProfile())
+    expect(view.result.current).toBe("web-standalone")
+    act(() => {
+      writePairedRemoteHost()
+      setActiveRemoteTransport({} as Transport)
+    })
+    expect(view.result.current).toBe("cloud-companion")
+  })
+
+  it("re-reads on a companion config change", () => {
+    const view = renderHook(() => useHostProfile())
+    expect(view.result.current).toBe("web-standalone")
+    act(() => {
+      writePairedRemoteHost()
+      window.dispatchEvent(new Event("cognia:companion-config-changed"))
+    })
+    expect(view.result.current).toBe("cloud-companion")
+  })
 })
+
+describe("companion config event parity", () => {
+  it("listens to the event name the transport actually dispatches", async () => {
+    const fs = await import("node:fs")
+    const path = await import("node:path")
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "lib", "tauri", "transport-companion.ts"),
+      "utf8"
+    )
+    expect(source).toContain('new Event("cognia:companion-config-changed")')
+  })
+})
+
+/** One row in the shape `stores/remote-host` persists after a pairing. */
+function writePairedRemoteHost(): void {
+  window.localStorage.setItem(
+    "cognia-remote-hosts",
+    JSON.stringify({
+      version: 3,
+      state: {
+        hosts: [
+          {
+            id: "host-1",
+            label: "Brain",
+            config: {
+              baseUrl: "https://brain.example:27890",
+              deviceId: "device-1",
+              deviceKeyThumbprint: "thumb-1",
+              serverVersion: "1.0.0",
+            },
+          },
+        ],
+      },
+    })
+  )
+}
 
 describe("useCapability — local OR server-backed", () => {
   it("desktop has local ocr, no headless", () => {

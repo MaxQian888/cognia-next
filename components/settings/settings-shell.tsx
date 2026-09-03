@@ -528,7 +528,7 @@ function SectionContent({
   headerActionsTarget: HTMLDivElement | null
 }) {
   const t = useTranslations("settings")
-  const { isReachable } = useSettingsSectionReachability()
+  const { blockReason, isReachable } = useSettingsSectionReachability()
 
   // Last line of defence for sections this host can't reach. The sidebar and
   // the finder both hide them, but `?section=` is a public deep-link contract
@@ -536,12 +536,21 @@ function SectionContent({
   // otherwise the panel renders and the user only discovers it can't work when
   // an IPC call rejects at the end of a multi-step flow. An explicit
   // explanation beats a silent redirect: the user asked for this section.
+  //
+  // Which explanation matters. A capability gap ends with "pair a host that
+  // runs it", advice that is simply wrong for a section pinned to the local
+  // shell — there, the desktop app on that machine is the only answer, and a
+  // user who has already paired a host reads the capability copy as the app
+  // failing to notice their pairing.
   if (!isReachable(section)) {
+    const pinnedToLocalShell = blockReason(section) === "profile"
     return (
       <SettingsEmptyState
         icon={<MonitorIcon />}
-        title={t("hostUnavailableSectionTitle")}
-        description={t("hostUnavailableSectionBody")}
+        title={t(pinnedToLocalShell ? "desktopOnlySectionTitle" : "hostUnavailableSectionTitle")}
+        description={t(
+          pinnedToLocalShell ? "desktopOnlySectionBody" : "hostUnavailableSectionBody"
+        )}
       />
     )
   }

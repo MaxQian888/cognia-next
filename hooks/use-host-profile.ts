@@ -9,6 +9,7 @@ import {
   type CapabilityId,
   type HostProfile,
 } from "@/lib/platform/capabilities"
+import { subscribeRemoteHostPairing } from "@/lib/platform/remote-host-pairing"
 import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 
 /**
@@ -18,11 +19,41 @@ import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/
  * `lib/platform/capabilities` module; this file only adds the
  * `useSyncExternalStore` glue. The SSR / static-export snapshot is
  * `"web-standalone"` (no `window`, no localStorage pairing), the client
- * snapshot resolves the real profile on first paint. Neither the profile nor
- * the capability set changes at runtime, so `subscribe` is a no-op.
+ * snapshot resolves the real profile on first paint.
+ *
+ * The profile is NOT frozen for the life of the process, which is what the
+ * no-op `subscribe` here used to assume. A browser starts with no host and
+ * gains one the moment a pairing lands, so every surface already mounted (the
+ * whole of Settings, most of all) has to be told. Each of the three writes
+ * that can produce a host announces itself: activating a remote host switches
+ * the active transport, the credential-book flows emit the companion config
+ * event, and registering a host in the remote-host registry emits its own.
+ * Listen to all three and re-read.
  */
 
-const subscribe = () => () => {}
+/**
+ * Emitted by `notifyCompanionConfigChanged` in lib/tauri/transport-companion.
+ * Mirrored rather than imported so this hook keeps its leaf import graph and
+ * cannot drag the transport into every component that asks for the profile.
+ */
+const COMPANION_CONFIG_EVENT = "cognia:companion-config-changed"
+
+function subscribe(onChange: () => void): () => void {
+  const stopTransport = subscribeActiveRemoteTransport(() => onChange())
+  const stopPairing = subscribeRemoteHostPairing(onChange)
+  if (typeof window === "undefined") {
+    return () => {
+      stopPairing()
+      stopTransport()
+    }
+  }
+  window.addEventListener(COMPANION_CONFIG_EVENT, onChange)
+  return () => {
+    window.removeEventListener(COMPANION_CONFIG_EVENT, onChange)
+    stopPairing()
+    stopTransport()
+  }
+}
 
 const getServerProfileSnapshot = (): HostProfile => "web-standalone"
 

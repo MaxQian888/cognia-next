@@ -197,6 +197,44 @@ describe("SettingsShell host-reachability backstop", () => {
     expect(screen.getByText("hostUnavailableSectionBody")).toBeInTheDocument()
   })
 
+  it("tells a desktop-pinned section apart from a capability gap", () => {
+    // `desktop` (window chrome, tray, hotkeys) is pinned to the local shell:
+    // no pairing opens it, so the capability copy — "pair a host that runs
+    // it" — would send the user after a host that cannot exist.
+    setDesktop(false)
+    mockSection = "desktop"
+    render(<SettingsShell />)
+    expect(screen.queryByTestId("section-body")).not.toBeInTheDocument()
+    expect(screen.getByText("desktopOnlySectionTitle")).toBeInTheDocument()
+    expect(screen.getByText("desktopOnlySectionBody")).toBeInTheDocument()
+    expect(screen.queryByText("hostUnavailableSectionBody")).not.toBeInTheDocument()
+  })
+
+  it("ships both refusal copies in every locale", async () => {
+    // The shell picks the key with a ternary inside `t()`, which the i18n lint
+    // does not resolve, so nothing else would notice a missing translation
+    // until the panel rendered the raw key path at a paired user.
+    const fs = await import("node:fs")
+    const path = await import("node:path")
+    for (const locale of ["en", "zh-CN"]) {
+      const catalogue = JSON.parse(
+        fs.readFileSync(
+          path.join(__dirname, "..", "..", "i18n", "messages", locale, "settings", "_root.json"),
+          "utf8"
+        )
+      ) as Record<string, string>
+      for (const key of [
+        "desktopOnlySectionTitle",
+        "desktopOnlySectionBody",
+        "hostUnavailableSectionTitle",
+        "hostUnavailableSectionBody",
+      ]) {
+        expect(typeof catalogue[key]).toBe("string")
+        expect(catalogue[key].length).toBeGreaterThan(0)
+      }
+    }
+  })
+
   it("explains rather than silently redirecting — the deep link stays addressable", () => {
     setDesktop(false)
     mockSection = "ccswitch"

@@ -183,7 +183,17 @@ export function detectHostProfile(): HostProfile {
   const { hasWebCompanionTarget } = require("./web-companion") as {
     hasWebCompanionTarget: () => boolean
   }
-  return hasWebCompanionTarget() ? "cloud-companion" : "web-standalone"
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { hasPairedRemoteHost } = require("./remote-host-pairing") as {
+    hasPairedRemoteHost: () => boolean
+  }
+  // Both registries count. `hasWebCompanionTarget` only sees the credential
+  // book (the `/pair` flow), while Settings > Remote hosts files its pairings
+  // in the remote-host store instead. Reading one of the two made a browser
+  // paired through the other look like it had no host at all, the narrowest
+  // thing this profile can say, and the one the whole capability-keyed half of
+  // Settings refuses on.
+  return hasWebCompanionTarget() || hasPairedRemoteHost() ? "cloud-companion" : "web-standalone"
 }
 
 /**

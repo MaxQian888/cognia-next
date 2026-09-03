@@ -22,6 +22,7 @@
 import { nanoid } from "nanoid"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { notifyRemoteHostPairingChanged } from "@/lib/platform/remote-host-pairing"
 import { persistLocalStorage } from "@/stores/persist-storage"
 
 import { isCapabilityId, type CapabilityId } from "@/lib/platform/capabilities"
@@ -351,6 +352,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
             connectionError: undefined,
           }
           set({ hosts: get().hosts.map((h) => (h.id === existing.id ? updated : h)) })
+          notifyRemoteHostPairingChanged()
           void saveRemoteHostCredential(existing.id, credential).catch(() => undefined)
           // If the refreshed host is active, re-install so the new key takes.
           if (get().activeHostId === existing.id) get().activateHost(existing.id)
@@ -366,6 +368,9 @@ export const useRemoteHostStore = create<RemoteHostState>()(
           connectionState: "disconnected",
         }
         set({ hosts: [...get().hosts, host] })
+        // The host profile is derived from this list, and localStorage has no
+        // same-tab change event, so the surfaces already mounted are told here.
+        notifyRemoteHostPairingChanged()
         void saveRemoteHostCredential(id, credential).catch(() => undefined)
         return host
       },
@@ -382,6 +387,7 @@ export const useRemoteHostStore = create<RemoteHostState>()(
       removeHost: (id) => {
         if (get().activeHostId === id) get().deactivate()
         set({ hosts: get().hosts.filter((h) => h.id !== id) })
+        notifyRemoteHostPairingChanged()
         void clearRemoteHostCredential(id).catch(() => undefined)
       },
 

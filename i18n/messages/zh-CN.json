@@ -32991,6 +32991,8 @@
       "webOnlyHintBefore": "仅在桌面版本中可用。运行 ",
       "webOnlyHintCode": "pnpm tauri dev"
     },
+    "desktopOnlySectionBody": "该设置项管理的是桌面应用所在机器本身：窗口外观、本机的配对端点，或尚未脱离本地外壳的能力。配对主机并不能打开它；请在你要配置的那台机器上打开 Cognia。",
+    "desktopOnlySectionTitle": "仅桌面端可用",
     "developer": {
       "lsp": {
         "description": "开启后，VS Code 扩展的 LSP 二进制策略会在一次会话内确认后允许未签名服务器启动，而非直接拒绝。仅当你在调试自己开发的 .vsix 时使用。",

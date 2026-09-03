@@ -167,17 +167,45 @@ export interface SettingsReachabilityContext {
 }
 
 /**
+ * Why a section is out of reach — the two answers are not interchangeable.
+ *
+ * `"capability"` is a gap the user can close: the section administers
+ * something no host on file provides, and pairing one that does opens it.
+ * `"profile"` is not: the section is bound to the local shell process (window
+ * chrome, this device's own pairing endpoints) or still bypasses the transport
+ * seam, so no amount of pairing will ever open it here. Telling a paired user
+ * the first when the truth is the second sends them to look for a host that
+ * cannot exist.
+ */
+export type SettingsSectionBlockReason = "capability" | "profile"
+
+/**
+ * The reason `item` is out of reach for `ctx`, or `null` when it is reachable.
+ * The profile pin is checked first because it is the stronger statement: a pin
+ * holds even where every required capability is present.
+ */
+export function settingsSectionBlockReason(
+  item: Pick<NavItem, "requires" | "profiles">,
+  ctx: SettingsReachabilityContext
+): SettingsSectionBlockReason | null {
+  if (item.profiles && !item.profiles.includes(ctx.profile)) return "profile"
+  if ((item.requires ?? []).some((cap) => !ctx.hasCapability(cap))) return "capability"
+  return null
+}
+
+/**
  * Whether `item` is reachable from a client described by `ctx`. Pure — the
  * sidebar, the ⌘K finder and the shell's section dispatch all ask this one
  * question so they cannot drift (a section hidden in the sidebar but reachable
- * through a `?section=` deep link only fails at its last IPC call).
+ * through a `?section=` deep link only fails at its last IPC call). Defined in
+ * terms of `settingsSectionBlockReason` so the gate and the explanation the
+ * shell renders can never disagree about which sections are out.
  */
 export function isSettingsSectionReachable(
   item: Pick<NavItem, "requires" | "profiles">,
   ctx: SettingsReachabilityContext
 ): boolean {
-  if (item.profiles && !item.profiles.includes(ctx.profile)) return false
-  return (item.requires ?? []).every((cap) => ctx.hasCapability(cap))
+  return settingsSectionBlockReason(item, ctx) === null
 }
 
 /** Every reachable section id for `ctx`, derived from the nav so the two can't drift. */

@@ -193,6 +193,37 @@ describe("detectHostProfile", () => {
     process.env[ENV_KEY] = "https://cloud.example.com"
     expect(detectHostProfile()).toBe("cloud-companion")
   })
+
+  it("counts a host paired through the remote-host registry", () => {
+    // `addHost()` writes here and never touches the credential book, and
+    // `activeHostId` is not persisted, so on the next page load this row is the
+    // only trace that the browser has a host at all. Reading just the book
+    // reported "no host anywhere" and Settings refused every host-backed
+    // section on a client that was fully paired.
+    window.localStorage.setItem(
+      "cognia-remote-hosts",
+      JSON.stringify({
+        version: 3,
+        state: {
+          hosts: [
+            {
+              id: "host-1",
+              label: "Brain",
+              config: {
+                baseUrl: "https://brain.example:27890",
+                deviceId: "device-1",
+                deviceKeyThumbprint: "thumb-1",
+                serverVersion: "1.0.0",
+              },
+            },
+          ],
+        },
+      })
+    )
+    expect(detectHostProfile()).toBe("cloud-companion")
+    expect(hasHostRuntime()).toBe(true)
+    expect(serverBackedCapabilities()).toContain("shell")
+  })
 })
 
 describe("hasHostRuntime", () => {

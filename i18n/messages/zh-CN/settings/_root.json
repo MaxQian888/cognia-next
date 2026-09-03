@@ -4,6 +4,8 @@
   "customModes": "自定义代理模式",
   "customModesDesc": "创建并管理具有特定工具、提示词和行为的自定义代理模式。",
   "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
+  "desktopOnlySectionBody": "该设置项管理的是桌面应用所在机器本身：窗口外观、本机的配对端点，或尚未脱离本地外壳的能力。配对主机并不能打开它；请在你要配置的那台机器上打开 Cognia。",
+  "desktopOnlySectionTitle": "仅桌面端可用",
   "groupAi": "AI 核心",
   "groupData": "数据",
   "groupExtensions": "扩展",

@@ -5,6 +5,7 @@ import {
   SETTINGS_SEARCH_KEYWORDS,
   isSearchMatch,
   isSettingsSectionReachable,
+  settingsSectionBlockReason,
   reachableSettingsSections,
   type NavItem,
   type SettingsReachabilityContext,
@@ -210,6 +211,29 @@ describe("settings-nav-config", () => {
         isSettingsSectionReachable({ requires: ["shell"], profiles: ["desktop"] }, cloudCompanion)
       ).toBe(false)
       expect(isSettingsSectionReachable({ profiles: ["desktop"] }, desktop)).toBe(true)
+    })
+
+    it("names the profile pin as the reason, even when a capability is also missing", () => {
+      // The pin is the stronger statement: "pair a host that runs it" is false
+      // advice for a section no host can ever open, so it must win the reason
+      // whatever the capability check would have said.
+      expect(
+        settingsSectionBlockReason({ requires: ["ocr"], profiles: ["desktop"] }, cloudCompanion)
+      ).toBe("profile")
+      expect(settingsSectionBlockReason({ profiles: ["desktop"] }, cloudCompanion)).toBe("profile")
+      expect(settingsSectionBlockReason({ requires: ["ocr"] }, cloudCompanion)).toBe("capability")
+      expect(settingsSectionBlockReason({ requires: ["shell"] }, cloudCompanion)).toBeNull()
+      expect(settingsSectionBlockReason({ profiles: ["desktop"] }, desktop)).toBeNull()
+    })
+
+    it("agrees with isSettingsSectionReachable on every nav item and profile", () => {
+      for (const ctx of [desktop, cloudCompanion, webStandalone]) {
+        for (const item of SETTINGS_NAV) {
+          expect(settingsSectionBlockReason(item, ctx) === null).toBe(
+            isSettingsSectionReachable(item, ctx)
+          )
+        }
+      }
     })
 
     it("the desktop reaches every section", () => {

@@ -26,13 +26,22 @@ import {
   isSettingsSectionReachable,
   reachableSettingsSections,
   SETTINGS_NAV,
+  settingsSectionBlockReason,
   type NavItem,
   type SettingsReachabilityContext,
+  type SettingsSectionBlockReason,
   type SettingsSectionId,
 } from "@/components/settings/settings-nav-config"
 import { useCapabilityChecker, useHostProfile } from "@/hooks/use-host-profile"
 
 export interface SettingsSectionReachability {
+  /**
+   * Why a section is out of reach, for surfaces that explain the refusal
+   * rather than just hiding the entry. `null` for a reachable section and for
+   * an id the nav does not carry (the merged `general` / `api-key` / `profile`
+   * ids, which the shell redirects before dispatch).
+   */
+  blockReason: (id: SettingsSectionId) => SettingsSectionBlockReason | null
   /** The context the answers were computed from — handy for tests and logs. */
   context: SettingsReachabilityContext
   /** Whether a section id is reachable from this client. */
@@ -49,7 +58,12 @@ export function useSettingsSectionReachability(): SettingsSectionReachability {
   return useMemo(() => {
     const context: SettingsReachabilityContext = { profile, hasCapability }
     const sections = reachableSettingsSections(context)
+    const byId = new Map(SETTINGS_NAV.map((item) => [item.id, item] as const))
     return {
+      blockReason: (id) => {
+        const item = byId.get(id)
+        return item ? settingsSectionBlockReason(item, context) : null
+      },
       context,
       isReachable: (id) => sections.has(id),
       navItems: SETTINGS_NAV.filter((item) => isSettingsSectionReachable(item, context)),
