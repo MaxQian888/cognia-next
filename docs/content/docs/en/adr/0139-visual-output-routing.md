@@ -95,6 +95,64 @@ overrides, so `chart-design` reaches existing installs on the next launch.
   table. They are reached deliberately (a notebook, a plugin's own output), not
   chosen from a menu, so adding them would cost budget for no decision.
 
+## Amendment (2026-09-03) — Contracts for the other four surfaces
+
+The decision above is unchanged: routing resident, contracts in skills. It was
+half-implemented. Four of the five surfaces had a route named for them and no
+contract behind it, and the renderer never became honest about the failures
+this ADR's own Context section enumerated.
+
+**The renderer now says what it could not draw.** `chart-renderer.tsx` had no
+validation at all, so every rule listed above failed in silence. The worst was
+not listed: pie and doughnut hardcoded `dataKey="value"`, so a chart whose
+series was called anything else rendered completely blank, and every fixture in
+the suite used `value`. `lib/artifacts/chart-contract.ts` is now the single
+answer to what a payload means, and a non-blocking notice above the chart lists
+what was dropped and why. The chart still draws whatever it can.
+
+**The chart contract forbade the route the host asks for.** In `fenced` mode the
+routing prompt requests a fenced payload and the same turn delivered a skill
+saying not to emit one. The prohibition assumed a missing `artifact_create`
+meant a missing dock. It does not: `fenced` is a desktop session with a live
+dock and the tool withheld, while the IM case resolves to `disabled`. Scoped,
+not deleted.
+
+**The envelope.** Detection never set `chartType`, so a fenced payload could
+only express its shape through an in-content `{"type": ...}` wrapper that no
+prompt documented, and everything else fell back to a line chart. This belongs
+in the ADR because the Context section above lists the detector's silent
+failures and missed this one. Detection now stamps a shape it can resolve and
+leaves an ambiguous payload unpinned.
+
+**Mermaid had no contract anywhere**, despite being the default for structural
+content and the only surface that works on `disabled`. `diagram-design` now
+owns it, with the grammar list verified against the installed renderer rather
+than transcribed from docs.
+
+**The rule for what goes resident.** A fact belongs in the prompt rather than a
+skill when either it applies on a channel that gets no skill at all, or
+breaking it fails silently and the model could not have recovered the rule from
+a tool's JSON schema. This is why two Mermaid rules are resident (an IM thread
+gets no `diagram-design`), and why the canvas `language` and `type` enums are
+not (the tool schema carries them). What no schema says is that `canvas_update`
+rewrites the whole buffer, so that one sentence is resident.
+
+**Budget.** The ceiling moves from 1,400 to 1,700 characters. This is not a red
+test turned green: 1,400 was infeasible, since the leanest `tools` variant
+lands at 1,420 with these contracts, and fitting under the old number meant
+deleting the only memorable line in the section to buy fifteen characters of
+permanent headroom. A second guard pins the `disabled` variant under 1,100,
+which encodes this ADR's actual principle better than one global number does:
+the channel that can use the least routing pays the least for it. The
+Consequences note above saying "roughly 150 tokens" was already wrong before
+this change; it is closer to 380 now.
+
+**Deliberately not done.** Dropping `diagram-design`'s `artifact-authoring`
+requirement so the full Mermaid contract reaches an IM thread. It is tempting
+and it is the mechanism, but the skill's bulk and its `assets/*.html` resources
+are dead weight where only one of its two routes exists. Named here so the next
+person does not have to re-derive it.
+
 ## References
 
 - ADR-0026 — marketplace integrations, built-in skill manifest, connector

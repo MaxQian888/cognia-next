@@ -61,9 +61,15 @@ export const ARTIFACT_RUNTIME_ADAPTERS: Record<ArtifactType, ArtifactRuntimeAdap
     type: "react",
     transport: "iframe",
     sandbox: "allow-scripts",
-    // The raster path re-renders the SOURCE in an off-screen frame, so what a
-    // React artifact captures is its unexecuted markup — usually close to
-    // nothing. `raw` only, until the offline React runtime lands.
+    // `raw` only, and the reason is not the one this comment used to give. The
+    // offline React runtime HAS landed (ADR-0158, `public/artifact-runtime/`),
+    // so the old "until it lands" note was stale. The real blocker is the
+    // sandbox: a React artifact runs in an opaque-origin `allow-scripts` frame,
+    // which html2canvas cannot read into from the parent, and the raster path
+    // re-renders the SOURCE off-screen with scripts stripped, so it captures
+    // unexecuted markup. Exporting one means capturing INSIDE the frame and
+    // posting the result back out. Until that exists, `raw` is the honest
+    // answer rather than a format that would silently produce a blank image.
     exportFormats: ["raw"],
   },
   mermaid: {
