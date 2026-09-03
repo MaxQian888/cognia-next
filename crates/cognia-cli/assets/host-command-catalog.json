@@ -1081,20 +1081,6 @@
                 ]
               }
             ]
-          },
-          {
-            "anyOf": [
-              {
-                "required": [
-                  "remote_execution_context"
-                ]
-              },
-              {
-                "required": [
-                  "remoteExecutionContext"
-                ]
-              }
-            ]
           }
         ]
       },
@@ -5755,20 +5741,6 @@
               {
                 "required": [
                   "requestId"
-                ]
-              }
-            ]
-          },
-          {
-            "anyOf": [
-              {
-                "required": [
-                  "remote_execution_context"
-                ]
-              },
-              {
-                "required": [
-                  "remoteExecutionContext"
                 ]
               }
             ]
@@ -12770,6 +12742,85 @@
         },
         "additionalProperties": false,
         "x-cognia-schema-owner": "external-agents"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "external_agent_detect_runtimes",
+      "category": "agents",
+      "resource": "external-agents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "process.spawn",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "external_agent_detect_runtimes (process.spawn)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crates/cognia-external-agent/src/version_probe.rs DetectedRuntimesReport",
+        "description": "Which catalogued agent runtimes this Host already has. `resolution` is the only verdict here: `installed` means the command resolved and its catalogued `--version` was read, `missing` means it is on no PATH or install root, `package-runner` means it launches through npx and its presence cannot be established without a network install, `not-local` means the runtime has no local command at all. `versionOutput` is raw probe output; the version verdict is rendered by assessRuntimeVersion() in lib/ai/agent/external/runtime-version.ts.",
+        "required": [
+          "runtimes"
+        ],
+        "properties": {
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "runtimeId",
+                "resolution"
+              ],
+              "properties": {
+                "runtimeId": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "resolution": {
+                  "type": "string",
+                  "enum": [
+                    "installed",
+                    "missing",
+                    "package-runner",
+                    "not-local"
+                  ]
+                },
+                "executablePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "versionOutput": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
       },
       "outputTyped": true
     },
@@ -21476,7 +21527,7 @@
       "operation": "side-effect",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "none",
       "idempotency": "required",
       "summary": "kill_external_agent (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -34729,7 +34780,7 @@
       "operation": "side-effect",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "none",
       "idempotency": "required",
       "summary": "send_to_external_agent (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -36941,7 +36992,7 @@
       "operation": "write",
       "capability": "process.spawn",
       "risk": "critical",
-      "approval": "signed-policy",
+      "approval": "none",
       "idempotency": "required",
       "summary": "spawn_external_agent (process.spawn)",
       "description": "Loopback service-token command. Target: execution; risk: critical.",
@@ -37106,7 +37157,12 @@
               "issueProjects",
               "labels",
               "issueEvents",
-              "issueRuns"
+              "issueRuns",
+              "connectorHeartbeats",
+              "platformIdentities",
+              "connectorCallbackBindings",
+              "workflowDeployments",
+              "executionRunBindings"
             ],
             "description": "Allowlist; mirror of `lib/sync/types.ts:SyncableTable` (live\nregistry: `sync_registry.rs::default_tables`, listable via\n`sync_list_tables`). Any other value returns 400 to prevent a\nmalicious phone from asking for arbitrary tables.\n`agentTeamBoard` (v104) is the one-way Agent-Team board mirror —\nboard edits travel back as `team_*` control RPCs, never as sync\nwrites.\n"
           },
@@ -46695,5 +46751,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "1dd760e19928f103729f48ae114e748f2f6a5e8f3eb616b7e67f00a1e0c62a88"
+  "catalogHash": "22726dca2536e9a505244877f425bc98183b01f8fd9f07d73abbebd3e4c60ab3"
 }
