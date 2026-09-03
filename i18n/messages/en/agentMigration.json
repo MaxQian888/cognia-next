@@ -16,6 +16,13 @@
   "cardBody": "Move settings, histories, skills, agents, MCP servers, commands, and memory into Cognia.",
   "cardTitle": "Coding-agent migration",
   "close": "Close",
+  "connectRuntime": {
+    "title": "Connect {name}",
+    "body": "Cognia can run {name} directly now that its setup is here.",
+    "action": "Connect",
+    "connected": "Already connected",
+    "failed": "The connection could not be created."
+  },
   "continue": "Continue",
   "description": "Import supported data from an installed coding agent. You can review every category before anything is written.",
   "errors": {

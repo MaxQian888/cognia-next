@@ -1985,6 +1985,13 @@
     "cardBody": "将设置、历史记录、技能、智能体、MCP 服务器、命令和记忆迁移到 Cognia。",
     "cardTitle": "编程智能体迁移",
     "close": "关闭",
+    "connectRuntime": {
+      "title": "连接 {name}",
+      "body": "配置已经迁移过来了，Cognia 现在可以直接运行 {name}。",
+      "action": "连接",
+      "connected": "已连接",
+      "failed": "无法创建连接。"
+    },
     "continue": "继续",
     "description": "从已安装的编程智能体导入受支持的数据。写入前可逐项预览。",
     "errors": {

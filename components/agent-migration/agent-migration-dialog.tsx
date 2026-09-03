@@ -34,6 +34,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { loggers } from "@cognia/logging"
 
 import { ArtifactWarnings } from "./artifact-warnings"
+import { ConnectRuntimeCard } from "./connect-runtime-card"
 
 const log = loggers.ui.child("agent-migration")
 
@@ -311,12 +312,15 @@ export function AgentMigrationDialog({ trigger }: AgentMigrationDialogProps) {
           </div>
         )}
 
-        {step === "result" && result && (
+        {step === "result" && result && vendor && (
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <CheckCircle2Icon className="size-5 text-primary" />
               {result.aborted ? t("result.aborted") : t("result.complete")}
             </div>
+            {/* Migration used to end here, leaving the user to find the
+                external-agent settings and pick the right preset themselves. */}
+            <ConnectRuntimeCard vendor={vendor} result={result} />
             {selectedArtifacts.map((artifact) => {
               const artifactResult = result.artifacts[artifact]
               if (!artifactResult) return null
