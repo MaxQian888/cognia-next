@@ -6,6 +6,9 @@ import {
   findModelConfigOption,
   isExternalAgentProviderId,
   resolveExternalAgentModels,
+  EMPTY_THINKING_SURFACE,
+  findThinkingConfigOption,
+  resolveExternalAgentThinking,
 } from "./session-models"
 
 it("binds a persisted agent-model marker to one agent", () => {
@@ -136,5 +139,76 @@ describe("findModelConfigOption", () => {
       currentValue: true,
     } as AcpConfigOption
     expect(findModelConfigOption([boolish])).toBeUndefined()
+  })
+})
+
+describe("resolveExternalAgentThinking", () => {
+  const thinkingOption = (over: Partial<AcpConfigOption> = {}): AcpConfigOption =>
+    ({
+      id: "thinking",
+      name: "Thinking",
+      category: "thought_level",
+      type: "select",
+      currentValue: "medium",
+      options: [
+        { value: "off", name: "Off" },
+        { value: "low", name: "Low" },
+        { value: "medium", name: "Medium" },
+        { value: "max", name: "Max" },
+      ],
+      ...over,
+    }) as AcpConfigOption
+
+  it("reads the agent's own vocabulary verbatim, in its own order", () => {
+    // Not projected onto the app's tiers here. `off` has no EffortTier and
+    // dropping it at this layer would hide from the caller that the agent
+    // offers it, which is a different statement from the agent being silent.
+    const surface = resolveExternalAgentThinking({ configOptions: [thinkingOption()] })
+    expect(surface.levels).toEqual(["off", "low", "medium", "max"])
+    expect(surface.currentLevel).toBe("medium")
+    expect(surface.write).toEqual({ kind: "config-option", optionId: "thinking" })
+  })
+
+  it("answers the empty surface when the agent declares no thinking control", () => {
+    // Absent, not broken: an agent with no depth axis still runs, and the
+    // composer keeps offering its generic ladder for it.
+    expect(resolveExternalAgentThinking({ configOptions: [] })).toEqual(EMPTY_THINKING_SURFACE)
+    expect(resolveExternalAgentThinking({})).toEqual(EMPTY_THINKING_SURFACE)
+  })
+
+  it("keeps the current level but refuses the write when the list is empty", () => {
+    // Same rule the model resolver keeps: dropping `currentLevel` would make
+    // the control show the wrong active row, while a write has nowhere to go.
+    const surface = resolveExternalAgentThinking({
+      configOptions: [thinkingOption({ options: [] } as Partial<AcpConfigOption>)],
+    })
+    expect(surface.currentLevel).toBe("medium")
+    expect(surface.write).toEqual({ kind: "none" })
+  })
+
+  it("does not mistake a model select for the thinking control", () => {
+    const model = {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: "sonnet",
+      options: [{ value: "sonnet", name: "Sonnet" }],
+    } as AcpConfigOption
+    expect(resolveExternalAgentThinking({ configOptions: [model] })).toEqual(EMPTY_THINKING_SURFACE)
+  })
+})
+
+describe("findThinkingConfigOption", () => {
+  it("ignores a boolean in the thought_level category", () => {
+    // Only a select carries a ladder. A boolean there is some other switch.
+    const boolish = {
+      id: "thinking",
+      name: "Thinking",
+      category: "thought_level",
+      type: "boolean",
+      currentValue: true,
+    } as AcpConfigOption
+    expect(findThinkingConfigOption([boolish])).toBeUndefined()
   })
 })

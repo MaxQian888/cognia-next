@@ -167,3 +167,41 @@ export async function resolveProxyEnv(
 ): Promise<Record<string, string>> {
   return {}
 }
+
+/**
+ * The same resolution, downgraded to best effort for a turn that will be
+ * dispatched to an EXTERNAL agent runtime.
+ *
+ * An external turn runs in an agent process that brings its own credentials.
+ * Pi, Codex, Gemini CLI and friends each authenticate themselves, and the
+ * subscription account is nowhere in that path. Resolving it was still fatal
+ * for them, because `resolveSendOptions` runs before the send path picks a
+ * lane: a browser or a companion with no active Anthropic account could not
+ * send a single turn to a configured external agent, and the failure it showed
+ * ("Could not resolve the active anthropic account") named a provider the turn
+ * was never going to use.
+ *
+ * Still ATTEMPTED rather than skipped: a turn whose tool surface collapses to
+ * `none` is dispatched on the built-in lane after this point (see
+ * `use-claude-chat-controller`'s `manualExternal`), and skipping outright would
+ * hand that fallback an empty env when a perfectly good account existed. So the
+ * env is resolved when it can be, and its absence stops being a refusal.
+ */
+export async function resolveAccountEnvForExternalRuntime(
+  providerId: string,
+  accountId: string | null
+): Promise<Record<string, string>> {
+  try {
+    return await resolveAccountEnv(providerId, accountId)
+  } catch (err) {
+    if (err instanceof SubscriptionAccountResolutionError) {
+      console.warn(
+        "resolveAccountEnv skipped for an external-runtime turn",
+        providerId,
+        err.message
+      )
+      return {}
+    }
+    throw err
+  }
+}

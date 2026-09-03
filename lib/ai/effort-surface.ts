@@ -63,6 +63,16 @@ export interface EffortSurfaceInput {
   defaultProvider?: string
   /** `composerBehavior.hiddenEffortTiers`. */
   hiddenTiers?: readonly EffortTier[]
+  /**
+   * The external agent's OWN published level vocabulary, when one has been
+   * read (`resolveExternalAgentThinking` over its `thought_level` config
+   * option). Only consulted on the external rail, and only when the agent
+   * actually answered: an empty or absent list keeps the generic fallback.
+   *
+   * Threaded rather than fetched here because this half is pure and the answer
+   * is a round trip to an agent process.
+   */
+  externalLevels?: readonly string[]
 }
 
 export interface EffortSurface {
@@ -93,9 +103,11 @@ export interface EffortSurface {
 export function resolveEffortSurface(input: EffortSurfaceInput): EffortSurface {
   // The external rail dispatches to an agent that brings its own model, so the
   // session's provider/model pair describes a runtime that is not going to run.
-  // `externalAgentThinkingLevels` is the surface-derived answer for it.
+  // `externalAgentThinkingLevels` answers from the agent's own published levels
+  // when it has declared them (Pi reports `max` for the models that honour it),
+  // and from the generic surface until then.
   if (input.runtime === "external") {
-    const offered = externalAgentThinkingLevels()
+    const offered = externalAgentThinkingLevels(input.externalLevels)
     return {
       offered,
       levels: visibleThinkingLevels(offered, input.hiddenTiers),

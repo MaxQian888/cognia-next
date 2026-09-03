@@ -76,6 +76,32 @@
   },
   "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
   "nav": {
+    "groups": {
+      "behaviorGroup": "行为",
+      "runtimeGroup": "运行时"
+    },
+    "items": {
+      "a2ui": {
+        "description": "供智能体驱动小应用的桥接工具",
+        "label": "A2UI 桥接"
+      },
+      "defaults": {
+        "description": "模型、权限、提示词与回复行为",
+        "label": "默认值"
+      },
+      "permissions": {
+        "description": "工具访问、审批规则与自动判定",
+        "label": "权限与工具"
+      },
+      "sessions": {
+        "description": "已存储的聊天与原生 SDK 会话",
+        "label": "会话"
+      },
+      "sidecar": {
+        "description": "状态、能力与 SDK 诊断",
+        "label": "侧载诊断"
+      }
+    },
     "mobileTrigger": "分区",
     "title": "智能体运行时设置"
   },

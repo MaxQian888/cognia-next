@@ -68,6 +68,7 @@ import {
 import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
 import { detectInstalledRuntimes } from "./installed-runtimes"
 import { __setProcessPlaneDepsForTests } from "./process-plane"
+import { EMPTY_THINKING_SURFACE } from "./session-models"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -309,6 +310,11 @@ function freshManager(): ExternalAgentManager {
 
 beforeEach(() => {
   ExternalAgentManager.resetInstance()
+  // The model/thinking surface cache is a module singleton and outlives the
+  // manager, and the thinking-level path now reads it rather than paying for a
+  // round trip per turn. Without this, one test's published ladder answers the
+  // next test's question.
+  forgetAgentModelSurface()
   mockProcessExitCb = undefined
   currentMock = new MockAdapter()
 })
@@ -462,8 +468,11 @@ describe("the cached model surface follows the writes that change it", () => {
     // Stubbed so a load does not re-enter the manager under test.
     restoreSurfaceDeps = __setModelSurfaceDepsForTests({
       fetchSurface: async () => ({
-        status: "ok",
-        data: { choices: [], currentModelId: "m", write: { kind: "none" } },
+        status: "ok" as const,
+        data: {
+          models: { choices: [], currentModelId: "m", write: { kind: "none" as const } },
+          thinking: EMPTY_THINKING_SURFACE,
+        },
       }),
     })
   })
@@ -1133,6 +1142,177 @@ describe("execute — model selection", () => {
 
     const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
     expect(opts.metadata?.reasoningEffort).toBeUndefined()
+  })
+
+  it("applies a requested thinking level through the thought_level option", async () => {
+    // The `metadata.reasoningEffort` bridge above is read by the Codex client
+    // and by nothing else. Every other adapter takes depth the way it takes a
+    // model — as a config option — so on Pi the composer's chip was inert.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "thinking",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: "medium",
+          options: [
+            { value: "off", name: "Off" },
+            { value: "low", name: "Low" },
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+            { value: "xhigh", name: "Extra high" },
+            { value: "max", name: "Max" },
+          ],
+        },
+      ],
+    }))
+
+    await m.execute("agent-1", "hi", { reasoningEffort: "max" })
+
+    expect(currentMock.setConfigOptionImpl).toHaveBeenCalledWith("s_1", "thinking", "max")
+  })
+
+  it("reads the published ladder once, not once per turn", async () => {
+    // The composer's chips already hold this reply per (agent, session). Asking
+    // the agent again on every turn was a second round trip to a real process
+    // for an answer nothing had invalidated.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "thinking",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: "low",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    }))
+
+    const first = await m.execute("agent-1", "one", { reasoningEffort: "high" })
+    const afterFirst = currentMock.getConfigOptionsImpl.mock.calls.length
+    expect(afterFirst).toBeGreaterThan(0)
+
+    // Same conversation, same agent session: nothing has moved, so nothing is
+    // asked again.
+    await m.execute("agent-1", "two", { sessionId: first.sessionId, reasoningEffort: "high" })
+    expect(currentMock.getConfigOptionsImpl.mock.calls.length).toBe(afterFirst)
+
+    // A model write DOES move the ladder, so that turn pays for a fresh read.
+    await m.execute("agent-1", "three", {
+      sessionId: first.sessionId,
+      reasoningEffort: "high",
+      model: "gpt-5.6-codex",
+    })
+    expect(currentMock.getConfigOptionsImpl.mock.calls.length).toBeGreaterThan(afterFirst)
+  })
+
+  it("folds a requested level DOWN onto the ladder the agent published", async () => {
+    // Pi accepts an unsupported level, answers success, and silently clamps to
+    // `off` — so forwarding `max` at a model that stops at `high` turns "think
+    // hard" into "don't think" with no error anywhere. Stepping down rather
+    // than up, because overspending a reasoning budget is the worse mistake.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "thinking",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: "low",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    }))
+
+    await m.execute("agent-1", "hi", { reasoningEffort: "max" })
+
+    expect(currentMock.setConfigOptionImpl).toHaveBeenCalledWith("s_1", "thinking", "high")
+  })
+
+  it("writes nothing when the agent already sits at the requested level", async () => {
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "thinking",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: "high",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    }))
+
+    await m.execute("agent-1", "hi", { reasoningEffort: "high" })
+
+    expect(currentMock.setConfigOptionImpl).not.toHaveBeenCalled()
+  })
+
+  it("leaves an agent with no thought_level option alone", async () => {
+    // Absent, not broken. Writing the app's own vocabulary at an agent that
+    // never published one is the silent-clamp bug the fold exists to prevent.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "sonnet",
+          options: [{ value: "sonnet", name: "Sonnet" }],
+        },
+      ],
+    }))
+
+    await m.execute("agent-1", "hi", { reasoningEffort: "max" })
+
+    // No model was requested either, so nothing at all should be written.
+    expect(currentMock.setConfigOptionImpl).not.toHaveBeenCalled()
+  })
+
+  it("still runs the turn when the agent refuses the level", async () => {
+    // Best-effort, like the model path: a rejected depth must not kill a turn
+    // that runs fine at the session's current one.
+    const m = await connectedManager()
+    currentMock.getConfigOptionsImpl = jest.fn((_sessionId: string) => ({
+      status: "ok",
+      data: [
+        {
+          id: "thinking",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: "low",
+          options: [{ value: "max", name: "Max" }],
+        },
+      ],
+    }))
+    currentMock.setConfigOptionImpl = jest.fn(async () => {
+      throw new Error("that model cannot think that hard")
+    })
+
+    await expect(m.execute("agent-1", "hi", { reasoningEffort: "max" })).resolves.toBeDefined()
   })
 
   it("switches a reused session onto a newly requested model", async () => {

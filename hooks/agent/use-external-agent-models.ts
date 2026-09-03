@@ -27,7 +27,11 @@ import {
   loadAgentModelSurface,
   type ModelSurfaceResult,
 } from "@/lib/ai/agent/external/model-surface-cache"
-import type { ExternalAgentModelSurface } from "@/lib/ai/agent/external/session-models"
+import {
+  EMPTY_THINKING_SURFACE,
+  type ExternalAgentModelSurface,
+  type ExternalAgentThinkingSurface,
+} from "@/lib/ai/agent/external/session-models"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
 
 export interface ExternalAgentModels {
@@ -37,6 +41,15 @@ export interface ExternalAgentModels {
   externalSessionId: string | null
   /** What the agent offers. `null` until an answer arrives. */
   surface: ExternalAgentModelSurface | null
+  /**
+   * The agent's own thinking ladder, from the same reply as `surface`.
+   *
+   * Empty (rather than `null`) when the agent published none, because the
+   * effort control's fallback is a ladder, not an absence: an agent with no
+   * `thought_level` option still runs, and the composer keeps offering the
+   * generic tiers for it.
+   */
+  thinking: ExternalAgentThinkingSurface
   loading: boolean
   /** Why there is nothing to show, when the agent was asked and could not say. */
   status: ModelSurfaceResult["status"] | "idle"
@@ -59,6 +72,7 @@ const IDLE: ExternalAgentModels = {
   agentId: null,
   externalSessionId: null,
   surface: null,
+  thinking: EMPTY_THINKING_SURFACE,
   loading: false,
   status: "idle",
   select: async () => {},
@@ -171,6 +185,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
       agentId,
       externalSessionId,
       surface: result?.status === "ready" ? result.surface : null,
+      thinking: result?.thinking ?? EMPTY_THINKING_SURFACE,
       loading,
       status: result?.status ?? "idle",
       select,

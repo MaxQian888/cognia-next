@@ -12,6 +12,7 @@ import {
   thinkingLevelToEffort,
   type EffortTier,
   type ThinkingLevel,
+  externalAgentThinkingLevels,
 } from "./thinking-level"
 
 describe("the tier ladder", () => {
@@ -213,5 +214,55 @@ describe("thinkingLevelIndex / thinkingLevelAtIndex", () => {
     for (const level of EFFORT_SLIDER_LEVELS) {
       expect(thinkingLevelAtIndex(thinkingLevelIndex(level))).toBe(level)
     }
+  })
+})
+
+describe("externalAgentThinkingLevels", () => {
+  it("offers the agent's own ladder when it published one", () => {
+    // The whole point of picking a Pi model that honours `max`. The generic
+    // fallback stops at `high`, so every tier above it was unreachable.
+    expect(externalAgentThinkingLevels(["off", "low", "medium", "high", "xhigh", "max"])).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ])
+  })
+
+  it("drops levels the app cannot persist or express", () => {
+    // `off` is the app's separate "leave the model alone" choice and is always
+    // reachable; `minimal` has no representation in SendOptions["effort"].
+    const levels = externalAgentThinkingLevels(["off", "minimal", "low"])
+    expect(levels).toEqual(["low"])
+  })
+
+  it("never offers ultracode, even for an agent that publishes xhigh", () => {
+    // The tier IS `xhigh` plus Cognia's dynamic-workflow tool suite, which the
+    // built-in send path injects. An external agent brings its own tools, so
+    // the name would promise something this turn cannot carry.
+    expect(externalAgentThinkingLevels(["xhigh", "max"])).not.toContain("ultracode")
+  })
+
+  it("re-orders a deepest-first agent into the app's ascending order", () => {
+    // The slider indexes into this list. Trusting publication order would
+    // invert the control for an agent that lists its levels the other way.
+    expect(externalAgentThinkingLevels(["max", "low", "high"])).toEqual(["low", "high", "max"])
+  })
+
+  it("falls back to the generic ladder when the agent has not answered", () => {
+    const fallback = externalAgentThinkingLevels()
+    expect(externalAgentThinkingLevels([])).toEqual(fallback)
+    expect(fallback.length).toBeGreaterThan(0)
+    // Nothing above `high` may be invented for an agent that never said.
+    expect(fallback).not.toContain("max")
+  })
+
+  it("ignores a vocabulary the app shares no level with", () => {
+    // An agent speaking entirely its own words gets the generic ladder rather
+    // than an empty control that offers nothing at all.
+    expect(externalAgentThinkingLevels(["think-a-bit", "think-a-lot"])).toEqual(
+      externalAgentThinkingLevels()
+    )
   })
 })

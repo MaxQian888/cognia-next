@@ -118,6 +118,8 @@ describe("listAgentRuntimes", () => {
     expect(rows[1].blockedReason).toMatch(/has not finished/i)
     expect(rows[1].blockTransient).toBe(true)
 
+    // Every reach failure is environment scoped, so the marker rides all of
+    // them: the row still refuses, but the selection behind it is not rewritten.
     const notGranted = listAgentRuntimes({
       ...base,
       externalEnabled: true,
@@ -125,7 +127,7 @@ describe("listAgentRuntimes", () => {
       runtimeSupportsExternalAgents: { ok: false, reason: "not-granted" },
     })
     expect(notGranted[1].blockedReason).toMatch(/agent control/i)
-    expect(notGranted[1].blockTransient).toBeUndefined()
+    expect(notGranted[1].blockTransient).toBe(true)
   })
 
   it("runs an agent through a paired host that can start the process", () => {

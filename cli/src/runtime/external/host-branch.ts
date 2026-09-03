@@ -17,6 +17,7 @@ export function createCliAgentHost(
   const supportsPty = platform !== "win32"
   return {
     supportsExternalAgents: (): boolean => true,
+    runsExternalAgentProcessesLocally: (): boolean => true,
     supportsAgentFs: (): boolean => true,
     supportsAgentTerminal: (): boolean => supportsPty,
     agentInvoke: <T>(name: string, args: Record<string, unknown>): Promise<T> =>
@@ -29,6 +30,7 @@ export function createCliAgentHost(
 const defaultHost = createCliAgentHost(new NodeExternalAgentBackend())
 
 export const supportsExternalAgents = defaultHost.supportsExternalAgents
+export const runsExternalAgentProcessesLocally = defaultHost.runsExternalAgentProcessesLocally
 export const supportsAgentFs = defaultHost.supportsAgentFs
 export const supportsAgentTerminal = defaultHost.supportsAgentTerminal
 export const agentInvoke = defaultHost.agentInvoke

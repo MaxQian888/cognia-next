@@ -4,12 +4,31 @@ import {
   forgetAgentModelSurface,
   loadAgentModelSurface,
 } from "./model-surface-cache"
-import type { ExternalAgentModelSurface } from "./session-models"
+import {
+  EMPTY_THINKING_SURFACE,
+  type ExternalAgentModelSurface,
+  type ExternalAgentThinkingSurface,
+} from "./session-models"
+import type { ExternalAgentSessionSurface } from "./model-surface-cache"
 
 const SURFACE: ExternalAgentModelSurface = {
   choices: [{ modelId: "anthropic/sonnet", name: "Sonnet" }],
   currentModelId: "anthropic/sonnet",
   write: { kind: "config-option", optionId: "model" },
+}
+
+const THINKING: ExternalAgentThinkingSurface = {
+  levels: ["low", "medium", "high", "xhigh", "max"],
+  currentLevel: "medium",
+  write: { kind: "config-option", optionId: "thinking" },
+}
+
+/** The reply shape the manager returns: both axes, from one round trip. */
+function reply(surface: ExternalAgentModelSurface = SURFACE): {
+  status: "ok"
+  data: ExternalAgentSessionSurface
+} {
+  return { status: "ok", data: { models: surface, thinking: THINKING } }
 }
 
 describe("loadAgentModelSurface", () => {
@@ -25,14 +44,14 @@ describe("loadAgentModelSurface", () => {
   })
 
   it("asks once and serves the rest from cache", () => {
-    const fetchSurface = jest.fn().mockResolvedValue({ status: "ok", data: SURFACE })
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
     restore = __setModelSurfaceDepsForTests({ fetchSurface })
 
     return loadAgentModelSurface("a", "s")
       .then(() => loadAgentModelSurface("a", "s"))
       .then((second) => {
         expect(fetchSurface).toHaveBeenCalledTimes(1)
-        expect(second).toEqual({ status: "ready", surface: SURFACE })
+        expect(second).toEqual({ status: "ready", surface: SURFACE, thinking: THINKING })
         expect(cachedAgentModelSurface("a", "s")).toEqual(second)
       })
   })
@@ -40,7 +59,7 @@ describe("loadAgentModelSurface", () => {
   it("shares one in-flight request between the composer and the panel", async () => {
     // Both mount together in the chat view. For Pi the fetch is a real RPC to a
     // real process, so the duplicate is not free.
-    const fetchSurface = jest.fn().mockResolvedValue({ status: "ok", data: SURFACE })
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
     restore = __setModelSurfaceDepsForTests({ fetchSurface })
 
     await Promise.all([loadAgentModelSurface("a", "s"), loadAgentModelSurface("a", "s")])
@@ -48,7 +67,7 @@ describe("loadAgentModelSurface", () => {
   })
 
   it("re-asks on refresh, which is what a write must do", async () => {
-    const fetchSurface = jest.fn().mockResolvedValue({ status: "ok", data: SURFACE })
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
     restore = __setModelSurfaceDepsForTests({ fetchSurface })
 
     await loadAgentModelSurface("a", "s")
@@ -57,7 +76,7 @@ describe("loadAgentModelSurface", () => {
   })
 
   it("keeps each session separate", async () => {
-    const fetchSurface = jest.fn().mockResolvedValue({ status: "ok", data: SURFACE })
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
     restore = __setModelSurfaceDepsForTests({ fetchSurface })
 
     await loadAgentModelSurface("a", "s1")
@@ -73,6 +92,9 @@ describe("loadAgentModelSurface", () => {
     expect(result.status).toBe("unsupported")
     expect(result.surface.choices).toEqual([])
     expect(result.surface.write).toEqual({ kind: "none" })
+    // Empty rather than absent: an agent with no model control can still be
+    // asked to think harder, and the effort chip reads this field directly.
+    expect(result.thinking).toEqual(EMPTY_THINKING_SURFACE)
   })
 
   it("never rejects, because the caller is an effect", async () => {
@@ -89,7 +111,7 @@ describe("loadAgentModelSurface", () => {
   it("forgets one agent without forgetting the others", async () => {
     // A reconnect can be a different process with a different model list, so
     // answering from the old one would offer models the new agent lacks.
-    const fetchSurface = jest.fn().mockResolvedValue({ status: "ok", data: SURFACE })
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
     restore = __setModelSurfaceDepsForTests({ fetchSurface })
 
     await loadAgentModelSurface("a", "s")
@@ -100,6 +122,18 @@ describe("loadAgentModelSurface", () => {
     expect(cachedAgentModelSurface("b", "s")).not.toBeNull()
     await loadAgentModelSurface("a", "s")
     expect(fetchSurface).toHaveBeenCalledTimes(3)
+  })
+
+  it("caches the thinking ladder alongside the models, from one fetch", async () => {
+    // The effort chip and the model picker mount together and read the same
+    // entry. Serving thinking from a second round trip is what the shared
+    // reply exists to avoid.
+    const fetchSurface = jest.fn().mockResolvedValue(reply())
+    restore = __setModelSurfaceDepsForTests({ fetchSurface })
+
+    await loadAgentModelSurface("a", "s")
+    expect(cachedAgentModelSurface("a", "s")?.thinking).toEqual(THINKING)
+    expect(fetchSurface).toHaveBeenCalledTimes(1)
   })
 
   it("answers null for a pair nothing has loaded", () => {
@@ -121,9 +155,9 @@ describe("loadAgentModelSurface", () => {
     const first = loadAgentModelSurface("a", "s")
     const second = loadAgentModelSurface("a", "s", { refresh: true })
 
-    newer.resolve({ status: "ok", data: { ...SURFACE, currentModelId: "after-the-write" } })
+    newer.resolve(reply({ ...SURFACE, currentModelId: "after-the-write" }))
     await second
-    older.resolve({ status: "ok", data: { ...SURFACE, currentModelId: "before-the-write" } })
+    older.resolve(reply({ ...SURFACE, currentModelId: "before-the-write" }))
     await first
 
     expect(cachedAgentModelSurface("a", "s")?.surface.currentModelId).toBe("after-the-write")
@@ -138,7 +172,7 @@ describe("loadAgentModelSurface", () => {
 
     const inFlight = loadAgentModelSurface("a", "s")
     forgetAgentModelSurface("a")
-    pending.resolve({ status: "ok", data: SURFACE })
+    pending.resolve(reply())
     await inFlight
 
     expect(cachedAgentModelSurface("a", "s")).toBeNull()
@@ -147,11 +181,11 @@ describe("loadAgentModelSurface", () => {
 
 /** A promise whose settlement this test controls. */
 function deferred(): {
-  promise: Promise<{ status: "ok"; data: ExternalAgentModelSurface }>
-  resolve: (value: { status: "ok"; data: ExternalAgentModelSurface }) => void
+  promise: Promise<{ status: "ok"; data: ExternalAgentSessionSurface }>
+  resolve: (value: { status: "ok"; data: ExternalAgentSessionSurface }) => void
 } {
-  let resolve!: (value: { status: "ok"; data: ExternalAgentModelSurface }) => void
-  const promise = new Promise<{ status: "ok"; data: ExternalAgentModelSurface }>((r) => {
+  let resolve!: (value: { status: "ok"; data: ExternalAgentSessionSurface }) => void
+  const promise = new Promise<{ status: "ok"; data: ExternalAgentSessionSurface }>((r) => {
     resolve = r
   })
   return { promise, resolve }

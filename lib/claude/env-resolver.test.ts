@@ -1,7 +1,12 @@
 // ADR-0028 — env-resolver unit tests. The transport layer is mocked so the
 // tests run without a real Tauri host.
 
-import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "./env-resolver"
+import {
+  resolveAccountEnv,
+  resolveAccountEnvForExternalRuntime,
+  resolveAccountId,
+  resolveProxyEnv,
+} from "./env-resolver"
 import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/tauri", () => ({
@@ -16,10 +21,20 @@ jest.mock("@/lib/runtime/standalone-mode", () => ({
 }))
 
 let unlockedAccountId: string | null = "local_acct_a"
+/**
+ * Makes the store read itself fail. `resolveAccountEnv` calls `getState()`
+ * outside every try block, so this is the one fault that escapes it without
+ * being wrapped — which is exactly what the external-runtime wrapper must NOT
+ * swallow.
+ */
+let accountStoreThrows = false
 
 jest.mock("@/stores/account/account-store", () => ({
   useAccountStore: {
-    getState: () => ({ unlockedAccountId }),
+    getState: () => {
+      if (accountStoreThrows) throw new TypeError("account store is not initialised")
+      return { unlockedAccountId }
+    },
   },
 }))
 
@@ -31,6 +46,7 @@ beforeEach(() => {
   mockCall.mockReset()
   unlockedAccountId = "local_acct_a"
   standaloneRuntime = false
+  accountStoreThrows = false
 })
 
 // Minimal-shape factories — only the fields the resolver reads. The full
@@ -215,6 +231,51 @@ describe("resolveAccountEnv", () => {
     })
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe("resolveAccountEnvForExternalRuntime", () => {
+  it("returns the env when an account does resolve", async () => {
+    // Not a skip. A turn whose tool surface collapses to `none` falls back to
+    // the built-in lane after this point, and handing that fallback an empty
+    // env when a good account existed would break a working send.
+    mockCall.mockResolvedValueOnce([{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: "oat-01" }])
+
+    await expect(resolveAccountEnvForExternalRuntime("anthropic", "abc")).resolves.toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "oat-01",
+    })
+  })
+
+  it("resolves empty instead of throwing when no account can be resolved", async () => {
+    // The regression this exists for: an external agent brings its own
+    // credentials, but `resolveSendOptions` resolves the account BEFORE the
+    // send path picks a lane. A browser with no active Anthropic account could
+    // not send one turn to a configured agent, and the error it showed named a
+    // provider the turn was never going to use.
+    mockCall.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+
+    await expect(resolveAccountEnvForExternalRuntime("anthropic", null)).resolves.toEqual({})
+  })
+
+  it("still resolves empty when the vault itself fails", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    mockCall.mockRejectedValueOnce(new Error("vault load failed"))
+
+    // Wrapped as a SubscriptionAccountResolutionError by `resolveAccountEnv`,
+    // so this arm is swallowed too — the agent authenticates itself either way.
+    await expect(resolveAccountEnvForExternalRuntime("anthropic", "abc")).resolves.toEqual({})
+    warn.mockRestore()
+  })
+
+  it("still throws for a failure that is not about account resolution", async () => {
+    // Only the resolution error is downgraded. A transport fault would not
+    // reach here — `resolveAccountEnv` wraps everything inside its try blocks —
+    // but the store read that precedes them is not wrapped, and a broken store
+    // is a programming error. Reporting it as "no credentials" would send the
+    // turn on without them and blame the user's account setup.
+    accountStoreThrows = true
+
+    await expect(resolveAccountEnvForExternalRuntime("anthropic", "abc")).rejects.toThrow(TypeError)
   })
 })
 

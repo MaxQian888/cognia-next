@@ -142,19 +142,31 @@ describe("getExternalAgentExecutionBlock", () => {
     }
   })
 
-  it("marks only the mid-handshake block as transient", () => {
-    // A Host still reporting its features becomes a Host that can spawn moments
-    // later, so a caller must not persist a decision from that verdict. The
-    // other three are settled until the user does something.
-    expect(
-      getExternalAgentExecutionBlock(baseConfig(), { ok: false, reason: "manifest-missing" })
-        ?.transient
-    ).toBe(true)
-    for (const reason of ["no-host", "unsupported", "not-granted"] as const) {
+  it("marks a transport block transient for every obstacle a wait can clear", () => {
+    // The verdict describes the SHELL, not the agent: a Host finishing its
+    // handshake, a socket reconnecting, or an Agent Control grant arriving all
+    // turn the same configuration runnable without anyone touching it. So no
+    // caller may persist a decision from one.
+    //
+    // `manifest-missing` alone used to carry the marker, and the reason a
+    // companion reports before its boot provider has run is `no-host` (the
+    // runtime snapshot starts empty, and the provider effect runs after its
+    // children commit). The composer chip read that as settled and rewrote the
+    // user's chosen agent back to the built-in lane on every reload.
+    for (const reason of ["manifest-missing", "no-host", "not-granted"] as const) {
       expect(getExternalAgentExecutionBlock(baseConfig(), { ok: false, reason })?.transient).toBe(
-        false
+        true
       )
     }
+  })
+
+  it("leaves a Host that has said no as a settled verdict", () => {
+    // `unsupported` is the answer of a Host that finished its handshake and
+    // does not start agent processes. Waiting never clears it, and a block
+    // nothing can settle leaves the chip stuck with no way back.
+    expect(
+      getExternalAgentExecutionBlock(baseConfig(), { ok: false, reason: "unsupported" })?.transient
+    ).toBe(false)
   })
 
   it("returns null for a healthy executable acp config in Tauri runtime", () => {

@@ -540,6 +540,31 @@ function transportBlockReason(reach: ProcessPlaneAvailability): string {
   }
 }
 
+/**
+ * Whether a `transport_blocked` verdict may be forgotten rather than persisted.
+ *
+ * These blocks are facts about the shell, not about the agent, so almost all of
+ * them are self-correcting: a Host finishes handshaking, a socket reconnects, a
+ * device is granted Agent Control. Rendering one is fine, persisting a decision
+ * from it is not, which is the same rule `withoutEnvironmentScopedVerdicts`
+ * applies to a stored one.
+ *
+ * It used to be transient only for `manifest-missing`, and the reason every
+ * OTHER pre-handshake frame reports is `no-host`: the runtime snapshot starts
+ * empty and is filled by a boot provider whose effect runs AFTER its
+ * children's. So on every reload of a companion shell the composer's runtime
+ * chip saw a settled block, rewrote the user's chosen external agent back to
+ * the built-in lane, and persisted it. The lane could not survive a refresh.
+ *
+ * `unsupported` is the one that stays settled. The paired Host has finished
+ * saying what it can do, and the answer was no. Waiting does not change that,
+ * so treating it as transient would leave the chip blocked with no way back
+ * except an edit the user has no reason to know they need.
+ */
+function isTransientReachBlock(reach: ProcessPlaneAvailability): boolean {
+  return reach.ok || reach.reason !== "unsupported"
+}
+
 export function isTransportSupportedOnCurrentPlatform(
   transport: ExternalAgentTransport,
   runtimeIsTauri: ExternalAgentRuntimeReach = defaultReach()
@@ -592,10 +617,9 @@ export function getExternalAgentExecutionBlock(
     return {
       code: "transport_blocked",
       reason: transportBlockReason(runtimeReach),
-      // A Host mid-handshake becomes a Host that can spawn moments later. Same
-      // reason a plugin-contributed protocol is transient: rendering the block
-      // is fine and self-correcting, persisting a decision from it is not.
-      transient: runtimeReach.ok ? undefined : runtimeReach.reason === "manifest-missing",
+      // Transient for every reason a wait can settle, and only those
+      // (`isTransientReachBlock`).
+      transient: isTransientReachBlock(runtimeReach),
     }
   }
   // An OpenCode config without an explicit endpoint auto-spawns `opencode
@@ -612,6 +636,9 @@ export function getExternalAgentExecutionBlock(
       code: "transport_blocked",
       reason:
         "Auto-spawning an OpenCode server requires the desktop (Tauri) runtime; configure a server endpoint instead.",
+      // Same environment scope as the transport gate above, so it follows the
+      // same rule about what may be persisted from it.
+      transient: isTransientReachBlock(runtimeReach),
     }
   }
   if (config.protocol === "opencode-v2" && !runtimeSupportsExternalAgents) {
@@ -619,6 +646,7 @@ export function getExternalAgentExecutionBlock(
       code: "transport_blocked",
       reason:
         "The legacy OpenCode V2 preview contract is documented-only and incompatible with current OpenCode V2 builds. Use stable OpenCode HTTP/SSE or ACP.",
+      transient: isTransientReachBlock(runtimeReach),
     }
   }
   const ecosystemReadiness = getExternalAgentEcosystemReadiness(

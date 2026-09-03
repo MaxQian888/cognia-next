@@ -29,6 +29,41 @@ describe("resolveEffortSurface", () => {
     expect(surface.modelId).toBeUndefined()
   })
 
+  it("offers the external agent's published ladder over the generic one", () => {
+    // The agent answered, so the guess is no longer the best available answer:
+    // Pi honours `max` on the model this conversation picked.
+    const surface = resolveEffortSurface({
+      runtime: "external",
+      externalLevels: ["off", "low", "medium", "high", "xhigh", "max"],
+    })
+
+    expect(surface.external).toBe(true)
+    expect(surface.levels).toContain("max")
+    expect(surface.levels).not.toContain("ultracode")
+  })
+
+  it("keeps the generic external ladder until the agent has answered", () => {
+    // An empty list is "not asked yet", not "this agent offers nothing".
+    const asked = resolveEffortSurface({ runtime: "external", externalLevels: [] })
+    const unasked = resolveEffortSurface({ runtime: "external" })
+
+    expect(asked.levels).toEqual(unasked.levels)
+    expect(asked.levels).not.toContain("max")
+  })
+
+  it("ignores a published ladder on the built-in rail", () => {
+    // The field only describes an external agent. Letting it widen the built-in
+    // surface would offer tiers the session's own model rejects.
+    const surface = resolveEffortSurface({
+      runtime: "claude-sdk",
+      sessionModel: FALLBACK_MODEL,
+      sessionProvider: FALLBACK_PROVIDER,
+      externalLevels: ["max"],
+    })
+
+    expect(surface.external).toBe(false)
+  })
+
   it("prefers the session's own model and provider over the app defaults", () => {
     const surface = resolveEffortSurface({
       runtime: "claude-sdk",

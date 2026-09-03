@@ -68,6 +68,68 @@ export function externalAgentIdFromProviderId(providerId: string | undefined): s
   }
 }
 
+/**
+ * What an agent offers on its THINKING axis, plus how a choice reaches it.
+ *
+ * Separate from the model surface because the two answer different questions
+ * and an agent can publish either without the other, but resolved from the SAME
+ * `session/config_options` reply: ACP's `thought_level` category is where both
+ * Pi (`get_available_thinking_levels`) and the Codex app-server client
+ * (`supportedReasoningEfforts`) put theirs.
+ *
+ * `levels` is the agent's own vocabulary, verbatim and in its own order. It is
+ * NOT the app's `EffortTier` union: Pi publishes `off` and `minimal` alongside
+ * the tiers the app can persist, and folding here would hide from the caller
+ * that the agent said so. `lib/ai/thinking-level.ts` does the projection.
+ */
+export interface ExternalAgentThinkingSurface {
+  /** Read-only because {@link EMPTY_THINKING_SURFACE} is a frozen singleton. */
+  levels: readonly string[]
+  currentLevel: string | null
+  /**
+   * `config-option` carries the option id a write must name. `none` means the
+   * agent published no thinking control, which a caller renders as absent
+   * rather than as broken.
+   */
+  write: { kind: "config-option"; optionId: string } | { kind: "none" }
+}
+
+export const EMPTY_THINKING_SURFACE: ExternalAgentThinkingSurface = Object.freeze({
+  levels: Object.freeze([]),
+  currentLevel: null,
+  write: Object.freeze({ kind: "none" }) as { kind: "none" },
+})
+
+/** The one select option an agent uses for thinking depth, if it declares one. */
+export function findThinkingConfigOption(
+  configOptions: readonly AcpConfigOption[] | undefined
+): Extract<AcpConfigOption, { type: "select" }> | undefined {
+  return configOptions?.find(
+    (option): option is Extract<AcpConfigOption, { type: "select" }> =>
+      option.category === "thought_level" && option.type === "select"
+  )
+}
+
+/**
+ * Resolve what a depth control should offer and where a selection should go.
+ *
+ * A declared-but-empty option still reports the agent's current level, for the
+ * same reason the model resolver keeps one: dropping it would make the control
+ * show the wrong active row.
+ */
+export function resolveExternalAgentThinking(input: {
+  configOptions?: readonly AcpConfigOption[]
+}): ExternalAgentThinkingSurface {
+  const option = findThinkingConfigOption(input.configOptions)
+  if (!option) return EMPTY_THINKING_SURFACE
+  const values = flattenValues(option.options)
+  return {
+    levels: values.map((value) => value.value),
+    currentLevel: option.currentValue || null,
+    write: values.length > 0 ? { kind: "config-option", optionId: option.id } : { kind: "none" },
+  }
+}
+
 /** One selectable model, flattened out of whichever shape carried it. */
 export interface ExternalAgentModelChoice {
   modelId: string

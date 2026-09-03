@@ -24,7 +24,12 @@ import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { detectHostProfile } from "@/lib/platform/capabilities"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
-import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
+import {
+  resolveAccountEnv,
+  resolveAccountEnvForExternalRuntime,
+  resolveAccountId,
+  resolveProxyEnv,
+} from "@/lib/claude/env-resolver"
 import { resolveSandboxEnabled, resolveSandboxSessionBinding } from "@/lib/sandbox/binding"
 import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
@@ -1406,7 +1411,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     proxyEnv = {}
   } else {
     ;[accountEnv, proxyEnv] = await Promise.all([
-      resolveAccountEnv(providerId, accountId),
+      // An external-runtime turn authenticates inside the agent process, so a
+      // missing subscription account must not refuse it. The lane is known
+      // here and only here: the send path picks it several hundred lines
+      // later, by which point this resolver has already thrown.
+      ctx.externalRuntimeId
+        ? resolveAccountEnvForExternalRuntime(providerId, accountId)
+        : resolveAccountEnv(providerId, accountId),
       resolveProxyEnv(session?.id ?? null),
     ])
   }

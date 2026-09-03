@@ -114,11 +114,24 @@ jest.mock("@/components/icons/brand-icon", () => ({
 //
 // `transient` mirrors the real classifier: a namespaced `pluginId:protocol`
 // adapter may still register this session, so a block on it is not settled.
+//
+// A `stdio` transport models the OTHER transient class: this shell cannot
+// reach a process plane right now (no Host paired yet, handshake unfinished,
+// socket dropped, Agent Control not granted). The real classifier marks every
+// one of those transient because they describe the shell rather than the agent.
 const mockBlock = (agent: {
   enabled?: boolean
   protocol?: string
+  transport?: string
 }): { code: string; reason: string; transient?: boolean } | null => {
   if (agent.enabled === false) return { code: "agent_disabled", reason: "Agent is disabled." }
+  if (agent.transport === "stdio") {
+    return {
+      code: "transport_blocked",
+      reason: "This device has not finished pairing with a Host.",
+      transient: true,
+    }
+  }
   if (typeof agent.protocol === "string" && agent.protocol.includes(":")) {
     return {
       code: "protocol_unsupported",
@@ -129,8 +142,11 @@ const mockBlock = (agent: {
   return null
 }
 jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
-  getExternalAgentExecutionBlock: (agent: { enabled?: boolean; protocol?: string }) =>
-    mockBlock(agent),
+  getExternalAgentExecutionBlock: (agent: {
+    enabled?: boolean
+    protocol?: string
+    transport?: string
+  }) => mockBlock(agent),
 }))
 jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({
   onProtocolAdapterRegistryChange: () => () => {},
@@ -185,7 +201,10 @@ jest.mock("@/stores/agent/agent-runtime-store", () => ({
 const mockSetExternalEnabled = jest.fn()
 const externalAgentState = {
   enabled: true,
-  agents: {} as Record<string, { id: string; name: string; enabled: boolean; protocol: string }>,
+  agents: {} as Record<
+    string,
+    { id: string; name: string; enabled: boolean; protocol: string; transport?: string }
+  >,
   connectionStatus: {} as Record<string, string>,
   agentValidity: {} as Record<string, Record<string, unknown>>,
   setEnabled: mockSetExternalEnabled,
@@ -504,6 +523,18 @@ describe("AgentRuntimeSelector — invalid selection repair", () => {
   it("leaves a valid external selection alone", () => {
     runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
     externalAgentState.agents = { a1: agent("a1", "Codex") }
+    render(<AgentRuntimeSelector />)
+    expect(fellBackToBuiltin()).toBe(false)
+  })
+
+  it("keeps the selection while this shell cannot reach a process plane yet", () => {
+    // The reload defect. A companion resolves its Host asynchronously, and the
+    // boot provider that writes the runtime snapshot runs its effect AFTER the
+    // composer's, so the first frame of every reload reports "no host". That
+    // used to read as a settled block, and the chip persisted the built-in lane
+    // over the user's chosen agent before the Host had even answered.
+    runtimeState.runtimeRef = { kind: "external", agentId: "a1" }
+    externalAgentState.agents = { a1: { ...agent("a1", "Pi"), transport: "stdio" } }
     render(<AgentRuntimeSelector />)
     expect(fellBackToBuiltin()).toBe(false)
   })

@@ -181,6 +181,11 @@ function appLadderFromTiers(tiers: readonly ReasoningTier[]): EffortTier[] {
 /**
  * The ladder to offer while an EXTERNAL agent runtime drives the turn.
  *
+ * `published` is the agent's OWN level vocabulary, read from the `thought_level`
+ * config option it declares (`resolveExternalAgentThinking`). When the agent
+ * said, the agent decides. Everything below describes the fallback for an agent
+ * that has not answered yet, or has no thinking control at all.
+ *
  * The other entry point keys off a provider + model, which is the wrong pair
  * here: an external agent (Codex, Gemini CLI, …) brings its own model, and the
  * renderer never learns which one — the composer's model chip describes the
@@ -200,8 +205,43 @@ function appLadderFromTiers(tiers: readonly ReasoningTier[]): EffortTier[] {
  * Each adapter still clamps what it receives onto its own published ladder, so
  * offering the intersection is safe rather than merely conservative.
  */
-export function externalAgentThinkingLevels(): EffortTier[] {
-  return appLadderFromTiers(tiersForSurface("generic-effort"))
+export function externalAgentThinkingLevels(published?: readonly string[]): EffortTier[] {
+  const declared = projectAgentLevels(published)
+  return declared.length > 0 ? declared : appLadderFromTiers(tiersForSurface("generic-effort"))
+}
+
+/**
+ * Project an agent's OWN level vocabulary onto the app ladder.
+ *
+ * An agent that publishes a `thought_level` config option has already answered
+ * the question the generic fallback was guessing at, and it answers it per
+ * model: Pi reports `off | minimal | low | medium | high | xhigh | max` for one
+ * model and a shorter list for another, and clamps anything outside it to
+ * `off` while reporting success. Offering the generic three therefore lost
+ * every tier above `high` on an agent that honours them, which is the whole
+ * point of picking that model.
+ *
+ * Two values are dropped rather than mapped, for the same reasons
+ * {@link appLadderFromTiers} drops them. `off` is not a depth (it is the app's
+ * separate "leave the model alone" choice and is always reachable), and
+ * `minimal` has no representation in `SendOptions["effort"]`, so the app could
+ * neither persist nor forward it.
+ *
+ * `ultracode` is never appended, even when the agent publishes `xhigh`: the
+ * tier IS `xhigh` plus Cognia's dynamic-workflow tool suite, and that suite is
+ * injected by the built-in runtime's own send path. An external agent brings
+ * its own tools, so the name would promise something the turn cannot carry.
+ *
+ * Re-ordered into the app's canonical ascending order rather than trusted as
+ * published: the slider indexes into this list, and an agent that listed its
+ * levels deepest-first would invert the whole control.
+ */
+function projectAgentLevels(published: readonly string[] | undefined): EffortTier[] {
+  if (!published || published.length === 0) return []
+  const declared = new Set(published)
+  return EFFORT_SLIDER_LEVELS.filter(
+    (level): level is EffortTier => level !== "ultracode" && declared.has(level)
+  )
 }
 
 /**

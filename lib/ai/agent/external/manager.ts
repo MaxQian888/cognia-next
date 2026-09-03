@@ -69,13 +69,20 @@ import { OpenCodeClientAdapter } from "./opencode-client"
 import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
 import { A2aClientAdapter } from "./a2a-client"
 import { DshSdkClientAdapter } from "./dsh-sdk-client"
-import { PiRpcClientAdapter } from "./pi-rpc-client"
+import { clampThinkingLevel, PiRpcClientAdapter } from "./pi-rpc-client"
 import {
   catalogModelSurface,
+  EMPTY_THINKING_SURFACE,
   resolveExternalAgentModels,
+  resolveExternalAgentThinking,
   type ExternalAgentModelSurface,
 } from "./session-models"
-import { forgetAgentModelSurface } from "./model-surface-cache"
+import {
+  cachedAgentModelSurface,
+  forgetAgentModelSurface,
+  loadAgentModelSurface,
+  type ExternalAgentSessionSurface,
+} from "./model-surface-cache"
 import { createDshRuntimeTransport, resolveDshLaunchFromConfig } from "./dsh-runtime-transport"
 import { runsExternalAgentProcessesLocally } from "./agent-transport"
 import { acpToolsToAgentTools } from "./translators"
@@ -545,7 +552,7 @@ export class ExternalAgentManager {
   async fetchSessionModelSurface(
     agentId: string,
     sessionId: string
-  ): Promise<AgentCapabilityResult<ExternalAgentModelSurface>> {
+  ): Promise<AgentCapabilityResult<ExternalAgentSessionSurface>> {
     const adapter = this.adapters.get(agentId)
     if (!adapter) return { status: "unsupported" }
     if (!adapter.getConfigOptions && !adapter.getSessionModels) return { status: "unsupported" }
@@ -566,10 +573,17 @@ export class ExternalAgentManager {
       }
       return {
         status: "ok",
-        data: resolveExternalAgentModels({
-          configOptions,
-          sessionModels: sessionModels ?? null,
-        }),
+        data: {
+          models: resolveExternalAgentModels({
+            configOptions,
+            sessionModels: sessionModels ?? null,
+          }),
+          // The SAME reply carries the agent's thinking ladder under the ACP
+          // `thought_level` category. Resolving it here rather than in a second
+          // call is what lets the composer's effort chip offer Pi's `max`
+          // without a round trip of its own.
+          thinking: resolveExternalAgentThinking({ configOptions }),
+        },
       }
     } catch (error) {
       return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }
@@ -619,7 +633,7 @@ export class ExternalAgentManager {
    */
   async fetchAgentModelCatalog(
     agentId: string
-  ): Promise<AgentCapabilityResult<ExternalAgentModelSurface>> {
+  ): Promise<AgentCapabilityResult<ExternalAgentSessionSurface>> {
     const pi = this.getPiRpcAdapter(agentId)
     if (!pi || !pi.isConnected()) return { status: "unsupported" }
     try {
@@ -627,7 +641,14 @@ export class ExternalAgentManager {
       if (listing.status !== "ok") {
         return { status: "error", error: new Error("Pi's model listing was unreadable") }
       }
-      return { status: "ok", data: catalogModelSurface(listing.models) }
+      // No session, so no thinking ladder: the levels an agent honours are per
+      // model AND per session, and inventing one from the global vocabulary
+      // would offer tiers that silently collapse to `off`. The effort control
+      // keeps its generic fallback until the first turn opens a session.
+      return {
+        status: "ok",
+        data: { models: catalogModelSurface(listing.models), thinking: EMPTY_THINKING_SURFACE },
+      }
     } catch (error) {
       return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }
     }
@@ -2291,6 +2312,22 @@ export class ExternalAgentManager {
       await this.applyModelToSession(adapter, session, options.model)
     }
 
+    // Strictly after the model, never in parallel with it. The ladder an agent
+    // honours is a property of the model it is currently on — Pi reports seven
+    // levels for one model and three for another, and clamps anything outside
+    // the list to `off` while answering `success: true`. Resolving the ladder
+    // before the model switch lands would fold the level against the OUTGOING
+    // model's list, which is how "max" quietly becomes "off".
+    if (options?.reasoningEffort) {
+      await this.applyThinkingLevelToSession(
+        adapter,
+        session,
+        options.reasoningEffort,
+        instance.config.id,
+        Boolean(options.model)
+      )
+    }
+
     instance.sessions.set(session.id, session)
     return session
   }
@@ -2345,6 +2382,89 @@ export class ExternalAgentManager {
       externalAgentManagerLogger.warn("setSessionModel failed for a reused session", {
         sessionId: session.id,
         model,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * Switch an already-created session onto the requested thinking depth.
+   *
+   * The composer's depth chip reaches Codex through `metadata.reasoningEffort`,
+   * which the Codex app-server client reads. Every other adapter ignores that
+   * channel entirely and takes its depth the way it takes its model: as a
+   * `thought_level` config option written with `setConfigOption`. On Pi — the
+   * one agent that publishes a per-model ladder worth picking from — the chip
+   * was therefore inert, and a conversation ran at whatever depth the agent
+   * happened to boot with.
+   *
+   * Folds rather than forwards. Pi accepts an unsupported level, answers
+   * `success: true`, and silently clamps to `off` (verified against 0.84.1), so
+   * an unvalidated write turns "think hard" into "don't think" with no error
+   * anywhere. {@link clampThinkingLevel} steps DOWN to the nearest published
+   * level, because overspending a reasoning budget is worse than underspending
+   * one.
+   *
+   * Best-effort, like {@link applyModelToSession}: an agent with no depth
+   * concept has nothing to set, and a refused level should not kill a turn that
+   * still runs fine at the session's current depth.
+   */
+  private async applyThinkingLevelToSession(
+    adapter: ProtocolAdapter,
+    session: ExternalAgentSession,
+    level: string,
+    agentId: string,
+    modelJustChanged: boolean
+  ): Promise<void> {
+    if (!adapter.setConfigOption) return
+    // Through the shared cache, not an RPC of its own. The composer's model and
+    // effort chips already ask for this exact reply once per (agent, session)
+    // and hold it, so re-reading it here bought a second `session/config_options`
+    // round trip on EVERY turn, including the many where nothing needs writing.
+    //
+    // A model write is the one thing that invalidates it, because the ladder an
+    // agent honours is a property of the model it is currently on. That case
+    // refreshes, which also re-primes the cache the chips read.
+    const cached = modelJustChanged ? null : cachedAgentModelSurface(agentId, session.id)
+    const surface =
+      cached?.status === "ready"
+        ? cached.thinking
+        : (await loadAgentModelSurface(agentId, session.id, { refresh: modelJustChanged })).thinking
+    if (surface.write.kind !== "config-option") return
+    const resolved = clampThinkingLevel(level, surface.levels)
+    // Nothing publishable matched. Leaving the session alone is the honest
+    // outcome: writing the app's own vocabulary at an agent that did not list it
+    // is the silent-clamp bug this method exists to prevent. Said out loud
+    // rather than swallowed, because the composer's chip still reads the level
+    // the user picked and nothing else will mention the difference.
+    if (!resolved) {
+      externalAgentManagerLogger.warn("thinking level dropped: agent published no match", {
+        sessionId: session.id,
+        requested: level,
+        published: surface.levels,
+      })
+      return
+    }
+    if (resolved !== level) {
+      externalAgentManagerLogger.info("thinking level folded onto the agent's ladder", {
+        sessionId: session.id,
+        requested: level,
+        resolved,
+        published: surface.levels,
+      })
+    }
+    if (surface.currentLevel === resolved) {
+      session.metadata = { ...(session.metadata ?? {}), thinkingLevel: resolved }
+      return
+    }
+    try {
+      await adapter.setConfigOption(session.id, surface.write.optionId, resolved)
+      session.metadata = { ...(session.metadata ?? {}), thinkingLevel: resolved }
+    } catch (error) {
+      externalAgentManagerLogger.warn("setConfigOption failed for thinking level", {
+        sessionId: session.id,
+        requested: level,
+        resolved,
         error: error instanceof Error ? error.message : String(error),
       })
     }

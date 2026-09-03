@@ -8,10 +8,12 @@ import {
   agentWriteTextFile,
   createCliAgentHost,
   getAcpHostCapabilities,
+  runsExternalAgentProcessesLocally,
 } from "./host-branch"
 
 describe("CLI external-agent host branch", () => {
   it("reports the CLI host and its durable elicitation overlay", () => {
+    expect(runsExternalAgentProcessesLocally()).toBe(true)
     expect(getAcpHostCapabilities()).toMatchObject({
       kind: "cli",
       terminal: process.platform !== "win32",

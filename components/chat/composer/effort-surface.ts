@@ -12,6 +12,7 @@
 
 import { useSettingsStore } from "@/stores/settings"
 import { useRuntimeRefForSession } from "@/stores/agent/agent-runtime-store"
+import { useExternalAgentModels } from "@/hooks/agent/use-external-agent-models"
 import { resolveEffortSurface, type EffortSurface } from "@/lib/ai/effort-surface"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { AgentRuntime } from "@/stores/agent/agent-runtime-store"
@@ -35,6 +36,11 @@ export function useEffortSurface(session: ChatSession | null): EffortSurface {
   // conversation must not decide whether this one shows a thinking dial.
   const runtimeRef = useRuntimeRefForSession(session?.id)
   const runtime: AgentRuntime = runtimeRef.kind === "builtin" ? "claude-sdk" : "external"
+  // The agent's OWN ladder, from the `thought_level` option it publishes. Same
+  // cached round trip the model chip already makes for this conversation, so
+  // asking costs nothing extra, and it is what lets Pi's `max` appear instead
+  // of the generic three tiers every external agent used to be given.
+  const agentThinking = useExternalAgentModels(session?.id).thinking
 
   return resolveEffortSurface({
     runtime,
@@ -43,5 +49,6 @@ export function useEffortSurface(session: ChatSession | null): EffortSurface {
     defaultModel,
     defaultProvider,
     hiddenTiers,
+    externalLevels: agentThinking.levels,
   })
 }

@@ -76,6 +76,32 @@
   },
   "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
   "nav": {
+    "groups": {
+      "behaviorGroup": "Behavior",
+      "runtimeGroup": "Runtime"
+    },
+    "items": {
+      "a2ui": {
+        "description": "Bridge tools for agent-driven mini-apps",
+        "label": "A2UI bridge"
+      },
+      "defaults": {
+        "description": "Model, permissions, prompts, and response behavior",
+        "label": "Defaults"
+      },
+      "permissions": {
+        "description": "Tool access, approval rules, and automatic decisions",
+        "label": "Permissions & tools"
+      },
+      "sessions": {
+        "description": "Stored chats and native SDK sessions",
+        "label": "Sessions"
+      },
+      "sidecar": {
+        "description": "Status, capabilities, and SDK diagnostics",
+        "label": "Sidecar"
+      }
+    },
     "mobileTrigger": "Sections",
     "title": "Agent runtime settings"
   },

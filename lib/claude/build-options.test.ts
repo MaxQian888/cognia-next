@@ -130,6 +130,22 @@ jest.mock("@/lib/claude/env-resolver", () => ({
   resolveAccountId: jest.fn(),
   resolveAccountEnv: jest.fn(),
   resolveProxyEnv: jest.fn(),
+  // The external lane's best-effort wrapper. Delegates to the same mock so a
+  // test that stubs `resolveAccountEnv` still describes both lanes, while an
+  // account resolution that REJECTS resolves empty here — which is the whole
+  // point of the wrapper and what the external-runtime cases below rely on.
+  resolveAccountEnvForExternalRuntime: jest.fn(
+    async (providerId: string, accountId: string | null) => {
+      const { resolveAccountEnv } = jest.requireMock("@/lib/claude/env-resolver") as {
+        resolveAccountEnv: jest.Mock
+      }
+      try {
+        return (await resolveAccountEnv(providerId, accountId)) ?? {}
+      } catch {
+        return {}
+      }
+    }
+  ),
 }))
 
 const mockGetAgentEnvSecret = jest.fn()
