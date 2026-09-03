@@ -4330,14 +4330,29 @@ fn resolve_pull_request_base(
     Ok(resolved_sha)
 }
 
+/// Can this root back a `git worktree add`?
+///
+/// Discovery and a workdir match are not enough. A repository whose HEAD is
+/// unborn has no commit to detach from, and `git worktree add --detach <path>
+/// HEAD` fails with `fatal: invalid reference: HEAD`. That is not a rare state:
+/// it is exactly what `ensure-default-workspace.ts` produces on a fresh
+/// install, which `git init`s the workspace it just created and never commits
+/// to it. The first chat turn then asked for a managed worktree over an empty
+/// repository and the whole turn was refused.
+///
+/// Answering `false` there routes the same directory to the Shadow backend,
+/// which is what it would have received had `git init` never run, and it
+/// upgrades itself: the moment the repository has a commit this answers `true`
+/// again and later runs get real worktrees.
 fn is_git_root(workspace_root: &Path) -> bool {
     let Ok(repository) = git2::Repository::discover(workspace_root) else {
         return false;
     };
-    repository
+    let workdir_matches = repository
         .workdir()
         .and_then(|path| path.canonicalize().ok())
-        .is_some_and(|path| path == workspace_root)
+        .is_some_and(|path| path == workspace_root);
+    workdir_matches && repository.head().is_ok()
 }
 
 fn clear_worktree_contents(execution_root: &Path) -> Result<(), String> {
@@ -5428,6 +5443,29 @@ mod tests {
         repository
             .commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
             .unwrap();
+    }
+
+    /// A freshly `git init`ed directory with no commit: exactly what
+    /// `ensure-default-workspace.ts` leaves behind on a first run.
+    #[test]
+    fn an_uncommitted_repository_is_not_worktree_capable() {
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        let root = repository.path().canonicalize().unwrap();
+
+        // `git worktree add --detach <path> HEAD` answers
+        // `fatal: invalid reference: HEAD` here, so claiming Git isolation
+        // refuses the run instead of falling back to the Shadow backend.
+        assert!(!is_git_root(&root));
+
+        seed_git_repository(&root);
+        assert!(is_git_root(&root));
+    }
+
+    #[test]
+    fn a_plain_directory_is_not_worktree_capable_either() {
+        let plain = TempDir::new().unwrap();
+        assert!(!is_git_root(&plain.path().canonicalize().unwrap()));
     }
 
     fn provisioning_repository() -> TempDir {
