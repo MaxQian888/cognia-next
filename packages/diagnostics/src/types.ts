@@ -310,6 +310,7 @@ export type DiagnosticCode =
   | "noSessionOpen"
   | "promptBlockedByPlugin"
   | "externalAgentNotSelected"
+  | "externalAgentNotReady"
   | "routingNoCandidates"
   // --- Cognia internals ---
   | "settingsLoadFailed"

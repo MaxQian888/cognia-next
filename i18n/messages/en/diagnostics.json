@@ -153,6 +153,10 @@
       "hint": "No external agent is selected for this session — pick one, or switch back to the built-in agent.",
       "label": "No agent selected"
     },
+    "externalAgentNotReady": {
+      "hint": "The agent for this session could not be started — open its settings to see why, or switch runtime.",
+      "label": "Agent could not start"
+    },
     "fallbackToBuiltin": {
       "hint": "The external agent couldn't take this turn, so it ran on the built-in agent instead.",
       "label": "Ran on the built-in agent"

@@ -458,6 +458,16 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "open-settings", section: "external-bridge" }],
     icon: "plug",
   },
+  // Retryable, unlike its neighbour: the agent IS selected, and the reason it
+  // could not start (a binary not on PATH yet, a host still handshaking) is
+  // usually gone by the time the user reads this.
+  externalAgentNotReady: {
+    severity: "error",
+    retryable: true,
+    persistent: false,
+    actions: [{ kind: "retry" }, { kind: "open-settings", section: "external-bridge" }],
+    icon: "plug",
+  },
 
   // ------------------------------------------------------- route boundaries
   chunkLoad: {

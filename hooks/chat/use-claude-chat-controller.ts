@@ -1924,6 +1924,36 @@ export function useClaudeChat() {
         // `sessionExternalLane`). Cleared when the turn settles, in
         // `maybeDrainSteer`.
         setSessionExternalLane(sessionId, extAgentId)
+        // A session remembers its lane across reloads; the manager does not.
+        // Registering the config with the manager happens when the user picks
+        // the agent, so a restored session sent without touching the picker
+        // reached `ExternalAgentManager.execute` with an id it had never been
+        // given and died on the manager-internal "Agent not found: <id>".
+        //
+        // Local lanes only. A host lane names a configuration the Host owns and
+        // runs; there is no local adapter to register, and asking the local
+        // store for it would answer `unknown-agent` for a perfectly good agent.
+        if (turnRuntimeRef?.kind === "external") {
+          const { ensureExternalAgentReady } =
+            await import("@/lib/agent/ensure-external-agent-ready")
+          const readiness = await ensureExternalAgentReady(extAgentId)
+          if (!readiness.ok) {
+            store.getState().replaceSessionMessages(sessionId, previousMessages)
+            await refuseTurn({
+              errorCode: "external_agent_unavailable",
+              finishRun: true,
+              diagnostic: createDiagnostic("externalAgentNotReady", {
+                source: "external-agent",
+                message:
+                  readiness.reason === "unknown-agent"
+                    ? undefined
+                    : (readiness as { detail: string }).detail,
+                meta: { sessionId, agentId: extAgentId },
+              }),
+            })
+            return
+          }
+        }
         // The text sent to the external agent: the PII-filtered prompt when
         // delegated by rule, else the raw composer text.
         const externalSendText = delegation ? delegation.filteredPrompt : providerText
