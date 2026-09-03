@@ -522,7 +522,11 @@ export function SourceControlPanel() {
         actions={actions}
       />
       <Sheet open={blameTarget !== null} onOpenChange={(open) => !open && setBlameTarget(null)}>
-        <SheetContent side="right" className="flex w-[40rem] flex-col" data-testid="blame-sheet">
+        <SheetContent
+          side="right"
+          className="flex w-full flex-col sm:max-w-2xl"
+          data-testid="blame-sheet"
+        >
           <SheetHeader>
             <SheetTitle className="truncate">
               {t("blame.title", { path: blameTarget?.path ?? "" })}

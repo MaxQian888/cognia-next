@@ -84,7 +84,7 @@ export function RemotePanel({ open, onOpenChange, rootDir, actions }: RemotePane
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-96" data-testid="remote-panel">
+      <SheetContent side="right" className="w-full sm:max-w-md" data-testid="remote-panel">
         <SheetHeader>
           <SheetTitle>{t("remotes.title")}</SheetTitle>
           <SheetDescription>{t("remotes.description")}</SheetDescription>

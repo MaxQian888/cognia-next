@@ -69,7 +69,7 @@ export function CompareRefsSheet({ open, onOpenChange, rootDir }: CompareRefsShe
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-[44rem] flex-col"
+        className="flex w-full flex-col sm:max-w-3xl"
         data-testid="compare-refs-sheet"
       >
         <SheetHeader>

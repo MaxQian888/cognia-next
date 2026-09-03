@@ -116,7 +116,11 @@ export function TimelineView({ open, onOpenChange, rootDir, filePath }: Timeline
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-[28rem] flex-col" data-testid="timeline-view">
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col sm:max-w-md"
+        data-testid="timeline-view"
+      >
         <SheetHeader>
           <div className="flex items-center justify-between gap-2">
             <SheetTitle>{t("timeline.title")}</SheetTitle>

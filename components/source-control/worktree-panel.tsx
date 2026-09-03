@@ -31,7 +31,7 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col sm:w-[30rem]"
+        className="flex w-full flex-col sm:max-w-lg"
         data-testid="worktree-panel"
       >
         <SheetHeader>

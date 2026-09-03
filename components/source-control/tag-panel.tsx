@@ -73,7 +73,7 @@ export function TagPanel({ open, onOpenChange, rootDir, actions }: TagPanelProps
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-96" data-testid="tag-panel">
+      <SheetContent side="right" className="w-full sm:max-w-md" data-testid="tag-panel">
         <SheetHeader>
           <SheetTitle>{t("tags.title")}</SheetTitle>
           <SheetDescription>{t("tags.description")}</SheetDescription>

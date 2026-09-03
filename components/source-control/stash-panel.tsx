@@ -50,7 +50,7 @@ export function StashPanel({ open, onOpenChange, stashes, actions }: StashPanelP
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-96" data-testid="stash-panel">
+      <SheetContent side="right" className="w-full sm:max-w-md" data-testid="stash-panel">
         <SheetHeader>
           <SheetTitle>{t("stash.title")}</SheetTitle>
           <SheetDescription>{t("stash.description")}</SheetDescription>
