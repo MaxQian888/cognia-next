@@ -8,6 +8,7 @@ import { registerGlobalSearchProvider } from "../registry"
 import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
 import { devicesProvider } from "./devices"
+import { gitBranchesProvider, gitWorktreesProvider } from "./git"
 import { sitesProvider } from "./sites"
 import { squadsProvider } from "./squads"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
@@ -64,6 +65,11 @@ export function builtinGlobalSearchProviders(
     // Not `teamsProvider` above, which finds a guild of Characters. A Squad is
     // an `AgentTeam`, and typing its name found nothing before this.
     squadsProvider,
+    // Scoped to whichever repository the panel is bound to, and empty on a
+    // client that is not offered Source Control at all. Both return [] rather
+    // than fetching, so the per-keystroke cost is a store read.
+    gitBranchesProvider,
+    gitWorktreesProvider,
   ]
 }
 

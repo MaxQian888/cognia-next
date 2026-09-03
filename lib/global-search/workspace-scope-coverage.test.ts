@@ -70,6 +70,17 @@ const EXPECTED: Record<string, { scoping: Scoping; why: string }> = {
     why: "A Squad belongs to a workspace: `createTeam` stamps the active project and the store purges per project. Out of scope it is noise, not a preference. Templates carry no projectId and `byProjectId` treats that as everywhere.",
   },
   "builtin.devices": { scoping: "global", why: "The device fleet is not per-workspace." },
+  "builtin.git-branches": {
+    scoping: "global",
+    why:
+      "The git store holds exactly one repository: the one `resolvePanelRoot` already bound to " +
+      "the active workspace or conversation. The list is therefore already scoped upstream, and " +
+      "a second workspace filter could only ever empty it.",
+  },
+  "builtin.git-worktrees": {
+    scoping: "global",
+    why: "Same single-repository store as the branches provider. Already scoped by the binding.",
+  },
   "builtin.sites": {
     scoping: "global",
     why:

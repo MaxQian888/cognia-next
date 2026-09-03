@@ -19,6 +19,8 @@ import {
   CompassIcon,
   ContactIcon,
   FolderIcon,
+  FolderGitIcon,
+  GitBranchIcon,
   GlobeIcon,
   InboxIcon,
   LayoutTemplateIcon,
@@ -71,6 +73,10 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   issue: CircleDotIcon,
   // Same glyph the `/sites` rail and the sites provider already use.
   site: GlobeIcon,
+  // The same two glyphs the branch picker and the worktree list use, so a
+  // palette row and the panel it opens read as the same object.
+  "git-branch": GitBranchIcon,
+  "git-worktree": FolderGitIcon,
 }
 
 export function kindIcon(kind: GlobalSearchKind): LucideIcon {

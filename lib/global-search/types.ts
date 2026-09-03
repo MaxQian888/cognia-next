@@ -55,6 +55,10 @@ export type GlobalSearchKind =
   | "device"
   /** A Cognia Site — a deployable project on the `/sites` console. */
   | "site"
+  /** A git branch in the bound repository. */
+  | "git-branch"
+  /** A linked worktree of the bound repository. */
+  | "git-worktree"
 
 /** The scope tabs across the top of the dialog. */
 export type GlobalSearchScope =
@@ -102,6 +106,8 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   issue: ["library"],
   device: ["library"],
   site: ["library"],
+  "git-branch": ["library"],
+  "git-worktree": ["library"],
 }
 
 /**
@@ -138,6 +144,11 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   // After the library definitions it can be handed work from: you reach for a
   // Squad by name much less often than for the workflow or skill it will run.
   squad: 23,
+  // Below the library definitions: a branch is scoped to whichever repository
+  // the panel is bound to right now, so it should not outrank a workspace-wide
+  // asset that matched the same needle.
+  "git-branch": 24,
+  "git-worktree": 25,
 }
 
 /** What the dialog does when an item is chosen. */

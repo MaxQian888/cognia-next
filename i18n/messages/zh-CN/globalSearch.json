@@ -56,6 +56,10 @@
     "syntax": "搜索语法",
     "took": "{ms} 毫秒"
   },
+  "git": {
+    "detached": "游离 HEAD",
+    "inWorktree": "在 {name}"
+  },
   "groups": {
     "messagesInChats": "提到“{query}”的会话"
   },
@@ -68,6 +72,8 @@
     "action": "命令",
     "character": "角色",
     "device": "设备",
+    "git-branch": "分支",
+    "git-worktree": "工作树",
     "inbox-contact": "联系人",
     "inbox-conversation": "收件箱会话",
     "issue": "议题",
@@ -83,6 +89,7 @@
     "settings": "设置",
     "site": "站点",
     "skill": "技能",
+    "squad": "小队",
     "team": "团队",
     "template": "模板",
     "workbench-panel": "工作台面板",

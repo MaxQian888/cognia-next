@@ -6,6 +6,8 @@ import {
   primaryScopeOf,
   type GlobalSearchKind,
 } from "./types"
+import enGlobalSearch from "@/i18n/messages/en/globalSearch.json"
+import zhGlobalSearch from "@/i18n/messages/zh-CN/globalSearch.json"
 
 const KINDS = Object.keys(KIND_SCOPES) as GlobalSearchKind[]
 
@@ -19,6 +21,20 @@ describe("global-search types", () => {
         expect(scope).not.toBe("all")
       }
     }
+  })
+
+  /**
+   * Four surfaces label a row with `t(`kinds.${item.kind}`)`, which is a
+   * DYNAMIC key: `lint:i18n` skips those, and the Jest intl mock answers with
+   * the key, so a kind with no catalogue entry renders as the literal string
+   * "kinds.git-branch" in production and nothing anywhere says so. This is the
+   * only thing that checks.
+   */
+  it("gives every kind a label in both catalogues", () => {
+    const en = (enGlobalSearch as { kinds: Record<string, string> }).kinds
+    const zh = (zhGlobalSearch as { kinds: Record<string, string> }).kinds
+    const missing = KINDS.filter((kind) => !en[kind] || !zh[kind])
+    expect(missing).toEqual([])
   })
 
   it("keeps priorities unique so group order is deterministic", () => {
