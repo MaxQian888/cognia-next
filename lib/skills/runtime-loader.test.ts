@@ -260,7 +260,9 @@ describe("session-scoped skill runtime loader", () => {
 
     const loaded = await loadSkillForSession("diagram-session", diagramSkill.id)
     expect(loaded).toMatchObject({ ok: true, skill: { id: diagramSkill.id } })
-    expect(loaded.ok && loaded.content).toContain("Required output contract")
+    // Renamed when the skill gained its Mermaid route: the HTML document is now
+    // one of two contracts, not "the" output contract.
+    expect(loaded.ok && loaded.content).toContain("The HTML + SVG contract")
     expect(loaded.ok && loaded.resources).toHaveLength(
       (await builtInCatalogResources(diagramSkill.id)).length
     )
