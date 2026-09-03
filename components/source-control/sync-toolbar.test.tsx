@@ -298,4 +298,43 @@ describe("SyncToolbar", () => {
       expect(await screen.findByTestId(id)).toHaveAttribute("data-disabled")
     }
   })
+
+  /**
+   * On a narrow pane this row is four fixed 28px buttons in the header's
+   * `shrink-0` actions slot, so its width comes straight out of the title and
+   * the branch chip. Sync stays on the row because "is there anything to
+   * pull" is the question the header exists to answer.
+   */
+  describe("dense", () => {
+    it("keeps sync on the row and folds the rest away", () => {
+      renderToolbar(makeActions(), { dense: true })
+      expect(screen.getByTestId("sync-sync")).toBeInTheDocument()
+      expect(screen.queryByTestId("sync-pull")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("sync-push")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("sync-publish")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("sync-fetch")).not.toBeInTheDocument()
+    })
+
+    it("offers what it folded away, in the menu", async () => {
+      const user = userEvent.setup()
+      const actions = makeActions()
+      renderToolbar(actions, { dense: true })
+      await user.click(screen.getByTestId("sync-more"))
+      await user.click(await screen.findByTestId("more-pull"))
+      expect(actions.pull).toHaveBeenCalled()
+    })
+
+    // Neither width may offer the same action twice: a menu entry beside its
+    // own button is two controls for one thing.
+    it("does not duplicate the network actions at the wide width", async () => {
+      const user = userEvent.setup()
+      renderToolbar(makeActions(), { dense: false })
+      expect(screen.getByTestId("sync-pull")).toBeInTheDocument()
+      await user.click(screen.getByTestId("sync-more"))
+      await screen.findByTestId("more-refresh")
+      expect(screen.queryByTestId("more-pull")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("more-push")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("more-fetch")).not.toBeInTheDocument()
+    })
+  })
 })

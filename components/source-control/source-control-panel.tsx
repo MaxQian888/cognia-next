@@ -316,6 +316,7 @@ export function SourceControlPanel() {
               actions={actions}
             />
             <SyncToolbar
+              dense={isNarrow}
               actions={actions}
               onOpenStash={() => setStashOpen(true)}
               onOpenTimeline={() => openTimelineFor(null)}

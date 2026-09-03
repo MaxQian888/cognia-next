@@ -66,6 +66,16 @@ interface SyncToolbarProps {
   onOpenWorktrees?: () => void
   onOpenStacks?: () => void
   onRefresh: () => void
+  /**
+   * Fold the network buttons into the overflow menu.
+   *
+   * Set when the PANE is narrow (`SOURCE_CONTROL_DENSE_WIDTH`). This row is
+   * four fixed 28px buttons that never yield, sitting in the header's
+   * `shrink-0` actions slot, so on a narrow pane they take their width out of
+   * the title and the branch chip. Sync stays: "is there anything to pull" is
+   * the question the header exists to answer.
+   */
+  dense?: boolean
 }
 
 interface IconBtnProps {
@@ -108,6 +118,7 @@ export function SyncToolbar({
   onOpenWorktrees = () => {},
   onOpenStacks = () => {},
   onRefresh,
+  dense = false,
 }: SyncToolbarProps) {
   const t = useTranslations("sourceControl")
   const ops = useGitStore((s) => s.ops)
@@ -147,16 +158,18 @@ export function SyncToolbar({
       >
         <RefreshCwIcon className="size-3.5" />
       </IconBtn>
-      <IconBtn
-        label={t("actions.pull")}
-        busy={ops.pull}
-        disabled={!can("git_pull")}
-        onClick={() => void actions.pull({ rebase: prefs.pullRebase })}
-        testId="sync-pull"
-      >
-        <ArrowDownToLineIcon className="size-3.5" />
-      </IconBtn>
-      {needsPublish ? (
+      {!dense && (
+        <IconBtn
+          label={t("actions.pull")}
+          busy={ops.pull}
+          disabled={!can("git_pull")}
+          onClick={() => void actions.pull({ rebase: prefs.pullRebase })}
+          testId="sync-pull"
+        >
+          <ArrowDownToLineIcon className="size-3.5" />
+        </IconBtn>
+      )}
+      {dense ? null : needsPublish ? (
         <IconBtn
           label={t("actions.publish")}
           busy={ops.push}
@@ -177,15 +190,17 @@ export function SyncToolbar({
           <ArrowUpFromLineIcon className="size-3.5" />
         </IconBtn>
       )}
-      <IconBtn
-        label={t("actions.fetch")}
-        busy={ops.fetch}
-        disabled={!can("git_fetch")}
-        onClick={() => void actions.fetch({ prune: prefs.fetchPrune })}
-        testId="sync-fetch"
-      >
-        <ArrowDownToLineIcon className="size-3.5 rotate-180" />
-      </IconBtn>
+      {!dense && (
+        <IconBtn
+          label={t("actions.fetch")}
+          busy={ops.fetch}
+          disabled={!can("git_fetch")}
+          onClick={() => void actions.fetch({ prune: prefs.fetchPrune })}
+          testId="sync-fetch"
+        >
+          <ArrowDownToLineIcon className="size-3.5 rotate-180" />
+        </IconBtn>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -204,6 +219,45 @@ export function SyncToolbar({
             <RefreshCwIcon className="size-3.5" />
             {t("actions.refresh")}
           </DropdownMenuItem>
+          {/*
+            The buttons the dense row gave up. Rendered here only when they are
+            not on the row, so neither width offers the same action twice.
+          */}
+          {dense && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={!can("git_pull")}
+                onSelect={() => void actions.pull({ rebase: prefs.pullRebase })}
+                data-testid="more-pull"
+              >
+                <ArrowDownToLineIcon className="size-3.5" />
+                {t("actions.pull")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!can("git_push")}
+                onSelect={() =>
+                  void (needsPublish ? actions.push({ setUpstream: true }) : actions.push())
+                }
+                data-testid="more-push"
+              >
+                {needsPublish ? (
+                  <UploadCloudIcon className="size-3.5" />
+                ) : (
+                  <ArrowUpFromLineIcon className="size-3.5" />
+                )}
+                {needsPublish ? t("actions.publish") : t("actions.push")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={!can("git_fetch")}
+                onSelect={() => void actions.fetch({ prune: prefs.fetchPrune })}
+                data-testid="more-fetch"
+              >
+                <ArrowDownToLineIcon className="size-3.5 rotate-180" />
+                {t("actions.fetch")}
+              </DropdownMenuItem>
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             disabled={!can("git_pull")}
