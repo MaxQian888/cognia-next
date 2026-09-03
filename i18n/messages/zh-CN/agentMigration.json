@@ -24,6 +24,12 @@
     "previewFailed": "无法生成迁移预览。",
     "scanFailed": "无法检测已安装的编程智能体。"
   },
+  "explain": {
+    "empty": "在这个 agent 上没有找到这类内容。",
+    "error": "这一类读取失败，详情记录在应用日志里。",
+    "shared": "Cognia 已经在读取这个位置，没有需要复制的内容。",
+    "unsupported": "这个 agent 没有以 Cognia 能导入的形式提供该内容。"
+  },
   "import": "导入",
   "preview": {
     "action": "预览",
@@ -67,5 +73,9 @@
     "codex": "Codex",
     "opencode": "OpenCode",
     "pi": "Pi"
+  },
+  "warnings": {
+    "more": "还有 {count} 条",
+    "title": "备注"
   }
 }

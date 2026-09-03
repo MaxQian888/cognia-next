@@ -31,6 +31,11 @@ import {
 import type { SettingsImportMergeStrategy } from "@/lib/settings-import"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { useProjectStore } from "@/stores/project/project-store"
+import { loggers } from "@cognia/logging"
+
+import { ArtifactWarnings } from "./artifact-warnings"
+
+const log = loggers.ui.child("agent-migration")
 
 type Step = "vendor" | "artifacts" | "preview" | "result"
 type MigrationErrorKey = "errors.scanFailed" | "errors.previewFailed" | "errors.importFailed"
@@ -148,6 +153,19 @@ export function AgentMigrationDialog({ trigger }: AgentMigrationDialogProps) {
         setProgress,
         controller.signal
       )
+      // The UI never shows `artifact.error`: it is a raw exception message from
+      // whichever layer threw, and can carry a filesystem path or database
+      // detail. Dropping it entirely made a failed import undiagnosable, so
+      // it goes to the log instead, where /logs can show it on request.
+      for (const [artifact, outcome] of Object.entries(next.artifacts)) {
+        if (outcome?.error) {
+          log.error("migration artifact failed", {
+            vendor: next.vendor,
+            artifact,
+            error: outcome.error,
+          })
+        }
+      }
       setResult(next)
       setStep("result")
     } catch {
@@ -244,17 +262,21 @@ export function AgentMigrationDialog({ trigger }: AgentMigrationDialogProps) {
                 const cell = preview.artifacts[artifact]
                 if (!cell) return null
                 return (
-                  <div
-                    key={artifact}
-                    className="flex items-center justify-between rounded-md border px-3 py-2"
-                  >
-                    <span className="text-sm">{t(`artifacts.names.${artifact}` as never)}</span>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{t(`status.${cell.status}` as never)}</Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {t("preview.items", { count: cell.count })}
-                      </span>
+                  <div key={artifact} className="space-y-2 rounded-md border px-3 py-2">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-sm">{t(`artifacts.names.${artifact}` as never)}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{t(`status.${cell.status}` as never)}</Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {t("preview.items", { count: cell.count })}
+                        </span>
+                      </div>
                     </div>
+                    <ArtifactWarnings
+                      status={cell.status}
+                      warnings={cell.warnings}
+                      testId={`preview-warnings-${artifact}`}
+                    />
                   </div>
                 )
               })}
@@ -298,17 +320,26 @@ export function AgentMigrationDialog({ trigger }: AgentMigrationDialogProps) {
             {selectedArtifacts.map((artifact) => {
               const artifactResult = result.artifacts[artifact]
               if (!artifactResult) return null
+              const cell = preview?.artifacts[artifact]
               return (
-                <div
-                  key={artifact}
-                  className="flex items-center justify-between rounded-md border px-3 py-2"
-                >
-                  <span className="text-sm">{t(`artifacts.names.${artifact}` as never)}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {artifactResult.error
-                      ? t("errors.artifactFailed")
-                      : t("result.imported", { count: artifactResult.imported })}
-                  </span>
+                <div key={artifact} className="space-y-2 rounded-md border px-3 py-2">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-sm">{t(`artifacts.names.${artifact}` as never)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {artifactResult.error
+                        ? t("errors.artifactFailed")
+                        : t("result.imported", { count: artifactResult.imported })}
+                    </span>
+                  </div>
+                  {/* `artifactResult.error` stays out of the UI on purpose (see
+                      ArtifactWarnings). The status explains a zero-import run
+                      that was never going to import anything, and the warnings
+                      explain one that tried and partly failed. */}
+                  <ArtifactWarnings
+                    status={artifactResult.error ? "error" : (cell?.status ?? "ready")}
+                    warnings={artifactResult.warnings}
+                    testId={`result-warnings-${artifact}`}
+                  />
                 </div>
               )
             })}

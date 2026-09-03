@@ -159,7 +159,7 @@ describe("PluginInstallFromGithubDialog", () => {
       "Detected source: Claude Code"
     )
     expect(screen.getByTestId("plugin-conversion-report")).toHaveTextContent(
-      "1 converted, 0 warnings"
+      "1 capability converted, no warnings, nothing blocking"
     )
   })
 

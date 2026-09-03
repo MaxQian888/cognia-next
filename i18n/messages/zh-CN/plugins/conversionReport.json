@@ -1,0 +1,27 @@
+{
+  "title": "转换报告",
+  "source": "识别到的来源：{source}",
+  "sources": {
+    "cognia": "Cognia",
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "gemini-cli": "Gemini CLI"
+  },
+  "fidelity": {
+    "native-exact": "原生",
+    "structured": "结构化",
+    "contextual": "近似",
+    "unsupported": "不支持"
+  },
+  "fidelityHint": {
+    "native-exact": "这已经是 Cognia 原生插件，无需转换。",
+    "structured": "清单及其贡献项可以完整迁移，与宿主强相关的部分列在下方。",
+    "contextual": "行为是依据来源的声明重建的，并非逐项对应翻译。",
+    "unsupported": "这个插件无法在不丢失行为的前提下转换。"
+  },
+  "counts": "已转换 {converted} 项能力，{warnings} 条警告，{blocking} 项阻塞",
+  "noIssues": "全部内容都已迁移。",
+  "issueBlocking": "阻塞 · {capability}",
+  "issueWarning": "警告 · {capability}",
+  "more": "还有 {count} 条"
+}

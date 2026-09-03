@@ -13,7 +13,14 @@ export const MIGRATION_ARTIFACTS = [
   "memory",
 ] as const
 export type MigrationArtifact = (typeof MIGRATION_ARTIFACTS)[number]
-export type MigrationArtifactStatus = "ready" | "shared" | "empty" | "unsupported" | "error"
+export const MIGRATION_ARTIFACT_STATUSES = [
+  "ready",
+  "shared",
+  "empty",
+  "unsupported",
+  "error",
+] as const
+export type MigrationArtifactStatus = (typeof MIGRATION_ARTIFACT_STATUSES)[number]
 
 export interface MigrationVendorProbe {
   vendor: MigrationVendor

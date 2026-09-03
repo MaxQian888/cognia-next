@@ -1,0 +1,27 @@
+{
+  "title": "Conversion report",
+  "source": "Detected source: {source}",
+  "sources": {
+    "cognia": "Cognia",
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "gemini-cli": "Gemini CLI"
+  },
+  "fidelity": {
+    "native-exact": "Native",
+    "structured": "Structured",
+    "contextual": "Contextual",
+    "unsupported": "Unsupported"
+  },
+  "fidelityHint": {
+    "native-exact": "Native Cognia plugin; no conversion required.",
+    "structured": "The manifest and its contributions carry over. Anything host-specific is listed below.",
+    "contextual": "Behaviour is rebuilt from what the source declared, not translated one-to-one.",
+    "unsupported": "This plugin cannot be converted without losing behaviour."
+  },
+  "counts": "{converted, plural, =0 {Nothing converted} =1 {1 capability converted} other {# capabilities converted}}, {warnings, plural, =0 {no warnings} =1 {1 warning} other {# warnings}}, {blocking, plural, =0 {nothing blocking} =1 {1 blocker} other {# blockers}}",
+  "noIssues": "Everything carried over.",
+  "issueBlocking": "Blocked · {capability}",
+  "issueWarning": "Warning · {capability}",
+  "more": "{count, plural, =1 {and 1 more} other {and # more}}"
+}

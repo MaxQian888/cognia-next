@@ -142,6 +142,65 @@ describe("AgentMigrationDialog", () => {
     expect(await screen.findByText("The migration could not be completed.")).toBeInTheDocument()
   })
 
+  it("shows every warning the preview produced", async () => {
+    // The wizard used to render a status badge and an item count next to these
+    // and nothing else, so a run that skipped most of what it found reported
+    // only the count it found.
+    buildMigrationPreview.mockResolvedValueOnce({
+      vendor: "codex",
+      artifacts: {
+        settings: {
+          artifact: "settings",
+          status: "ready",
+          count: 2,
+          warnings: ["model: no Cognia equivalent for `o3-high`"],
+          items: [{}, {}],
+        },
+        sessions: { artifact: "sessions", status: "empty", count: 0, warnings: [], items: [] },
+      },
+    })
+    const user = await openArtifacts()
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    await screen.findByText("2 items")
+
+    expect(screen.getByText(/no Cognia equivalent for .o3-high/)).toBeInTheDocument()
+  })
+
+  it("shows apply-time warnings and explains a shared category", async () => {
+    buildMigrationPreview.mockResolvedValueOnce({
+      vendor: "codex",
+      artifacts: {
+        settings: {
+          artifact: "settings",
+          status: "ready",
+          count: 2,
+          warnings: [],
+          items: [{}, {}],
+        },
+        commands: { artifact: "commands", status: "shared", count: 3, warnings: [], items: [] },
+      },
+    })
+    applyMigration.mockResolvedValueOnce({
+      vendor: "codex",
+      aborted: false,
+      artifacts: {
+        settings: { imported: 1, warnings: ["review.md: could not parse frontmatter"] },
+        commands: { imported: 0, skipped: 3, warnings: [] },
+      },
+    })
+    const user = await openArtifacts()
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    await screen.findByText("2 items")
+    await user.click(screen.getByRole("button", { name: "Import" }))
+
+    expect(await screen.findByText(/could not parse frontmatter/)).toBeInTheDocument()
+    // "0 imported" on its own reads like a failure. It is not: Cognia already
+    // reads the same directory, so the row says so.
+    expect(screen.getByTestId("result-warnings-commands")).toHaveTextContent(
+      "Cognia already reads this location"
+    )
+  })
+
   it("does not expose raw per-artifact errors", async () => {
     applyMigration.mockResolvedValueOnce({
       vendor: "codex",

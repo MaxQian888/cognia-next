@@ -5,20 +5,26 @@
  *
  * Renders a `SessionLossReport` honestly: the five-level fidelity badge with
  * its meaning, a provenance marker for rebuilt records, and every loss entry
- * by kind. An unsupported conversion is shown as unsupported — never dressed
+ * by kind. An unsupported conversion is shown as unsupported, never dressed
  * up as success.
  *
- * `reverseFidelity` labels the OTHER direction — writing a canonical session
+ * `reverseFidelity` labels the OTHER direction, writing a canonical session
  * back out as a new native runtime session. `SessionCodec.materialize` is
  * declared by the claude-code and pi codecs and has no runtime caller anywhere
  * in the app (only the conformance suite exercises it), so the honest label is
  * "defined, not yet available here" rather than silence. Dormancy that is only
  * true in a type is indistinguishable from a bug six months later.
+ *
+ * The arrangement is shared with plugin conversion and the migration wizard
+ * through `FidelitySummary`. This component keeps its own props, its own
+ * `sessionImport.fidelityReport` namespace and every `data-testid`, because it
+ * also renders inside the chat header's tooltip
+ * (`components/chat/imported-origin-chip.tsx`).
  */
 
 import { useTranslations } from "next-intl"
 
-import { Badge } from "@/components/ui/badge"
+import { FidelitySummary, type FidelityBadgeVariant } from "@/components/common/fidelity-summary"
 import type {
   CanonicalSessionHeader,
   SessionLossReport,
@@ -37,10 +43,7 @@ export interface FidelityReportProps {
   >
 }
 
-const BADGE_VARIANT: Record<
-  SessionLossReport["fidelity"],
-  "default" | "secondary" | "outline" | "destructive"
-> = {
+const BADGE_VARIANT: Record<SessionLossReport["fidelity"], FidelityBadgeVariant> = {
   "native-exact": "default",
   structured: "secondary",
   contextual: "secondary",
@@ -51,33 +54,43 @@ const BADGE_VARIANT: Record<
 export function FidelityReport({ loss, reverseFidelity, sessionHeader }: FidelityReportProps) {
   const t = useTranslations("sessionImport.fidelityReport")
 
-  return (
-    <div className="space-y-2 text-xs" data-testid="fidelity-report">
-      <div className="flex items-center gap-2">
-        <span className="font-medium">{t("title")}</span>
-        <Badge variant={BADGE_VARIANT[loss.fidelity]} data-testid="fidelity-badge">
-          {t(`fidelity.${loss.fidelity}`)}
-        </Badge>
-        {loss.rebuilt && (
-          <Badge variant="outline" data-testid="rebuilt-badge">
-            {t("rebuilt")}
-          </Badge>
-        )}
-      </div>
-      <p className="text-muted-foreground">{t(`fidelityHint.${loss.fidelity}`)}</p>
-      {loss.rebuilt && <p className="text-muted-foreground">{t("rebuiltHint")}</p>}
+  const badges = [
+    {
+      id: "fidelity",
+      label: t(`fidelity.${loss.fidelity}`),
+      variant: BADGE_VARIANT[loss.fidelity],
+      testId: "fidelity-badge",
+    },
+    ...(loss.rebuilt
+      ? [
+          {
+            id: "rebuilt",
+            label: t("rebuilt"),
+            variant: "outline" as const,
+            testId: "rebuilt-badge",
+          },
+        ]
+      : []),
+  ]
+
+  const hints = [t(`fidelityHint.${loss.fidelity}`), ...(loss.rebuilt ? [t("rebuiltHint")] : [])]
+
+  const meta = (
+    <>
       {sessionHeader && (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-muted-foreground">
+        <dl className="grid grid-cols-1 gap-x-2 gap-y-1 text-muted-foreground sm:grid-cols-[auto_1fr]">
           {sessionHeader.source?.version && (
             <>
               <dt>{t("sourceVersion")}</dt>
-              <dd data-testid="source-version">{sessionHeader.source.version}</dd>
+              <dd className="min-w-0 break-all" data-testid="source-version">
+                {sessionHeader.source.version}
+              </dd>
             </>
           )}
           {sessionHeader.lineage?.kind && (
             <>
               <dt>{t("relationship")}</dt>
-              <dd data-testid="session-relationship">
+              <dd className="min-w-0 break-all" data-testid="session-relationship">
                 {t(`relationships.${sessionHeader.lineage.kind}`)}
                 {sessionHeader.lineage.parentCanonicalSessionId
                   ? ` · ${sessionHeader.lineage.parentCanonicalSessionId}`
@@ -88,14 +101,14 @@ export function FidelityReport({ loss, reverseFidelity, sessionHeader }: Fidelit
           {sessionHeader.lifecycle?.status && (
             <>
               <dt>{t("lifecycle")}</dt>
-              <dd data-testid="session-lifecycle">
+              <dd className="min-w-0 break-all" data-testid="session-lifecycle">
                 {t(`lifecycleStatuses.${sessionHeader.lifecycle.status}`)}
                 {sessionHeader.lifecycle.background ? ` · ${t("background")}` : ""}
               </dd>
             </>
           )}
           <dt>{t("recoverability")}</dt>
-          <dd data-testid="session-recoverability">
+          <dd className="min-w-0 break-all" data-testid="session-recoverability">
             {sessionHeader.runtimeBinding?.nativeSessionId && sessionHeader.runtimeBinding.presetId
               ? t("nativeResumeCandidate", { preset: sessionHeader.runtimeBinding.presetId })
               : t("readOnlyMirror")}
@@ -107,25 +120,26 @@ export function FidelityReport({ loss, reverseFidelity, sessionHeader }: Fidelit
           {t("reverseDormant", { fidelity: t(`fidelity.${reverseFidelity}`) })}
         </p>
       )}
-      {loss.losses.length === 0 ? (
-        <p className="text-muted-foreground" data-testid="no-losses">
-          {t("noLosses")}
-        </p>
-      ) : (
-        <div className="space-y-1">
-          <p className="text-muted-foreground" data-testid="loss-count">
-            {t("lossCount", { count: loss.losses.length })}
-          </p>
-          <ul className="list-disc space-y-0.5 pl-4">
-            {loss.losses.map((entry, index) => (
-              <li key={`${entry.path}-${index}`} className="text-muted-foreground">
-                <span className="font-mono">{entry.path}</span> — {t(`lossKinds.${entry.kind}`)}
-                {entry.detail ? `: ${entry.detail}` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+    </>
+  )
+
+  return (
+    <FidelitySummary
+      testId="fidelity-report"
+      title={t("title")}
+      badges={badges}
+      hints={hints}
+      meta={meta}
+      entries={loss.losses.map((entry, index) => ({
+        id: `${entry.path}-${index}`,
+        path: entry.path,
+        label: t(`lossKinds.${entry.kind}`),
+        detail: entry.detail,
+      }))}
+      emptyLabel={t("noLosses")}
+      emptyTestId="no-losses"
+      countLabel={t("lossCount", { count: loss.losses.length })}
+      countTestId="loss-count"
+    />
   )
 }

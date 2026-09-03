@@ -24,6 +24,12 @@
     "previewFailed": "The migration preview could not be created.",
     "scanFailed": "Installed coding agents could not be detected."
   },
+  "explain": {
+    "empty": "Nothing of this kind was found for this agent.",
+    "error": "This category could not be read. The details are in the app logs.",
+    "shared": "Cognia already reads this location, so there is nothing to copy.",
+    "unsupported": "This agent does not expose this in a form Cognia can import."
+  },
   "import": "Import",
   "preview": {
     "action": "Preview",
@@ -67,5 +73,9 @@
     "codex": "Codex",
     "opencode": "OpenCode",
     "pi": "Pi"
+  },
+  "warnings": {
+    "more": "{count, plural, =1 {and 1 more} other {and # more}}",
+    "title": "Notes"
   }
 }
