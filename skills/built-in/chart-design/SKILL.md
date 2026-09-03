@@ -17,7 +17,7 @@ metadata:
     intents: [chart, plot, graph-quantitative-data, compare-quantities, show-trend]
   capability-requirements:
     - capability: artifact-authoring
-      reason: chart output requires the host artifact dock and artifact_create tool
+      reason: chart output requires a host artifact route, either the artifact_create tool or the fenced-payload detector
   host-policies: [artifact-channel, permission-ceiling, user-language]
 ---
 
@@ -47,9 +47,23 @@ artifact_create({
 call `artifact_update` with its `artifactId` — the reader keeps the version
 history and reviews your change as a diff, instead of getting a second chart.
 
-This catalog skill is offered only when the host has exposed artifact authoring.
-If `artifact_create` is absent, do not try to bypass that decision with a fenced
-JSON block: use a compact markdown table or prose instead.
+### When `artifact_create` is absent
+
+This skill is offered whenever the host has *some* route to the dock, and that
+route is not always the tool. The routing section of your system prompt names
+the one this channel actually has, so follow it.
+
+- **It asks for a fenced chart payload.** The dock and its detector are live and
+  only the tool was withheld. This is a desktop session, not an IM thread. Emit
+  exactly one fenced block tagged `json` whose entire body is the chart object,
+  and nothing else inside that fence. Always name the `type`: without it the
+  dock draws a line chart whatever the rows contain, and on `pie`, `doughnut`
+  and `scatter` that is the difference between the chart you meant and a wrong
+  one. The `at least three lines` rule below is the detector's own floor, so a
+  single-line blob is left in the transcript as raw JSON.
+- **It offers no artifact route at all** — an IM thread, or the user turned
+  artifact authoring off. Then do not try to bypass that decision with a fenced
+  JSON block: use a compact markdown table or prose instead.
 
 ## The data contract
 
@@ -66,8 +80,8 @@ Hard requirements, each of which the renderer or the detector actually enforces:
   that starts at row two will not be drawn at all. Use `0` rather than omitting a
   key, and never `null`.
 - **Pretty-print `content` across at least three lines.** This keeps stored
-  chart data reviewable and preserves compatibility with imported fenced-chart
-  artifacts, whose detector has a line-count floor.
+  chart data reviewable, and on the fenced route it is a hard requirement rather
+  than a courtesy: the detector ignores a block of fewer than three lines.
 - **Do not specify colours, axis titles, widths or margins.** The renderer owns
   the palette so every chart in the app matches the user's theme in both light
   and dark. A `colors` or `options` key is ignored; hand-picked hex is how a
@@ -128,7 +142,8 @@ Guardrails worth honouring:
   missing.
 - **This channel has no artifact dock** (an IM connector thread, for instance).
   Chart artifacts live in the dock; where there is no dock, use the channel's own
-  rich content or a compact markdown table.
+  rich content or a compact markdown table. No dock is not the same as no tool,
+  so check **When `artifact_create` is absent** before falling back.
 
 ## Labelling
 

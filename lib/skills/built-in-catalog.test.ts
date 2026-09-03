@@ -36,12 +36,19 @@ describe("built-in skills catalog", () => {
     expect(entry.surface).toEqual([])
     // Each of these is a real constraint in the pipeline, not style advice:
     // the artifact tool, the series list read from `data[0]` only, the
-    // compatibility line-count floor, and the palette the renderer owns.
+    // detector's line-count floor, and the palette the renderer owns.
     expect(entry.content).toContain("`artifact_create`")
-    expect(entry.content).toContain("do not try to bypass")
     expect(entry.content).toContain("first row only")
     expect(entry.content).toContain("at least three lines")
     expect(entry.content).toContain("Do not specify colours")
+    // The prohibition survives, now scoped to the branch where it is true.
+    // It used to be blanket, which contradicted the host: in `fenced` mode the
+    // routing prompt ASKS for a fenced payload, and that is a desktop session
+    // with a live dock, not the IM case this sentence is about.
+    expect(entry.content).toContain("do not try to bypass")
+    expect(entry.content).toContain("It offers no artifact route at all")
+    expect(entry.content).toContain("fenced block tagged `json`")
+    expect(entry.content).toContain("Always name the `type`")
     // Scatter is the one shape with a different row contract.
     expect(entry.content).toMatch(/`x` and\s+`y`\*\* as numbers/)
   })
