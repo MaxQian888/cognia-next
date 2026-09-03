@@ -3,8 +3,20 @@
  * Similar to OpenAI Canvas auto-triggering behavior
  */
 
-import type { ArtifactType, ArtifactLanguage, ArtifactRendererProfile } from "@/types"
-import { LANGUAGE_MAP, ALWAYS_CREATE_TYPES, generateArtifactTitle } from "@/lib/artifacts"
+import type {
+  ArtifactChartType,
+  ArtifactType,
+  ArtifactLanguage,
+  ArtifactRendererProfile,
+} from "@/types"
+import {
+  LANGUAGE_MAP,
+  ALWAYS_CREATE_TYPES,
+  DETECTION_PATTERNS,
+  generateArtifactTitle,
+  matchesTypePatterns,
+  parseChartPayload,
+} from "@/lib/artifacts"
 
 // Configuration for auto-detection
 export interface ArtifactDetectionConfig {
@@ -27,6 +39,16 @@ export interface DetectedArtifact {
   type: ArtifactType
   language?: ArtifactLanguage
   rendererProfile?: ArtifactRendererProfile
+  /**
+   * The shape a chart payload actually declared or implied.
+   *
+   * Detection never used to set this, so a fenced chart could only say what it
+   * was through an in-content `{"type": ...}` envelope that nothing documented,
+   * and everything else defaulted to a line chart. Left `undefined` when the
+   * contract had to guess, so an ambiguous payload stays unpinned rather than
+   * being frozen as the wrong shape.
+   */
+  chartType?: ArtifactChartType
   content: string
   title: string
   startIndex: number
@@ -38,51 +60,19 @@ export interface DetectedArtifact {
 // Code block regex - matches ```language\n...\n```
 const CODE_BLOCK_REGEX = /```(\w+)?\n([\s\S]*?)```/g
 
-// HTML detection patterns
-const HTML_PATTERNS = [/<!DOCTYPE\s+html/i, /<html[\s>]/i, /<head[\s>]/i, /<body[\s>]/i]
+/**
+ * The detection table lives in `lib/artifacts/constants.ts`. This file used to
+ * carry a second, private copy of all seven pattern groups, and the two had
+ * already drifted apart: the copy here missed `mindmap` and rejected an arrow
+ * component that returns JSX directly (`const App = () => <div/>`), both of
+ * which the shared table accepted. Since this file is the one that actually
+ * runs in production, the shared table was the more permissive of the two and
+ * nothing was using it. One table, no drift.
+ */
+const { html: HTML_PATTERNS, react: REACT_PATTERNS } = DETECTION_PATTERNS
 
 const DIAGRAM_DESIGN_RENDERER_MARKER =
   /<meta\b(?=[^>]*\bname\s*=\s*["']cognia-renderer["'])(?=[^>]*\bcontent\s*=\s*["']diagram-design-v1["'])[^>]*>/i
-
-// React/JSX detection patterns
-const REACT_PATTERNS = [
-  /import\s+(?:React|{[^}]*})\s+from\s+['"]react['"]/,
-  /export\s+(?:default\s+)?function\s+\w+\s*\([^)]*\)\s*{[\s\S]*?return\s*\(/,
-  /export\s+(?:default\s+)?const\s+\w+\s*=\s*\([^)]*\)\s*=>\s*(?:\(|{)/,
-  /const\s+\w+\s*=\s*\(\)\s*=>\s*(?:\(|{)[\s\S]*?<\w+/,
-  /<[A-Z]\w*[\s/>]/, // JSX component usage like <Component
-]
-
-// SVG detection patterns
-const SVG_PATTERNS = [/<svg[\s>]/i, /xmlns="http:\/\/www\.w3\.org\/2000\/svg"/]
-
-// Mermaid detection patterns
-const MERMAID_PATTERNS = [
-  /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph)/m,
-]
-
-// Chart data patterns (JSON with data arrays)
-const CHART_PATTERNS = [
-  /\[\s*{\s*"name"\s*:\s*"[^"]+"\s*,\s*"value"\s*:/,
-  /{\s*"type"\s*:\s*"(line|bar|pie|doughnut|area|scatter|radar)"/,
-  /{\s*"data"\s*:\s*\[/,
-]
-
-// Math/LaTeX patterns
-const MATH_PATTERNS = [
-  /\$\$[\s\S]+?\$\$/,
-  /\\begin\{(equation|align|matrix|bmatrix|pmatrix)/,
-  /\\frac\{/,
-  /\\sum_/,
-  /\\int_/,
-]
-
-// Jupyter notebook patterns
-const JUPYTER_PATTERNS = [
-  /"cells"\s*:\s*\[/,
-  /"cell_type"\s*:\s*"(code|markdown)"/,
-  /"nbformat"\s*:/,
-]
 
 /**
  * Detect artifact type from content
@@ -92,17 +82,17 @@ export function detectArtifactType(
   language?: string
 ): { type: ArtifactType; confidence: number } {
   // Check for Jupyter notebook first (JSON structure)
-  if (JUPYTER_PATTERNS.some((p) => p.test(content))) {
+  if (matchesTypePatterns(content, "jupyter")) {
     return { type: "jupyter", confidence: 0.95 }
   }
 
   // Check for mermaid diagrams
-  if (language === "mermaid" || MERMAID_PATTERNS.some((p) => p.test(content))) {
+  if (language === "mermaid" || matchesTypePatterns(content, "mermaid")) {
     return { type: "mermaid", confidence: 0.9 }
   }
 
   // Check for math/LaTeX
-  if (language === "latex" || language === "tex" || MATH_PATTERNS.some((p) => p.test(content))) {
+  if (language === "latex" || language === "tex" || matchesTypePatterns(content, "math")) {
     return { type: "math", confidence: 0.85 }
   }
 
@@ -113,7 +103,7 @@ export function detectArtifactType(
   }
 
   // Check for SVG
-  if (language === "svg" || SVG_PATTERNS.some((p) => p.test(content))) {
+  if (language === "svg" || matchesTypePatterns(content, "svg")) {
     return { type: "svg", confidence: 0.9 }
   }
 
@@ -128,7 +118,7 @@ export function detectArtifactType(
   }
 
   // Check for chart data
-  if (CHART_PATTERNS.some((p) => p.test(content))) {
+  if (matchesTypePatterns(content, "chart")) {
     return { type: "chart", confidence: 0.8 }
   }
 
@@ -230,10 +220,15 @@ export function detectArtifacts(
     const lineCount = countLines(block.code)
 
     if (shouldAutoCreate(block.code, type, config)) {
+      const chartContract = type === "chart" ? parseChartPayload(block.code) : undefined
       artifacts.push({
         type,
         language,
         rendererProfile: type === "html" ? detectArtifactRendererProfile(block.code) : undefined,
+        chartType:
+          chartContract && chartContract.resolvedFrom !== "fallback"
+            ? chartContract.chartType
+            : undefined,
         content: block.code,
         title: generateTitle(block.code, type, block.language),
         startIndex: block.startIndex,
@@ -338,7 +333,7 @@ export function isCompleteArtifact(content: string, type: ArtifactType): boolean
     case "svg":
       return content.includes("<svg") && content.includes("</svg>")
     case "mermaid":
-      return MERMAID_PATTERNS.some((p) => p.test(content))
+      return matchesTypePatterns(content, "mermaid")
     case "jupyter":
       return content.includes('"cells"') && content.includes('"nbformat"')
     default:

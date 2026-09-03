@@ -160,6 +160,37 @@ describe("matchesTypePatterns", () => {
     expect(matchesTypePatterns("graph TD\nA --> B", "mermaid")).toBe(true)
   })
 
+  // The keyword list was frozen at ten while Mermaid grew to roughly thirty,
+  // so these all rendered inline and then fell through to a `code` artifact.
+  // Verified against the installed mermaid@11.16.1 with detectType().
+  it.each([
+    "mindmap\n  root",
+    "timeline\n  title T",
+    "quadrantChart\n  title T",
+    "kanban\n  col",
+    'xychart\n  title "T"',
+    "sankey\n  a,b,1",
+    "architecture\n  group g",
+    'packet\n  0-7: "a"',
+    "radar-beta\n  axis a",
+    "venn-beta\n  title T",
+    "requirementDiagram\n  requirement r",
+    "C4Context\n  title T",
+  ])("identifies %s as Mermaid", (source) => {
+    expect(matchesTypePatterns(source, "mermaid")).toBe(true)
+  })
+
+  it("leaves bare `radar` and `venn` alone, since neither parses without -beta", () => {
+    expect(matchesTypePatterns("radar\n  axis a", "mermaid")).toBe(false)
+    expect(matchesTypePatterns("venn\n  title T", "mermaid")).toBe(false)
+  })
+
+  it("identifies a bare scatter array as Chart JSON", () => {
+    // `chart-design` documents `{x, y}` rows as the scatter contract, and
+    // following it used to produce a `code` artifact rather than a chart.
+    expect(matchesTypePatterns('[{"x": 1, "y": 2}, {"x": 3, "y": 4}]', "chart")).toBe(true)
+  })
+
   it("identifies Chart JSON", () => {
     expect(
       matchesTypePatterns('[{"name":"Jan","value":12},{"name":"Feb","value":18}]', "chart")

@@ -1318,6 +1318,10 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
               },
             }),
             ...(item.rendererProfile ? { rendererProfile: item.rendererProfile } : {}),
+            // Only set when the payload actually said (or clearly implied) its
+            // shape. Without this the fenced route could not express a pie or a
+            // scatter at all, because the renderer falls back to a line chart.
+            ...(item.chartType ? { chartType: item.chartType } : {}),
           }
 
           if (

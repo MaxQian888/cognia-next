@@ -4,7 +4,12 @@
  */
 
 import type { ArtifactType } from "@/types"
-import { MERMAID_TYPE_NAMES, LANGUAGE_DISPLAY_NAMES, matchesTypePatterns } from "./constants"
+import {
+  MERMAID_KEYWORD_PATTERN,
+  MERMAID_TYPE_NAMES,
+  LANGUAGE_DISPLAY_NAMES,
+  matchesTypePatterns,
+} from "./constants"
 
 /**
  * Localized strings used to build a default artifact title.
@@ -85,9 +90,7 @@ export function generateArtifactTitle(
 
   // For mermaid, try to extract diagram type
   if (type === "mermaid") {
-    const mermaidMatch = content.match(
-      /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap|gitGraph|journey)/m
-    )
+    const mermaidMatch = content.match(MERMAID_KEYWORD_PATTERN)
     if (mermaidMatch) {
       const key = mermaidMatch[1]
       return m.mermaidTypes[key] ?? MERMAID_TYPE_NAMES[key] ?? m.mermaidDiagram

@@ -254,6 +254,24 @@ export function canDesign(type: ArtifactType): boolean {
 /**
  * Detection patterns for various artifact types
  */
+/**
+ * Every grammar the installed Mermaid renders, verified against
+ * `mermaid@11.16.1` with `detectType()` rather than transcribed from docs.
+ *
+ * Three copies of this list used to exist and two of them had drifted: the
+ * detector and this file both omitted `mindmap` while `utils.ts` had it, so a
+ * mind map rendered inline but could never be lifted into the dock. The wider
+ * problem was that the list had been frozen at ten keywords while Mermaid grew
+ * to roughly thirty, so most grammars drew in the transcript and then fell
+ * through to a `code` artifact.
+ *
+ * `radar`, `venn`, `swimlane`, `wardley`, `cynefin`, `treeView` and `railroad`
+ * parse ONLY with their `-beta` suffix, so the bare words are deliberately
+ * absent. The rest accept either form.
+ */
+export const MERMAID_KEYWORD_PATTERN =
+  /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|C4Context|kanban|treemap|info|ishikawa|eventmodeling|xychart|sankey|block|architecture|packet|radar-beta|venn-beta|swimlane-beta|wardley-beta|cynefin-beta|treeView-beta|railroad-beta)/m
+
 export const DETECTION_PATTERNS = {
   html: [/<!DOCTYPE\s+html/i, /<html[\s>]/i, /<head[\s>]/i, /<body[\s>]/i],
   react: [
@@ -265,13 +283,15 @@ export const DETECTION_PATTERNS = {
     /<[A-Z]\w*[\s/>]/,
   ],
   svg: [/<svg[\s>]/i, /xmlns="http:\/\/www\.w3\.org\/2000\/svg"/],
-  mermaid: [
-    /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph)/m,
-  ],
+  mermaid: [MERMAID_KEYWORD_PATTERN],
   chart: [
     /\[\s*{\s*"name"\s*:\s*"[^"]+"\s*,\s*"value"\s*:/,
     /{\s*"type"\s*:\s*"(line|bar|pie|doughnut|area|scatter|radar)"/,
     /{\s*"data"\s*:\s*\[/,
+    // A bare scatter array. `chart-design` documents `{x, y}` rows as the
+    // scatter contract, and until this pattern existed following that
+    // documentation produced a `code` artifact rather than a chart.
+    /\[\s*{\s*"x"\s*:\s*-?\d+(?:\.\d+)?\s*,\s*"y"\s*:\s*-?\d+(?:\.\d+)?/,
   ],
   math: [
     /\$\$[\s\S]+?\$\$/,

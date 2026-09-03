@@ -274,3 +274,51 @@ describe("detectStreamingArtifact", () => {
     ).toBeNull()
   })
 })
+
+describe("chart shape carried through detection", () => {
+  const fence = (body: string) => "```json\n" + body + "\n```"
+
+  it("stamps a declared shape so the dock does not fall back to a line chart", () => {
+    const [artifact] = detectArtifacts(
+      fence(JSON.stringify({ type: "bar", data: [{ name: "a", value: 1 }] }, null, 2))
+    )
+    expect(artifact.type).toBe("chart")
+    expect(artifact.chartType).toBe("bar")
+  })
+
+  it("stamps a bare x/y array as scatter", () => {
+    const [artifact] = detectArtifacts(
+      fence(
+        JSON.stringify(
+          [
+            { x: 1, y: 2 },
+            { x: 3, y: 4 },
+          ],
+          null,
+          2
+        )
+      )
+    )
+    expect(artifact.type).toBe("chart")
+    expect(artifact.chartType).toBe("scatter")
+  })
+
+  it("leaves an ambiguous payload unpinned rather than guessing", () => {
+    // `resolvedFrom: "fallback"` means nobody chose this shape. Stamping it
+    // would freeze the artifact as a line chart forever.
+    const [artifact] = detectArtifacts(
+      fence(
+        JSON.stringify(
+          [
+            { name: "a", value: 1 },
+            { name: "b", value: 2 },
+          ],
+          null,
+          2
+        )
+      )
+    )
+    expect(artifact.type).toBe("chart")
+    expect(artifact.chartType).toBeUndefined()
+  })
+})

@@ -641,6 +641,19 @@ describe("autoCreateFromContent", () => {
     expect(created.metadata?.rendererProfile).toBe("diagram-design-v1")
   })
 
+  it("persists the chart shape a fenced payload declared", async () => {
+    // Detection never used to set chartType, so a fenced pie arrived in the
+    // dock as a line chart with no way for the payload to say otherwise.
+    const payload = JSON.stringify({ type: "pie", data: [{ name: "a", value: 1 }] }, null, 2)
+    const [created] = await useArtifactStore.getState().autoCreateFromContent({
+      sessionId: "s",
+      messageId: "chart-message",
+      content: "```json\n" + payload + "\n```",
+    })
+    expect(created.type).toBe("chart")
+    expect(created.metadata?.chartType).toBe("pie")
+  })
+
   it("creates artifacts from a multi-line code block", async () => {
     const md = "```js\n" + "console.log(1)\n".repeat(15) + "```"
     const out = await useArtifactStore.getState().autoCreateFromContent({
