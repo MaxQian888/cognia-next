@@ -68,7 +68,7 @@ describe("toUnifiedConnectorDigest", () => {
     })
     expect(unified.nextRunAt).toBe(new Date("2026-05-13T08:00:00Z").getTime())
     expect(unified.lastRunAt).toBe(new Date("2026-05-12T08:00:00Z").getTime())
-    expect(unified.origin.tableName).toBe("tasks")
+    expect(unified.origin.tableName).toBe("scheduledTasks")
     expect(unified.origin.deepLinkHref).toBe("/scheduler?taskId=conn-1")
     expect(unified.capabilities).toEqual({ runNow: true, pause: true, edit: true, delete: true })
   })

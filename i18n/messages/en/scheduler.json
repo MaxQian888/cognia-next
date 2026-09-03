@@ -599,7 +599,9 @@
       "segmentsInvalid": "Segments must be a non-empty JSON array of message segments",
       "skillIdRequired": "Skill is required for skill tasks",
       "teamIdRequired": "Team is required for agent-team tasks",
-      "workflowIdRequired": "Workflow is required for workflow tasks"
+      "workflowIdRequired": "Workflow is required for workflow tasks",
+      "commandRequired": "A command is required.",
+      "cwdRequired": "A working directory is required."
     },
     "externalAgent": {
       "agentId": "External agent",
@@ -693,6 +695,17 @@
       "workflowIdManual": "Workflow id",
       "workflowIdManualPlaceholder": "…or paste a workflow id",
       "workflowPlaceholder": "Pick a workflow"
+    },
+    "characterMissing": "Character {id} (no longer available)",
+    "backgroundCommand": {
+      "command": "Command",
+      "commandPlaceholder": "pnpm test --silent",
+      "commandHelp": "Runs unattended, so it must not need input. Its output is kept with the run.",
+      "cwd": "Working directory",
+      "cwdPlaceholder": "/Users/you/project",
+      "browse": "Browse",
+      "label": "Label",
+      "labelPlaceholder": "Nightly test run"
     }
   },
   "payloadDescription": "Data passed to the task executor",
@@ -1118,5 +1131,20 @@
       "remote-host": "This schedule belongs to a paired host, whose workspaces are not the ones on this device.",
       "task-running": "A run is in flight. Wait for it to finish before moving the schedule."
     }
-  }
+  },
+  "runArtifacts": {
+    "title": "Open what it produced",
+    "session": "Open the conversation",
+    "goal": "Open the goal",
+    "plan": "Open the plan",
+    "squad": "Open the squad",
+    "workflow-run": "Open the workflow run"
+  },
+  "authoredBy": {
+    "agent": "Agent",
+    "agentHint": "An agent set this up on your behalf. You can pause or delete it here.",
+    "plugin": "Plugin",
+    "pluginHint": "A plugin set this up. You can pause or delete it here."
+  },
+  "createTaskFailed": "The task could not be created."
 }

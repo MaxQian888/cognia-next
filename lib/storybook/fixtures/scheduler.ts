@@ -156,7 +156,7 @@ export function makeUnifiedItem(over: Partial<UnifiedScheduledItem> = {}): Unifi
     lastRunAt: BASE - DAY,
     successCount: 40,
     failureCount: 2,
-    origin: { tableName: "tasks", deepLinkHref: "/scheduler" },
+    origin: { tableName: "scheduledTasks", deepLinkHref: "/scheduler" },
     capabilities: { runNow: true, pause: true, edit: true, delete: true },
     ...over,
   }

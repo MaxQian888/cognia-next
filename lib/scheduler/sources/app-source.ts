@@ -383,8 +383,9 @@ export function toUnified(task: ScheduledTask): UnifiedScheduledItem {
     failureCount: task.failureCount,
     tags: task.tags,
     projectId: task.projectId,
+    createdBySource: task.createdBy?.kind,
     origin: {
-      tableName: "tasks",
+      tableName: "scheduledTasks",
       deepLinkHref: `/scheduler?taskId=${encodeURIComponent(task.id)}`,
     },
     capabilities: { runNow: true, pause: true, edit: true, delete: true },

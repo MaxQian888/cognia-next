@@ -25,6 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
@@ -151,7 +152,25 @@ export const UnifiedTaskSidebarItem = React.memo(function UnifiedTaskSidebarItem
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{item.name}</p>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {/* `min-w-0 shrink` on the title, not `shrink-0` on the badge: the
+              title has to be the thing that truncates, or a long name paints
+              over the badge instead of yielding to it. */}
+          <p className="min-w-0 shrink truncate text-sm font-medium">{item.name}</p>
+          {/* Only for a schedule someone other than the user authored. A "user"
+              badge on every row the user made themselves is noise, and the
+              question this answers is "did I set this up". */}
+          {item.createdBySource && item.createdBySource !== "user" && (
+            <Badge
+              variant="outline"
+              className="shrink-0 rounded-pill px-1.5 py-0 text-[10px] font-normal"
+              data-testid={`unified-authored-by-${item.createdBySource}`}
+              title={t(`authoredBy.${item.createdBySource}Hint`)}
+            >
+              {t(`authoredBy.${item.createdBySource}`)}
+            </Badge>
+          )}
+        </div>
         <p className="truncate text-xs text-muted-foreground">
           {triggerText}
           {nextRunDate ? ` · ${nextRunText}` : ""}

@@ -47,12 +47,14 @@ import {
   PlanPayloadEditor,
   WorkflowPayloadEditor,
   ImPushPayloadEditor,
+  BackgroundCommandPayloadEditor,
   EMPTY_CHAT_LIKE_DRAFT,
   EMPTY_EXTERNAL_AGENT_DRAFT,
   EMPTY_AGENT_TEAM_DRAFT,
   EMPTY_GOAL_DRAFT,
   EMPTY_PLAN_DRAFT,
   EMPTY_WORKFLOW_DRAFT,
+  EMPTY_BACKGROUND_COMMAND_DRAFT,
   EMPTY_IM_PUSH_DRAFT,
   payloadToChatLikeDraft,
   payloadToExternalAgentDraft,
@@ -60,6 +62,7 @@ import {
   payloadToGoalDraft,
   payloadToPlanDraft,
   payloadToWorkflowDraft,
+  payloadToBackgroundCommandDraft,
   payloadToImPushDraft,
   chatLikeDraftToPayload,
   externalAgentDraftToPayload,
@@ -67,6 +70,7 @@ import {
   goalDraftToPayload,
   planDraftToPayload,
   workflowDraftToPayload,
+  backgroundCommandDraftToPayload,
   imPushDraftToPayload,
   isChatLikeTaskType,
   isStructuredEditableTaskType,
@@ -77,6 +81,7 @@ import {
   type GoalDraft,
   type PlanDraft,
   type WorkflowDraft,
+  type BackgroundCommandDraft,
   type ImPushDraft,
 } from "@/components/scheduler/payload-editors"
 import {
@@ -291,6 +296,8 @@ interface TaskFormState {
   workflowDraft: WorkflowDraft
   /** Structured-mode draft for im-push task type. */
   imPushDraft: ImPushDraft
+  /** Structured-mode draft for background-command task type. */
+  backgroundCommandDraft: BackgroundCommandDraft
   /**
    * Which editor to render. Toggling structured → JSON serializes the draft
    * into payloadJson; toggling back parses payloadJson into the draft. Free-
@@ -367,6 +374,8 @@ function buildStructuredPayload(f: TaskFormState): Record<string, unknown> {
       return workflowDraftToPayload(f.workflowDraft) as Record<string, unknown>
     case "im-push":
       return imPushDraftToPayload(f.imPushDraft) as Record<string, unknown>
+    case "background-command":
+      return backgroundCommandDraftToPayload(f.backgroundCommandDraft) as Record<string, unknown>
     default:
       return chatLikeDraftToPayload(f.taskType, f.chatLikeDraft) as Record<string, unknown>
   }
@@ -394,7 +403,9 @@ function serializeStructuredDraft(f: TaskFormState): string {
                 ? f.workflowDraft
                 : f.taskType === "im-push"
                   ? f.imPushDraft
-                  : f.chatLikeDraft
+                  : f.taskType === "background-command"
+                    ? f.backgroundCommandDraft
+                    : f.chatLikeDraft
     return JSON.stringify(raw, null, 2)
   }
 }
@@ -417,6 +428,8 @@ function parseIntoDraftUpdates(
       return { workflowDraft: payloadToWorkflowDraft(parsed) }
     case "im-push":
       return { imPushDraft: payloadToImPushDraft(parsed) }
+    case "background-command":
+      return { backgroundCommandDraft: payloadToBackgroundCommandDraft(parsed) }
     default:
       return isChatLikeTaskType(taskType)
         ? { chatLikeDraft: payloadToChatLikeDraft(taskType, parsed) }
@@ -467,6 +480,10 @@ function createInitialState(
       initialType === "im-push"
         ? payloadToImPushDraft(initialValues?.payload)
         : { ...EMPTY_IM_PUSH_DRAFT },
+    backgroundCommandDraft:
+      initialType === "background-command"
+        ? payloadToBackgroundCommandDraft(initialValues?.payload)
+        : { ...EMPTY_BACKGROUND_COMMAND_DRAFT },
     payloadEditorMode: startInStructured ? "structured" : "json",
     payloadFieldErrors: {},
     notifyOnStart: initialValues?.notification?.onStart ?? false,
@@ -720,6 +737,10 @@ export function TaskForm({
           : { ...EMPTY_WORKFLOW_DRAFT },
       imPushDraft:
         input.type === "im-push" ? payloadToImPushDraft(input.payload) : { ...EMPTY_IM_PUSH_DRAFT },
+      backgroundCommandDraft:
+        input.type === "background-command"
+          ? payloadToBackgroundCommandDraft(input.payload)
+          : { ...EMPTY_BACKGROUND_COMMAND_DRAFT },
       payloadEditorMode: isStructuredEditableTaskType(input.type) ? "structured" : "json",
       payloadFieldErrors: {},
       notifyOnStart: input.notification?.onStart ?? false,
@@ -1486,6 +1507,22 @@ export function TaskForm({
             errors={f.payloadFieldErrors}
             disabled={isSubmitting}
             testId="scheduler-task-im-push-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "background-command" && (
+          <BackgroundCommandPayloadEditor
+            draft={f.backgroundCommandDraft}
+            onDraftChange={(draft) =>
+              updateForm({
+                backgroundCommandDraft: draft,
+                payloadError: null,
+                payloadFieldErrors: {},
+              })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-background-command-editor"
           />
         )}
 

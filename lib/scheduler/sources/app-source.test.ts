@@ -58,14 +58,24 @@ describe("toUnified (app source mapper)", () => {
     expect(unified.nextRunAt).toBe(new Date("2026-05-12T09:00:00Z").getTime())
     expect(unified.successCount).toBe(4)
     expect(unified.failureCount).toBe(1)
-    expect(unified.origin.tableName).toBe("tasks")
+    expect(unified.origin.tableName).toBe("scheduledTasks")
     expect(unified.origin.deepLinkHref).toBe("/scheduler?taskId=task-1")
+    // Provenance rides through, so the panel can tell a schedule the user made
+    // from one an agent made on their behalf. Undefined for a row that predates
+    // the creator column rather than defaulting to "user", which would claim
+    // authorship the row does not actually record.
+    expect(unified.createdBySource).toBeUndefined()
     expect(unified.capabilities).toEqual({
       runNow: true,
       pause: true,
       edit: true,
       delete: true,
     })
+  })
+
+  it("carries the creator kind through so the panel can show who authored it", () => {
+    const unified = toUnified(makeTask({ createdBy: { kind: "agent", sessionId: "sess-1" } }))
+    expect(unified.createdBySource).toBe("agent")
   })
 
   it("maps real plugin executor tasks to the plugin kind", () => {
@@ -79,7 +89,7 @@ describe("toUnified (app source mapper)", () => {
 
     expect(unified.kind).toBe("plugin")
     expect(unified.unifiedId).toBe("plugin:plugin-row")
-    expect(unified.origin.tableName).toBe("tasks")
+    expect(unified.origin.tableName).toBe("scheduledTasks")
   })
 
   it("collapses an unknown status to 'unknown'", () => {

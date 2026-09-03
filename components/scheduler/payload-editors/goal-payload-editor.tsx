@@ -6,6 +6,7 @@
  */
 
 import { useTranslations } from "next-intl"
+import { CharacterPicker } from "./character-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -18,6 +19,8 @@ export interface GoalPayloadEditorProps {
   errors?: Record<string, string>
   disabled?: boolean
   testId?: string
+  /** Injectable list for tests, bypassing Dexie. */
+  charactersForTesting?: import("@cognia/agent-config-types").Character[]
 }
 
 function toNum(value: string): number | undefined {
@@ -31,6 +34,7 @@ export function GoalPayloadEditor({
   errors,
   disabled,
   testId = "goal-payload-editor",
+  charactersForTesting,
 }: GoalPayloadEditorProps) {
   const t = useTranslations("scheduler")
 
@@ -61,17 +65,16 @@ export function GoalPayloadEditor({
         <p className="text-xs text-muted-foreground">{t("payload.goal.objectiveHelp")}</p>
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">{t("payload.goal.characterId")}</Label>
-        <Input
-          value={draft.characterId ?? ""}
-          onChange={(e) => update("characterId", e.target.value || undefined)}
-          placeholder={t("payload.goal.characterIdPlaceholder")}
-          disabled={disabled}
-          className="h-10 font-mono text-xs"
-          data-testid={`${testId}-character-input`}
-        />
-      </div>
+      {/* Was a bare text input asking for an opaque id, with a silent no-match
+          when it was typed wrong. Same field the chat editor has always had a
+          real picker for. */}
+      <CharacterPicker
+        value={draft.characterId}
+        onChange={(characterId) => update("characterId", characterId)}
+        disabled={disabled}
+        testId={testId}
+        charactersForTesting={charactersForTesting}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-2">

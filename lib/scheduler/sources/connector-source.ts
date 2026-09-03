@@ -290,7 +290,7 @@ export function toUnifiedConnectorDigest(task: ScheduledTask): UnifiedScheduledI
     failureCount: task.failureCount,
     tags: task.tags,
     origin: {
-      tableName: "tasks",
+      tableName: "scheduledTasks",
       deepLinkHref: `/scheduler?taskId=${encodeURIComponent(task.id)}`,
     },
     capabilities: { runNow: true, pause: true, edit: true, delete: true },

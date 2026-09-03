@@ -342,13 +342,21 @@ export default function SchedulerPage() {
     async (input: CreateScheduledTaskInput) => {
       setIsSubmitting(true)
       try {
-        await createTask(input)
+        const created = await createTask(input)
+        if (!created) {
+          // `createTask` answers `null` for a refusal as well as a failure, and
+          // the sheet used to close either way: a task the permission policy
+          // turned down simply vanished with no row and no message. Keep the
+          // sheet open so the user's input survives, and say why.
+          toast.error(useSchedulerStore.getState().error ?? t("createTaskFailed"))
+          return
+        }
         setShowCreateSheet(false)
       } finally {
         setIsSubmitting(false)
       }
     },
-    [createTask]
+    [createTask, t]
   )
 
   const handleCreateSystemTask = useCallback(
@@ -574,12 +582,13 @@ export default function SchedulerPage() {
     async (input: CreateScheduledTaskInput) => {
       setIsSubmitting(true)
       try {
-        await createTask(input)
+        const created = await createTask(input)
+        if (!created) toast.error(useSchedulerStore.getState().error ?? t("createTaskFailed"))
       } finally {
         setIsSubmitting(false)
       }
     },
-    [createTask]
+    [createTask, t]
   )
 
   const handleRequestElevation = useCallback(async () => {

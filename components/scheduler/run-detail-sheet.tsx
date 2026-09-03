@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { InspectRow } from "./details/_shared/inspect-row"
+import { RunArtifactLinks } from "./run-artifact-links"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { toRunStatusPill, type UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
@@ -98,6 +99,10 @@ export function RunDetailSheet({ open, onOpenChange, run }: RunDetailSheetProps)
               </pre>
             </section>
           )}
+
+          {/* Before the raw dump: the link is what the user came for, and the
+              output blob is the evidence behind it. */}
+          <RunArtifactLinks output={run.result} />
 
           {run.result !== undefined && run.status !== "failed" && (
             <section>

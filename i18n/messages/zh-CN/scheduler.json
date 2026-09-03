@@ -599,7 +599,9 @@
       "segmentsInvalid": "segments 必须是非空的消息片段 JSON 数组",
       "skillIdRequired": "skill 任务必须选择技能",
       "teamIdRequired": "agent-team 任务必须选择团队",
-      "workflowIdRequired": "工作流任务需要选择工作流"
+      "workflowIdRequired": "工作流任务需要选择工作流",
+      "commandRequired": "必须填写命令。",
+      "cwdRequired": "必须填写工作目录。"
     },
     "externalAgent": {
       "agentId": "外部代理",
@@ -693,6 +695,17 @@
       "workflowIdManual": "工作流 ID",
       "workflowIdManualPlaceholder": "……或粘贴工作流 ID",
       "workflowPlaceholder": "选择一个工作流"
+    },
+    "characterMissing": "角色 {id}（已不存在）",
+    "backgroundCommand": {
+      "command": "命令",
+      "commandPlaceholder": "pnpm test --silent",
+      "commandHelp": "它会在无人值守时运行，所以不能需要输入。输出会随这次运行一起保存。",
+      "cwd": "工作目录",
+      "cwdPlaceholder": "/Users/you/project",
+      "browse": "浏览",
+      "label": "标签",
+      "labelPlaceholder": "每晚测试"
     }
   },
   "payloadDescription": "传递给执行器的数据",
@@ -1118,5 +1131,20 @@
       "remote-host": "该日程属于已配对的宿主，其工作区与本设备的并不相同。",
       "task-running": "有运行正在进行，请等待其结束后再移动日程。"
     }
-  }
+  },
+  "runArtifacts": {
+    "title": "打开这次运行的产物",
+    "session": "打开对话",
+    "goal": "打开目标",
+    "plan": "打开计划",
+    "squad": "打开小队",
+    "workflow-run": "打开工作流运行"
+  },
+  "authoredBy": {
+    "agent": "Agent",
+    "agentHint": "这是 agent 代你设置的。你可以在这里暂停或删除它。",
+    "plugin": "插件",
+    "pluginHint": "这是插件设置的。你可以在这里暂停或删除它。"
+  },
+  "createTaskFailed": "无法创建这个任务。"
 }

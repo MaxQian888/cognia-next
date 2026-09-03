@@ -107,6 +107,16 @@ export interface UnifiedScheduledItem {
    * than foreign — see `taskVisibleInWorkspace`.
    */
   projectId?: string
+  /**
+   * Who put this on the schedule.
+   *
+   * Only `app` schedules carry a creator record; a workflow trigger or a
+   * system task is machine-wide and leaves this unset. It matters now that an
+   * agent can author a schedule of its own: a user who finds an unfamiliar row
+   * needs to be able to tell "I set this up and forgot" from "something set
+   * this up on my behalf" without opening it.
+   */
+  createdBySource?: "user" | "agent" | "plugin"
   origin: UnifiedItemOrigin
   capabilities: UnifiedItemCapabilities
 }

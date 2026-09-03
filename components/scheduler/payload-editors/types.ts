@@ -10,6 +10,7 @@
 import type {
   AgentTaskPayload,
   AgentTeamTaskPayload,
+  BackgroundCommandTaskPayload,
   ChatLikeTaskPayload,
   ExternalAgentTaskPayload,
   GoalTaskPayload,
@@ -96,6 +97,19 @@ export interface GoalDraft {
   timeoutMinutes?: number
 }
 
+/**
+ * Draft for `background-command` tasks.
+ *
+ * Three fields, and it had no structured editor at all: the create form fell
+ * through to a raw JSON textarea, so scheduling a command meant knowing the
+ * payload key names by heart and getting the JSON right by hand.
+ */
+export interface BackgroundCommandDraft {
+  command: string
+  cwd: string
+  label?: string
+}
+
 /** Draft for `plan` tasks — executes an existing AgentPlan. */
 export interface PlanDraft {
   planId: string
@@ -126,6 +140,10 @@ export interface ImPushDraft {
 
 export const EMPTY_AGENT_TEAM_DRAFT: AgentTeamDraft = { teamId: "", ultracode: false }
 export const EMPTY_GOAL_DRAFT: GoalDraft = { objective: "" }
+export const EMPTY_BACKGROUND_COMMAND_DRAFT: BackgroundCommandDraft = {
+  command: "",
+  cwd: "",
+}
 export const EMPTY_PLAN_DRAFT: PlanDraft = { planId: "", replanOnFailure: false }
 export const EMPTY_WORKFLOW_DRAFT: WorkflowDraft = {
   workflowId: "",
@@ -349,6 +367,16 @@ export function payloadToAgentTeamDraft(raw: unknown): AgentTeamDraft {
   return draft
 }
 
+export function payloadToBackgroundCommandDraft(raw: unknown): BackgroundCommandDraft {
+  const draft: BackgroundCommandDraft = { ...EMPTY_BACKGROUND_COMMAND_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.command === "string") draft.command = p.command
+  if (typeof p.cwd === "string") draft.cwd = p.cwd
+  if (typeof p.label === "string") draft.label = p.label
+  return draft
+}
+
 export function payloadToGoalDraft(raw: unknown): GoalDraft {
   const draft: GoalDraft = { ...EMPTY_GOAL_DRAFT }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
@@ -394,6 +422,22 @@ export function goalDraftToPayload(draft: GoalDraft): GoalTaskPayload {
   if (typeof draft.timeoutMinutes === "number" && draft.timeoutMinutes > 0)
     config.timeoutMs = draft.timeoutMinutes * 60_000
   if (Object.keys(config).length > 0) out.config = config
+  return out
+}
+
+export function backgroundCommandDraftToPayload(
+  draft: BackgroundCommandDraft
+): BackgroundCommandTaskPayload {
+  const command = trimOrUndef(draft.command)
+  if (!command) throw new DraftValidationError({ command: "commandRequired" })
+  const cwd = trimOrUndef(draft.cwd)
+  // The executor resolves the command against `cwd`, and an unattended command
+  // whose working directory is whatever the process happened to start in is a
+  // different command each time. Required rather than defaulted for that reason.
+  if (!cwd) throw new DraftValidationError({ cwd: "cwdRequired" })
+  const out: BackgroundCommandTaskPayload = { command, cwd }
+  const label = trimOrUndef(draft.label)
+  if (label) out.label = label
   return out
 }
 
@@ -508,6 +552,7 @@ export function isChatLikeTaskType(t: ScheduledTaskType): boolean {
 export function isStructuredEditableTaskType(t: ScheduledTaskType): boolean {
   return (
     isChatLikeTaskType(t) ||
+    t === "background-command" ||
     t === "external-agent" ||
     t === "agent-team" ||
     t === "goal" ||

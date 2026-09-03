@@ -16,6 +16,10 @@ export type { PlanPayloadEditorProps } from "./plan-payload-editor"
 export { WorkflowPayloadEditor } from "./workflow-payload-editor"
 export type { WorkflowPayloadEditorProps } from "./workflow-payload-editor"
 
+export { BackgroundCommandPayloadEditor } from "./background-command-payload-editor"
+export type { BackgroundCommandPayloadEditorProps } from "./background-command-payload-editor"
+export { CharacterPicker } from "./character-picker"
+export type { CharacterPickerProps } from "./character-picker"
 export { ImPushPayloadEditor } from "./im-push-payload-editor"
 export type { ImPushPayloadEditorProps } from "./im-push-payload-editor"
 
@@ -59,6 +63,9 @@ export {
   isChatLikeTaskType,
   isStructuredEditableTaskType,
   DraftValidationError,
+  EMPTY_BACKGROUND_COMMAND_DRAFT,
+  payloadToBackgroundCommandDraft,
+  backgroundCommandDraftToPayload,
 } from "./types"
 export type {
   ChatLikeDraft,
@@ -68,5 +75,6 @@ export type {
   PlanDraft,
   WorkflowDraft,
   ImPushDraft,
+  BackgroundCommandDraft,
   McpPickerMode,
 } from "./types"
