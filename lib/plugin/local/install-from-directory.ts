@@ -31,6 +31,17 @@ export interface InstallFromDirectoryOptions {
   /** Override the plugin display name fed to the error-bus dispatch on
    *  failure — useful when the caller already resolved the manifest. */
   pluginName?: string
+  /**
+   * Conversion overlay for a foreign bundle, from `inspectLocalPluginSource`.
+   *
+   * The native side copies the source tree into staging, applies these on top,
+   * and only then reads the manifest, so a Claude Code bundle whose manifest
+   * lives at `.claude-plugin/plugin.json` installs as a Cognia plugin. Omitted
+   * for a native directory, which takes the original path unchanged. The
+   * overlay is allowlisted to `plugin.json` and `dist/index.js` in Rust; the
+   * renderer cannot widen it.
+   */
+  generatedFiles?: Record<string, string>
 }
 
 /**
@@ -61,7 +72,7 @@ export async function installPluginFromDirectory(
   try {
     const result = await invoke<{ pluginId: string; warnings: string[] }>(
       "plugin_install_from_directory",
-      { sourceDir }
+      { sourceDir, generatedFiles: options.generatedFiles }
     )
     loggers.plugin.info(`[local-install] installed ${result.pluginId} from ${sourceDir}`)
     return {

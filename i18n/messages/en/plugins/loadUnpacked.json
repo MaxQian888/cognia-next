@@ -1,4 +1,9 @@
 {
+  "cancel": "Cancel",
+  "conversionBlocked": "This bundle cannot be converted without losing behaviour. The blockers are listed above.",
+  "conversionBody": "{source} plugins are not a Cognia format. Cognia can convert this bundle and install the result. Review what carries over before continuing.",
+  "conversionTitle": "Convert this plugin?",
+  "convertAndInstall": "Convert and install",
   "directoryPickerTitle": "Pick a plugin directory",
   "installSuccess": "{name} installed from disk.",
   "label": "Load unpacked",

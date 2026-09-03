@@ -21,8 +21,12 @@ import { Button } from "@/components/ui/button"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import { usePluginPreInstall } from "@/hooks/plugins/use-plugin-pre-install"
 import { createLocalDirectoryClient } from "@/lib/plugin/local/local-directory-client"
-import { previewLocalManifest } from "@/lib/plugin/local/install-from-directory"
+import {
+  inspectLocalPluginSource,
+  type LocalPluginInspection,
+} from "@/lib/plugin/local/convert-local-source"
 import { PluginPreInstallDialog } from "./plugin-pre-install-dialog"
+import { LoadUnpackedConversionDialog } from "./load-unpacked-conversion-dialog"
 
 export interface LoadUnpackedButtonProps {
   className?: string
@@ -49,7 +53,39 @@ export function useLoadUnpackedFlow(
   const t = useTranslations("plugins.loadUnpacked")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState<{
+    sourceDir: string
+    inspection: LocalPluginInspection
+  } | null>(null)
   const preInstall = usePluginPreInstall(null)
+
+  /**
+   * Run the shared pre-install chain against a directory, optionally with a
+   * conversion overlay. Split out because a foreign bundle takes the same path
+   * as a native one, just after the user approves the conversion.
+   */
+  const runInstall = useCallback(
+    async (sourceDir: string, inspection: LocalPluginInspection) => {
+      const manifest = inspection.manifest
+      if (!manifest) throw new Error("conversion produced no manifest")
+      const pluginId = manifest.id
+      const pluginName = manifest.name ?? pluginId
+      const client = createLocalDirectoryClient(
+        sourceDir,
+        inspection.native ? undefined : { manifest, generatedFiles: inspection.generatedFiles }
+      )
+      const result = await preInstall.install(pluginId, manifest.version, pluginName, client)
+      if (result.status === "installed") {
+        toast.success(t("installSuccess", { name: pluginName }))
+        onInstalled?.(result.pluginId)
+      } else if (result.status === "cancelled") {
+        // Quiet — the user explicitly backed out at a step.
+      } else {
+        setError(result.message)
+      }
+    },
+    [onInstalled, preInstall, t]
+  )
 
   const trigger = useCallback(
     async (providedSourceDir?: string) => {
@@ -70,38 +106,55 @@ export function useLoadUnpackedFlow(
               })
             )
         if (typeof picked !== "string") return // user cancelled
-        // Resolve the real plugin id from disk so the pre-install chain
-        // gets a meaningful id (used for conflict detection against the
-        // installed-plugins table).
-        const manifest = await previewLocalManifest(picked)
-        const pluginId = manifest.id
-        const pluginName = manifest.name ?? pluginId
 
-        const client = createLocalDirectoryClient(picked)
-        const result = await preInstall.install(pluginId, manifest.version, pluginName, client)
-        if (result.status === "installed") {
-          toast.success(t("installSuccess", { name: pluginName }))
-          onInstalled?.(result.pluginId)
-        } else if (result.status === "cancelled") {
-          // Quiet — the user explicitly backed out at a step.
-        } else {
-          setError(result.message)
+        // Reads the whole bundle, not just `plugin.json`, so a Claude Code /
+        // Codex / Gemini directory is recognised instead of throwing a raw
+        // "plugin.json not found" at the user. The manifest that comes back is
+        // the converted one, which is what the pre-install chain must gate on.
+        const inspection = await inspectLocalPluginSource(picked)
+        if (inspection.native) {
+          await runInstall(picked, inspection)
+          return
         }
+        // Foreign bundle: the user sees what conversion carries over first.
+        setPending({ sourceDir: picked, inspection })
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setBusy(false)
       }
     },
-    [onInstalled, preInstall, t]
+    [runInstall, t]
   )
 
+  const confirmConversion = useCallback(async () => {
+    if (!pending) return
+    const { sourceDir, inspection } = pending
+    setPending(null)
+    setBusy(true)
+    try {
+      await runInstall(sourceDir, inspection)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }, [pending, runInstall])
+
   const dialog = (
-    <PluginPreInstallDialog
-      target={preInstall.target}
-      onContinue={preInstall.resolveContinue}
-      onCancel={preInstall.resolveCancel}
-    />
+    <>
+      <LoadUnpackedConversionDialog
+        inspection={pending?.inspection ?? null}
+        onConfirm={() => void confirmConversion()}
+        onCancel={() => setPending(null)}
+        busy={busy}
+      />
+      <PluginPreInstallDialog
+        target={preInstall.target}
+        onContinue={preInstall.resolveContinue}
+        onCancel={preInstall.resolveCancel}
+      />
+    </>
   )
 
   return { trigger, busy, error, dialog }

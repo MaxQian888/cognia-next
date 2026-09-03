@@ -21,7 +21,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
@@ -601,6 +601,7 @@ async fn reload_inner(state: SharedState, req: ReloadRequest) -> Response {
                 &blocking_state.app_handle,
                 source_dir,
                 requested_plugin_id.as_deref(),
+                &BTreeMap::new(),
             )?
         } else if let Some(bundle_path) = bundle_path.as_deref() {
             install_inner_blocking(&blocking_state, bundle_path, requested_plugin_id.as_deref())?
@@ -1121,13 +1122,41 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
     app_handle: &tauri::AppHandle<P>,
     source_dir: &str,
 ) -> anyhow::Result<(String, Vec<String>)> {
-    install_from_directory_blocking(app_handle, source_dir, None)
+    install_from_directory_blocking(app_handle, source_dir, None, &BTreeMap::new())
 }
 
+/// Install a picked directory, overlaying a TS-side conversion result.
+///
+/// Backs "Load unpacked" for a foreign plugin bundle. `generated_files` is
+/// allowlisted and confined by `cognia_plugin_runtime::generated_files`, so the
+/// renderer cannot place arbitrary files on disk through this.
+pub async fn install_converted_from_directory_inner<P: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<P>,
+    source_dir: &str,
+    generated_files: &BTreeMap<String, String>,
+) -> anyhow::Result<(String, Vec<String>)> {
+    install_from_directory_blocking(app_handle, source_dir, None, generated_files)
+}
+
+/// Install a plugin directory, optionally overlaying a conversion result.
+///
+/// `generated_files` is the TS converter's output for a foreign bundle (a
+/// Claude Code, Codex or Gemini plugin). When it is empty this behaves exactly
+/// as it always has: the source must already carry `plugin.json`.
+///
+/// When it is NOT empty the validation order has to change, and that is the
+/// whole subtlety here. The source of a foreign bundle keeps its manifest at
+/// `.claude-plugin/plugin.json`, so asserting `plugin.json` up front would
+/// reject every convertible plugin before conversion could be applied. The
+/// order becomes: copy the tree into staging, overlay the converted files
+/// there, then read and validate the manifest FROM STAGING. The manifest that
+/// gets registered is therefore always the one actually on disk, and the
+/// overlay is still confined to the allowlist in `cognia_plugin_runtime::generated_files`.
 fn install_from_directory_blocking<P: tauri::Runtime>(
     app_handle: &tauri::AppHandle<P>,
     source_dir: &str,
     expected_plugin_id: Option<&str>,
+    generated_files: &BTreeMap<String, String>,
 ) -> anyhow::Result<(String, Vec<String>)> {
     let source = PathBuf::from(source_dir);
     if !source.is_absolute() {
@@ -1139,21 +1168,44 @@ fn install_from_directory_blocking<P: tauri::Runtime>(
     if !source.is_dir() {
         anyhow::bail!("source path is not a directory: {}", source.display());
     }
+    let converting = !generated_files.is_empty();
     let manifest_path = source.join("plugin.json");
-    if !manifest_path.exists() {
+    if !converting && !manifest_path.exists() {
         anyhow::bail!(
             "plugin.json not found in {} — pass the directory that contains the manifest",
             source.display()
         );
     }
-    let manifest_bytes = std::fs::read(&manifest_path)?;
+
+    // Stage into a scratch directory first so the manifest we register is the
+    // post-overlay one, and so a failed conversion never touches a live install.
+    let scratch = tempfile::Builder::new()
+        .prefix(".cognia-plugin-convert-")
+        .tempdir()?;
+    copy_dir_recursive(&source, scratch.path())?;
+    if converting {
+        cognia_plugin_runtime::generated_files::apply_generated_files(
+            scratch.path(),
+            generated_files,
+        )
+        .map_err(|e| anyhow::anyhow!("apply conversion overlay: {e}"))?;
+    }
+
+    let staged_manifest = scratch.path().join("plugin.json");
+    if !staged_manifest.exists() {
+        anyhow::bail!(
+            "conversion produced no plugin.json for {}",
+            source.display()
+        );
+    }
+    let manifest_bytes = std::fs::read(&staged_manifest)?;
     let (manifest, plugin_id) = read_manifest_from_bytes(&manifest_bytes)?;
     validate_expected_plugin_id(expected_plugin_id, &plugin_id)?;
 
     let plugin_state = app_handle.state::<PluginRuntimeState>();
     let target_dir = plugin_state.plugin_dir(&plugin_id);
     replace_directory_atomically(&target_dir, |staging| {
-        copy_dir_recursive(&source, staging)?;
+        copy_dir_recursive(scratch.path(), staging)?;
         Ok(())
     })?;
 

@@ -20,6 +20,12 @@ import {
   type PluginConversionReport,
   type PluginEcosystem,
 } from "@/lib/plugin/convert/ecosystem"
+import {
+  MAX_SNAPSHOT_ENTRIES,
+  MAX_TEXT_FILE_BYTES,
+  generatedFilesFrom,
+  isSnapshotTextFile,
+} from "@/lib/plugin/convert/source-snapshot"
 
 const GITHUB_API = "https://api.github.com"
 
@@ -55,10 +61,6 @@ const PLUGIN_MARKERS: Array<{ format: PluginEcosystem; path: string }> = [
   { format: "codex", path: ".codex-plugin/plugin.json" },
   { format: "gemini-cli", path: "gemini-extension.json" },
 ]
-const TEXT_FILE_PATTERN =
-  /\.(?:md|markdown|txt|json|jsonc|toml|ya?ml|js|mjs|cjs|ts|tsx|jsx|sh|bash|zsh|py|rs|css|html)$/i
-const MAX_SNAPSHOT_ENTRIES = 2_000
-const MAX_TEXT_FILE_BYTES = 1_000_000
 
 const README_CANDIDATES = [
   "README.md",
@@ -326,7 +328,7 @@ async function fetchPluginSnapshot(
     if (entry.type !== "file" || typeof entry.path !== "string") continue
     const relative = root ? entry.path.slice(root.length + 1) : entry.path
     if (!relative || relative === markerPath) continue
-    if (!TEXT_FILE_PATTERN.test(relative)) {
+    if (!isSnapshotTextFile(relative)) {
       // Keep the path so resource-bearing skills stay bundles. The installer
       // retains the original binary from the tarball; it is never overlaid.
       snapshot.set(relative, "")
@@ -377,10 +379,7 @@ export async function fetchGithubPluginPreview(ref: GithubPluginRef): Promise<Gi
     }
     throw error
   }
-  const generatedFiles: Record<string, string> = {}
-  for (const [path, contents] of converted.files) {
-    if (snapshot.get(path) !== contents) generatedFiles[path] = contents
-  }
+  const generatedFiles = generatedFilesFrom(snapshot, converted.files)
 
   const readme = await firstRepoFile(pinnedRef, found.root, README_CANDIDATES)
   const license = await firstRepoFile(pinnedRef, found.root, LICENSE_CANDIDATES)

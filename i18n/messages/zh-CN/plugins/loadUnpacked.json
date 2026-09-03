@@ -1,4 +1,9 @@
 {
+  "cancel": "取消",
+  "conversionBlocked": "这个插件包无法在不丢失行为的前提下转换，阻塞原因列在上方。",
+  "conversionBody": "{source} 插件不是 Cognia 的格式。Cognia 可以转换这个插件包并安装转换结果。继续之前请先看看哪些内容能够迁移。",
+  "conversionTitle": "要转换这个插件吗？",
+  "convertAndInstall": "转换并安装",
   "directoryPickerTitle": "选择插件目录",
   "installSuccess": "{name} 已从本地安装。",
   "label": "加载本地插件目录",

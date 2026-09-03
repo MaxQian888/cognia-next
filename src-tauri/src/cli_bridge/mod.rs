@@ -582,9 +582,15 @@ pub async fn preview_local_manifest(source_dir: String) -> Result<serde_json::Va
 pub async fn plugin_install_from_directory(
     app: tauri::AppHandle,
     source_dir: String,
+    // Conversion overlay for a foreign bundle (Claude Code / Codex / Gemini).
+    // Omitted for a native `plugin.json` directory, which keeps the original
+    // behaviour byte for byte. Allowlisted and confined by
+    // `cognia_plugin_runtime::generated_files`.
+    generated_files: Option<std::collections::BTreeMap<String, String>>,
 ) -> Result<PluginInstallReceipt, String> {
     use tauri::Emitter;
-    match handlers::install_from_directory_inner(&app, &source_dir).await {
+    let overlay = generated_files.unwrap_or_default();
+    match handlers::install_converted_from_directory_inner(&app, &source_dir, &overlay).await {
         Ok((plugin_id, warnings)) => {
             // `source` tells the renderer which driver did this. Without it
             // the DevTools hot-reload panel labels a drag-and-drop install as

@@ -35,6 +35,7 @@ mod contract;
 pub mod devtools;
 pub mod error;
 pub mod fs_watcher;
+pub mod generated_files;
 pub mod github;
 pub mod lifecycle;
 pub mod marketplace;
