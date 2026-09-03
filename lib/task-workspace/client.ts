@@ -52,8 +52,25 @@ export function taskIdForMessage(messageId: string): string {
   return safeId("task:", messageId)
 }
 
+/**
+ * Distinguishes one page load from the next.
+ *
+ * `runId` is the chat store's per-session turn counter, and that counter lives
+ * only in the slice: it is never persisted, so it restarts at 0 on every
+ * reload. Two turns in two different loads of the same conversation therefore
+ * minted the SAME run id, and the second was refused by the host with
+ * "runId is already owned by another task run" whenever the first had not been
+ * settled. That is a wedged conversation with no way out from the UI, on a
+ * counter that was only ever meant to drive the run clock.
+ *
+ * Persisting the counter would be the wrong repair: identity is not what it is
+ * for. An epoch that cannot repeat is, and it is stable for the life of the
+ * module, so anything deriving the same id twice within one load still agrees.
+ */
+const RUN_ID_EPOCH = Date.now().toString(36)
+
 export function runIdForTurn(sessionId: string, runId: number): string {
-  return safeId("run:", `${sessionId}:${runId}`)
+  return safeId("run:", `${sessionId}:${runId}:${RUN_ID_EPOCH}`)
 }
 
 export async function beginTaskWorkspaceTurn(

@@ -77,7 +77,24 @@ describe("task workspace client", () => {
 
   it("normalizes task and run ids for the Rust boundary", () => {
     expect(taskIdForMessage("message / 1")).toBe("task:message___1")
-    expect(runIdForTurn("session / 1", 2)).toBe("run:session___1:2")
+    expect(runIdForTurn("session / 1", 2)).toMatch(/^run:session___1:2:[a-z0-9]+$/)
+  })
+
+  /**
+   * The chat store's turn counter is slice-only and restarts at 0 on every
+   * reload, so without an epoch two turns in two page loads of one conversation
+   * minted the same id. The host then refused the second with "runId is already
+   * owned by another task run" whenever the first had not settled, which wedged
+   * the conversation with no way out from the UI.
+   */
+  it("gives the same turn number in two page loads two different ids", async () => {
+    const first = runIdForTurn("session", 0)
+    jest.resetModules()
+    const reloaded = await import("./client")
+    // A different module instance is a different page load.
+    expect(reloaded.runIdForTurn("session", 0)).not.toBe(first)
+    // Same load, same answer: anything deriving it twice still agrees.
+    expect(runIdForTurn("session", 0)).toBe(first)
   })
 
   it("activates the isolated execution root and starts watching", async () => {
