@@ -10,7 +10,7 @@ import {
   useGitStatus,
   useGitStore,
 } from "./git-store"
-import type { GitConflict, GitDiff, GitStatus } from "@/types/git"
+import type { GitConflict, GitDiff, GitStatus, GitWorktree } from "@/types/git"
 
 function mkDiff(path: string): GitDiff {
   return { path, oldContent: "", newContent: "", hunks: [], isBinary: false }
@@ -37,6 +37,19 @@ beforeEach(() => {
   })
 })
 
+function worktree(path: string, branch: string | null, locked = false): GitWorktree {
+  return {
+    path,
+    branch,
+    head: "a1b2c3d",
+    locked,
+    lockReason: locked ? "cognia:workspace-a" : null,
+    prunable: false,
+    pruneReason: null,
+    isMain: false,
+  }
+}
+
 describe("git-store", () => {
   it("setRootDir clears transient state when path changes", () => {
     act(() => {
@@ -45,6 +58,53 @@ describe("git-store", () => {
     })
     expect(useGitStore.getState().rootDir).toBe("/repo")
     expect(useGitStore.getState().status).toBeNull()
+  })
+
+  /**
+   * A worktree list held across a repo switch would place the NEXT
+   * repository's branches in the PREVIOUS one's directories, so the panel
+   * would offer "open worktree" against a path that has nothing to do with
+   * the branch on the row.
+   */
+  it("setRootDir clears the worktree and stack slices with the branches", () => {
+    act(() => {
+      useGitStore.getState().setWorktrees([worktree("/repo/wt/a", "a")])
+      useGitStore.getState().setStackParents([["b", "a"]])
+      useGitStore.getState().setRootDir("/other")
+    })
+    expect(useGitStore.getState().worktrees).toEqual([])
+    expect(useGitStore.getState().stackParents).toEqual([])
+  })
+
+  it("reset clears the worktree and stack slices", () => {
+    act(() => {
+      useGitStore.getState().setWorktrees([worktree("/repo/wt/a", "a")])
+      useGitStore.getState().setStackParents([["b", "a"]])
+      useGitStore.getState().reset()
+    })
+    expect(useGitStore.getState().worktrees).toEqual([])
+    expect(useGitStore.getState().stackParents).toEqual([])
+  })
+
+  /**
+   * The fs watcher republishes on every relevant write, and worktrees change
+   * orders of magnitude less often than status. Without the guard each tick
+   * would hand consumers a fresh array identity and re-run every `useMemo`
+   * keyed on it.
+   */
+  it("setWorktrees keeps array identity when nothing the UI reads moved", () => {
+    act(() => useGitStore.getState().setWorktrees([worktree("/repo/wt/a", "a")]))
+    const first = useGitStore.getState().worktrees
+    act(() => useGitStore.getState().setWorktrees([worktree("/repo/wt/a", "a")]))
+    expect(useGitStore.getState().worktrees).toBe(first)
+  })
+
+  it("setWorktrees publishes when a lock or branch actually changes", () => {
+    act(() => useGitStore.getState().setWorktrees([worktree("/repo/wt/a", "a")]))
+    const first = useGitStore.getState().worktrees
+    act(() => useGitStore.getState().setWorktrees([worktree("/repo/wt/a", "a", true)]))
+    expect(useGitStore.getState().worktrees).not.toBe(first)
+    expect(useGitStore.getState().worktrees[0]?.locked).toBe(true)
   })
 
   it("setRootDir is a no-op when unchanged", () => {

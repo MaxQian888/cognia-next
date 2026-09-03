@@ -14,6 +14,7 @@ import { persist } from "zustand/middleware"
 import { persistLocalStorage } from "@/stores/persist-storage"
 import type {
   GitBranch,
+  GitWorktree,
   GitCommit,
   GitConflict,
   GitDiff,
@@ -86,6 +87,29 @@ function emptyOps(): Record<GitOp, boolean> {
   }
 }
 
+/**
+ * Whether two worktree lists describe the same thing, for the identity guard
+ * in `setWorktrees`. Compares only the fields the UI reads; `head` moves on
+ * every commit inside a worktree and would defeat the guard without changing
+ * anything a caller renders.
+ */
+function sameWorktrees(a: readonly GitWorktree[], b: readonly GitWorktree[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  return a.every((left, index) => {
+    const right = b[index]
+    return (
+      right !== undefined &&
+      left.path === right.path &&
+      left.branch === right.branch &&
+      left.locked === right.locked &&
+      left.lockReason === right.lockReason &&
+      left.prunable === right.prunable &&
+      left.isMain === right.isMain
+    )
+  })
+}
+
 export interface GitState {
   // --- repo binding ---
   rootDir: string | null
@@ -117,6 +141,22 @@ export interface GitState {
   stashes: GitStashEntry[]
   conflicts: GitConflict[]
   activeConflictPath: string | null
+
+  // --- worktrees / stacks ---
+  /**
+   * Every linked worktree of the bound repository, main checkout included.
+   *
+   * Backend-derived and deliberately NOT persisted: another process can prune
+   * a worktree while the app is closed, so a restored list would be a claim
+   * about the disk that nothing checked. The fs watcher keeps it fresh (it
+   * learned to see `.git/worktrees/` for exactly this).
+   */
+  worktrees: GitWorktree[]
+  /**
+   * `[child, parent]` pairs from `branch.<name>.cognia-parent` (ADR-0151).
+   * Git config is the record, so this is a cache of it, not a second truth.
+   */
+  stackParents: Array<[string, string]>
 
   // --- timeline ---
   timelineRepo: GitCommit[]
@@ -155,6 +195,8 @@ export interface GitState {
   setBranches: (branches: GitBranch[]) => void
   setStashes: (stashes: GitStashEntry[]) => void
   setConflicts: (conflicts: GitConflict[]) => void
+  setWorktrees: (worktrees: GitWorktree[]) => void
+  setStackParents: (pairs: Array<[string, string]>) => void
   setActiveConflict: (path: string | null) => void
   setTimeline: (scope: TimelineScope, commits: GitCommit[]) => void
   setTimelineScope: (scope: TimelineScope) => void
@@ -185,6 +227,8 @@ export const useGitStore = create<GitState>()(
       stashes: [],
       conflicts: [],
       activeConflictPath: null,
+      worktrees: [],
+      stackParents: [],
       timelineRepo: [],
       timelineFile: [],
       timelineScope: "repo",
@@ -210,6 +254,11 @@ export const useGitStore = create<GitState>()(
           stashes: [],
           conflicts: [],
           activeConflictPath: null,
+          // Must clear with the branches they annotate: a worktree list held
+          // across a repo switch would place the NEXT repository's branches
+          // in the PREVIOUS one's directories.
+          worktrees: [],
+          stackParents: [],
           timelineRepo: [],
           timelineFile: [],
           commitAmend: false,
@@ -261,6 +310,13 @@ export const useGitStore = create<GitState>()(
       setBranches: (branches) => set({ branches }),
       setStashes: (stashes) => set({ stashes }),
       setConflicts: (conflicts) => set({ conflicts }),
+      // Identity-stable when nothing moved. Worktrees change orders of
+      // magnitude less often than status, and the fs watcher republishes on
+      // every relevant write, so without this guard each tick would hand
+      // consumers a fresh array and re-run every `useMemo` keyed on it.
+      setWorktrees: (worktrees) =>
+        set((s) => (sameWorktrees(s.worktrees, worktrees) ? s : { worktrees })),
+      setStackParents: (stackParents) => set({ stackParents }),
       setActiveConflict: (activeConflictPath) => set({ activeConflictPath }),
 
       setTimeline: (scope, commits) =>
@@ -287,6 +343,11 @@ export const useGitStore = create<GitState>()(
           stashes: [],
           conflicts: [],
           activeConflictPath: null,
+          // Must clear with the branches they annotate: a worktree list held
+          // across a repo switch would place the NEXT repository's branches
+          // in the PREVIOUS one's directories.
+          worktrees: [],
+          stackParents: [],
           timelineRepo: [],
           timelineFile: [],
           ops: emptyOps(),
