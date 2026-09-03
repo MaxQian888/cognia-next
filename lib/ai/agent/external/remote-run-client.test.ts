@@ -241,6 +241,35 @@ describe("starting a turn", () => {
     expect(calls[0].payload).not.toHaveProperty("externalSessionId")
   })
 
+  // The two axes the host lane had no way to carry. A conversation bound to a
+  // host configuration ran on the agent's own default model however loudly the
+  // composer chip promised otherwise.
+  it("sends the model and the thinking level the composer picked", async () => {
+    reply = { started: true, runId: "run-1" }
+    await startRemoteExternalTurn({
+      runId: "run-1",
+      chatSessionId: "c",
+      stamp,
+      prompt: "hi",
+      model: "z-ai/glm-5.3-flash",
+      reasoningEffort: "high",
+    })
+    expect(calls[0].payload).toMatchObject({
+      model: "z-ai/glm-5.3-flash",
+      reasoningEffort: "high",
+    })
+  })
+
+  // Omitted, not null. The request schema is `additionalProperties: false` and
+  // the host reads a missing key as "inherit whatever the configuration says",
+  // so a null would be both a 422 and a lie about what was chosen.
+  it("omits the model axes when nothing was picked", async () => {
+    reply = { started: true, runId: "run-1" }
+    await startRemoteExternalTurn({ runId: "run-1", chatSessionId: "c", stamp, prompt: "hi" })
+    expect(calls[0].payload).not.toHaveProperty("model")
+    expect(calls[0].payload).not.toHaveProperty("reasoningEffort")
+  })
+
   it("passes a resume id through", async () => {
     reply = { started: true, runId: "run-1" }
     await startRemoteExternalTurn({

@@ -100,6 +100,18 @@ export async function startRemoteExternalTurn(input: {
   chatSessionId: string
   stamp: ExternalAgentConfigStamp
   prompt: string
+  /**
+   * The model the composer picked for this conversation.
+   *
+   * Sent per turn rather than stored on the configuration: the configuration
+   * is shared by every conversation bound to it, and a model is a property of
+   * the conversation. This is the same value the local lane hands to
+   * `executeOnExternalAgent`, so the two lanes cannot disagree about what the
+   * chip is promising.
+   */
+  model?: string
+  /** The composer's thinking level, in the app's vocabulary. */
+  reasoningEffort?: string
   externalSessionId?: string
 }): Promise<RemoteTurnStart> {
   // Starting a turn is an interactive approval, like the configuration writes
@@ -116,6 +128,11 @@ export async function startRemoteExternalTurn(input: {
     chatSessionId: input.chatSessionId,
     prompt: input.prompt,
     stamp: { ...input.stamp },
+    // Every optional axis is omitted rather than sent as null. The request
+    // schema is `additionalProperties: false` and the host reads a missing key
+    // as "inherit", so an explicit null would be both a 422 and a lie.
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
     ...(input.externalSessionId ? { externalSessionId: input.externalSessionId } : {}),
   })
 

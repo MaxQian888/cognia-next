@@ -86,12 +86,14 @@ function setup(
       manager.agents.delete(id)
       manager.removed.push(id)
     },
+    executed: [] as Array<Record<string, unknown>>,
     async execute(
       _agentId: string,
       _prompt: string,
       options?: { onEvent?: (e: ExternalAgentEvent) => void }
     ) {
       onEvent = options?.onEvent
+      manager.executed.push({ ...(options as Record<string, unknown>) })
       return new Promise<void>((res, rej) => {
         resolveTurn = res
         rejectTurn = rej
@@ -158,6 +160,38 @@ describe("starting a run", () => {
     })
     expect(result).toEqual({ started: true, runId: "run-1", agentId: "eac_1" })
     expect(h.manager.added).toEqual([{ id: "eac_1", name: "Pi" }])
+  })
+
+  // The host lane had no model axis at all, so a conversation bound to a host
+  // configuration ran on the agent's own default however loudly the composer
+  // chip promised otherwise.
+  it("runs the turn on the model the client picked", async () => {
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+      model: "z-ai/glm-5.3-flash",
+      reasoningEffort: "high",
+    })
+    expect(h.manager.executed[0]).toMatchObject({
+      model: "z-ai/glm-5.3-flash",
+      reasoningEffort: "high",
+    })
+  })
+
+  // Absent means "inherit whatever the configuration selects". Passing an
+  // empty value through would switch the agent's session onto nothing, and the
+  // manager's own gate reads a missing key, not a falsy one.
+  it("leaves the agent's own selection alone when no model was picked", async () => {
+    await startRemoteExternalRun({
+      runId: "run-1",
+      chatSessionId: "chat-1",
+      stamp: STAMP,
+      prompt: "hi",
+    })
+    expect(h.manager.executed[0]).not.toHaveProperty("model")
+    expect(h.manager.executed[0]).not.toHaveProperty("reasoningEffort")
   })
 
   it("refuses without mounting when admission refuses", async () => {

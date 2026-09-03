@@ -23,12 +23,14 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import {
   AGENT_MODEL_CATALOG,
   cachedAgentModelSurface,
+  EMPTY_MODEL_SURFACE,
   loadAgentModelCatalog,
   loadAgentModelSurface,
   agentModelSurfaceRevision,
   subscribeAgentModelSurface,
   type ModelSurfaceResult,
 } from "@/lib/ai/agent/external/model-surface-cache"
+import { mountHostConfigForCatalog } from "@/lib/ai/agent/external/host-config-mount"
 import {
   externalAgentProcessPlaneScope,
   subscribeExternalAgentProcessPlane,
@@ -93,7 +95,19 @@ async function resolveSessionId(agentId: string, chatSessionId: string): Promise
 
 export function useExternalAgentModels(sessionId: string | undefined): ExternalAgentModels {
   const runtimeRef = useRuntimeRefForSession(sessionId)
-  const agentId = runtimeRef.kind === "external" ? runtimeRef.agentId : null
+  /**
+   * A configuration the paired Host owns, when the conversation runs on one.
+   *
+   * The host lane answered IDLE here, so the picker offered no models and the
+   * effort chip no ladder for an agent that has both. The turn then ran on
+   * whatever the agent defaults to, which on Pi is its own configured model
+   * rather than anything the user chose. The id is the configuration id, which
+   * is also the id the host mounts the agent under and the id the persisted
+   * `externalAgentProviderId` marker names, so nothing downstream has to know
+   * which lane produced it.
+   */
+  const hostConfigId = runtimeRef.kind === "host" ? runtimeRef.configId : null
+  const agentId = runtimeRef.kind === "external" ? runtimeRef.agentId : hostConfigId
 
   const [externalSessionId, setExternalSessionId] = useState<string | null>(null)
   const [result, setResult] = useState<ModelSurfaceResult | null>(null)
@@ -134,6 +148,41 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     let cancelled = false
     void (async () => {
       try {
+        // A host-owned configuration is not in this shell's agent store, so
+        // there is nothing to resolve a session against until it is mounted.
+        // Mounting is what makes the catalog readable: on a browser the mount
+        // reaches the Host through the process plane, which is the same route
+        // the turn itself takes.
+        if (hostConfigId) {
+          setLoading(true)
+          let mountedId: string | null
+          try {
+            mountedId = await mountHostConfigForCatalog(hostConfigId)
+          } catch (cause) {
+            // Reported as an error rather than left to fall through. Without
+            // the mount the catalog read below finds no adapter and answers
+            // `unsupported`, which reads as "this agent has no models" about
+            // an agent that was never asked. It is also the only exit here
+            // that can reject, and an uncaught one is an unhandled rejection
+            // in an effect.
+            if (cancelled) return
+            setResult({
+              status: "error",
+              surface: EMPTY_MODEL_SURFACE,
+              thinking: EMPTY_THINKING_SURFACE,
+              detail: cause instanceof Error ? cause.message : String(cause),
+            })
+            return
+          }
+          if (cancelled) return
+          if (!mountedId) {
+            // The host no longer has this configuration. Not an error: the
+            // conversation outlived it, and the picker says so by having
+            // nothing to offer rather than by reporting a failure.
+            setResult(null)
+            return
+          }
+        }
         const resolved = await resolveSessionId(agentId, sessionId)
         if (cancelled) return
         setExternalSessionId(resolved)
@@ -177,7 +226,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     return () => {
       cancelled = true
     }
-  }, [agentId, sessionId, nonce, planeScope])
+  }, [agentId, hostConfigId, sessionId, nonce, planeScope])
 
   /**
    * What the shared cache holds right now, derived rather than mirrored.

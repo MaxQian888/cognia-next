@@ -3000,6 +3000,12 @@ async function externalAgentRunTurn(payload: Record<string, unknown>): Promise<{
     runId,
     chatSessionId,
     prompt,
+    // Per turn, and unvalidated on purpose. The host does not hold the
+    // caller's model catalog, and the agent is the thing that knows which ids
+    // it accepts. An id it does not know comes back as the agent's own
+    // refusal, which is a better answer than this layer guessing.
+    model: payload.model as string | undefined,
+    reasoningEffort: payload.reasoningEffort as string | undefined,
     externalSessionId: payload.externalSessionId as string | undefined,
     callerDeviceId: payload.callerDeviceId as string | undefined,
     stamp: {

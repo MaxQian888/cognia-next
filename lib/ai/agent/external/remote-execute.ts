@@ -38,6 +38,10 @@ export interface RemoteExecuteOptions {
   chatSessionId: string
   /** Resume a session this chat already established on the host. */
   externalSessionId?: string
+  /** The model this conversation picked, replayed onto the host's session. */
+  model?: string
+  /** The composer's thinking level, in the app's vocabulary. */
+  reasoningEffort?: string
   onEvent?: (event: ExternalAgentEvent) => void
   /**
    * A frame arrived out of order. Surfaced so the caller can say the transcript
@@ -127,6 +131,8 @@ export async function executeOnRemoteHostAgent(
       chatSessionId: options.chatSessionId,
       stamp: options.stamp,
       prompt,
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
       externalSessionId: options.externalSessionId,
     })
     if (!started.started) {

@@ -2248,6 +2248,53 @@ export function useClaudeChat() {
             }
           }
 
+          // The model and the thinking level this turn runs on, resolved once
+          // for BOTH executors.
+          //
+          // The model is the one the picker persisted on this conversation,
+          // replayed onto whatever session the agent opens next. `select()`
+          // writes it through to a session that already exists, but a catalog
+          // pick made before the first turn has no session to write to, and
+          // every later turn opens against an agent that was never told. The
+          // row was being written and never read back, so the chip showed a
+          // model the turn did not run on.
+          //
+          // Guarded on the marker naming THIS agent rather than on the model
+          // being non-empty: the same column holds the provider model for a
+          // built-in lane, and `externalAgentIdFromProviderId` returns null for
+          // the legacy unscoped marker, which cannot be attributed to an agent
+          // and so must not be replayed at one. `extAgentId` is the
+          // configuration id on the host lane, which is also the id the picker
+          // stamps, so one guard covers both.
+          //
+          // The thinking level reached only the built-in runtime before this.
+          // On an external agent the control was silently inert. Both fields
+          // carry the same resolved precedence chain (IM override, then
+          // session, then bot, then app default), and the adapter folds the
+          // value onto whatever ladder its model publishes.
+          //
+          // `requestedEffort` rather than `effort`: the latter has already been
+          // through the `modelSupportsEffort` gate against the SESSION's model,
+          // which this rail does not run, because the external agent brings its
+          // own. Reading the gated field made the control inert again whenever
+          // the session happened to sit on a model that rejects the Anthropic
+          // `effort` parameter (Haiku, Sonnet 4.5), even though the agent about
+          // to run it honours the level fine.
+          //
+          // Shared rather than written out per branch: the host-owned lane had
+          // no model axis at all, so a conversation bound to a host
+          // configuration ran on the agent's own default however loudly the
+          // chip promised otherwise.
+          const externalModelAxes = {
+            ...(session?.model &&
+            externalAgentIdFromProviderId(session.providerOverride) === extAgentId
+              ? { model: session.model }
+              : {}),
+            ...(sendOptions.requestedEffort || sendOptions.effort
+              ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
+              : {}),
+          }
+
           // Two executors, one contract. `executeOnRemoteHostAgent` presents
           // the same `(prompt, { onEvent }) => ExternalAgentResult | null`
           // shape over the companion plane, so everything downstream of this
@@ -2263,6 +2310,7 @@ export function useClaudeChat() {
                   },
                   chatSessionId: sessionId,
                   newRunId: () => remoteRunId,
+                  ...externalModelAxes,
                   onEvent: handleExternalEvent,
                 })
               : await executeOnExternalAgent(externalSendText, {
@@ -2277,39 +2325,7 @@ export function useClaudeChat() {
                     ? { sessionId: session.importRuntimeBinding.nativeSessionId }
                     : {}),
                   workingDirectory: sendOptions.cwd,
-                  // The model the picker persisted on this conversation, replayed
-                  // onto whatever session the agent opens next. `select()` writes
-                  // it through to a session that already exists, but a catalog
-                  // pick made before the first turn has no session to write to,
-                  // and every later turn opens against an agent that was never
-                  // told. The row was being written and never read back, so the
-                  // chip showed a model the turn did not run on.
-                  //
-                  // Guarded on the marker naming THIS agent rather than on the
-                  // model being non-empty: the same column holds the provider
-                  // model for a built-in lane, and `externalAgentIdFromProviderId`
-                  // returns null for the legacy unscoped marker, which cannot be
-                  // attributed to an agent and so must not be replayed at one.
-                  ...(session?.model &&
-                  externalAgentIdFromProviderId(session.providerOverride) === extAgentId
-                    ? { model: session.model }
-                    : {}),
-                  // The composer's thinking level, which before this reached only the
-                  // built-in runtime — on an external agent the control was silently
-                  // inert. Both fields carry the same resolved precedence chain (IM
-                  // override > session > bot > app default), and the adapter folds
-                  // the value onto whatever ladder its model publishes.
-                  //
-                  // `requestedEffort` rather than `effort`: the latter has already
-                  // been through the `modelSupportsEffort` gate against the SESSION's
-                  // model, which this rail does not run — the external agent brings
-                  // its own. Reading the gated field made the control inert again
-                  // whenever the session happened to sit on a model that rejects the
-                  // Anthropic `effort` parameter (Haiku, Sonnet 4.5), even though the
-                  // agent about to run it honours the level fine.
-                  ...(sendOptions.requestedEffort || sendOptions.effort
-                    ? { reasoningEffort: sendOptions.requestedEffort ?? sendOptions.effort }
-                    : {}),
+                  ...externalModelAxes,
                   context: {
                     custom: {
                       additionalDirectories: sendOptions.additionalDirectories ?? [],

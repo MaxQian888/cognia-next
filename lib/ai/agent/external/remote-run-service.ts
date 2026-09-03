@@ -36,6 +36,7 @@ import type {
 import type { ExternalAgentConfigStamp } from "@/types/agent/external-agent-config-store"
 import type { ApprovalDecision } from "@cognia/agent-config-types"
 
+import { mountHostConfigAgent, resetHostConfigMountsForTests } from "./host-config-mount"
 import { admitExternalAgentRun, releaseExternalAgentRun } from "./run-admission"
 import type { RunAdmissionRefusal } from "./run-admission"
 import { pickPermissionOptionId } from "./chat-decision-bridge"
@@ -59,6 +60,18 @@ export interface RemoteRunRequest {
   chatSessionId: string
   stamp: ExternalAgentConfigStamp
   prompt: string
+  /**
+   * Model id this turn runs on, chosen from the configuration's own catalog.
+   *
+   * The host-owned lane had no model axis at all, so a conversation bound to a
+   * host configuration ran on whatever the agent defaults to no matter what
+   * the composer's picker said. The local lane has passed this to
+   * `manager.execute` since it existed, and this is the same value reaching
+   * the same call from the other side of the wire.
+   */
+  model?: string
+  /** Thinking level for this turn, in the app's vocabulary (`low` to `max`). */
+  reasoningEffort?: string
   /** Resume an agent session this run already created. */
   externalSessionId?: string
   /**
@@ -130,10 +143,6 @@ interface ActiveRun {
 
 const runs = new Map<string, ActiveRun>()
 const decisions = new Map<string, PendingDecision>()
-/** configId → the revision currently mounted on the manager. */
-const mounted = new Map<string, string>()
-/** configId → the mount in flight, so two runs cannot interleave a teardown. */
-const mounting = new Map<string, Promise<string>>()
 
 export interface RemoteRunDeps {
   admit: typeof admitExternalAgentRun
@@ -153,6 +162,8 @@ export interface ExternalRunManager {
     prompt: string,
     options?: {
       sessionId?: string
+      model?: string
+      reasoningEffort?: string
       onEvent?: (event: ExternalAgentEvent) => void
       signal?: AbortSignal
     }
@@ -192,82 +203,7 @@ export function __resetRemoteRunStateForTests(): void {
   for (const decision of decisions.values()) clearTimeout(decision.timer)
   runs.clear()
   decisions.clear()
-  mounted.clear()
-  mounting.clear()
-}
-
-// ---------------------------------------------------------------------------
-// Mounting
-// ---------------------------------------------------------------------------
-
-/**
- * Make the manager hold exactly the admitted revision for this configuration.
- *
- * The agent id is the configuration id, so a second run against the same
- * configuration reuses the connected process instead of spawning a rival. A
- * revision change tears the agent down first: leaving the old one mounted
- * would run the previous command line under the new configuration's name,
- * which is the failure the revision check exists to prevent.
- *
- * Nothing here installs a runtime or a plugin. Admission already refused
- * anything that is not ready; if the adapter is missing at this point that is
- * an error to report, not a gap to fill.
- *
- * Mounts for one configuration are serialized (see {@link mountAgent}): the
- * read of `mounted`, the teardown and the re-add are one critical section, so
- * two runs starting at once cannot both pass the `getAgent` check and both
- * call `addAgent`.
- */
-async function mountAgentExclusive(
-  manager: ExternalRunManager,
-  configId: string,
-  revision: string,
-  config: ExternalAgentConfig
-): Promise<string> {
-  const agentId = configId
-  const current = mounted.get(configId)
-  if (current === revision && manager.getAgent(agentId)) return agentId
-
-  // A revision change still tears the old agent down even when another run is
-  // mid-turn on it: leaving it mounted would run the previous command line
-  // under the new revision's name, which is the failure the revision check
-  // exists to prevent, and losing a turn is the lesser harm. That run settles
-  // as `failed` when its `execute` rejects.
-  if (manager.getAgent(agentId)) {
-    await manager.removeAgent(agentId)
-    mounted.delete(configId)
-  }
-  await manager.addAgent({ ...config, id: agentId }, { connect: true })
-  mounted.set(configId, revision)
-  return agentId
-}
-
-/**
- * Serialize {@link mountAgentExclusive} per configuration.
- *
- * Chained rather than locked so a caller never has to poll: each mount waits
- * for the previous one to finish before it reads `mounted`. A failed mount is
- * swallowed by the chain (`.catch`) so it does not poison the next run's turn;
- * the failure is still returned to its own caller.
- */
-async function mountAgent(
-  manager: ExternalRunManager,
-  configId: string,
-  revision: string,
-  config: ExternalAgentConfig
-): Promise<string> {
-  const previous = mounting.get(configId)
-  const next = (previous ? previous.catch(() => undefined) : Promise.resolve()).then(() =>
-    mountAgentExclusive(manager, configId, revision, config)
-  )
-  mounting.set(configId, next)
-  try {
-    return await next
-  } finally {
-    // Only the tail clears the slot; a later mount already queued behind this
-    // one owns it now.
-    if (mounting.get(configId) === next) mounting.delete(configId)
-  }
+  resetHostConfigMountsForTests()
 }
 
 // ---------------------------------------------------------------------------
@@ -513,7 +449,7 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
   const record = admission.run.record
   let agentId: string
   try {
-    agentId = await mountAgent(
+    agentId = await mountHostConfigAgent(
       manager,
       record.configId,
       record.revision,
@@ -559,6 +495,12 @@ export async function startRemoteExternalRun(request: RemoteRunRequest): Promise
     try {
       await manager.execute(agentId, request.prompt, {
         sessionId: request.externalSessionId,
+        // Omitted rather than passed as undefined so the manager's own
+        // `if (options?.model)` gate reads the same on both lanes: an absent
+        // model means "inherit the agent's own selection", and writing an
+        // empty one would switch a session onto nothing.
+        ...(request.model ? { model: request.model } : {}),
+        ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
         signal: controller.signal,
         onEvent: (event) => {
           if (run.settled) return

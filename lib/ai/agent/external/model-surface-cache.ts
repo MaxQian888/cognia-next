@@ -49,7 +49,15 @@ export interface ModelSurfaceResult {
   detail?: string
 }
 
-const EMPTY_SURFACE: ExternalAgentModelSurface = {
+/**
+ * What a surface looks like when there is nothing to offer.
+ *
+ * Exported because a caller can fail BEFORE the agent is reachable at all (a
+ * host-owned configuration whose mount was refused), and reporting that as
+ * `unsupported` would tell the user the agent has no models when in fact it
+ * was never asked.
+ */
+export const EMPTY_MODEL_SURFACE: ExternalAgentModelSurface = {
   choices: [],
   currentModelId: null,
   write: { kind: "none" },
@@ -234,18 +242,22 @@ export async function loadAgentModelSurface(
         return { status: "ready", surface: result.data.models, thinking: result.data.thinking }
       }
       if (result.status === "unsupported") {
-        return { status: "unsupported", surface: EMPTY_SURFACE, thinking: EMPTY_THINKING_SURFACE }
+        return {
+          status: "unsupported",
+          surface: EMPTY_MODEL_SURFACE,
+          thinking: EMPTY_THINKING_SURFACE,
+        }
       }
       return {
         status: "error",
-        surface: EMPTY_SURFACE,
+        surface: EMPTY_MODEL_SURFACE,
         thinking: EMPTY_THINKING_SURFACE,
         detail: result.error.message,
       }
     })
     .catch((error: unknown): ModelSurfaceResult => ({
       status: "error",
-      surface: EMPTY_SURFACE,
+      surface: EMPTY_MODEL_SURFACE,
       thinking: EMPTY_THINKING_SURFACE,
       detail: error instanceof Error ? error.message : String(error),
     }))

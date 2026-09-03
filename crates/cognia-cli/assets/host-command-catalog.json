@@ -13026,6 +13026,14 @@
           "prompt": {
             "type": "string"
           },
+          "model": {
+            "type": "string",
+            "description": "Model id this turn runs on, chosen from the configuration's own catalog. Omit to inherit whatever the host configuration selects. The local lane passes the same value to `manager.execute`, so a conversation keeps the model it was given whichever lane runs it."
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "description": "Thinking level for this turn, in the app's vocabulary (`low` to `max`). Folded onto whatever ladder the chosen model publishes; an agent with no reasoning axis ignores it."
+          },
           "externalSessionId": {
             "type": "string"
           },
@@ -46874,5 +46882,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "4d9cd24c6710a5898079e0a53724f5af0d627ff79f8436af6a41ead02fca545f"
+  "catalogHash": "ad343410324399e35d98d2d888f8f112bb82765f8469ef1ac5947c48fdcf3230"
 }

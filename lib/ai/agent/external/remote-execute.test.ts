@@ -47,6 +47,24 @@ beforeEach(() => {
 })
 
 describe("executeOnRemoteHostAgent", () => {
+  // The composer resolves the model and the thinking level once for both
+  // lanes, so this executor has to carry them exactly as the local one does.
+  it("forwards the model and the thinking level to the host", async () => {
+    const run = executeOnRemoteHostAgent("hi", {
+      stamp: STAMP,
+      chatSessionId: "chat-1",
+      newRunId: () => "run-1",
+      model: "z-ai/glm-5.3-flash",
+      reasoningEffort: "high",
+    })
+    handlers?.onTerminal("completed")
+    await run
+    expect(started[0]).toMatchObject({
+      model: "z-ai/glm-5.3-flash",
+      reasoningEffort: "high",
+    })
+  })
+
   // The host streams from the moment it accepts, so a subscription opened
   // after the RPC returned would miss the opening frames.
   it("subscribes before it starts the turn", async () => {
