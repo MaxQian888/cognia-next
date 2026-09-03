@@ -337,6 +337,7 @@ export function SourceControlPanel() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setView(candidate)}
+                aria-label={t(`views.${candidate}`)}
                 className={cn("h-7 gap-1.5 px-2 text-xs", view === candidate && "bg-accent")}
                 data-testid={`sc-view-${candidate}`}
               >
@@ -345,7 +346,12 @@ export function SourceControlPanel() {
                 ) : (
                   <GitBranchIcon aria-hidden className="size-3.5" />
                 )}
-                <span className="hidden @xl/feature-header:inline">{t(`views.${candidate}`)}</span>
+                {/* `@3xl` (768px of HEADER width), not `@xl`. At `@xl` the
+                    labels still showed on an 820px window where the row had no
+                    room for them, and the slot's own `overflow-x-auto` cut
+                    "Browse" off mid-word. Icon-only is the honest fallback, and
+                    `aria-label` carries the name either way. */}
+                <span className="hidden @3xl/feature-header:inline">{t(`views.${candidate}`)}</span>
               </Button>
             ))}
           </div>
