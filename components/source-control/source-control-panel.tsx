@@ -7,7 +7,7 @@
  * return and reuses the shared resizable split.
  */
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
@@ -35,7 +35,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
-import { useMediaQuery } from "@/hooks/ui/use-media-query"
+import { useElementWidth } from "@/hooks/use-element-width"
 import { Spinner } from "@/components/ui/spinner"
 import { gitInit, runGitUserAction } from "@/lib/git/commands"
 import { parseGitTarget } from "@/lib/git/target"
@@ -70,6 +70,19 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { useChatStore } from "@/stores/chat"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
+
+/**
+ * Below this PANE width the panel stacks its two columns instead of splitting
+ * them side by side, and its header collapses the root controls behind a
+ * popover.
+ *
+ * A pane width, not a viewport width, and the distinction is the point. The
+ * compact tier (`useCompactLayout`, 768px) asks "is this a phone-shaped
+ * SCREEN", and `app/source-control/page.tsx` uses it to choose which body to
+ * mount at all. This one asks "does this PANE have room for two columns",
+ * which has a different answer wherever the panel is not the whole window.
+ */
+export const SOURCE_CONTROL_DENSE_WIDTH = 960
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
@@ -126,7 +139,15 @@ export function SourceControlPanel() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [timelineFile, setTimelineFile] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
-  const isNarrow = useMediaQuery("(max-width: 959.98px)")
+  // Measured, not queried. `useMediaQuery` asked how wide the WINDOW is and
+  // answered for the PANE, which is a different number wherever this panel is
+  // not the whole screen: nested in a workspace tab it got a side-by-side
+  // split it had no room for at a 1000px window. `useElementWidth` measures in
+  // a layout effect before paint, so the first frame already has the right
+  // layout. `0` means "not measured yet", so it must not read as narrow.
+  const panelRef = useRef<HTMLDivElement>(null)
+  const paneWidth = useElementWidth(panelRef)
+  const isNarrow = paneWidth > 0 && paneWidth < SOURCE_CONTROL_DENSE_WIDTH
   const layout = useResizableLayout(
     isNarrow ? "cognia-git-panel-vertical" : "cognia-git-panel-horizontal"
   )
@@ -258,8 +279,10 @@ export function SourceControlPanel() {
 
   return (
     <div
+      ref={panelRef}
       className="flex h-full min-h-0 flex-col"
       data-bg-target="chat"
+      data-dense={isNarrow ? "true" : undefined}
       data-testid="source-control-panel"
     >
       <FeaturePageHeader

@@ -47,9 +47,12 @@ jest.mock("@/lib/workspace/open-folder", () => ({
 jest.mock("@/hooks/ui/use-resizable-layout", () => ({
   useResizableLayout: () => ({ defaultLayout: undefined, onLayoutChanged: jest.fn() }),
 }))
-const useMediaQueryMock = jest.fn().mockReturnValue(false)
-jest.mock("@/hooks/ui/use-media-query", () => ({
-  useMediaQuery: (...args: unknown[]) => useMediaQueryMock(...args),
+// The panel measures its own pane rather than querying the window, so the
+// layout fork is driven by a width in px. `0` is "not measured yet" and must
+// read as wide, which the default here also asserts.
+const elementWidthMock = jest.fn().mockReturnValue(1400)
+jest.mock("@/hooks/use-element-width", () => ({
+  useElementWidth: (...args: unknown[]) => elementWidthMock(...args),
 }))
 // Stub the resizable wrapper — the real Group measures the DOM, which jsdom
 // can't satisfy. Expose size props as data attributes for unit assertions.
@@ -323,7 +326,7 @@ jest.mock("./clone-repository-dialog", () => ({
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { gitInit } from "@/lib/git/commands"
-import { SourceControlPanel } from "./source-control-panel"
+import { SOURCE_CONTROL_DENSE_WIDTH, SourceControlPanel } from "./source-control-panel"
 import { useGitStore } from "@/stores/git/git-store"
 import type { GitStatus } from "@/types/git"
 
@@ -348,7 +351,7 @@ beforeEach(() => {
   repoCfg.remoteWorkspaces = []
   repoCfg.openFolder.mockReset()
   repoCfg.refresh.mockClear()
-  useMediaQueryMock.mockReset().mockReturnValue(false)
+  elementWidthMock.mockReset().mockReturnValue(1400)
   openPathAsWorkspace.mockReset()
   actionCfg.resolveConflict.mockReset().mockResolvedValue(null)
   actionCfg.sequencerContinue.mockReset().mockResolvedValue(null)
@@ -496,8 +499,8 @@ describe("SourceControlPanel", () => {
     }
   })
 
-  it("stacks the changes and diff panes in narrow desktop windows", () => {
-    useMediaQueryMock.mockReturnValue(true)
+  it("stacks the changes and diff panes when the PANE is narrow", () => {
+    elementWidthMock.mockReturnValue(SOURCE_CONTROL_DENSE_WIDTH - 1)
     render(<SourceControlPanel />)
     expect(screen.getByTestId("resizable-group")).toHaveAttribute("data-orientation", "vertical")
     expect(screen.getByTestId("resizable-panel-sc-changes")).toHaveAttribute(
@@ -508,6 +511,30 @@ describe("SourceControlPanel", () => {
       "data-default-size",
       "58%"
     )
+  })
+
+  /**
+   * `useElementWidth` returns 0 until the ref is attached. Treating that as
+   * narrow would stack the panes for one frame on every mount, then snap them
+   * side by side, which is a visible flash on the widest screens.
+   */
+  it("stays side by side while the pane has not been measured", () => {
+    elementWidthMock.mockReturnValue(0)
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("resizable-group")).toHaveAttribute("data-orientation", "horizontal")
+    expect(screen.getByTestId("source-control-panel")).not.toHaveAttribute("data-dense")
+  })
+
+  /**
+   * The tier is a PANE width. `useMediaQuery("(max-width: 959.98px)")` asked
+   * about the window and answered for the pane, so a 1000px window with the
+   * panel nested in a workspace tab got a side-by-side split it had no room
+   * for.
+   */
+  it("marks itself dense from its own width, not the window's", () => {
+    elementWidthMock.mockReturnValue(SOURCE_CONTROL_DENSE_WIDTH - 1)
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("source-control-panel")).toHaveAttribute("data-dense", "true")
   })
 
   it("shows the sequencer banner when an operation is in progress", () => {
