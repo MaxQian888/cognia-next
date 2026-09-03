@@ -992,10 +992,17 @@ describe("tuiReducer", () => {
     expect(noCancel.renderEpoch).toBe(base().renderEpoch)
   })
 
-  it("OVERLAY_MOVE navigates a files completion list", () => {
+  it("OVERLAY_MOVE navigates a searchable list", () => {
     let s = reduce(base(), {
       type: "OVERLAY_OPEN",
-      overlay: { kind: "files", token: "@s", completions: ["src/", "spec/"], index: 0 },
+      overlay: {
+        kind: "sessions",
+        items: [
+          { id: "a", title: "one" },
+          { id: "b", title: "two" },
+        ] as never,
+        index: 0,
+      },
     })
     s = reduce(s, { type: "OVERLAY_MOVE", delta: 1 })
     expect((s.overlay as { index: number }).index).toBe(1)

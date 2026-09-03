@@ -4,7 +4,7 @@ import { render } from "@testing-library/react"
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import type { ResolvedConfig } from "../../config/schema"
-import { Footer, fitFooterSuffixes } from "./Footer"
+import { Footer, fitFooterSuffixes, planReserve } from "./Footer"
 import type { StatusSegmentView } from "../format/status-bar"
 
 const config: ResolvedConfig = {
@@ -138,11 +138,40 @@ describe("Footer", () => {
     expect(text).toContain("…") // truncation marker
   })
 
-  it("budgets plan and hint suffixes into the same physical row", () => {
-    const suffixes = fitFooterSuffixes(40, 12, "A very long plan title that cannot wrap", true)
+  it("budgets plan and hint suffixes into the room the segments left", () => {
+    const suffixes = fitFooterSuffixes(26, "A very long plan title that cannot wrap", true)
     expect(suffixes.reservedWidth).toBeLessThanOrEqual(26)
     expect(suffixes.planText).toContain("…")
+    // The hint is pure leftover, so a row with no spare columns simply drops it.
     expect(suffixes.hintText).toBe("")
+  })
+
+  it("caps what a plan title may reserve before the segments are fitted", () => {
+    // A title far longer than the row still gives back two thirds of it.
+    expect(planReserve(90, "x".repeat(200))).toBe(30)
+    // A short title reserves only what it needs, and no title reserves nothing.
+    expect(planReserve(90, "Ship it")).toBe(13)
+    expect(planReserve(90, undefined)).toBe(0)
+  })
+
+  it("keeps identity segments ahead of the idle hint on a normal terminal", () => {
+    const { container } = render(
+      <Footer
+        config={config}
+        usage={{ inputTokens: 91_000, outputTokens: 12_400 }}
+        turnStatus="idle"
+        gitBranch="dev"
+        contextWindow={200_000}
+        planTitle="Rebuild the tool cards"
+        columns={92}
+      />
+    )
+    const text = container.textContent ?? ""
+    // The hint used to be reserved first and cost four identity segments.
+    expect(text).toContain("claude-x")
+    expect(text).toContain("anthropic")
+    expect(text).toContain("tok")
+    expect(text).toContain("📋 Rebuild the tool cards")
   })
 
   it("honors the persisted idle-hint preference", () => {

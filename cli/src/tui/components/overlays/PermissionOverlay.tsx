@@ -99,6 +99,17 @@ export function PermissionOverlay({
           </Text>
         ) : null}
       </Text>
+      {/* What is being approved comes BEFORE the answers. The choice list used
+          to render first, which put the command, the description and (worst)
+          the proposed diff underneath the buttons: Enter landed on "allow"
+          without the change ever having been on screen above it. */}
+      {summary ? <Text color={theme.muted}>{summary}</Text> : null}
+      {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
+      {diff.length > 0 && diffRows > 0 ? (
+        <Box marginBottom={1} flexDirection="column">
+          <DiffView diff={diff} lang={diffLang} maxLines={diffRows} />
+        </Box>
+      ) : null}
       <SelectList
         items={choices.map((c) => ({ label: c.label }))}
         index={index}
@@ -107,13 +118,6 @@ export function PermissionOverlay({
         onSelect={(i) => onResolve(choiceToDecision(choices[i], req.toolName))}
         onCancel={() => onResolve(choiceToDecision({ label: "Deny", value: "deny" }, req.toolName))}
       />
-      {summary ? <Text color={theme.muted}>{summary}</Text> : null}
-      {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
-      {diff.length > 0 && diffRows > 0 ? (
-        <Box marginTop={1} flexDirection="column">
-          <DiffView diff={diff} lang={diffLang} maxLines={diffRows} />
-        </Box>
-      ) : null}
     </Box>
   )
 }

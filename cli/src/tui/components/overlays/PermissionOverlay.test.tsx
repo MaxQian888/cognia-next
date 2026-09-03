@@ -154,7 +154,7 @@ describe("PermissionOverlay", () => {
     expect(onResolve).toHaveBeenCalledWith({ decision: "deny", message: 'Denied "bash".' })
   })
 
-  it("keeps permission controls visible before details in a tiny viewport", () => {
+  it("puts what is being approved above the choices, and keeps every choice in a tiny viewport", () => {
     const { container } = render(
       <PermissionOverlay
         req={req}
@@ -166,7 +166,31 @@ describe("PermissionOverlay", () => {
       />
     )
     const text = container.textContent ?? ""
-    expect(text.indexOf("Allow once")).toBeLessThan(text.indexOf("rm -rf /tmp/x"))
+    // The command comes first: Enter must never land on "allow" before the thing
+    // being allowed has been on screen above it. The choices are still reserved
+    // ahead of the diff by the row budget, so they cannot be pushed off instead.
+    expect(text.indexOf("rm -rf /tmp/x")).toBeLessThan(text.indexOf("Allow once"))
+    expect(text).toContain("Allow always")
     expect(text).toContain("Deny")
+  })
+
+  it("shows the diff above the choices for an edit request", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={
+          {
+            toolName: "Edit",
+            input: { file_path: "/a.ts", old_string: "before", new_string: "after" },
+          } as never
+        }
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        maxRows={24}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text.indexOf("after")).toBeLessThan(text.indexOf("Allow once"))
   })
 })

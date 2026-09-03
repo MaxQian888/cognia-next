@@ -307,6 +307,16 @@ const SEP_WIDTH = stringWidth(SEGMENT_SEP)
 const ELLIPSIS_WIDTH = 2
 
 /** Total display width of segments joined by ` · ` (CJK-aware). */
+/**
+ * Columns a fitted status row actually paints, including its separators and the
+ * trailing " …" when segments were dropped. The footer needs this to hand the
+ * *leftover* width to its plan chip and idle hint, instead of reserving room for
+ * them up front and then truncating real status to pay for it.
+ */
+export function fittedStatusWidth(fitted: FittedStatusBar): number {
+  return joinedWidth(fitted.segments) + (fitted.truncated ? ELLIPSIS_WIDTH : 0)
+}
+
 function joinedWidth(segments: StatusSegmentView[]): number {
   if (segments.length === 0) return 0
   let w = 0

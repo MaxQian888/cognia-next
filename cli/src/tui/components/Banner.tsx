@@ -85,7 +85,7 @@ export function Banner({
       </Text>
       <Text color={theme.muted}>{shortenCwd(cwd, density === "medium" ? 40 : 80)}</Text>
       {status && statusSegments.length > 0 && (
-        <Text color={bypass ? theme.warning : theme.muted}>{statusSegments.join("  ·  ")}</Text>
+        <Text color={bypass ? theme.warning : theme.muted}>{statusSegments.join(" · ")}</Text>
       )}
       {density === "full" ? (
         <Text color={theme.muted} dimColor>

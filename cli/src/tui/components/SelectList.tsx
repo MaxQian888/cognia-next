@@ -9,14 +9,36 @@ import { Box, Text, type DOMElement } from "ink"
 import { useModalInput } from "../input/input-router"
 
 import { useTheme } from "../theme/context"
+import { stringWidth } from "../markdown/width"
 import { windowList } from "./list-window"
 import { windowByWrappedRows } from "./overlay-layout"
 import { OverlayFooter } from "./OverlayFooter"
 import { usePanelClick } from "../input/use-panel-click"
 import { isMouseSequence } from "../input/mouse"
 
-/** Row prefix drawn before every label ("❯ " / "  "), stolen from the wrap width. */
-const LIST_ROW_CHROME = 2
+/**
+ * Columns a row loses to chrome before its text starts wrapping: the panel's
+ * round border (1 each side), its `paddingX={1}` (1 each side) and the "❯ " /
+ * "  " row prefix. The prefix alone used to be counted, which left the wrap
+ * budget four columns too generous, so a row the window believed fit on one
+ * line actually wrapped onto two.
+ */
+const LIST_ROW_CHROME = 6
+
+/** Smallest gap between a label and a right-aligned hint. Below this the two
+ * read as one run-on string, so the row falls back to the inline single space. */
+const HINT_GAP = 2
+
+/**
+ * Gutter that right-aligns a row's hint against the panel's inner edge, or null
+ * when the row is too full to align (the caller then falls back to one space).
+ * Pure so the column math is testable without Ink.
+ */
+export function hintGutter(labelWidth: number, hintWidth: number, rowWidth: number): string | null {
+  if (rowWidth <= 0 || hintWidth === 0) return null
+  const gap = rowWidth - labelWidth - hintWidth
+  return gap >= HINT_GAP ? " ".repeat(gap) : null
+}
 
 export interface SelectItem {
   label: string
@@ -182,11 +204,21 @@ export function SelectList({
       {win.above > 0 ? <Text color={theme.muted} dimColor>{`  ↑ ${win.above} more`}</Text> : null}
       {visible.map((item, i) => {
         const row = win.start + i
+        // Hints line up on the right edge when the row has room, so a list of
+        // sessions or models reads as two columns instead of a ragged sentence.
+        const gutter = item.hint
+          ? hintGutter(stringWidth(item.label), stringWidth(item.hint), rowWidth)
+          : null
         return (
           <Text key={row} color={row === index ? theme.accent : item.color} bold={row === index}>
             {row === index ? "❯ " : "  "}
             {item.label}
-            {item.hint ? <Text color={theme.muted}> {item.hint}</Text> : null}
+            {item.hint ? (
+              <Text color={theme.muted} dimColor>
+                {gutter ?? " "}
+                {item.hint}
+              </Text>
+            ) : null}
           </Text>
         )
       })}

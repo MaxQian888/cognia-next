@@ -40,7 +40,6 @@ import type {
 } from "../../config/schema"
 import type { ProviderOption } from "../commands/provider-options"
 import type { CredentialKind } from "../../config/credentials"
-import type { ConfigMenuRow } from "../commands/config-menu"
 import type { ModelMeta } from "../runtime/model-meta"
 import type { FormOverlayState } from "./form"
 import type { SessionAnalysis } from "../format/usage-analysis"
@@ -583,8 +582,6 @@ export interface AgentStatsOverlay {
 export type Overlay =
   | { kind: "none" }
   | { kind: "permission"; req: PermissionRequestEvent; choices: PermissionChoice[]; index: number }
-  | { kind: "slash"; query: string; index: number }
-  | { kind: "files"; token: string; completions: string[]; index: number }
   // `/model` switcher. `options` is the FULL provider catalog; `query` is the
   // live typeahead filter (the list can run to hundreds of OpenRouter ids), and
   // `index` points into the FILTERED view, not `options` — so navigation and
@@ -638,7 +635,6 @@ export type Overlay =
         returnToSettings?: { section: number; index: number }
       }
     }
-  | { kind: "config"; rows: ConfigMenuRow[]; index: number }
   | { kind: "sessions"; items: SessionSummary[]; index: number; query?: string }
   | { kind: "usage" }
   // Subscription limits/usage panel (`/limits`, alias `/subscription`). Renders

@@ -2,7 +2,7 @@ import React from "react"
 import { render } from "@testing-library/react"
 import { __fireInput, __resetInk } from "ink"
 
-import { SelectList } from "./SelectList"
+import { SelectList, hintGutter } from "./SelectList"
 
 // jsdom has no Yoga layout, so stub the absolute-position reader for click tests.
 jest.mock("../input/element-position", () => ({
@@ -10,6 +10,19 @@ jest.mock("../input/element-position", () => ({
 }))
 
 const items = [{ label: "One", hint: "first" }, { label: "Two" }, { label: "Three" }]
+
+describe("hintGutter", () => {
+  it("right-aligns a hint when the row has room", () => {
+    // 40 columns of row, a 10-column label and a 7-column hint leave 23 of gap.
+    expect(hintGutter(10, 7, 40)).toBe(" ".repeat(23))
+  })
+
+  it("declines when label and hint would collide", () => {
+    expect(hintGutter(30, 9, 40)).toBeNull()
+    expect(hintGutter(10, 0, 40)).toBeNull()
+    expect(hintGutter(10, 7, 0)).toBeNull()
+  })
+})
 
 describe("SelectList", () => {
   beforeEach(() => __resetInk())

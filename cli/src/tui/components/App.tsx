@@ -2691,7 +2691,6 @@ export function App({
       persistBackendModelFn={persistBackendModelFn}
       persistCredentialFn={persistCredentialFn}
       persistPluginTools={persistPluginTools}
-      openModelPicker={openModelPicker}
       applySettings={applySettings}
       activateSettings={activateSettings}
       applySubagentModelEdit={applySubagentModelEdit}

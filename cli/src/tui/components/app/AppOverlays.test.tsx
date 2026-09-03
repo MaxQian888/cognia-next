@@ -46,7 +46,6 @@ function propsFor(
     persistBackendModelFn: jest.fn(() => true),
     persistCredentialFn: jest.fn(() => true),
     persistPluginTools: jest.fn(),
-    openModelPicker: jest.fn(),
     applySettings: jest.fn(),
     activateSettings: jest.fn(),
     applySubagentModelEdit: jest.fn(),

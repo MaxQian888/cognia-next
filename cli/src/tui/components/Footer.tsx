@@ -17,6 +17,7 @@ import { Box, Text, type DOMElement } from "ink"
 import {
   buildStatusBar,
   fitStatusSegments,
+  fittedStatusWidth,
   readGitBranch,
   resolveSegments,
   type StatusSegmentView,
@@ -30,23 +31,49 @@ import type { SessionTotals, TurnStatus, UsageInfo } from "../state/types"
 
 const HINT_TEXT = " · ⚙ /settings · ▸ /inspect"
 
-/** Keep every footer suffix inside the same physical terminal row. */
+const PLAN_PREFIX = " · 📋 "
+
+/** The most of the row a plan chip may claim before the identity segments are
+ * fitted. A plan title is session content worth a glance, but it is not worth
+ * more than a third of the status line. */
+const PLAN_MAX_SHARE = 1 / 3
+
+/**
+ * Columns to hold back for the plan chip before the status segments are fitted.
+ * Bounded, so a long plan title can never push model / mode / context off the
+ * row: whatever the chip does not need goes straight back to the segments.
+ */
+export function planReserve(columns: number, planTitle: string | undefined): number {
+  if (!planTitle) return 0
+  const wanted = stringWidth(PLAN_PREFIX) + stringWidth(planTitle)
+  const cap = Math.floor(Math.max(0, columns) * PLAN_MAX_SHARE)
+  return Math.min(wanted, cap)
+}
+
+/**
+ * Fit the footer's suffixes into the columns the identity segments left over.
+ *
+ * `room` is what remains AFTER the status row has been fitted (which itself ran
+ * against a width already reduced by {@link planReserve}). Both suffixes used to
+ * be reserved up front off the FIRST segment's width alone: on a 92-column
+ * terminal that handed 54 columns to a plan title and a constant hint, and
+ * truncated model / context / tokens / cwd with a "…" to pay for them.
+ *
+ * Within the leftover the plan chip still wins. It names what this session
+ * proposed, where the hint is the same sentence every time.
+ */
 export function fitFooterSuffixes(
-  columns: number,
-  firstSegmentWidth: number,
+  room: number,
   planTitle: string | undefined,
   showHint: boolean
 ): { planText: string; hintText: string; reservedWidth: number } {
-  const roomAfterIdentity = Math.max(0, columns - firstSegmentWidth - 2)
-  const hintText = showHint && stringWidth(HINT_TEXT) <= roomAfterIdentity ? HINT_TEXT : ""
-  const planPrefix = " · 📋 "
-  const planRoom = Math.max(0, roomAfterIdentity - stringWidth(hintText))
+  const available = Math.max(0, room)
   let planText = ""
-  if (planTitle && planRoom > stringWidth(planPrefix) + 1) {
-    const titleRoom = planRoom - stringWidth(planPrefix)
-    const fittedTitle = truncateToWidth(planTitle, titleRoom)
-    planText = planPrefix + fittedTitle
+  if (planTitle && available > stringWidth(PLAN_PREFIX) + 1) {
+    planText = PLAN_PREFIX + truncateToWidth(planTitle, available - stringWidth(PLAN_PREFIX))
   }
+  const afterPlan = available - stringWidth(planText)
+  const hintText = showHint && stringWidth(HINT_TEXT) <= afterPlan ? HINT_TEXT : ""
   return {
     planText,
     hintText,
@@ -118,19 +145,22 @@ function FooterImpl({
       }),
     [config, usage, totals, git, contextWindow, rateLimits, capabilities, theme]
   )
+  // Identity first, suffixes out of what is left. The only width held back is a
+  // bounded slice for the plan chip; the idle hint is pure leftover, so it can
+  // never evict the status this row exists to show.
+  const fitted = React.useMemo(
+    () => fitStatusSegments(allSegments, cols - planReserve(cols, planTitle)),
+    [allSegments, cols, planTitle]
+  )
+  const { segments, truncated } = fitted
   const suffixes = React.useMemo(
     () =>
       fitFooterSuffixes(
-        cols,
-        allSegments[0] ? stringWidth(allSegments[0].text) : 0,
+        cols - fittedStatusWidth(fitted),
         planTitle,
         !busy && showHint && config.statusBar?.showHints !== false
       ),
-    [cols, allSegments, planTitle, busy, showHint, config.statusBar?.showHints]
-  )
-  const { segments, truncated } = React.useMemo(
-    () => fitStatusSegments(allSegments, Math.max(0, cols - suffixes.reservedWidth)),
-    [allSegments, cols, suffixes.reservedWidth]
+    [cols, fitted, planTitle, busy, showHint, config.statusBar?.showHints]
   )
   // Cache the rendered segments so App's footer click hit-test maps a column to
   // the EXACT segment shown. Written in an effect (not during render) so it never

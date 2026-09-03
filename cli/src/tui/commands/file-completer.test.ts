@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { activeAtToken, completeAtPath, splitToken, type DirEntry } from "./file-completer"
+import { completeAtPath, splitToken, type DirEntry } from "./file-completer"
 
 const listing: Record<string, DirEntry[]> = {
   ".": [
@@ -27,19 +27,6 @@ describe("splitToken", () => {
   })
   it("handles a root path", () => {
     expect(splitToken("@/etc")).toEqual({ dir: "/", prefix: "etc" })
-  })
-})
-
-describe("activeAtToken", () => {
-  it("detects a trailing @token", () => {
-    expect(activeAtToken("look at @src/ap")).toEqual({ token: "@src/ap", start: 8 })
-  })
-  it("detects an @token at the start", () => {
-    expect(activeAtToken("@re")).toEqual({ token: "@re", start: 0 })
-  })
-  it("returns null when not in an @ reference", () => {
-    expect(activeAtToken("plain text")).toBeNull()
-    expect(activeAtToken("a@b c")).toBeNull()
   })
 })
 

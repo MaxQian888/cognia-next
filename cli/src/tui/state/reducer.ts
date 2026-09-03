@@ -308,8 +308,6 @@ function overlayLength(overlay: Overlay): number | null {
       // The `/provider` picker navigates the FILTERED view (same reason as
       // `model`), so the length must reflect the active typeahead query.
       return filterProviderOptions(overlay.options, overlay.query ?? "").length
-    case "config":
-      return overlay.rows.length
     case "subagentModels":
       return overlay.rows.length
     case "settings":
@@ -324,8 +322,6 @@ function overlayLength(overlay: Overlay): number | null {
       return filterInspectItems(overlay.items, overlay.query ?? "").length
     case "quickActions":
       return filterQuickActions(overlay.rows, overlay.query ?? "").length
-    case "files":
-      return overlay.completions.length
     case "plan":
       return PLAN_APPROVAL_CHOICES.length
     default:

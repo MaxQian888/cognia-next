@@ -49,6 +49,21 @@ describe("stringWidth", () => {
     expect(stringWidth("a‍b")).toBe(2) // ZWJ contributes nothing
   })
 
+  it("measures ambiguous dingbats as one column, emoji-presentation ones as two", () => {
+    // The whole 2600..27BF block used to count as emoji, so every ✓ / ✗ status
+    // glyph measured double and any right-aligned column came out a cell short.
+    expect(stringWidth("✓")).toBe(1)
+    expect(stringWidth("✗")).toBe(1)
+    expect(stringWidth("✎")).toBe(1)
+    expect(stringWidth("❯")).toBe(1)
+    expect(stringWidth("★")).toBe(1)
+    // The genuinely emoji-presentation members of that block stay two columns.
+    expect(stringWidth("✅")).toBe(2)
+    expect(stringWidth("❌")).toBe(2)
+    expect(stringWidth("⚡")).toBe(2)
+    expect(stringWidth("✨")).toBe(2)
+  })
+
   it("counts astral-plane ideographs and emoji as wide", () => {
     expect(stringWidth("\u{20000}")).toBe(2) // CJK Ext B
     expect(stringWidth("🚀")).toBe(2)

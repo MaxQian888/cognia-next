@@ -78,20 +78,59 @@ function isZeroWidth(cp: number): boolean {
   )
 }
 
+/**
+ * The code points in Miscellaneous Symbols / Dingbats (U+2600..U+27BF) that
+ * Unicode gives `Emoji_Presentation=Yes`, i.e. the ones a terminal paints two
+ * columns wide on their own. The rest of that block (`✓ ✗ ✎ ★ ☰ ❯` …) is
+ * East-Asian *Ambiguous* and renders in ONE column, which is how this TUI has
+ * always drawn them.
+ *
+ * The whole block used to be measured as emoji, so every `✓`/`✗` in a status
+ * glyph, a tool card or a list row counted double: right-aligned columns came
+ * out a cell short and wrap budgets under-filled by one per glyph.
+ */
+const DINGBAT_EMOJI_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x2614, 0x2615],
+  [0x2648, 0x2653],
+  [0x267f, 0x267f],
+  [0x2693, 0x2693],
+  [0x26a1, 0x26a1],
+  [0x26aa, 0x26ab],
+  [0x26bd, 0x26be],
+  [0x26c4, 0x26c5],
+  [0x26ce, 0x26ce],
+  [0x26d4, 0x26d4],
+  [0x26ea, 0x26ea],
+  [0x26f2, 0x26f3],
+  [0x26f5, 0x26f5],
+  [0x26fa, 0x26fa],
+  [0x26fd, 0x26fd],
+  [0x2705, 0x2705],
+  [0x270a, 0x270b],
+  [0x2728, 0x2728],
+  [0x274c, 0x274c],
+  [0x274e, 0x274e],
+  [0x2753, 0x2755],
+  [0x2757, 0x2757],
+  [0x2795, 0x2797],
+  [0x27b0, 0x27b0],
+  [0x27bf, 0x27bf],
+]
+
 function isEmoji(cp: number): boolean {
-  return (
-    (cp >= 0x1f1e6 && cp <= 0x1f1ff) ||
-    (cp >= 0x1f300 && cp <= 0x1faff) ||
-    (cp >= 0x2600 && cp <= 0x27bf)
-  )
+  if (cp >= 0x1f1e6 && cp <= 0x1f1ff) return true
+  if (cp >= 0x1f300 && cp <= 0x1faff) return true
+  if (cp < 0x2600 || cp > 0x27bf) return false
+  return DINGBAT_EMOJI_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi)
 }
 
 function fallbackStringWidth(text: string): number {
   let width = 0
   for (const { segment } of graphemeSegments(text.replace(ANSI_SEQUENCE, ""))) {
-    // Keycap sequences use an ASCII base plus U+20E3, but terminals paint the
-    // completed emoji as a two-cell glyph.
-    let clusterWidth = segment.includes("\u20e3") ? 2 : 0
+    // Keycap sequences use an ASCII base plus U+20E3, and U+FE0F asks for the
+    // emoji *presentation* of an otherwise-narrow symbol ("☝️"). Terminals paint
+    // both as a two-cell glyph, whatever the base character measures alone.
+    let clusterWidth = segment.includes("\u20e3") || segment.includes("\ufe0f") ? 2 : 0
     for (const ch of segment) {
       const cp = ch.codePointAt(0)
       if (cp === undefined || isZeroWidth(cp)) continue

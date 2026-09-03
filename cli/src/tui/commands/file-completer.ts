@@ -19,17 +19,6 @@ export function splitToken(token: string): { dir: string; prefix: string } {
 }
 
 /**
- * Detect a trailing `@token` at the cursor. Returns the token (including `@`)
- * and its start offset, or null when the cursor is not in an `@` reference.
- */
-export function activeAtToken(text: string): { token: string; start: number } | null {
-  const match = /(^|\s)(@\S*)$/.exec(text)
-  if (!match) return null
-  const token = match[2]
-  return { token, start: text.length - token.length }
-}
-
-/**
  * Completions for a path token, each prefixed with `sigil` so it inserts ready
  * to use. The `@` composer reference uses the default sigil; the bash-mode
  * completer ({@link ../commands/bash-completer}) passes `""` for bare paths.

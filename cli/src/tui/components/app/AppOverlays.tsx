@@ -83,11 +83,10 @@ import { buildConvDetail } from "../../runtime/agent-stats-model"
 import { formatToolResultBody } from "../../commands/expand-command"
 import { cycleEnum, applyTargetDefault, settingsSections } from "../../runtime/settings-sections"
 import { EFFORT_SLIDER_LEVELS, PERMISSION_MODES } from "../../../config/schema"
-import { deriveEffortSliderState, modelSupportsEffort } from "../../../config/thinking"
+import { modelSupportsEffort } from "../../../config/thinking"
 import { bufferFromText } from "../../input/buffer"
 import type { CapturePermissionDecision } from "@/lib/claude/run-and-capture"
 import type { ThinkingLevel, SubagentModelOverride } from "../../../config/schema"
-import type { ConfigMenuRow } from "../../commands/config-menu"
 import type { TuiState, TuiAction } from "../../state/types"
 import { permissionModeMeta, permissionRiskMarker } from "../../state/permission-mode-meta"
 import { contentRows } from "../../layout/terminal-layout"
@@ -114,7 +113,6 @@ export interface AppOverlaysProps {
    * returns false on failure (read-only home) so the key prompt can surface it. */
   persistCredentialFn: (providerId: string, secret: string, kind: "apiKey" | "authToken") => boolean
   persistPluginTools: (home: string, enabled: boolean) => void
-  openModelPicker: () => void
   applySettings: (target: SettingsApplyTarget, value: string | boolean) => void
   activateSettings: (row: SettingsRow) => void
   applySubagentModelEdit: (agentId: string, override: SubagentModelOverride | null) => void
@@ -144,7 +142,6 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
     persistBackendModelFn,
     persistCredentialFn,
     persistPluginTools,
-    openModelPicker,
     applySettings,
     activateSettings,
     applySubagentModelEdit,
@@ -539,60 +536,6 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
             />
           )
         })()}
-      {state.overlay.kind === "config" && (
-        <SelectList
-          title="Settings"
-          items={state.overlay.rows.map((r) => ({ label: r.label, hint: r.value }))}
-          index={state.overlay.index}
-          width={columns}
-          maxRows={itemRows}
-          onMove={(delta) => dispatch({ type: "OVERLAY_MOVE", delta })}
-          onSelect={(i) => {
-            const row = (state.overlay as { rows: ConfigMenuRow[] }).rows[i]
-            switch (row.action) {
-              case "provider":
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: {
-                    kind: "provider",
-                    options: collectProviderOptions(state.config),
-                    index: 0,
-                  },
-                })
-                break
-              case "model": {
-                openModelPicker()
-                break
-              }
-              case "mode":
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: { kind: "mode", options: [...PERMISSION_MODES], index: 0 },
-                })
-                break
-              case "thinking":
-                dispatch({
-                  type: "OVERLAY_OPEN",
-                  overlay: {
-                    kind: "effortSlider",
-                    ...deriveEffortSliderState(state.config.thinkingLevel),
-                  },
-                })
-                break
-              case "auth":
-                dispatch({
-                  type: "NOTICE",
-                  message: `Auth: ${row.value}. Set with: cognia-agent auth login --provider ${state.config.provider} --api-key <key> | --subscription <token>`,
-                })
-                break
-              case "cwd":
-                dispatch({ type: "NOTICE", message: state.config.cwd })
-                break
-            }
-          }}
-          onCancel={() => dispatch({ type: "OVERLAY_CLOSE" })}
-        />
-      )}
       {state.overlay.kind === "settings" && (
         <SettingsOverlay
           sections={state.overlay.sections}
