@@ -15,11 +15,17 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
+import { panelColumns } from "../overlay-layout"
 import { OverlayFooter } from "../OverlayFooter"
 import { sparkline, stackedBar } from "../../format/charts"
 import { progressBar } from "../../format/status-bar"
 import { formatCost, formatTokens } from "../../format/usage"
-import type { AgentStatsOverview, ConvStatRow } from "../../runtime/agent-stats-model"
+import {
+  convRowMetrics,
+  convRowTitle,
+  type AgentStatsOverview,
+  type ConvStatRow,
+} from "../../runtime/agent-stats-model"
 
 const FOOTER = "↑/↓ move · enter analyze · esc close"
 const HEADER_RESERVE = 12
@@ -64,6 +70,9 @@ export function AgentStatsPanel({
   const safeIndex = rows.length > 0 ? Math.min(index, rows.length - 1) : 0
   const current = rows[safeIndex]
   const listMax = Math.max(3, maxRows - HEADER_RESERVE - overview.notes.length)
+  // Rows cut their title to the columns they actually have; a row that wraps
+  // costs a second terminal row the window budget never counted.
+  const rowColumns = panelColumns(width)
   const win = windowList(rows.length, safeIndex, listMax)
   const visible = rows.slice(win.start, win.end)
 
@@ -198,18 +207,12 @@ export function AgentStatsPanel({
             {visible.map((row, i) => {
               const rowIdx = win.start + i
               const selected = rowIdx === safeIndex
-              const title = row.title.replace(/\s+/g, " ").slice(0, 48)
               return (
                 <Text key={row.id} color={selected ? theme.accent : undefined} bold={selected}>
                   {selected ? "❯ " : "  "}
                   <Text color={theme.muted}>{sourceTag(row.source)} </Text>
-                  {title}
-                  <Text color={theme.muted}>
-                    {" · "}
-                    {row.messageCount} msg
-                    {row.tokens > 0 ? ` · ${formatTokens(row.tokens)} tok` : ""}
-                    {row.costUsd > 0 ? ` · ${formatCost(row.costUsd)}` : ""}
-                  </Text>
+                  {convRowTitle(row, rowColumns)}
+                  <Text color={theme.muted}>{convRowMetrics(row)}</Text>
                 </Text>
               )
             })}

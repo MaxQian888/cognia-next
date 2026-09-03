@@ -21,6 +21,8 @@ import { useTheme } from "../../theme/context"
 import type { ThemePalette } from "../../theme/palette"
 import type { Assessment, AssessmentLevel, SessionReport } from "@/lib/analysis/session-report"
 import { contentRows } from "../../layout/terminal-layout"
+import { panelColumns } from "../overlay-layout"
+import { truncateToWidth } from "../../markdown/width"
 
 const ASSESSMENT_LABEL: Record<Assessment["id"], string> = {
   cacheEfficiency: "Cache efficiency",
@@ -68,11 +70,18 @@ function assessmentDetail(a: Assessment): string {
   }
 }
 
+/** Border and padding around the title row. The title has to fit one row: it
+ * sits above the scrolling viewport, whose height is budgeted assuming this
+ * header is exactly as tall as `PANEL_CHROME_ROWS` says. */
+const TITLE_CHROME = 4
+
 export interface AgentStatsDetailPanelProps {
   report: SessionReport
   title: string
   onClose: () => void
   viewportRows?: number
+  /** Terminal width, so the title can be cut to one row. */
+  width?: number | string
 }
 
 export function AgentStatsDetailPanel({
@@ -80,6 +89,7 @@ export function AgentStatsDetailPanel({
   title,
   onClose,
   viewportRows,
+  width,
 }: AgentStatsDetailPanelProps): React.ReactElement {
   const theme = useTheme()
   const viewport = Math.max(1, contentRows(viewportRows ?? 24, PANEL_CHROME_ROWS))
@@ -97,7 +107,8 @@ export function AgentStatsDetailPanel({
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
       <Text bold color={theme.accent}>
-        {title.replace(/\s+/g, " ").slice(0, 70) || "Conversation"}
+        {truncateToWidth(title.replace(/\s+/g, " ").trim(), panelColumns(width) - TITLE_CHROME) ||
+          "Conversation"}
       </Text>
       <PanelViewport viewportRows={viewport} scroll={scroll}>
         {/* KPIs */}

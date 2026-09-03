@@ -4,9 +4,13 @@ import type { SessionUsageRow } from "@/lib/db/session-usage"
 import {
   buildAgentStats,
   buildConvDetail,
+  convRowMetrics,
+  convRowTitle,
   sourceOfSessionId,
+  type ConvStatRow,
   type ConvWithUsage,
 } from "./agent-stats-model"
+import { stringWidth } from "../markdown/width"
 
 const day = (d: string): number => Date.parse(`${d}T00:00:00Z`)
 
@@ -180,5 +184,53 @@ describe("sourceOfSessionId across both namespaces", () => {
   it("calls a local session unknown rather than inventing a source", () => {
     expect(sourceOfSessionId("chat-1")).toBe("unknown")
     expect(sourceOfSessionId("ext:")).toBe("unknown")
+  })
+})
+
+describe("convRowMetrics / convRowTitle", () => {
+  const base: ConvStatRow = {
+    id: "import:claude:1",
+    source: "claude-code",
+    title: "",
+    messageCount: 42,
+    toolCalls: 8,
+    tokens: 128_000,
+    costUsd: 1.24,
+    updatedAt: 0,
+  }
+
+  it("drops the metrics a row has nothing to say about", () => {
+    expect(convRowMetrics({ ...base, tokens: 0, costUsd: 0 })).toBe(" \u00b7 42 msg")
+    expect(convRowMetrics(base)).toBe(" \u00b7 42 msg \u00b7 128k tok \u00b7 $1.24")
+  })
+
+  it("cuts an ASCII title to the columns left beside the metrics", () => {
+    const row = { ...base, title: "x".repeat(200) }
+    const painted = stringWidth(`  CC ${convRowTitle(row, 80)}${convRowMetrics(row)}`)
+    expect(painted).toBeLessThanOrEqual(80 - 4)
+  })
+
+  it("cuts a CJK title by display columns, not characters", () => {
+    // The titles are the user's own first message, so they are routinely CJK.
+    const row = { ...base, title: "\u91cd\u6784".repeat(30) }
+    const painted = stringWidth(`  CC ${convRowTitle(row, 80)}${convRowMetrics(row)}`)
+    expect(painted).toBeLessThanOrEqual(80 - 4)
+    expect(convRowTitle(row, 80)).toContain("\u2026")
+  })
+
+  it("gives a cheap row more of the line than an expensive one", () => {
+    const long = { ...base, title: "z".repeat(200) }
+    const cheap = { ...long, tokens: 0, costUsd: 0 }
+    expect(stringWidth(convRowTitle(cheap, 80))).toBeGreaterThan(
+      stringWidth(convRowTitle(long, 80))
+    )
+  })
+
+  it("leaves a title that already fits alone, whitespace collapsed", () => {
+    expect(convRowTitle({ ...base, title: "  a  b  " }, 200)).toBe("a b")
+  })
+
+  it("drops the title when the metrics leave no room worth spending", () => {
+    expect(convRowTitle({ ...base, title: "a real title" }, 30)).toBe("")
   })
 })

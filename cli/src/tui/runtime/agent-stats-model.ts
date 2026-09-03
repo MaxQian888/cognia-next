@@ -20,6 +20,8 @@ import {
   type ModelUsageRow,
 } from "@/lib/usage/session-analytics"
 import { analyzeSession, type SessionReport } from "@/lib/analysis/session-report"
+import { formatCost, formatTokens } from "../format/usage"
+import { stringWidth, truncateToWidth } from "../markdown/width"
 
 /** One conversation + the usage rows derived from its imported `metadata.usage`. */
 export interface ConvWithUsage {
@@ -80,6 +82,43 @@ export interface AgentStatsOverview {
   topTools: ToolCount[]
   /** Truncation / source-availability disclosures — surfaced, never silent. */
   notes: string[]
+}
+
+/** Border, padding and the caret the conversation rows sit inside. */
+const CONV_ROW_CHROME = 6
+
+/** Below this the title is a fragment rather than a name, so the row shows the
+ * metrics alone rather than two useless characters and an ellipsis. */
+const MIN_TITLE_COLUMNS = 8
+
+/**
+ * The trailing metrics of one conversation row, as a single measurable string.
+ *
+ * Rendered as-is by the panel, so the width charged for the suffix and the
+ * width it actually paints cannot drift apart.
+ */
+export function convRowMetrics(row: ConvStatRow): string {
+  const parts = [`${row.messageCount} msg`]
+  if (row.tokens > 0) parts.push(`${formatTokens(row.tokens)} tok`)
+  if (row.costUsd > 0) parts.push(formatCost(row.costUsd))
+  return ` \u00b7 ${parts.join(" \u00b7 ")}`
+}
+
+/**
+ * A conversation title cut to the columns left between the source tag and the
+ * metrics, measured in display columns.
+ *
+ * Conversation titles are the user's own first message, so they are frequently
+ * CJK, where a character budget buys twice the columns it thinks it does. The
+ * row would then wrap, and a wrapped row costs a second terminal row that
+ * `windowList` never counted.
+ */
+export function convRowTitle(row: ConvStatRow, columns: number): string {
+  const title = row.title.replace(/\s+/g, " ").trim()
+  if (!title) return ""
+  const tag = 3 // the two-letter source tag and its trailing space
+  const room = columns - CONV_ROW_CHROME - tag - stringWidth(convRowMetrics(row))
+  return room < MIN_TITLE_COLUMNS ? "" : truncateToWidth(title, room)
 }
 
 /**

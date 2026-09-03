@@ -961,6 +961,7 @@ export function AppOverlays(props: AppOverlaysProps): React.ReactElement {
           report={state.overlay.report}
           title={state.overlay.title}
           viewportRows={viewportRows}
+          width={columns}
           onClose={() => {
             if (state.overlay.kind !== "agentStatsDetail") return
             dispatch({ type: "OVERLAY_OPEN", overlay: state.overlay.back })

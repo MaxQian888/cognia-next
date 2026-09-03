@@ -1,6 +1,7 @@
 import {
   agentRowBadge,
   agentRowHint,
+  agentRowTask,
   agentSummary,
   buildAgentPanelRows,
   buildLiveAgentTreeRows,
@@ -12,6 +13,7 @@ import {
   type AgentPanelRow,
   type AgentPanelSources,
 } from "./agents-panel-model"
+import { stringWidth } from "../markdown/width"
 import type { BackgroundTaskJournalRecord } from "@/lib/background-tasks/registry-core"
 import type { CliBackgroundRunInfo } from "../../agent/subagent-background-tasks"
 import type { SubagentLiveEntry } from "../../agent/subagent-live-output"
@@ -504,5 +506,60 @@ describe("agentSummary", () => {
       })
     )
     expect(agentSummary(rows)).toEqual({ total: 2, running: 1, settled: 1 })
+  })
+})
+
+describe("agentRowTask", () => {
+  const base: AgentPanelRow = {
+    id: "bg:1",
+    kind: "background",
+    name: "planner",
+    task: "",
+    status: "running",
+    startedAt: 0,
+  }
+  const width = (row: AgentPanelRow, columns: number) =>
+    stringWidth(
+      `  \u25c6 ${row.name} \u00b7 ${agentRowHint(row, 60_000)} \u00b7 ${agentRowTask(row, 60_000, columns)}`
+    )
+
+  it("cuts an ASCII task to the columns the row has left", () => {
+    const row = { ...base, task: "x".repeat(200) }
+    // The row plus the panel border and padding must not exceed the terminal.
+    expect(width(row, 80)).toBeLessThanOrEqual(80 - 4)
+  })
+
+  it("cuts a CJK task by display columns, not characters", () => {
+    // 40 wide glyphs are 80 columns: a character budget would let every one of
+    // them through and the row would wrap onto a second terminal row.
+    const row = { ...base, task: "\u91cd\u6784".repeat(20) }
+    expect(width(row, 80)).toBeLessThanOrEqual(80 - 4)
+    expect(agentRowTask(row, 60_000, 80)).toContain("\u2026")
+  })
+
+  it("leaves a task that already fits alone", () => {
+    const row = { ...base, task: "short task" }
+    expect(agentRowTask(row, 60_000, 120)).toBe("short task")
+  })
+
+  it("collapses whitespace so a multi-line prompt stays one row", () => {
+    const row = { ...base, task: "  first line\n\n  second line  " }
+    expect(agentRowTask(row, 60_000, 120)).toBe("first line second line")
+  })
+
+  it("drops the task entirely when the row has no room worth spending", () => {
+    const row = { ...base, task: "some task text" }
+    expect(agentRowTask(row, 60_000, 30)).toBe("")
+  })
+
+  it("charges the nesting indent, so a child row cuts earlier than its parent", () => {
+    const row = { ...base, task: "y".repeat(200) }
+    const parent = agentRowTask(row, 60_000, 80)
+    const child = agentRowTask({ ...row, depth: 2 }, 60_000, 80)
+    expect(stringWidth(child)).toBeLessThan(stringWidth(parent))
+  })
+
+  it("is empty for a row with no task", () => {
+    expect(agentRowTask(base, 60_000, 80)).toBe("")
   })
 })

@@ -105,3 +105,21 @@ export function windowByWrappedRows(
     below: labels.length - end,
   }
 }
+
+/**
+ * Terminal width assumed when a panel is sized by a percentage, or not sized at
+ * all, matching the fallback every other TUI renderer uses.
+ */
+export const DEFAULT_PANEL_COLUMNS = 80
+
+/**
+ * The columns a panel's rows can actually spend, given its `width` prop.
+ *
+ * Panels take `number | string | undefined` so they can be laid out by Ink's
+ * percentage widths, but a row that has to cut its own text needs a real
+ * number to cut against. Production passes the terminal width. Everything else
+ * falls back rather than measuring against a percentage string.
+ */
+export function panelColumns(width: number | string | undefined): number {
+  return typeof width === "number" && width > 0 ? width : DEFAULT_PANEL_COLUMNS
+}

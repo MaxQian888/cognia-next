@@ -17,6 +17,7 @@ import type { CliBackgroundRunInfo } from "../../agent/subagent-background-tasks
 import { liveTokenCount, type SubagentLiveEntry } from "../../agent/subagent-live-output"
 import { bareToolName } from "../markdown/diff"
 import { toolDisplayName } from "../format/tools"
+import { stringWidth, truncateToWidth } from "../markdown/width"
 import type { InflightSubagentRow } from "../format/subagent"
 
 /** A row's lifecycle state — identical union to {@link BackgroundTaskStatus}. */
@@ -441,6 +442,32 @@ export function agentSummary(rows: AgentPanelRow[]): {
 } {
   const running = rows.filter((r) => r.status === "running").length
   return { total: rows.length, running, settled: rows.length - running }
+}
+
+/** Border plus horizontal padding of the panel box the rows sit inside. */
+const AGENT_ROW_CHROME = 4
+
+/** Below this many columns a task fragment says nothing, so the row drops it
+ * and keeps the hint, which is the part that is always readable. */
+const MIN_TASK_COLUMNS = 8
+
+/**
+ * A row's task text, cut to the columns actually left on that row.
+ *
+ * Before the task starts, the row has already spent columns on the selection
+ * caret, the nesting indent, the status glyph, the agent name and the hint,
+ * and the panel draws a border and padding around all of it. A fixed character
+ * budget accounts for none of that, and it measures a CJK task at half its
+ * real width, so such a row paints past the terminal and wraps. A wrapped row
+ * costs a second terminal row that `windowList` never counted, which pushes
+ * the scroll hint and the footer out of the panel.
+ */
+export function agentRowTask(row: AgentPanelRow, now: number, columns: number): string {
+  const task = row.task ? row.task.replace(/\s+/g, " ").trim() : ""
+  if (!task) return ""
+  const prefix = `${"  ".repeat(1 + (row.depth ?? 0))}${row.depth ? "\u2514 " : ""}\u25c6 ${row.name} \u00b7 ${agentRowHint(row, now)} \u00b7 `
+  const room = columns - AGENT_ROW_CHROME - stringWidth(prefix)
+  return room < MIN_TASK_COLUMNS ? "" : truncateToWidth(task, room)
 }
 
 export const AGENTS_PANEL_FOOTER = "↑/↓ / click · enter view · s stop native task · esc close"

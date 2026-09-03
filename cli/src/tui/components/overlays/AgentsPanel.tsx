@@ -12,11 +12,13 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
+import { panelColumns } from "../overlay-layout"
 import { OverlayFooter } from "../OverlayFooter"
 import { usePanelClick } from "../../input/use-panel-click"
 import {
   agentRowBadge,
   agentRowHint,
+  agentRowTask,
   agentSummary,
   AGENTS_PANEL_FOOTER,
   type AgentPanelRow,
@@ -81,6 +83,9 @@ export function AgentsPanel({
   const current = rows[safeIndex]
 
   const summary = agentSummary(rows)
+  // Rows cut their task text to the columns they actually have; a row that
+  // wraps costs a second terminal row the window budget never counted.
+  const rowColumns = panelColumns(width)
   const win = windowList(rows.length, safeIndex, maxRows)
   const visible = rows.slice(win.start, win.end)
 
@@ -154,7 +159,7 @@ export function AgentsPanel({
             const row = win.start + i
             const selected = row === safeIndex
             const badge = agentRowBadge(agentRow.status)
-            const task = agentRow.task ? agentRow.task.replace(/\s+/g, " ").slice(0, 60) : ""
+            const task = agentRowTask(agentRow, now, rowColumns)
             // Nested dispatches indent under their parent row (the hierarchical
             // ordering pass stamped `depth` and seated children below parents).
             const indent = "  ".repeat(agentRow.depth ?? 0)

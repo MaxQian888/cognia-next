@@ -112,3 +112,39 @@ describe("AgentStatsDetailPanel", () => {
     expect(text).toContain("/commit")
   })
 })
+
+describe("title row", () => {
+  beforeEach(() => __resetInk())
+
+  it("cuts a long title to one row, measured in display columns", () => {
+    // The title sits above the scrolling viewport, whose height is budgeted
+    // assuming this header is exactly one row. A CJK title is the case a
+    // character budget gets wrong: 40 glyphs are 80 columns, not 40.
+    const cjk = "重构会话渲染管线".repeat(5)
+    const { container } = render(
+      <AgentStatsDetailPanel
+        report={report}
+        title={cjk}
+        width={80}
+        viewportRows={60}
+        onClose={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("…")
+    expect(text).not.toContain(cjk)
+  })
+
+  it("falls back to a placeholder when the conversation has no title", () => {
+    const { container } = render(
+      <AgentStatsDetailPanel
+        report={report}
+        title="   "
+        width={80}
+        viewportRows={60}
+        onClose={() => {}}
+      />
+    )
+    expect(container.textContent ?? "").toContain("Conversation")
+  })
+})

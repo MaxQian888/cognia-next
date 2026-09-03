@@ -4,6 +4,8 @@ import {
   logPanelItemRows,
   LOG_PANEL_EXTRA_ROWS,
   OVERLAY_MIN_ROWS,
+  panelColumns,
+  DEFAULT_PANEL_COLUMNS,
 } from "./overlay-layout"
 
 describe("logPanelItemRows", () => {
@@ -95,5 +97,21 @@ describe("windowByWrappedRows", () => {
 
   it("survives a zero row budget by showing exactly the selection", () => {
     expect(windowByWrappedRows(short, 2, 0, 80)).toMatchObject({ start: 2, count: 1 })
+  })
+})
+
+describe("panelColumns", () => {
+  it("uses a real width when the panel is given one", () => {
+    expect(panelColumns(120)).toBe(120)
+  })
+
+  it("falls back for a percentage width, which cannot be cut against", () => {
+    expect(panelColumns("80%")).toBe(DEFAULT_PANEL_COLUMNS)
+  })
+
+  it("falls back when unsized, or sized to nothing", () => {
+    expect(panelColumns(undefined)).toBe(DEFAULT_PANEL_COLUMNS)
+    expect(panelColumns(0)).toBe(DEFAULT_PANEL_COLUMNS)
+    expect(panelColumns(-10)).toBe(DEFAULT_PANEL_COLUMNS)
   })
 })

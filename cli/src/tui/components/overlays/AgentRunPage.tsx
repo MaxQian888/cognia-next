@@ -29,6 +29,8 @@ import { useTheme } from "../../theme/context"
 import { parseMouseEvent } from "../../input/mouse"
 import { toolDisplayName } from "../../format/tools"
 import { contentRows } from "../../layout/terminal-layout"
+import { panelColumns } from "../overlay-layout"
+import { truncateToWidth } from "../../markdown/width"
 import {
   agentRowBadge,
   formatElapsed,
@@ -140,6 +142,11 @@ function TimelineSegment({
   )
 }
 
+/** Border, padding and the "Task \u00b7 " prefix the task line spends before
+ * its own text. The line has to fit one terminal row: it sits above the
+ * scrolling viewport, whose height is budgeted assuming the header is fixed. */
+const TASK_CHROME = 11
+
 export function AgentRunPage({
   liveId,
   name,
@@ -225,7 +232,8 @@ export function AgentRunPage({
       </Text>
       {task ? (
         <Text color={theme.muted} dimColor>
-          Task · {task.replace(/\s+/g, " ").slice(0, 200)}
+          Task ·{" "}
+          {truncateToWidth(task.replace(/\s+/g, " ").trim(), panelColumns(width) - TASK_CHROME)}
         </Text>
       ) : null}
       <PanelViewport viewportRows={viewport} scroll={scroll}>

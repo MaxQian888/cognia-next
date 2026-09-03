@@ -15,7 +15,8 @@ import { useModalInput } from "../../input/input-router"
 
 import { useTheme } from "../../theme/context"
 import { windowList } from "../list-window"
-import { fitToWidth, stringWidth } from "../../markdown/width"
+import { fitToWidth, stringWidth, truncateToWidth } from "../../markdown/width"
+import { panelColumns } from "../overlay-layout"
 import { OverlayFooter } from "../OverlayFooter"
 import { usePanelClick } from "../../input/use-panel-click"
 import { SUBAGENT_MODELS_FOOTER, type SubagentModelRow } from "../../runtime/subagent-models-model"
@@ -49,6 +50,11 @@ export interface SubagentModelsPanelProps {
   maxRows?: number
   width?: number | string
 }
+
+/** Border, padding and the four-space indent the focused row's description
+ * line spends before its own text. It has to fit one row: a wrapped
+ * description costs a row `windowList` never counted. */
+const DESCRIPTION_CHROME = 8
 
 export function SubagentModelsPanel({
   rows,
@@ -156,7 +162,10 @@ export function SubagentModelsPanel({
                 {focused && row.description ? (
                   <Text color={theme.muted} dimColor>
                     {"    "}
-                    {row.description.replace(/\s+/g, " ").slice(0, 72)}
+                    {truncateToWidth(
+                      row.description.replace(/\s+/g, " ").trim(),
+                      panelColumns(width) - DESCRIPTION_CHROME
+                    )}
                   </Text>
                 ) : null}
               </Box>
