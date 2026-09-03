@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { hostConfigOriginAgentId } from "@/lib/ai/agent/runtime-catalog/pairing"
 import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -116,6 +117,26 @@ describe("create", () => {
     expect(record.config.credentialRefs).toBeUndefined()
     expect(record.config.unsandboxedConsent).toBeUndefined()
     expect(record.enabled).toBe(false)
+  })
+
+  it("records where an import came from, so the two copies stay one agent", async () => {
+    // The store mints its own `eac_*` id, so without this the only key left to
+    // recognise the copy by is the name, and a rename on either side puts the
+    // same agent in the runtime picker twice.
+    const record = await createHostExternalAgentConfig(
+      { fromImport: true, config: config({ id: "local_pi" }) },
+      ready
+    )
+    expect(record.config.metadata).toMatchObject({ importedFromAgentId: "local_pi" })
+    expect(hostConfigOriginAgentId(record)).toBe("local_pi")
+  })
+
+  it("does not stamp provenance on an ordinary create", async () => {
+    const record = await createHostExternalAgentConfig(
+      { config: config({ id: "local_pi" }) },
+      ready
+    )
+    expect(hostConfigOriginAgentId(record)).toBeNull()
   })
 
   it("keeps a normal create's refs — only imports are distrusted", async () => {

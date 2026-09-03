@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-agent-configs"
+import { pairRuntimeConfigs } from "@/lib/ai/agent/runtime-catalog/pairing"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { selectAgents } from "@/stores/agent/external-agent-store/selectors"
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
@@ -111,15 +112,16 @@ export function HostExternalAgentConfigs() {
     useHostExternalAgentConfigs()
   const localAgents = useExternalAgentStore(selectAgents)
 
-  // Only agents the host does not already have. Matching on name rather than
-  // id because the host mints its own `configId` on import, so a copied agent
-  // never carries the local one back.
-  const copyable = useMemo(() => {
-    const taken = new Set(
-      configs.map((record) => record.config.name).filter((name): name is string => Boolean(name))
-    )
-    return Object.values(localAgents).filter((agent) => agent.name && !taken.has(agent.name))
-  }, [configs, localAgents])
+  // Only agents the host does not already have, decided by the shared pairing
+  // rule rather than by a name comparison written out here. The runtime picker
+  // folds a copied agent into one row using the same rule, and the two must
+  // agree about what "already there" means: when they did not, this menu
+  // correctly refused to copy Pi twice while the picker listed both copies as
+  // unrelated agents.
+  const copyable = useMemo(
+    () => pairRuntimeConfigs(Object.values(localAgents), configs).localOnly,
+    [configs, localAgents]
+  )
 
   return (
     <Card>

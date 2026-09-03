@@ -148,6 +148,15 @@ export async function createHostExternalAgentConfig(
       // An import is never trusted to arrive enabled: it has, by construction,
       // no credentials on this host yet.
       enabled: false,
+      // Where the copy came from, so the two records can be recognised as one
+      // agent later. The store mints its own `eac_*` id, which is why the
+      // sending id has to be recorded as provenance rather than kept: without
+      // it the only key left is the name, and a rename on either side turns
+      // one agent back into two rows in the runtime picker. Provenance only
+      // ever feeds that join, never admission or readiness.
+      ...(incoming.id
+        ? { metadata: { ...incoming.metadata, importedFromAgentId: incoming.id } }
+        : {}),
     }
   }
   const prepared = await prepare(incoming, deps)

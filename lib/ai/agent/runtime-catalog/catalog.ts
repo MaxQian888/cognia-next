@@ -29,6 +29,7 @@ import type {
 import type { ExternalAgentConfigRecord } from "@/types/agent/external-agent-config-store"
 import type { AgentRuntimeDescriptor } from "./types"
 import { runtimeRefKey } from "./types"
+import { pairRuntimeConfigs } from "./pairing"
 
 /**
  * Which sidecar runtime a builtin turn really lands on.
@@ -129,33 +130,53 @@ function externalDescriptors(input: AgentRuntimeCatalogInput): AgentRuntimeDescr
 }
 
 /**
- * Host-owned rows stay a separate group rather than merging with the local
- * ones. A local agent runs where this shell can spawn a process, and on a
- * browser that is nowhere, so presenting the two as interchangeable would be
- * the misleading part. Only ready, enabled configurations appear. The rest are
+ * A host-owned row. Only ready, enabled configurations appear. The rest are
  * actionable on the settings page, not in a picker.
  */
-function hostDescriptors(input: AgentRuntimeCatalogInput): AgentRuntimeDescriptor[] {
-  return (input.hostConfigs ?? [])
-    .filter((record) => record.enabled && record.lifecycleStatus === "ready")
-    .map((record) => {
-      const config = record.config as { name?: string; protocol?: string }
-      const name = config.name ?? record.configId
-      const ref = {
-        kind: "host",
-        configId: record.configId,
-        revision: record.revision,
-        lifecycleGeneration: record.lifecycleGeneration,
-        name,
-      } as const
-      return {
-        ref,
-        key: runtimeRefKey(ref),
-        group: "host" as const,
-        name,
-        ...(config.protocol ? { protocolLabel: config.protocol.toUpperCase() } : {}),
-      }
-    })
+function hostDescriptor(record: ExternalAgentConfigRecord): AgentRuntimeDescriptor {
+  const config = record.config as { name?: string; protocol?: string }
+  const name = config.name ?? record.configId
+  const ref = hostRefFor(record, name)
+  return {
+    ref,
+    key: runtimeRefKey(ref),
+    group: "host" as const,
+    placement: "host",
+    name,
+    ...(config.protocol ? { protocolLabel: config.protocol.toUpperCase() } : {}),
+  }
+}
+
+function hostRefFor(record: ExternalAgentConfigRecord, name: string) {
+  return {
+    kind: "host",
+    configId: record.configId,
+    revision: record.revision,
+    lifecycleGeneration: record.lifecycleGeneration,
+    name,
+  } as const
+}
+
+/** Ready, enabled, and therefore worth offering. */
+function selectableHostConfigs(
+  input: AgentRuntimeCatalogInput
+): readonly ExternalAgentConfigRecord[] {
+  return (input.hostConfigs ?? []).filter(
+    (record) => record.enabled && record.lifecycleStatus === "ready"
+  )
+}
+
+/**
+ * Which lane a row that exists on both sides should actually run on.
+ *
+ * The machine that can start the process decides. A shell with its own process
+ * table runs the copy it holds. A browser has no process table and reaches the
+ * agent only through the Host, which also owns the configuration there, so the
+ * host lane is both the shorter path and the one whose run outlives the tab.
+ */
+function prefersHostLane(reach: ExternalAgentRuntimeReach): boolean {
+  if (typeof reach === "boolean") return false
+  return !(reach.ok && reach.via === "local")
 }
 
 /**
@@ -164,11 +185,70 @@ function hostDescriptors(input: AgentRuntimeCatalogInput): AgentRuntimeDescripto
  * The builtin row is unconditional. A catalog that could return zero rows would
  * leave the composer with nothing to name, and "no runtime" is not a state chat
  * can be in.
+ *
+ * Local and host-owned rows are PAIRED rather than concatenated. Copying an
+ * agent to the Host leaves it in this shell's store too, and listing both
+ * copies put two rows with the same name, protocol and binary in front of the
+ * user with nothing to choose between them. `pairRuntimeConfigs` is the same
+ * rule the settings copy menu uses to decide what is left to copy, so the two
+ * surfaces cannot disagree about what "already there" means.
  */
 export function listAgentRuntimes(input: AgentRuntimeCatalogInput): AgentRuntimeDescriptor[] {
+  const local = externalDescriptors(input)
+  const hostConfigs = selectableHostConfigs(input)
+  const { paired, hostOnly } = pairRuntimeConfigs(
+    local.map((row) => ({ id: agentIdOf(row), name: row.name, row })),
+    hostConfigs
+  )
+
+  const mergedByLocalKey = new Map<string, AgentRuntimeDescriptor>()
+  for (const { local: entry, host } of paired) {
+    mergedByLocalKey.set(entry.row.key, mergeRows(entry.row, host, input))
+  }
+
   return [
     builtinDescriptor(input.providerId),
-    ...externalDescriptors(input),
-    ...hostDescriptors(input),
+    ...local.map((row) => mergedByLocalKey.get(row.key) ?? row),
+    ...hostOnly.map(hostDescriptor),
   ]
+}
+
+/** The local agent id behind an `external` row. */
+function agentIdOf(row: AgentRuntimeDescriptor): string {
+  return row.ref.kind === "external" ? row.ref.agentId : row.key
+}
+
+/**
+ * One row for an agent both sides hold.
+ *
+ * The host ref wins wherever the process cannot start locally, and with it the
+ * host's group, so the row keeps landing in the section that describes where it
+ * runs. Everything the local row knows and the host record does not (the brand
+ * glyph, the warning from the last real contact) is carried across: dropping it
+ * would make a merged row less informative than either of the two it replaced.
+ */
+function mergeRows(
+  localRow: AgentRuntimeDescriptor,
+  record: ExternalAgentConfigRecord,
+  input: AgentRuntimeCatalogInput
+): AgentRuntimeDescriptor {
+  const hostRow = hostDescriptor(record)
+  const onHost = prefersHostLane(input.runtimeSupportsExternalAgents)
+  const chosen = onHost ? hostRow : localRow
+  const other = onHost ? localRow : hostRow
+  return {
+    ...localRow,
+    ...(onHost ? { protocolLabel: localRow.protocolLabel ?? hostRow.protocolLabel } : {}),
+    ref: chosen.ref,
+    key: chosen.key,
+    group: chosen.group,
+    name: localRow.name ?? hostRow.name,
+    placement: "both",
+    alternateRef: other.ref,
+    // A block belongs to the LOCAL lane's process reach. Running on the host
+    // lane means the Host starts the process from its own configuration, which
+    // is exactly the reach the local row was blocked on, so carrying the block
+    // over would disable a row that works.
+    ...(onHost ? { blockedReason: undefined, blockTransient: undefined } : {}),
+  }
 }

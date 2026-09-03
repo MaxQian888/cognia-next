@@ -140,6 +140,72 @@ describe("listAgentRuntimes", () => {
     expect(rows[1].blockedReason).toBeUndefined()
   })
 
+  it("folds a copy of the same agent into one row instead of listing it twice", () => {
+    // The regression: copying an agent to the Host leaves it in the local
+    // store too, and the catalog used to concatenate the two lists, so the
+    // picker showed "Pi" under External agents and "Pi" under Host-owned
+    // agents with nothing to choose between them.
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
+      hostConfigs: [hostRecord({ config: { name: "Pi (native RPC)", protocol: "pi-rpc" } })],
+      runtimeSupportsExternalAgents: { ok: true, via: "remote" },
+    })
+    expect(rows.map((row) => row.key)).toEqual(["builtin", "host:eac_1"])
+    expect(rows[1]).toMatchObject({
+      placement: "both",
+      name: "Pi (native RPC)",
+      group: "host",
+      ref: { kind: "host", configId: "eac_1" },
+      alternateRef: { kind: "external", agentId: "local_pi" },
+    })
+  })
+
+  it("keeps the local lane for a shell that can start the process itself", () => {
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
+      hostConfigs: [hostRecord({ config: { name: "Pi (native RPC)", protocol: "pi-rpc" } })],
+      runtimeSupportsExternalAgents: { ok: true, via: "local" },
+    })
+    expect(rows.map((row) => row.key)).toEqual(["builtin", "external:local_pi"])
+    expect(rows[1]).toMatchObject({
+      placement: "both",
+      group: "external",
+      alternateRef: { kind: "host", configId: "eac_1" },
+    })
+  })
+
+  it("drops a local block from a merged row that will run on the host", () => {
+    // The block describes the LOCAL lane's process reach, which is exactly
+    // what running on the host lane replaces, so carrying it over would
+    // disable a row that works.
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent({ id: "local_pi", name: "Pi (native RPC)", protocol: "pi-rpc" })],
+      hostConfigs: [hostRecord({ config: { name: "Pi (native RPC)", protocol: "pi-rpc" } })],
+      runtimeSupportsExternalAgents: { ok: false, reason: "not-granted" },
+    })
+    expect(rows[1]).toMatchObject({ placement: "both", group: "host" })
+    expect(rows[1].blockedReason).toBeUndefined()
+  })
+
+  it("leaves unrelated agents on both sides alone", () => {
+    const rows = listAgentRuntimes({
+      ...base,
+      externalEnabled: true,
+      externalAgents: [agent({ id: "local_codex", name: "Codex" })],
+      hostConfigs: [hostRecord({ config: { name: "Pi on the box", protocol: "pi-rpc" } })],
+      runtimeSupportsExternalAgents: { ok: true, via: "remote" },
+    })
+    expect(rows.map((row) => row.key)).toEqual(["builtin", "external:local_codex", "host:eac_1"])
+    expect(rows[1].placement).toBeUndefined()
+    expect(rows[2].placement).toBe("host")
+  })
+
   it("keeps host rows in their own group and only when ready and enabled", () => {
     const rows = listAgentRuntimes({
       ...base,

@@ -87,11 +87,33 @@ export function isSameRuntimeRef(a: AgentRuntimeRef, b: AgentRuntimeRef): boolea
   return runtimeRefKey(a) === runtimeRefKey(b)
 }
 
+/**
+ * Where the agent behind one row is configured.
+ *
+ * `both` is the row that used to be two. A configuration copied to the paired
+ * Host stayed in this shell's own store as well, and the catalog listed each
+ * copy as an unrelated agent: same name, same protocol, same binary, one under
+ * "External agents" and one under "Host-owned agents". On a browser paired to
+ * a headless Host they even start the process on the SAME machine, so nothing
+ * on the row told them apart. They are now one row that says where it runs.
+ */
+export type AgentRuntimePlacement = "local" | "host" | "both"
+
 /** One selectable row in the runtime catalog. */
 export interface AgentRuntimeDescriptor {
   ref: AgentRuntimeRef
   key: string
   group: "builtin" | "external" | "host"
+  /**
+   * Which stores hold this agent. Absent on the builtin lane, which is neither.
+   */
+  placement?: AgentRuntimePlacement
+  /**
+   * The other ref a `both` row could also run on, so a caller that wants the
+   * lane this row did NOT pick can still reach it without re-deriving the
+   * pairing. `ref` is the one a click selects.
+   */
+  alternateRef?: AgentRuntimeRef
   /** User-authored name. Absent for the builtin lane, which is translated. */
   name?: string
   /** i18n key for the row title. Present only where the name is ours to write. */
