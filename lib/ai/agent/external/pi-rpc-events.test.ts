@@ -422,3 +422,66 @@ describe("mapPiEvent — native-tool approvals", () => {
     expect(event.type).toBe("elicitation_request")
   })
 })
+
+describe("a turn the provider refused", () => {
+  /**
+   * Pi reports a failed turn on the assistant message it could not produce:
+   * `stopReason: "error"` plus the provider's own message. Nothing read it, so
+   * an insufficient balance or a model outside the plan reached Cognia as an
+   * ordinary message end. The session stayed `streaming` with no text and no
+   * error, the status edge that settles the turn never fired, its managed
+   * workspace run stayed `running`, and the session's NEXT turn was refused for
+   * good with "pipeline workspace is already active".
+   */
+  it("surfaces the provider's reason instead of ending the message quietly", () => {
+    const events = mapPiEvent(
+      {
+        type: "message_end",
+        stopReason: "error",
+        errorMessage: '402: {"message":"Insufficient Balance"}',
+      },
+      { sessionId: "s1", now: () => new Date(0) }
+    )
+
+    expect(events.map((event) => event.type)).toEqual(["error", "message_end"])
+    const failure = events[0] as { error: string; recoverable: boolean }
+    expect(failure.error).toContain("Insufficient Balance")
+    // Pi keeps the session, and the same prompt on a model the plan includes
+    // succeeds, so this must not tear the agent down.
+    expect(failure.recoverable).toBe(true)
+  })
+
+  // Pi's persisted record nests these under `message`, and the RPC frame has
+  // been seen either way. Reading one shape only is how a refusal goes
+  // unnoticed on the shape that was not checked.
+  it("reads the refusal from a nested message just as well as from the root", () => {
+    const events = mapPiEvent(
+      {
+        type: "message_end",
+        message: { stopReason: "error", errorMessage: "403: MODEL_NOT_IN_PLAN" },
+      },
+      { sessionId: "s1", now: () => new Date(0) }
+    )
+
+    expect(events.map((event) => event.type)).toEqual(["error", "message_end"])
+    expect((events[0] as { error: string }).error).toContain("MODEL_NOT_IN_PLAN")
+  })
+
+  it("names the refusal even when the provider sent no message", () => {
+    const events = mapPiEvent(
+      { type: "message_end", stopReason: "error" },
+      { sessionId: "s1", now: () => new Date(0) }
+    )
+
+    expect((events[0] as { error: string }).error).toMatch(/refused this turn/)
+  })
+
+  it("leaves an ordinary message end alone", () => {
+    const events = mapPiEvent(
+      { type: "message_end", stopReason: "end_turn" },
+      { sessionId: "s1", now: () => new Date(0) }
+    )
+
+    expect(events.map((event) => event.type)).toEqual(["message_end"])
+  })
+})

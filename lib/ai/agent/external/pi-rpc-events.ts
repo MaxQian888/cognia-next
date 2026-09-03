@@ -160,8 +160,38 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
     case "message_start":
       return [{ ...base, type: "message_start", role: "assistant" }]
 
-    case "message_end":
-      return [{ ...base, type: "message_end" }]
+    case "message_end": {
+      // Pi reports a failed turn HERE, on the assistant message it could not
+      // produce: `stopReason: "error"` with the provider's own message. Nothing
+      // read it, so a refused turn reached Cognia as a perfectly ordinary
+      // message end. The session stayed `streaming` with no text and no error,
+      // which meant the status edge that settles the turn never fired, its
+      // managed workspace run stayed `running`, and the NEXT turn in that
+      // session was refused for good with "pipeline workspace is already
+      // active". A provider saying "insufficient balance" or
+      // "MODEL_NOT_IN_PLAN" wedged the conversation instead of showing why.
+      //
+      // Emitted BEFORE `message_end` so a consumer that tears the message down
+      // on end still sees the reason. Recoverable: Pi keeps the session, and
+      // the same prompt on a model the plan includes succeeds.
+      // Read from the event root AND from a nested `message`: Pi's persisted
+      // session record carries both fields under `message`, and the RPC frame
+      // has been seen either way. Checking one shape only is how a refusal goes
+      // unnoticed on the shape that was not checked.
+      const message = asRecord(event.message)
+      const stopReason = asString(event.stopReason) ?? asString(message?.stopReason)
+      if (stopReason !== "error") return [{ ...base, type: "message_end" }]
+      const detail = asString(event.errorMessage) ?? asString(message?.errorMessage)
+      return [
+        {
+          ...base,
+          type: "error",
+          error: detail ?? "The agent's provider refused this turn",
+          recoverable: true,
+        },
+        { ...base, type: "message_end" },
+      ]
+    }
 
     case "message_update":
       return mapAssistantMessageEvent(
