@@ -826,16 +826,74 @@ export function runStagedSyncDown(opts: RunSyncDownOptions = {}): StagedSyncRun 
 }
 
 /**
+ * How long the app must have been away before coming back earns a full pull.
+ *
+ * Below this the socket was never suspended and `installEventDrivenSync` was
+ * delivering invalidations the whole time, so there is nothing to catch up on.
+ */
+export const FOREGROUND_SYNC_MIN_AWAY_MS = 5_000
+
+/** Floor between two foreground pulls, however often the app is re-entered. */
+export const FOREGROUND_SYNC_COOLDOWN_MS = 30_000
+
+/**
+ * Returning to the app is only worth a pull if the app was actually away.
+ *
+ * A full pull is one request per synced table, and nothing bounded how often
+ * one could be started. `installForegroundSync` and `installResumeSync` are
+ * also the SAME event on web, because `subscribeResume` falls back to
+ * `visibilitychange`, so one tab switch armed two of them.
+ *
+ * Anything that flickers the visibility state therefore pinned the Host's rate
+ * limiter, and a paired browser was measured re-pulling every table twice a
+ * second for as long as it was left open. The 429s that came back landed on
+ * whatever else was in flight: the host-owned agent list, for one, which made
+ * a configured agent vanish from the runtime picker.
+ *
+ * The two floors are the pair `installResumeReconnect` already uses: away time
+ * for "nothing accumulated", and a cooldown so even genuine absences cannot be
+ * re-entered into a storm. The state is module-scoped rather than per
+ * installer precisely because both installers observe the one return.
+ *
+ * `installNetworkSync` deliberately keeps neither: connectivity loss is a
+ * different signal, and there really is a gap behind it.
+ */
+let foregroundHiddenSince: number | null = null
+let lastForegroundSync = 0
+
+/**
+ * Whether this return to the foreground should pull, consuming the away time.
+ *
+ * An unknown away time (a mobile `resume` with no `visibilitychange` before
+ * it, or the first return after install) counts as away: the cooldown is what
+ * keeps that from being a hole.
+ */
+function claimForegroundSync(now: number): boolean {
+  const awayFor = foregroundHiddenSince === null ? Infinity : now - foregroundHiddenSince
+  foregroundHiddenSince = null
+  if (awayFor < FOREGROUND_SYNC_MIN_AWAY_MS) return false
+  if (now - lastForegroundSync < FOREGROUND_SYNC_COOLDOWN_MS) return false
+  lastForegroundSync = now
+  return true
+}
+
+/**
  * Re-run the sync whenever the document becomes visible. Returns a
  * teardown function that detaches the listener; safe to call inside
  * useEffect.
  */
-export function installForegroundSync(opts: RunSyncDownOptions = {}): () => void {
+export function installForegroundSync(
+  opts: RunSyncDownOptions = {},
+  now: () => number = Date.now
+): () => void {
   if (typeof document === "undefined") return () => {}
+  if (document.visibilityState === "hidden") foregroundHiddenSince ??= now()
   const handler = () => {
-    if (document.visibilityState === "visible") {
-      void runSyncDown(opts)
+    if (document.visibilityState !== "visible") {
+      foregroundHiddenSince ??= now()
+      return
     }
+    if (claimForegroundSync(now())) void runSyncDown(opts)
   }
   document.addEventListener("visibilitychange", handler)
   return () => document.removeEventListener("visibilitychange", handler)
@@ -990,14 +1048,19 @@ export function installNetworkSync(opts: RunSyncDownOptions = {}): Promise<() =>
  * different surfaces (the visibility API fires on web tab focus changes;
  * the `resume` event fires when the app process is restored on mobile).
  */
-export function installResumeSync(opts: RunSyncDownOptions = {}): Promise<() => void> {
+export function installResumeSync(
+  opts: RunSyncDownOptions = {},
+  now: () => number = Date.now
+): Promise<() => void> {
   return subscribeResume(() => {
-    void runSyncDown(opts)
+    if (claimForegroundSync(now())) void runSyncDown(opts)
   })
 }
 
 /** Test-only — wipes the cursor map between tests. */
 export function __resetSyncStateForTests(): void {
+  foregroundHiddenSince = null
+  lastForegroundSync = 0
   stateMap.clear()
   inflight = null
   stagedInflight = null

@@ -20,6 +20,8 @@ import {
   SYNC_HANDLER_TABLES,
   installEventDrivenSync,
   EVENT_SYNC_COALESCE_MS,
+  FOREGROUND_SYNC_COOLDOWN_MS,
+  FOREGROUND_SYNC_MIN_AWAY_MS,
   installForegroundSync,
   installNetworkSync,
   installResumeSync,
@@ -443,6 +445,83 @@ describe("installForegroundSync", () => {
       await new Promise((r) => setTimeout(r, 0))
     }
     expect(handler).toHaveBeenCalledTimes(1)
+    teardown()
+  })
+
+  // The defect: every return to the foreground started a full pull, one
+  // request per synced table, with nothing bounding the rate. A pane that
+  // flickers hidden (measured at twice a second in an embedded browser) pinned
+  // the Host's rate limiter, and the 429s landed on unrelated reads.
+  it("skips a return the app was barely away for", async () => {
+    const transport = makeTransport()
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters"))
+    const handlers = [{ table: "characters" as const, run: handler }]
+    let clock = 1_000_000
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    })
+
+    const teardown = installForegroundSync({ transport, handlers }, () => clock)
+
+    // Away for a blink, then back. Nothing accumulated: the socket never
+    // suspended and the event-driven sync covered the window.
+    clock += 1_000
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    })
+    document.dispatchEvent(new Event("visibilitychange"))
+
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(handler).not.toHaveBeenCalled()
+    teardown()
+  })
+
+  it("pulls after a real absence, then holds the cooldown", async () => {
+    const transport = makeTransport()
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters"))
+    const handlers = [{ table: "characters" as const, run: handler }]
+    let clock = 1_000_000
+    const hide = () => {
+      Object.defineProperty(document, "visibilityState", {
+        value: "hidden",
+        configurable: true,
+      })
+      document.dispatchEvent(new Event("visibilitychange"))
+    }
+    const show = () => {
+      Object.defineProperty(document, "visibilityState", {
+        value: "visible",
+        configurable: true,
+      })
+      document.dispatchEvent(new Event("visibilitychange"))
+    }
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+    })
+
+    const teardown = installForegroundSync({ transport, handlers }, () => clock)
+
+    clock += FOREGROUND_SYNC_MIN_AWAY_MS
+    show()
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    // Away long enough again, but back inside the cooldown.
+    hide()
+    clock += FOREGROUND_SYNC_MIN_AWAY_MS
+    show()
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    // Past the cooldown, a genuine return pulls again.
+    hide()
+    clock += FOREGROUND_SYNC_COOLDOWN_MS
+    show()
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(handler).toHaveBeenCalledTimes(2)
     teardown()
   })
 
