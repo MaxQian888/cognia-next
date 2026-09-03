@@ -1,4 +1,8 @@
 import type { MigrationVendor, MigrationVendorProbe } from "@/lib/agent-migration/types"
+import {
+  displayNameForMigrationVendor,
+  primaryPresetIdForMigrationVendor,
+} from "@/lib/agent-ecosystem/runtime-link"
 import type { OnboardingShell } from "@cognia/agent-config-types"
 
 /**
@@ -86,43 +90,29 @@ export function hasModelAccess(input: {
 }
 
 /**
- * Which external-agent preset each migration vendor corresponds to.
+ * A vendor's display name.
  *
- * The probe answers "is this vendor's config on disk"; the preset is what the
- * flow would actually run the first output through, and where its display name
- * comes from. Kept here rather than inside `useMachineScan` because the
- * recommended path's plan needs the same mapping to label its migration lines
- * — the alternative was a plan line reading "Bring over your claude-code
- * setup", printing an internal id at the user.
- */
-export const VENDOR_RUNTIME: Record<MigrationVendor, string> = {
-  "claude-code": "claude-code",
-  codex: "codex",
-  opencode: "opencode-server",
-  // Added with the vendor itself. Its absence was not merely cosmetic: an
-  // installed Pi resolved to `undefined`, so the runtime row rendered with an
-  // undefined id and `hasModelAccess` could not see it — an already
-  // authenticated Pi still got asked for credentials.
-  pi: "pi",
-}
-
-/**
- * A vendor's display name, taken from the runtime the same probe produced.
+ * Resolved through `lib/agent-ecosystem`, which maps the vendor to its primary
+ * external-agent runtime and reads the name off
+ * `protocol/external-agent-runtimes.json`. The scan result is still consulted
+ * first, because `useMachineScan` already resolved the same preset and carried
+ * its name onto the runtime row, so the common path needs no second lookup.
  *
- * `useMachineScan` already resolved every installed vendor to its
- * external-agent preset and carried that preset's name onto the runtime row,
- * so the name is in the scan result and needs no second lookup — which also
- * keeps this module free of the preset catalogue and testable in the fast node
- * project. Falls back to the raw vendor id only if the two halves of the scan
- * result disagree, which they cannot in practice.
+ * This used to read a four-entry `VENDOR_RUNTIME` map declared right here,
+ * whose `pi` entry held a runtime id where a preset id belonged. The lookup
+ * resolved to nothing, so the row rendered the raw slug and `hasModelAccess`
+ * could not see an already authenticated Pi. Both halves now come from the
+ * same catalog, so they cannot disagree.
  *
- * Both the scan step and the recommended plan call it: without it, a row reads
- * "Import commands, settings and past sessions from claude-code", printing an
- * internal slug at someone who has only ever seen the words "Claude Code".
+ * Falls back to the raw vendor id only when the vendor has no launchable
+ * runtime at all, which no current migration vendor is.
  */
 export function vendorLabel(scan: ScanResult, vendor: MigrationVendor): string {
-  const runtimeId = VENDOR_RUNTIME[vendor]
-  return scan.runtimes.find((runtime) => runtime.id === runtimeId)?.label ?? vendor
+  const presetId = primaryPresetIdForMigrationVendor(vendor)
+  const fromScan = presetId
+    ? scan.runtimes.find((runtime) => runtime.id === presetId)?.label
+    : undefined
+  return fromScan ?? displayNameForMigrationVendor(vendor) ?? vendor
 }
 
 /** Vendors worth offering to import — installed, and not already imported. */

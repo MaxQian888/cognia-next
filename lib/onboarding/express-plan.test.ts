@@ -55,10 +55,15 @@ describe("buildExpressPlan", () => {
     expect(migration?.label).toBe("Claude Code")
   })
 
-  it("falls back to the vendor id when the scan's two halves disagree", () => {
+  it("still names the vendor when the scan's two halves disagree", () => {
+    // This used to assert the raw id, back when `vendorLabel` had nothing but
+    // the scan result to read and printed "claude-code" at the user whenever
+    // the runtime row was missing. It now falls through to the runtime catalog,
+    // so the disagreement costs a nicer name, not a readable one.
     const orphaned: ScanResult = { ...EMPTY_SCAN, migratable: RICH_SCAN.migratable }
     const migration = build({ scan: orphaned }).find((item) => item.kind === "migrate-config")
-    expect(migration?.label).toBe("claude-code")
+    expect(migration?.label).toBe("Claude Code ACP adapter")
+    expect(migration?.label).not.toBe("claude-code")
   })
 
   it("skips a vendor the probe found but did not consider installed", () => {

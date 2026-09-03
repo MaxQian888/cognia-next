@@ -65,6 +65,7 @@
   "vendors": {
     "claude-code": "Claude Code",
     "codex": "Codex",
-    "opencode": "OpenCode"
+    "opencode": "OpenCode",
+    "pi": "Pi"
   }
 }

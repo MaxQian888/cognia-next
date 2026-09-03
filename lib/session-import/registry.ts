@@ -43,6 +43,18 @@ const dynamicSources: RegisteredSource[] = []
 const STATIC_IDS = new Set(STATIC_SOURCES.map((s) => s.id))
 
 /**
+ * The first-party source ids, frozen and ordered.
+ *
+ * Exported so `lib/agent-ecosystem`'s conformance test can assert that every
+ * built-in source is claimed by an ecosystem row without tripping over the
+ * plugin overlay: `getSessionSources()` also returns runtime registrations,
+ * which are namespaced and must stay free to appear and disappear.
+ */
+export const STATIC_SESSION_SOURCE_IDS: readonly string[] = Object.freeze(
+  STATIC_SOURCES.map((source) => source.id)
+)
+
+/**
  * Register a session source at runtime. Dynamic sources are evaluated AFTER the
  * static list, so a plugin cannot shadow a built-in. When `pluginId` is given
  * the source id is namespaced `${pluginId}:${id}` unless it already carries a

@@ -5,6 +5,7 @@ import {
   SCAN_SOFT_TIMEOUT_MS,
   hasModelAccess,
   migratableVendors,
+  vendorLabel,
   resolveScanPhase,
   shellRunsMachineScan,
   type ScanResult,
@@ -149,5 +150,38 @@ describe("shellRunsMachineScan", () => {
 
   it.each(["web", "mobile-standalone"] as const)("does not probe on %s", (shell) => {
     expect(shellRunsMachineScan(shell)).toBe(false)
+  })
+})
+
+describe("vendorLabel", () => {
+  it("names Pi, which the old hard-coded map could not", () => {
+    // `VENDOR_RUNTIME.pi` held "pi", a runtime id, where a preset id belonged.
+    // Nothing resolved it, so the row printed the raw slug at the user.
+    expect(vendorLabel(EMPTY_SCAN, "pi")).toBe("Pi (native RPC)")
+    expect(vendorLabel(EMPTY_SCAN, "pi")).not.toBe("pi")
+  })
+
+  it("prefers the label the scan already resolved", () => {
+    const scan: ScanResult = {
+      ...EMPTY_SCAN,
+      runtimes: [runtime({ id: "pi-rpc", label: "Pi" })],
+    }
+    expect(vendorLabel(scan, "pi")).toBe("Pi")
+  })
+
+  it("ignores a runtime row whose id is not the vendor's preset", () => {
+    const scan: ScanResult = {
+      ...EMPTY_SCAN,
+      runtimes: [runtime({ id: "codex", label: "Codex" })],
+    }
+    expect(vendorLabel(scan, "pi")).toBe("Pi (native RPC)")
+  })
+
+  it.each([
+    ["claude-code", "Claude Code ACP adapter"],
+    ["codex", "Codex ACP adapter"],
+    ["opencode", "OpenCode (auto-spawn)"],
+  ] as const)("resolves %s without a scan result", (vendor, expected) => {
+    expect(vendorLabel(EMPTY_SCAN, vendor)).toBe(expected)
   })
 })

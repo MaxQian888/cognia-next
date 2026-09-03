@@ -4,9 +4,11 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 const probeVendors = jest.fn()
 jest.mock("@/lib/agent-migration/probe", () => ({ probeVendors: () => probeVendors() }))
 
-jest.mock("@/lib/ai/agent/external/presets", () => ({
-  EXTERNAL_AGENT_PRESETS: { "claude-code": { name: "Claude Code" }, pi: { name: "Pi" } },
-}))
+// `@/lib/ai/agent/external/presets` is deliberately NOT mocked. It used to be,
+// with a hand-written table containing a `pi` key that does not exist in the
+// real preset list, and that fiction is what let the Pi bug below survive a
+// green test. The real module is two checked-in JSON files and types, so it is
+// safe here, and using it means an id this hook resolves has to be a real one.
 
 let ocrSettings: unknown = { defaultProviderId: "auto" }
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -14,6 +16,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
     selector({ settings: { ocrSettings } }),
 }))
 
+import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/presets"
 import { useMachineScan } from "./use-machine-scan"
 
 beforeEach(() => {
@@ -41,17 +44,24 @@ describe("useMachineScan", () => {
     ])
   })
 
-  it("maps every migration vendor to its runtime preset", async () => {
-    // `pi` was added to MIGRATION_VENDORS without a VENDOR_RUNTIME row, so an
-    // installed Pi resolved to an undefined preset id: the runtime row rendered
-    // with no id and `hasModelAccess` could not see it, meaning an
-    // already-authenticated Pi was still asked for Cognia credentials.
+  it("maps every migration vendor to a real preset id", async () => {
+    // Two rounds of this bug. First `pi` joined MIGRATION_VENDORS with no
+    // VENDOR_RUNTIME row at all. Then a row was added holding "pi", which is
+    // Pi's *runtime* id, not a preset id, so the lookup still resolved to
+    // nothing: the row carried an id no preset matched, and `hasModelAccess`
+    // could not see an already-authenticated Pi. The resolution now goes
+    // through the runtime catalog, which cannot produce a non-preset id.
     probeVendors.mockResolvedValue([
       { vendor: "pi", installed: true, configPath: "/home/.pi/agent/settings.json" },
     ])
     const { result } = renderHook(() => useMachineScan("tauri"))
     await waitFor(() => expect(result.current.phase).toBe("found"))
-    expect(result.current.result.runtimes).toEqual([{ id: "pi", label: "Pi", authenticated: true }])
+    const [runtime] = result.current.result.runtimes
+    expect(runtime.id).toBe("pi-rpc")
+    expect(runtime.id).not.toBe("pi")
+    expect(Object.keys(EXTERNAL_AGENT_PRESETS)).toContain(runtime.id)
+    expect(runtime.label).not.toBe("pi")
+    expect(runtime.authenticated).toBe(true)
   })
 
   it("treats a config-less install as present but not signed in", async () => {

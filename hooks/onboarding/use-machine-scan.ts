@@ -6,10 +6,13 @@ import { EXTERNAL_AGENT_PRESETS } from "@/lib/ai/agent/external/presets"
 import { resolveCapabilities, shellHasImageSource } from "@/lib/onboarding/capabilities"
 import { probeVendors } from "@/lib/agent-migration/probe"
 import {
+  displayNameForMigrationVendor,
+  primaryPresetIdForMigrationVendor,
+} from "@/lib/agent-ecosystem/runtime-link"
+import {
   EMPTY_SCAN,
   SCAN_HARD_TIMEOUT_MS,
   SCAN_SOFT_TIMEOUT_MS,
-  VENDOR_RUNTIME,
   resolveScanPhase,
   shellRunsMachineScan,
   type ScanPhase,
@@ -90,15 +93,25 @@ export function useMachineScan(shell: OnboardingShell): MachineScan {
         if (cancelled) return
         const runtimes: ScannedRuntime[] = probes
           .filter((p) => p.installed)
-          .map((p) => ({
-            id: VENDOR_RUNTIME[p.vendor],
-            label:
-              EXTERNAL_AGENT_PRESETS[
-                VENDOR_RUNTIME[p.vendor] as keyof typeof EXTERNAL_AGENT_PRESETS
-              ]?.name ?? p.vendor,
-            // A config file on disk is how these CLIs record a completed login.
-            authenticated: Boolean(p.configPath),
-          }))
+          .flatMap((p) => {
+            // `primaryPresetIdForMigrationVendor` goes through the runtime
+            // catalog, so the id here is always a live `EXTERNAL_AGENT_PRESETS`
+            // key. The old `VENDOR_RUNTIME[p.vendor]` was not: its `pi` entry
+            // held a runtime id, which resolved to no preset, printed a raw
+            // slug as the label, and hid an authenticated Pi from
+            // `hasModelAccess`.
+            const presetId = primaryPresetIdForMigrationVendor(p.vendor)
+            if (!presetId) return []
+            const preset = EXTERNAL_AGENT_PRESETS[presetId as keyof typeof EXTERNAL_AGENT_PRESETS]
+            return [
+              {
+                id: presetId,
+                label: preset?.name ?? displayNameForMigrationVendor(p.vendor) ?? p.vendor,
+                // A config file on disk is how these CLIs record a completed login.
+                authenticated: Boolean(p.configPath),
+              },
+            ]
+          })
         log.info("machine scan complete", {
           runtimes: runtimes.length,
           migratable: probes.filter((p) => p.installed).length,
