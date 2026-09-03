@@ -9,7 +9,7 @@
  * so the row labels match the transcript's own tool-card summaries. No Ink, no
  * I/O — unit-tested without rendering.
  */
-import { summarizeResult, summarizeToolCall, toolDisplayName } from "../format/tools"
+import { summarizeResult, summarizeToolCall, toolGlyph, toolHeaderLabel } from "../format/tools"
 import { isSubagentTool, subagentName } from "../format/subagent"
 import type { Cell, InspectItem } from "../state/types"
 
@@ -26,7 +26,7 @@ export function collectInspectables(cells: Cell[]): InspectItem[] {
       const sub = isSubagentTool(cell.toolName)
       const label = sub
         ? `◆ ${subagentName(cell.input)}`
-        : `${cell.isError ? "✗" : "✓"} ${toolDisplayName(cell.toolName)}`
+        : `${cell.isError ? "✗" : "✓"} ${toolGlyph(cell.toolName)} ${toolHeaderLabel(cell.toolName)}`
       out.push({
         cellId: cell.id,
         label,

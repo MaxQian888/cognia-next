@@ -6,17 +6,21 @@ import {
   isDiffTool,
   isTodoTool,
   parseTodos,
-  resultCountLabel,
   resultPreview,
   runningToolLines,
   summarizeResult,
   summarizeToolCall,
   toolDetailLine,
   toolDisplayName,
+  toolGlyph,
+  toolHeaderLabel,
+  toolIconKey,
+  humanizeToolName,
   toolFileLine,
   toolFilePath,
   toolKind,
 } from "./tools"
+import { stringWidth } from "../markdown/width"
 import type { ToolCell } from "../state/types"
 
 const toolCell = (over: Partial<ToolCell> = {}): ToolCell => ({
@@ -177,23 +181,23 @@ describe("summarizeToolCall", () => {
 describe("toolDetailLine", () => {
   it("builds '└ <tool>: <summary>' for a bash tool", () => {
     expect(toolDetailLine(toolCell({ toolName: "bash", input: { command: "npm test" } }))).toBe(
-      "└ bash: npm test"
+      "└ Bash: npm test"
     )
   })
 
   it("uses the file path for a read tool", () => {
     expect(toolDetailLine(toolCell({ toolName: "read", input: { file_path: "/a/b.ts" } }))).toBe(
-      "└ read: /a/b.ts"
+      "└ Read: /a/b.ts"
     )
   })
 
   it("collapses an MCP tool name to <server>:<tool>", () => {
     const line = toolDetailLine(toolCell({ toolName: "mcp__github__create_issue", input: {} }))
-    expect(line).toBe("└ github:create_issue")
+    expect(line).toBe("└ github:Create issue")
   })
 
   it("drops the summary tail when there is no natural summary", () => {
-    expect(toolDetailLine(toolCell({ toolName: "noop", input: {} }))).toBe("└ noop")
+    expect(toolDetailLine(toolCell({ toolName: "noop", input: {} }))).toBe("└ Noop")
   })
 
   it("truncates to the column budget with an ellipsis", () => {
@@ -228,7 +232,7 @@ describe("runningToolLines", () => {
       toolCell({ id: "5", toolName: "bash", input: { command: "four" }, status: "running" }),
     ]
     const lines = runningToolLines(tools, 80, 3)
-    expect(lines).toEqual(["└ bash: two", "└ bash: three", "└ bash: four"])
+    expect(lines).toEqual(["└ Bash: two", "└ Bash: three", "└ Bash: four"])
   })
 
   it("is empty when nothing is running", () => {
@@ -241,6 +245,51 @@ describe("toolKind", () => {
     expect(toolKind("mcp__github__create_issue")).toBe("mcp")
     expect(toolKind("plugin__web-tools__fetch")).toBe("plugin")
     expect(toolKind("bash")).toBe("builtin")
+  })
+})
+
+describe("toolIconKey / toolGlyph", () => {
+  it("buckets a tool the way the web row does, namespace and aliases included", () => {
+    expect(toolIconKey("Read")).toBe("read")
+    expect(toolIconKey("cat")).toBe("read")
+    expect(toolIconKey("mcp__cognia-tools__grep")).toBe("search")
+    expect(toolIconKey("plugin__web-tools__fetch")).toBe("web")
+    expect(toolIconKey("MultiEdit")).toBe("edit")
+    expect(toolIconKey("ls")).toBe("folder")
+    expect(toolIconKey("todowrite")).toBe("task")
+    expect(toolIconKey("something_unknown")).toBe("generic")
+  })
+
+  it("uses one-column glyphs, so a header's width math stays exact", () => {
+    const keys = [
+      "read",
+      "write",
+      "edit",
+      "grep",
+      "glob",
+      "bash",
+      "webfetch",
+      "ls",
+      "notebookedit",
+      "todowrite",
+      "unknown_tool",
+    ]
+    const glyphs = keys.map(toolGlyph)
+    for (const glyph of glyphs) expect(stringWidth(glyph)).toBe(1)
+    // Buckets must be visually distinguishable, not all the same glyph.
+    expect(new Set(glyphs).size).toBe(glyphs.length)
+  })
+})
+
+describe("humanizeToolName / toolHeaderLabel", () => {
+  it("titles a builtin and keeps an mcp namespace beside the humanized tool", () => {
+    expect(humanizeToolName("bash")).toBe("Bash")
+    expect(humanizeToolName("multi_edit")).toBe("Multi edit")
+    expect(humanizeToolName("todoWrite")).toBe("Todo Write")
+    expect(humanizeToolName("")).toBe("Tool")
+    expect(toolHeaderLabel("read")).toBe("Read")
+    expect(toolHeaderLabel("mcp__github__create_issue")).toBe("github:Create issue")
+    expect(toolHeaderLabel("plugin__web-tools__fetch")).toBe("web-tools:Fetch")
   })
 })
 
@@ -310,27 +359,5 @@ describe("resultPreview", () => {
   it("returns '' for null or all-blank results", () => {
     expect(resultPreview(null)).toBe("")
     expect(resultPreview("   \n  ")).toBe("")
-  })
-})
-
-describe("resultCountLabel", () => {
-  it("counts grep matches and glob/ls entries (singular/plural)", () => {
-    expect(resultCountLabel("grep", "a:1:x\nb:2:y\n")).toBe("2 matches")
-    expect(resultCountLabel("grep", "only:1:x")).toBe("1 match")
-    expect(resultCountLabel("glob", "a.ts\nb.ts\nc.ts")).toBe("3 files")
-    expect(resultCountLabel("glob", "one.ts")).toBe("1 file")
-    expect(resultCountLabel("ls", "a\nb")).toBe("2 entries")
-    expect(resultCountLabel("list", "x")).toBe("1 entry")
-  })
-
-  it("reads MCP content-block array results", () => {
-    expect(resultCountLabel("grep", [{ type: "text", text: "x:1:a\ny:2:b" }])).toBe("2 matches")
-  })
-
-  it("returns undefined for tools without a natural count, and for empty results", () => {
-    expect(resultCountLabel("bash", "some output")).toBeUndefined()
-    expect(resultCountLabel("read", "file contents")).toBeUndefined()
-    expect(resultCountLabel("grep", "")).toBeUndefined()
-    expect(resultCountLabel("grep", null)).toBeUndefined()
   })
 })

@@ -93,19 +93,79 @@ export function wrapTerminalText(text: string, width: number): string[] {
   return output.length > 0 ? output : [""]
 }
 
+/**
+ * Hard-wrap a styled run at exact terminal-cell boundaries, preserving each
+ * span's style across the wrap. The same grapheme accounting as
+ * {@link wrapTerminalText}, but a physical row can now carry several styles, so
+ * a tool header can tint its status glyph, its name and its result chip
+ * differently while the row-count math stays identical.
+ *
+ * Newlines inside a span's text break the row exactly as they do in plain text.
+ * Adjacent graphemes sharing a style are re-joined into one span, so a row is
+ * never fragmented per character.
+ */
+export function wrapTerminalSpans(spans: TerminalSpan[], width: number): TerminalLine[] {
+  const columns = Math.max(1, Math.floor(width))
+  const lines: TerminalLine[] = []
+  let current: TerminalSpan[] = []
+  let used = 0
+
+  const push = () => {
+    lines.push({ spans: current, plain: current.map((span) => span.text).join("") })
+    current = []
+    used = 0
+  }
+  const append = (grapheme: string, source: TerminalSpan) => {
+    const last = current[current.length - 1]
+    if (last && sameStyle(last, source)) last.text += grapheme
+    else current.push({ ...source, text: grapheme })
+  }
+
+  for (const span of spans) {
+    const text = sanitizeTerminalText(span.text)
+    const physicals = text.split("\n")
+    physicals.forEach((physical, index) => {
+      if (index > 0) push()
+      for (const grapheme of graphemes(physical)) {
+        const cellWidth = graphemeWidth(grapheme)
+        if (used > 0 && used + cellWidth > columns) push()
+        append(grapheme, span)
+        used += cellWidth
+      }
+    })
+  }
+  push()
+  return lines
+}
+
+/** Two spans render identically when their style and text decorations match. */
+function sameStyle(a: TerminalSpan, b: TerminalSpan): boolean {
+  return (
+    a.style === b.style &&
+    Boolean(a.bold) === Boolean(b.bold) &&
+    Boolean(a.italic) === Boolean(b.italic) &&
+    Boolean(a.underline) === Boolean(b.underline)
+  )
+}
+
+/**
+ * Build a block from either a single-styled `text` or a styled `spans` run.
+ * `spans` is the richer form used by the transcript cells that carry more than
+ * one colour (a tool header, a diff body, a bash cell); `text` stays for the
+ * cells that genuinely are one colour end to end.
+ */
 export function buildTerminalBlock(options: {
   id: string
-  text: string
+  text?: string
+  spans?: TerminalSpan[]
   width: number
   style?: TerminalStyle
   target?: string
 }): TerminalBlock {
-  const plainText = sanitizeTerminalText(options.text)
   const style = options.style ?? "plain"
-  const lines = wrapTerminalText(plainText, options.width).map((plain) => ({
-    plain,
-    spans: [{ text: plain, style }],
-  }))
+  const source: TerminalSpan[] = options.spans ?? [{ text: options.text ?? "", style }]
+  const plainText = source.map((span) => sanitizeTerminalText(span.text)).join("")
+  const lines = wrapTerminalSpans(source, options.width)
   return {
     id: options.id,
     lines,

@@ -52,7 +52,7 @@ describe("collectInspectables", () => {
       toolCell("2", "bash", { input: { command: "boom" }, result: "err", isError: true }),
     ])
     const read = items.find((i) => i.cellId === "1")!
-    expect(read.label).toContain("read")
+    expect(read.label).toContain("Read")
     expect(read.summary).toBe("/a.ts")
     expect(read.lines).toBe(2)
     const errored = items.find((i) => i.cellId === "2")!

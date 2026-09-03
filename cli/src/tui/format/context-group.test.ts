@@ -26,6 +26,15 @@ describe("isContextTool", () => {
   })
 })
 
+describe("isContextTool", () => {
+  it("folds a namespaced builtin as readily as a bare one", () => {
+    expect(isContextTool("Read")).toBe(true)
+    expect(isContextTool("mcp__cognia-tools__grep")).toBe(true)
+    expect(isContextTool("plugin__web-tools__list")).toBe(true)
+    expect(isContextTool("bash")).toBe(false)
+  })
+})
+
 describe("groupContextRuns", () => {
   it("folds an adjacent run of ≥2 completed context tools", () => {
     const cells: Cell[] = [tool("read"), tool("grep"), tool("glob")]

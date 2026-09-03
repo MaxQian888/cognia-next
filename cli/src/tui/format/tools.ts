@@ -40,6 +40,116 @@ export function toolDisplayName(toolName: string): string {
   return m ? `${m[1]}:${m[2]}` : toolName
 }
 
+/**
+ * Coarse icon bucket for a tool — the terminal counterpart of the GUI's
+ * `ToolIconKey` (`lib/chat/tool-summary.ts`). The two surfaces classify the same
+ * names into the same buckets (including the third-party aliases `cat`/`view`/
+ * `search`/`list`), so a `grep` reads as a search in the app and in the CLI.
+ */
+export type ToolIconKey =
+  | "read"
+  | "write"
+  | "edit"
+  | "search"
+  | "glob"
+  | "terminal"
+  | "web"
+  | "folder"
+  | "notebook"
+  | "task"
+  | "generic"
+
+/** Name → bucket. Mirrors `ICON_BY_NAME` in `lib/chat/tool-summary.ts`. */
+const ICON_BY_NAME: Record<string, ToolIconKey> = {
+  read: "read",
+  cat: "read",
+  view: "read",
+  write: "write",
+  create: "write",
+  edit: "edit",
+  multiedit: "edit",
+  multi_edit: "edit",
+  str_replace: "edit",
+  apply_patch: "edit",
+  notebookedit: "notebook",
+  bash: "terminal",
+  shell: "terminal",
+  grep: "search",
+  search: "search",
+  glob: "glob",
+  ls: "folder",
+  list: "folder",
+  webfetch: "web",
+  web_fetch: "web",
+  fetch: "web",
+  websearch: "web",
+  web_search: "web",
+  todowrite: "task",
+  task: "task",
+  agent: "task",
+  dispatch_agent: "task",
+}
+
+/**
+ * The icon bucket for a tool name. Namespace-aware: `mcp__github__read` buckets
+ * as a read, exactly as the GUI folds the namespace before classifying.
+ */
+export function toolIconKey(toolName: string): ToolIconKey {
+  return ICON_BY_NAME[bareToolName(toolName).toLowerCase()] ?? "generic"
+}
+
+/**
+ * One-column glyph per bucket — the terminal stand-in for the GUI's lucide
+ * icons. Every glyph is deliberately outside the ranges
+ * `markdown/width.stringWidth` measures as two columns, so a tool header's
+ * width math (and therefore the virtualized renderer's wrapping) stays exact.
+ */
+const GLYPH_BY_ICON: Record<ToolIconKey, string> = {
+  read: "\u25a4",
+  write: "\u229e",
+  edit: "\u22a1",
+  search: "\u2315",
+  glob: "\u2042",
+  terminal: "\u00bb",
+  web: "\u25cd",
+  folder: "\u2261",
+  notebook: "\u25a6",
+  task: "\u25a3",
+  generic: "\u2317",
+}
+
+/** The glyph for a tool name's bucket — see {@link GLYPH_BY_ICON}. */
+export function toolGlyph(toolName: string): string {
+  return GLYPH_BY_ICON[toolIconKey(toolName)]
+}
+
+/**
+ * Humanize a machine tool name for display: `multi_edit` → "Multi edit",
+ * `todoWrite` → "Todo Write". Same transformation the GUI applies
+ * (`humanizeToolName` in `lib/chat/tool-summary.ts`) so the two surfaces title
+ * a tool identically.
+ */
+export function humanizeToolName(name: string): string {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!words) return "Tool"
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * The header label for a tool card. A builtin is humanized (`bash` → "Bash");
+ * an MCP / plugin tool keeps its `<source>:<tool>` identity — the namespace is
+ * the useful half in a terminal, and the `[mcp]` / `[plugin]` badge sits beside
+ * it — with only the tool segment humanized.
+ */
+export function toolHeaderLabel(toolName: string): string {
+  const m = /^(?:mcp|plugin)__(.+?)__(.+)$/.exec(toolName)
+  return m ? `${m[1]}:${humanizeToolName(m[2])}` : humanizeToolName(toolName)
+}
+
 /** The TodoWrite tool name (case-insensitive match). */
 export function isTodoTool(toolName: string): boolean {
   return toolName.toLowerCase() === "todowrite"
@@ -129,7 +239,12 @@ export function toolFileLine(toolName: string, input: Record<string, unknown>): 
  * for grep.
  */
 export function summarizeToolCall(toolName: string, input: Record<string, unknown>): string {
-  const name = toolName.toLowerCase()
+  // Namespace-aware, like the GUI's `summarizeToolCall` (which folds the
+  // namespace via `normalizeToolName` before dispatching): the cognia builtins
+  // arrive as `mcp__cognia-tools__bash` on the ai-sdk path, and without this
+  // fold every one of them fell through to the generic key scan — so a wrapped
+  // `bash` showed no command and a wrapped `grep` no pattern.
+  const name = bareToolName(toolName).toLowerCase()
   if (name === "bash" || name === "shell") {
     return firstString(input, ["command", "cmd"]) ?? ""
   }
@@ -163,13 +278,13 @@ export function summarizeToolCall(toolName: string, input: Record<string, unknow
 
 /**
  * The live "what's running" detail line for the working indicator, Codex-style:
- * `└ <tool>: <summary>` (e.g. `└ bash: npm test`). Reuses {@link toolDisplayName}
+ * `└ <tool>: <summary>` (e.g. `└ Bash: npm test`). Reuses {@link toolHeaderLabel}
  * and {@link summarizeToolCall} so the label and summary match the tool card.
  * Truncated to `columns` display columns; the `: <summary>` tail is dropped when
  * the tool has no natural summary.
  */
 export function toolDetailLine(tool: ToolCell, columns = 80): string {
-  const name = toolDisplayName(tool.toolName)
+  const name = toolHeaderLabel(tool.toolName)
   const summary = summarizeToolCall(tool.toolName, tool.input)
   const body = summary ? `${name}: ${summary}` : name
   return truncateToWidth(`└ ${body}`, columns)
@@ -232,53 +347,6 @@ export function summarizeResult(result: unknown): ResultSize {
   }
   if (text.length === 0) return { lines: 0, bytes: 0 }
   return { lines: text.split("\n").length, bytes: text.length }
-}
-
-/** Coerce a tool result to plain text: a string verbatim, an MCP content-block
- * array by joining its text blocks, anything else by JSON. */
-function resultText(result: unknown): string {
-  if (result == null) return ""
-  if (typeof result === "string") return result
-  if (Array.isArray(result)) {
-    const texts = result
-      .map((b) =>
-        b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string"
-          ? (b as { text: string }).text
-          : ""
-      )
-      .filter(Boolean)
-    if (texts.length > 0) return texts.join("\n")
-  }
-  try {
-    return JSON.stringify(result)
-  } catch {
-    return String(result)
-  }
-}
-
-/**
- * A tool-specific count for the collapsed card header — "12 matches" for grep,
- * "3 files" for glob, "8 entries" for ls — which reads more usefully than a raw
- * line count. Returns undefined for tools without a natural count, so the caller
- * falls back to {@link summarizeResult}.
- */
-export function resultCountLabel(toolName: string, result: unknown): string | undefined {
-  if (result == null) return undefined
-  const text = resultText(result)
-  if (!text) return undefined
-  const n = text.split("\n").filter((l) => l.trim().length > 0).length
-  switch (toolName.toLowerCase()) {
-    case "grep":
-    case "search":
-      return `${n} match${n === 1 ? "" : "es"}`
-    case "glob":
-      return `${n} file${n === 1 ? "" : "s"}`
-    case "ls":
-    case "list":
-      return `${n} entr${n === 1 ? "y" : "ies"}`
-    default:
-      return undefined
-  }
 }
 
 /**

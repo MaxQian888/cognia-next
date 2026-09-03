@@ -641,7 +641,7 @@ describe("App", () => {
       await Promise.resolve()
     })
     // Collapsed tools keep one useful preview line without exposing the full body.
-    await waitFor(() => expect(container.textContent).toContain("bash"))
+    await waitFor(() => expect(container.textContent).toContain("Bash"))
     expect(container.textContent).toContain("SENTINEL_TOOL_PREVIEW")
     expect(container.textContent).not.toContain("SENTINEL_TOOL_DETAIL")
     // Ctrl+T reveals all tool output (Ctrl+R now opens history search).

@@ -49,10 +49,14 @@ describe("CellView", () => {
       status: "running",
       collapsed: true,
     })
-    expect(text).toContain("edit")
+    // The header humanizes the machine name the way the web row does.
+    expect(text).toContain("Edit")
     expect(text).toContain("/a.ts")
     expect(text).toContain("x")
     expect(text).toContain("y")
+    // A diff renders whether or not the card is collapsed, so no caret promises
+    // an expansion that would reveal nothing.
+    expect(text).not.toContain("▸")
   })
 
   it("shows a protocol label in the header while the canonical name still drives the diff", () => {
@@ -157,7 +161,9 @@ describe("CellView", () => {
       collapsed: true,
     })
     expect(text).toContain("[mcp]")
-    expect(text).toContain("github:create_issue")
+    // The namespace stays (it is the useful half in a terminal, and the badge
+    // sits beside it) while the tool segment is humanized.
+    expect(text).toContain("github:Create issue")
   })
 
   it("shows a result size hint on a collapsed non-diff tool card", () => {
@@ -309,7 +315,7 @@ describe("CellView", () => {
       result: "file.txt",
       collapsed: false,
     })
-    expect(text).toContain("bash")
+    expect(text).toContain("Bash")
     expect(text).toContain("file.txt")
   })
 
@@ -375,7 +381,102 @@ describe("CellView", () => {
     expect(text).toContain("2 │")
   })
 
-  it("shows an explicit expand affordance on a collapsed tool with output", () => {
+  it("prints a bucket glyph so a read, a search and a shell-out differ at a glance", () => {
+    const base = {
+      id: "1",
+      kind: "tool" as const,
+      callKey: "k",
+      status: "done" as const,
+      collapsed: true,
+    }
+    const read = renderCell({ ...base, toolName: "read", input: { file_path: "/a.ts" } })
+    const grep = renderCell({ ...base, toolName: "grep", input: { pattern: "foo" } })
+    const bash = renderCell({ ...base, toolName: "bash", input: { command: "ls" } })
+    expect(read).toContain("▤")
+    expect(grep).toContain("⌕")
+    expect(bash).toContain("»")
+  })
+
+  it("shows a caret only when collapsing actually hides a body", () => {
+    const withOutput = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/a.ts" },
+      status: "done",
+      result: "contents",
+      collapsed: true,
+    })
+    const withoutOutput = renderCell({
+      id: "2",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/a.ts" },
+      status: "running",
+      collapsed: true,
+    })
+    expect(withOutput).toContain("▸")
+    expect(withoutOutput).not.toContain("▸")
+    const expanded = renderCell({
+      id: "3",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/a.ts" },
+      status: "done",
+      result: "contents",
+      collapsed: false,
+    })
+    expect(expanded).toContain("▾")
+  })
+
+  it("counts a context tool's result instead of echoing the file's first line", () => {
+    const read = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "read",
+      input: { file_path: "/a.ts" },
+      status: "done",
+      result: "first line\nsecond line",
+      collapsed: true,
+    })
+    expect(read).toContain("2 lines")
+    expect(read).not.toContain("first line")
+    // A shell command's output IS the answer, so it keeps its preview row.
+    const bash = renderCell({
+      id: "2",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "pwd" },
+      status: "done",
+      result: "/workspace",
+      collapsed: true,
+    })
+    expect(bash).toContain("↳ /workspace")
+  })
+
+  it("keeps a failed call's message on the detail line, not in the header chip", () => {
+    const text = renderCell({
+      id: "1",
+      kind: "tool",
+      callKey: "k",
+      toolName: "bash",
+      input: { command: "false" },
+      status: "error",
+      isError: true,
+      result: "Error: command failed\nmore detail",
+      collapsed: true,
+    })
+    expect(text).toContain("↳ Error: command failed")
+    // The header carries the command, the failure gets its own full-width row.
+    expect(text.split("↳")[0]).not.toContain("Error: command failed")
+  })
+
+  it("marks a collapsed tool with output as expandable, without repeating the command", () => {
     const text = renderCell({
       id: "1",
       kind: "tool",
@@ -386,7 +487,10 @@ describe("CellView", () => {
       result: "const x = 1",
       collapsed: true,
     })
-    expect(text).toContain("/inspect")
+    // The caret is the affordance. `/inspect` is advertised once in the footer
+    // hint (`Footer.HINT_TEXT`), not on every settled row.
+    expect(text).toContain("▸")
+    expect(text).not.toContain("/inspect")
   })
 
   it("serializes object tool results when expanded", () => {

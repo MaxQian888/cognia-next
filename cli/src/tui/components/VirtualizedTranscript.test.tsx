@@ -39,6 +39,84 @@ describe("VirtualizedTranscript", () => {
     expect(container.textContent).toContain("second")
   })
 
+  it("folds a settled context burst into one summary row", () => {
+    const tool = (id: string, toolName: string): Cell => ({
+      id,
+      kind: "tool",
+      callKey: id,
+      toolName,
+      input: { file_path: `/${id}.ts` },
+      status: "done",
+      result: "contents",
+      collapsed: true,
+    })
+    const { container } = render(
+      <VirtualizedTranscript
+        cells={[tool("a", "read"), tool("b", "read"), tool("c", "grep")]}
+        width={80}
+        top={0}
+        viewportRows={20}
+        verbose={false}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("⚙ 2 reads, 1 search")
+    expect(text).not.toContain("/a.ts")
+    expect(container.querySelectorAll('[data-testid="terminal-block"]').length).toBe(1)
+  })
+
+  it("keeps every context call visible in verbose mode", () => {
+    const tool = (id: string): Cell => ({
+      id,
+      kind: "tool",
+      callKey: id,
+      toolName: "read",
+      input: { file_path: `/${id}.ts` },
+      status: "done",
+      result: "contents",
+      collapsed: true,
+    })
+    const { container } = render(
+      <VirtualizedTranscript
+        cells={[tool("a"), tool("b")]}
+        width={80}
+        top={0}
+        viewportRows={40}
+        verbose
+      />
+    )
+    expect(container.textContent).toContain("/a.ts")
+    expect(container.textContent).toContain("/b.ts")
+  })
+
+  it("paints a tool header with one span per styled run", () => {
+    const { container } = render(
+      <VirtualizedTranscript
+        cells={[
+          {
+            id: "t",
+            kind: "tool",
+            callKey: "t",
+            toolName: "bash",
+            input: { command: "pnpm test" },
+            status: "error",
+            isError: true,
+            result: "boom",
+            collapsed: true,
+          },
+        ]}
+        width={80}
+        top={0}
+        viewportRows={20}
+        verbose={false}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("✗")
+    expect(text).toContain("» Bash pnpm test")
+    expect(text).toContain("↳ boom")
+  })
+
   it("reserves the terminal auto-wrap column so the next row keeps its first character", async () => {
     const onMetrics = jest.fn()
     render(

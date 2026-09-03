@@ -24,23 +24,29 @@ import {
 } from "../format/result-images"
 import { buildImageEscape, detectGraphics } from "../format/terminal-graphics"
 import {
-  diffStat,
   isDiffTool,
-  resultCountLabel,
   resultPreview,
-  summarizeResult,
   summarizeToolCall,
-  toolDisplayName,
   toolFileLine,
   toolFilePath,
+  toolGlyph,
+  toolHeaderLabel,
   toolKind,
 } from "../format/tools"
+import {
+  describeToolResult,
+  formatResultDescriptor,
+  isDetailDescriptor,
+  type ResultTone,
+  type ToolResultDescriptor,
+} from "../format/tool-result"
 import {
   isSubagentTool,
   subagentDispatchCount,
   subagentName,
   subagentTask,
 } from "../format/subagent"
+import { isContextTool } from "../format/context-group"
 import { planStats, planTitle } from "../runtime/plan"
 import { fileUri } from "../runtime/editor"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
@@ -165,6 +171,63 @@ function linkifyToolSummary(cell: ToolCell, summary: string): string {
   return osc8Link(fileUri(abs, line, vscodeTerm ? "vscode" : "generic"), summary, true)
 }
 
+/** Colour of a result chip by tone. Neutral chips stay dim so a settled card
+ * reads as one quiet row, while a diff's +/- keeps its diff colour. */
+function toneColor(tone: ResultTone, theme: ReturnType<typeof useTheme>): string {
+  return tone === "success" ? theme.diffAdded : tone === "error" ? theme.danger : theme.muted
+}
+
+/** The header's right-hand chip: "12 matches", "+5 -2", "320 lines". Errors are
+ * excluded by {@link isDetailDescriptor} and render on the detail line instead,
+ * where the message gets the full row width. */
+function ResultChip({ descriptor }: { descriptor: ToolResultDescriptor }) {
+  const theme = useTheme()
+  return (
+    <Text color={toneColor(descriptor.tone, theme)} dimColor={descriptor.tone === "neutral"}>
+      {" "}
+      · {formatResultDescriptor(descriptor)}
+    </Text>
+  )
+}
+
+/** The disclosure caret. Printed only when the card actually has a body to
+ * reveal, so a bodyless call is not advertising an expansion that does nothing.
+ * The caret is the whole affordance: the command that opens the body
+ * (`/inspect`) is already advertised once in the footer hint, and repeating it
+ * on every settled row buried the transcript it was meant to make legible. */
+function Disclosure({ shown, collapsed }: { shown: boolean; collapsed: boolean }) {
+  const theme = useTheme()
+  if (!shown) return null
+  return (
+    <Text color={theme.muted} dimColor>
+      {collapsed ? "▸ " : "▾ "}
+    </Text>
+  )
+}
+
+/** The indented body of an expanded card: a left rule that ties the output to
+ * its header, the terminal counterpart of the web row's `border-l` nest. */
+function CardBody({ children }: { children: React.ReactNode }) {
+  const theme = useTheme()
+  return (
+    // marginLeft 2 + the 1-cell border + paddingLeft 1 puts the rule directly
+    // under the header's caret and costs exactly the 4 columns the written-block
+    // renderer's `  │ ` prefix costs, so both layouts wrap a body identically.
+    <Box
+      flexDirection="column"
+      marginLeft={2}
+      paddingLeft={1}
+      borderStyle="single"
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      borderColor={theme.borderSubtle}
+    >
+      {children}
+    </Box>
+  )
+}
+
 function ToolView({ cell }: { cell: ToolCell }) {
   const theme = useTheme()
   const STATUS_COLOR: Record<ToolCell["status"], string> = {
@@ -177,45 +240,37 @@ function ToolView({ cell }: { cell: ToolCell }) {
   const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
   // Make the file path a clickable OSC-8 hyperlink so a Ctrl/Cmd-click opens it
   // in the editor (vscode://file inside a VS Code terminal, else file://). Only
-  // on terminals with confirmed OSC-8 support — the link bytes are zero-width, so
-  // the displayed text + column math are unchanged.
+  // on terminals with confirmed OSC-8 support: the link bytes are zero-width, so
+  // the displayed text and column math are unchanged.
   const summaryDisplay = linkifyToolSummary(cell, summary)
   const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
   const diffLang = diff.length > 0 ? langFromPath(diffFilePath(cell.input) ?? "") : undefined
-  const stat = diffStat(cell.toolName, cell.input)
-  // Result magnitude for the collapsed-card hint — only meaningful once a
-  // (non-diff) result has landed and the card is still collapsed.
-  const size =
-    cell.collapsed && diff.length === 0 && hasUsefulResult
-      ? summarizeResult(cell.result)
-      : { lines: 0, bytes: 0 }
-  // A tool-specific count ("12 matches", "3 files") reads better than a raw line
-  // count for search-shaped tools; falls back to the line count otherwise.
-  const countLabel =
-    cell.collapsed && diff.length === 0 && hasUsefulResult
-      ? resultCountLabel(cell.toolName, cell.result)
-      : undefined
-  // An errored, collapsed tool shows a one-line error preview in the header so
-  // the failure is visible without expanding the card.
-  const errorPreview =
-    cell.collapsed && cell.status === "error" && cell.result != null
-      ? resultPreview(cell.result)
-      : ""
-  // Some protocol adapters provide no useful raw input (so `summary` is empty)
-  // but do return a descriptive result. Show its first line instead of reducing
-  // a completed card to a bare tool name.
-  const successPreview =
-    cell.collapsed && cell.status === "done" && cell.result != null
-      ? resultPreview(cell.result)
-      : ""
+  // One descriptor answers "what did this produce" for both TUI renderers and
+  // for the web row, so the same call reads the same everywhere.
+  const descriptor = describeToolResult(cell)
+  const chip = descriptor && !isDetailDescriptor(descriptor) ? descriptor : null
+  // A failure's first line, and the first line of a result whose header chip
+  // only carries a size. Both land under the header where they have room.
+  const detail =
+    descriptor && isDetailDescriptor(descriptor)
+      ? { text: formatResultDescriptor(descriptor), tone: descriptor.tone }
+      : cell.collapsed &&
+          cell.status === "done" &&
+          cell.result != null &&
+          // A context tool's chip already says how much came back, and the first
+          // line of a file or a match list adds nothing. Preview the tools whose
+          // output IS the answer (a shell command, an MCP call) instead.
+          !isContextTool(cell.toolName)
+        ? { text: resultPreview(cell.result), tone: "neutral" as ResultTone }
+        : null
+  // A diff renders whether or not the card is collapsed, so only a hidden result
+  // body makes the card collapsible. Showing a caret next to an always-visible
+  // diff would advertise an expansion that reveals nothing.
+  const collapsible = diff.length === 0 && hasUsefulResult
+  // Some protocol adapters supply neither a usable input summary nor a result.
+  // Say so, instead of reducing a settled card to a bare tool name.
   const missingDetails =
-    cell.collapsed &&
-    (cell.status === "done" || cell.status === "error") &&
-    !summary &&
-    !errorPreview &&
-    !successPreview &&
-    !countLabel &&
-    size.lines === 0
+    (cell.status === "done" || cell.status === "error") && !summary && !chip && !detail?.text
       ? cell.status === "error"
         ? "failed · no error details"
         : "completed · no details"
@@ -224,54 +279,40 @@ function ToolView({ cell }: { cell: ToolCell }) {
     <Box flexDirection="column">
       <Box>
         <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
+        <Disclosure shown={collapsible} collapsed={cell.collapsed} />
         <ToolBadge toolName={cell.toolName} />
-        {/* Label from the protocol when there is one, canonical name otherwise —
+        <Text color={theme.muted}>{toolGlyph(cell.toolName)} </Text>
+        {/* Label from the protocol when there is one, canonical name otherwise.
             `cell.toolName` still drives every formatter above. */}
-        <Text bold>{cell.displayTitle ?? toolDisplayName(cell.toolName)}</Text>
+        <Text bold>{cell.displayTitle ?? toolHeaderLabel(cell.toolName)}</Text>
         {summary ? <Text color={theme.muted}> {summaryDisplay}</Text> : null}
         {cell.status === "cancelled" ? <Text color={theme.muted}> · stopped</Text> : null}
-        {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
-        {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}
         <ElapsedHint status={cell.status} />
-        {countLabel ? (
-          <Text color={theme.muted} dimColor>
-            {" "}
-            · {countLabel}
-          </Text>
-        ) : size.lines > 0 ? (
-          <Text color={theme.muted} dimColor>
-            {" "}
-            · {size.lines} line{size.lines === 1 ? "" : "s"}
-          </Text>
-        ) : missingDetails ? (
+        {chip ? <ResultChip descriptor={chip} /> : null}
+        {missingDetails ? (
           <Text color={cell.status === "error" ? theme.danger : theme.muted} dimColor>
             {" "}
             · {missingDetails}
           </Text>
         ) : null}
-        {cell.collapsed && hasUsefulResult ? (
-          <Text color={theme.accent} dimColor>
-            {" "}
-            ▸ expand: /inspect
-          </Text>
-        ) : cell.collapsed ? (
-          <Text color={theme.muted} dimColor>
-            {" "}
-            ▸
-          </Text>
-        ) : null}
       </Box>
-      {cell.collapsed && (errorPreview || successPreview) ? (
+      {cell.collapsed && detail?.text ? (
         <Box paddingLeft={2}>
-          <Text color={errorPreview ? theme.danger : theme.muted} dimColor>
-            ↳ {errorPreview || successPreview}
+          <Text color={detail.tone === "error" ? theme.danger : theme.muted} dimColor>
+            ↳ {detail.text}
           </Text>
         </Box>
       ) : null}
-      {diff.length > 0 && <DiffView diff={diff} lang={diffLang} />}
-      {!cell.collapsed && diff.length === 0 && hasUsefulResult && (
-        <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
-      )}
+      {diff.length > 0 ? (
+        <CardBody>
+          <DiffView diff={diff} lang={diffLang} />
+        </CardBody>
+      ) : null}
+      {!cell.collapsed && diff.length === 0 && hasUsefulResult ? (
+        <CardBody>
+          <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
+        </CardBody>
+      ) : null}
     </Box>
   )
 }
@@ -396,20 +437,19 @@ function SubagentView({ cell }: { cell: ToolCell }) {
   const task = subagentTask(cell.input)
   const dispatchCount = subagentDispatchCount(cell.input)
   const hasUsefulResult = cell.result != null && !isUserCancellationResult(cell)
-  const size =
-    cell.collapsed && hasUsefulResult ? summarizeResult(cell.result) : { lines: 0, bytes: 0 }
-  const errorPreview =
-    cell.collapsed && cell.status === "error" && cell.result != null
-      ? resultPreview(cell.result)
-      : ""
-  const successPreview =
-    cell.collapsed && cell.status === "done" && cell.result != null
-      ? resultPreview(cell.result)
-      : ""
+  const descriptor = describeToolResult(cell)
+  const chip = descriptor && !isDetailDescriptor(descriptor) ? descriptor : null
+  const detail =
+    descriptor && isDetailDescriptor(descriptor)
+      ? { text: formatResultDescriptor(descriptor), tone: descriptor.tone }
+      : cell.collapsed && cell.status === "done" && cell.result != null
+        ? { text: resultPreview(cell.result), tone: "neutral" as ResultTone }
+        : null
   return (
     <Box flexDirection="column">
       <Box>
         <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
+        <Disclosure shown={hasUsefulResult} collapsed={cell.collapsed} />
         <Text color={theme.accent} bold>
           ◆ {name}
         </Text>
@@ -419,41 +459,25 @@ function SubagentView({ cell }: { cell: ToolCell }) {
           {SUBAGENT_STATUS_LABEL[cell.status]}
         </Text>
         <ElapsedHint status={cell.status} />
-        {size.lines > 0 ? (
-          <Text color={theme.muted} dimColor>
-            {" "}
-            · {size.lines} line{size.lines === 1 ? "" : "s"}
-          </Text>
-        ) : null}
-        {cell.collapsed && hasUsefulResult ? (
-          <Text color={theme.accent} dimColor>
-            {" "}
-            ▸ expand: /inspect
-          </Text>
-        ) : cell.collapsed ? (
-          <Text color={theme.muted} dimColor>
-            {" "}
-            ▸
-          </Text>
-        ) : null}
+        {chip ? <ResultChip descriptor={chip} /> : null}
       </Box>
       {task ? (
         <Box paddingLeft={2}>
           <Text color={theme.muted}>{task}</Text>
         </Box>
       ) : null}
-      {cell.collapsed && (errorPreview || successPreview) ? (
+      {cell.collapsed && detail?.text ? (
         <Box paddingLeft={2}>
-          <Text color={errorPreview ? theme.danger : theme.muted} dimColor>
-            ↳ {errorPreview || successPreview}
+          <Text color={detail.tone === "error" ? theme.danger : theme.muted} dimColor>
+            ↳ {detail.text}
           </Text>
         </Box>
       ) : null}
-      {!cell.collapsed && hasUsefulResult && (
-        <Box paddingLeft={2}>
+      {!cell.collapsed && hasUsefulResult ? (
+        <CardBody>
           <ToolResult result={cell.result} />
-        </Box>
-      )}
+        </CardBody>
+      ) : null}
     </Box>
   )
 }

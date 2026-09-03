@@ -94,7 +94,7 @@ describe("BottomStatus", () => {
         tools={[tool({ toolName: "bash", input: { command: "npm test" } })]}
       />
     )
-    expect(container.textContent ?? "").toContain("└ bash: npm test")
+    expect(container.textContent ?? "").toContain("└ Bash: npm test")
   })
 
   it("caps tool detail at three lines (most recent)", () => {

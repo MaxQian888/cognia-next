@@ -97,7 +97,10 @@ describe("Transcript", () => {
       },
     ]
     const collapsed = render(<Transcript cells={cells} mode="live" />)
-    expect(collapsed.container.textContent ?? "").toContain("preview")
+    // A read is a context tool: the header counts the result instead of echoing
+    // the file's first line, and the body stays hidden until verbose.
+    expect(collapsed.container.textContent ?? "").toContain("2 lines")
+    expect(collapsed.container.textContent ?? "").not.toContain("preview")
     expect(collapsed.container.textContent ?? "").not.toContain("LIVE_SECRET_BODY")
     const verbose = render(<Transcript cells={cells} mode="live" verbose />)
     expect(verbose.container.textContent ?? "").toContain("LIVE_SECRET_BODY")
@@ -172,7 +175,7 @@ describe("Transcript", () => {
       },
     ]
     const collapsed = render(<Transcript cells={cells} />)
-    expect(collapsed.container.textContent ?? "").toContain("preview")
+    expect(collapsed.container.textContent ?? "").toContain("2 lines")
     expect(collapsed.container.textContent ?? "").not.toContain("SECRET_FILE_BODY")
     const verbose = render(<Transcript cells={cells} verbose />)
     expect(verbose.container.textContent ?? "").toContain("SECRET_FILE_BODY")

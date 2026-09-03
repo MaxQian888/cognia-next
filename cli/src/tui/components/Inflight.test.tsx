@@ -65,7 +65,7 @@ describe("Inflight", () => {
     )
     // A running tool now shows a spinner glyph instead of the static ⏳.
     expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
-    expect(container.textContent).toContain("bash")
+    expect(container.textContent).toContain("Bash")
   })
 
   it("re-renders tool cells when they complete", () => {

@@ -48,7 +48,7 @@ describe("cellToTerminalBlock", () => {
       id: "t",
       kind: "tool",
       callKey: "t",
-      toolName: "Read",
+      toolName: "git_show",
       input: { path: "a.txt" },
       status: "done",
       result: "VISIBLE\nSECRET",
@@ -58,6 +58,97 @@ describe("cellToTerminalBlock", () => {
     expect(collapsed).toContain("↳ VISIBLE")
     expect(collapsed).not.toContain("SECRET")
     expect(cellToTerminalBlock(cell, { width: 80, verbose: true }).plainText).toContain("SECRET")
+  })
+
+  it("styles a tool header: status, disclosure, glyph, label and result chip", () => {
+    const cell: Cell = {
+      id: "t",
+      kind: "tool",
+      callKey: "t",
+      toolName: "grep",
+      input: { pattern: "foo" },
+      status: "done",
+      result: "a.ts:1:foo\nb.ts:2:foo",
+      collapsed: true,
+    }
+    const block = cellToTerminalBlock(cell, { width: 120, verbose: false })
+    const header = block.lines[0]
+    expect(header.plain).toContain("✓")
+    expect(header.plain).toContain("▸")
+    expect(header.plain).toContain("⌕")
+    expect(header.plain).toContain("Grep foo")
+    expect(header.plain).toContain("2 matches")
+    // The status glyph is green, the chip is dim: one row, several styles.
+    expect(header.spans[0]).toMatchObject({ text: "✓ ", style: "success" })
+    expect(header.spans.some((span) => span.style === "muted")).toBe(true)
+    expect(header.spans.some((span) => span.bold)).toBe(true)
+  })
+
+  it("colours a diff's sign column and indents the body under a rule", () => {
+    const cell: Cell = {
+      id: "e",
+      kind: "tool",
+      callKey: "e",
+      toolName: "edit",
+      input: { file_path: "/a.ts", old_string: "before", new_string: "after" },
+      status: "running",
+      collapsed: true,
+    }
+    const block = cellToTerminalBlock(cell, { width: 120, verbose: false })
+    expect(block.plainText).toContain("+1 -1")
+    const added = block.lines.find((line) => line.plain.includes("+ after"))
+    const removed = block.lines.find((line) => line.plain.includes("- before"))
+    expect(added?.spans.some((span) => span.style === "success")).toBe(true)
+    expect(removed?.spans.some((span) => span.style === "danger")).toBe(true)
+    expect(added?.plain.startsWith("  │ ")).toBe(true)
+  })
+
+  it("puts a failure on its own detail row, not in the header chip", () => {
+    const cell: Cell = {
+      id: "f",
+      kind: "tool",
+      callKey: "f",
+      toolName: "bash",
+      input: { command: "false" },
+      status: "error",
+      isError: true,
+      result: "Error: command failed\nstack frame",
+      collapsed: true,
+    }
+    const block = cellToTerminalBlock(cell, { width: 120, verbose: false })
+    expect(block.lines[0].plain).not.toContain("Error: command failed")
+    expect(block.plainText).toContain("↳ Error: command failed")
+    expect(block.plainText).not.toContain("stack frame")
+  })
+
+  it("frames a sub-agent dispatch as a delegated agent, not a tool card", () => {
+    const cell: Cell = {
+      id: "s",
+      kind: "tool",
+      callKey: "s",
+      toolName: "task",
+      input: { subagent_type: "reviewer", prompt: "review the diff" },
+      status: "done",
+      result: "looks good",
+      collapsed: true,
+    }
+    const block = cellToTerminalBlock(cell, { width: 120, verbose: false })
+    expect(block.lines[0].plain).toContain("◆ reviewer")
+    expect(block.lines[0].plain).toContain("subagent · done")
+    expect(block.plainText).toContain("review the diff")
+    expect(block.plainText).toContain("↳ looks good")
+  })
+
+  it("tints markdown structure instead of painting a whole reply one colour", () => {
+    const block = cellToTerminalBlock(
+      { id: "a", kind: "assistant", raw: "# Title\n\nsee `code` and [docs](https://x.test)" },
+      { width: 120, verbose: false }
+    )
+    const heading = block.lines.find((line) => line.plain.includes("Title"))
+    expect(heading?.spans.every((span) => span.style === "accent")).toBe(true)
+    const body = block.lines.find((line) => line.plain.includes("code"))
+    expect(body?.spans.some((span) => span.style === "code")).toBe(true)
+    expect(body?.spans.some((span) => span.style === "accent" && span.underline)).toBe(true)
   })
 
   it("keeps streaming and extended fence fallbacks copyable and safe", () => {

@@ -10,13 +10,16 @@
  * tool (run length 1) is left as its own row — folding earns its keep only for a
  * burst.
  */
+import { bareToolName } from "../markdown/diff"
 import type { Cell, ToolCell } from "../state/types"
 
 /** Context-gathering tools whose bursts are worth folding. */
 const CONTEXT_TOOLS = new Set(["read", "cat", "view", "grep", "search", "glob", "ls", "list"])
 
 export function isContextTool(toolName: string): boolean {
-  return CONTEXT_TOOLS.has(toolName.toLowerCase())
+  // Namespace-aware: the cognia builtins arrive as `mcp__cognia-tools__read` on
+  // the ai-sdk path, and a wrapped read is exactly as noisy as a bare one.
+  return CONTEXT_TOOLS.has(bareToolName(toolName).toLowerCase())
 }
 
 export type ContextRun = { kind: "single"; cell: Cell } | { kind: "group"; tools: ToolCell[] }
