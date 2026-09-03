@@ -25,8 +25,7 @@
  */
 
 import type { Project } from "@/types"
-import { gitInit } from "@/lib/git/commands"
-import { createWorkspaceDir } from "@/lib/files/workspace-fs"
+import { createApprovedWorkspaceDir, initApprovedGitRepository } from "./host-approved-fs"
 import { trustWorkspace } from "@/lib/db/trusted-workspaces"
 import { useProjectStore } from "@/stores/project/project-store"
 import { createWorkspaceFromScratch, type CreateWorkspaceDeps } from "./create-workspace"
@@ -144,8 +143,11 @@ export function defaultEnsureDefaultWorkspaceDeps(
   return {
     listProjects: () => useProjectStore.getState().projects,
     resolveParentDir: () => resolveProjectsRoot(configuredProjectsRoot),
-    createDir: createWorkspaceDir,
-    initGit: gitInit,
+    // Approval-aware: both commands are `approval: "interactive"`, so against
+    // a paired host a bare call creates nothing and answers
+    // `interactive_approval_required`.
+    createDir: createApprovedWorkspaceDir,
+    initGit: initApprovedGitRepository,
     openAsWorkspace: openPathAsWorkspace,
     trust: (path) => trustWorkspace(path, "auto-provisioned default workspace"),
   }

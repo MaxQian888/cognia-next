@@ -29,8 +29,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { DirectoryField } from "@/components/settings/common/directory-field"
-import { createWorkspaceDir } from "@/lib/files/workspace-fs"
-import { gitInit } from "@/lib/git/commands"
+import {
+  createApprovedWorkspaceDir,
+  initApprovedGitRepository,
+} from "@/lib/workspace/host-approved-fs"
 import { useSettingsStore } from "@/stores/settings"
 import { createWorkspaceFromScratch } from "@/lib/workspace/create-workspace"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
@@ -47,8 +49,11 @@ export interface NewWorkspaceDialogProps {
 }
 
 const DEFAULT_DEPS: Parameters<typeof createWorkspaceFromScratch>[1] = {
-  createDir: createWorkspaceDir,
-  initGit: gitInit,
+  // Both steps carry the host's interactive approval. Called bare, they
+  // answered `interactive_approval_required` from every paired client, which
+  // is what made this dialog report failure and leave nothing on disk.
+  createDir: createApprovedWorkspaceDir,
+  initGit: initApprovedGitRepository,
   openAsWorkspace: openPathAsWorkspace,
 }
 

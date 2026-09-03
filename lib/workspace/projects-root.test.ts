@@ -24,10 +24,56 @@ describe("resolveProjectsRoot", () => {
     )
   })
 
-  it("is null where there is no local filesystem to resolve against", async () => {
-    // Browser / mobile: creation happens on a paired host, which resolves its
-    // own root — proposing a path from a device that has none would be a lie.
-    await expect(resolveProjectsRoot(null, { homeDir: async () => null })).resolves.toBeNull()
+  it("is null where neither this device nor the Host names a parent", async () => {
+    await expect(
+      resolveProjectsRoot(null, { homeDir: async () => null, hostWorkspaceRoots: async () => [] })
+    ).resolves.toBeNull()
+  })
+
+  it("asks the Host when this shell has no filesystem of its own", async () => {
+    // Browser / mobile companion: the directory is made on the paired Host, so
+    // the parent has to be one that Host accepts.
+    await expect(
+      resolveProjectsRoot(null, {
+        homeDir: async () => null,
+        hostWorkspaceRoots: async () => [
+          { path: "/var/lib/cognia/workspaces/", source: "headless-workspaces-dir" },
+        ],
+      })
+    ).resolves.toBe("/var/lib/cognia/workspaces")
+  })
+
+  it("prefers the Host root over a projectsRoot synced from another machine", async () => {
+    // A headless Host confines every client write to its workspaces directory,
+    // so a path that belongs to someone's desktop is refused on arrival.
+    await expect(
+      resolveProjectsRoot("/Users/someone-else/Projects", {
+        homeDir: async () => null,
+        hostWorkspaceRoots: async () => [
+          { path: "/var/lib/cognia/workspaces", source: "headless-workspaces-dir" },
+        ],
+      })
+    ).resolves.toBe("/var/lib/cognia/workspaces")
+  })
+
+  it("keeps the configured value when the Host names nothing", async () => {
+    await expect(
+      resolveProjectsRoot("/srv/code", {
+        homeDir: async () => null,
+        hostWorkspaceRoots: async () => [],
+      })
+    ).resolves.toBe("/srv/code")
+  })
+
+  it("never lets a Host lookup failure take the resolution down", async () => {
+    await expect(
+      resolveProjectsRoot(null, {
+        homeDir: async () => null,
+        hostWorkspaceRoots: async () => {
+          throw new Error("transport is down")
+        },
+      })
+    ).resolves.toBeNull()
   })
 })
 

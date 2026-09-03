@@ -15,25 +15,52 @@ import {
   joinPath,
   stripTrailingSep,
 } from "@/lib/claude/instructions/paths"
+import { listWorkspaceRoots } from "@/lib/files/workspace-fs"
+import type { WorkspaceRoot } from "@/lib/files/types"
 import { resolveHome, type ResolveHomeDeps } from "@/lib/memory/external/home"
 
 /** Home-relative default, in the spirit of `~/IdeaProjects` and friends. */
 export const DEFAULT_PROJECTS_DIR_NAME = "Projects"
 
+export interface ResolveProjectsRootDeps extends ResolveHomeDeps {
+  /**
+   * What the Host says it will let a client create workspaces in. Defaults to
+   * {@link listWorkspaceRoots}, which answers an empty list rather than
+   * throwing when the Host is too old to know the command.
+   */
+  hostWorkspaceRoots?: () => Promise<readonly WorkspaceRoot[]>
+}
+
 /**
- * The effective parent directory for new workspaces: the configured value when
- * set, else `<home>/Projects`. Null when neither resolves — a browser or mobile
- * shell with no local filesystem, where creation happens on a paired host
- * instead and that host resolves its own root.
+ * The effective parent directory for new workspaces.
+ *
+ * On a shell that has its own filesystem this is the configured value when set,
+ * else `<home>/Projects`, exactly as it always was.
+ *
+ * A browser or mobile companion has neither, and the directory is going to be
+ * made on the paired Host anyway. So the Host is asked where it accepts one.
+ * That answer is preferred over a configured `projectsRoot` here because the
+ * setting is synced from whichever machine wrote it: a headless Host confines
+ * every client write to its own workspaces directory
+ * (`SpawnPolicy::validate_workspace_root`), so a path copied from someone's
+ * desktop is refused on arrival. Returning it anyway would turn a working
+ * "New workspace" into a mkdir that always fails.
+ *
+ * Null only when nothing resolves at all, which is the honest answer: this
+ * device cannot propose a path and the Host did not name one.
  */
 export async function resolveProjectsRoot(
   configured: string | null | undefined,
-  deps: ResolveHomeDeps = {}
+  deps: ResolveProjectsRootDeps = {}
 ): Promise<string | null> {
   const explicit = configured?.trim()
-  if (explicit) return stripTrailingSep(explicit)
   const home = await resolveHome(deps)
-  return home ? joinPath(home, DEFAULT_PROJECTS_DIR_NAME) : null
+  if (home) return explicit ? stripTrailingSep(explicit) : joinPath(home, DEFAULT_PROJECTS_DIR_NAME)
+
+  const hostRoots = await (deps.hostWorkspaceRoots ?? listWorkspaceRoots)().catch(() => [])
+  const hostRoot = hostRoots.find((root) => root.path.trim())?.path.trim()
+  if (hostRoot) return stripTrailingSep(hostRoot)
+  return explicit ? stripTrailingSep(explicit) : null
 }
 
 const CONTROL_CHARS = new RegExp("[\\u0000-\\u001f\\u007f]", "g")
