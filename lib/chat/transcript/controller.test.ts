@@ -102,6 +102,26 @@ describe("TranscriptController", () => {
     expect(source.turnMessages).toHaveBeenCalledTimes(2)
   })
 
+  it("subscribes to revisions only once start() runs, and drops it on clear", () => {
+    const unsubscribe = jest.fn()
+    const subscribeRevision = jest.fn(() => unsubscribe)
+    const controller = new TranscriptController("s1", {
+      capabilities: jest.fn(async () => transcriptCapabilitiesV1()),
+      timeline: jest.fn(async () => page()),
+      turnMessages: jest.fn(),
+      subscribeRevision,
+    })
+
+    expect(subscribeRevision).not.toHaveBeenCalled()
+
+    controller.start()
+    controller.start()
+    expect(subscribeRevision).toHaveBeenCalledTimes(1)
+
+    controller.clear()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
   it("clears only the current session cache and reloads newest on a stale detail", async () => {
     const source: PublicTranscriptSource = {
       capabilities: jest.fn(async () => transcriptCapabilitiesV1()),

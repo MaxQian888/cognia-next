@@ -10,6 +10,7 @@ import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { createDiagnostic, type CogniaDiagnostic } from "@cognia/diagnostics"
 import { createSilenceWatchdog, type SilenceWatchdog } from "@/lib/chat/silence-watchdog"
 import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
+import { externalAgentIdFromProviderId } from "@/lib/ai/agent/external/session-models"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
@@ -2202,6 +2203,23 @@ export function useClaudeChat() {
                     ? { sessionId: session.importRuntimeBinding.nativeSessionId }
                     : {}),
                   workingDirectory: sendOptions.cwd,
+                  // The model the picker persisted on this conversation, replayed
+                  // onto whatever session the agent opens next. `select()` writes
+                  // it through to a session that already exists, but a catalog
+                  // pick made before the first turn has no session to write to,
+                  // and every later turn opens against an agent that was never
+                  // told. The row was being written and never read back, so the
+                  // chip showed a model the turn did not run on.
+                  //
+                  // Guarded on the marker naming THIS agent rather than on the
+                  // model being non-empty: the same column holds the provider
+                  // model for a built-in lane, and `externalAgentIdFromProviderId`
+                  // returns null for the legacy unscoped marker, which cannot be
+                  // attributed to an agent and so must not be replayed at one.
+                  ...(session?.model &&
+                  externalAgentIdFromProviderId(session.providerOverride) === extAgentId
+                    ? { model: session.model }
+                    : {}),
                   // The composer's thinking level, which before this reached only the
                   // built-in runtime — on an external agent the control was silently
                   // inert. Both fields carry the same resolved precedence chain (IM

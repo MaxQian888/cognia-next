@@ -30,7 +30,8 @@ export class TranscriptController {
   private readonly listeners = new Set<() => void>()
   private readonly detailCache: TranscriptDetailCache<SessionTurnMessagesPage>
   private nextCursor: string | undefined
-  private readonly unsubscribeRevision: (() => void) | undefined
+  private unsubscribeRevision: (() => void) | undefined
+  private started = false
   private snapshot: TranscriptControllerSnapshot = {
     mode: "unknown",
     items: [],
@@ -48,7 +49,19 @@ export class TranscriptController {
     cacheBudget?: { softBytes?: number; hardBytes?: number }
   ) {
     this.detailCache = new TranscriptDetailCache(cacheBudget)
-    this.unsubscribeRevision = source.subscribeRevision?.(sessionId, (revision) => {
+  }
+
+  /**
+   * Wire the revision subscription. Kept out of the constructor because the
+   * hook builds the controller during render: the remote source opens the
+   * companion WebSocket here, and that flips the transport's connection state,
+   * which wakes every other connectivity subscriber inside our render pass.
+   * Idempotent, so a re-run of the owning effect is free.
+   */
+  start = (): void => {
+    if (this.started) return
+    this.started = true
+    this.unsubscribeRevision = this.source.subscribeRevision?.(this.sessionId, (revision) => {
       if (this.snapshot.revision !== null && revision <= this.snapshot.revision) return
       void this.reconcile()
     })
@@ -161,6 +174,8 @@ export class TranscriptController {
 
   clear(): void {
     this.unsubscribeRevision?.()
+    this.unsubscribeRevision = undefined
+    this.started = false
     this.detailCache.clearSession(this.sessionId)
     this.listeners.clear()
   }

@@ -1387,6 +1387,81 @@ describe("useClaudeChat — actions", () => {
     )
   })
 
+  // The model picker persists its pick on the conversation row and relies on
+  // the turn replaying it (`applyModelToSession`). Nothing read the row back,
+  // so a model chosen before the first turn — the only way to pick one on an
+  // agent with no session open yet — never reached the agent at all.
+  it("replays the model this conversation persisted for its own agent", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "External",
+      model: "anthropic/claude-opus-4-1",
+      providerOverride: `cognia:external-agent:${encodeURIComponent("ext-1")}`,
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({ agentId: "ext-1", model: "anthropic/claude-opus-4-1" })
+    )
+  })
+
+  it("does not replay a model the row attributes to a different agent", async () => {
+    // The marker is scoped per agent precisely so a pick made on one agent is
+    // not asked for on another, which would be a model that agent never listed.
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "External",
+      model: "anthropic/claude-opus-4-1",
+      providerOverride: `cognia:external-agent:${encodeURIComponent("ext-2")}`,
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "hi",
+      expect.not.objectContaining({ model: expect.anything() })
+    )
+  })
+
+  it("does not replay a provider model as if the agent had offered it", async () => {
+    // An unmarked row holds the built-in lane's model. Replaying it would ask
+    // the agent for a model id no agent published, and the legacy unscoped
+    // marker cannot be attributed to an agent either.
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    chatState.activeSessionId = "sess-1"
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "External",
+      model: "claude-opus-5",
+      providerOverride: "cognia:external-agent",
+    })
+    executeOnExternalAgentMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi", undefined, { sessionId: "sess-1" })
+    })
+
+    expect(executeOnExternalAgentMock).toHaveBeenCalledWith(
+      "hi",
+      expect.not.objectContaining({ model: expect.anything() })
+    )
+  })
+
   // ADR-0127 §1: the external rail rides the per-session coalescer — a burst
   // of deltas inside one frame must not fan out into one store commit each.
   it("external-agent deltas are rAF-coalesced: a 50-delta burst yields ≤2 store commits", async () => {

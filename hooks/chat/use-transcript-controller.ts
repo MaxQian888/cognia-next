@@ -44,6 +44,9 @@ export function useTranscriptController(
 
   useEffect(() => {
     if (!controller) return
+    // `start()` opens the revision subscription — a side effect that must not
+    // run while the owning component renders (see TranscriptController.start).
+    controller.start()
     void controller.loadInitial()
     return () => controller.clear()
   }, [controller])
