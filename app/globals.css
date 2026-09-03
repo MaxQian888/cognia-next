@@ -4243,3 +4243,75 @@ html[data-reduce-motion="true"] .boot-preview__block {
 .effort-ultra-breathe {
   animation: effort-ultra-breathe 3.6s ease-in-out infinite;
 }
+
+/* ---------------------------------------------------------------------------
+   Sonner toast geometry.
+
+   Sonner does not size a toast from its content. It measures each toast once
+   in JS and then renders that number back: the expanded stack sets
+   `height: var(--initial-height)` (the toast's own measurement) and the
+   collapsed pile sets `height: var(--front-toast-height)` (the newest
+   toast's). Both are captured at mount and refreshed only when that toast's
+   own title/description text changes, never when the layout the measurement
+   was taken in changes underneath it.
+
+   In this app that layout does change under a live toast. Sonner's own 600px
+   breakpoint swaps a fixed 356px toast for `calc(100% - 2 * offset)`, and the
+   appearance appliers (style pack, typography, density, radius) rewrite the
+   variables the toast's text is laid out with after first paint. A toast
+   measured tall then stays tall for its whole life: a two-line error painted
+   as a several-hundred-pixel box with its text stranded near the top, which
+   is the failure these rules answer.
+
+   `height: auto` on the expanded stack makes the rendered height the content
+   height, so a stale measurement can no longer inflate a toast. The
+   `!important` is for order, not specificity: Sonner appends its stylesheet
+   to <head> when the Toaster mounts, which is after this file, so an
+   equal-specificity rule here would lose the tie. The max-height is the other
+   half of the same answer. It also bounds the collapsed pile, where the
+   height comes from a DIFFERENT toast's measurement and no rule here can
+   recompute it, and the content scrolls inside that bound instead of spilling
+   out of the box.
+--------------------------------------------------------------------------- */
+[data-sonner-toast] {
+  max-height: 40dvh;
+}
+[data-sonner-toast][data-mounted="true"][data-expanded="true"] {
+  height: auto !important;
+}
+
+/* A toast long enough to wrap reads as a short paragraph with an icon, not as
+   a label centred against a block of empty space. */
+[data-sonner-toast][data-styled="true"] {
+  align-items: flex-start !important;
+}
+[data-sonner-toast][data-styled="true"] [data-icon] {
+  /* Optical centring on the FIRST line: a 16px icon in a 19.5px line box. */
+  margin-top: 2px;
+}
+
+/* The bound has to be restated here: a percentage max-height resolved against
+   the toast's own `auto` height computes to `none`, so the content would grow
+   past the toast rather than scroll inside it. */
+[data-sonner-toast][data-styled="true"] [data-content] {
+  max-height: calc(40dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The toast's cross-axis alignment is now flex-start, which is right for the
+   text but not for a control: an Undo button belongs beside the message, not
+   pinned to its first line. */
+[data-sonner-toast][data-styled="true"] [data-button] {
+  align-self: center;
+}
+
+/* An id, a URL or a file path arrives as one unbreakable token. Sonner sets
+   `overflow-wrap: anywhere` on the toast, but the flex children still need
+   `min-width: 0` or the token sets their min-content width and pushes the
+   close and action buttons out of the toast. */
+[data-sonner-toast][data-styled="true"] [data-title],
+[data-sonner-toast][data-styled="true"] [data-description] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
