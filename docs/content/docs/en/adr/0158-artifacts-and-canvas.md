@@ -133,8 +133,9 @@ Renderer-profile types (`chart`, `mermaid`, `math`) rasterise from their mounted
 node via a preview registry, and say `ArtifactPreviewNotMountedError` when there
 is none rather than returning a blank image.
 
-`react` offers `raw` only: an off-screen capture of unexecuted JSX is a blank
-rectangle, and pretending otherwise would be a worse failure than refusing.
+`react` offered `raw` only for the same reason, since an off-screen capture of
+unexecuted JSX is a blank rectangle. It now offers `png` and `pdf` too, by
+asking the live frame for a snapshot of what it drew (see the amendment below).
 
 The three download paths that disagreed — the panel's, its "download as", and the
 chat card's `text/plain` blob that named a chart `chart.chart` — now all call
@@ -256,3 +257,40 @@ Still unfixed: `scripts/gates/check-network-egress.mjs` cannot see a
 `<script src="https://…">` inside a template literal — it only scans `fetch`,
 `new WebSocket` and `new EventSource`. This change removes the last such site in
 the app, but the blind spot remains.
+
+
+## Amendment (2026-09-03) — React artifacts export as PNG
+
+The Decision above gave `react` `raw` only, and the comment in
+`runtime-adapters.ts` blamed the missing offline runtime. That reason expired
+when the runtime landed in this same ADR, and the real blocker was never
+stated: a React artifact's frame is `sandbox="allow-scripts"` with no
+`allow-same-origin`, so the parent cannot read into it, and re-rendering the
+SOURCE off-screen captures unexecuted JSX.
+
+Rasterising inside the frame is not the answer either, and this is worth
+recording because it is the obvious thing to try. html2canvas clones the
+document into a child iframe and reads it back, but an opaque-origin document
+cannot read even its own `about:blank` child. Measured in a browser against a
+frame built exactly like the preview: `contentDocument` comes back `null`.
+Canvas and `toDataURL` do work in there, but nothing can get the DOM into a
+canvas in the first place.
+
+So the frame serialises rather than rasterises. A new `capture-snapshot`
+message asks it for a static HTML document of what it drew, and the parent
+renders that in the same-origin capture frame it already uses for `html`
+artifacts. The snapshot's scripts are stripped by the existing sanitizer, which
+is correct here: the snapshot is post-execution DOM, so they have already run.
+
+Consequences worth knowing:
+
+- **`png`/`pdf` for `react` need a MOUNTED preview**, unlike every other type.
+  The exporter raises `ArtifactPreviewNotMountedError` when there is none,
+  rather than emitting a blank image.
+- **A frame that failed to render refuses to be captured.** It would otherwise
+  serialise its empty body and produce a blank PNG with no explanation.
+- **The runtime build sentinel now hashes the shell's source.** It previously
+  watched only the react/babel versions and the OUTPUT hashes, so editing
+  `artifact-shell-entry.ts` left the committed bundle stale while the build
+  reported "already fresh". The capture handler was written, tested and
+  silently not shipped until that was fixed.

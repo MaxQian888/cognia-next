@@ -36,6 +36,12 @@ import { useThemeCssVars } from "@/lib/appearance/use-theme-css-vars"
 import { loggers } from "@cognia/logging"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { registerArtifactPreviewNode } from "@/lib/artifacts/preview-registry"
+import {
+  ArtifactFrameCaptureError,
+  ArtifactFrameCaptureTimeoutError,
+  registerArtifactFrameCapturer,
+  type ArtifactFrameSnapshot,
+} from "@/lib/artifacts/frame-capture-registry"
 import type { ArtifactRuntimeHealth } from "@/types/artifact/artifact"
 import type { Artifact, PreviewErrorBoundaryProps, PreviewErrorBoundaryState } from "@/types"
 import {
@@ -139,12 +145,16 @@ function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
 export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const t = useTranslations("artifactPreview")
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  // Mirrors `error` for the capturer, which is a long-lived closure and would
+  // otherwise read a stale value from the render it was created in.
+  const errorRef = useRef<string | null>(null)
   // `chart` / `mermaid` / `math` draw as live React in this tree, so the only
   // way to rasterise them is to hand html2canvas the mounted node. Registering
   // it here is what makes "export as PNG" possible for those types at all —
   // there is no serialisable source to re-render off-screen the way html and
-  // svg can be. Iframe transports do not register: the exporter re-renders
-  // their source instead (`lib/artifacts/export/raster.ts`).
+  // svg can be. Iframe transports register a CAPTURER instead, below: their
+  // frame is opaque-origin, so it has to be asked for a snapshot rather than
+  // read (`lib/artifacts/frame-capture-registry.ts`).
   const registerRendererNode = useCallback(
     (node: HTMLDivElement | null) => {
       if (!node) return undefined
@@ -196,6 +206,64 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
           ? "svg"
           : "text"
   const needsRuntime = frameMode === "react" || frameMode === "interactive"
+
+  // Answering an export request. A scripted frame is opaque-origin, so the
+  // exporter cannot read it and the frame cannot rasterise itself either (see
+  // `frame-capture-registry.ts`). It asks, the frame serialises, we resolve.
+  const pendingCaptures = useRef(
+    new Map<
+      string,
+      { resolve: (snapshot: ArtifactFrameSnapshot) => void; reject: (error: Error) => void }
+    >()
+  )
+  const captureSeq = useRef(0)
+
+  useEffect(() => {
+    if (!needsIframe) return undefined
+    const pending = pendingCaptures.current
+    const dispose = registerArtifactFrameCapturer(artifact.id, (timeoutMs) => {
+      const target = iframeRef.current?.contentWindow
+      if (!target) {
+        return Promise.reject(new ArtifactFrameCaptureError("preview frame is not mounted"))
+      }
+      // A frame that failed to render would happily serialise its empty body,
+      // and the export would be a blank PNG with no explanation. Refuse
+      // instead: the export is "what you see", and there is nothing to see.
+      if (errorRef.current) {
+        return Promise.reject(new ArtifactFrameCaptureError(errorRef.current))
+      }
+      captureSeq.current += 1
+      const requestId = `capture-${captureSeq.current}`
+      return new Promise<ArtifactFrameSnapshot>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(requestId)
+          reject(new ArtifactFrameCaptureTimeoutError(artifact.id, timeoutMs))
+        }, timeoutMs)
+        pending.set(requestId, {
+          resolve: (snapshot) => {
+            clearTimeout(timer)
+            pending.delete(requestId)
+            resolve(snapshot)
+          },
+          reject: (error) => {
+            clearTimeout(timer)
+            pending.delete(requestId)
+            reject(error)
+          },
+        })
+        target.postMessage({ type: "capture-snapshot", requestId }, "*")
+      })
+    })
+    return () => {
+      dispose()
+      // Unmounting mid-export must not leave a caller hanging until its timeout.
+      for (const [id, entry] of pending) {
+        pending.delete(id)
+        entry.reject(new ArtifactFrameCaptureError("preview closed before the capture finished"))
+      }
+    }
+  }, [artifact.id, needsIframe])
+
   const [frameRuntime, setFrameRuntime] = useState<ArtifactFrameRuntime | null>(null)
 
   const runtimeHealth: ArtifactRuntimeHealth = error
@@ -210,6 +278,12 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   useEffect(() => {
     diagramThemeVariablesRef.current = diagramThemeVariables
   }, [diagramThemeVariables])
+
+  // The capturer is a long-lived closure, so it reads the failure through a ref
+  // rather than the `error` of the render that created it.
+  useEffect(() => {
+    errorRef.current = error
+  }, [error])
 
   // `useTranslations()` hands back a fresh function on every render. Anything
   // that reads it from an effect dependency list therefore re-runs on every
@@ -536,6 +610,20 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
         )
         syncParentContext()
         void pushScriptedContent()
+        return
+      }
+      if (event.data?.type === "artifact-capture-result") {
+        const entry = pendingCaptures.current.get(event.data.requestId)
+        entry?.resolve({
+          html: String(event.data.html ?? ""),
+          width: Number(event.data.width) || 0,
+          height: Number(event.data.height) || 0,
+        })
+        return
+      }
+      if (event.data?.type === "artifact-capture-error") {
+        const entry = pendingCaptures.current.get(event.data.requestId)
+        entry?.reject(new ArtifactFrameCaptureError(String(event.data.message ?? "capture failed")))
         return
       }
       if (event.data?.type === "artifact-preview-ready") {

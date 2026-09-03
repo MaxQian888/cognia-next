@@ -14,11 +14,16 @@
  * - **svg**: parsed straight into an `<img>` and drawn to a canvas. No DOM
  *   walk needed, and it is the only path that survives an artifact whose
  *   preview is not on screen.
- * - **html / react**: re-rendered into an off-screen, *same-origin* iframe.
+ * - **html**: re-rendered into an off-screen, *same-origin* iframe.
  *   html2canvas walks the DOM, and it cannot walk into the sandboxed preview
  *   frame (`components/artifacts/artifact-preview.tsx` gives that one
  *   `sandbox="allow-scripts"` with no `allow-same-origin`). This indirection is
  *   the same recipe `lib/export/html/chat-png.ts` uses.
+ * - **react**: the same off-screen iframe, but re-rendering the SOURCE would
+ *   capture unexecuted JSX, so the live preview is asked for a snapshot of
+ *   what it actually drew first (`lib/artifacts/frame-capture-registry.ts`).
+ *   Rasterising inside that frame is impossible: html2canvas clones into a
+ *   child iframe, and an opaque-origin document cannot read its own child.
  * - **renderer types** (chart / mermaid / math): captured from the mounted
  *   node via `lib/artifacts/preview-registry.ts`. Recharts and Mermaid draw
  *   live React/SVG; there is no serialisable source to re-render off-screen.
@@ -27,6 +32,7 @@
 import html2canvas from "html2canvas-pro"
 import { sanitizeHTML } from "@/lib/artifacts/preview-utils"
 import { getArtifactPreviewNode } from "@/lib/artifacts/preview-registry"
+import { captureArtifactFrame } from "@/lib/artifacts/frame-capture-registry"
 import { getArtifactRuntimeAdapter } from "@/components/artifacts/runtime-adapters"
 import type { Artifact } from "@/types"
 
@@ -177,6 +183,16 @@ export async function renderArtifactToPngBlob(
   const adapter = getArtifactRuntimeAdapter(artifact.type)
 
   if (artifact.type === "svg") return rasteriseSvg(artifact.content)
+  if (artifact.type === "react") {
+    // A React artifact's source is JSX that has not run. The only thing worth
+    // capturing is what the live preview drew, so ask it.
+    const snapshot = await captureArtifactFrame(artifact.id)
+    if (!snapshot) throw new ArtifactPreviewNotMountedError(artifact.id)
+    if (snapshot.height > MAX_PNG_HEIGHT_PX) {
+      throw new ArtifactTooLargeToRasteriseError(snapshot.height)
+    }
+    return rasteriseHtml(snapshot.html, background ?? "#ffffff")
+  }
   if (adapter.transport === "iframe") {
     return rasteriseHtml(artifact.content, background ?? "#ffffff")
   }

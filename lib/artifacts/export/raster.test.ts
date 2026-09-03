@@ -16,6 +16,10 @@ import {
   clearArtifactPreviewNodes,
   registerArtifactPreviewNode,
 } from "@/lib/artifacts/preview-registry"
+import {
+  registerArtifactFrameCapturer,
+  __resetArtifactFrameCapturersForTests,
+} from "@/lib/artifacts/frame-capture-registry"
 
 function fakeCanvas(blob: Blob | null = new Blob(["png"], { type: "image/png" })) {
   return {
@@ -26,6 +30,7 @@ function fakeCanvas(blob: Blob | null = new Blob(["png"], { type: "image/png" })
 beforeEach(() => {
   html2canvasMock.mockReset().mockResolvedValue(fakeCanvas())
   clearArtifactPreviewNodes()
+  __resetArtifactFrameCapturersForTests()
   document.body.innerHTML = ""
 })
 
@@ -131,5 +136,50 @@ describe("renderArtifactToPngBlob — unsupported transports", () => {
     await expect(
       renderArtifactToPngBlob({ id: "a3", type: "jupyter", content: "{}" })
     ).rejects.toBeInstanceOf(ArtifactNotRasterisableError)
+  })
+})
+
+describe("renderArtifactToPngBlob — react", () => {
+  const snapshot = (html: string, height = 400) => ({ html, width: 900, height })
+
+  it("captures what the live frame drew, not the unexecuted source", async () => {
+    // The artifact's own content is JSX that has not run, so re-rendering it
+    // off-screen would produce a blank image. The snapshot is the whole point.
+    registerArtifactFrameCapturer("r1", async () =>
+      snapshot("<!DOCTYPE html><html><body><h1>drawn</h1></body></html>")
+    )
+    const promise = renderArtifactToPngBlob({
+      id: "r1",
+      type: "react",
+      content: "export default function App(){ return <h1>drawn</h1> }",
+    })
+    const frame = await new Promise<HTMLIFrameElement>((resolve) => {
+      const poll = setInterval(() => {
+        const found = document.querySelector("iframe") as HTMLIFrameElement | null
+        if (found) {
+          clearInterval(poll)
+          resolve(found)
+        }
+      }, 0)
+    })
+    expect(frame.srcdoc).toContain("drawn")
+    expect(frame.srcdoc).not.toContain("export default")
+    frame.dispatchEvent(new Event("load"))
+    expect((await promise).type).toBe("image/png")
+  })
+
+  it("says the preview must be open rather than exporting a blank image", async () => {
+    await expect(
+      renderArtifactToPngBlob({ id: "r1", type: "react", content: "x" })
+    ).rejects.toBeInstanceOf(ArtifactPreviewNotMountedError)
+  })
+
+  it("refuses a snapshot taller than a canvas can hold", async () => {
+    registerArtifactFrameCapturer("r1", async () =>
+      snapshot("<html></html>", MAX_PNG_HEIGHT_PX + 1)
+    )
+    await expect(
+      renderArtifactToPngBlob({ id: "r1", type: "react", content: "x" })
+    ).rejects.toBeInstanceOf(ArtifactTooLargeToRasteriseError)
   })
 })

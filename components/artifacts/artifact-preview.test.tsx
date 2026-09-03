@@ -4,6 +4,13 @@
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
+import {
+  ArtifactFrameCaptureError,
+  captureArtifactFrame,
+  hasArtifactFrameCapturer,
+  __resetArtifactFrameCapturersForTests,
+} from "@/lib/artifacts/frame-capture-registry"
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
@@ -86,6 +93,7 @@ const dummy = (overrides: Partial<Artifact> = {}): Artifact => ({
 beforeEach(() => {
   transformArtifactJsx.mockClear()
   loadArtifactReactRuntime.mockClear()
+  __resetArtifactFrameCapturersForTests()
   delete mockSettings.artifacts
 })
 
@@ -207,6 +215,70 @@ describe("ArtifactPreview", () => {
     await waitFor(() => expect(transformArtifactJsx).toHaveBeenCalledTimes(2))
     expect(container.querySelector("iframe")).toBe(iframe)
     expect(iframe.srcdoc).toBe(srcdocBefore)
+  })
+
+  describe("export capture", () => {
+    it("asks the live frame for a snapshot and resolves with it", async () => {
+      // The exporter cannot read this frame (opaque origin) and the frame
+      // cannot rasterise itself, so PNG export is a conversation.
+      const { container } = render(
+        <ArtifactPreview artifact={dummy({ id: "r1", type: "react", content: "x" })} />
+      )
+      await waitFor(() => expect(hasArtifactFrameCapturer("r1")).toBe(true))
+      const iframe = container.querySelector("iframe") as HTMLIFrameElement
+      const post = jest.fn()
+      Object.defineProperty(iframe, "contentWindow", {
+        configurable: true,
+        value: { postMessage: post },
+      })
+
+      const pending = captureArtifactFrame("r1")
+      await waitFor(() => expect(post).toHaveBeenCalled())
+      const requestId = post.mock.calls[0][0].requestId
+      expect(post.mock.calls[0][0].type).toBe("capture-snapshot")
+
+      act(() => {
+        const event = new MessageEvent("message", {
+          data: {
+            type: "artifact-capture-result",
+            requestId,
+            html: "<!DOCTYPE html><html><body>drawn</body></html>",
+            width: 900,
+            height: 400,
+          },
+        })
+        // `source` is getter-only, and the component filters on it.
+        Object.defineProperty(event, "source", { value: iframe.contentWindow })
+        fireEvent(window, event)
+      })
+      await expect(pending).resolves.toEqual({
+        html: "<!DOCTYPE html><html><body>drawn</body></html>",
+        width: 900,
+        height: 400,
+      })
+    })
+
+    it("refuses rather than exporting a blank image when the frame failed", async () => {
+      // A frame that never rendered would happily serialise its empty body.
+      loadArtifactReactRuntime.mockRejectedValueOnce(new Error("gone"))
+      render(<ArtifactPreview artifact={dummy({ id: "r2", type: "react", content: "x" })} />)
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+      await expect(captureArtifactFrame("r2")).rejects.toBeInstanceOf(ArtifactFrameCaptureError)
+    })
+
+    it("stops answering once the preview unmounts", async () => {
+      const { unmount } = render(
+        <ArtifactPreview artifact={dummy({ id: "r3", type: "react", content: "x" })} />
+      )
+      await waitFor(() => expect(hasArtifactFrameCapturer("r3")).toBe(true))
+      unmount()
+      expect(await captureArtifactFrame("r3")).toBeNull()
+    })
+
+    it("never registers for a renderer type, which is read from the DOM instead", () => {
+      render(<ArtifactPreview artifact={dummy({ id: "c1", type: "chart", content: "[]" })} />)
+      expect(hasArtifactFrameCapturer("c1")).toBe(false)
+    })
   })
 
   it("surfaces a specific failure when the local runtime is missing", async () => {

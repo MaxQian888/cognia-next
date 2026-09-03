@@ -2,7 +2,7 @@
   "schema": 1,
   "reactVersion": "19.2.8",
   "babelVersion": "8.0.4",
-  "shellEntrySha": "baa731a826ff303f6adc9fba36f8869f52771c519bbc496b1e96cd9e60e9ec8d",
+  "shellEntrySha": "646c14daa950d08a44a1f0c9165bdaef12166241bda0bcfb48e2f8397eca3797",
   "files": {
     "react-runtime.js": {
       "bytes": 192680,

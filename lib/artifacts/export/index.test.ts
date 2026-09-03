@@ -89,9 +89,10 @@ describe("renderArtifactExport", () => {
   })
 
   it("refuses a format the artifact's adapter does not offer", async () => {
-    // `react` deliberately offers `raw` only: its off-screen capture would be
-    // blank, so offering png would produce an empty file, not an error.
-    await expect(renderArtifactExport(artifact({ type: "react" }), "png")).rejects.toBeInstanceOf(
+    // `jupyter` has no raster path at all, so png is genuinely unavailable
+    // there. (`react` used to sit here, and now offers png by capturing its
+    // live frame instead of re-rendering unexecuted JSX.)
+    await expect(renderArtifactExport(artifact({ type: "jupyter" }), "png")).rejects.toBeInstanceOf(
       UnsupportedArtifactExportError
     )
     expect(renderPngMock).not.toHaveBeenCalled()

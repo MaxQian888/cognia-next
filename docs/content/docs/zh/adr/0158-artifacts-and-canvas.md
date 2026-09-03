@@ -114,7 +114,9 @@ manifest 与 ADR-0139 的路由提示由**同一个**判定式把门（已提取
 （`chart`、`mermaid`、`math`）从其挂载节点栅格化，取不到时抛
 `ArtifactPreviewNotMountedError`，而不是返回一张空白图。
 
-`react` 只提供 `raw`：对未执行的 JSX 做离屏截图就是一个空白矩形，假装可以是比
+`react` 曾经也只提供 `raw`，理由相同：对未执行的 JSX 做离屏截图就是一个空白矩形。
+现在它也提供 `png` 与 `pdf`，办法是向仍在运行的帧索取一份「它画出了什么」的快照
+（见下方修订）。原文保留于此：假装可以是比
 拒绝更糟的失败。
 
 三条互相矛盾的下载路径——面板的、面板的「导出为」、以及聊天卡片那个把 chart 存成
@@ -220,3 +222,34 @@ MCP Apps 沙箱、插件 webview、VS Code 扩展面板、`plan-html-view`、分
 仍未修复：`scripts/gates/check-network-egress.mjs` 看不见模板字符串里的
 `<script src="https://…">`——它只扫 `fetch`、`new WebSocket` 与 `new EventSource`。
 本次改动移除了应用里最后一处，但盲区本身还在。
+
+
+## 修订（2026-09-03）：React artifact 支持导出 PNG
+
+上面的「决定」只给了 `react` 一个 `raw`，而 `runtime-adapters.ts` 里的注释把原因
+归给「离线 runtime 还没落地」。那个理由在本 ADR 自己让 runtime 落地时就过期了，而
+真正的阻塞从未被写下来：React artifact 的帧是 `sandbox="allow-scripts"` 且没有
+`allow-same-origin`，父窗口读不进去；而对**源码**做离屏重渲染，截到的是没有执行过
+的 JSX。
+
+在帧内栅格化同样不成立，这一点值得记下来，因为它正是最容易想到的做法。html2canvas
+会把文档克隆进一个子 iframe 再读回来，而一个不透明源（opaque origin）的文档，连自
+己的 `about:blank` 子帧都读不了。用与预览完全相同的方式构造帧、在浏览器里实测：
+`contentDocument` 返回 `null`。canvas 与 `toDataURL` 在里面是可用的，但根本没有办法
+先把 DOM 弄进 canvas。
+
+所以帧改为**序列化**而不是栅格化。新增的 `capture-snapshot` 消息向它索取一份「它画
+出了什么」的静态 HTML 文档，父窗口再把这份快照放进它本来就用于 `html` artifact 的
+同源截图帧里渲染。快照里的脚本由既有的净化器剥掉，这在此处是正确的：快照是执行**之
+后**的 DOM，脚本已经跑完了。
+
+需要知道的后果：
+
+- **`react` 的 `png`/`pdf` 需要预览处于挂载状态**，这一点和其他所有类型都不同。取不
+  到时导出器抛 `ArtifactPreviewNotMountedError`，而不是给出一张空白图。
+- **渲染失败的帧会拒绝被截取**，否则它会老老实实序列化一个空 body，导出一张没有任何
+  解释的空白 PNG。
+- **runtime 构建的新鲜度哨兵现在会把 shell 的源码一并哈希。** 它此前只看 react/babel
+  版本和**产物**哈希，于是改动 `artifact-shell-entry.ts` 会让已提交的 bundle 变陈旧，
+  而构建还报告「already fresh」。本次的截取处理器正是写好、测好、却被静默地没有发
+  布，直到这个哨兵被修好。

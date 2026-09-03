@@ -66,9 +66,12 @@ describe("declared export formats all have a renderer", () => {
     expect(ARTIFACT_RUNTIME_ADAPTERS.jupyter.exportFormats).not.toContain("png")
   })
 
-  it("does not claim png for react, whose off-screen capture would be blank", () => {
-    // The raster path re-renders the SOURCE; unexecuted JSX draws nothing.
-    expect(ARTIFACT_RUNTIME_ADAPTERS.react.exportFormats).not.toContain("png")
+  it("offers png for react, which captures the live frame rather than the source", () => {
+    // Re-rendering the SOURCE off-screen would draw nothing, because unexecuted
+    // JSX is not markup. The exporter asks the mounted preview for a snapshot
+    // of what it drew, so this format is real but needs a preview on screen.
+    expect(ARTIFACT_RUNTIME_ADAPTERS.react.exportFormats).toContain("png")
+    expect(ARTIFACT_RUNTIME_ADAPTERS.react.exportFormats).toContain("pdf")
   })
 
   it("offers png for every visual renderer type", () => {

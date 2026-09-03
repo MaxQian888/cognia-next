@@ -354,8 +354,10 @@ interface ArtifactStoreState {
 - **运行时健康徽章** —— iframe 加载中 / 出错 / 就绪三态显示在右上角，方便调试。
 - **复制 / 下载 / 导出为** —— 由 `runtime-adapters.ts:exportFormats` 驱动。`raw`
   永远提供；`html`/`svg` 另加自身的源码形式；`png` 与 `pdf` 自 ADR-0158 起是真的
-  （`lib/artifacts/export/`）。`react` 只提供 `raw`——对未执行的 JSX 做离屏截图就是
-  一个空白矩形。栅格化 `chart`/`mermaid`/`math` 需要其预览已挂载，取不到时抛
+  （`lib/artifacts/export/`）。`react` 三种都提供，但它的 `png`/`pdf` 需要预览**已挂
+  载**：对未执行的 JSX 做离屏截图就是一个空白矩形，所以导出器改为向仍在运行的帧
+  索取其已渲染 DOM 的快照（`lib/artifacts/frame-capture-registry.ts`）。栅格化
+  `chart`/`mermaid`/`math` 同样需要其预览已挂载，取不到时抛
   `ArtifactPreviewNotMountedError`，而不是返回空图。所有下载都走 `exportArtifact`，
   取代了此前三条互相矛盾的路径（其中一条把 chart 存成 `chart.chart`）。
 - **Plugin 扩展槽** —— `PluginExtensionSlot` 让插件追加自定义操作按钮。
