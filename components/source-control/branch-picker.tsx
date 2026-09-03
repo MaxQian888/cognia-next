@@ -76,6 +76,12 @@ interface BranchPickerProps {
   > &
     Partial<Pick<UseGitActionsResult, "can">>
   onPicked?: () => void
+  /**
+   * Applied to the outer column. `w-72` is the popover's width, which four
+   * mounts want and the navigator does not: inside a resizable column it would
+   * pin that column open at 288px.
+   */
+  className?: string
 }
 
 /** A branch whose row has already been decided. */
@@ -86,7 +92,7 @@ interface BranchRow {
   isAgent: boolean
 }
 
-export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps) {
+export function BranchPicker({ branches, actions, onPicked, className }: BranchPickerProps) {
   const t = useTranslations("sourceControl")
   const { prefs } = useSourceControlPrefs()
   const rootDir = useGitStore((s) => s.rootDir)
@@ -187,7 +193,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
   }
 
   return (
-    <div className="flex w-72 flex-col" data-testid="branch-picker">
+    <div className={cn("flex w-72 flex-col", className)} data-testid="branch-picker">
       <Command>
         <CommandInput placeholder={t("branches.search")} />
         <CommandList>

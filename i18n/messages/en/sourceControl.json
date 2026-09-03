@@ -54,7 +54,8 @@
     "renameTo": "Rename current branch to…",
     "search": "Search branches…",
     "stackParent": "on {name}",
-    "switch": "Switch Branch"
+    "switch": "Switch Branch",
+    "title": "Branches"
   },
   "clone": {
     "authHelp": "Sign in with your Git credential manager or SSH agent, then retry.",
@@ -432,6 +433,11 @@
       "list": "List"
     },
     "timelineView": "Timeline view"
+  },
+  "views": {
+    "browse": "Browse",
+    "changes": "Changes",
+    "label": "View"
   },
   "worktrees": {
     "baseRefLabel": "Start point (optional)",

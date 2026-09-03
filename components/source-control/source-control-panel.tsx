@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/empty"
 import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
 import { useElementWidth } from "@/hooks/use-element-width"
+import { cn } from "@/lib/utils"
 import { Spinner } from "@/components/ui/spinner"
 import { gitInit, runGitUserAction } from "@/lib/git/commands"
 import { parseGitTarget } from "@/lib/git/target"
@@ -57,6 +58,7 @@ import { RestoreDialog } from "./restore-dialog"
 import { PanelRootChip } from "@/components/workspace/panel-root-chip"
 import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
 import { RootSwitcher } from "./root-switcher"
+import { RepositoryNavigator } from "./repository-navigator"
 import { StackPanel } from "./stack-panel"
 import { StashPanel } from "./stash-panel"
 import { SyncToolbar } from "./sync-toolbar"
@@ -83,6 +85,11 @@ import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
  * which has a different answer wherever the panel is not the whole window.
  */
 export const SOURCE_CONTROL_DENSE_WIDTH = 960
+
+/** Which body the panel is showing. */
+export type SourceControlView = "changes" | "browse"
+
+export const SOURCE_CONTROL_VIEWS: readonly SourceControlView[] = ["changes", "browse"]
 
 export function SourceControlPanel() {
   const t = useTranslations("sourceControl")
@@ -145,6 +152,11 @@ export function SourceControlPanel() {
   // split it had no room for at a 1000px window. `useElementWidth` measures in
   // a layout effect before paint, so the first frame already has the right
   // layout. `0` means "not measured yet", so it must not read as narrow.
+  // Which body: the change list and its diff, or the repository navigator.
+  // Local state rather than a route param, because the two views share every
+  // read and a URL that named one would have to be kept in step with the
+  // panel's four other mounts.
+  const [view, setView] = useState<SourceControlView>("changes")
   const panelRef = useRef<HTMLDivElement>(null)
   const paneWidth = useElementWidth(panelRef)
   const isNarrow = paneWidth > 0 && paneWidth < SOURCE_CONTROL_DENSE_WIDTH
@@ -306,6 +318,38 @@ export function SourceControlPanel() {
             />
           </div>
         }
+        navigationPlacement="inline"
+        navigation={
+          // The inline slot, which is `min-w-0 shrink overflow-x-auto`, so a
+          // two-tab set can never push the actions past the header's edge.
+          <div
+            role="tablist"
+            aria-label={t("views.label")}
+            className="flex items-center gap-0.5"
+            data-testid="sc-view-switcher"
+          >
+            {SOURCE_CONTROL_VIEWS.map((candidate) => (
+              <Button
+                key={candidate}
+                type="button"
+                role="tab"
+                aria-selected={view === candidate}
+                variant="ghost"
+                size="sm"
+                onClick={() => setView(candidate)}
+                className={cn("h-7 gap-1.5 px-2 text-xs", view === candidate && "bg-accent")}
+                data-testid={`sc-view-${candidate}`}
+              >
+                {candidate === "changes" ? (
+                  <FileSearchIcon aria-hidden className="size-3.5" />
+                ) : (
+                  <GitBranchIcon aria-hidden className="size-3.5" />
+                )}
+                <span className="hidden @xl/feature-header:inline">{t(`views.${candidate}`)}</span>
+              </Button>
+            ))}
+          </div>
+        }
         actions={
           <div className="flex min-w-0 items-center gap-0.5">
             <BranchHeader
@@ -439,6 +483,13 @@ export function SourceControlPanel() {
             </Button>
           </EmptyContent>
         </Empty>
+      ) : view === "browse" ? (
+        <RepositoryNavigator
+          rootDir={rootDir}
+          branches={branches}
+          actions={actions}
+          canMutate={actions.can}
+        />
       ) : (
         <ResizablePanelGroup
           orientation={isNarrow ? "vertical" : "horizontal"}

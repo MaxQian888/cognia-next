@@ -537,6 +537,32 @@ describe("SourceControlPanel", () => {
     expect(screen.getByTestId("source-control-panel")).toHaveAttribute("data-dense", "true")
   })
 
+  /**
+   * Worktrees and stacks used to be two clicks deep in an overflow menu, each
+   * opening a Sheet over the diff, while fetch and pull had top-level buttons.
+   * The navigator is the correction, and it has to be reachable from the
+   * header rather than being another thing behind a menu.
+   */
+  it("switches between the changes body and the repository navigator", () => {
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("resizable-group")).toBeInTheDocument()
+    expect(screen.queryByTestId("repository-navigator")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("sc-view-browse"))
+
+    expect(screen.getByTestId("repository-navigator")).toBeInTheDocument()
+    expect(screen.queryByTestId("resizable-group")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("sc-view-changes"))
+    expect(screen.getByTestId("resizable-group")).toBeInTheDocument()
+  })
+
+  it("marks the open view on the switcher", () => {
+    render(<SourceControlPanel />)
+    expect(screen.getByTestId("sc-view-changes")).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByTestId("sc-view-browse")).toHaveAttribute("aria-selected", "false")
+  })
+
   it("shows the sequencer banner when an operation is in progress", () => {
     act(() =>
       useGitStore.getState().setRepoState({

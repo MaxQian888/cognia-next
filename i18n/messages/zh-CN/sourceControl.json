@@ -54,7 +54,8 @@
     "renameTo": "将当前分支重命名为…",
     "search": "搜索分支…",
     "stackParent": "基于 {name}",
-    "switch": "切换分支"
+    "switch": "切换分支",
+    "title": "分支"
   },
   "clone": {
     "authHelp": "请先通过 Git 凭据管理器或 SSH Agent 登录，然后重试。",
@@ -432,6 +433,11 @@
       "list": "列表"
     },
     "timelineView": "时间线视图"
+  },
+  "views": {
+    "browse": "浏览",
+    "changes": "改动",
+    "label": "视图"
   },
   "worktrees": {
     "baseRefLabel": "起始点（可选）",
