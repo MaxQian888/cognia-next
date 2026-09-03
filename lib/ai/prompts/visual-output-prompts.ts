@@ -13,7 +13,19 @@
  * only read when the model thinks to load one, and "which surface should this
  * be?" is a question it has to answer *before* it knows a skill exists. The
  * per-channel contracts stay in the skills, where they belong and where they
- * cost nothing until needed; only the routing is resident.
+ * cost nothing until needed, and only the routing is resident.
+ *
+ * A fact earns a place here, rather than in a skill, when either it applies on
+ * a channel that gets no skill at all, or breaking it fails silently and the
+ * model could not have recovered the rule from a tool's JSON schema.
+ *
+ * That is why two Mermaid rules sit in the table below. `diagram-design` is
+ * gated on `artifact-authoring`, so it is never delivered to an IM thread, and
+ * an IM thread is the one channel where Mermaid is the only surface left. An
+ * unquoted label renders an error card, and a pinned palette is unreadable in
+ * the other theme, and neither is guessable. By the same rule the canvas
+ * `language` and `type` enums are NOT here: the tool schema already carries
+ * them. What no schema says is "read it before you rewrite it".
  *
  * Deliberately short. This is appended to every send, so it earns its budget by
  * being a decision table and nothing else.
@@ -43,8 +55,10 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
     "",
     "- **Structural** — architecture, a flow, a sequence, a state machine, a data",
     "  model, a timeline: a fenced `mermaid` block inline in the reply. It renders",
-    "  in place and needs no dock. For a presentation-quality figure instead, load",
-    "  the `diagram-design` skill.",
+    "  in place and needs no dock. Quote any label containing punctuation",
+    '  (`A["Auth (v2)"]`), and set no colours and no `%%{init}%%` — Cognia',
+    "  re-themes the diagram on a light/dark flip. For a presentation-quality",
+    "  figure instead, load the `diagram-design` skill.",
   ]
 
   if (channels.artifacts === "tools") {
@@ -54,7 +68,8 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
       "  hoverable, versioned and exportable as PNG or PDF. Load the `chart-design`",
       "  skill for the data contract before the first one.",
       "- **Something the reader will keep editing** — a document, a spec, a draft they",
-      "  will iterate on with you: `canvas_create`. Revise with `canvas_update`.",
+      "  will iterate on with you: `canvas_create`. `canvas_update` rewrites the whole",
+      "  buffer, so `canvas_read` first and send the document back complete.",
       "- Use `artifact_update` to revise an artifact rather than re-emitting it, so the",
       "  reader keeps its history and reviews your change as a diff.",
       "- Never hand-draw a chart as SVG while the dock is available. A drawing is a",
@@ -63,9 +78,11 @@ export function buildVisualOutputSection(channels: VisualOutputChannels): string
   } else if (channels.artifacts === "fenced") {
     lines.push(
       "- **Quantitative**: emit one supported fenced chart payload for Cognia's",
-      "  detector to lift into the dock. Use `{name,value}` for pie/doughnut and",
-      "  `{x,y}` for scatter. Do not name unavailable artifact tools, and never expose raw",
-      "  JSON or HTML outside the fenced payload.",
+      '  detector to lift into the dock: a `json` fence holding `{"type":"bar",',
+      '  "data":[…]}`. Name the `type` or the dock draws a line chart whatever the',
+      "  rows say. Rows are `{name,value}`, or `{x,y}` for scatter. Do not name",
+      "  unavailable artifact tools, and never expose raw JSON or HTML outside the",
+      "  fenced payload.",
       "- **Editable documents**: answer inline; direct canvas authoring is unavailable."
     )
   } else {
