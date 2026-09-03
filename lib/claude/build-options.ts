@@ -4188,6 +4188,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         available: projectedPluginTool(["inspect_plugin_conversion", "apply_plugin_conversion"]),
         reason: "The confined plugin conversion inspect/apply tools are unavailable",
       },
+      scheduler: {
+        // Projected from the tools this turn will actually be handed, not from
+        // "does a scheduler exist". The family reaches a non-IM session only
+        // when the character has `enableBuiltInSkills` on, and an IM one only
+        // when the channel permits it, so a prompt telling the model to call
+        // `scheduler_list_tasks` when it has no such tool is worse than no
+        // prompt at all.
+        available: projectedPluginTool([
+          "scheduler_list_tasks",
+          "scheduler_create_task",
+          "mcp__cognia__schedule_task",
+        ]),
+        reason: "No scheduler tools are available on this turn",
+      },
       screenCapture: {
         available: projectedPluginTool(["take_screenshot", "extract_screenshot_ocr"]),
         reason: "No permitted screen-capture route is available",

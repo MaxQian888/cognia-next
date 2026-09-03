@@ -50,3 +50,6 @@ import "./im"
 import "./plugin-conversion"
 // Issue tracker (ADR-0132 slice ③): file issues from chat, resolve projects.
 import "./issues"
+// Scheduler: read, author and amend the user's own schedule. Gated on the
+// user's SchedulerPermissionPolicy as well as the dispatcher's HITL card.
+import "./scheduler"

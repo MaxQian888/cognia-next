@@ -25,6 +25,7 @@ describe("built-in skills catalog", () => {
       "ocr-extraction",
       "plugin-authoring",
       "plugin-conversion",
+      "scheduling",
       "web-research",
       "workflow-authoring",
     ])
@@ -82,6 +83,10 @@ describe("built-in skills catalog", () => {
       "ocr-extraction": "catalog",
       "plugin-authoring": "explicit",
       "plugin-conversion": "explicit",
+      // `catalog`, not `inject`: there is no scheduler SURFACE in a chat, and
+      // the capability gate (`scheduler` → does this turn actually hold the
+      // tools) is what keeps it off a turn that could not act on it.
+      scheduling: "catalog",
       "web-research": "catalog",
       "workflow-authoring": "inject",
     })
@@ -108,6 +113,7 @@ describe("built-in skills catalog", () => {
       "im-binding",
       "ocr",
       "plugin-conversion-tools",
+      "scheduler",
       "screen-capture",
       "twin-context",
       "web-fetch",

@@ -22,6 +22,7 @@ export type RuntimeSkillCapability =
   | "screenCapture"
   | "twinContext"
   | "webFetch"
+  | "scheduler"
   | "webSearch"
   | "workflowEditorTools"
   | "workspace"
@@ -45,6 +46,7 @@ export const BUILT_IN_CAPABILITY_RUNTIME_KEYS: Readonly<
   "im-binding": "imBinding",
   ocr: "ocr",
   "plugin-conversion-tools": "pluginConversionTools",
+  scheduler: "scheduler",
   "screen-capture": "screenCapture",
   "twin-context": "twinContext",
   "web-fetch": "webFetch",
