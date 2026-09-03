@@ -15,6 +15,9 @@
  * {@link forgetAgentModelSurface} when an agent disconnects.
  */
 
+import { computeBackoffDelay } from "@cognia/primitives/backoff"
+
+import { externalAgentProcessPlaneScope } from "./process-plane"
 import {
   EMPTY_THINKING_SURFACE,
   type ExternalAgentModelSurface,
@@ -56,9 +59,60 @@ const cache = new Map<string, ModelSurfaceResult>()
 const inFlight = new Map<string, Promise<ModelSurfaceResult>>()
 /** Monotonic per key, so a load can tell whether a newer one has started. */
 const issued = new Map<string, number>()
+/**
+ * Failed attempts per key, and the moment the next one is allowed.
+ *
+ * An `error` answer used to be cached exactly like a `ready` one, with no
+ * expiry, so an agent that was asked one moment too early stayed "has no
+ * models" for the life of the tab. The only way back was reopening the model
+ * popover, which is the one action a user has no reason to take when the
+ * picker is telling them there is nothing to pick.
+ */
+const failures = new Map<string, { attempts: number; retryAt: number }>()
+/** Which machine the cached answers describe. See `retireStaleScope`. */
+let cachedScope: string | null = null
+const listeners = new Set<() => void>()
+let revision = 0
+
+/** First retry a second out, capped at half a minute, with the usual jitter. */
+const RETRY_BASE_MS = 1000
+const RETRY_MAX_MS = 30_000
 
 function key(agentId: string, sessionId: string): string {
   return `${agentId}\u0000${sessionId}`
+}
+
+/**
+ * Wake every reader after a write.
+ *
+ * The composer mounts TWO copies of `useExternalAgentModels`: the model picker
+ * and the effort chip, each with its own `nonce`. Refreshing from the picker
+ * updated this module and neither copy of the other hook, so the effort chip
+ * kept rendering a ladder from before the refresh until it remounted. A cache
+ * shared by two consumers has to be able to tell them it changed.
+ */
+export function subscribeAgentModelSurface(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function publish(): void {
+  revision += 1
+  for (const listener of [...listeners]) listener()
+}
+
+/**
+ * Drop everything the moment the process plane points somewhere else.
+ *
+ * A cached answer is about the machine that produced it. Repointing a browser
+ * at a second Host does not make the old answer stale so much as make it about
+ * somebody else, and this module had no way to notice: `installed-runtimes`
+ * already guards its cache this way and this one did not.
+ */
+function retireStaleScope(): void {
+  const scope = externalAgentProcessPlaneScope()
+  if (cachedScope !== null && cachedScope !== scope) forgetAgentModelSurface()
+  cachedScope = scope
 }
 
 /** What the last load found, or `null` when this pair was never loaded. */
@@ -85,14 +139,17 @@ export function forgetAgentModelSurface(agentId?: string): void {
     issued.set(id, (issued.get(id) ?? 0) + 1)
     cache.delete(id)
     inFlight.delete(id)
+    failures.delete(id)
   }
-  const keys = [...new Set([...cache.keys(), ...inFlight.keys()])]
+  const keys = [...new Set([...cache.keys(), ...inFlight.keys(), ...failures.keys()])]
   if (!agentId) {
     for (const entry of keys) invalidate(entry)
+    publish()
     return
   }
   const prefix = `${agentId}\u0000`
   for (const entry of keys) if (entry.startsWith(prefix)) invalidate(entry)
+  publish()
 }
 
 /** Injected so the loader is testable without standing up a manager. */
@@ -147,10 +204,15 @@ export async function loadAgentModelSurface(
   sessionId: string,
   { refresh = false } = {}
 ): Promise<ModelSurfaceResult> {
+  retireStaleScope()
   const id = key(agentId, sessionId)
   if (!refresh) {
     const hit = cache.get(id)
-    if (hit) return hit
+    // An `error` is a moment, not a fact about the agent. It is served from
+    // cache only until its backoff expires, and then the next reader retries
+    // on its own. `ready` and `unsupported` are answers the agent gave and
+    // stay until something invalidates them.
+    if (hit && (hit.status !== "error" || (failures.get(id)?.retryAt ?? 0) > Date.now())) return hit
     const pending = inFlight.get(id)
     if (pending) return pending
   }
@@ -188,7 +250,27 @@ export async function loadAgentModelSurface(
       detail: error instanceof Error ? error.message : String(error),
     }))
     .then((result) => {
-      if (isNewest()) cache.set(id, result)
+      if (isNewest()) {
+        cache.set(id, result)
+        if (result.status === "error") {
+          const attempts = (failures.get(id)?.attempts ?? 0) + 1
+          failures.set(id, {
+            attempts,
+            retryAt:
+              Date.now() +
+              computeBackoffDelay(attempts - 1, {
+                baseDelayMs: RETRY_BASE_MS,
+                maxDelayMs: RETRY_MAX_MS,
+                // The same ratio jitter the reconnect paths use, so several
+                // surfaces that failed together do not retry in lockstep.
+                jitter: { kind: "ratio", ratio: 0.25 },
+              }),
+          })
+        } else {
+          failures.delete(id)
+        }
+        publish()
+      }
       return result
     })
     .finally(() => {
@@ -209,4 +291,15 @@ export function loadAgentModelCatalog(
   options: { refresh?: boolean } = {}
 ): Promise<ModelSurfaceResult> {
   return loadAgentModelSurface(agentId, AGENT_MODEL_CATALOG, options)
+}
+
+/**
+ * A counter that moves on every write.
+ *
+ * `useSyncExternalStore` needs a snapshot value, and the cache itself is a Map
+ * whose identity never changes. A revision is the smallest thing that can
+ * change, so two hooks reading one cache both re-render when it does.
+ */
+export function agentModelSurfaceRevision(): number {
+  return revision
 }

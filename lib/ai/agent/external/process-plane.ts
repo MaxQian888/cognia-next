@@ -45,7 +45,7 @@
 import { hasCapability } from "@/lib/platform/capabilities"
 import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { supportsHostFeatureOperation } from "@/lib/platform/host-feature-manifest"
-import { getRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
+import { getRuntimeSnapshot, subscribeRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import {
@@ -201,6 +201,24 @@ export function externalAgentProcessPlane(
     return { ok: false, reason: "not-granted" }
   }
   return { ok: true, via: "remote" }
+}
+
+/**
+ * Wake a reader whenever the plane's answer could have moved.
+ *
+ * The two inputs are the runtime snapshot (connection state, host operations,
+ * grants) and the remote-host store (which Host is active). Shared rather than
+ * written out per consumer: a hook that subscribes to only one of them keeps
+ * rendering a verdict from before the other changed, and the model-surface
+ * hook was doing exactly that by subscribing to neither.
+ */
+export function subscribeExternalAgentProcessPlane(onChange: () => void): () => void {
+  const stopSnapshot = subscribeRuntimeSnapshot(onChange)
+  const stopHosts = useRemoteHostStore.subscribe(onChange)
+  return () => {
+    stopSnapshot()
+    stopHosts()
+  }
 }
 
 /**

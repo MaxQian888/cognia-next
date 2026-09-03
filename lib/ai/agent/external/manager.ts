@@ -1970,6 +1970,15 @@ export class ExternalAgentManager {
         // preset, the protocol or the adapter's method list on its own.
         this.refreshCapabilityProfile(agentId, instance, adapter)
 
+        // A connect is the one moment a "this agent has no models" answer is
+        // known to be out of date. Anything read BEFORE the handshake was read
+        // from an adapter that could not answer yet, and the cache has no TTL
+        // for a reason: the surfaces are told when it changes rather than
+        // polling. Disconnect already invalidates; connect did not, so a picker
+        // that mounted a moment early kept its `unsupported` for the life of
+        // the tab.
+        forgetAgentModelSurface(agentId)
+
         externalAgentManagerLogger.info("Connected to external agent", { agentId })
         return
       } catch (error) {

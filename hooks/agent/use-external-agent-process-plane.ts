@@ -28,20 +28,10 @@ import { useMemo, useSyncExternalStore } from "react"
 import {
   externalAgentProcessPlane,
   externalAgentProcessPlaneScope,
+  subscribeExternalAgentProcessPlane as subscribe,
   type ProcessPlaneAvailability,
   type ProcessPlaneCommand,
 } from "@/lib/ai/agent/external/process-plane"
-import { subscribeRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
-import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
-
-function subscribe(onChange: () => void): () => void {
-  const stopSnapshot = subscribeRuntimeSnapshot(onChange)
-  const stopHosts = useRemoteHostStore.subscribe(onChange)
-  return () => {
-    stopSnapshot()
-    stopHosts()
-  }
-}
 
 /**
  * A value `useSyncExternalStore` can compare.

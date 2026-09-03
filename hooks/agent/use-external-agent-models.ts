@@ -18,15 +18,21 @@
  * render it as absent, never as "this agent has no models".
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
 import {
   AGENT_MODEL_CATALOG,
   cachedAgentModelSurface,
   loadAgentModelCatalog,
   loadAgentModelSurface,
+  agentModelSurfaceRevision,
+  subscribeAgentModelSurface,
   type ModelSurfaceResult,
 } from "@/lib/ai/agent/external/model-surface-cache"
+import {
+  externalAgentProcessPlaneScope,
+  subscribeExternalAgentProcessPlane,
+} from "@/lib/ai/agent/external/process-plane"
 import {
   EMPTY_THINKING_SURFACE,
   type ExternalAgentModelSurface,
@@ -93,6 +99,32 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
   const [result, setResult] = useState<ModelSurfaceResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [nonce, setNonce] = useState(0)
+  /**
+   * Which machine the answer would come from.
+   *
+   * In the effect's deps, not merely read once, for two reasons. A companion
+   * resolves this only after its Host reports its feature manifest and its
+   * grants, so a hook that fetched on mount asked before there was anywhere to
+   * ask, cached the refusal and stopped. And a browser repointed at a second
+   * Host is asking a different machine, which the shared cache also keys on.
+   */
+  const planeScope = useSyncExternalStore(
+    subscribeExternalAgentProcessPlane,
+    externalAgentProcessPlaneScope,
+    () => "server"
+  )
+  /**
+   * The composer mounts a SECOND copy of this hook for the effort chip, with
+   * its own `nonce`. Refreshing from the model popover updated the shared
+   * cache and neither copy of the other hook, so the effort ladder stayed on a
+   * pre-refresh answer until it remounted. Reading the module's revision here
+   * is what makes both copies one view of one cache.
+   */
+  const cacheRevision = useSyncExternalStore(
+    subscribeAgentModelSurface,
+    agentModelSurfaceRevision,
+    () => 0
+  )
 
   useEffect(() => {
     // No clearing here: the memo below already answers IDLE for a built-in
@@ -145,7 +177,28 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     return () => {
       cancelled = true
     }
-  }, [agentId, sessionId, nonce])
+  }, [agentId, sessionId, nonce, planeScope])
+
+  /**
+   * What the shared cache holds right now, derived rather than mirrored.
+   *
+   * Deliberately not an effect that copies into `result`: the effect above
+   * re-fetches whenever `nonce > 0`, so a write-triggered re-run would fetch,
+   * publish and fetch again forever, and mirroring one store into another
+   * piece of state is the render cascade that rule exists to stop. Reading it
+   * during render, keyed on the cache's revision, is the same answer with no
+   * second copy to keep in step.
+   */
+  const shared = useMemo(() => {
+    if (!agentId) return null
+    // `cacheRevision` is the dependency: it moves on every write, which is
+    // exactly when this has to be read again.
+    void cacheRevision
+    return cachedAgentModelSurface(agentId, externalSessionId ?? AGENT_MODEL_CATALOG)
+  }, [agentId, externalSessionId, cacheRevision])
+  // The cache wins when it has an answer. `result` covers the frames before
+  // the first write lands, and whatever this run of the effect is holding.
+  const effective = shared ?? result
 
   const refresh = useCallback(() => setNonce((value) => value + 1), [])
 
@@ -154,12 +207,12 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
       // Throw rather than resolve. A silent return is indistinguishable from a
       // completed write to the caller, which then keeps its optimistic chip and
       // its persisted session row while the agent was never told anything.
-      if (!agentId || !result || result.status !== "ready") {
+      if (!agentId || !effective || effective.status !== "ready") {
         throw new Error("The agent has no open session to set a model on")
       }
       // A catalog pick has nowhere to go yet: the caller persists it on the
       // conversation and `applyModelToSession` replays it on the first turn.
-      if (result.surface.write.kind === "session-seed") return
+      if (effective.surface.write.kind === "session-seed") return
       if (!externalSessionId) {
         throw new Error("The agent has no open session to set a model on")
       }
@@ -167,7 +220,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
       await getExternalAgentManager().selectSessionModel(
         agentId,
         externalSessionId,
-        result.surface,
+        effective.surface,
         modelId
       )
       // Re-read rather than patching the local copy: setting a model can move
@@ -176,7 +229,7 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
       const next = await loadAgentModelSurface(agentId, externalSessionId, { refresh: true })
       setResult(next)
     },
-    [agentId, externalSessionId, result]
+    [agentId, externalSessionId, effective]
   )
 
   return useMemo(() => {
@@ -184,12 +237,12 @@ export function useExternalAgentModels(sessionId: string | undefined): ExternalA
     return {
       agentId,
       externalSessionId,
-      surface: result?.status === "ready" ? result.surface : null,
-      thinking: result?.thinking ?? EMPTY_THINKING_SURFACE,
+      surface: effective?.status === "ready" ? effective.surface : null,
+      thinking: effective?.thinking ?? EMPTY_THINKING_SURFACE,
       loading,
-      status: result?.status ?? "idle",
+      status: effective?.status ?? "idle",
       select,
       refresh,
     }
-  }, [agentId, externalSessionId, result, loading, select, refresh])
+  }, [agentId, externalSessionId, effective, loading, select, refresh])
 }

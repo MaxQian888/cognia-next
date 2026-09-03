@@ -3,7 +3,9 @@ import {
   cachedAgentModelSurface,
   forgetAgentModelSurface,
   loadAgentModelSurface,
+  subscribeAgentModelSurface,
 } from "./model-surface-cache"
+import { __setProcessPlaneDepsForTests } from "./process-plane"
 import {
   EMPTY_THINKING_SURFACE,
   type ExternalAgentModelSurface,
@@ -190,3 +192,154 @@ function deferred(): {
   })
   return { promise, resolve }
 }
+
+describe("a failed load is a moment, not a verdict", () => {
+  let restore: (() => void) | undefined
+
+  beforeEach(() => {
+    forgetAgentModelSurface()
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+    restore?.()
+    restore = undefined
+  })
+
+  /**
+   * The regression: an `error` was cached exactly like a `ready`, with no
+   * expiry, so an agent asked one moment before it finished connecting stayed
+   * "has no models" for the life of the tab. The only escape was reopening the
+   * model popover, which is the one action a user has no reason to take while
+   * the picker is telling them there is nothing to pick.
+   */
+  it("retries on its own once the backoff expires", async () => {
+    let calls = 0
+    restore = __setModelSurfaceDepsForTests({
+      fetchSurface: async () => {
+        calls += 1
+        return calls === 1 ? { status: "error", error: new Error("not connected yet") } : reply()
+      },
+    })
+
+    expect((await loadAgentModelSurface("a", "s")).status).toBe("error")
+    // Still inside the backoff: served from cache, no second attempt.
+    expect((await loadAgentModelSurface("a", "s")).status).toBe("error")
+    expect(calls).toBe(1)
+
+    jest.setSystemTime(Date.now() + 60_000)
+    expect((await loadAgentModelSurface("a", "s")).status).toBe("ready")
+    expect(calls).toBe(2)
+  })
+
+  it("keeps serving an answer the agent actually gave", async () => {
+    let calls = 0
+    restore = __setModelSurfaceDepsForTests({
+      fetchSurface: async () => {
+        calls += 1
+        return { status: "unsupported" }
+      },
+    })
+
+    expect((await loadAgentModelSurface("a", "s")).status).toBe("unsupported")
+    jest.setSystemTime(Date.now() + 600_000)
+    expect((await loadAgentModelSurface("a", "s")).status).toBe("unsupported")
+    // `unsupported` is the agent's own answer, so it does not expire.
+    expect(calls).toBe(1)
+  })
+
+  it("backs off further with each consecutive failure", async () => {
+    let calls = 0
+    restore = __setModelSurfaceDepsForTests({
+      fetchSurface: async () => {
+        calls += 1
+        return { status: "error", error: new Error("still down") }
+      },
+    })
+
+    await loadAgentModelSurface("a", "s")
+    jest.setSystemTime(Date.now() + 2_000)
+    await loadAgentModelSurface("a", "s")
+    expect(calls).toBe(2)
+    // The second failure's window is longer than the first's, so the same
+    // step forward is no longer enough.
+    jest.setSystemTime(Date.now() + 2_000)
+    await loadAgentModelSurface("a", "s")
+    expect(calls).toBe(2)
+  })
+})
+
+describe("a cached answer is about one machine", () => {
+  let restore: (() => void) | undefined
+  let restorePlane: (() => void) | undefined
+
+  beforeEach(() => forgetAgentModelSurface())
+  afterEach(() => {
+    restore?.()
+    restorePlane?.()
+    restore = undefined
+    restorePlane = undefined
+  })
+
+  it("drops everything when the process plane points somewhere else", async () => {
+    let calls = 0
+    restore = __setModelSurfaceDepsForTests({
+      fetchSurface: async () => {
+        calls += 1
+        return reply()
+      },
+    })
+    let host = "host-a"
+    restorePlane = __setProcessPlaneDepsForTests({
+      hasLocalProcessTable: () => false,
+      isRemoteHostActive: () => true,
+      activeHostId: () => host,
+    })
+
+    await loadAgentModelSurface("a", "s")
+    await loadAgentModelSurface("a", "s")
+    expect(calls).toBe(1)
+
+    // Repointing at a second Host does not make the old answer stale so much
+    // as make it about somebody else.
+    host = "host-b"
+    await loadAgentModelSurface("a", "s")
+    expect(calls).toBe(2)
+  })
+})
+
+describe("subscribeAgentModelSurface", () => {
+  let restore: (() => void) | undefined
+
+  beforeEach(() => forgetAgentModelSurface())
+  afterEach(() => {
+    restore?.()
+    restore = undefined
+  })
+
+  /**
+   * The composer mounts TWO copies of `useExternalAgentModels` (the model
+   * picker and the effort chip), each with its own refresh counter. Without a
+   * notification the chip kept rendering a ladder from before the picker's
+   * refresh until it happened to remount.
+   */
+  it("wakes every reader after a write", async () => {
+    restore = __setModelSurfaceDepsForTests({ fetchSurface: async () => reply() })
+    // Warm up first so the plane scope is already settled: the scope check
+    // legitimately publishes when it retires a cache from another host, and
+    // that is not the write this test is about.
+    await loadAgentModelSurface("warmup", "s")
+    let woke = 0
+    const off = subscribeAgentModelSurface(() => {
+      woke += 1
+    })
+    await loadAgentModelSurface("a", "s")
+    expect(woke).toBe(1)
+    forgetAgentModelSurface("a")
+    expect(woke).toBe(2)
+    off()
+    await loadAgentModelSurface("b", "s")
+    expect(woke).toBe(2)
+  })
+})
