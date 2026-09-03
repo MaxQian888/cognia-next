@@ -716,14 +716,16 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
 
     // Unconditional: `assertExtensionReady` above already refused the session
     // if no verified extension exists, so reaching here means one was loaded
-    // and must prove it. Five seconds covers a cold TypeScript compile.
+    // and must prove it. The budget follows the policy, because `session_start`
+    // waits for every OTHER loaded extension too and only `isolated` bounds
+    // that set.
     const settled = await Promise.race([
       record.handshake.then(() => true),
-      delay(PI_EXTENSION_HANDSHAKE_TIMEOUT_MS).then(() => false),
+      delay(piHandshakeTimeoutMs(this.extensionPolicy())).then(() => false),
     ])
     if (!settled) {
       await this.closeSession(piSessionId)
-      throw new PiExtensionHandshakeError(piSessionId)
+      throw new PiExtensionHandshakeError(piSessionId, this.extensionPolicy())
     }
 
     const session: ExternalAgentSession = {
@@ -760,9 +762,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     if (extra.forkFrom) args.push("--fork", extra.forkFrom)
     args.push("--session-id", piSessionId)
 
-    const policy =
-      (this._config?.metadata?.piExtensionPolicy as PiExtensionPolicy | undefined) ?? "isolated"
-    args.push(...extensionPolicyArgs(policy))
+    args.push(...extensionPolicyArgs(this.extensionPolicy()))
 
     // `assertExtensionReady` guarantees interception is available by the time
     // we get here, so this is now always the "intercepted" floor. The
@@ -795,6 +795,19 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
    * Pi's permission matrix. The override still exists for development, but it
    * is honoured by the *resolver* (which then hashes what it found), not here.
    */
+  /**
+   * Which extensions Pi loads alongside ours.
+   *
+   * Read in two places that must agree: the argv builder, which turns it into
+   * Pi's isolation flags, and the handshake budget, which has to allow for
+   * whatever those flags let start first.
+   */
+  private extensionPolicy(): PiExtensionPolicy {
+    return (
+      (this._config?.metadata?.piExtensionPolicy as PiExtensionPolicy | undefined) ?? "isolated"
+    )
+  }
+
   private extensionPath(): string | undefined {
     const configured = this._config?.metadata?.piExtensionPath as string | undefined
     if (configured) return configured
@@ -1516,8 +1529,41 @@ export class PiOutboundBlockedError extends Error {
   }
 }
 
-/** How long the bundled extension has to announce itself before the session fails. */
+/**
+ * How long the bundled extension has to announce itself before the session
+ * fails, under `isolated` — the only policy whose startup Cognia controls.
+ *
+ * Measured against Pi 0.84.3 on a cold working directory: 250ms with the
+ * user's stack off. Five seconds is a wide margin over that.
+ */
 export const PI_EXTENSION_HANDSHAKE_TIMEOUT_MS = 5000
+
+/**
+ * The same budget under a policy that loads the user's own extensions.
+ *
+ * `session_start` does not fire until every loaded extension has initialised,
+ * and under `global` that set is whatever the user installed: on a real
+ * machine, an LSP bridge, an MCP client dialing five servers, a background-task
+ * poller, a status line, a permission engine. Measured on that machine, the
+ * same handshake that takes 250ms isolated took 5578ms — just past the
+ * isolated budget, so every Pi session on that install was refused with
+ * "the extension did not report ready", about an extension that was loading
+ * perfectly well behind somebody else's.
+ *
+ * Waiting longer is the honest answer rather than a workaround: the time is
+ * spent in code Cognia neither ships nor can bound, and the gate exists to
+ * catch an extension that is ABSENT or tampered with, which no amount of
+ * waiting will fix. `isolated` keeps the tight budget precisely because its
+ * startup set is ours.
+ */
+export const PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS = 30_000
+
+/** The budget this policy's startup set deserves. */
+export function piHandshakeTimeoutMs(policy: PiExtensionPolicy): number {
+  return policy === "isolated"
+    ? PI_EXTENSION_HANDSHAKE_TIMEOUT_MS
+    : PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS
+}
 
 /** Marker the bundled extension writes on `session_start`. */
 export const PI_HANDSHAKE_MARKER = "cognia-ready"
@@ -1555,13 +1601,27 @@ export class PiExtensionUnavailableError extends Error {
   }
 }
 
-/** Raised when the bundled extension never proved it loaded. */
+/**
+ * Raised when the bundled extension never proved it loaded.
+ *
+ * Names the policy, because the two cases need different things from the user.
+ * Under `isolated` the startup set is ours and a timeout means the extension is
+ * genuinely not loading. Under `global` it means the user's own Pi extensions
+ * are still starting, and the actionable advice is to switch this agent to
+ * isolated rather than to go looking for a broken Cognia file.
+ */
 export class PiExtensionHandshakeError extends Error {
   readonly reasonCode = "extension_handshake_failed"
-  constructor(sessionId: string) {
+  constructor(sessionId: string, policy: PiExtensionPolicy = "isolated") {
+    const timeout = piHandshakeTimeoutMs(policy)
     super(
       `The Cognia Pi extension did not report ready for session ${sessionId} within ` +
-        `${PI_EXTENSION_HANDSHAKE_TIMEOUT_MS}ms`
+        `${timeout}ms` +
+        (policy === "isolated"
+          ? ""
+          : `. This agent runs with extension policy "${policy}", so Pi loads your own ` +
+            `extensions before the session starts. Switch it to "isolated" if they are slow ` +
+            `or failing.`)
     )
     this.name = "PiExtensionHandshakeError"
   }

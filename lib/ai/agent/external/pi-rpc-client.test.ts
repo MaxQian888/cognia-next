@@ -17,6 +17,10 @@ import {
   type PiExtensionVerdict,
   clampThinkingLevel,
   extensionPolicyArgs,
+  piHandshakeTimeoutMs,
+  PI_EXTENSION_HANDSHAKE_TIMEOUT_MS,
+  PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS,
+  PiExtensionHandshakeError,
   parsePiModel,
   processToolFloor,
   type PiRpcHost,
@@ -134,6 +138,38 @@ describe("extensionPolicyArgs", () => {
   it("only trusts project-local files when explicitly asked", () => {
     expect(extensionPolicyArgs("global")).toEqual(["--no-approve"])
     expect(extensionPolicyArgs("trusted-project")).toEqual(["--approve"])
+  })
+})
+
+describe("piHandshakeTimeoutMs", () => {
+  /**
+   * `session_start` fires only once every loaded extension has initialised, so
+   * the budget has to cover whatever the policy lets load. Measured against Pi
+   * 0.84.3 on one real install: 250ms isolated, 5578ms with the user's own
+   * stack (an LSP bridge, an MCP client dialing five servers, a background-task
+   * poller, a status line, a permission engine). The flat 5s budget refused
+   * every Pi session on that machine, about an extension that was loading fine
+   * behind somebody else's.
+   */
+  it("keeps the tight budget only where the startup set is ours", () => {
+    expect(piHandshakeTimeoutMs("isolated")).toBe(PI_EXTENSION_HANDSHAKE_TIMEOUT_MS)
+    expect(PI_EXTENSION_HANDSHAKE_TIMEOUT_MS).toBe(5000)
+  })
+
+  it("allows for a third-party stack under every policy that loads one", () => {
+    for (const policy of ["global", "trusted-project"] as const) {
+      expect(piHandshakeTimeoutMs(policy)).toBe(PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS)
+      // Comfortably past the 5578ms actually measured.
+      expect(piHandshakeTimeoutMs(policy)).toBeGreaterThan(6000)
+    }
+  })
+
+  it("names the policy in the refusal, because the two need different actions", () => {
+    expect(new PiExtensionHandshakeError("s1", "isolated").message).not.toContain('isolated"')
+    const global = new PiExtensionHandshakeError("s1", "global").message
+    expect(global).toContain("30000ms")
+    expect(global).toContain("global")
+    expect(global).toContain("isolated")
   })
 })
 
