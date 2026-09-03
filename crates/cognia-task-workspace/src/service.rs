@@ -1239,6 +1239,16 @@ impl TaskWorkspaceService {
             imported: Vec::new(),
         };
         for source_root in source_roots {
+            // A source repository that is no longer on disk is skipped, not
+            // fatal. `open()` calls this with `?`, and a single row pointing at
+            // a deleted clone (a scratch directory, an unmounted volume, a
+            // worktree source someone moved) would otherwise refuse to start
+            // the whole task-workspace service, taking every healthy workspace
+            // with it. Nothing can be reconciled against a repository that is
+            // not there, so there is no verdict to lose by skipping it.
+            if !Path::new(&source_root).is_dir() {
+                continue;
+            }
             self.reconcile_git_source(Path::new(&source_root), &records, &mut outcome)?;
         }
         Ok(outcome)
@@ -1317,9 +1327,16 @@ impl TaskWorkspaceService {
                 && normalized_path_key(Path::new(&record.source_root))
                     == normalized_path_key(&source_root)
                 && record.environment_kind != crate::WorkspaceEnvironmentKind::Imported
+                // `Conflict` is swept too, which is what gives a conflicted row
+                // any way back. The sweep is the only thing that can decide a
+                // row is consistent again, and while it skipped this state a
+                // row that reached it stayed there for good: the one
+                // `Conflict → Active` transition in this service belongs to the
+                // Bundle handoff retry, which a conversation refused with
+                // `managed workspace is not active` never reaches.
                 && matches!(
                     record.state,
-                    WorkspaceState::Active | WorkspaceState::Provisioning
+                    WorkspaceState::Active | WorkspaceState::Provisioning | WorkspaceState::Conflict
                 )
         }) {
             let path = normalized_path_key(Path::new(&record.execution_root));
@@ -1327,8 +1344,38 @@ impl TaskWorkspaceService {
                 row.lock_reason.as_deref() == record.locked_by.as_deref()
                     && record.git_common_dir == git_common_dir
             });
-            if verified {
+            // A row that says `gitWorktree` over a root that is not a linked
+            // worktree checkout was mis-declared when it was provisioned, and
+            // no amount of sweeping will find the worktree it is looking for.
+            // The root on disk is already exactly what a shadow root is, so the
+            // repair is the metadata alone. This is the residue of the bundle
+            // path claiming Git isolation over a repository with no commit to
+            // detach from.
+            let mis_declared = !verified
+                && !inventory_by_path.contains_key(&path)
+                && Path::new(&record.execution_root).is_dir()
+                && !is_linked_worktree_checkout(Path::new(&record.execution_root));
+            if verified || mis_declared {
+                if mis_declared
+                    && matches!(
+                        record.state,
+                        WorkspaceState::Active | WorkspaceState::Conflict
+                    )
+                {
+                    let _ = self
+                        .registry
+                        .reclassify_isolation(&record.workspace_id, IsolationKind::Shadow);
+                }
                 outcome.reclaimed.push(record.workspace_id.clone());
+                if record.state == WorkspaceState::Conflict {
+                    let _ = self.registry.transition(
+                        &record.workspace_id,
+                        record.owner_type,
+                        record.owner_ref.as_deref(),
+                        WorkspaceState::Active,
+                        now_ms(),
+                    );
+                }
             } else {
                 outcome.orphaned.push(record.workspace_id.clone());
                 if record.state == WorkspaceState::Active {
@@ -4782,6 +4829,36 @@ fn environment_summary_from_record(record: &WorkspaceRecord) -> crate::Workspace
     }
 }
 
+/// Is this directory a checkout that `git worktree` created?
+///
+/// A linked worktree carries a `.git` FILE whose `gitdir:` line points into the
+/// repository's `worktrees/` administrative directory. A shadow copy carries no
+/// `.git` at all, and a standalone clone carries a `.git` directory. Only the
+/// first is something `git worktree list` could ever have listed, which is what
+/// separates a worktree that was removed from a row that never had one.
+///
+/// Answers `false` on any read error. The caller uses this to decide whether to
+/// CORRECT a row, and correcting one on the strength of an unreadable directory
+/// would be a guess.
+fn is_linked_worktree_checkout(execution_root: &Path) -> bool {
+    let dot_git = execution_root.join(".git");
+    // Follows a symlink deliberately: what matters is what the entry resolves
+    // to, not how it is spelled.
+    if !fs::metadata(&dot_git).is_ok_and(|metadata| metadata.is_file()) {
+        return false;
+    }
+    let Ok(text) = fs::read_to_string(&dot_git) else {
+        return false;
+    };
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("gitdir:"))
+        .any(|target| {
+            Path::new(target.trim())
+                .components()
+                .any(|component| component.as_os_str() == "worktrees")
+        })
+}
+
 fn normalized_path_key(path: &Path) -> String {
     path.canonicalize()
         .unwrap_or_else(|_| path.to_path_buf())
@@ -5473,6 +5550,223 @@ mod tests {
         repository
             .commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
             .unwrap();
+    }
+
+    /// Registers a row that claims Git isolation over a root that is not a
+    /// worktree, which is exactly the residue the pre-fix bundle path left.
+    fn insert_mis_declared_row(
+        service: &TaskWorkspaceService,
+        source_root: &Path,
+        execution_root: &Path,
+        state: WorkspaceState,
+    ) -> String {
+        fs::create_dir_all(execution_root).unwrap();
+        let record = service
+            .registry
+            .insert(
+                crate::WorkspaceOwnerType::Session,
+                Some("session-1".into()),
+                source_root.to_string_lossy().into_owned(),
+                git_common_dir(source_root),
+                WorkspaceBaseSpec::WorkingState,
+                IsolationKind::GitWorktree,
+                execution_root.to_string_lossy().into_owned(),
+                1,
+            )
+            .unwrap();
+        service
+            .registry
+            .transition(
+                &record.workspace_id,
+                record.owner_type,
+                record.owner_ref.as_deref(),
+                WorkspaceState::Active,
+                2,
+            )
+            .unwrap();
+        if state == WorkspaceState::Conflict {
+            service
+                .registry
+                .transition(
+                    &record.workspace_id,
+                    record.owner_type,
+                    record.owner_ref.as_deref(),
+                    WorkspaceState::Conflict,
+                    3,
+                )
+                .unwrap();
+        }
+        record.workspace_id
+    }
+
+    /// The row says `gitWorktree`, the root on disk is a plain directory, and
+    /// the sweep will never find the worktree it is looking for. Before this it
+    /// moved the row to `Conflict` on every pass, and nothing could move it
+    /// back: the one `Conflict → Active` transition in this service belongs to
+    /// the Bundle handoff retry, which a conversation refused with
+    /// `managed workspace is not active` never reaches.
+    #[test]
+    fn a_row_claiming_a_worktree_it_never_had_is_corrected_to_shadow() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(&repository.path().canonicalize().unwrap());
+        let executions = TempDir::new().unwrap();
+        let execution_root = executions.path().join("root-1");
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let workspace_id = insert_mis_declared_row(
+            &service,
+            &repository.path().canonicalize().unwrap(),
+            &execution_root,
+            WorkspaceState::Active,
+        );
+
+        let outcome = service.reconcile_known_worktrees().unwrap();
+        assert!(outcome.reclaimed.contains(&workspace_id));
+        assert!(outcome.orphaned.is_empty());
+
+        let record = service.registry.get(&workspace_id).unwrap().unwrap();
+        assert_eq!(record.isolation_kind, IsolationKind::Shadow);
+        assert_eq!(record.state, WorkspaceState::Active);
+        // Metadata only. A shadow root IS the directory, so nothing may be
+        // copied, moved or discarded to reach this state.
+        assert!(execution_root.is_dir());
+    }
+
+    /// The state a conversation is actually stuck in. The row was conflicted by
+    /// an earlier sweep, and the sweep is the only thing that can decide it is
+    /// consistent again, so it has to look at conflicted rows to do it.
+    #[test]
+    fn a_conflicted_row_returns_to_active_once_it_is_understood() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(&repository.path().canonicalize().unwrap());
+        let executions = TempDir::new().unwrap();
+        let execution_root = executions.path().join("root-1");
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let workspace_id = insert_mis_declared_row(
+            &service,
+            &repository.path().canonicalize().unwrap(),
+            &execution_root,
+            WorkspaceState::Conflict,
+        );
+
+        service.reconcile_known_worktrees().unwrap();
+
+        let record = service.registry.get(&workspace_id).unwrap().unwrap();
+        assert_eq!(record.state, WorkspaceState::Active);
+        assert_eq!(record.isolation_kind, IsolationKind::Shadow);
+    }
+
+    /// A worktree that really was one and lost its registration is a different
+    /// fault, and correcting its isolation would silently change what the root
+    /// IS. It stays conflicted so someone can look at it.
+    #[test]
+    fn a_worktree_that_lost_its_registration_stays_conflicted() {
+        let data = TempDir::new().unwrap();
+        let repository_parent = TempDir::new().unwrap();
+        let repository = repository_parent.path().join("main");
+        fs::create_dir_all(&repository).unwrap();
+        git2::Repository::init(&repository).unwrap();
+        seed_git_repository(&repository);
+        let checkout = repository_parent.path().join("linked");
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let record = service
+            .registry
+            .insert(
+                crate::WorkspaceOwnerType::Session,
+                Some("session-1".into()),
+                repository.canonicalize().unwrap().to_string_lossy().into_owned(),
+                git_common_dir(&repository),
+                WorkspaceBaseSpec::WorkingState,
+                IsolationKind::GitWorktree,
+                checkout.to_string_lossy().into_owned(),
+                1,
+            )
+            .unwrap();
+        let add = Command::new("git")
+            .args(["-C"])
+            .arg(&repository)
+            .args(["worktree", "add", "--detach"])
+            .arg(&checkout)
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+        service
+            .registry
+            .transition(
+                &record.workspace_id,
+                record.owner_type,
+                record.owner_ref.as_deref(),
+                WorkspaceState::Active,
+                2,
+            )
+            .unwrap();
+        // Drop git's administrative record while leaving the checkout, which is
+        // what a pruned or hand-deleted `worktrees/` entry leaves behind.
+        let admin = repository.join(".git").join("worktrees");
+        fs::remove_dir_all(&admin).unwrap();
+        assert!(is_linked_worktree_checkout(&checkout));
+
+        let outcome = service.reconcile_known_worktrees().unwrap();
+        assert!(outcome.orphaned.contains(&record.workspace_id));
+        let after = service.registry.get(&record.workspace_id).unwrap().unwrap();
+        assert_eq!(after.state, WorkspaceState::Conflict);
+        assert_eq!(after.isolation_kind, IsolationKind::GitWorktree);
+    }
+
+    /// `open()` runs the sweep with `?`. One row pointing at a repository that
+    /// is no longer on disk used to refuse to start the whole service, taking
+    /// every healthy workspace down with it.
+    #[test]
+    fn a_source_repository_that_is_gone_does_not_refuse_the_service() {
+        let data = TempDir::new().unwrap();
+        let vanishing = TempDir::new().unwrap();
+        let repository = vanishing.path().join("main");
+        fs::create_dir_all(&repository).unwrap();
+        git2::Repository::init(&repository).unwrap();
+        seed_git_repository(&repository);
+        let executions = TempDir::new().unwrap();
+        let execution_root = executions.path().join("root-1");
+
+        {
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            insert_mis_declared_row(
+                &service,
+                &repository.canonicalize().unwrap(),
+                &execution_root,
+                WorkspaceState::Active,
+            );
+        }
+        drop(vanishing);
+
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into()));
+        assert!(reopened.is_ok(), "{:?}", reopened.err());
+        assert!(reopened.unwrap().reconcile_known_worktrees().is_ok());
+    }
+
+    #[test]
+    fn a_shadow_root_is_not_mistaken_for_a_linked_worktree() {
+        let plain = TempDir::new().unwrap();
+        assert!(!is_linked_worktree_checkout(plain.path()));
+
+        // A standalone clone carries a `.git` DIRECTORY, which no
+        // `git worktree list` would ever have listed either.
+        let clone = TempDir::new().unwrap();
+        git2::Repository::init(clone.path()).unwrap();
+        assert!(!is_linked_worktree_checkout(clone.path()));
+
+        // A `.git` file that points somewhere other than an administrative
+        // `worktrees/` entry is a submodule, not a linked worktree.
+        let submodule = TempDir::new().unwrap();
+        fs::write(submodule.path().join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+        assert!(!is_linked_worktree_checkout(submodule.path()));
     }
 
     /// A freshly `git init`ed directory with no commit: exactly what

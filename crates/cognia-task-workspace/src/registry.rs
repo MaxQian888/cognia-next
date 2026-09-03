@@ -510,6 +510,34 @@ impl WorkspaceRegistry {
         Ok(record)
     }
 
+    /// Correct a row that claims an isolation it never had.
+    ///
+    /// Reconciliation is the only caller, and only for a `GitWorktree` row
+    /// whose execution root carries no linked-worktree gitdir. Such a row was
+    /// mis-declared at provisioning time: the bundle path used to claim Git
+    /// isolation over any discoverable repository, including one with no commit
+    /// to detach a worktree from, so the provisioner fell back to a shadow copy
+    /// while the row kept saying `gitWorktree`. Every sweep afterwards looked
+    /// for a worktree that was never created and moved the row to `Conflict`,
+    /// which nothing could clear.
+    ///
+    /// The correction is metadata only. The execution root on disk is already
+    /// exactly what a shadow root is, so nothing is copied, moved or discarded.
+    pub fn reclassify_isolation(
+        &self,
+        workspace_id: &str,
+        isolation_kind: IsolationKind,
+    ) -> Result<WorkspaceRecord, RegistryError> {
+        let store = self.store.lock();
+        let mut record = store
+            .get_workspace(workspace_id)
+            .map_err(RegistryError::Store)?
+            .ok_or_else(|| RegistryError::NotFound(workspace_id.to_string()))?;
+        record.isolation_kind = isolation_kind;
+        store.put_workspace(&record).map_err(RegistryError::Store)?;
+        Ok(record)
+    }
+
     /// Classify a Cognia-owned row as session-managed or permanent.
     pub fn set_environment_kind(
         &self,
