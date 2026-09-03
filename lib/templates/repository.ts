@@ -8,6 +8,16 @@ export interface StoredTemplatePackage {
   trust: TemplateTrust
   importedAt: number
   source: "file" | "link" | "plugin" | "marketplace"
+  /**
+   * The plugin that PERFORMED a `source: "plugin"` import, not the one that
+   * authored the package.
+   *
+   * The two differ whenever a plugin imports somebody else's bytes, and only
+   * the importer is the party the library-write ownership check in
+   * `lib/plugin/api/templates-api.ts` can hold responsible afterwards. Absent
+   * for every other source.
+   */
+  pluginId?: string
   yankedAt?: number
 }
 

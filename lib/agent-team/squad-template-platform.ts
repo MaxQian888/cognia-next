@@ -116,6 +116,14 @@ export interface SquadTemplatePlatformStatus {
   latestVersion?: string
   /** Every release version, oldest first. Drives the export picker. */
   releases: string[]
+  /**
+   * The `latestVersion` release itself.
+   *
+   * Carried alongside the version string because a share link ships the whole
+   * envelope, hash and all, and re-reading the repository from a row just to
+   * get back what this pass already loaded is one round trip per row.
+   */
+  latestRelease?: TemplateDefinitionEnvelope
   /** Set when this definition was created by `service.fork`. */
   derivedFrom?: TemplateDerivation
   /** The draft row, when one exists. `publish` needs its revision. */
@@ -147,8 +155,26 @@ export async function readSquadTemplatePlatformStatus(
     definitionId,
     state: usable.length > 0 ? "published" : draft ? "draft" : "absent",
     ...(usable.length > 0 ? { latestVersion: usable[usable.length - 1]!.version! } : {}),
+    ...(usable.length > 0 ? { latestRelease: usable[usable.length - 1]! } : {}),
     releases: usable.map((release) => release.version!),
     ...(derivedFrom ? { derivedFrom } : {}),
     ...(draft ? { draft } : {}),
   }
+}
+
+/**
+ * The definition a "share via link" on this row means.
+ *
+ * Same order as {@link resolveSquadTemplateDefinition}: the newest usable
+ * release wins, and the draft is only reached when nothing was ever published.
+ * Handing the draft over rather than returning nothing is deliberate, because
+ * `buildSharedTemplateDefinition` refuses it with `unpublished` and the share
+ * button then renders itself disabled WITH that reason. A row that has nothing
+ * in the library at all returns undefined, which is a different sentence and
+ * the caller says so.
+ */
+export function squadTemplateShareDefinition(
+  status: SquadTemplatePlatformStatus
+): TemplateDefinitionEnvelope | undefined {
+  return status.latestRelease ?? status.draft
 }

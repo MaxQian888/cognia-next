@@ -10,6 +10,7 @@ import {
   readSquadTemplatePlatformStatus,
   resolveSquadTemplateDefinition,
   squadTemplateDefinitionId,
+  squadTemplateShareDefinition,
 } from "./squad-template-platform"
 
 const userTemplate: AgentTeamTemplate = {
@@ -175,6 +176,25 @@ describe("readSquadTemplatePlatformStatus", () => {
     expect(status.state).toBe("published")
     expect(status.latestVersion).toBe("1.1.0")
     expect(status.releases).toEqual(["1.0.0", "1.1.0"])
+    // The envelope itself, not just its version: a share link ships the whole
+    // definition and would otherwise re-read the repository row by row.
+    expect(status.latestRelease?.version).toBe("1.1.0")
+    expect(squadTemplateShareDefinition(status)).toBe(status.latestRelease)
+  })
+
+  it("offers the draft to share when nothing was ever published, and nothing when absent", async () => {
+    const runtime = makeRuntime()
+    await runtime.repository.saveDraft(
+      await definition({ id: "legacy.agentTeam.user-1", version: null }),
+      0
+    )
+    const drafted = await readSquadTemplatePlatformStatus(userTemplate, {}, runtime)
+    // Handed over rather than withheld: the share button refuses a draft with
+    // "publish a version first", which is the sentence the row should show.
+    expect(squadTemplateShareDefinition(drafted)).toBe(drafted.draft)
+
+    const absent = await readSquadTemplatePlatformStatus(userTemplate, {}, makeRuntime())
+    expect(squadTemplateShareDefinition(absent)).toBeUndefined()
   })
 
   it("carries the fork lineage when the service records one", async () => {

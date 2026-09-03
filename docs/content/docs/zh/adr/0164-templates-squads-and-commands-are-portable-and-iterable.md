@@ -37,8 +37,8 @@ description: "小队记得自己来自哪个模板，会话模板成为一等的
 - 小队模板首次发布是 0.1.0，因为 `service.publish` 拒绝与 `getPublishSuggestion` 不一致的版本号。改它是平台决定，不是小队决定。
 - 伴侣同步写入的会话模板绕过了表的写入器，所以同步处理器自己宣布应用了的行，输入框订阅它。没应用任何行的拉取保持沉默。
 - 分享查看器用「原生壳，或页面 origin 不等于分享端点」判断自己是否在应用内，失败即关闭，绝不只看 `isTauri()`，因为浏览器在这里是一等的壳。
-- `ctx.commands` 暴露给前端与混合插件。Python 插件还需要宿主请求路由器里的一条路由，暂缓。
-- 有意暂缓：868 个叶子的 `agentTeamsWorkspace` 命名空间拆分、`/issues` 与小队共用一块看板、`verified-fresh-agent`、面向 Agent 的模板与小队 sidecar 工具、备份分享链接的 PII 门。
+- `ctx.commands` 与 `ctx.templates` 暴露给前端、混合与 Python 插件。宿主请求路由器不需要专门的路由，在目录里向 python 打开命名空间即可，接受回调的方法仍按名字拒绝。Python 插件在 `manifest.commands` 里声明命令，命令桥（`lib/plugin/bridge/commands-bridge.ts`）在「所有者优先」的分发路径上把一个结构化的调用对象交给它的 `@hook("onCommand")`。
+- 有意暂缓：原列表已无剩余项。共用看板已随后落地：`/issues` 与小队任务看板共用同一个 `components/board/kanban-board.tsx` 原语（列、拖放、折叠、空状态、键盘移动），两块看板互相链接，派给小队的议题卡带小队徽章，小队看板带回到来源议题的徽章。`verified-fresh-agent` 已随后落地：聊天控制器在直接回合开始前装上 `lib/agent/composition/verified-fresh-agent.ts`，回合结束后由一个不带主回合记忆、Twin 与工具历史的新会话对照请求、最终回复与工作区 diff 独立复核，结果以 `verification-verdict` 消息部件留在对话里并可打开 Reviewer 会话，配对壳上可见但禁用并注明原因。面向 Agent 的模板与小队工具已作为宿主路由的内置工具落在插件工具中继上（`lib/claude/template-builtin-tools.ts`，在「设置 > 工具」里通过 `selfInvokeTools.templates` 按需开启）：`template_list` / `template_get` / `template_instantiate`、`chat_template_list` / `chat_template_get` 与 `squad_list` / `squad_apply_template` / `squad_save_as_template`，每一次写入都先经过 `ctx.templates` 所用的同一个插件同意代理。备份分享链接现在经过 `lib/share/backup-share-gate.ts`：明文包用 `@cognia/redact` 扫描，所有者先看到按区域分组的命中报告并勾选确认后链接才会生成，加密信封原样通过并标注为无法扫描，干净的包直接生成链接并附一行说明，且从不做脱敏，因为脱敏后的备份无法如实恢复。`agentTeamsWorkspace` 命名空间现已按顶层分区拆到 `i18n/messages/<locale>/agentTeamsWorkspace/` 下（零散标量叶子放在 `_root.json`），键名与调用点均未改动。
 
 ## 修订
 
