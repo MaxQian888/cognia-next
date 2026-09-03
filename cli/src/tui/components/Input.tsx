@@ -50,7 +50,7 @@ import { type ListDir } from "../commands/file-completer"
 import { activeBashPathToken, completeBashPath } from "../commands/bash-completer"
 import { detectMention } from "../mention/detector"
 import { acceptMention } from "../mention/accept"
-import { highlightMentions } from "../mention/highlight"
+import { highlightMentions, highlightMentionsWithCursor } from "../mention/highlight"
 import { createMentionProviders, type MentionProviders } from "../mention/providers"
 import { createMentionLoader } from "../mention/async-load"
 import type { MentionCandidate } from "../mention/types"
@@ -89,27 +89,9 @@ function makeFsListDir(cwd: string): ListDir {
   }
 }
 
-/** Render a line's mention tokens in their kind colour (cosmetic only). Used
- * when the cursor is not on this row, so we never have to splice the inverse
- * cursor cell into a coloured segment. */
-const HighlightedLine = React.memo(function HighlightedLine({ line }: { line: string }) {
-  const theme = useTheme()
-  const segments = useMemo(() => highlightMentions(line), [line])
-  return (
-    <Text>
-      {segments.map((seg, i) => {
-        const color =
-          seg.kind === "skill" ? theme.accent : seg.kind === "agent" ? theme.info : undefined
-        return (
-          <Text key={i} color={color}>
-            {seg.text}
-          </Text>
-        )
-      })}
-    </Text>
-  )
-})
-
+/** Render one composer line: its mention tokens in their kind colour, plus the
+ * inverse caret cell when the cursor is on this row. Cosmetic only, the buffer
+ * itself is untouched. */
 const LineView = React.memo(function LineView({
   line,
   cursorCol,
@@ -119,20 +101,30 @@ const LineView = React.memo(function LineView({
   cursorCol: number
   disabled: boolean
 }) {
-  // No cursor on this row → render with mention-token highlighting.
-  if (cursorCol < 0 || disabled) return <HighlightedLine line={line} />
-  const before = line.slice(0, cursorCol)
-  const afterCursor = nextGraphemeBoundary(line, cursorCol)
-  // Ink trims styling from a trailing blank cell, which makes an inverse-space
-  // caret disappear at the end of an empty line. A block glyph survives Ink's
-  // render pass while preserving the same single-cell visual caret.
-  const at = line.slice(cursorCol, afterCursor) || "█"
-  const after = line.slice(afterCursor)
+  const theme = useTheme()
+  // The caret is split INTO the mention segments rather than replacing them.
+  // Rendering the cursor row as plain text instead made an `@agent:` token
+  // change colour as the cursor moved onto and off its line.
+  const segments = useMemo(
+    () =>
+      cursorCol < 0 || disabled
+        ? highlightMentions(line)
+        : highlightMentionsWithCursor(line, cursorCol, nextGraphemeBoundary(line, cursorCol)),
+    [line, cursorCol, disabled]
+  )
   return (
     <Text>
-      {before}
-      <Text inverse>{at}</Text>
-      {after}
+      {segments.map((seg, i) => (
+        <Text
+          key={i}
+          color={
+            seg.kind === "skill" ? theme.accent : seg.kind === "agent" ? theme.info : undefined
+          }
+          inverse={"cursor" in seg && seg.cursor === true}
+        >
+          {seg.text}
+        </Text>
+      ))}
     </Text>
   )
 })

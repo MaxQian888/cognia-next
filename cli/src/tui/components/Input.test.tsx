@@ -182,6 +182,9 @@ describe("Input (rich composer)", () => {
   })
 
   it("does not re-highlight unchanged lines on cursor-only edits", () => {
+    // Rows without the cursor take the `highlightMentions` branch, which this
+    // spy sees. The cursor's own row goes through `highlightMentionsWithCursor`
+    // and is expected to recompute, so this asserts about the OTHER rows only.
     const highlight = jest.requireMock("../mention/highlight") as {
       highlightMentions: jest.Mock
     }
@@ -192,6 +195,17 @@ describe("Input (rich composer)", () => {
     highlight.highlightMentions.mockClear()
     key("", { leftArrow: true })
     expect(highlight.highlightMentions).not.toHaveBeenCalled()
+  })
+
+  it("keeps a mention token coloured on the row the cursor is on", () => {
+    // The cursor row used to render as plain text, so an `@agent:` token
+    // changed colour as the cursor moved onto and off its line.
+    const { container } = render(<Harness onSubmit={jest.fn()} />)
+    type("@agent:reviewer go")
+    const coloured = Array.from(container.querySelectorAll("[data-color]")).filter((el) =>
+      (el.textContent ?? "").includes("@agent:reviewer")
+    )
+    expect(coloured.length).toBeGreaterThan(0)
   })
 
   it("backspaces characters", () => {

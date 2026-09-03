@@ -33,3 +33,54 @@ export function highlightMentions(line: string): LineSegment[] {
   if (segments.length === 0) segments.push({ text: line })
   return segments
 }
+
+/** A {@link LineSegment} plus a flag for the single run the caret occupies. */
+export interface CursorLineSegment extends LineSegment {
+  cursor?: boolean
+}
+
+/**
+ * The block glyph the caret uses when it sits past the last character.
+ *
+ * Ink trims styling from a trailing blank cell, so an inverse space at the end
+ * of a line renders as nothing at all. A block glyph survives that pass while
+ * showing the same single-cell caret.
+ */
+export const END_OF_LINE_CARET = "█"
+
+/**
+ * Tokenize a line and split out the cell the caret occupies, so the row the
+ * cursor is on can be drawn with both the caret and its mention colours.
+ *
+ * The composer used to fall back to unhighlighted text on whichever row held
+ * the cursor, so an `@agent:` token changed colour as the cursor moved onto
+ * and off its line. `cursorEnd` is the next grapheme boundary, so a caret over
+ * a wide or combined character covers the whole cluster.
+ */
+export function highlightMentionsWithCursor(
+  line: string,
+  cursorCol: number,
+  cursorEnd: number
+): CursorLineSegment[] {
+  const out: CursorLineSegment[] = []
+  let offset = 0
+  for (const segment of highlightMentions(line)) {
+    const end = offset + segment.text.length
+    if (cursorCol >= offset && cursorCol < end) {
+      const kind = segment.kind ? { kind: segment.kind } : {}
+      const from = cursorCol - offset
+      const to = Math.min(Math.max(cursorEnd - offset, from + 1), segment.text.length)
+      const before = segment.text.slice(0, from)
+      const after = segment.text.slice(to)
+      if (before) out.push({ text: before, ...kind })
+      out.push({ text: segment.text.slice(from, to), ...kind, cursor: true })
+      if (after) out.push({ text: after, ...kind })
+    } else if (segment.text) {
+      out.push(segment)
+    }
+    offset = end
+  }
+  // Past the last character: an empty line, or the cursor parked at the end.
+  if (cursorCol >= offset) out.push({ text: END_OF_LINE_CARET, cursor: true })
+  return out
+}
