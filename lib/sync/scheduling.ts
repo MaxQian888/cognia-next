@@ -119,3 +119,19 @@ export async function applyInSlices<T>(
     if (i < slices.length - 1) await yieldToMain()
   }
 }
+
+/**
+ * Wait a stated number of milliseconds.
+ *
+ * The third pacing primitive, and the only one that is a real delay rather than
+ * a scheduling hint. It exists for one caller: a host that answered "you are
+ * over quota, come back in N seconds". Neither {@link yieldToMain} nor
+ * {@link whenIdle} can express that, because the thing to wait for is not the
+ * browser becoming free, it is a token bucket on the other end refilling.
+ *
+ * Zero or negative resolves on the next macrotask rather than never, so a
+ * caller can pass a computed remainder without guarding the sign.
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)))
+}

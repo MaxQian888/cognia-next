@@ -288,7 +288,11 @@ impl RpcError {
     /// Wave 3.3 — 429 Too Many Requests with the wait time embedded in
     /// the message (`retry_after_seconds=N`). The flat envelope keeps
     /// the contract simple; phones can parse the integer.
-    fn rate_limited(retry_after_secs: u64) -> (StatusCode, Json<Self>) {
+    /// `pub(super)` so the device plane's own 429 constructor can be pinned
+    /// against this one. Two producers of the same status code that disagree on
+    /// the wire shape is a client-side bug waiting to happen, and the drift
+    /// guard has to be able to see both.
+    pub(super) fn rate_limited(retry_after_secs: u64) -> (StatusCode, Json<Self>) {
         (
             StatusCode::TOO_MANY_REQUESTS,
             Json(

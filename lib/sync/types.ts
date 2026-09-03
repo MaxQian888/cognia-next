@@ -48,8 +48,31 @@ export interface SyncResult {
 
 export interface SyncFailure {
   table: SyncableTable
-  reason: "transport" | "not_implemented" | "schema" | "upgrade_required" | "unknown"
+  reason:
+    | "transport"
+    | "not_implemented"
+    | "schema"
+    | "upgrade_required"
+    | "unknown"
+    /**
+     * The host refused because this device is over its read quota.
+     *
+     * Its own category because it is the one failure that says nothing about
+     * the table: the pull was never attempted, and the same call succeeds once
+     * the bucket refills. Folded into `transport` it read as "this table is
+     * broken", so the orchestrator moved straight on to the next table and
+     * spent the rest of the run being refused in turn.
+     */
+    | "rate_limited"
   message: string
+  /**
+   * How long the host asked this client to wait, when it said so.
+   *
+   * Only ever set alongside `reason: "rate_limited"`. The orchestrator waits
+   * this out rather than guessing, which is what keeps a drained bucket from
+   * turning one refusal into one refusal per remaining table.
+   */
+  retryAfterMs?: number
 }
 
 export type SyncOutcome = { ok: true; result: SyncResult } | { ok: false; failure: SyncFailure }

@@ -119,6 +119,61 @@ describe("runSyncHandler", () => {
     expect(out.failure.message).toContain("network unreachable")
   })
 
+  // A quota refusal says nothing about the table. Folded into `transport` it
+  // read as "this table is broken", and the orchestrator moved straight on to
+  // spend the next token that was not there.
+  it("classifies a quota refusal as rate_limited and keeps the host's wait", async () => {
+    const fake = makeFakeTable()
+    const refusal = Object.assign(
+      new Error("device exceeded the remote execution quota; retry_after_seconds=3"),
+      { code: "rate_limited", retryable: true, retryAfterMs: 3_000 }
+    )
+    const transport = makeTransport(refusal)
+
+    const out = await runSyncHandler<FakeRow>(
+      { table: "characters", getTable: () => fake.table },
+      transport,
+      { since: 0 }
+    )
+
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.failure.reason).toBe("rate_limited")
+    expect(out.failure.retryAfterMs).toBe(3_000)
+  })
+
+  it("still recognises a quota refusal from a host that stated no wait", async () => {
+    const fake = makeFakeTable()
+    const refusal = Object.assign(new Error("HTTP 429"), { code: "http_429" })
+    const transport = makeTransport(refusal)
+
+    const out = await runSyncHandler<FakeRow>(
+      { table: "characters", getTable: () => fake.table },
+      transport,
+      { since: 0 }
+    )
+
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.failure.reason).toBe("rate_limited")
+    expect(out.failure.retryAfterMs).toBeUndefined()
+  })
+
+  it("does not mistake an unrelated error mentioning 429 rows for a refusal", async () => {
+    const fake = makeFakeTable()
+    const transport = makeTransport(new Error("network unreachable"))
+
+    const out = await runSyncHandler<FakeRow>(
+      { table: "characters", getTable: () => fake.table },
+      transport,
+      { since: 0 }
+    )
+
+    expect(out.ok).toBe(false)
+    if (out.ok) return
+    expect(out.failure.reason).toBe("transport")
+  })
+
   it("classifies Dexie schema errors as schema", async () => {
     const transport = makeTransport({
       rows: [{ id: "a", name: "alpha" }],

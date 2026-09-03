@@ -34,7 +34,7 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import type { RunStatus } from "@/types/workflow/visual"
 
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
-import { whenIdle, yieldToMain } from "./scheduling"
+import { sleep, whenIdle, yieldToMain } from "./scheduling"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
 import { syncAgentTeamBoard } from "./handlers/agent-team-board"
 import { syncAgentTaskAttempts, syncAgentTasks } from "./handlers/agent-tasks"
@@ -82,7 +82,7 @@ import {
   syncAgentTeammates,
   syncAgentTeams,
 } from "./handlers/agent-team-definitions"
-import type { SyncCursor, SyncOutcome, SyncableTable } from "./types"
+import type { SyncCursor, SyncFailure, SyncOutcome, SyncableTable } from "./types"
 
 export type SyncFn = (transport: Transport, cursor: SyncCursor) => Promise<SyncOutcome>
 
@@ -619,6 +619,41 @@ export interface RunSyncDownOptions {
  */
 let inflight: Promise<SyncOutcome[]> | null = null
 
+/**
+ * Shared read-quota cooldown.
+ *
+ * The host's rate limit is per DEVICE, not per table and not per run, so the
+ * only useful place to hold a refusal is somewhere every caller sees it. A
+ * staged bootstrap has three chains draining at once and the event-driven
+ * installer can start a fourth: back off in one of them and the others keep the
+ * bucket pinned, which is precisely the "never clears it" failure
+ * `CompanionError.retryAfterMs` was added to describe.
+ *
+ * Measured against a headless host on loopback before this existed: a boot
+ * drained the bucket after roughly twenty tables and then took the refusal for
+ * every remaining one, so 23 of 43 tables ended each boot empty with
+ * `lastError: "device exceeded the remote execution quota"`, and the next boot
+ * repeated it because the cursor never advanced.
+ */
+let quotaCooldownUntil = 0
+
+/** How many times one table will wait out a refusal before it is reported. */
+const QUOTA_RETRIES_PER_TABLE = 3
+/** Used when the host refused without saying for how long. */
+const QUOTA_FALLBACK_WAIT_MS = 1_000
+/** Never park a table longer than this, however long the host asked for. */
+const QUOTA_MAX_WAIT_MS = 30_000
+
+async function awaitQuotaCooldown(): Promise<void> {
+  const remaining = quotaCooldownUntil - Date.now()
+  if (remaining > 0) await sleep(Math.min(remaining, QUOTA_MAX_WAIT_MS))
+}
+
+function noteQuotaRefusal(failure: SyncFailure): void {
+  const wait = Math.min(failure.retryAfterMs ?? QUOTA_FALLBACK_WAIT_MS, QUOTA_MAX_WAIT_MS)
+  quotaCooldownUntil = Math.max(quotaCooldownUntil, Date.now() + wait)
+}
+
 export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[]> {
   const isTargeted = opts.only !== undefined || opts.stages !== undefined
   if (inflight && !isTargeted) return inflight
@@ -647,7 +682,25 @@ export function runSyncDown(opts: RunSyncDownOptions = {}): Promise<SyncOutcome[
       if (index > 0) await yieldToMain()
       const state = getState(table)
       const sinceAtStart = state.since
-      const outcome = await run(t, { since: sinceAtStart })
+      // A refusal recorded by any chain parks every table, including this one,
+      // before it spends a token that is not there.
+      await awaitQuotaCooldown()
+      let outcome = await run(t, { since: sinceAtStart })
+      // A quota refusal says nothing about this table, so retrying it is the
+      // only honest response. Bounded, because a host that keeps refusing has
+      // a problem waiting cannot fix, and a table reported as rate-limited is
+      // still better than a run that never ends.
+      for (
+        let attempt = 0;
+        !outcome.ok &&
+        outcome.failure.reason === "rate_limited" &&
+        attempt < QUOTA_RETRIES_PER_TABLE;
+        attempt++
+      ) {
+        noteQuotaRefusal(outcome.failure)
+        await awaitQuotaCooldown()
+        outcome = await run(t, { since: sinceAtStart })
+      }
       if (outcome.ok) {
         // Monotonic cursor guard: a targeted "sync now" run (opts.only) and a
         // full background pull share `stateMap` entries (see getState), so a
@@ -953,5 +1006,6 @@ export function __resetSyncStateForTests(): void {
   // `ensureHydrated` would see a "host change" and wipe the tables it just
   // seeded.
   hydratedServerKey = null
+  quotaCooldownUntil = 0
   void clearCursors()
 }

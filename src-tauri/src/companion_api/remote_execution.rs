@@ -274,6 +274,43 @@ pub async fn execute(
     result
 }
 
+/// The 429 a device gets when it outruns its bucket.
+///
+/// Two things this answer has to carry, and for a long time it carried neither
+/// in a form any client reads.
+///
+/// **`retryable`.** `ExecutionError::new` derives it from `is_server_error()`,
+/// which is false for a 429. That default is wrong for exactly this error: we
+/// have just computed how long the caller must wait, so "come back then" is the
+/// whole message. Left false, the client refuses to retry at all
+/// (`transport-companion.ts`: `if (hostSaysRetryable === false) throw lastError`)
+/// and records the table as failed for the rest of the run.
+///
+/// **The wait.** It lived only in `details.retryAfterSeconds`, which no client
+/// parses. [`super::rpc::RpcError::rate_limited`] on the sibling RPC path had
+/// already settled the convention, `retry_after_seconds=N` inside the message,
+/// and that is what `retryAfterMsFromErrorMessage` reads. Both paths now answer
+/// the same shape, and `details` keeps the machine-readable copy.
+///
+/// Together these are why a companion's sync bootstrap emptied more than half
+/// its mirror on every boot. The burst drains the read bucket, which is
+/// expected and self-correcting, but every table refused after that gave up
+/// instantly instead of waiting out a refill this host had already quantified.
+fn rate_limited_error(request_id: &str, retry_after: std::time::Duration) -> ExecutionError {
+    let retry_after_secs = retry_after.as_secs();
+    let mut error = ExecutionError::new(
+        request_id,
+        StatusCode::TOO_MANY_REQUESTS,
+        "rate_limited",
+        format!(
+            "device exceeded the remote execution quota; retry_after_seconds={retry_after_secs}"
+        ),
+    );
+    error.retryable = true;
+    error.details = json!({ "retryAfterSeconds": retry_after_secs });
+    error
+}
+
 /// Which rate-limit bucket a command is charged to.
 ///
 /// The manifest's `operation` is the single authority — a `read` cannot change
@@ -341,14 +378,7 @@ async fn execute_inner(
             .rate_limiter
             .check_class(&request.principal.device_id, class)
         {
-            let mut error = ExecutionError::new(
-                &request.request_id,
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate_limited",
-                "device exceeded the remote execution quota",
-            );
-            error.details = json!({ "retryAfterSeconds": retry_after.as_secs() });
-            return Err(error);
+            return Err(rate_limited_error(&request.request_id, retry_after));
         }
     }
 
@@ -1116,6 +1146,44 @@ mod tests {
                 "{command} is a read and must not spend the strict bucket"
             );
         }
+    }
+
+    /// A quota refusal must be answerable, not terminal.
+    ///
+    /// The client's whole retry decision is `detail.retryable`, and its wait is
+    /// parsed out of the message. Getting either wrong turns "wait 3 seconds"
+    /// into "this table failed", which is how a bootstrap burst used to leave
+    /// half a companion's mirror empty until the next launch.
+    #[test]
+    fn a_quota_refusal_is_retryable_and_says_how_long_to_wait() {
+        let error = rate_limited_error("req-1", std::time::Duration::from_secs(3));
+
+        assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(error.code, "rate_limited");
+        assert!(
+            error.retryable,
+            "a 429 the host itself timed is retryable; `is_server_error()` is the wrong default here"
+        );
+        assert!(
+            error.message.contains("retry_after_seconds=3"),
+            "the wait must ride in the message, which is where the client parses it: {}",
+            error.message
+        );
+        assert_eq!(error.details["retryAfterSeconds"], json!(3));
+    }
+
+    /// The two 429 producers must not drift apart. A client cannot be expected
+    /// to parse one shape from the RPC plane and another from the device plane.
+    #[test]
+    fn both_rate_limit_paths_agree_on_the_wire_shape() {
+        let device_plane = rate_limited_error("req-1", std::time::Duration::from_secs(7));
+        let (status, rpc_plane) = super::super::rpc::RpcError::rate_limited(7);
+
+        assert_eq!(device_plane.status, status);
+        assert_eq!(device_plane.code, rpc_plane.0.code);
+        assert!(device_plane.message.contains("retry_after_seconds=7"));
+        assert!(rpc_plane.0.message.contains("retry_after_seconds=7"));
+        assert_eq!(device_plane.retryable, rpc_plane.0.retryable);
     }
 
     #[test]

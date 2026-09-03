@@ -132,10 +132,39 @@ export async function runSyncHandler<TRow extends { id: string }>(
   return { ok: true, result: { table: opts.table, applied, nextSince: since } }
 }
 
+/**
+ * The two fields a `CompanionError` carries that matter here, read structurally
+ * rather than by importing the class. `lib/tauri/transport-companion` imports
+ * the sync registry, so naming the type here would close a cycle, and the RTC
+ * transport raises its own error object with the same two fields anyway.
+ */
+function quotaRefusal(err: unknown): { retryAfterMs?: number } | null {
+  if (!err || typeof err !== "object") return null
+  const candidate = err as { code?: unknown; retryAfterMs?: unknown; message?: unknown }
+  const message = typeof candidate.message === "string" ? candidate.message : ""
+  const isQuota =
+    candidate.code === "rate_limited" || candidate.code === "http_429" || /\b429\b/.test(message)
+  if (!isQuota) return null
+  return typeof candidate.retryAfterMs === "number" && Number.isFinite(candidate.retryAfterMs)
+    ? { retryAfterMs: candidate.retryAfterMs }
+    : {}
+}
+
 function classifyTransportError(table: SyncableTable, err: unknown): SyncFailure {
   const message = err instanceof Error ? err.message : String(err)
   if (/upgrade_required/i.test(message)) {
     return { table, reason: "upgrade_required", message }
+  }
+  // Before the generic transport bucket: a quota refusal is the host declining
+  // to answer yet, not this table failing.
+  const quota = quotaRefusal(err)
+  if (quota) {
+    return {
+      table,
+      reason: "rate_limited",
+      message,
+      ...(quota.retryAfterMs === undefined ? {} : { retryAfterMs: quota.retryAfterMs }),
+    }
   }
   // The Rust server rejects unknown RPCs with a 404 / "command not found"
   // response — surface as `not_implemented` so the orchestrator can mark

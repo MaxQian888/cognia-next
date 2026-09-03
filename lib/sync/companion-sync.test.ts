@@ -246,6 +246,88 @@ describe("runSyncDown", () => {
     expect(getSyncStateFor("characters")).toMatchObject({ since: 200, lastError: null })
   })
 
+  // The host's read bucket is per DEVICE. Before this, one drained bucket
+  // turned into one refusal per remaining table: measured against a headless
+  // host on loopback, 23 of 43 tables ended every boot empty.
+  it("waits out a quota refusal and re-runs the same table", async () => {
+    const transport = makeTransport()
+    const run = jest.fn<Promise<SyncOutcome>, [Transport, { since: number }]>()
+    run.mockResolvedValueOnce({
+      ok: false,
+      failure: {
+        table: "characters",
+        reason: "rate_limited",
+        message: "over quota",
+        retryAfterMs: 5,
+      },
+    })
+    run.mockResolvedValueOnce(makeOkOutcome("characters", 1, 42))
+
+    const outcomes = await runSyncDown({
+      transport,
+      handlers: [{ table: "characters" as const, run }],
+    })
+
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(outcomes[0].ok).toBe(true)
+    expect(getSyncStateFor("characters")).toMatchObject({ since: 42, lastError: null })
+  })
+
+  it("gives up on a table the host keeps refusing rather than looping forever", async () => {
+    const transport = makeTransport()
+    const run = jest.fn<Promise<SyncOutcome>, [Transport, { since: number }]>().mockResolvedValue({
+      ok: false,
+      failure: {
+        table: "characters",
+        reason: "rate_limited",
+        message: "over quota",
+        retryAfterMs: 1,
+      },
+    })
+
+    const outcomes = await runSyncDown({
+      transport,
+      handlers: [{ table: "characters" as const, run }],
+    })
+
+    // One attempt plus the bounded retries, then reported.
+    expect(run).toHaveBeenCalledTimes(4)
+    expect(outcomes[0].ok).toBe(false)
+    expect(getSyncStateFor("characters").lastError).toContain("over quota")
+  })
+
+  // The cooldown is shared because the quota is. A refusal recorded while one
+  // table was running has to park the tables behind it too, or the staged
+  // bootstrap's other chains keep the bucket pinned.
+  it("parks a later table after an earlier one was refused", async () => {
+    const transport = makeTransport()
+    const refused = jest.fn<Promise<SyncOutcome>, [Transport, { since: number }]>()
+    refused.mockResolvedValueOnce({
+      ok: false,
+      failure: {
+        table: "characters",
+        reason: "rate_limited",
+        message: "over quota",
+        retryAfterMs: 30,
+      },
+    })
+    refused.mockResolvedValueOnce(makeOkOutcome("characters", 1, 1))
+    const later = jest.fn().mockResolvedValue(makeOkOutcome("skills", 1, 1))
+
+    const startedAt = Date.now()
+    await runSyncDown({
+      transport,
+      handlers: [
+        { table: "characters" as const, run: refused },
+        { table: "skills" as const, run: later },
+      ],
+    })
+
+    expect(later).toHaveBeenCalledTimes(1)
+    // The second table did not start until the stated wait had elapsed.
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(25)
+  })
+
   it("captures lastError on a failing handler without breaking the others", async () => {
     const transport = makeTransport()
     const handlers = [
