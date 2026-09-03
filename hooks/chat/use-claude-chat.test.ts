@@ -324,6 +324,17 @@ const checkDelegationMock = jest.fn(
   } => ({ shouldDelegate: false })
 )
 const setDelegationRulesMock = jest.fn()
+/**
+ * The send readies its own lane before dispatching, so a restored session that
+ * never touched the runtime picker does not die on the manager's internal
+ * "Agent not found". These tests point at `ext-1` without ever registering it
+ * with a manager, so without this every external-lane case is refused with
+ * `external_agent_unavailable` before `executeOnExternalAgent` is reached.
+ */
+jest.mock("@/lib/agent/ensure-external-agent-ready", () => ({
+  ensureExternalAgentReady: async () => ({ ok: true, alreadyConnected: true }),
+}))
+
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   executeOnExternalAgent: (...a: unknown[]) => executeOnExternalAgentMock(...(a as [])),
   getExternalAgentManager: () => ({
@@ -332,11 +343,32 @@ jest.mock("@/lib/ai/agent/external/manager", () => ({
     setDelegationRules: (...a: unknown[]) => setDelegationRulesMock(...(a as [])),
   }),
 }))
+/**
+ * A stand-in for the real mapper, kept faithful on the one axis the tests read:
+ * events it does not route into parts return the SAME array, which is how the
+ * caller detects "no change". Appending for every event made a turn that
+ * produced nothing look like a turn that produced text, so a guard on "did
+ * this turn show anything" could never be exercised here.
+ */
+const PARTS_EVENTS = new Set([
+  "message_delta",
+  "thinking",
+  "commentary_delta",
+  "tool_use_start",
+  "tool_call_update",
+  "tool_use_end",
+  "tool_result",
+  "hook_fire",
+  // Not a real mapper case; the older tests emit it as a shorthand for a text
+  // delta and assert one appended character per event.
+  "text",
+])
 jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
-  applyExternalAgentEventToParts: (parts: unknown) => [
-    ...((parts as unknown[]) ?? []),
-    { type: "text", text: "x", state: "streaming" },
-  ],
+  applyExternalAgentEventToParts: (parts: unknown, event: unknown) => {
+    const type = (event as { type?: string } | undefined)?.type
+    if (type && !PARTS_EVENTS.has(type)) return parts as unknown[]
+    return [...((parts as unknown[]) ?? []), { type: "text", text: "x", state: "streaming" }]
+  },
 }))
 
 const startSquadRunMock = jest.fn<Promise<StartSquadRunResult>, [StartSquadRunInput]>()
@@ -1324,6 +1356,62 @@ describe("useClaudeChat — actions", () => {
         surface: "chat",
       })
     )
+  })
+
+  /**
+   * Pi reports a refused turn on the assistant message it could not produce,
+   * and the adapter maps that to an `error` event. `applyExternalAgentEventToParts`
+   * has no `error` case, so the reason was dropped and the turn settled as an
+   * ordinary completion with an empty bubble: a provider saying "402
+   * Insufficient Balance" reached the user as nothing at all.
+   */
+  it("shows the provider's own words when the agent errored and produced nothing", async () => {
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockImplementation(
+      async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+        opts.onEvent({
+          type: "error",
+          error: '402: {"message":"Insufficient Balance"}',
+          recoverable: true,
+        })
+        // Pi still settles the turn as an ordinary end, which is what made
+        // this look like a success.
+        return { success: true, finalResponse: "" }
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    // The failure path routes through the diagnostic surface, which is the
+    // same red card a refused turn already uses.
+    const reported = chatState.setSessionDiagnostic.mock.calls.map((call) =>
+      JSON.stringify(call[1])
+    )
+    expect(reported.join("\n")).toContain("Insufficient Balance")
+  })
+
+  it("keeps a turn that recovered and answered a success", async () => {
+    // An `error` mid-turn is not a refusal when the agent went on to produce
+    // text, so the promotion above must not fire on one.
+    useAgentRuntimeStore.setState({ runtimeRef: { kind: "external", agentId: "ext-1" } })
+    executeOnExternalAgentMock.mockImplementation(
+      async (_text: string, opts: { onEvent: (e: unknown) => void }) => {
+        opts.onEvent({ type: "error", error: "a retryable hiccup", recoverable: true })
+        opts.onEvent({ type: "message_delta", delta: { type: "text", text: "recovered" } })
+        return { success: true, finalResponse: "recovered" }
+      }
+    )
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hi")
+    })
+    const reported = chatState.setSessionDiagnostic.mock.calls.map((call) =>
+      JSON.stringify(call[1])
+    )
+    expect(reported.join("\n")).not.toContain("hiccup")
   })
 
   it("reuses a verified imported native session on the external lane", async () => {

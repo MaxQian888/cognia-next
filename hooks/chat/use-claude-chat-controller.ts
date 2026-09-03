@@ -2154,6 +2154,18 @@ export function useClaudeChat() {
             coalesce.commit.call(nextMessages)
             coalesce.persist.call(nextMessages)
           }
+          /**
+           * What the agent said when it refused this turn.
+           *
+           * Pi reports a failed turn on the assistant message it could not
+           * produce (`stopReason: "error"` carrying the provider's own words),
+           * and the adapter maps that to an `error` event. Nothing downstream
+           * read it: `applyExternalAgentEventToParts` has no `error` case, so
+           * "402 Insufficient Balance" was dropped and the turn settled as a
+           * perfectly ordinary completion with an empty assistant bubble. The
+           * user was told nothing at all.
+           */
+          let externalErrorDetail: string | null = null
           /** Seal the coalescer: apply the last frame now, drop the debounced write. */
           const sealCoalescer = () => {
             coalesce.commit.flush()
@@ -2180,6 +2192,16 @@ export function useClaudeChat() {
           const handleExternalEvent = (
             event: import("@/types/agent/external-agent").ExternalAgentEvent
           ) => {
+            // First, before anything else in this handler can throw or return:
+            // an agent that refused the turn has exactly one useful thing to
+            // say, and remembering it must not depend on the projection or the
+            // routing below succeeding. Remembered rather than rendered,
+            // because an `error` can also arrive mid-turn on an agent that
+            // recovers and answers anyway; it is promoted to a failure only
+            // when the turn ends with nothing to show.
+            if (event.type === "error") {
+              externalErrorDetail = event.error ?? externalErrorDetail
+            }
             const capture = captureEventFromCanonical(canonicalEventFromExternalEvent(event))
             if (capture) void projectDirectChatCaptureEvent(sessionId, capture)
             if (event.type === "permission_request") {
@@ -2309,15 +2331,25 @@ export function useClaudeChat() {
             return
           }
 
+          const hasVisibleText = assistantParts.some(
+            (p) => (p as { type?: string }).type === "text" && (p as { text?: string }).text
+          )
+
+          // An agent that reported an error and produced nothing did not
+          // complete: it was refused, and the provider's own words are the
+          // only useful thing to show. Checked before the `finalResponse`
+          // fallback below, which would otherwise paint an empty string over
+          // the reason. Guarded on there being no text so a turn that
+          // recovered and answered is still a success.
+          if (!hasVisibleText && externalErrorDetail) {
+            await handleExternalFailure(externalErrorDetail)
+            return
+          }
+
           // When the event stream never produced a text track (some agents
           // only emit a single final response), fall back to the assembled
           // finalResponse to make sure the user always sees something.
-          if (
-            assistantParts.length === 0 ||
-            !assistantParts.some(
-              (p) => (p as { type?: string }).type === "text" && (p as { text?: string }).text
-            )
-          ) {
+          if (!hasVisibleText) {
             assistantParts = [
               ...(assistantParts as unknown as Array<Record<string, unknown>>),
               { type: "text", text: result.finalResponse, state: "done" },
