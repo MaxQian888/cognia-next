@@ -144,12 +144,131 @@ export async function runWorkspaceUserAction<T>(
 }
 
 /**
+ * The task-workspace commands ONE chat turn issues while it holds a managed
+ * working copy.
+ *
+ * Every one of them is `approval: "interactive"`, so on a companion each was
+ * refused with `a current device-bound approval lease is required` and the
+ * turn died before the model was ever called. Wrapping them individually in
+ * {@link runWorkspaceUserAction} would mint a lease per tool event, and the
+ * settle happens long after the send call returns, so a one-shot lease is the
+ * wrong shape here. The gesture being approved is pressing Send once.
+ */
+export const WORKSPACE_TURN_COMMANDS = Object.freeze([
+  "task_workspace_bundle_acquire",
+  "task_workspace_bundle_turn_begin",
+  "task_workspace_bundle_turn_settle",
+  "task_workspace_bundle_turn_abort",
+  "task_workspace_record_tool_event",
+  "task_workspace_begin",
+  "task_workspace_settle",
+])
+
+/** How long a scope's lease runs before it is re-minted on the next call. */
+const SCOPE_LEASE_TTL_SECONDS = 15 * 60
+/** Re-mint this far ahead of expiry so a call in flight cannot outlive it. */
+const SCOPE_RENEW_MARGIN_MS = 30_000
+
+interface ApprovalScope {
+  commands: readonly string[]
+  token: string
+  expiresAt: number
+  closed: boolean
+}
+
+/**
+ * Standing approvals, newest last. Unlike {@link pendingApprovals} these are
+ * NOT consumed by a call: one scope covers every command it names for as long
+ * as the work it was opened for is running.
+ */
+const approvalScopes: ApprovalScope[] = []
+
+/** A standing approval held open by {@link openWorkspaceApprovalScope}. */
+export interface WorkspaceApprovalScope {
+  close(): void
+}
+
+/**
+ * Hold one approval open across a piece of multi-call work.
+ *
+ * Returns `null` when nothing needs approving: this shell IS the execution
+ * host, or its host does not gate these commands. Throws
+ * {@link WorkspaceOperationUnavailableError} when the device cannot mint a
+ * lease at all, so a surface can say which grant is missing instead of showing
+ * the host's wire refusal.
+ *
+ * The caller MUST `close()` it. A scope left open keeps a step-up token usable
+ * by later work the user never asked for, which is the whole thing the lease
+ * exists to prevent.
+ */
+export async function openWorkspaceApprovalScope(
+  commands: readonly string[] = WORKSPACE_TURN_COMMANDS
+): Promise<WorkspaceApprovalScope | null> {
+  const snapshot = getRuntimeSnapshot()
+  if (!snapshot.target || snapshot.target.kind !== "companion") return null
+  const gated = commands.filter(
+    (command) => getCommandDescriptor(command)?.approval === "interactive"
+  )
+  if (gated.length === 0) return null
+  for (const command of gated) {
+    const availability = resolveUserActionAvailability(snapshot, command)
+    if (availability.state !== "available") {
+      throw new WorkspaceOperationUnavailableError(command, availability)
+    }
+  }
+
+  const lease = await issueHostAdminLease([...gated], SCOPE_LEASE_TTL_SECONDS)
+  const scope: ApprovalScope = {
+    commands: gated,
+    token: lease.token,
+    expiresAt: lease.expiresAt,
+    closed: false,
+  }
+  approvalScopes.push(scope)
+  return {
+    close() {
+      scope.closed = true
+      const index = approvalScopes.indexOf(scope)
+      if (index >= 0) approvalScopes.splice(index, 1)
+    },
+  }
+}
+
+/**
+ * The live scope covering `command`, re-minting it when it is about to expire.
+ *
+ * A managed turn can outrun any single lease, and losing one mid-turn means the
+ * settle that releases the working copy is refused. Renewal keeps the same
+ * scope alive rather than widening its TTL, so an abandoned scope still stops
+ * being usable.
+ */
+async function scopeLeaseFor(command: string): Promise<string | undefined> {
+  const scope = [...approvalScopes]
+    .reverse()
+    .find((candidate) => !candidate.closed && candidate.commands.includes(command))
+  if (!scope) return undefined
+  if (scope.expiresAt - Date.now() > SCOPE_RENEW_MARGIN_MS) return scope.token
+  const renewed = await issueHostAdminLease([...scope.commands], SCOPE_LEASE_TTL_SECONDS)
+  if (scope.closed) return undefined
+  scope.token = renewed.token
+  scope.expiresAt = renewed.expiresAt
+  return scope.token
+}
+
+/**
  * The transport `client.ts` writes through. Reads may use the base transport
  * directly, writes must come through here or they lose the lease.
  */
 export const approvalAwareTransport = {
-  call<T>(command: string, args?: unknown): Promise<T> {
-    const next = applyWorkspaceApproval(command, args)
+  async call<T>(command: string, args?: unknown): Promise<T> {
+    let next = applyWorkspaceApproval(command, args)
+    if (next?.adminLease === undefined) {
+      // A one-shot lease wins: it was minted for this exact call. Only when
+      // there is none does the standing scope answer.
+      const scoped = await scopeLeaseFor(command)
+      if (scoped)
+        next = { ...((next ?? args ?? {}) as Record<string, unknown>), adminLease: scoped }
+    }
     // Preserve the caller's arity. A few commands take no arguments at all,
     // and forwarding an explicit `undefined` changes the call the transport
     // sees for no benefit.

@@ -586,3 +586,49 @@ describe("hostStateScope", () => {
     expect(parseHostFeatureManifest(wire)).toBeNull()
   })
 })
+
+describe("workspace.task-workspace", () => {
+  // The plane had no descriptor at all. Both hosts dispatched every arm, and
+  // `resolveOperationAvailability` still answered `operation-unavailable`, so a
+  // companion refused its own chat turn before the request left the device.
+  it("is advertised by both execution hosts and by neither thin client", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(manifest.features["workspace.task-workspace"]?.operations).toEqual(
+        expect.arrayContaining([
+          "task_workspace_bundle_acquire",
+          "task_workspace_bundle_turn_begin",
+          "task_workspace_bundle_turn_settle",
+          "task_workspace_record_tool_event",
+        ])
+      )
+    }
+    expect(
+      buildLocalHostFeatureManifest({ platform: "web" }).features["workspace.task-workspace"]
+    ).toBeUndefined()
+  })
+
+  it("leaves the caller's own subscription out, because it never travels", () => {
+    const operations =
+      buildLocalHostFeatureManifest({ platform: "headless" }).features["workspace.task-workspace"]
+        ?.operations ?? []
+
+    expect(operations).not.toContain("task_workspace_watch")
+    expect(operations).not.toContain("task_workspace_stop_watch")
+  })
+
+  // The plane is unusable without a lease, but naming the minter twice makes
+  // the whole manifest unparseable: the flat operation list is a flatMap and
+  // the parser rejects a duplicate name.
+  it("relies on source-control.git for the lease minter rather than repeating it", () => {
+    const manifest = buildLocalHostFeatureManifest({ platform: "headless" })
+
+    expect(manifest.features["workspace.task-workspace"]?.operations).not.toContain(
+      "host_admin_lease_issue"
+    )
+    expect(manifest.operations.map((operation) => operation.name)).toContain(
+      "host_admin_lease_issue"
+    )
+    expect(parseHostFeatureManifest(JSON.parse(JSON.stringify(manifest)))).not.toBeNull()
+  })
+})

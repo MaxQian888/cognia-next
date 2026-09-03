@@ -57,6 +57,87 @@ const bundle = {
   createdAt: 1,
 }
 
+describe("a session-scoped managed workspace", () => {
+  // `createManagedWorkspaceContext` is used exactly when the owning workspace
+  // has no directory, so the Project it names is rootless by construction. The
+  // helper used to ask that Project for a root and refuse the first turn of
+  // every rootless chat with "managed execution requires at least one Project
+  // root".
+  const rootlessProject = { id: "project-default", roots: [] }
+  const managedContext: SessionExecutionContext = {
+    ...context,
+    projectId: "project-default",
+    projectRoot: "/managed/session-1",
+    workspaceBinding: { kind: "managed", workspaceId: "managed-workspace:session-1" },
+    managedWorkspace: {
+      availability: "available",
+      localRoot: "/managed/session-1",
+      materializedAt: 5,
+    },
+  }
+  const managedBundle = {
+    ...bundle,
+    leases: [
+      {
+        bundleId: "bundle-1",
+        workspaceId: "workspace-managed",
+        logicalRootId: "primary",
+        role: "primary" as const,
+        aliasPath: "/isolated/managed",
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    acquireWorkspaceBundle.mockResolvedValue(managedBundle)
+    getWorkspaceBundle.mockResolvedValue(null)
+  })
+
+  it("mounts the managed directory instead of asking a rootless Project", async () => {
+    const binding = await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context: managedContext,
+      project: rootlessProject,
+      loadProvisioning: async () => undefined,
+    })
+
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "project-default",
+        roots: [{ logicalRootId: "primary", role: "primary", sourceRoot: "/managed/session-1" }],
+      })
+    )
+    expect(binding.primaryAlias).toBe("/isolated/managed")
+    expect(binding.primaryLogicalRootId).toBe("primary")
+    expect(binding.additionalAliases).toEqual([])
+    expect(binding.context.execution?.roots).toEqual([
+      {
+        logicalRootId: "primary",
+        role: "primary",
+        aliasPath: "/isolated/managed",
+        workspaceId: "workspace-managed",
+      },
+    ])
+  })
+
+  it("names the managed workspace when this device never materialized it", async () => {
+    await expect(
+      ensureSessionExecutionBundle({
+        sessionId: "session-1",
+        context: {
+          ...managedContext,
+          projectRoot: "",
+          managedWorkspace: { availability: "missing-on-device" },
+        },
+        project: rootlessProject,
+        loadProvisioning: async () => undefined,
+      })
+    ).rejects.toThrow("managed workspace is not available on this device")
+    expect(acquireWorkspaceBundle).not.toHaveBeenCalled()
+  })
+})
+
 describe("ensureSessionExecutionBundle", () => {
   beforeEach(() => {
     jest.clearAllMocks()

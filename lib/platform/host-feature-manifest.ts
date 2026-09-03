@@ -27,6 +27,11 @@ export const HOST_FEATURE_IDS = [
   "ocr.server",
   "notifications.remote",
   "workspace.files",
+  // The managed working copy a chat turn runs in. Its absence is what a client
+  // reads as "this host cannot hold a working copy for me", which is the honest
+  // answer for a host too old to have the plane, and was the WRONG answer for
+  // every host that has always had it.
+  "workspace.task-workspace",
   "source-control.git",
   "twin.runtime",
   "session.state-sync",
@@ -205,6 +210,29 @@ export const INBOX_RELAY_HOST_OPERATIONS = Object.freeze([
 export const SOURCE_CONTROL_HOST_OPERATIONS = Object.freeze(
   getCommandManifest()
     .commands.filter((command) => command.name.startsWith("git_") && command.target === "execution")
+    .map((command) => command.name)
+)
+
+/**
+ * Managed working copies, implemented by the remote execution host.
+ *
+ * Derived from the manifest for the same reason the git list is: the arms are
+ * host-neutral (`crate::task_workspace::service()`), so a hand-kept list would
+ * drift the moment one was added. `target: "client"` drops
+ * `task_workspace_watch` / `_stop_watch`, which are the caller's own
+ * subscription and never travel.
+ *
+ * This feature had no descriptor at all, which is why it mattered: nothing
+ * advertised the plane, `resolveOperationAvailability` answered
+ * `operation-unavailable` for every command in it, and a companion refused its
+ * own chat turn before the request left the device. The host had dispatched all
+ * of them the whole time.
+ */
+export const TASK_WORKSPACE_HOST_OPERATIONS = Object.freeze(
+  getCommandManifest()
+    .commands.filter(
+      (command) => command.name.startsWith("task_workspace_") && command.target === "execution"
+    )
     .map((command) => command.name)
 )
 
@@ -440,6 +468,20 @@ export function buildLocalHostFeatureManifest({
         "event:workflow://step-execute",
         "event:ocr://download-progress",
       ],
+    }
+    // The managed working copy a chat turn runs in: acquire the bundle, open
+    // the turn, record what the tools did, settle.
+    //
+    // Every one of these is `approval: "interactive"`, so the plane is only
+    // usable alongside `host_admin_lease_issue`. That operation is NOT repeated
+    // here: the flat `operations` list is a flatMap with no dedupe and the
+    // parser rejects a duplicate name outright, so naming it twice would make
+    // the whole manifest unparseable. `source-control.git` declares it, and the
+    // two features are emitted by this same branch, so a host that advertises
+    // one always advertises the other.
+    features["workspace.task-workspace"] = {
+      version: 1,
+      operations: [...TASK_WORKSPACE_HOST_OPERATIONS],
     }
     features["workspace.files"] = {
       version: 1,

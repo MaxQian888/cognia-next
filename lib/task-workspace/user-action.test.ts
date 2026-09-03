@@ -23,7 +23,9 @@ import {
   applyWorkspaceApproval,
   approvalAwareTransport,
   getWorkspaceOperationAvailability,
+  openWorkspaceApprovalScope,
   runWorkspaceUserAction,
+  WORKSPACE_TURN_COMMANDS,
   WorkspaceOperationUnavailableError,
 } from "./user-action"
 
@@ -172,5 +174,108 @@ describe("getWorkspaceOperationAvailability", () => {
     expect(getWorkspaceOperationAvailability("task_workspace_managed_delete").state).toBe(
       "unsupported"
     )
+  })
+})
+
+describe("openWorkspaceApprovalScope", () => {
+  /** The turn commands, plus the lease minter, all published and granted. */
+  function turnCapableSnapshot() {
+    return companionSnapshot({
+      operations: [...WORKSPACE_TURN_COMMANDS, "host_admin_lease_issue"],
+    })
+  }
+
+  beforeEach(() => {
+    issueLeaseMock.mockResolvedValue({
+      token: "turn-lease",
+      operations: [...WORKSPACE_TURN_COMMANDS],
+      expiresAt: Date.now() + 15 * 60 * 1000,
+    })
+  })
+
+  // The defect: every task-workspace call a managed turn makes is
+  // `approval: "interactive"`, and the send path wrapped none of them, so the
+  // host refused with "a current device-bound approval lease is required".
+  it("covers every call of the turn with one lease, not one lease per call", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    const scope = await openWorkspaceApprovalScope()
+
+    await approvalAwareTransport.call("task_workspace_bundle_turn_begin", { bundleId: "b1" })
+    await approvalAwareTransport.call("task_workspace_record_tool_event", { taskId: "t1" })
+    await approvalAwareTransport.call("task_workspace_bundle_turn_settle", { turnId: "u1" })
+
+    expect(issueLeaseMock).toHaveBeenCalledTimes(1)
+    for (const [, args] of callMock.mock.calls) {
+      expect(args).toMatchObject({ adminLease: "turn-lease" })
+    }
+    scope?.close()
+  })
+
+  it("stops covering anything once the turn settles", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    const scope = await openWorkspaceApprovalScope()
+    scope?.close()
+
+    await approvalAwareTransport.call("task_workspace_record_tool_event", { taskId: "t1" })
+
+    expect(callMock).toHaveBeenCalledWith("task_workspace_record_tool_event", { taskId: "t1" })
+  })
+
+  it("re-mints rather than letting a long turn outlive its lease", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    issueLeaseMock.mockResolvedValueOnce({
+      token: "about-to-expire",
+      operations: [...WORKSPACE_TURN_COMMANDS],
+      expiresAt: Date.now() + 1_000,
+    })
+    const scope = await openWorkspaceApprovalScope()
+
+    await approvalAwareTransport.call("task_workspace_record_tool_event", { taskId: "t1" })
+
+    expect(issueLeaseMock).toHaveBeenCalledTimes(2)
+    expect(callMock).toHaveBeenCalledWith("task_workspace_record_tool_event", {
+      taskId: "t1",
+      adminLease: "turn-lease",
+    })
+    scope?.close()
+  })
+
+  it("approves nothing on a shell that IS the execution host", async () => {
+    snapshotMock.mockReturnValue(NATIVE_HOST_SNAPSHOT)
+
+    await expect(openWorkspaceApprovalScope()).resolves.toBeNull()
+    expect(issueLeaseMock).not.toHaveBeenCalled()
+  })
+
+  it("names the missing grant instead of letting the host refuse the turn", async () => {
+    snapshotMock.mockReturnValue(
+      companionSnapshot({
+        operations: [...WORKSPACE_TURN_COMMANDS, "host_admin_lease_issue"],
+        grants: ["workspace.write"],
+      })
+    )
+
+    await expect(openWorkspaceApprovalScope()).rejects.toThrow(WorkspaceOperationUnavailableError)
+    expect(issueLeaseMock).not.toHaveBeenCalled()
+  })
+
+  it("lets a one-shot lease win over the standing scope", async () => {
+    snapshotMock.mockReturnValue(turnCapableSnapshot())
+    const scope = await openWorkspaceApprovalScope()
+    issueLeaseMock.mockResolvedValueOnce({
+      token: "one-shot",
+      operations: ["task_workspace_record_tool_event"],
+      expiresAt: Date.now() + 120_000,
+    })
+
+    await runWorkspaceUserAction("task_workspace_record_tool_event", () =>
+      approvalAwareTransport.call("task_workspace_record_tool_event", { taskId: "t1" })
+    )
+
+    expect(callMock).toHaveBeenCalledWith("task_workspace_record_tool_event", {
+      taskId: "t1",
+      adminLease: "one-shot",
+    })
+    scope?.close()
   })
 })
