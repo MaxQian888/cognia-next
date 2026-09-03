@@ -2,4 +2,4 @@
 "cognia-next": patch
 ---
 
-Show the warnings that plugin conversion and coding-agent migration were already producing. Installing a Claude Code, Codex or Gemini plugin now lists which capabilities did not survive conversion and why, instead of a bare "N warnings" count, and the migration wizard shows each importer's notes and explains a category that imported nothing because Cognia already reads the same location.
+A conversation whose page reloaded mid-turn can be sent to again. The turn it left running kept holding that conversation's working copy, and because nothing ever ended it, every later message was refused with "pipeline workspace is already active" until the app itself was restarted. A refused send now asks the browser's other tabs whether any of them is still driving that turn, and releases it only when none is.

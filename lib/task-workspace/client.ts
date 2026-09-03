@@ -4,6 +4,11 @@ import { onTauriEvent } from "@/lib/tauri"
 // and routing all of them one way means a write cannot be added later that
 // silently skips the lease. See `./user-action.ts`.
 import { approvalAwareTransport as transport, runWorkspaceUserAction } from "./user-action"
+import {
+  forgetOpenBundleTurn,
+  reclaimAbandonedBundleTurns,
+  rememberOpenBundleTurn,
+} from "./abandoned-turns"
 import { recordTaskWorkspaceOutcome } from "@/lib/code-adoption/outcome"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
@@ -131,15 +136,51 @@ export async function beginTaskWorkspaceBundleTurn(
   }
 }
 
+/**
+ * The host's refusal when a run is still `running` on this conversation's
+ * execution root.
+ *
+ * Matched on the message because that is all the host sends: the refusal is a
+ * plain `Err(String)` from the task-workspace service and gains nothing from a
+ * code here that only this one call site would read.
+ */
+const WORKSPACE_ALREADY_ACTIVE = /pipeline workspace is already active/i
+
 export async function beginWorkspaceBundleTurn(
   bundleId: string,
   request: BeginWorkspaceBundleTurn
 ): Promise<WorkspaceBundleTurnLease | null> {
   try {
+    return await beginWorkspaceBundleTurnOnce(bundleId, request)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const hostDeferred = /remote.control|not authorized|unknown.command|forbidden/i.test(message)
+    if (hostDeferred) return null
+    if (!WORKSPACE_ALREADY_ACTIVE.test(message)) throw error
+    // A turn is holding this conversation's working copy. It is either a live
+    // one somewhere (another tab, another device), in which case refusing is
+    // right, or one this browser abandoned by reloading mid-turn, which nothing
+    // else will ever end. Asking is the only way to tell the two apart.
+    const released = await reclaimAbandonedBundleTurns(request.run.sessionId).catch(() => [])
+    if (released.length === 0) throw error
+    return await beginWorkspaceBundleTurnOnce(bundleId, request)
+  }
+}
+
+async function beginWorkspaceBundleTurnOnce(
+  bundleId: string,
+  request: BeginWorkspaceBundleTurn
+): Promise<WorkspaceBundleTurnLease> {
+  {
     const turn = await transport.call<WorkspaceBundleTurnLease>(
       "task_workspace_bundle_turn_begin",
       { bundleId, request }
     )
+    rememberOpenBundleTurn({
+      bundleTurnId: turn.bundleTurnId,
+      sessionId: request.run.sessionId,
+      openedAt: Date.now(),
+    })
     const primaryIndex = turn.runs.findIndex((lease) =>
       lease.logicalRootIds.includes(turn.primaryLogicalRootId)
     )
@@ -165,11 +206,6 @@ export async function beginWorkspaceBundleTurn(
       })
     }
     return turn
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const hostDeferred = /remote.control|not authorized|unknown.command|forbidden/i.test(message)
-    if (!hostDeferred) throw error
-    return null
   }
 }
 
@@ -207,6 +243,7 @@ export async function settleWorkspaceBundleTurn(
     "task_workspace_bundle_turn_settle",
     { bundleTurnId, finalState }
   )
+  forgetOpenBundleTurn(bundleTurnId)
   return reconcileWorkspaceBundleTurnOutcome(outcome)
 }
 
@@ -217,6 +254,7 @@ export async function abortWorkspaceBundleTurn(
     "task_workspace_bundle_turn_abort",
     { bundleTurnId }
   )
+  forgetOpenBundleTurn(bundleTurnId)
   return reconcileWorkspaceBundleTurnOutcome(outcome)
 }
 

@@ -26,6 +26,16 @@ jest.mock("@/lib/tauri", () => ({
   onTauriEvent: (...args: unknown[]) => subscribe(...args),
 }))
 
+const reclaim = jest.fn(async () => [] as string[])
+const remember = jest.fn()
+const forget = jest.fn()
+jest.mock("./abandoned-turns", () => ({
+  reclaimAbandonedBundleTurns: (...args: unknown[]) =>
+    reclaim(...(args as [])) as Promise<string[]>,
+  rememberOpenBundleTurn: (...args: unknown[]) => remember(...args),
+  forgetOpenBundleTurn: (...args: unknown[]) => forget(...args),
+}))
+
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
   acquireWorkspaceBundle,
@@ -72,6 +82,9 @@ describe("task workspace client", () => {
     call.mockReset()
     subscribe.mockReset()
     recordOutcome.mockReset()
+    reclaim.mockReset().mockResolvedValue([])
+    remember.mockReset()
+    forget.mockReset()
     useTaskWorkspaceStore.getState().clear()
   })
 
@@ -273,6 +286,96 @@ describe("task workspace client", () => {
       bundleId: "bundle-1",
       logicalRootId: "primary",
       input,
+    })
+  })
+
+  describe("a conversation whose working copy is still held", () => {
+    const input = {
+      taskId: "task-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      agentId: "built-in",
+      agentKind: "in-app",
+      workspaceRoot: "/isolated/repo",
+    }
+    const lease = {
+      bundleTurnId: "turn-2",
+      bundleId: "bundle-1",
+      primaryLogicalRootId: "primary",
+      primaryAlias: "/isolated/repo",
+      additionalAliases: [],
+      runs: [
+        {
+          workspaceId: "ws-primary",
+          logicalRootIds: ["primary"],
+          run: {
+            taskId: "task-primary",
+            runId: "run-primary",
+            executionRoot: "/isolated/repo",
+            state: "running",
+          },
+        },
+      ],
+      state: "running",
+      createdAt: 1,
+      settledAt: null,
+    }
+
+    // The reload case. A turn nothing is driving any more held the execution
+    // root, and before this the conversation was refused for good.
+    it("releases what this browser abandoned, then begins", async () => {
+      call
+        .mockRejectedValueOnce(new Error("pipeline workspace is already active: session-1"))
+        .mockResolvedValueOnce(lease)
+      reclaim.mockResolvedValue(["turn-1"])
+
+      await expect(
+        beginWorkspaceBundleTurn("bundle-1", { primaryLogicalRootId: "primary", run: input })
+      ).resolves.toMatchObject({ bundleTurnId: "turn-2" })
+      expect(reclaim).toHaveBeenCalledWith("session-1")
+      expect(call).toHaveBeenCalledTimes(2)
+    })
+
+    // Nothing was released, so the turn holding the root is live somewhere and
+    // the refusal was right. Retrying would only refuse again, and swallowing
+    // it would send a turn with no working copy.
+    it("keeps the refusal when nothing was abandoned", async () => {
+      call.mockRejectedValue(new Error("pipeline workspace is already active: session-1"))
+      reclaim.mockResolvedValue([])
+
+      await expect(
+        beginWorkspaceBundleTurn("bundle-1", { primaryLogicalRootId: "primary", run: input })
+      ).rejects.toThrow("already active")
+      expect(call).toHaveBeenCalledTimes(1)
+    })
+
+    // Only this one refusal is retried. Any other failure is the host saying
+    // something a second identical call cannot change.
+    it("does not retry a different failure", async () => {
+      call.mockRejectedValue(new Error("workspace is not a directory: /isolated/repo"))
+      await expect(
+        beginWorkspaceBundleTurn("bundle-1", { primaryLogicalRootId: "primary", run: input })
+      ).rejects.toThrow("not a directory")
+      expect(reclaim).not.toHaveBeenCalled()
+      expect(call).toHaveBeenCalledTimes(1)
+    })
+
+    // A host that defers the whole plane still answers null rather than
+    // throwing, which is what lets a turn run unmanaged.
+    it("still defers to a host that will not run the plane", async () => {
+      call.mockRejectedValue(new Error("remote control is not authorized"))
+      await expect(
+        beginWorkspaceBundleTurn("bundle-1", { primaryLogicalRootId: "primary", run: input })
+      ).resolves.toBeNull()
+      expect(reclaim).not.toHaveBeenCalled()
+    })
+
+    it("records the turn it opened so a later page can release it", async () => {
+      call.mockResolvedValueOnce(lease)
+      await beginWorkspaceBundleTurn("bundle-1", { primaryLogicalRootId: "primary", run: input })
+      expect(remember).toHaveBeenCalledWith(
+        expect.objectContaining({ bundleTurnId: "turn-2", sessionId: "session-1" })
+      )
     })
   })
 
