@@ -164,6 +164,7 @@
     "0162-sftp-is-shell-equivalent",
     "0163-provider-operation-contract",
     "0164-templates-squads-and-commands-are-portable-and-iterable",
-    "0165-ambient-cost-visibility-and-the-optimization-loop"
+    "0165-ambient-cost-visibility-and-the-optimization-loop",
+    "0166-a-branch-knows-where-it-lives"
   ]
 }
