@@ -5,7 +5,7 @@ import {
   type GitProviderDeps,
   type GitSearchSnapshot,
 } from "./git"
-import type { GlobalSearchContext, GlobalSearchItem } from "../types"
+import type { GlobalSearchContext, GlobalSearchItem, GlobalSearchProvider } from "../types"
 import type { GitBranch, GitWorktree } from "@/types/git"
 
 const ctx = {
@@ -64,7 +64,7 @@ function deps(overrides: Partial<GitProviderDeps> = {}): GitProviderDeps {
 }
 
 async function search(
-  provider: ReturnType<typeof createGitBranchesProvider>,
+  provider: { search: GlobalSearchProvider["search"] },
   needle: string
 ): Promise<GlobalSearchItem[]> {
   const result = await provider.search({
@@ -85,7 +85,6 @@ describe("git branches provider", () => {
   it("says which worktree holds a branch rather than implying it is here", async () => {
     const items = await search(createGitBranchesProvider(deps()), "held-one")
     const row = items.find((item) => item.title === "held-one")
-    expect(row?.extra).toMatchObject({ placement: "otherWorktree" })
     expect(row?.subtitle).toBe("globalSearch.git.inWorktree")
   })
 

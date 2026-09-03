@@ -3,7 +3,16 @@ import { BranchHeader } from "./branch-header"
 import type { GitBranch } from "@/types/git"
 
 const branches: GitBranch[] = [
-  { name: "main", isCurrent: true, isRemote: false, upstream: null, ahead: 0, behind: 0 },
+  {
+    name: "main",
+    isCurrent: true,
+    isRemote: false,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    checkedOutIn: null,
+    checkoutLocked: false,
+  },
 ]
 const actions = {
   checkout: jest.fn(),

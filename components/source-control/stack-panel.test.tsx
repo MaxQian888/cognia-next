@@ -24,10 +24,46 @@ const STACK: Stack = {
 }
 
 const BRANCHES: GitBranch[] = [
-  { name: "main", isCurrent: false, isRemote: false, upstream: null, ahead: 0, behind: 0 },
-  { name: "me/a", isCurrent: true, isRemote: false, upstream: null, ahead: 0, behind: 0 },
-  { name: "me/b", isCurrent: false, isRemote: false, upstream: null, ahead: 0, behind: 0 },
-  { name: "origin/main", isCurrent: false, isRemote: true, upstream: null, ahead: 0, behind: 0 },
+  {
+    name: "main",
+    isCurrent: false,
+    isRemote: false,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    checkedOutIn: null,
+    checkoutLocked: false,
+  },
+  {
+    name: "me/a",
+    isCurrent: true,
+    isRemote: false,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    checkedOutIn: null,
+    checkoutLocked: false,
+  },
+  {
+    name: "me/b",
+    isCurrent: false,
+    isRemote: false,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    checkedOutIn: null,
+    checkoutLocked: false,
+  },
+  {
+    name: "origin/main",
+    isCurrent: false,
+    isRemote: true,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    checkedOutIn: null,
+    checkoutLocked: false,
+  },
 ]
 
 function state(over: Partial<GitStackLayerState> & { branch: string }): GitStackLayerState {

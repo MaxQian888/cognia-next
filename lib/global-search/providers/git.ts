@@ -130,7 +130,7 @@ export function createGitBranchesProvider(deps: GitProviderDeps = defaultDeps) {
             : (row.upstream ?? undefined),
         icon: { lucide: GitBranchIcon },
         score: match.score,
-        extra: { placement: placement.kind, current: row.isCurrent },
+        extra: { current: row.isCurrent },
         action: { type: "navigate", href: sourceControlHref(target) },
       }
     },
@@ -163,7 +163,7 @@ export function createGitWorktreesProvider(deps: GitProviderDeps = defaultDeps) 
         subtitle: row.branch ?? ctx.t("globalSearch.git.detached"),
         icon: { lucide: FolderGitIcon },
         score: match.score,
-        extra: { locked: row.locked, main: row.isMain },
+        extra: { current: row.isMain },
         action: { type: "navigate", href: sourceControlHref(target) },
       }
     },

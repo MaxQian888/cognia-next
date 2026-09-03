@@ -135,6 +135,8 @@ export function makeBranch(name: string, over: Partial<GitBranch> = {}): GitBran
     upstream: null,
     ahead: 0,
     behind: 0,
+    checkedOutIn: null,
+    checkoutLocked: false,
     ...over,
   }
 }

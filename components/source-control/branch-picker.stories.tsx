@@ -11,6 +11,8 @@ const branch = (name: string, over: Partial<GitBranch> = {}): GitBranch => ({
   name,
   isCurrent: false,
   isRemote: false,
+  checkedOutIn: null,
+  checkoutLocked: false,
   upstream: null,
   ahead: 0,
   behind: 0,
