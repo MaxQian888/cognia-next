@@ -1986,11 +1986,11 @@
     "cardTitle": "编程智能体迁移",
     "close": "关闭",
     "connectRuntime": {
-      "title": "连接 {name}",
-      "body": "配置已经迁移过来了，Cognia 现在可以直接运行 {name}。",
       "action": "连接",
+      "body": "配置已经迁移过来了，Cognia 现在可以直接运行 {name}。",
       "connected": "已连接",
-      "failed": "无法创建连接。"
+      "failed": "无法创建连接。",
+      "title": "连接 {name}"
     },
     "continue": "继续",
     "description": "从已安装的编程智能体导入受支持的数据。写入前可逐项预览。",
@@ -39147,7 +39147,8 @@
       "renameTo": "将当前分支重命名为…",
       "search": "搜索分支…",
       "stackParent": "基于 {name}",
-      "switch": "切换分支"
+      "switch": "切换分支",
+      "title": "分支"
     },
     "clone": {
       "authHelp": "请先通过 Git 凭据管理器或 SSH Agent 登录，然后重试。",
@@ -39526,6 +39527,11 @@
       },
       "timelineView": "时间线视图"
     },
+    "views": {
+      "browse": "浏览",
+      "changes": "改动",
+      "label": "视图"
+    },
     "worktrees": {
       "baseRefLabel": "起始点（可选）",
       "baseRefPlaceholder": "HEAD、分支、标签或提交",
@@ -39544,7 +39550,6 @@
       "forceRemove": "强制移除",
       "forceRemoveDescription": "丢弃此工作树中未提交的更改。",
       "main": "主工作树",
-      "mobileEntry": "工作树在「工作区」页面管理",
       "open": "打开",
       "ownership": {
         "imported": "导入环境",

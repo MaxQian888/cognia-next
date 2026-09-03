@@ -474,7 +474,6 @@
     "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
     "removeTitle": "移除工作树？",
     "removed": "工作树已移除",
-    "title": "工作树",
-    "mobileEntry": "工作树在「工作区」页面管理"
+    "title": "工作树"
   }
 }

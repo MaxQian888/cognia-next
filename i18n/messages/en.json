@@ -39147,7 +39147,8 @@
       "renameTo": "Rename current branch to…",
       "search": "Search branches…",
       "stackParent": "on {name}",
-      "switch": "Switch Branch"
+      "switch": "Switch Branch",
+      "title": "Branches"
     },
     "clone": {
       "authHelp": "Sign in with your Git credential manager or SSH agent, then retry.",
@@ -39526,6 +39527,11 @@
       },
       "timelineView": "Timeline view"
     },
+    "views": {
+      "browse": "Browse",
+      "changes": "Changes",
+      "label": "View"
+    },
     "worktrees": {
       "baseRefLabel": "Start point (optional)",
       "baseRefPlaceholder": "HEAD, branch, tag, or commit",
@@ -39544,7 +39550,6 @@
       "forceRemove": "Force removal",
       "forceRemoveDescription": "Discard uncommitted changes in this worktree.",
       "main": "Main",
-      "mobileEntry": "Worktrees live in Workspace",
       "open": "Open",
       "ownership": {
         "imported": "Imported environment",

@@ -60,6 +60,9 @@ jest.mock("@/components/source-control/changes-view", () => ({
     </button>
   ),
 }))
+jest.mock("@/components/source-control/repository-navigator", () => ({
+  RepositoryNavigator: () => <div data-testid="repository-navigator" />,
+}))
 jest.mock("@/components/source-control/commit-box", () => ({
   CommitBox: ({ stagedCount }: { stagedCount: number }) => (
     <div data-testid="commit-box">{stagedCount}</div>
@@ -181,12 +184,39 @@ it("says so when git is unavailable and when the folder is not a repository", ()
   expect(screen.getByTestId("sc-mobile-not-a-repo")).toBeInTheDocument()
 })
 
-describe("worktrees", () => {
-  it("says where worktrees live instead of silently omitting them", async () => {
+describe("browse", () => {
+  /**
+   * Worktrees used to be a link out to `/workspace?tab=environments`, because
+   * the desktop worktree sheet had a table with nowhere to go at 375px. The
+   * navigator does not: its inventory degrades to cards below 640px on its own
+   * measured width, and a stack is a vertical chain, which a phone has room
+   * for. So the phone gets the same two views the desktop panel offers.
+   */
+  it("shows the repository navigator instead of linking out", async () => {
     render(<SourceControlMobileBody />)
-    const link = await screen.findByTestId("sc-mobile-worktrees-link")
-    // Addressable because /workspace puts its tab in the URL. A link to the
-    // page with no tab would land the user on Overview and leave them hunting.
-    expect(link).toHaveAttribute("href", "/workspace?tab=environments")
+    expect(screen.queryByTestId("sc-mobile-worktrees-link")).not.toBeInTheDocument()
+
+    fireEvent.click(await screen.findByTestId("sc-mobile-view-browse"))
+    expect(screen.getByTestId("repository-navigator")).toBeInTheDocument()
+  })
+
+  it("keeps the change list as the screen it opens on", async () => {
+    render(<SourceControlMobileBody />)
+    expect(await screen.findByTestId("sc-mobile-view-changes")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    expect(screen.queryByTestId("repository-navigator")).not.toBeInTheDocument()
+  })
+
+  /**
+   * The commit box is the action this screen exists for, so it must not be on
+   * screen while the navigator is: a pinned field under a branch list commits
+   * changes the user cannot see.
+   */
+  it("hides the commit box while browsing", async () => {
+    render(<SourceControlMobileBody />)
+    fireEvent.click(await screen.findByTestId("sc-mobile-view-browse"))
+    expect(screen.queryByTestId("commit-box")).not.toBeInTheDocument()
   })
 })

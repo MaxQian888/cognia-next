@@ -32,32 +32,33 @@
  * ahead and behind counts, because they are one-tap actions and "is there
  * anything to pull" is the reason to open git on a phone at all.
  *
- * Worktrees are the one omission that now says where it went. `/workspace` has
- * a real Environments tab that works at 375px (its list degrades to cards below
- * 640px) and it is addressable as `?tab=environments`, so the honest answer
- * stopped being silence: not rendering something AND not saying where it lives
- * reads as "this build cannot do worktrees", which is not true.
+ * Worktrees and stacks are no longer among the omissions. They were a link out
+ * to `/workspace?tab=environments` while the only way to show them here was the
+ * desktop worktree sheet, whose table has nowhere to go at 375px. The
+ * repository navigator does not have that problem: its inventory degrades to
+ * cards below 640px on its own measured width, and a stack renders as a
+ * vertical chain. So the phone gets the same two views the desktop panel
+ * offers, and the change list stays the one it opens on.
  */
 
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import Link from "next/link"
 import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
-  BoxesIcon,
-  ChevronRightIcon,
   FolderOpenIcon,
   GitBranchIcon,
   RefreshCwIcon,
 } from "lucide-react"
 
 import { BranchHeader } from "@/components/source-control/branch-header"
+import { RepositoryNavigator } from "@/components/source-control/repository-navigator"
 import { ChangesView } from "@/components/source-control/changes-view"
 import { CommitBox } from "@/components/source-control/commit-box"
 import { DiffPane } from "@/components/source-control/diff-pane"
 import { PullToRefresh } from "@/components/interactions/pull-to-refresh"
 import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -94,6 +95,9 @@ export function SourceControlMobileBody() {
    * page. Same reasoning as `devices-mobile-body`.
    */
   const [diffOpen, setDiffOpen] = useState(false)
+  // Which body: the change list, or the repository navigator. Same two views
+  // the desktop panel offers, so a phone is not a different product.
+  const [view, setView] = useState<"changes" | "browse">("changes")
   const onSelectFile = useCallback(
     (path: string, staged: boolean) => {
       selectFile(path, staged)
@@ -210,57 +214,89 @@ export function SourceControlMobileBody() {
       </header>
 
       {/*
-        A pointer, not a trigger. Tapping this navigates to a screen that
-        actually works on a phone, rather than opening the desktop worktree
-        sheet in 375px where its table has nowhere to go.
+        Worktrees and stacks stopped being a link out. They are the navigator,
+        and it is usable here: the worktree inventory degrades to cards below
+        640px on its own measured width, and a stack renders as a vertical
+        chain, which is the one shape a phone has room for.
+
+        The rest of the desktop's dialogs stay deliberately absent, for the
+        reason at the top of this file. A trigger that opens an unusable dialog
+        is worse than not offering it.
       */}
-      <Link
-        href="/workspace?tab=environments"
-        className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground active:bg-accent"
-        data-testid="sc-mobile-worktrees-link"
+      <div
+        role="tablist"
+        aria-label={t("views.label")}
+        className="flex shrink-0 border-b"
+        data-testid="sc-mobile-views"
       >
-        <BoxesIcon aria-hidden className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{t("worktrees.mobileEntry")}</span>
-        <ChevronRightIcon aria-hidden className="size-3.5 shrink-0" />
-      </Link>
+        {(["changes", "browse"] as const).map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            role="tab"
+            aria-selected={view === candidate}
+            onClick={() => setView(candidate)}
+            className={cn(
+              "min-h-11 flex-1 px-3 text-xs text-muted-foreground active:bg-accent",
+              view === candidate && "border-b-2 border-primary font-medium text-foreground"
+            )}
+            data-testid={`sc-mobile-view-${candidate}`}
+          >
+            {t(`views.${candidate}`)}
+          </button>
+        ))}
+      </div>
 
-      {/* `status` is null until the first load resolves, and `ChangesView`
-          requires it. The desktop panel guards the same way rather than
-          rendering an empty list that reads as "no changes". */}
-      {status ? (
-        <PullToRefresh onRefresh={refresh} className="min-h-0 flex-1">
-          <ChangesView
-            variant="review"
-            density="touch"
+      {view === "browse" ? (
+        <div className="min-h-0 flex-1">
+          <RepositoryNavigator
             rootDir={rootDir}
-            status={status}
+            branches={branches}
             actions={actions}
-            committing={committing}
-            selectedPath={selectedPath}
-            onSelectFile={onSelectFile}
+            canMutate={actions.can}
           />
-        </PullToRefresh>
+        </div>
       ) : (
-        <div className="min-h-0 flex-1 px-3 py-6" data-testid="sc-mobile-loading">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="mt-3 h-4 w-full" />
-          <Skeleton className="mt-2 h-4 w-2/3" />
-        </div>
-      )}
+        <>
+          {/* `status` is null until the first load resolves, and `ChangesView`
+              requires it. The desktop panel guards the same way rather than
+              rendering an empty list that reads as "no changes". */}
+          {status ? (
+            <PullToRefresh onRefresh={refresh} className="min-h-0 flex-1">
+              <ChangesView
+                variant="review"
+                density="touch"
+                rootDir={rootDir}
+                status={status}
+                actions={actions}
+                committing={committing}
+                selectedPath={selectedPath}
+                onSelectFile={onSelectFile}
+              />
+            </PullToRefresh>
+          ) : (
+            <div className="min-h-0 flex-1 px-3 py-6" data-testid="sc-mobile-loading">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="mt-3 h-4 w-full" />
+              <Skeleton className="mt-2 h-4 w-2/3" />
+            </div>
+          )}
 
-      {/* The commit box is pinned rather than scrolled to. It is the one action
-          the screen exists for, and a message field that walks off the bottom
-          of a list is a field nobody finds. */}
-      {status ? (
-        <div className="shrink-0 border-t px-2 py-2">
-          <CommitBox
-            rootDir={rootDir}
-            stagedCount={stagedCount}
-            committing={committing}
-            actions={actions}
-          />
-        </div>
-      ) : null}
+          {/* The commit box is pinned rather than scrolled to. It is the one
+              action the screen exists for, and a message field that walks off
+              the bottom of a list is a field nobody finds. */}
+          {status ? (
+            <div className="shrink-0 border-t px-2 py-2">
+              <CommitBox
+                rootDir={rootDir}
+                stagedCount={stagedCount}
+                committing={committing}
+                actions={actions}
+              />
+            </div>
+          ) : null}
+        </>
+      )}
 
       <ResponsiveDetailSheet
         open={diffOpen && Boolean(selectedPath)}
