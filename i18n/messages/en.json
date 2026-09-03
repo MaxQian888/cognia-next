@@ -12295,6 +12295,10 @@
       "syntax": "Search syntax",
       "took": "{ms} ms"
     },
+    "git": {
+      "detached": "Detached HEAD",
+      "inWorktree": "In {name}"
+    },
     "groups": {
       "messagesInChats": "Conversations mentioning “{query}”"
     },
@@ -12307,6 +12311,8 @@
       "action": "Commands",
       "character": "Characters",
       "device": "Devices",
+      "git-branch": "Branch",
+      "git-worktree": "Worktree",
       "inbox-contact": "Contacts",
       "inbox-conversation": "Inbox conversations",
       "issue": "Issues",
@@ -12322,6 +12328,7 @@
       "settings": "Settings",
       "site": "Sites",
       "skill": "Skills",
+      "squad": "Squad",
       "team": "Teams",
       "template": "Templates",
       "workbench-panel": "Workbench panels",
