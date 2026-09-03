@@ -32,3 +32,46 @@ export const Empty: Story = { args: { chartData: [] } }
 export const ParseError: Story = {
   args: { chartData: undefined, content: "{ not valid json" },
 }
+
+// The regression this whole change exists for: before the contract fix, a pie
+// whose numeric key was not literally `value` rendered completely blank.
+export const PieByNonValueKey: Story = {
+  args: {
+    chartType: "pie",
+    chartData: undefined,
+    content: JSON.stringify(
+      {
+        type: "pie",
+        data: [
+          { name: "Chrome", share: 62 },
+          { name: "Safari", share: 21 },
+          { name: "Edge", share: 11 },
+          { name: "Firefox", share: 6 },
+        ],
+      },
+      null,
+      2
+    ),
+  },
+}
+
+// Best-effort render plus the notice: an unsupported type, a series that only
+// appears after the first row, a row with no name, and a non-numeric value.
+export const DegradedWithNotice: Story = {
+  args: {
+    chartType: undefined,
+    chartData: undefined,
+    content: JSON.stringify(
+      {
+        type: "histogram",
+        data: [
+          { name: "Jan", revenue: 10 },
+          { name: "Feb", revenue: 12, cost: 4 },
+          { name: "", revenue: null },
+        ],
+      },
+      null,
+      2
+    ),
+  },
+}

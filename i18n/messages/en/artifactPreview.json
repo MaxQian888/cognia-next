@@ -3,7 +3,7 @@
     "unknownType": "Chart type “{type}” is not supported, so it was drawn as a line chart.",
     "lateSeries": "Series “{series}” is not in the first row, so it was not drawn.",
     "missingName": "{count, plural, =1 {1 row has no name, so its label is blank} other {# rows have no name, so their labels are blank}}.",
-    "nonNumericValue": "Series “{series}” has {count, plural, =1 {1 value} other {# values}} that are not numbers, drawn as gaps.",
+    "nonNumericValue": "Series “{series}” has {count, plural, =1 {1 value that is not a number} other {# values that are not numbers}}, drawn as gaps.",
     "extraSeriesDropped": "A pie chart draws one series, so “{series}” {count, plural, =1 {was} other {were}} not drawn.",
     "scatterMissingXY": "{count, plural, =1 {1 row has} other {# rows have}} no numeric x and y, so {count, plural, =1 {it was} other {they were}} not plotted.",
     "noNumericSeries": "No numeric series was found, so there is nothing to draw."
