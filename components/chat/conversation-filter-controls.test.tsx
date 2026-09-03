@@ -108,6 +108,38 @@ const pick = (element: HTMLElement) => fireEvent.click(element)
 /** vaul's drawer captures the pointer on press, which jsdom cannot do — click without a pointer sequence. */
 const tap = (element: HTMLElement) => fireEvent.click(element)
 
+/**
+ * The two families a section can be nested under. `sort` is top level, so it is
+ * not here (`lib/chat/conversation-filter-families.ts` owns the fold).
+ */
+const FAMILY_OF: Record<string, "refine" | "scope"> = {
+  status: "refine",
+  activity: "refine",
+  location: "scope",
+  agent: "scope",
+  model: "scope",
+}
+
+/**
+ * Walk to a facet section, whichever depth the fold put it at. A family that
+ * ended up with one section collapses back to the top level, so the walk has to
+ * ask what is on screen rather than assume two levels everywhere.
+ */
+async function openSection(_user: ReturnType<typeof userEvent.setup>, key: string) {
+  const family = FAMILY_OF[key]
+  if (family) {
+    const familyRow = screen.queryByTestId(`conversation-filter-trigger-family-${family}`)
+    // A sub-trigger opens on click as well as on hover, and click is the only
+    // one jsdom can drive two levels deep: `user.hover` on a nested trigger
+    // reads as "the pointer left the parent submenu" against zero-size rects
+    // and closes the level above before the child can open.
+    if (familyRow) pick(familyRow)
+  }
+  const section = await screen.findByTestId(`conversation-filter-trigger-section-${key}`)
+  pick(section)
+  return section
+}
+
 describe("ConversationFilterMenu (desktop)", () => {
   it("labels the trigger plainly when nothing is filtered", () => {
     menu()
@@ -131,14 +163,17 @@ describe("ConversationFilterMenu (desktop)", () => {
     await user.click(screen.getByTestId("conversation-filter-trigger"))
     const content = await screen.findByTestId("conversation-filter-trigger-menu")
     expect(content).toHaveAttribute("data-side", "right")
+    // Four rows, not seven: saved views, sort, and one family per question.
+    // `scope` is absent entirely because nothing on this install has a
+    // workspace, agent or model to offer.
     const rows = within(content).getAllByRole("menuitem")
     expect(rows.map((r) => r.textContent)).toEqual([
       "views.label",
       "sort.labelsort.options.recent",
-      "filters.label",
-      "activity.label",
+      "families.refine",
     ])
     expect(screen.queryByTestId("conversation-filter-trigger-section-location")).toBeNull()
+    expect(screen.queryByTestId("conversation-filter-trigger-family-scope")).toBeNull()
   })
 
   it("lists the location / agent / model sections once options exist, with per-section counts", async () => {
@@ -149,6 +184,11 @@ describe("ConversationFilterMenu (desktop)", () => {
       activeFilters: 2,
     })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
+    // Three facet lists, one family row. The count on the family is the sum of
+    // what is nested under it, so the fold hides no active filter.
+    const family = await screen.findByTestId("conversation-filter-trigger-family-scope")
+    expect(within(family).getByTestId("conversation-filter-section-count")).toHaveTextContent("2")
+    await user.hover(family)
     const location = await screen.findByTestId("conversation-filter-trigger-section-location")
     expect(location).toHaveTextContent("sections.location")
     expect(location).toHaveTextContent('selectedSummary:{"count":1}')
@@ -161,7 +201,7 @@ describe("ConversationFilterMenu (desktop)", () => {
     const user = userEvent.setup()
     const { actions } = menu()
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByTestId("conversation-filter-trigger-section-sort"))
+    await openSection(user, "sort")
     const options = await screen.findAllByRole("menuitemradio")
     expect(options.map((o) => o.textContent)).toEqual([
       "sort.options.recent",
@@ -187,7 +227,7 @@ describe("ConversationFilterMenu (desktop)", () => {
       activeFilters: 1,
     })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByTestId("conversation-filter-trigger-section-status"))
+    await openSection(user, "status")
     expect(
       await screen.findByRole("menuitemcheckbox", { name: "filters.options.pinned" })
     ).toHaveAttribute("aria-checked", "true")
@@ -207,7 +247,7 @@ describe("ConversationFilterMenu (desktop)", () => {
     const user = userEvent.setup()
     menu({ scopeOwnsKind: true })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByTestId("conversation-filter-trigger-section-status"))
+    await openSection(user, "status")
     expect(
       await screen.findByRole("menuitemcheckbox", { name: "filters.options.unread" })
     ).toBeInTheDocument()
@@ -223,7 +263,7 @@ describe("ConversationFilterMenu (desktop)", () => {
       activeFilters: 1,
     })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByTestId("conversation-filter-trigger-section-location"))
+    await openSection(user, "location")
     const any = await screen.findByRole("menuitemcheckbox", { name: /workspace\.any/ })
     expect(any).toHaveAttribute("aria-checked", "false")
     const alpha = screen.getByRole("menuitemcheckbox", { name: /Alpha/ })
@@ -248,7 +288,7 @@ describe("ConversationFilterMenu (desktop)", () => {
     const user = userEvent.setup()
     const { actions } = menu()
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByTestId("conversation-filter-trigger-section-activity"))
+    await openSection(user, "activity")
     pick(await screen.findByRole("menuitemradio", { name: "activity.options.week" }))
     expect(actions.setActivity).toHaveBeenCalledWith("week")
   })
@@ -478,20 +518,31 @@ describe("ConversationFilterMenu (mobile drawer)", () => {
     const drawer = await screen.findByTestId("conversation-filter-trigger-drawer")
     expect(within(drawer).getByText("drawer.title")).toBeInTheDocument()
     expect(screen.queryByTestId("conversation-filter-trigger-menu")).toBeNull()
-    // Sort + status start expanded; the rest folded.
+    // The same fold the dropdown draws: sort at the top level, then one row
+    // per family. Sort and the narrowing family start open, the facet lists
+    // stay folded because their length is install-specific.
     expect(within(drawer).getByTestId("conversation-filter-trigger-section-sort")).toHaveAttribute(
       "aria-expanded",
       "true"
     )
-    expect(
-      within(drawer).getByTestId("conversation-filter-trigger-section-location")
-    ).toHaveAttribute("aria-expanded", "false")
+    expect(within(drawer).getByTestId("conversation-filter-trigger-family-refine")).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    const scope = within(drawer).getByTestId("conversation-filter-trigger-family-scope")
+    expect(scope).toHaveAttribute("aria-expanded", "false")
+    expect(within(drawer).queryByTestId("conversation-filter-trigger-section-location")).toBeNull()
     tap(within(drawer).getByRole("radio", { name: "sort.options.title" }))
     expect(actions.setSortBy).toHaveBeenCalledWith("title")
     tap(within(drawer).getByRole("checkbox", { name: "filters.options.unread" }))
     expect(actions.toggle).toHaveBeenCalledWith("unread", true)
 
-    tap(within(drawer).getByTestId("conversation-filter-trigger-section-location"))
+    // One tap to a workspace, because a family opens onto its first section
+    // rather than onto more closed rows. The touch target is unchanged.
+    tap(scope)
+    expect(
+      await within(drawer).findByTestId("conversation-filter-trigger-section-location")
+    ).toHaveAttribute("aria-expanded", "true")
     const alpha = await within(drawer).findByRole("checkbox", { name: /Alpha/ })
     expect(alpha.closest("label")).toHaveClass("min-h-11")
     tap(alpha)

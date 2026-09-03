@@ -7,6 +7,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 import { SidebarCustomizer } from "./sidebar-customizer"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { SIDEBAR_WIDTH_DEFAULT, useUIStore } from "@/stores/ui"
 import { DEFAULT_SIDEBAR_LAYOUT, SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 jest.mock("next-intl", () => ({
@@ -38,6 +39,13 @@ beforeEach(() => {
   saveMock.mockClear()
   platformValue = "tauri"
   setLayout(["workflows", "inbox"], [])
+  act(() => {
+    useUIStore.setState({
+      sidebarPeekEnabled: true,
+      sidebarSearchCollapsible: true,
+      sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+    })
+  })
 })
 
 const renderCustomizer = () =>
@@ -216,5 +224,49 @@ describe("SidebarCustomizer — rail side", () => {
     expect(sideGroup()).toBeInTheDocument()
     fireEvent.click(screen.getByRole("radio", { name: "customize.sideLeft" }))
     expect(lastPatch()).toEqual({ sidebarSide: "left" })
+  })
+})
+
+describe("SidebarCustomizer behaviour block", () => {
+  it("reflects the live preferences and writes each one straight through", () => {
+    renderCustomizer()
+    const peek = screen.getByTestId("sidebar-customizer-peek")
+    const search = screen.getByTestId("sidebar-customizer-search-collapsible")
+    expect(peek).toBeChecked()
+    expect(search).toBeChecked()
+
+    fireEvent.click(peek)
+    expect(useUIStore.getState().sidebarPeekEnabled).toBe(false)
+    // The two are independent, which is the point of two switches.
+    expect(useUIStore.getState().sidebarSearchCollapsible).toBe(true)
+
+    fireEvent.click(search)
+    expect(useUIStore.getState().sidebarSearchCollapsible).toBe(false)
+  })
+
+  it("offers the width back only once a drag has moved it", () => {
+    renderCustomizer()
+    const reset = screen.getByTestId("sidebar-customizer-width-reset")
+    expect(reset).toBeDisabled()
+
+    act(() => {
+      useUIStore.setState({ sidebarWidth: 380 })
+    })
+    expect(screen.getByTestId("sidebar-customizer-width-reset")).toBeEnabled()
+    fireEvent.click(screen.getByTestId("sidebar-customizer-width-reset"))
+    expect(useUIStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH_DEFAULT)
+  })
+
+  it("is absent on the mobile shell, where the rail is a full-width drawer", () => {
+    platformValue = "mobile"
+    renderCustomizer()
+    expect(screen.queryByTestId("sidebar-customizer-peek")).toBeNull()
+    expect(screen.queryByTestId("sidebar-customizer-width-reset")).toBeNull()
+  })
+
+  it("never touches the synced layout, which is a different kind of preference", () => {
+    renderCustomizer()
+    fireEvent.click(screen.getByTestId("sidebar-customizer-peek"))
+    expect(saveMock).not.toHaveBeenCalled()
   })
 })

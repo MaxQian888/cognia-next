@@ -14,10 +14,12 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -46,7 +48,8 @@ import {
 } from "@/components/ui/empty"
 import { PluginViewContainerPanel } from "@/components/shell/plugin-view-container-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { useIsNarrow, useRangeSelection, useEdgeResize } from "@/hooks/ui"
+import { useIsNarrow, useMediaQuery, useRangeSelection, useEdgeResize } from "@/hooks/ui"
+import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
 import { useConversationOrderFreeze } from "@/hooks/chat/use-conversation-order-freeze"
@@ -77,6 +80,8 @@ import { DEFAULT_SIDEBAR_SIDE, type SidebarSide } from "@/types/shell/sidebar"
 import { createPortal } from "react-dom"
 import { useTitleBarProjection } from "@/components/shell/title-bar-outlets"
 import { useEdgePanelTransition } from "@/hooks/shell/use-edge-panel-transition"
+import { useSidebarPeek } from "@/hooks/shell/use-sidebar-peek"
+import { SidebarPeekEdge, SidebarPeekFrame } from "@/components/shell/sidebar-peek-panel"
 import { useReportShellColumn } from "@/hooks/shell/use-report-shell-column"
 import { useSidebarNavHost } from "@/hooks/shell/use-sidebar-nav-host"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
@@ -178,10 +183,13 @@ import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import {
   ArchiveIcon,
   ArrowDownIcon,
+  ArrowDownUpIcon,
   ArrowUpIcon,
   ChevronRightIcon,
   FolderIcon,
   FolderPlusIcon,
+  LayoutListIcon,
+  ListTreeIcon,
   MenuIcon,
   MessagesSquareIcon,
   MoreHorizontalIcon,
@@ -233,6 +241,13 @@ const CONVERSATION_DROP_ANIMATION: DropAnimation = {
   sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: "0.35" } } }),
 }
 const EMPTY_SESSION_METADATA: SessionRowMetadataItem[] = []
+
+/**
+ * Flipping a display switch is not firing a command — the user is usually
+ * flipping two or three. Radix closes the whole menu on select, which two
+ * levels down means re-opening and re-walking for every one of them.
+ */
+const keepMenuOpen = (event: Event) => event.preventDefault()
 
 /**
  * Names the accordion's drag context so it is distinguishable from the session
@@ -433,6 +448,12 @@ export function ChannelList(props: Props) {
   // column (no leftover strip); the list header exposes the quick-collapse
   // action while the global shortcut and View menu share the same state.
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
+  const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed)
+  // Edge peek: hovering the seam a collapsed rail folded into floats it back
+  // over the content. Off on touch-only pointers, where there is no hover to
+  // read and the swipe gesture below is the way in instead.
+  const peekPreference = useUIStore((s) => s.sidebarPeekEnabled)
+  const hasHover = useMediaQuery("(hover: hover) and (pointer: fine)")
   // The rail's header renders into the title bar's start outlet when the
   // workspace enables projection (`title-bar-outlets.tsx`), and stands down
   // while collapsed so an invisible column leaves nothing in the bar. The bar
@@ -458,6 +479,19 @@ export function ChannelList(props: Props) {
   // render so the class and the new width reach the DOM in one commit.
   const animatingCollapse = useEdgePanelTransition(sidebarCollapsed, { element: asideRef })
 
+  // Armed only once the collapse has finished playing. Switching the inner
+  // layer out of the flex row mid-collapse would fling the list sideways
+  // instead of letting the aside clip it, which is the whole point of the
+  // fixed-width layer.
+  const peekArmed =
+    sidebarCollapsed && !animatingCollapse && peekPreference && hasHover && !isNarrow
+  const peek = useSidebarPeek({ enabled: peekArmed })
+  const { close: closePeek } = peek
+  const pinSidebar = useCallback(() => {
+    closePeek()
+    setSidebarCollapsed(false)
+  }, [closePeek, setSidebarCollapsed])
+
   // Stable identity: passed down as `onSelect`, it feeds `handleSessionSelect`
   // (a useCallback that lists it as a dep). An inline function here changed
   // every render → busted EVERY memoized <SessionRow> on any sidebar
@@ -472,10 +506,23 @@ export function ChannelList(props: Props) {
     [onSelect, isNarrow]
   )
 
-  const handleSheetChange = (next: boolean) => {
+  const handleSheetChange = useCallback((next: boolean) => {
     log.info("channel-list sheet toggle", { open: next })
     setOpenMobile(next)
-  }
+  }, [])
+
+  // Touch shells have no ⌘B and no window chrome to hang a toggle off, so the
+  // rail is summoned the way every mobile drawer is. The sheet lives on the
+  // leading edge whichever side the desktop rail took, because a drawer that
+  // swaps edges with a desktop-only preference would be unlearnable.
+  useEdgeSwipe({
+    edge: "left",
+    enabled: isNarrow,
+    onOpen: () => handleSheetChange(true),
+    onClose: () => {
+      if (openMobile) handleSheetChange(false)
+    },
+  })
 
   if (isNarrow) {
     return (
@@ -521,8 +568,11 @@ export function ChannelList(props: Props) {
             : "border-r",
         // Clip during collapse (and while animating) so the fixed-width inner
         // layer is hidden rather than spilling; leave it un-clipped when idle
-        // so the resize handle can protrude past the right edge.
-        (sidebarCollapsed || animatingCollapse) && "overflow-hidden",
+        // so the resize handle can protrude past the right edge. Armed for a
+        // peek the clip has to come off: the flyout and its hover strip are
+        // children of this zero-width box on purpose, and clipping is exactly
+        // what would keep them off screen.
+        (sidebarCollapsed || animatingCollapse) && !peekArmed && "overflow-hidden",
         // One clock for every shell edge panel — this rail, the artifact dock
         // and the terminal dock all collapse at `SHELL_DOCK_TIMING_CLASS`'s
         // pace. They used to claim parity in a comment while running 200ms
@@ -531,8 +581,11 @@ export function ChannelList(props: Props) {
       )}
       style={{ width: sidebarCollapsed ? 0 : width }}
       aria-label={t("conversationsTitle")}
-      aria-hidden={sidebarCollapsed || undefined}
-      inert={sidebarCollapsed || undefined}
+      // Armed, the box is still zero wide but no longer empty: the flyout it
+      // holds carries its own `inert` while parked, so hiding the whole
+      // element here would take the peek with it.
+      aria-hidden={(sidebarCollapsed && !peekArmed) || undefined}
+      inert={(sidebarCollapsed && !peekArmed) || undefined}
       data-bg-target="chat"
       // Deliberately NOT `data-slot="sidebar-inner"`. That slot's wallpaper
       // rule (globals.css, "when a wallpaper is painting under a shadcn
@@ -542,11 +595,29 @@ export function ChannelList(props: Props) {
       // rail carries one tint now, owned by `ChannelListBody` below.
       data-collapsed={sidebarCollapsed || undefined}
     >
-      {/* Fixed-width inner layer: keeps the list from reflowing as the aside's
-          width animates to 0 — the content is clipped, not squished. */}
-      <div className="flex h-full min-h-0 flex-col" style={{ width }}>
+      {peekArmed ? (
+        <SidebarPeekEdge
+          side={sidebarSide}
+          active={peek.open}
+          onMouseEnter={peek.edgeHandlers.onMouseEnter}
+          onMouseLeave={peek.edgeHandlers.onMouseLeave}
+        />
+      ) : null}
+      {/* One list, two placements. In flow it is the fixed-width inner layer
+          that keeps the rail from reflowing as the aside animates to 0; armed,
+          the same node becomes the flyout. Moving it by class rather than
+          re-rendering it somewhere else is what keeps a peek free. */}
+      <SidebarPeekFrame
+        armed={peekArmed}
+        open={peek.open}
+        side={sidebarSide}
+        width={width}
+        onPin={pinSidebar}
+        onMouseEnter={peek.panelHandlers.onMouseEnter}
+        onMouseLeave={peek.panelHandlers.onMouseLeave}
+      >
         <ChannelListBody {...props} onSelect={handleSelect} headerOutlet={headerOutlet} />
-      </div>
+      </SidebarPeekFrame>
       {!sidebarCollapsed && (
         <SidebarResizeHandle
           width={width}
@@ -1476,6 +1547,10 @@ function ChannelListBody({
   // owns its row; the filter and the list actions beside it hide until it
   // lets go (see `ChannelListSearch`).
   const [searchExpanded, setSearchExpanded] = useState(false)
+  // Whether the field rests as a button. A preference rather than a constant:
+  // the rail is the only place the space is tight, and a user who searches
+  // constantly would rather keep the field open than pay a click per query.
+  const searchCollapsible = useUIStore((s) => s.sidebarSearchCollapsible)
 
   // Canvas guild has its own dedicated rail; do not render the chat
   // session list when the user is in canvas mode.
@@ -1590,8 +1665,24 @@ function ChannelListBody({
             onQueryChange={setQuery}
             onExpandedChange={setSearchExpanded}
             compact={merged}
+            collapsible={merged && searchCollapsible}
           />
-          {searchExpanded ? null : (
+          {/* Collapsed rather than unmounted, on the same clock the field
+              grows on: the two are one gesture, and swapping these three out
+              in a single frame made the field's opening read as a glitch. They
+              keep their box while it plays, which is what stops the row from
+              reflowing under the pointer. */}
+          <div
+            data-testid="channel-list-search-actions"
+            data-hidden={searchExpanded || undefined}
+            aria-hidden={searchExpanded || undefined}
+            inert={searchExpanded || undefined}
+            className={cn(
+              "flex items-center gap-1.5 overflow-hidden",
+              `transition-[max-width,opacity] ${SHELL_DOCK_TIMING_CLASS}`,
+              searchExpanded ? "max-w-0 opacity-0" : "max-w-40 opacity-100"
+            )}
+          >
             <>
               {/* Beside the field it governs: how far a query looks is not a
                   display preference and does not belong in a settings page.
@@ -1622,7 +1713,7 @@ function ChannelListBody({
                   row instead (`Header`). */}
               {merged ? <HeaderActions layout="compact" {...headerActionProps} /> : null}
             </>
-          )}
+          </div>
         </div>
         {merged && view === "archived" ? (
           // Where you are, now that neither a heading row nor the archived
@@ -1847,11 +1938,22 @@ function ChannelListBody({
   return merged ? <SidebarRowsScope containerRef={containerRef}>{rows}</SidebarRowsScope> : rows
 }
 
+/**
+ * Resting width of the rail's search control, in px. The nav rows' icon column
+ * is 32px, so the button lands on it exactly.
+ *
+ * Also the control's flex basis, which is what makes the resting form sit
+ * beside the three buttons after it rather than holding the row's whole
+ * remaining width open around a 32px glyph.
+ */
+const SEARCH_BUTTON_PX = 32
+
 function ChannelListSearch({
   inputRef,
   onQueryChange,
   onExpandedChange,
   compact = false,
+  collapsible = false,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>
   onQueryChange: (query: string) => void
@@ -1870,6 +1972,15 @@ function ChannelListSearch({
    * shrinking its text would walk into the iOS auto-zoom rule below.
    */
   compact?: boolean
+  /**
+   * Rest as a single 32px button and open into the row when used. This is the
+   * rail's default: the field spent the whole session holding a placeholder
+   * next to three other controls, and a rail that narrow cannot afford a
+   * permanently open text input. `false` keeps the field always open, which is
+   * what the mobile Sheet wants (it has the width) and what a user who lives
+   * in search can switch back to.
+   */
+  collapsible?: boolean
 }) {
   const t = useTranslations("desktop.channelList")
   const [value, setValue] = useState("")
@@ -1878,6 +1989,9 @@ function ChannelListSearch({
   // caret / the clear button.
   const [focused, setFocused] = useState(false)
   const expanded = focused || value.length > 0
+  // The field is a button until it is used. `expanded` already means "the
+  // field owns the row" for the controls beside it, so the two stay one idea.
+  const buttonForm = collapsible && !expanded
   useEffect(() => {
     onExpandedChange?.(expanded)
   }, [expanded, onExpandedChange])
@@ -1909,9 +2023,25 @@ function ChannelListSearch({
 
   return (
     <div
-      className="min-w-0 flex-1"
+      // The WRAPPER carries the width, not the field inside it. A `flex-1`
+      // wrapper holding a 32px control would keep the row's whole remaining
+      // width while drawing a lone magnifier at the leading edge, leaving a
+      // third of the rail empty between it and the three buttons pinned to the
+      // other end. Resting it is one more 32px button beside those three.
+      //
+      // `flex-grow` rather than a width, because it is the one length here that
+      // interpolates: the end state is "whatever the row has left" once the
+      // actions beside it have collapsed, which no fixed value can name.
+      className={cn(
+        "relative min-w-0",
+        collapsible
+          ? cn(`transition-[flex-grow] ${SHELL_DOCK_TIMING_CLASS}`, buttonForm ? "grow-0" : "grow")
+          : "flex-1"
+      )}
+      style={collapsible ? { flexBasis: SEARCH_BUTTON_PX } : undefined}
       data-testid="channel-list-search"
       data-expanded={expanded || undefined}
+      data-button-form={buttonForm || undefined}
     >
       <InputGroup
         // Compact: sized and cornered like the navigation rows right above it
@@ -1924,6 +2054,7 @@ function ChannelListSearch({
           compact ? "h-8 rounded-md" : "h-9 rounded-lg",
           "border-border/40 bg-muted/40 shadow-none transition-colors",
           "hover:bg-muted/60",
+          collapsible && `overflow-hidden transition-[background-color] ${SHELL_DOCK_TIMING_CLASS}`,
           // Softer focus treatment than the form default — this sits in a rail,
           // not a form, so a 3px halo reads as an alarm rather than a caret.
           "has-[[data-slot=input-group-control]:focus-visible]:border-ring/50 has-[[data-slot=input-group-control]:focus-visible]:bg-background/60 has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-ring/25"
@@ -2027,6 +2158,25 @@ function ChannelListSearch({
           )}
         </InputGroupAddon>
       </InputGroup>
+      {buttonForm ? (
+        // The 32px box is almost entirely the magnifier addon, and clicking an
+        // addon does not focus the control beside it. Rather than rebuild the
+        // resting form as a real button (which would fork the accessible name,
+        // the focus ring, the clear button and the shortcut hint into two
+        // controls that are really one), the overlay is a pointer target only:
+        // hidden from assistive tech, out of the tab order, and doing nothing
+        // but handing focus to the field. Focus is the single thing that opens
+        // the field, so a click, a tab and `/` all arrive the same way.
+        <button
+          type="button"
+          aria-hidden
+          tabIndex={-1}
+          data-testid="channel-list-search-button"
+          onClick={() => inputRef.current?.focus()}
+          style={{ width: SEARCH_BUTTON_PX }}
+          className="absolute inset-y-0 left-0 rounded-md"
+        />
+      ) : null}
     </div>
   )
 }
@@ -2244,6 +2394,60 @@ function HeaderActions({
   const isArchived = view === "archived"
   const viewLabel = isArchived ? t("viewActive") : t("viewArchived")
   const compact = layout === "compact"
+  // One table for the row's six switches: they differ only in which key they
+  // write, and a checkbox block per switch is how the submenu would drift from
+  // the flat list it replaced.
+  const displayToggles: {
+    key: string
+    label: string
+    checked: boolean
+    onChange: (checked: boolean) => void
+  }[] = [
+    {
+      key: "density",
+      label: t("compactDensity"),
+      checked: density === "compact",
+      onChange: (checked) => onUpdateDisplay({ density: checked ? "compact" : "comfortable" }),
+    },
+    {
+      key: "preview",
+      label: t("showPreview"),
+      checked: showPreview,
+      onChange: (checked) => onUpdateDisplay({ showPreview: checked }),
+    },
+    {
+      key: "custom-icons",
+      label: t("showCustomIcons"),
+      checked: showCustomIcons,
+      onChange: (checked) => onUpdateDisplay({ showCustomIcons: checked }),
+    },
+    {
+      key: "timestamps",
+      label: t("showTimestamps"),
+      checked: showTimestamps,
+      onChange: (checked) => onUpdateDisplay({ showTimestamps: checked }),
+    },
+    {
+      key: "unread-badges",
+      label: t("showUnreadBadges"),
+      checked: showUnreadBadges,
+      onChange: (checked) => onUpdateDisplay({ showUnreadBadges: checked }),
+    },
+    {
+      key: "title-motion",
+      label: t("titleMotion"),
+      checked: titleMotion === "hover",
+      onChange: (checked) => onUpdateDisplay({ titleMotion: checked ? "hover" : "off" }),
+    },
+  ]
+  // The fold's price is a closed row saying nothing about what is inside it, so
+  // the row pays it back: the fields that are on, in the order they are drawn.
+  const metadataSummary = CONVERSATION_SIDEBAR_METADATA_OPTIONS.filter((field) =>
+    metadataFields.includes(field)
+  )
+    .map((field) => t(`metadata.${field}`))
+    .join(", ")
+  const metadataLabel = metadataSummary || t("metadata.none")
   const menu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2271,7 +2475,7 @@ function HeaderActions({
         // configures. Inline (the title row): a plain drop-down, as before.
         side={compact ? "right" : "bottom"}
         align={compact ? "start" : "end"}
-        className="w-56"
+        className="w-60"
       >
         {compact ? (
           <>
@@ -2291,109 +2495,121 @@ function HeaderActions({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        <DropdownMenuLabel>{t("displayOptions")}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuCheckboxItem
-          checked={density === "compact"}
-          onCheckedChange={(checked) =>
-            onUpdateDisplay({ density: checked ? "compact" : "comfortable" })
-          }
-        >
-          {t("compactDensity")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={showPreview}
-          onCheckedChange={(checked) => onUpdateDisplay({ showPreview: Boolean(checked) })}
-        >
-          {t("showPreview")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={showCustomIcons}
-          onCheckedChange={(checked) => onUpdateDisplay({ showCustomIcons: Boolean(checked) })}
-        >
-          {t("showCustomIcons")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuCheckboxItem
-          checked={showTimestamps}
-          onCheckedChange={(checked) => onUpdateDisplay({ showTimestamps: Boolean(checked) })}
-        >
-          {t("showTimestamps")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          {t("metadata.label")}
-        </DropdownMenuLabel>
-        {CONVERSATION_SIDEBAR_METADATA_OPTIONS.map((field) => (
-          <DropdownMenuCheckboxItem
-            key={field}
-            checked={metadataFields.includes(field)}
-            onCheckedChange={(checked) =>
-              onUpdateDisplay({
-                metadata: toggleConversationSidebarMetadata(
-                  metadataFields,
-                  field,
-                  Boolean(checked)
-                ),
-              })
-            }
-          >
-            {t(`metadata.${field}`)}
-          </DropdownMenuCheckboxItem>
-        ))}
-        <DropdownMenuCheckboxItem
-          checked={titleMotion === "hover"}
-          onCheckedChange={(checked) => onUpdateDisplay({ titleMotion: checked ? "hover" : "off" })}
-        >
-          {t("titleMotion")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          {t("groupBy.label")}
-        </DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={groupBy}
-          onValueChange={(value) => onUpdateDisplay({ groupBy: value as ConversationGroupBy })}
-        >
-          {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
-            <DropdownMenuRadioItem key={option} value={option}>
-              {t(`groupBy.options.${option}`)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
+        {/* Four questions, one row each. Flat, the menu asked all of them at
+            once and ran past the rail — 22 rows to scroll for the one switch
+            you came for. Every row still reads out its own answer, so the
+            readout the flat list gave is not paid for by the fold; the sibling
+            filter menu is folded exactly this way. */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-display">
+            <SlidersHorizontalIcon className="size-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("displayOptions")}</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="max-h-[min(70vh,480px)] w-60 overflow-y-auto">
+            {displayToggles.map((toggle) => (
+              <DropdownMenuCheckboxItem
+                key={toggle.key}
+                checked={toggle.checked}
+                onCheckedChange={(checked) => toggle.onChange(Boolean(checked))}
+                onSelect={keepMenuOpen}
+                data-testid={`channel-list-display-${toggle.key}`}
+              >
+                {toggle.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-metadata">
+            <LayoutListIcon className="size-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("metadata.label")}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">{metadataLabel}</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            {CONVERSATION_SIDEBAR_METADATA_OPTIONS.map((field) => (
+              <DropdownMenuCheckboxItem
+                key={field}
+                checked={metadataFields.includes(field)}
+                onCheckedChange={(checked) =>
+                  onUpdateDisplay({
+                    metadata: toggleConversationSidebarMetadata(
+                      metadataFields,
+                      field,
+                      Boolean(checked)
+                    ),
+                  })
+                }
+                onSelect={keepMenuOpen}
+                data-testid={`channel-list-metadata-${field}`}
+              >
+                {t(`metadata.${field}`)}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-group">
+            <ListTreeIcon className="size-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("groupBy.label")}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">
+              {t(`groupBy.options.${groupBy}`)}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            <DropdownMenuRadioGroup
+              value={groupBy}
+              onValueChange={(value) => onUpdateDisplay({ groupBy: value as ConversationGroupBy })}
+            >
+              {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
+                <DropdownMenuRadioItem
+                  key={option}
+                  value={option}
+                  data-testid={`channel-list-group-${option}`}
+                >
+                  {t(`groupBy.options.${option}`)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         {/* Sort sits beside grouping, the setting it pairs with — the filter
             menu carries the same radio group, because that is where a narrowed
             list is being shaped. Both write `conversationSidebar.sortBy`. */}
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          {t("sortBy.label")}
-        </DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={sortBy}
-          onValueChange={(value) => onUpdateDisplay({ sortBy: value as ConversationSortBy })}
-        >
-          {CONVERSATION_SORT_BY_OPTIONS.map((option) => (
-            <DropdownMenuRadioItem
-              key={option}
-              value={option}
-              data-testid={`channel-list-sort-${option}`}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2" data-testid="channel-list-menu-sort">
+            <ArrowDownUpIcon className="size-4 text-muted-foreground" aria-hidden />
+            <span className="flex-1 truncate">{t("sortBy.label")}</span>
+            <span className="max-w-24 truncate text-xs text-muted-foreground">
+              {t(`sortBy.options.${sortBy}`)}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            <DropdownMenuRadioGroup
+              value={sortBy}
+              onValueChange={(value) => onUpdateDisplay({ sortBy: value as ConversationSortBy })}
             >
-              {t(`sortBy.options.${option}`)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+              {CONVERSATION_SORT_BY_OPTIONS.map((option) => (
+                <DropdownMenuRadioItem
+                  key={option}
+                  value={option}
+                  data-testid={`channel-list-sort-${option}`}
+                >
+                  {t(`sortBy.options.${option}`)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         <DropdownMenuSeparator />
-        <DropdownMenuCheckboxItem
-          checked={showUnreadBadges}
-          onCheckedChange={(checked) => onUpdateDisplay({ showUnreadBadges: Boolean(checked) })}
-        >
-          {t("showUnreadBadges")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
+        {/* Not a display switch: this one widens what the search field reads,
+            so it stays out in the open where the field is. */}
         <DropdownMenuCheckboxItem
           checked={searchOptions.content}
           onCheckedChange={(checked) =>
             onUpdateDisplay({ search: { ...searchOptions, content: Boolean(checked) } })
           }
+          onSelect={keepMenuOpen}
+          data-testid="channel-list-search-content"
         >
           {t("searchMessageContent")}
         </DropdownMenuCheckboxItem>

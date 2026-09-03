@@ -393,6 +393,63 @@ describe("<AppShellMobile />", () => {
     expect(screen.getByTestId("guild-create-team")).toBeInTheDocument()
   })
 
+  it("opens and closes the drawer on an edge swipe, the way every phone drawer does", async () => {
+    render(<AppShellMobile />)
+    const touch = (x: number, y: number) =>
+      Object.assign([{ clientX: x, clientY: y } as Touch], {
+        item: () => ({ clientX: x, clientY: y }) as Touch,
+      }) as unknown as TouchList
+    const fire = (type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true }) as TouchEvent
+      Object.defineProperty(event, "touches", { value: touch(x, y) })
+      Object.defineProperty(event, "changedTouches", { value: touch(x, y) })
+      act(() => {
+        window.dispatchEvent(event)
+      })
+    }
+    const swipe = (fromX: number, toX: number) => {
+      fire("touchstart", fromX, 400)
+      fire("touchmove", toX, 400)
+      fire("touchend", toX, 400)
+    }
+
+    swipe(6, 180)
+    await waitFor(() => expect(screen.getByTestId("mobile-nav-sheet")).toBeInTheDocument())
+
+    // And back out the way it came.
+    swipe(200, 40)
+    await waitFor(() => expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull())
+  })
+
+  it("stands down while another sheet owns the screen", async () => {
+    // A drag aimed at the surface in front cannot be told apart from one aimed
+    // at the shell behind it, and answering both stacks the drawer under a
+    // sheet the user is still reading.
+    const user = userEvent.setup()
+    render(<AppShellMobile />)
+    await user.click(screen.getByTestId("mobile-actions-trigger"))
+    await waitFor(() => expect(screen.getByTestId("mobile-action-new-chat")).toBeInTheDocument())
+    await user.click(screen.getByTestId("mobile-action-new-chat"))
+    await waitFor(() => expect(screen.getByTestId("char-picker")).toBeInTheDocument())
+
+    const touch = (x: number, y: number) =>
+      Object.assign([{ clientX: x, clientY: y } as Touch], {
+        item: () => ({ clientX: x, clientY: y }) as Touch,
+      }) as unknown as TouchList
+    const fire = (type: string, x: number, y: number) => {
+      const event = new Event(type, { bubbles: true }) as TouchEvent
+      Object.defineProperty(event, "touches", { value: touch(x, y) })
+      Object.defineProperty(event, "changedTouches", { value: touch(x, y) })
+      act(() => {
+        window.dispatchEvent(event)
+      })
+    }
+    fire("touchstart", 6, 400)
+    fire("touchmove", 180, 400)
+    fire("touchend", 180, 400)
+    expect(screen.queryByTestId("mobile-nav-sheet")).toBeNull()
+  })
+
   it("mounts the guild rail in its sheet variant so it is not md-gated away", async () => {
     // The rail's default variant is `hidden md:flex`. A phone viewport never
     // reaches `md`, so the default would render the drawer's entire navigation

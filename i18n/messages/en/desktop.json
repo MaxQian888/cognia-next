@@ -106,6 +106,7 @@
       "agent": "Agent",
       "label": "Row details",
       "model": "Model",
+      "none": "None",
       "provider": "Provider",
       "workspace": "Workspace"
     },
@@ -116,6 +117,7 @@
     "newFolder": "New folder",
     "newFolderName": "New folder",
     "openSessions": "Open sessions",
+    "pinSidebar": "Keep open",
     "renameFolder": "Rename folder",
     "resizeHandle": "Resize sidebar",
     "searchAria": "Search conversations",
@@ -188,6 +190,7 @@
     "canvas": "Canvas",
     "createTeam": "Create team",
     "customize": {
+      "behaviour": "Behaviour",
       "description": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
       "dragHint": "Drag to reorder",
       "hidden": "Hidden",
@@ -196,16 +199,23 @@
       "more": "In More menu",
       "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
       "moveToMore": "Move to More",
+      "peek": "Reveal on edge hover",
+      "peekHint": "While the list is collapsed, resting the pointer on the seam floats it back over the conversation.",
       "pin": "Pin to rail",
       "pinItem": "Pin item",
       "pinned": "Pinned",
       "pinnedEmpty": "No pinned items — everything is in the More menu.",
       "restoreDefaults": "Restore defaults",
+      "searchButton": "Search rests as a button",
+      "searchButtonHint": "The search field opens into the row when you use it, and folds back to an icon when you are done.",
       "showItem": "Show",
       "side": "Rail position",
       "sideLeft": "Left",
       "sideRight": "Right",
-      "title": "Customize sidebar"
+      "title": "Customize sidebar",
+      "width": "Width",
+      "widthReset": "Reset",
+      "widthValue": "{width}px"
     },
     "devices": "Devices",
     "directMessages": "Chats",
@@ -575,6 +585,22 @@
   "shellLayoutNotice": {
     "description": "Panel toggles, theme, zoom and language now live in the Views menu in the title bar. The pet, OCR and clipboard buttons moved there too. Press ⌘B to show or hide the conversation list.",
     "title": "Layout simplified"
+  },
+  "sidebarUser": {
+    "lock": "Lock Cognia",
+    "lockFailed": "Cognia could not be locked.",
+    "manageAccounts": "Profiles",
+    "menuAria": "Account menu for {name}",
+    "noProfile": "No profile",
+    "petFailed": "The desktop pet could not be opened.",
+    "settings": "Settings",
+    "showPet": "Desktop pet",
+    "signIn": "Sign in to Cognia Cloud",
+    "standingCloud": "Cognia Cloud",
+    "standingLocal": "On this device",
+    "standingOrg": "Organization member",
+    "usage": "Usage",
+    "usageLeft": "{percent}% left"
   },
   "statusBar": {
     "awaitingApproval": "Awaiting approval",

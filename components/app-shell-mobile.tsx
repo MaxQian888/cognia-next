@@ -59,6 +59,7 @@ import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
+import { useEdgeSwipe } from "@/hooks/ui/use-edge-swipe"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
@@ -225,6 +226,31 @@ export function AppShellMobile() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
   const [exportOpen, setExportOpen] = useState(false)
+
+  // The drawer's second way in and out. The hamburger stays where it is, but a
+  // phone reaches the leading edge far more easily than the top-left corner of
+  // a tall screen, and every other drawer on the platform answers to the same
+  // drag. Vertical intent still wins, so scrolling the conversation cannot
+  // summon it (`hooks/ui/use-edge-swipe.ts`).
+  //
+  // Disarmed while any other sheet or dialog owns the screen. A gesture aimed
+  // at the surface in front cannot be told apart from one aimed at the shell
+  // behind it, and answering both stacks the navigation drawer under a sheet
+  // the user is still reading. The close half is guarded on the drawer being
+  // open for the same reason `ChannelList` guards its own: an outward swipe is
+  // a gesture anywhere on screen, and a carousel or a swipeable row must not
+  // spend it on a drawer that was never out.
+  const modalSurfaceOpen =
+    memberSheetOpen || sessionSettingsOpen || searchOpen || characterPickerOpen || exportOpen
+  useEdgeSwipe({
+    edge: "left",
+    enabled: !modalSurfaceOpen,
+    onOpen: () => setNavOpen(true),
+    onClose: () => {
+      if (navOpen) setNavOpen(false)
+    },
+  })
+
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
 

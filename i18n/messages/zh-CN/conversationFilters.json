@@ -131,5 +131,9 @@
     "label": "工作区",
     "any": "任意工作区",
     "unassigned": "无工作区"
+  },
+  "families": {
+    "refine": "缩小范围",
+    "scope": "归属与来源"
   }
 }

@@ -135,6 +135,10 @@ let collapsedFolderIds: string[] = []
 const uiListeners = new Set<() => void>()
 const emitUiChange = () => uiListeners.forEach((listener) => listener())
 let sidebarCollapsed = false
+// Both default to the pre-existing behaviour so the assertions written before
+// either preference existed keep describing what they were written for.
+let sidebarPeekEnabled = false
+let sidebarSearchCollapsible = false
 const setSidebarCollapsed = jest.fn()
 const setSidebarWidth = jest.fn()
 const setGroupCollapsed = jest.fn()
@@ -198,6 +202,8 @@ jest.mock("@/stores/ui", () => ({
       setSidebarWidth,
       sidebarCollapsed,
       setSidebarCollapsed,
+      sidebarPeekEnabled,
+      sidebarSearchCollapsible,
     })
   },
   SIDEBAR_WIDTH_DEFAULT: 256,
@@ -237,11 +243,16 @@ jest.mock("@/hooks/chat/use-chat-history-search", () => ({
 }))
 
 let isNarrow = false
+// jsdom's `matchMedia` stub answers "no" to everything, which would read as a
+// touch-only device and disarm the edge peek in every test. Answer the hover
+// query from a flag instead so both pointer worlds are reachable.
+let hasHover = true
 jest.mock("@/hooks/ui", () => {
   const actual = jest.requireActual("@/hooks/ui") as Record<string, unknown>
   return {
     ...actual,
     useIsNarrow: () => isNarrow,
+    useMediaQuery: (query: string) => (query.includes("hover") ? hasHover : false),
   }
 })
 
@@ -298,6 +309,7 @@ import {
   useTitleBarOutletRef,
 } from "@/components/shell/title-bar-outlets"
 import { useShellColumnsStore } from "@/stores/ui/shell-columns-store"
+import { PEEK_OPEN_DELAY_MS } from "@/hooks/shell/use-sidebar-peek"
 import { useProjectStore } from "@/stores/project/project-store"
 import type { Project } from "@/types"
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
@@ -368,6 +380,9 @@ beforeEach(() => {
   pendingConversationReveal = null
   isNarrow = false
   sidebarCollapsed = false
+  sidebarPeekEnabled = false
+  sidebarSearchCollapsible = false
+  hasHover = true
   conversationSidebar = null
   sidebarSide = "left"
   conversationFilters = { unread: false, pinned: false, branched: false, kind: "all" }
@@ -969,6 +984,42 @@ test("the `/` shortcut hint is decorative: hidden from AT, explained on hover, a
   expect(screen.getByText("/")).toBeInTheDocument()
 })
 
+/**
+ * Which submenu of the ⋯ / display menu a switch lives in. `searchMessageContent`
+ * is absent on purpose: it widens what the search field reads, so it stayed at
+ * the top level with the field.
+ */
+const MENU_SECTION_OF: Record<string, "display" | "metadata" | "group" | "sort" | undefined> = {
+  compactDensity: "display",
+  showPreview: "display",
+  showCustomIcons: "display",
+  showTimestamps: "display",
+  showUnreadBadges: "display",
+  titleMotion: "display",
+  "metadata.provider": "metadata",
+}
+
+/**
+ * Walk one level into the menu. A sub-trigger opens on click as well as on
+ * hover, and click is the only gesture jsdom can drive: against zero-size rects
+ * `user.hover` reads as the pointer leaving the menu, which closes it.
+ */
+async function openMenuSection(section: "display" | "metadata" | "group" | "sort" | undefined) {
+  if (!section) return
+  fireEvent.click(await screen.findByTestId(`channel-list-menu-${section}`))
+}
+
+/**
+ * Activate an item inside a submenu. `user.click` moves the pointer off the
+ * open sub-trigger first, which Radix reads as leaving the submenu; Radix wires
+ * select onto `onClick`, so a bare click is both enough and safe. The flush is
+ * the settings save queue: it writes on a microtask after the select.
+ */
+const pick = async (element: HTMLElement) => {
+  fireEvent.click(element)
+  await act(async () => {})
+}
+
 test.each([
   {
     label: "compactDensity",
@@ -1050,7 +1101,8 @@ test.each([
   )
 
   await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: testCase.label }))
+  await openMenuSection(MENU_SECTION_OF[testCase.label])
+  await pick(await screen.findByRole("menuitemcheckbox", { name: testCase.label }))
 
   expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: testCase.expected })
 })
@@ -1072,9 +1124,9 @@ test("rapid display-option changes merge against the latest optimistic settings"
   )
 
   await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
-  await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+  await openMenuSection("display")
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
 
   expect(saveSettings).toHaveBeenLastCalledWith({
     conversationSidebar: { density: "compact", showPreview: true },
@@ -1115,16 +1167,16 @@ test("an intermediate store write cannot roll back later optimistic display chan
   const { rerender } = render(renderList())
 
   await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
-  await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+  await openMenuSection("display")
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
 
   // Simulate save A reaching the store while save B is still pending.
   conversationSidebar = { density: "compact", showPreview: false, groupBy: "date" }
   callQueue.push(characters, [], undefined)
   rerender(renderList())
-  await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemradio", { name: "groupBy.options.none" }))
+  await openMenuSection("group")
+  await pick(await screen.findByRole("menuitemradio", { name: "groupBy.options.none" }))
 
   resolveFirst()
   await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(2))
@@ -1153,9 +1205,9 @@ test("a failed display-option save does not block the next queued change", async
   )
 
   await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
-  await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+  await openMenuSection("display")
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
 
   await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2))
   expect(logWarn).toHaveBeenCalledWith(
@@ -1942,12 +1994,100 @@ test("the display menu carries the sort axis beside grouping", async () => {
     />
   )
   await user.click(screen.getByRole("button", { name: "displayOptions" }))
-  // Grouping and sorting are siblings; the menu that offers one offers both.
-  expect(screen.getByText("groupBy.label")).toBeInTheDocument()
-  expect(screen.getByText("sortBy.label")).toBeInTheDocument()
+  // Grouping and sorting are siblings; the menu that offers one offers both —
+  // now as two closed rows that already say which answer is in force.
+  expect(screen.getByTestId("channel-list-menu-group")).toHaveTextContent("groupBy.label")
+  const sortRow = screen.getByTestId("channel-list-menu-sort")
+  expect(sortRow).toHaveTextContent("sortBy.label")
+  expect(sortRow).toHaveTextContent("sortBy.options.recent")
+  await openMenuSection("sort")
   expect(screen.getByTestId("channel-list-sort-recent")).toHaveAttribute("aria-checked", "true")
-  await user.click(screen.getByTestId("channel-list-sort-title"))
+  await pick(screen.getByTestId("channel-list-sort-title"))
   expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: { sortBy: "title" } })
+})
+
+test("the display menu asks its four questions as four rows, not twenty-two", async () => {
+  conversationSidebar = { metadata: ["agent", "model"], groupBy: "date", sortBy: "recent" }
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+
+  // Four folded rows, and each carries its answer on its face — the fold must
+  // not cost the readout the flat list gave for free.
+  const rows = screen.getAllByTestId(/^channel-list-menu-/)
+  expect(rows.map((row) => row.textContent)).toEqual([
+    "displayOptions",
+    "metadata.labelmetadata.agent, metadata.model",
+    "groupBy.labelgroupBy.options.date",
+    "sortBy.labelsortBy.options.recent",
+  ])
+  // The switches themselves are one level in: nothing but the four rows, the
+  // search reach and the folder action is on the first screen.
+  expect(screen.queryByRole("menuitemcheckbox", { name: "compactDensity" })).toBeNull()
+  expect(screen.queryByRole("menuitemradio", { name: "sortBy.options.title" })).toBeNull()
+  expect(screen.getByRole("menuitemcheckbox", { name: "searchMessageContent" })).toBeInTheDocument()
+
+  await openMenuSection("display")
+  expect(
+    await screen.findByRole("menuitemcheckbox", { name: "compactDensity" })
+  ).toBeInTheDocument()
+})
+
+test("the row-details row says so when it is showing nothing", async () => {
+  conversationSidebar = { metadata: [] }
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  // An empty readout would read as "unknown"; the row names the empty state.
+  expect(screen.getByTestId("channel-list-menu-metadata")).toHaveTextContent(
+    "metadata.labelmetadata.none"
+  )
+})
+
+test("flipping one display switch leaves the menu open for the next", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false }
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await openMenuSection("display")
+  await pick(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+
+  // Radix closes the whole menu on select, which two levels down means
+  // re-opening and re-walking for every switch after the first.
+  expect(screen.getByRole("menuitemcheckbox", { name: "showPreview" })).toBeInTheDocument()
 })
 
 test("a folder created from the list opens its name for editing straight away", async () => {
@@ -2780,7 +2920,12 @@ describe("channel-list branch coverage top-ups", () => {
     const user = userEvent.setup()
     renderList([dmSession, teamSession])
     await user.click(screen.getByTestId("channel-list-filter-trigger"))
-    await user.hover(await screen.findByTestId("channel-list-filter-trigger-section-status"))
+    // Two levels now: the facets are folded into families
+    // (`lib/chat/conversation-filter-families.ts`), and a sub-trigger opens on
+    // click as well as on hover, which is the only gesture jsdom can drive
+    // through a nested submenu.
+    fireEvent.click(await screen.findByTestId("channel-list-filter-trigger-family-refine"))
+    fireEvent.click(await screen.findByTestId("channel-list-filter-trigger-section-status"))
     // The boolean quick filters are still the surface's own; direct-vs-team is
     // the guild rows' decision and has no second control here.
     expect(
@@ -2823,7 +2968,12 @@ describe("channel-list branch coverage top-ups", () => {
     const user = userEvent.setup()
     renderList([dmSession, teamSession])
     await user.click(screen.getByTestId("channel-list-filter-trigger"))
-    await user.hover(await screen.findByTestId("channel-list-filter-trigger-section-status"))
+    // Two levels now: the facets are folded into families
+    // (`lib/chat/conversation-filter-families.ts`), and a sub-trigger opens on
+    // click as well as on hover, which is the only gesture jsdom can drive
+    // through a nested submenu.
+    fireEvent.click(await screen.findByTestId("channel-list-filter-trigger-family-refine"))
+    fireEvent.click(await screen.findByTestId("channel-list-filter-trigger-section-status"))
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "filters.options.unread" }))
     expect(setConversationFilters).toHaveBeenCalledWith({
       ...EMPTY_CONVERSATION_FILTERS,
@@ -3225,6 +3375,128 @@ describe("title-bar projection", () => {
     expect(useShellColumnsStore.getState().sidebarHostsNav).toBe(false)
   })
 
+  describe("edge peek", () => {
+    it("is not armed while the rail is open", () => {
+      sidebarPeekEnabled = true
+      renderProjected()
+      expect(screen.queryByTestId("sidebar-peek-edge")).toBeNull()
+      expect(screen.queryByTestId("sidebar-peek-panel")).toBeNull()
+    })
+
+    it("collapsed, parks the list beside the seam and floats it out on hover", () => {
+      jest.useFakeTimers()
+      try {
+        sidebarCollapsed = true
+        sidebarPeekEnabled = true
+        renderProjected()
+        const panel = screen.getByTestId("sidebar-peek-panel")
+        // Parked: off screen, unreachable, and carrying the whole list. The
+        // list is the SAME instance the open rail renders, moved by a class.
+        expect(panel).not.toHaveAttribute("data-open")
+        expect(panel).toHaveAttribute("inert")
+        expect(panel).toContainElement(screen.getByTestId("channel-list-header"))
+
+        const edge = screen.getByTestId("sidebar-peek-edge")
+        act(() => {
+          fireEvent.mouseEnter(edge)
+        })
+        // Not on contact. A pointer crossing the seam on its way somewhere
+        // else must not fling a panel over the conversation.
+        expect(screen.getByTestId("sidebar-peek-panel")).not.toHaveAttribute("data-open")
+        act(() => {
+          jest.advanceTimersByTime(PEEK_OPEN_DELAY_MS)
+        })
+        const opened = screen.getByTestId("sidebar-peek-panel")
+        expect(opened).toHaveAttribute("data-open", "true")
+        expect(opened).not.toHaveAttribute("inert")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("takes the edge the rail folded into", () => {
+      sidebarCollapsed = true
+      sidebarPeekEnabled = true
+      sidebarSide = "right"
+      renderProjected()
+      expect(screen.getByTestId("sidebar-peek-edge")).toHaveAttribute("data-side", "right")
+      expect(screen.getByTestId("sidebar-peek-panel")).toHaveAttribute("data-side", "right")
+    })
+
+    it("pinning from inside the flyout restores the rail for good", () => {
+      jest.useFakeTimers()
+      try {
+        sidebarCollapsed = true
+        sidebarPeekEnabled = true
+        renderProjected()
+        act(() => {
+          fireEvent.mouseEnter(screen.getByTestId("sidebar-peek-edge"))
+          jest.advanceTimersByTime(PEEK_OPEN_DELAY_MS)
+        })
+        fireEvent.click(screen.getByTestId("sidebar-peek-pin"))
+        expect(setSidebarCollapsed).toHaveBeenCalledWith(false)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("stays out of the way on a touch-only pointer, where the swipe is the way in", () => {
+      sidebarCollapsed = true
+      sidebarPeekEnabled = true
+      hasHover = false
+      renderProjected()
+      expect(screen.queryByTestId("sidebar-peek-edge")).toBeNull()
+    })
+
+    it("is off entirely when the preference is off", () => {
+      sidebarCollapsed = true
+      sidebarPeekEnabled = false
+      renderProjected()
+      expect(screen.queryByTestId("sidebar-peek-edge")).toBeNull()
+    })
+  })
+
+  describe("search in its resting form", () => {
+    it("rests as one button and opens into the row when used", () => {
+      sidebarSearchCollapsible = true
+      renderProjected()
+      const search = screen.getByTestId("channel-list-search")
+      expect(search).toHaveAttribute("data-button-form", "true")
+      // Sized to the control, so it sits beside the three buttons after it
+      // instead of holding the row's remaining width open around a glyph.
+      expect(search).toHaveClass("grow-0")
+      expect(search).toHaveStyle({ flexBasis: "32px" })
+      // Still one control with one name and one tab stop. The overlay is a
+      // pointer target that hands focus over, not a second search button.
+      const input = screen.getByLabelText("searchAria")
+      const overlay = screen.getByTestId("channel-list-search-button")
+      expect(overlay).toHaveAttribute("aria-hidden", "true")
+      expect(overlay).toHaveAttribute("tabindex", "-1")
+
+      fireEvent.click(overlay)
+      act(() => input.focus())
+      expect(search).not.toHaveAttribute("data-button-form")
+      expect(screen.queryByTestId("channel-list-search-button")).toBeNull()
+    })
+
+    it("holds the row open while it still has a query", () => {
+      sidebarSearchCollapsible = true
+      renderProjected()
+      const input = screen.getByLabelText("searchAria")
+      act(() => input.focus())
+      fireEvent.change(input, { target: { value: "budget" } })
+      act(() => input.blur())
+      expect(screen.getByTestId("channel-list-search")).not.toHaveAttribute("data-button-form")
+    })
+
+    it("keeps the field open when the preference says so", () => {
+      sidebarSearchCollapsible = false
+      renderProjected()
+      expect(screen.getByTestId("channel-list-search")).not.toHaveAttribute("data-button-form")
+      expect(screen.queryByTestId("channel-list-search-button")).toBeNull()
+    })
+  })
+
   it("keeps the mobile Sheet's header inline, without the shell navigation", () => {
     isNarrow = true
     renderProjected()
@@ -3396,11 +3668,15 @@ describe("title-bar projection", () => {
       expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
 
       // Focus (what `/` gives it) expands the field; the filter and ⋯ beside
-      // it yield. New conversation heads the rail and never moves.
+      // it yield. They stay mounted and collapse on the field's own clock, so
+      // the row does not reflow under the pointer mid-gesture, but they are
+      // out of reach for the keyboard and for assistive tech while it is open.
       act(() => input.focus())
       expect(search).toHaveAttribute("data-expanded", "true")
-      expect(screen.queryByTestId("channel-list-filter-trigger")).toBeNull()
-      expect(screen.queryByTestId("channel-list-actions-menu")).toBeNull()
+      const actions = screen.getByTestId("channel-list-search-actions")
+      expect(actions).toHaveAttribute("data-hidden", "true")
+      expect(actions).toHaveAttribute("aria-hidden", "true")
+      expect(actions).toHaveClass("max-w-0")
       expect(screen.getByTestId("sidebar-new-conversation")).toBeInTheDocument()
 
       // The global-search hatch sits inside the field, and carries the query.

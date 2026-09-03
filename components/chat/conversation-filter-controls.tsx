@@ -12,9 +12,11 @@ import {
   EyeOffIcon,
   FilterIcon,
   FolderTreeIcon,
+  LayersIcon,
   RotateCcwIcon,
   SaveIcon,
   SettingsIcon,
+  SlidersHorizontalIcon,
   TelescopeIcon,
   Trash2Icon,
   XIcon,
@@ -89,6 +91,12 @@ import {
   type ResolvedConversationView,
 } from "@/lib/chat/conversation-views"
 import { cn } from "@/lib/utils"
+import {
+  defaultOpenFacetEntries,
+  groupFacetSections,
+  type ConversationFacetFamilyKey,
+  type FacetMenuEntry,
+} from "@/lib/chat/conversation-filter-families"
 import type { ConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 
 /**
@@ -213,6 +221,30 @@ const SECTION_ICON: Record<
   agent: BotIcon,
   model: CpuIcon,
   activity: CalendarClockIcon,
+}
+
+const FAMILY_ICON: Record<ConversationFacetFamilyKey, LucideIcon> = {
+  refine: SlidersHorizontalIcon,
+  scope: LayersIcon,
+}
+
+/** The menu's two levels, and what each top-level row says about itself. */
+type FacetEntry = FacetMenuEntry<FacetSection>
+
+function useFacetEntries(sections: FacetSection[]): FacetEntry[] {
+  return useMemo(() => groupFacetSections(sections), [sections])
+}
+
+/**
+ * A family's row summary: the sections inside it that have something to say,
+ * named. The fold must not cost the user the readout the flat menu gave them,
+ * so "Filters · Last activity" is the price of collapsing two rows into one.
+ */
+function familySummary(entry: Extract<FacetEntry, { kind: "family" }>): string | undefined {
+  const parts = entry.sections
+    .filter((section) => section.activeCount > 0)
+    .map((section) => section.summary ?? section.label)
+  return parts.length > 0 ? parts.join(" · ") : undefined
 }
 
 function useFacetSections(model: ConversationFilterViewModel): FacetSection[] {
@@ -428,6 +460,9 @@ export function ConversationFilterMenu({
 }: ConversationFilterMenuProps) {
   const isMobile = useIsMobile()
   const sections = useFacetSections(model)
+  // One fold, two renderers. Computing it here rather than inside each shell is
+  // what stops the dropdown and the drawer from nesting different things.
+  const entries = useFacetEntries(sections)
   const [saveOpen, setSaveOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
   const openSave = useCallback(() => setSaveOpen(true), [])
@@ -438,7 +473,7 @@ export function ConversationFilterMenu({
       {isMobile ? (
         <FilterDrawer
           model={model}
-          sections={sections}
+          entries={entries}
           triggerClassName={triggerClassName}
           testId={testId}
           onSaveView={openSave}
@@ -447,7 +482,7 @@ export function ConversationFilterMenu({
       ) : (
         <FilterDropdown
           model={model}
-          sections={sections}
+          entries={entries}
           side={side}
           triggerClassName={triggerClassName}
           testId={testId}
@@ -476,7 +511,7 @@ export function ConversationFilterMenu({
 
 interface ShellProps {
   model: ConversationFilterViewModel
-  sections: FacetSection[]
+  entries: FacetEntry[]
   triggerClassName?: string
   testId: string
   onSaveView: () => void
@@ -486,9 +521,78 @@ interface ShellProps {
 /** Keep the menu open on select — the user is composing a filter, not firing a command. */
 const keepOpen = (event: Event) => event.preventDefault()
 
+/** The family row's glyph. A component so the icon table stays one lookup. */
+function FamilyIcon({ family }: { family: ConversationFacetFamilyKey }) {
+  const Icon = FAMILY_ICON[family]
+  return <Icon className="size-4 text-muted-foreground" aria-hidden />
+}
+
+/**
+ * One facet section as a submenu. Extracted because it is now drawn at two
+ * depths (top level for `sort` and for any family that collapsed, one level in
+ * for the rest) and a copy per depth is how the two would drift.
+ */
+function FacetSectionSubmenu({ section, testId }: { section: FacetSection; testId: string }) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="gap-2" data-testid={`${testId}-section-${section.key}`}>
+        <section.icon className="size-4 text-muted-foreground" aria-hidden />
+        <span className="flex-1 truncate">{section.label}</span>
+        {section.summary ? (
+          <span className="max-w-24 truncate text-xs text-muted-foreground">{section.summary}</span>
+        ) : null}
+        <CountPill count={section.activeCount} />
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-[min(70vh,480px)] w-56 overflow-y-auto">
+        {section.groups.map((group, index) => (
+          <div key={group.key}>
+            {index > 0 ? <DropdownMenuSeparator /> : null}
+            {group.label ? (
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                {group.label}
+              </DropdownMenuLabel>
+            ) : null}
+            {group.kind === "radio" ? (
+              <DropdownMenuRadioGroup
+                value={group.items.find((item) => item.checked)?.value}
+                onValueChange={(value) =>
+                  group.items.find((item) => item.value === value)?.onSelect()
+                }
+              >
+                {group.items.map((item) => (
+                  <DropdownMenuRadioItem key={item.value} value={item.value} onSelect={keepOpen}>
+                    {item.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            ) : (
+              group.items.map((item) => (
+                <DropdownMenuCheckboxItem
+                  key={item.value || "__any__"}
+                  checked={item.checked}
+                  onCheckedChange={item.onSelect}
+                  onSelect={keepOpen}
+                  className={cn(!item.value && "text-muted-foreground")}
+                >
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.count != null ? (
+                    <span className="ml-2 shrink-0 text-xs text-muted-foreground tabular-nums">
+                      {item.count}
+                    </span>
+                  ) : null}
+                </DropdownMenuCheckboxItem>
+              ))
+            )}
+          </div>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
+
 function FilterDropdown({
   model,
-  sections,
+  entries,
   side,
   triggerClassName,
   testId,
@@ -597,70 +701,32 @@ function FilterDropdown({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
-        {sections.map((section) => (
-          <DropdownMenuSub key={section.key}>
-            <DropdownMenuSubTrigger
-              className="gap-2"
-              data-testid={`${testId}-section-${section.key}`}
-            >
-              <section.icon className="size-4 text-muted-foreground" aria-hidden />
-              <span className="flex-1 truncate">{section.label}</span>
-              {section.summary ? (
-                <span className="max-w-24 truncate text-xs text-muted-foreground">
-                  {section.summary}
-                </span>
-              ) : null}
-              <CountPill count={section.activeCount} />
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-[min(70vh,480px)] w-56 overflow-y-auto">
-              {section.groups.map((group, index) => (
-                <div key={group.key}>
-                  {index > 0 ? <DropdownMenuSeparator /> : null}
-                  {group.label ? (
-                    <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                      {group.label}
-                    </DropdownMenuLabel>
-                  ) : null}
-                  {group.kind === "radio" ? (
-                    <DropdownMenuRadioGroup
-                      value={group.items.find((item) => item.checked)?.value}
-                      onValueChange={(value) =>
-                        group.items.find((item) => item.value === value)?.onSelect()
-                      }
-                    >
-                      {group.items.map((item) => (
-                        <DropdownMenuRadioItem
-                          key={item.value}
-                          value={item.value}
-                          onSelect={keepOpen}
-                        >
-                          {item.label}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  ) : (
-                    group.items.map((item) => (
-                      <DropdownMenuCheckboxItem
-                        key={item.value || "__any__"}
-                        checked={item.checked}
-                        onCheckedChange={item.onSelect}
-                        onSelect={keepOpen}
-                        className={cn(!item.value && "text-muted-foreground")}
-                      >
-                        <span className="flex-1 truncate">{item.label}</span>
-                        {item.count != null ? (
-                          <span className="ml-2 shrink-0 text-xs text-muted-foreground tabular-nums">
-                            {item.count}
-                          </span>
-                        ) : null}
-                      </DropdownMenuCheckboxItem>
-                    ))
-                  )}
-                </div>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ))}
+        {entries.map((entry) =>
+          entry.kind === "section" ? (
+            <FacetSectionSubmenu key={entry.key} section={entry.section} testId={testId} />
+          ) : (
+            <DropdownMenuSub key={entry.key}>
+              <DropdownMenuSubTrigger
+                className="gap-2"
+                data-testid={`${testId}-family-${entry.key}`}
+              >
+                <FamilyIcon family={entry.key} />
+                <span className="flex-1 truncate">{t(`families.${entry.key}`)}</span>
+                {familySummary(entry) ? (
+                  <span className="max-w-24 truncate text-xs text-muted-foreground">
+                    {familySummary(entry)}
+                  </span>
+                ) : null}
+                <CountPill count={entry.activeCount} />
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-56">
+                {entry.sections.map((section) => (
+                  <FacetSectionSubmenu key={section.key} section={section} testId={testId} />
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )
+        )}
         {activeFilters > 0 ? (
           <>
             <DropdownMenuSeparator />
@@ -675,9 +741,80 @@ function FilterDropdown({
   )
 }
 
+/**
+ * One facet section as a drawer accordion row. Extracted for the same reason
+ * its dropdown twin was: it is drawn at two depths now, and a copy per depth is
+ * how the two would drift apart.
+ */
+function FacetSectionAccordionItem({ section, testId }: { section: FacetSection; testId: string }) {
+  return (
+    <AccordionItem value={section.key}>
+      <AccordionTrigger
+        className="items-center py-3 hover:no-underline"
+        data-testid={`${testId}-section-${section.key}`}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <section.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate">{section.label}</span>
+          {section.summary ? (
+            <span className="ml-1 truncate text-xs font-normal text-muted-foreground">
+              {section.summary}
+            </span>
+          ) : null}
+          <CountPill count={section.activeCount} className="ml-auto" />
+        </span>
+      </AccordionTrigger>
+      <AccordionContent className="pb-2">
+        {section.groups.map((group, index) => (
+          <div key={group.key} className={cn(index > 0 && "mt-2 border-t pt-2")}>
+            {group.label ? (
+              <p className="px-1 py-1 text-xs text-muted-foreground">{group.label}</p>
+            ) : null}
+            {group.kind === "radio" ? (
+              <RadioGroup
+                value={group.items.find((item) => item.checked)?.value}
+                onValueChange={(value) =>
+                  group.items.find((item) => item.value === value)?.onSelect()
+                }
+                className="gap-0"
+              >
+                {group.items.map((item) => (
+                  <label
+                    key={item.value}
+                    className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-1 text-sm active:bg-accent/60"
+                  >
+                    <RadioGroupItem value={item.value} />
+                    <span className="flex-1 truncate">{item.label}</span>
+                  </label>
+                ))}
+              </RadioGroup>
+            ) : (
+              group.items.map((item) => (
+                <label
+                  key={item.value || "__any__"}
+                  className={cn(
+                    "flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-1 text-sm active:bg-accent/60",
+                    !item.value && "text-muted-foreground"
+                  )}
+                >
+                  <Checkbox checked={item.checked} onCheckedChange={item.onSelect} />
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.count != null ? (
+                    <span className="text-xs text-muted-foreground tabular-nums">{item.count}</span>
+                  ) : null}
+                </label>
+              ))
+            )}
+          </div>
+        ))}
+      </AccordionContent>
+    </AccordionItem>
+  )
+}
+
 function FilterDrawer({
   model,
-  sections,
+  entries,
   triggerClassName,
   testId,
   onSaveView,
@@ -796,72 +933,56 @@ function FilterDrawer({
                 </div>
               ) : null}
             </div>
-            <Accordion type="multiple" defaultValue={["sort", "status"]}>
-              {sections.map((section) => (
-                <AccordionItem key={section.key} value={section.key}>
-                  <AccordionTrigger
-                    className="items-center py-3 hover:no-underline"
-                    data-testid={`${testId}-section-${section.key}`}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-2">
-                      <section.icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="truncate">{section.label}</span>
-                      {section.summary ? (
-                        <span className="ml-1 truncate text-xs font-normal text-muted-foreground">
-                          {section.summary}
-                        </span>
-                      ) : null}
-                      <CountPill count={section.activeCount} className="ml-auto" />
-                    </span>
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-2">
-                    {section.groups.map((group, index) => (
-                      <div key={group.key} className={cn(index > 0 && "mt-2 border-t pt-2")}>
-                        {group.label ? (
-                          <p className="px-1 py-1 text-xs text-muted-foreground">{group.label}</p>
+            <Accordion type="multiple" defaultValue={defaultOpenFacetEntries(entries)}>
+              {entries.map((entry) =>
+                entry.kind === "section" ? (
+                  <FacetSectionAccordionItem
+                    key={entry.key}
+                    section={entry.section}
+                    testId={testId}
+                  />
+                ) : (
+                  <AccordionItem key={entry.key} value={entry.key}>
+                    <AccordionTrigger
+                      className="items-center py-3 hover:no-underline"
+                      data-testid={`${testId}-family-${entry.key}`}
+                    >
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <FamilyIcon family={entry.key} />
+                        <span className="truncate">{t(`families.${entry.key}`)}</span>
+                        {familySummary(entry) ? (
+                          <span className="ml-1 truncate text-xs font-normal text-muted-foreground">
+                            {familySummary(entry)}
+                          </span>
                         ) : null}
-                        {group.kind === "radio" ? (
-                          <RadioGroup
-                            value={group.items.find((item) => item.checked)?.value}
-                            onValueChange={(value) =>
-                              group.items.find((item) => item.value === value)?.onSelect()
-                            }
-                            className="gap-0"
-                          >
-                            {group.items.map((item) => (
-                              <label
-                                key={item.value}
-                                className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-1 text-sm active:bg-accent/60"
-                              >
-                                <RadioGroupItem value={item.value} />
-                                <span className="flex-1 truncate">{item.label}</span>
-                              </label>
-                            ))}
-                          </RadioGroup>
-                        ) : (
-                          group.items.map((item) => (
-                            <label
-                              key={item.value || "__any__"}
-                              className={cn(
-                                "flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-1 text-sm active:bg-accent/60",
-                                !item.value && "text-muted-foreground"
-                              )}
-                            >
-                              <Checkbox checked={item.checked} onCheckedChange={item.onSelect} />
-                              <span className="flex-1 truncate">{item.label}</span>
-                              {item.count != null ? (
-                                <span className="text-xs text-muted-foreground tabular-nums">
-                                  {item.count}
-                                </span>
-                              ) : null}
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    ))}
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
+                        <CountPill count={entry.activeCount} className="ml-auto" />
+                      </span>
+                    </AccordionTrigger>
+                    {/* Nested, not flattened with a heading: the whole point of
+                        the fold is that a family's facets are out of the way
+                        until the user says which question they are asking. */}
+                    <AccordionContent className="pb-1 pl-3">
+                      {/* The family's first section opens with it. Opening
+                          "Narrow the list" onto two more closed rows is a
+                          second tap that answers nothing, and the fold is only
+                          worth having if the first thing under it is already
+                          on screen. */}
+                      <Accordion
+                        type="multiple"
+                        defaultValue={entry.sections[0] ? [entry.sections[0].key] : []}
+                      >
+                        {entry.sections.map((section) => (
+                          <FacetSectionAccordionItem
+                            key={section.key}
+                            section={section}
+                            testId={testId}
+                          />
+                        ))}
+                      </Accordion>
+                    </AccordionContent>
+                  </AccordionItem>
+                )
+              )}
             </Accordion>
           </div>
           <DrawerFooter className="flex-row gap-2 pt-3">

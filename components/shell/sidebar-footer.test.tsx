@@ -2,101 +2,36 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
-import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { render, screen } from "@testing-library/react"
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
-
-const routerPush = jest.fn()
-let pathname = "/"
-jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: routerPush, replace: jest.fn(), back: jest.fn() }),
-  usePathname: () => pathname,
-  useSearchParams: () => new URLSearchParams(),
-}))
-
-const logInfo = jest.fn()
-jest.mock("@cognia/logging", () => {
-  const stub = {
-    trace: jest.fn(),
-    debug: jest.fn(),
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    fatal: jest.fn(),
-    child: function () {
-      return this
-    },
-    withContext: function () {
-      return this
-    },
-  }
-  return {
-    loggers: new Proxy(
-      { ui: { ...stub, info: (...args: unknown[]) => logInfo(...args) } },
-      { get: (target: Record<string, unknown>, prop: string) => target[prop] ?? stub }
-    ),
-    createLogger: () => stub,
-  }
-})
-
-jest.mock("@/stores/ui", () => ({
-  useUIStore: <T,>(
-    selector: (s: { selectedGuild: { kind: "dm" }; setSelectedGuild: () => void }) => T
-  ): T => selector({ selectedGuild: { kind: "dm" }, setSelectedGuild: () => {} }),
-}))
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => "tauri" }))
-// A stable snapshot: `useSyncExternalStore` compares by identity, and a
-// fresh `[]` per call would re-render forever.
-const NO_CONTAINERS: never[] = []
-jest.mock("@/lib/plugin/registries/view-container-registry", () => ({
-  subscribeViewContainers: () => () => {},
-  getViewContainerSnapshot: () => NO_CONTAINERS,
-}))
-jest.mock("@/lib/plugin/context-keys/context-key-store", () => ({
-  subscribeContextKeys: () => () => {},
-  getContextKeyRevision: () => 0,
-  evaluateContextWhen: () => true,
-}))
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: ({ point }: { point: string }) => <div data-testid={`slot-${point}`} />,
+}))
+// The account card has its own suite (`sidebar-user-card.test.tsx`), so here it
+// is a stub and this file keeps testing what the footer itself decides.
+jest.mock("./sidebar-user-card", () => ({
+  SidebarUserCard: () => <div data-testid="sidebar-user-card" />,
 }))
 
 import { SidebarFooter } from "./sidebar-footer"
 
-beforeEach(() => {
-  routerPush.mockReset()
-  logInfo.mockReset()
-  pathname = "/"
-  act(() => {
-    useSettingsStore.setState({
-      settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT } } as never,
-      save: jest.fn(async () => {}) as never,
-    })
-  })
-})
-
 describe("SidebarFooter", () => {
-  it("opens settings from its row and mounts the rail's bottom plugin slot", () => {
+  it("ends the rail on the account card, over the rail's bottom plugin slot", () => {
     render(<SidebarFooter />)
-    expect(screen.getByTestId("slot-sidebar.left.bottom")).toBeInTheDocument()
-    const settings = screen.getByTestId("sidebar-footer-settings")
-    // The visible label is the accessible name (WCAG 2.5.3): no "Open
-    // settings" override on a row that reads "Settings".
-    expect(settings).not.toHaveAttribute("aria-label")
-    expect(settings).toHaveTextContent("settings")
-    expect(settings).not.toHaveAttribute("aria-current")
-    fireEvent.click(settings)
-    expect(routerPush).toHaveBeenCalledWith("/settings")
-    expect(logInfo).toHaveBeenCalledWith("guild open settings")
+    const footer = screen.getByTestId("sidebar-footer")
+    expect(footer).toContainElement(screen.getByTestId("slot-sidebar.left.bottom"))
+    expect(footer).toContainElement(screen.getByTestId("sidebar-user-card"))
   })
 
-  it("lights the row while on a settings route", () => {
-    pathname = "/settings/general"
+  it("no longer carries a Settings row of its own", () => {
+    // Settings moved into the account card's menu. The icon column keeps its
+    // own gear, so the destination did not become unreachable.
     render(<SidebarFooter />)
-    expect(screen.getByTestId("sidebar-footer-settings")).toHaveAttribute("aria-current", "page")
+    expect(screen.queryByTestId("sidebar-footer-settings")).toBeNull()
+  })
+
+  it("takes a caller's class so the rail can place it", () => {
+    render(<SidebarFooter className="mt-2" />)
+    expect(screen.getByTestId("sidebar-footer")).toHaveClass("mt-2")
   })
 })

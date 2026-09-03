@@ -106,6 +106,7 @@
       "agent": "Agent",
       "label": "行详情",
       "model": "模型",
+      "none": "无",
       "provider": "提供商",
       "workspace": "工作区"
     },
@@ -116,6 +117,7 @@
     "newFolder": "新建文件夹",
     "newFolderName": "新建文件夹",
     "openSessions": "打开会话列表",
+    "pinSidebar": "固定",
     "renameFolder": "重命名文件夹",
     "resizeHandle": "调整侧边栏宽度",
     "searchAria": "搜索对话",
@@ -188,6 +190,7 @@
     "canvas": "画布",
     "createTeam": "创建团队",
     "customize": {
+      "behaviour": "行为",
       "description": "把常用项固定到导航栏，其余收进「更多」菜单。可拖拽排序，或隐藏从不使用的项。",
       "dragHint": "拖拽以排序",
       "hidden": "已隐藏",
@@ -196,16 +199,23 @@
       "more": "更多菜单中",
       "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
       "moveToMore": "移至更多",
+      "peek": "边缘悬停时展开",
+      "peekHint": "列表折叠后，把指针停在接缝上即可让它浮回对话之上。",
       "pin": "固定到导航栏",
       "pinItem": "固定项目",
       "pinned": "已固定",
       "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
       "restoreDefaults": "恢复默认",
+      "searchButton": "搜索以按钮形态停靠",
+      "searchButtonHint": "使用时搜索框会展开占满整行，用完后收回成一个图标。",
       "showItem": "显示",
       "side": "导航栏位置",
       "sideLeft": "左侧",
       "sideRight": "右侧",
-      "title": "自定义侧边栏"
+      "title": "自定义侧边栏",
+      "width": "宽度",
+      "widthReset": "恢复默认",
+      "widthValue": "{width}px"
     },
     "devices": "设备",
     "directMessages": "对话",
@@ -575,6 +585,22 @@
   "shellLayoutNotice": {
     "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
     "title": "布局已简化"
+  },
+  "sidebarUser": {
+    "lock": "锁定 Cognia",
+    "lockFailed": "无法锁定 Cognia。",
+    "manageAccounts": "配置档案",
+    "menuAria": "{name} 的账户菜单",
+    "noProfile": "尚未创建档案",
+    "petFailed": "无法打开桌面宠物。",
+    "settings": "设置",
+    "showPet": "桌面宠物",
+    "signIn": "登录 Cognia 云",
+    "standingCloud": "Cognia 云",
+    "standingLocal": "仅本机",
+    "standingOrg": "组织成员",
+    "usage": "用量",
+    "usageLeft": "剩余 {percent}%"
   },
   "statusBar": {
     "awaitingApproval": "等待批准",

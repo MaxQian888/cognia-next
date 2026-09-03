@@ -256,6 +256,8 @@ describe("useUIStore", () => {
         sidebarCollapsed: false,
         sidebarTeamsCollapsed: false,
         sidebarWidth: 256,
+        sidebarPeekEnabled: true,
+        sidebarSearchCollapsible: true,
         channelListView: "active",
         collapsedFolderIds: [],
         groupCollapseOverrides: {},
@@ -463,6 +465,25 @@ describe("useUIStore", () => {
       const raw = window.localStorage.getItem("cognia-ui")
       const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
       expect(parsed.state.findOpen).toBeUndefined()
+    })
+  })
+
+  describe("sidebar behaviour preferences", () => {
+    it("defaults both to on, which is the behaviour the rail was redesigned around", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.sidebarPeekEnabled).toBe(true)
+      expect(result.current.sidebarSearchCollapsible).toBe(true)
+    })
+
+    it("switches each independently", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setSidebarPeekEnabled(false))
+      expect(result.current.sidebarPeekEnabled).toBe(false)
+      expect(result.current.sidebarSearchCollapsible).toBe(true)
+
+      act(() => result.current.setSidebarSearchCollapsible(false))
+      expect(result.current.sidebarSearchCollapsible).toBe(false)
+      expect(result.current.sidebarPeekEnabled).toBe(false)
     })
   })
 

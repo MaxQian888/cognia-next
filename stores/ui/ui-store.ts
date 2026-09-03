@@ -143,6 +143,26 @@ interface UIState {
   setSidebarWidth: (width: number) => void
 
   /**
+   * Collapsed sidebar only: hovering the window edge the rail sits on floats
+   * it back over the content until the pointer leaves
+   * (`components/shell/sidebar-peek-panel.tsx`). This is what makes "fully
+   * collapsed" a usable resting state rather than a trip through ⌘B every
+   * time the user wants one glance at the list. Persisted; the peek itself is
+   * transient and lives in the component.
+   */
+  sidebarPeekEnabled: boolean
+  setSidebarPeekEnabled: (enabled: boolean) => void
+
+  /**
+   * The rail's search field rests as a single icon button and expands into
+   * the row when it is used (`ChannelListSearch`). Off = the field is always
+   * open, which is the older behaviour and what a user who searches
+   * constantly wants. Persisted.
+   */
+  sidebarSearchCollapsible: boolean
+  setSidebarSearchCollapsible: (collapsible: boolean) => void
+
+  /**
    * Active ⇄ Archived slice shown in the ChannelList. Persisted so the choice
    * survives reloads (previously an ephemeral component `useState`).
    */
@@ -382,6 +402,12 @@ export const useUIStore = create<UIState>()(
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
 
+      sidebarPeekEnabled: true,
+      setSidebarPeekEnabled: (enabled) => set({ sidebarPeekEnabled: enabled }),
+
+      sidebarSearchCollapsible: true,
+      setSidebarSearchCollapsible: (collapsible) => set({ sidebarSearchCollapsible: collapsible }),
+
       channelListView: "active",
       setChannelListView: (view) => set({ channelListView: view }),
 
@@ -563,6 +589,8 @@ export const useUIStore = create<UIState>()(
         sidebarCollapsed: s.sidebarCollapsed,
         sidebarTeamsCollapsed: s.sidebarTeamsCollapsed,
         sidebarWidth: s.sidebarWidth,
+        sidebarPeekEnabled: s.sidebarPeekEnabled,
+        sidebarSearchCollapsible: s.sidebarSearchCollapsible,
         channelListView: s.channelListView,
         collapsedFolderIds: s.collapsedFolderIds,
         groupCollapseOverrides: s.groupCollapseOverrides,
