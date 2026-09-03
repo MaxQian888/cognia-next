@@ -16,10 +16,12 @@ jest.mock("@/lib/agent-tasks/runtime", () => ({
 
 const logInfo = jest.fn()
 const logError = jest.fn()
+const logWarn = jest.fn()
 jest.mock("@cognia/logging", () => ({
   loggers: {
     scheduler: {
       info: (...args: unknown[]) => logInfo(...args),
+      warn: (...args: unknown[]) => logWarn(...args),
       error: (...args: unknown[]) => logError(...args),
     },
   },
@@ -37,6 +39,7 @@ type StoreState = {
   initialize: jest.Mock<Promise<void>, []>
   isInitialized: boolean
   setSchedulerStatus: jest.Mock<void, [string]>
+  loadPermissionPolicy: jest.Mock<Promise<void>, []>
 }
 
 let storeState: StoreState
@@ -62,6 +65,7 @@ beforeEach(() => {
   storeListeners.clear()
   storeState = {
     initialize: jest.fn(async () => undefined),
+    loadPermissionPolicy: jest.fn(async () => undefined),
     isInitialized: false,
     setSchedulerStatus: jest.fn((status) => {
       if (status !== "stopped" || !storeState.isInitialized) return
@@ -73,6 +77,7 @@ beforeEach(() => {
   reconcileAgentTaskRuntime.mockClear()
   logInfo.mockClear()
   logError.mockClear()
+  logWarn.mockClear()
   installBridgeMock.mockClear()
   teardownBridgeMock.mockClear()
 })

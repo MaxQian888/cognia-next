@@ -1,9 +1,27 @@
 /**
- * Scheduler Database
- * Dexie-based persistence for scheduled tasks and executions
+ * Scheduler persistence.
+ *
+ * The two stores live in the ACCOUNT database (`CogniaDB`, schema v219) as
+ * `scheduledTasks` / `scheduledTaskRuns`. They used to be a standalone Dexie
+ * database named `CogniaSchedulerDB`, which meant a schedule was shared across
+ * accounts, stored its prompts and webhook URLs in the clear, sat outside the
+ * data-governance catalog, and was silently absent from every backup. Folding
+ * it into the account database fixes all four at once.
+ *
+ * What did NOT change is placement: ADR-0128 decision 6 says every host keeps
+ * its own schedule and nothing hands tasks between hosts. The account database
+ * is still local to its host, and `scheduler-host-target.ts` still routes a
+ * client to a paired host over `scheduled_task_*` RPCs. Account scoping and
+ * host placement are different axes.
+ *
+ * `SchedulerDatabase` survives as a facade over that database so the ~60 call
+ * sites keep their method surface. It is deliberately NOT a Dexie subclass any
+ * more, so anything that needs raw Dexie behaviour has to ask for it here (see
+ * `transaction`) rather than reaching through a table handle.
  */
 
-import Dexie, { type EntityTable } from "dexie"
+import Dexie from "dexie"
+import type { EntityTable } from "dexie"
 import type {
   ScheduledTask,
   ScheduledTaskType,
@@ -12,149 +30,94 @@ import type {
   TaskFilter,
   TaskStatistics,
 } from "@/types/scheduler"
+import type { DBScheduledTask, DBTaskExecution } from "@/lib/db/scheduled-task-types"
+import { getDb } from "@/lib/db/schema"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.app
 
-// Database entity types (stored format)
-interface DBScheduledTask {
-  id: string
-  name: string
-  description?: string
-  type: string
-  trigger: string // JSON serialized TaskTrigger
-  /** Denormalized event trigger discriminator for the v4 compound index. */
-  eventType: string
-  payload?: string // JSON serialized Record<string, unknown>
-  config: string // JSON serialized TaskExecutionConfig
-  notification: string // JSON serialized TaskNotificationConfig
-  createdBy?: string // JSON serialized ScheduledTaskCreator (v3)
-  /** Owning workspace — soft FK onto the main db's `projects` (v5). */
-  projectId?: string
-  status: string
-  tags?: string // JSON serialized string[]
-  endAt?: string // ISO date string
-  promotion?: string // JSON serialized ScheduledTaskPromotion (promotedAt as ISO)
-  onSuccessTaskIds?: string // JSON serialized string[]
-  onFailureTaskIds?: string // JSON serialized string[]
-  consecutiveFailures?: number
-  lastRunAt?: string // ISO date string
-  nextRunAt?: string // ISO date string
-  runCount: number
-  successCount: number
-  failureCount: number
-  lastError?: string
-  lastTerminalReason?: string
-  lastTerminalAt?: string // ISO date string
-  createdAt: string // ISO date string
-  updatedAt: string // ISO date string
-}
-
-interface DBTaskExecution {
-  id: string
-  taskId: string
-  taskName: string
-  taskType: string
-  status: string
-  input?: string // JSON serialized
-  output?: string // JSON serialized
-  error?: string
-  retryAttempt: number
-  duration?: number
-  scheduledFor?: string // ISO date string
-  triggerSource?: string
-  terminalReason?: string
-  retryScheduledAt?: string // ISO date string
-  startedAt: string // ISO date string
-  completedAt?: string // ISO date string
-  logs: string // JSON serialized TaskExecutionLog[]
-}
-
 /**
- * Tables this database deliberately does NOT persist on a headless host.
+ * Scheduler tables a headless host deliberately does NOT snapshot.
  *
- * `cli/src/db/bootstrap.ts` snapshots Dexie to a JSON file; every mutation
+ * `cli/src/db/bootstrap.ts` snapshots Dexie to a JSON file and every mutation
  * schedules a re-dump, so a high-churn table makes the snapshot cost grow with
- * uptime. `tasks` is low-churn configuration and MUST survive a restart —
- * without it a `cognia serve` brain reboots with an empty schedule and silently
- * stops firing. `executions` is append-heavy history the brain does not need
- * across restarts: failures are already durable in `connectorAudit` and the
- * Notification Center, and `interruptStaleExecutions()` has nothing to reconcile
- * when the table starts empty.
+ * uptime. `scheduledTasks` is low-churn configuration and MUST survive a
+ * restart. Without it a `cognia serve` brain reboots with an empty schedule and
+ * silently stops firing. `scheduledTaskRuns` is append-heavy history the brain
+ * does not need across restarts: failures are already durable in
+ * `connectorAudit` and the Notification Center, and `interruptStaleExecutions()`
+ * has nothing to reconcile when the table starts empty.
  *
  * This is intentional dormancy, so it is labelled on all three axes: here at
  * the type, in the snapshot source that consumes it, and pinned by
- * `scheduler-db.test.ts` / `bootstrap.test.ts`. Do not "fix" it by adding
- * `executions` to the snapshot — measure the flush cost first (see W3.1).
+ * `scheduler-db.test.ts` / `bootstrap.test.ts`. Do not "fix" it by adding the
+ * runs table to the snapshot. Measure the flush cost first (see W3.1).
+ *
+ * Since v219 these are tables of the ACCOUNT database, so the exclusion is
+ * applied to the primary snapshot source rather than to a second database.
  */
-export const SCHEDULER_SNAPSHOT_EXCLUDED_TABLES: readonly string[] = ["executions"]
+export const SCHEDULER_SNAPSHOT_EXCLUDED_TABLES: readonly string[] = ["scheduledTaskRuns"]
 
-/** Dexie database name — the key this database occupies in a host snapshot. */
-export const SCHEDULER_DB_NAME = "CogniaSchedulerDB"
+/**
+ * Name of the LEGACY standalone scheduler database.
+ *
+ * Nothing writes it any more. It survives so `legacy-db-migration.ts` can
+ * recognise a pre-v219 install, drain it into the account database, and delete
+ * it. Do not reintroduce it as a storage target.
+ */
+export const LEGACY_SCHEDULER_DB_NAME = "CogniaSchedulerDB"
 
-// Database class
-class SchedulerDatabase extends Dexie {
-  tasks!: EntityTable<DBScheduledTask, "id">
-  executions!: EntityTable<DBTaskExecution, "id">
+/**
+ * Facade over the account database's two scheduler stores.
+ *
+ * Not a Dexie subclass. `tasks` / `executions` are getters that resolve
+ * `getDb()` on every access rather than capturing a handle, because the active
+ * account database is swapped wholesale on account switch and lock
+ * (`activateAccountDatabase` / `closeCachedDb` in `lib/db/schema.ts`). A
+ * captured handle would keep serving the previous account's rows.
+ *
+ * Both getters are `private`: a caller outside this module that reaches for a
+ * raw table handle bypasses the (de)serialization below and would read the
+ * stored shape, not a `ScheduledTask`. Use the methods, or add one.
+ */
+class SchedulerDatabase {
+  private get tasks(): EntityTable<DBScheduledTask, "id"> {
+    return getDb().scheduledTasks as unknown as EntityTable<DBScheduledTask, "id">
+  }
 
-  constructor(name: string = SCHEDULER_DB_NAME) {
-    super(name)
+  private get executions(): EntityTable<DBTaskExecution, "id"> {
+    return getDb().scheduledTaskRuns as unknown as EntityTable<DBTaskExecution, "id">
+  }
 
-    this.version(1).stores({
-      tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt]",
-      executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-    })
+  /**
+   * Delegate to the account database's transaction.
+   *
+   * The three internal callers open `rw` over both scheduler stores. Now that
+   * the stores are tables of the SAME Dexie instance, that transaction is a
+   * genuine one rather than two databases updated in sequence, so a failed
+   * `deleteTask` can no longer leave executions orphaned behind a deleted task.
+   */
+  private transaction<T>(
+    mode: "r" | "rw",
+    tables: unknown,
+    scope: () => PromiseLike<T> | T
+  ): PromiseLike<T> {
+    return getDb().transaction(
+      mode as "rw",
+      tables as Parameters<ReturnType<typeof getDb>["transaction"]>[1],
+      scope as () => Promise<T>
+    ) as PromiseLike<T>
+  }
 
-    this.version(2).stores({
-      tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
-      executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-    })
-
-    // v3 — task author provenance. Existing schedules were necessarily
-    // user-authored because no agent/plugin creation surface existed before
-    // this version, so the backfill is deterministic and idempotent.
-    this.version(3)
-      .stores({
-        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
-        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-      })
-      .upgrade((tx) =>
-        tx
-          .table<DBScheduledTask, string>("tasks")
-          .toCollection()
-          .modify((task) => {
-            if (!task.createdBy) task.createdBy = JSON.stringify({ kind: "user" })
-          })
-      )
-
-    // v4 — event-trigger lookup. `trigger` is serialized JSON, so the previous
-    // query loaded every active task and filtered it in JavaScript. Persisting
-    // the event discriminator makes both exact-event and all-event lookups use
-    // one compound index. Empty string denotes a non-event trigger.
-    this.version(4)
-      .stores({
-        tasks:
-          "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type], [status+eventType]",
-        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-      })
-      .upgrade((tx) =>
-        tx
-          .table<DBScheduledTask, string>("tasks")
-          .toCollection()
-          .modify((task) => {
-            task.eventType = eventTypeFromSerializedTrigger(task.trigger)
-          })
-      )
-
-    // v5 — owning workspace. Index only: the backfill needs the MAIN database
-    // (to read a creating session's workspace), and reaching across Dexie
-    // instances from inside an upgrade transaction is how you get a deadlock.
-    // `backfillTaskWorkspaces` runs it at boot instead, where both are open.
-    this.version(5).stores({
-      tasks:
-        "id, name, type, status, nextRunAt, createdAt, projectId, [status+nextRunAt], [status+type], [status+eventType], [projectId+status]",
-      executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-    })
+  /**
+   * Raw stored rows, for callers that only need a cheap shape-agnostic read.
+   *
+   * `lib/boot/startup-probe.ts` wants "is anything scheduled, and is any of it
+   * active" and nothing else. Running every row through `deserializeTask` for
+   * that would parse six JSON blobs per task during boot.
+   */
+  async listStoredTasks(): Promise<DBScheduledTask[]> {
+    return this.tasks.toArray()
   }
 
   // ========== Task Operations ==========
@@ -609,6 +572,10 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
     createdBy: JSON.stringify(task.createdBy ?? { kind: "user" }),
+    // Denormalized so `[createdBySource+status]` can answer a per-source quota
+    // without decrypting `createdBy` on every row. Defaults to "user" for the
+    // same reason the blob above does.
+    createdBySource: task.createdBy?.kind ?? "user",
     projectId: task.projectId,
     status: task.status,
     tags: task.tags ? JSON.stringify(task.tags) : undefined,
@@ -653,7 +620,15 @@ function deserializePromotion(serialized: string): ScheduledTask["promotion"] | 
   }
 }
 
-function eventTypeFromSerializedTrigger(serialized: string): string {
+/**
+ * Recover the event discriminator from a stored trigger blob.
+ *
+ * Exported for `legacy-db-migration.ts`: rows drained out of the pre-v219
+ * standalone database carry `eventType` already, but a row written by a very
+ * old build may not, and a missing discriminator silently drops the task out
+ * of every `[status+eventType]` lookup rather than erroring.
+ */
+export function eventTypeFromSerializedTrigger(serialized: string): string {
   try {
     const trigger = JSON.parse(serialized) as { type?: unknown; eventType?: unknown }
     return trigger.type === "event" && typeof trigger.eventType === "string"
@@ -661,6 +636,23 @@ function eventTypeFromSerializedTrigger(serialized: string): string {
       : ""
   } catch {
     return ""
+  }
+}
+
+/**
+ * Recover the creator discriminator from a stored `createdBy` blob.
+ *
+ * Mirrors the default in `serializeTask`: a row with no creator record predates
+ * the column and is necessarily user-authored, because no agent or plugin
+ * creation surface existed before it.
+ */
+export function createdBySourceFromSerializedCreator(serialized: string | undefined): string {
+  if (!serialized) return "user"
+  try {
+    const raw = JSON.parse(serialized) as { kind?: unknown }
+    return typeof raw.kind === "string" ? raw.kind : "user"
+  } catch {
+    return "user"
   }
 }
 
@@ -784,7 +776,10 @@ function safeDeserializeExecution(dbExecution: DBTaskExecution): TaskExecution |
   }
 }
 
-// Export singleton instance
+/**
+ * The one facade instance. Stateless, so a single module-level value is safe
+ * even though the database underneath it is swapped on account switch.
+ */
 export const schedulerDb = new SchedulerDatabase()
 
 export { SchedulerDatabase }

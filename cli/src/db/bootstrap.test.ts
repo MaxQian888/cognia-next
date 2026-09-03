@@ -414,10 +414,13 @@ describe("ensureCliDb", () => {
     expect(h2.installs).toBe(1)
   })
 
-  // No database seam at all — the production default. Drives the real
-  // `CogniaDB` + `CogniaSchedulerDB` under fake-indexeddb so a missing scheduler
-  // source (the bug this whole change fixes) fails here rather than in the field.
-  it("defaults to both real databases, with the scheduler exclusions applied", async () => {
+  // No database seam at all: the production default. Drives the real `CogniaDB`
+  // under fake-indexeddb. The schedule used to live in a second database and
+  // needed its own source, and forgetting it rebooted a brain with an empty
+  // schedule. Since schema v219 it is `scheduledTasks` inside the account
+  // database, so the guard that matters now is that the SCHEDULE is snapshotted
+  // and the RUN HISTORY is not.
+  it("defaults to the real account database, with the scheduler exclusions applied", async () => {
     __resetCliDbForTesting()
     const writes: { path: string; data: string }[] = []
     const handle = await ensureCliDb({
@@ -432,11 +435,12 @@ describe("ensureCliDb", () => {
       await handle.flush()
       const written = JSON.parse(writes[0].data)
       expect(written.snapshotFormat).toBe(2)
-      expect(Object.keys(written.dbs)).toContain("CogniaSchedulerDB")
-      // The primary key is the live CogniaDB name (per-account, not hardcoded).
-      expect(Object.keys(written.dbs)).toHaveLength(2)
-      expect(written.dbs.CogniaSchedulerDB.tables).toHaveProperty("tasks")
-      expect(written.dbs.CogniaSchedulerDB.tables).not.toHaveProperty("executions")
+      // One database now. The key is the live CogniaDB name, which is
+      // per-account rather than hardcoded.
+      expect(Object.keys(written.dbs)).toHaveLength(1)
+      const [primary] = Object.values(written.dbs) as [{ tables: Record<string, unknown> }]
+      expect(primary.tables).toHaveProperty("scheduledTasks")
+      expect(primary.tables).not.toHaveProperty("scheduledTaskRuns")
     } finally {
       await handle.dispose()
       __resetCliDbForTesting()

@@ -1,7 +1,7 @@
 {
-  "latestVersion": 218,
-  "schemaSha256": "27f897a430be793f1e68bd7399d1b7f223c5bec4735cfbbf56c4aba85179aaec",
-  "staticTableCount": 344,
+  "latestVersion": 219,
+  "schemaSha256": "4524c05cc3cb393e2216700a4954f7d6afe7168fe64703bf462d729ba9db8e87",
+  "staticTableCount": 346,
   "companionSyncTableCount": 43,
   "companionSyncTables": [
     "adapterInstances",

@@ -385,6 +385,16 @@ export const SETTINGS_SYNC = {
   turnProvider: { category: "desktop-only" },
   externalBridge: { category: "desktop-only" },
   networkProxy: { category: "desktop-only" },
+  schedulerPermissionPolicy: {
+    category: "device-local",
+    rationale:
+      "A schedule is host-owned (ADR-0128): every host keeps its own tasks and nothing hands them between hosts. The policy governs the schedule the host it lives on actually owns, so each host legitimately holds its own answer. A phone creating a task on a paired desktop is checked against the DESKTOP's policy, over the scheduled_task_* RPCs, which is the whole point of the rule.",
+  },
+  schedulerLegacyDrainCompleted: {
+    category: "device-local",
+    rationale:
+      "Records that THIS machine's pre-v219 CogniaSchedulerDB was drained into this account. Mirroring it to another device would tell that device a migration it never ran is already done, and its own legacy schedules would be stranded.",
+  },
   biometricRequiredFor: {
     category: "device-local",
     rationale:

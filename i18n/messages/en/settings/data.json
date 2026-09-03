@@ -352,6 +352,12 @@
       "importTitle": "Import presets",
       "title": "Prompt presets"
     },
+    "scheduledTasks": {
+      "title": "Scheduled tasks",
+      "body": "Your schedules: triggers, payloads, and the workspace each is bound to. Run history stays on the machine that ran it.",
+      "importTitle": "Import scheduled tasks",
+      "importBody": "Add scheduled tasks from the archive. They arrive paused, so nothing starts firing the moment the import finishes."
+    },
     "schedulerPrefs": {
       "body": "Filter, interval, and policy preferences for the scheduler tab.",
       "importBody": "Restore your scheduler tab preferences.",

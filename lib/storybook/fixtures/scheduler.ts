@@ -212,7 +212,7 @@ export function makeUnifiedRun(over: Partial<UnifiedExecutionRun> = {}): Unified
     startedAt,
     finishedAt: status === "running" ? undefined : startedAt + 1_850,
     durationMs: status === "running" ? undefined : 1_850,
-    origin: { tableName: "schedulerDb.executions", nativeId: `run-${unifiedRunSeq}` },
+    origin: { tableName: "scheduledTaskRuns", nativeId: `run-${unifiedRunSeq}` },
     ...over,
   }
 }

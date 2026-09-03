@@ -20,6 +20,7 @@ import type {
 } from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
+import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
@@ -176,6 +177,7 @@ export async function applyBackupPackage(
       db.retrievalProfiles,
       db.retrievalEncryptedContent,
       db.chatTemplates,
+      db.scheduledTasks,
       db.templateDefinitions,
       db.templatePackages,
       db.templateInstances,
@@ -253,6 +255,27 @@ export async function applyBackupPackage(
         opts,
         summary,
         idPrefix: "tpl",
+        respectBuiltIn: false,
+      })
+      // Imported schedules land PAUSED. An archive can be months old, and a
+      // restore that silently armed every cron in it would start firing work
+      // the moment the import finished, on a machine the user may have just
+      // set up. Deliberately not `respectBuiltIn`: there are no built-in
+      // schedules, every row is something someone set up.
+      await applyCollection<DBScheduledTask>({
+        rows: env.scheduledTasks?.map((row) => ({
+          ...row,
+          status: "paused",
+          // A stale next-run would make the missed-run sweep try to catch up on
+          // everything the archive slept through. Let the scheduler recompute
+          // it when the user resumes the task.
+          nextRunAt: undefined,
+        })),
+        table: db.scheduledTasks,
+        kind: "scheduledTasks",
+        opts,
+        summary,
+        idPrefix: "task",
         respectBuiltIn: false,
       })
       await applyKeyedCollection<TemplateDefinitionRow>({

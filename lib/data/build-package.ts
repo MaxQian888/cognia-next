@@ -103,6 +103,7 @@ export async function buildBackupPackage(
     pluginReviews,
     pluginAnalytics,
     chatTemplates,
+    scheduledTasks,
     templateDefinitions,
     templatePackages,
     templateInstances,
@@ -147,6 +148,7 @@ export async function buildBackupPackage(
     readTable(db.pluginReviews),
     readTable(db.pluginAnalytics),
     readTable(db.chatTemplates),
+    readTable(db.scheduledTasks),
     readTable(db.templateDefinitions),
     readTable(db.templatePackages),
     readTable(db.templateInstances),
@@ -228,6 +230,8 @@ export async function buildBackupPackage(
     // No built-in concept, so `includeBuiltIns` is a no-op here: every row is
     // something the user typed.
     chatTemplates,
+    // Configuration only. Run history stays on the machine that ran it.
+    scheduledTasks,
     templateDefinitions,
     templatePackages,
     templateInstances,
@@ -275,6 +279,7 @@ export async function buildBackupPackage(
       "memoryAuditEvents",
       "retrievalProfileDeks",
       "chatTemplates",
+      "scheduledTasks",
       "templateDefinitions",
       "templatePackages",
       "templateInstances",

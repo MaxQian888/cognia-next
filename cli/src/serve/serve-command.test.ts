@@ -260,9 +260,8 @@ describe("serveCommand", () => {
       fs.readFileSync(path.join(snapshotDirectory, "manifest.json"), "utf8")
     ) as { snapshotFormat: number; dbs: Record<string, { tables: string[] }> }
     expect(manifest.snapshotFormat).toBe(3)
-    const primaryDatabaseName = Object.keys(manifest.dbs).find(
-      (name) => name !== "CogniaSchedulerDB"
-    )
+    // One database since schema v219, so there is nothing to filter out.
+    const [primaryDatabaseName] = Object.keys(manifest.dbs)
     expect(primaryDatabaseName).toBeDefined()
     expect(manifest.dbs[primaryDatabaseName!].tables).toContain("sessions")
     const sessionsFile = fs

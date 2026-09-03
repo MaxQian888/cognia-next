@@ -5,6 +5,7 @@
  * @jest-environment node
  */
 import fs from "node:fs"
+import { getDb } from "@/lib/db/schema"
 import os from "node:os"
 import path from "node:path"
 
@@ -201,11 +202,12 @@ describe("startDurability", () => {
     }
   })
 
-  // The whole point of the multi-database snapshot: a `cognia serve` brain that
-  // restarts must come back with its schedule intact. Before this, the
-  // scheduler's separate `CogniaSchedulerDB` was never persisted, so the brain
-  // rebooted with an empty task table while still reporting the scheduler
-  // runtime as running.
+  // A `cognia serve` brain that restarts must come back with its schedule
+  // intact. The schedule used to be a second database that was never
+  // persisted, so the brain rebooted with an empty task table while still
+  // reporting the scheduler runtime as running. Since schema v219 it is
+  // `scheduledTasks` inside the account database, and the guard that survives
+  // is the same one: the schedule persists, the run history does not.
   it("round-trips a scheduled task across a restart, without persisting executions", async () => {
     __resetCliDbForTesting()
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-serve-sched-"))
@@ -248,31 +250,34 @@ describe("startDurability", () => {
         fs.readFileSync(path.join(tableDirectory, "manifest.json"), "utf8")
       )
       expect(manifest.snapshotFormat).toBe(3)
-      expect(manifest.dbs.CogniaSchedulerDB.tables).toEqual(["tasks"])
+      const [primaryTables] = Object.values(manifest.dbs) as [{ tables: string[] }]
+      expect(primaryTables.tables).toContain("scheduledTasks")
+      expect(primaryTables.tables).not.toContain("scheduledTaskRuns")
       const schedulerTasksFile = fs
         .readdirSync(tableDirectory)
-        .find((name) => name.includes("CogniaSchedulerDB") && name.includes("tasks"))!
+        .find((name) => name.includes("scheduledTasks"))!
       const persistedTasks = JSON.parse(
         fs.readFileSync(path.join(tableDirectory, schedulerTasksFile), "utf8")
       )
       expect(persistedTasks.map((row: { id: string }) => row.id)).toContain(task.id)
       expect(
-        fs
-          .readdirSync(tableDirectory)
-          .some((name) => name.includes("CogniaSchedulerDB") && name.includes("executions"))
+        fs.readdirSync(tableDirectory).some((name) => name.includes("scheduledTaskRuns"))
       ).toBe(false)
 
       // Simulate the restart: wipe the in-memory tables, then reopen from disk.
-      await schedulerDb.tasks.clear()
-      await schedulerDb.executions.clear()
+      const db = getDb()
+      await db.scheduledTasks.clear()
+      await db.scheduledTaskRuns.clear()
       __resetCliDbForTesting()
 
       const second = await startDurability({ home, accountId: "acct_sched" })
       expect(await schedulerDb.getTask(task.id)).not.toBeNull()
-      expect(await schedulerDb.executions.count()).toBe(0)
+      expect(await getDb().scheduledTaskRuns.count()).toBe(0)
       await second.dispose()
     } finally {
-      await schedulerDb.tasks.clear().catch(() => {})
+      await getDb()
+        .scheduledTasks.clear()
+        .catch(() => {})
       __resetCliDbForTesting()
       fs.rmSync(home, { recursive: true, force: true })
     }

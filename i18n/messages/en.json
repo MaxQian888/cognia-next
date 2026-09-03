@@ -6600,6 +6600,8 @@
         "title": "List directory"
       },
       "openInReview": "Open in review",
+      "openInWorkspace": "Open in the workspace panel",
+      "openInWorkspaceOutOfScope": "That file is outside this conversation's workspace.",
       "plan": {
         "title": "Plan"
       },
@@ -21815,6 +21817,7 @@
         "clear": "Clear",
         "empty": "No output yet. Lines appear here once the plugin logs through the host, and for a Python plugin once its host runs.",
         "exited": "Host process exited",
+        "openInPanel": "Open this plugin's output in the log panel",
         "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
         "streamEnd": "— stream ended —"
       },
@@ -21944,6 +21947,9 @@
         "title": "Verification",
         "verifiedAt": "Verified {date}"
       },
+      "viewInfo": "Details",
+      "viewManifest": "Raw JSON",
+      "viewToggleAria": "Switch between plugin details and the raw manifest",
       "workflowTriggers": "Workflow triggers"
     },
     "devSession": {
@@ -32525,6 +32531,12 @@
           "importBody": "Add or replace your saved system-prompt presets.",
           "importTitle": "Import presets",
           "title": "Prompt presets"
+        },
+        "scheduledTasks": {
+          "body": "Your schedules: triggers, payloads, and the workspace each is bound to. Run history stays on the machine that ran it.",
+          "importBody": "Add scheduled tasks from the archive. They arrive paused, so nothing starts firing the moment the import finishes.",
+          "importTitle": "Import scheduled tasks",
+          "title": "Scheduled tasks"
         },
         "schedulerPrefs": {
           "body": "Filter, interval, and policy preferences for the scheduler tab.",

@@ -295,6 +295,8 @@ export const CORE_TABLE_NAMES = [
   "runRecords",
   "runRetrospectives",
   "sandboxConnections",
+  "scheduledTaskRuns",
+  "scheduledTasks",
   "serviceConnections",
   "sessionAttachmentUploads",
   "sessionFolders",
@@ -437,6 +439,12 @@ export const PORTABLE_BACKUP_BINDINGS = {
   // a launch spec: the same class of thing as `promptPresets`, and portable
   // for the same reason. A phrase you wrote is yours, not this machine's.
   chatTemplates: "chatTemplates",
+  // Schedules are configuration the user authored: a cron expression, a prompt,
+  // a workspace binding. Losing them on a restore is losing work. The run
+  // history (`scheduledTaskRuns`) deliberately stays out, for the same reason
+  // it stays out of the headless snapshot: it is append-heavy and rebuilding it
+  // on another machine would be meaningless anyway.
+  scheduledTasks: "scheduledTasks",
   templateDefinitions: "templateDefinitions",
   templatePackages: "templatePackages",
   templateInstances: "templateInstances",
@@ -762,6 +770,14 @@ const AUTO_INCREMENT_METADATA_TABLES = new Set<CoreTableName>([
 ])
 
 const USER_CONTENT_TABLES = new Set<CoreTableName>([
+  // A scheduled task's payload is whatever the user (or an agent on their
+  // behalf) wants run unattended: chat prompts, goal objectives, scripts. Its
+  // notification block carries webhook URLs and IM conversation targets. The
+  // run rows quote the task's input and the model's output back. All of it is
+  // the same class of thing as a session message, and none of it belonged on
+  // disk in the clear, which it was until schema v219.
+  "scheduledTasks",
+  "scheduledTaskRuns",
   // Squad definitions carry per-teammate system prompts and the task the squad
   // was created for, all user-authored. `agentTeamRuns` alongside them is
   // metadata-only because it records execution, not instructions.
@@ -882,6 +898,7 @@ const VERY_LARGE_TABLES = new Set<CoreTableName>([
 ])
 
 const LARGE_TABLES = new Set<CoreTableName>([
+  "scheduledTaskRuns",
   "a2uiEventHistory",
   // Complete build outputs as `Uint8Array` — the single largest row shape in
   // the app. Bounded by `lib/sites/artifact-gc.ts`, not by row count.

@@ -340,13 +340,14 @@ async function flushDirtyTables(
 }
 
 /**
- * Normalise the two database seams into one source factory.
+ * Normalise the database seams into one source factory.
  *
- * Default: `CogniaDB` (whose Dexie name is per-account, so it is read off the
- * instance rather than hardcoded) plus the scheduler's separate
- * `CogniaSchedulerDB`, minus the tables that database excludes on purpose.
- * The scheduler module is imported lazily so `chat`/`run` — which never open a
- * database — keep paying nothing for it.
+ * Default: `CogniaDB`, whose Dexie name is per-account and so is read off the
+ * instance rather than hardcoded. The scheduler used to contribute a second
+ * source (`CogniaSchedulerDB`); schema v219 folded it into the account
+ * database, so what survives is its table exclusion. The scheduler module is
+ * imported lazily so `chat` and `run`, which never open a database, keep paying
+ * nothing for it.
  */
 function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly SnapshotSource[]> {
   if (opts.getDatabases) return async () => opts.getDatabases!()
@@ -357,14 +358,12 @@ function resolveSourcesFactory(opts: EnsureCliDbOptions): () => Promise<readonly
     }
   }
   return async () => {
-    const [{ schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES }] =
-      await Promise.all([import("@/lib/scheduler/scheduler-db")])
+    const { SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } = await import("@/lib/scheduler/scheduler-db")
     const primary = getDb() as unknown as DbLike
     return [
-      { name: primary.name ?? "CogniaDB", db: primary },
       {
-        name: SCHEDULER_DB_NAME,
-        db: schedulerDb as unknown as DbLike,
+        name: primary.name ?? "CogniaDB",
+        db: primary,
         excludeTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
       },
     ]

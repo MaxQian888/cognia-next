@@ -23,6 +23,7 @@ export function SchedulerInitializer() {
   const initialize = useSchedulerStore((state) => state.initialize)
   const isInitialized = useSchedulerStore((state) => state.isInitialized)
   const setSchedulerStatus = useSchedulerStore((state) => state.setSchedulerStatus)
+  const loadPermissionPolicy = useSchedulerStore((state) => state.loadPermissionPolicy)
 
   useEffect(() => {
     schedulerInitializerMounts += 1
@@ -34,6 +35,14 @@ export function SchedulerInitializer() {
     // finished" (fills the chat:completed + agent:completed gaps; goal/team/plan
     // already emit their own subsystem-level events). Idempotent.
     const teardownBridge = installExecutionEventBridge()
+
+    // Hydrate the permission policy for display. Independent of `initialize()`
+    // on purpose: enforcement reads `AppSettings` at check time, so this is
+    // only what the settings card and the scheduler panel render, and it must
+    // not be able to fail scheduler boot.
+    void loadPermissionPolicy().catch((error) => {
+      log.warn("[SchedulerInitializer] Failed to load the scheduler policy:", error)
+    })
 
     if (!isInitialized) {
       initialize()
@@ -75,7 +84,7 @@ export function SchedulerInitializer() {
         }
       })
     }
-  }, [initialize, isInitialized, setSchedulerStatus])
+  }, [initialize, isInitialized, loadPermissionPolicy, setSchedulerStatus])
 
   // Handle beforeunload for graceful shutdown
   useEffect(() => {

@@ -5,12 +5,11 @@
 
 // Mock IndexedDB for tests
 import "fake-indexeddb/auto"
-import Dexie from "dexie"
+import { getDb } from "@/lib/db/schema"
 import {
-  schedulerDb,
-  SchedulerDatabase,
-  SCHEDULER_DB_NAME,
+  LEGACY_SCHEDULER_DB_NAME,
   SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+  schedulerDb,
 } from "./scheduler-db"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
@@ -710,104 +709,29 @@ describe("SchedulerDatabase", () => {
     })
   })
 
-  describe("schema v3 creator migration", () => {
-    it("backfills pre-v3 tasks to user provenance", async () => {
-      const name = `CogniaSchedulerDB-v3-${crypto.randomUUID()}`
-      const legacy = new Dexie(name)
-      legacy.version(2).stores({
-        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
-        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-      })
-      await legacy.open()
-      const row = createMockTask({ id: "legacy-user" })
-      await legacy.table("tasks").add({
-        ...row,
-        trigger: JSON.stringify(row.trigger),
-        payload: JSON.stringify(row.payload),
-        config: JSON.stringify(row.config),
-        notification: JSON.stringify(row.notification),
-        createdAt: row.createdAt.toISOString(),
-        updatedAt: row.updatedAt.toISOString(),
-      })
-      legacy.close()
-
-      const upgraded = new SchedulerDatabase(name)
-      await upgraded.open()
-      expect((await upgraded.getTask("legacy-user"))?.createdBy).toEqual({ kind: "user" })
-      upgraded.close()
-      await Dexie.delete(name)
-    })
-  })
-
-  describe("schema v4 event index migration", () => {
-    it("backfills eventType from the serialized trigger and excludes non-events", async () => {
-      const name = `CogniaSchedulerDB-v4-${crypto.randomUUID()}`
-      const legacy = new Dexie(name)
-      legacy.version(3).stores({
-        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
-        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
-      })
-      await legacy.open()
-      for (const row of [
-        createMockTask({
-          id: "legacy-event",
-          trigger: { type: "event", eventType: "job:exited" },
-        }),
-        createMockTask({ id: "legacy-cron" }),
-      ]) {
-        await legacy.table("tasks").add({
-          ...row,
-          trigger: JSON.stringify(row.trigger),
-          payload: JSON.stringify(row.payload),
-          config: JSON.stringify(row.config),
-          notification: JSON.stringify(row.notification),
-          createdBy: JSON.stringify({ kind: "user" }),
-          createdAt: row.createdAt.toISOString(),
-          updatedAt: row.updatedAt.toISOString(),
-        })
-      }
-      legacy.close()
-
-      const upgraded = new SchedulerDatabase(name)
-      await upgraded.open()
-      expect(upgraded.verno).toBe(5)
-      await expect(upgraded.getActiveEventTasks("job:exited")).resolves.toEqual([
-        expect.objectContaining({ id: "legacy-event" }),
-      ])
-      expect((await upgraded.getActiveEventTasks()).map((task) => task.id)).toEqual([
-        "legacy-event",
-      ])
-      expect(await upgraded.tasks.get("legacy-event")).toEqual(
-        expect.objectContaining({ eventType: "job:exited" })
-      )
-      expect(await upgraded.tasks.get("legacy-cron")).toEqual(
-        expect.objectContaining({ eventType: "" })
-      )
-      upgraded.close()
-      await Dexie.delete(name)
-    })
-  })
-
   // Third axis of the intentional-dormancy label (Working Rule 7): the type
   // documents the exemption, the headless snapshot source consumes it, and this
   // pins it. `tasks` MUST stay persistable — dropping it is what made a
   // restarted `cognia serve` brain reboot with an empty schedule.
   describe("headless snapshot exclusions", () => {
-    it("excludes only executions, never tasks", () => {
-      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).toEqual(["executions"])
-      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).not.toContain("tasks")
+    it("excludes only the run history, never the schedule itself", () => {
+      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).toEqual(["scheduledTaskRuns"])
+      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).not.toContain("scheduledTasks")
     })
 
-    it("names every excluded table as a real table on this database", () => {
-      const declared = schedulerDb.tables.map((table) => table.name)
+    it("names every excluded table as a real table on the account database", () => {
+      const declared = getDb().tables.map((table) => table.name)
       for (const excluded of SCHEDULER_SNAPSHOT_EXCLUDED_TABLES) {
         expect(declared).toContain(excluded)
       }
     })
 
-    it("pins the database name the snapshot files it under", () => {
-      expect(SCHEDULER_DB_NAME).toBe("CogniaSchedulerDB")
-      expect(schedulerDb.name).toBe(SCHEDULER_DB_NAME)
+    it("keeps the legacy database name, and only as a migration target", () => {
+      // The constant survives so `legacy-db-migration.ts` can recognise a
+      // pre-v219 install. Nothing may write to a database under this name
+      // again, which is what the second assertion is for.
+      expect(LEGACY_SCHEDULER_DB_NAME).toBe("CogniaSchedulerDB")
+      expect(getDb().name).not.toBe(LEGACY_SCHEDULER_DB_NAME)
     })
   })
 })

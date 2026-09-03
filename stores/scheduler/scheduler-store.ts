@@ -137,6 +137,8 @@ interface SchedulerActions {
   isPluginExecutionActive: (executionId: string) => boolean
 
   // Permission Management
+  /** Hydrate {@link permissionPolicy} from `AppSettings`. Idempotent. */
+  loadPermissionPolicy: () => Promise<void>
   updatePermissionPolicy: (update: Partial<SchedulerPermissionPolicy>) => void
   checkPermission: (
     taskType: ScheduledTaskType,
@@ -700,10 +702,40 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       // ========== Permission Management ==========
 
+      /**
+       * Hydrate the policy from the account database for DISPLAY.
+       *
+       * Deliberately not called from `initialize`: this store's copy is what
+       * the settings card renders, and the enforcement path
+       * (`lib/scheduler/write-authority.ts`) reads `AppSettings` directly at
+       * check time instead. That keeps a long-lived tab from enforcing a stale
+       * policy, and keeps a Dexie read out of the scheduler's boot ordering.
+       *
+       * Until it resolves the store serves `DEFAULT_PERMISSION_POLICY`, which
+       * is the restrictive answer (`agentAutoCreate: false`).
+       */
+      loadPermissionPolicy: async () => {
+        const { getSettings } = await import("@/lib/db/settings")
+        const stored = await getSettings()
+          .then((settings) => settings.schedulerPermissionPolicy)
+          .catch(() => undefined)
+        if (!stored) return
+        // Merge over the defaults so a policy persisted before a new field
+        // existed does not surface that field as `undefined`.
+        set({ permissionPolicy: { ...DEFAULT_PERMISSION_POLICY, ...stored } })
+      },
+
       updatePermissionPolicy: (update) => {
-        set((state) => ({
-          permissionPolicy: { ...state.permissionPolicy, ...update },
-        }))
+        const next = { ...get().permissionPolicy, ...update }
+        set({ permissionPolicy: next })
+        // Optimistic in-memory update, durable write behind it. The settings
+        // card is a live control, and awaiting a Dexie round-trip per keystroke
+        // would make the number input stutter.
+        void import("@/lib/db/settings")
+          .then(({ saveSettings }) => saveSettings({ schedulerPermissionPolicy: next }))
+          .catch((error) => {
+            log.error("scheduler.permissionPolicy.persistFailed", { error })
+          })
       },
 
       checkPermission: (taskType, source) => {
@@ -834,10 +866,15 @@ export const useSchedulerStore = create<SchedulerStore>()(
     {
       name: "cognia-scheduler",
       storage: persistLocalStorage(),
+      // `permissionPolicy` is deliberately absent. It is a rule about what
+      // agents and plugins may do on the user's behalf, so it belongs inside
+      // the account (encrypted, backed up, per-account) rather than in this
+      // machine's localStorage, where every account shared one copy. It lives
+      // in `AppSettings.schedulerPermissionPolicy` and is hydrated by
+      // `loadPermissionPolicy`. What stays here is view state.
       partialize: (state) => ({
         autoRefreshInterval: state.autoRefreshInterval,
         filter: state.filter,
-        permissionPolicy: state.permissionPolicy,
       }),
     }
   )

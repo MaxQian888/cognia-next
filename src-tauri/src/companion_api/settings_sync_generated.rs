@@ -49,6 +49,18 @@
 //!   Favourites of the mobile `/me` list. The desktop has no `/me` surface, so there is nothing
 //!   on the other side to mirror to or from.
 //!
+//! `schedulerLegacyDrainCompleted` — device-local (never crosses the wire).
+//!   Records that THIS machine's pre-v219 CogniaSchedulerDB was drained into this account.
+//!   Mirroring it to another device would tell that device a migration it never ran is already
+//!   done, and its own legacy schedules would be stranded.
+//!
+//! `schedulerPermissionPolicy` — device-local (never crosses the wire).
+//!   A schedule is host-owned (ADR-0128): every host keeps its own tasks and nothing hands them
+//!   between hosts. The policy governs the schedule the host it lives on actually owns, so each
+//!   host legitimately holds its own answer. A phone creating a task on a paired desktop is
+//!   checked against the DESKTOP's policy, over the scheduled_task_* RPCs, which is the whole
+//!   point of the rule.
+//!
 //! `selectedMicId` — device-local (never crosses the wire).
 //!   An OS-issued input-device identifier. The desktop's microphone id addresses nothing on the
 //!   phone.

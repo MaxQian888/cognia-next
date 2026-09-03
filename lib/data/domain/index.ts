@@ -34,6 +34,7 @@ export type DomainKey =
   | "mcpServers"
   | "promptPresets"
   | "chatTemplates"
+  | "scheduledTasks"
   | "characters"
   | "teams"
   | "settingsTheme"
@@ -160,6 +161,13 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     // usage counters travel with the row because they are what orders the `/`
     // menu on the far side.
     return { chatTemplates: (await db.chatTemplates.toArray()) as ChatTemplateRow[] }
+  }),
+  makeSpec("scheduledTasks", "scheduledTasks", async () => {
+    const db = getDb()
+    // Stored rows, unconverted. The scheduler's deserializer is a lossy view by
+    // design (it applies load-time defaults), so exporting through it would
+    // bake this build's defaults into the archive.
+    return { scheduledTasks: await db.scheduledTasks.toArray() }
   }),
   makeSpec("characters", "characters", async () => {
     const db = getDb()

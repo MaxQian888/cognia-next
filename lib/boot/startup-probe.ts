@@ -14,10 +14,10 @@ export interface StartupProbeDependencies {
 
 const defaultDependencies: StartupProbeDependencies = {
   getDatabase: getDb,
-  listScheduledTasks: async () => {
-    const { schedulerDb } = await import("@/lib/scheduler/scheduler-db")
-    return schedulerDb.tasks.toArray()
-  },
+  // Reads the account database directly. Since schema v219 the schedule lives
+  // there as `scheduledTasks`, so pulling in the whole scheduler module to
+  // reach it would cost a boot-time import for two fields.
+  listScheduledTasks: async () => getDb().scheduledTasks.toArray(),
   getTwinRuntimeSettings: async () => {
     const { getTwinRuntimeSettings } = await import("@/lib/db/twin-runtime-settings")
     return getTwinRuntimeSettings()

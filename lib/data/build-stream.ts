@@ -136,6 +136,7 @@ export async function* buildBackupSections(
     yield* tableSections("twinDrafts", db.twinDrafts, iterate)
     yield* tableSections("twinJobs", db.twinJobs, iterate)
     yield* tableSections("chatTemplates", db.chatTemplates, iterate)
+    yield* tableSections("scheduledTasks", db.scheduledTasks, iterate)
     yield* tableSections("templateDefinitions", db.templateDefinitions, iterate)
     yield* tableSections("templatePackages", db.templatePackages, iterate)
     yield* tableSections("templateInstances", db.templateInstances, iterate)

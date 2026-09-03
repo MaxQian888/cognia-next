@@ -42,6 +42,7 @@ describe("DOMAIN_TRANSFERS", () => {
         "mcpServers",
         "plugins",
         "promptPresets",
+        "scheduledTasks",
         "settingsTheme",
         "skills",
         "teams",

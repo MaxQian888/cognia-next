@@ -247,6 +247,8 @@
   "runRecords": "metadata-only",
   "runRetrospectives": "metadata-only",
   "sandboxConnections": "metadata-only",
+  "scheduledTaskRuns": "encrypted-content",
+  "scheduledTasks": "encrypted-content",
   "serviceConnections": "metadata-only",
   "sessionAttachmentUploads": "metadata-only",
   "sessionFolders": "metadata-only",

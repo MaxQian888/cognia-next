@@ -115,6 +115,23 @@ export {
 /** Initialize the scheduler — register executors, start the loop. */
 export async function initSchedulerSystem(driver?: SchedulerTimingDriver): Promise<void> {
   registerBuiltInExecutors()
+  // Before ANYTHING reads the schedule. A pre-v219 install keeps its rows in a
+  // separate machine-wide database, and arming the timing driver first would
+  // boot a brain with an empty schedule that silently never fires.
+  try {
+    const { migrateLegacySchedulerDatabase } = await import("./legacy-db-migration")
+    await migrateLegacySchedulerDatabase()
+  } catch (error) {
+    // A failed adoption must not take the scheduler down with it: the account
+    // database may still hold schedules of its own that need to run. The
+    // migration leaves the legacy database in place on failure, so a later boot
+    // retries.
+    log.error(
+      `[Scheduler] legacy schedule adoption failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  }
   await initTaskScheduler(driver)
   const { installProviderDiagnosticsRefreshSchedule } =
     await import("@/lib/provider-diagnostics/refresh")

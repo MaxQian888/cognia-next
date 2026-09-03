@@ -5163,6 +5163,29 @@ export interface AppSettings {
   networkProxy?: import("@/types/network/proxy").NetworkProxySettings
 
   /**
+   * Who may put work on the user's schedule, and how much.
+   *
+   * Lived in `localStorage` via the scheduler store's zustand persist until
+   * schema v219. That put it outside the account boundary, outside every
+   * backup, and in the clear, which is the wrong place for a rule about what
+   * agents and plugins are allowed to do. `taskDefaults` rides along inside it
+   * because the settings card has always written the two together.
+   *
+   * Absent means `DEFAULT_PERMISSION_POLICY` (`types/scheduler`).
+   */
+  schedulerPermissionPolicy?: import("@/types/scheduler").SchedulerPermissionPolicy
+
+  /**
+   * Set once the pre-v219 machine-wide `CogniaSchedulerDB` has been drained
+   * into THIS account's database (`lib/scheduler/legacy-db-migration.ts`).
+   *
+   * Account-scoped on purpose: the flag records what happened to this account,
+   * not to the machine. It exists so a delete that failed after a successful
+   * drain cannot make the next boot adopt the same schedules twice.
+   */
+  schedulerLegacyDrainCompleted?: boolean
+
+  /**
    * Per-action biometric guard policy (Wave 1.5). Each flag, when true,
    * requires a successful biometric verification before the named action
    * runs. Devices with no biometric enrollment fall through unless the

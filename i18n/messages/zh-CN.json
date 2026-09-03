@@ -6600,6 +6600,8 @@
         "title": "列出目录"
       },
       "openInReview": "在审阅中打开",
+      "openInWorkspace": "在工作区面板中打开",
+      "openInWorkspaceOutOfScope": "该文件不在当前会话的工作区内。",
       "plan": {
         "title": "计划"
       },
@@ -21815,6 +21817,7 @@
         "clear": "清空",
         "empty": "还没有输出。插件通过宿主打日志后会出现在这里；Python 插件则要等它的宿主跑起来。",
         "exited": "宿主进程已退出",
+        "openInPanel": "在日志面板中查看该插件的输出",
         "runtimeStrip": "Python {version} · 已加载 {plugins}（{lazy} 空闲）· {calls} 次调用",
         "streamEnd": "— 流结束 —"
       },
@@ -21944,6 +21947,9 @@
         "title": "运行校验",
         "verifiedAt": "校验时间 {date}"
       },
+      "viewInfo": "信息",
+      "viewManifest": "原始 JSON",
+      "viewToggleAria": "在插件信息与原始 manifest 之间切换",
       "workflowTriggers": "工作流触发"
     },
     "devSession": {
@@ -32525,6 +32531,12 @@
           "importBody": "添加或替换已保存的系统提示词预设。",
           "importTitle": "导入预设",
           "title": "提示词预设"
+        },
+        "scheduledTasks": {
+          "body": "你的定时任务：触发器、载荷，以及各自绑定的工作区。运行历史留在跑过它的那台机器上。",
+          "importBody": "从归档中添加定时任务。它们会以暂停状态到达，导入一结束不会立刻开始触发。",
+          "importTitle": "导入定时任务",
+          "title": "定时任务"
         },
         "schedulerPrefs": {
           "body": "调度器选项卡的筛选、间隔与策略偏好。",

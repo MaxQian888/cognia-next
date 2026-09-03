@@ -6,6 +6,7 @@
 // app versions without surprise migrations: the importer reads `manifest.version`
 // and `manifest.schemaVersion` and refuses anything it doesn't understand.
 
+import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
 import type {
   AppSettings,
   Character,
@@ -126,6 +127,18 @@ export interface BackupPayloadV3 {
    * answer than one carrying a number nobody reads directly.
    */
   chatTemplates?: ChatTemplateRow[]
+  /**
+   * Scheduled tasks (schema v219). Configuration the user authored: a trigger,
+   * a payload, a workspace binding. Run history is NOT here. It is append-heavy
+   * and machine-specific, and a restore that replayed another machine's run log
+   * would be describing runs that never happened here.
+   *
+   * Rows are the STORED shape, JSON blobs and ISO strings, not `ScheduledTask`.
+   * The scheduler owns that conversion (`lib/scheduler/scheduler-db.ts`), and a
+   * backup that round-trips through it would silently drop any field a future
+   * build adds before this one learns about it.
+   */
+  scheduledTasks?: DBScheduledTask[]
   /** Unified portable template data. Device bindings and migration rollback snapshots stay local. */
   templateDefinitions?: TemplateDefinitionRow[]
   templatePackages?: TemplatePackageRow[]

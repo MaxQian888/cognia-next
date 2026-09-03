@@ -144,16 +144,22 @@ export interface DurabilityHandle {
   dispose(): Promise<void>
 }
 
-/** The two databases the headless brain persists, in primary-first order. */
+/**
+ * The one database the headless brain persists.
+ *
+ * There used to be two: the account database plus the scheduler's own
+ * `CogniaSchedulerDB`. Schema v219 folded the schedule into the account
+ * database, so the second source is gone. The run-history exclusion moved onto
+ * the primary source and still applies for the same reason it always did, that
+ * an append-heavy table makes the snapshot cost grow with uptime.
+ */
 async function resolveDurabilitySources(): Promise<DurabilitySourceLike[]> {
-  const { schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } =
-    await import("@/lib/scheduler/scheduler-db")
+  const { SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } = await import("@/lib/scheduler/scheduler-db")
   const primary = getDb() as unknown as DurabilityDbLike
   return [
-    { name: primary.name ?? "CogniaDB", db: primary },
     {
-      name: SCHEDULER_DB_NAME,
-      db: schedulerDb as unknown as DurabilityDbLike,
+      name: primary.name ?? "CogniaDB",
+      db: primary,
       excludeTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
     },
   ]
@@ -265,28 +271,22 @@ export async function startDurability(opts: DurabilityOptions): Promise<Durabili
     home: opts.home,
     fileName: `db-${opts.accountId}.json`,
     debounceMs: opts.debounceMs,
-    // BOTH databases: `CogniaDB` and the scheduler's separate
-    // `CogniaSchedulerDB`. Without the second one a restarted brain reboots with
-    // an empty schedule while still reporting the scheduler runtime as running.
+    // One database since schema v219: the schedule is `scheduledTasks` inside
+    // the account database rather than a separate `CogniaSchedulerDB`. It still
+    // MUST be snapshotted, or a restarted brain reboots with an empty schedule
+    // while reporting the scheduler runtime as running. Run history stays out.
     getDatabases: async () => {
-      const { schedulerDb, SCHEDULER_DB_NAME, SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } =
-        await import("@/lib/scheduler/scheduler-db")
+      const { SCHEDULER_SNAPSHOT_EXCLUDED_TABLES } = await import("@/lib/scheduler/scheduler-db")
       const primary = getDb()
-      installWriteFlush(primary as unknown as DexieLike, (tableName) =>
-        handleRef.current?.scheduleTableFlush(primary.name, tableName)
-      )
       installWriteFlush(
-        schedulerDb as unknown as DexieLike,
-        (tableName) => handleRef.current?.scheduleTableFlush(SCHEDULER_DB_NAME, tableName),
-        {
-          ignoreTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
-        }
+        primary as unknown as DexieLike,
+        (tableName) => handleRef.current?.scheduleTableFlush(primary.name, tableName),
+        { ignoreTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES }
       )
       return [
-        { name: primary.name, db: primary as unknown as DbLike },
         {
-          name: SCHEDULER_DB_NAME,
-          db: schedulerDb as unknown as DbLike,
+          name: primary.name,
+          db: primary as unknown as DbLike,
           excludeTables: SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
         },
       ]

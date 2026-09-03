@@ -395,7 +395,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 218
+export const CURRENT_SCHEMA_VERSION = 219
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -893,6 +893,16 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
     "&id, &dedupeKey, policyId, policyVersionId, traceId, state, enqueuedAt, [state+enqueuedAt], [policyId+state]",
   evalOnlineBudget: "&id, policyId, day, [policyId+day]",
   projectMiningRuns: "&id, projectId, status, createdAt, [projectId+status]",
+  // v219 — the scheduler's own two stores, folded in from the standalone
+  // `CogniaSchedulerDB` (which was account-agnostic, unencrypted and outside
+  // data governance). `eventType` and `createdBySource` are denormalized
+  // discriminators: `trigger` and `createdBy` are encrypted JSON blobs after
+  // the fold, so neither an event lookup nor a per-source quota could be
+  // answered from an index without them. Host-owned placement (ADR-0128) is
+  // unchanged — the account database is still local to its host.
+  scheduledTasks:
+    "id, name, type, status, nextRunAt, createdAt, projectId, createdBySource, [status+nextRunAt], [status+type], [status+eventType], [projectId+status], [createdBySource+status]",
+  scheduledTaskRuns: "id, taskId, status, startedAt, [taskId+startedAt]",
 }
 
 let databaseConnectionSequence = 0
@@ -1426,6 +1436,12 @@ export class CogniaDB extends Dexie {
 
   // v212 — user-started history backfill runs (project-context mining).
   projectMiningRuns!: Table<import("@/types/memory/governance").ProjectMiningRun, string>
+
+  // v219 — the scheduler's two stores, folded in from the standalone
+  // `CogniaSchedulerDB`. Reached through `lib/scheduler/scheduler-db.ts`'s
+  // facade, which owns the (de)serialization, rather than directly.
+  scheduledTasks!: Table<import("./scheduled-task-types").DBScheduledTask, string>
+  scheduledTaskRuns!: Table<import("./scheduled-task-types").DBTaskExecution, string>
 
   accountContentMigrations!: Table<
     {
