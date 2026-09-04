@@ -1,37 +1,4 @@
 {
-  "automationPolicy": {
-    "add": "Add row",
-    "allowedProcessNames": {
-      "description": "Case-insensitive process names the action's target must match.",
-      "label": "Allowed processes",
-      "placeholder": "Chrome"
-    },
-    "allowedUrlPatterns": {
-      "description": "Regular expressions evaluated against the target browser tab's URL.",
-      "label": "Allowed URLs",
-      "placeholder": "^https://"
-    },
-    "allowedWindowTitlePatterns": {
-      "description": "Regular expressions evaluated against the target window's title.",
-      "label": "Allowed window titles",
-      "placeholder": "^Visual Studio Code"
-    },
-    "description": "Extra constraints applied after permission gate + consent for Computer Use actions. Empty lists impose no constraint; any non-empty allowlist hard-fails actions whose facts don't satisfy it.",
-    "emptyNote": "No constraints configured — Computer Use actions follow only the permission gate and consent broker.",
-    "forbiddenScreenRegions": {
-      "description": "Pixel rectangles where clicks and drags are denied (password manager popups, system tray secrets, etc.).",
-      "height": "Height",
-      "label": "Forbidden screen regions",
-      "width": "Width",
-      "x": "X",
-      "y": "Y"
-    },
-    "regexInvalid": "Invalid regex",
-    "remove": "Remove row",
-    "rowAriaLabel": "{label} entry {index}",
-    "saveError": "Could not save policy: {error}",
-    "title": "Per-action policy"
-  },
   "backend": {
     "label": "Backend"
   },

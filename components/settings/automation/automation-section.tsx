@@ -2,7 +2,7 @@
 
 /**
  * Settings → Automation. Six-tab shell (`?autoTab=`): Overview, Permissions,
- * Whitelist, Audit, Inspector, Sandboxes.
+ * Access rules, Audit, Inspector, Sandboxes.
  *
  * The tab strip is `PanelTabStrip`, not a bare `TabsList`. Six triggers with
  * the base `whitespace-nowrap` overflow a narrow viewport, and this section is
@@ -60,7 +60,7 @@ import type { Capabilities } from "@/lib/automation/types"
 import { listAuditRows } from "@/lib/automation/audit"
 
 import { AutomationAuditTable } from "./automation-audit-table"
-import { WhitelistTab } from "./whitelist-tab"
+import { AccessRulesTab } from "./access-rules-tab"
 import { InspectorTab } from "./inspector-tab"
 import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
@@ -89,7 +89,7 @@ interface OverviewMetrics {
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000
 const METRICS_REFRESH_MS = 60_000
 
-type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector" | "sandboxes"
+type TabId = "overview" | "permissions" | "accessRules" | "audit" | "inspector" | "sandboxes"
 
 /**
  * Tab order and iconography in one table, so the strip, the id guard and the
@@ -98,7 +98,7 @@ type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector" | 
 const TAB_DEFS: { id: TabId; icon: PanelTab<TabId>["icon"] }[] = [
   { id: "overview", icon: ActivityIcon },
   { id: "permissions", icon: ShieldCheckIcon },
-  { id: "whitelist", icon: ListChecksIcon },
+  { id: "accessRules", icon: ListChecksIcon },
   { id: "audit", icon: ScrollTextIcon },
   { id: "inspector", icon: SearchCheckIcon },
   { id: "sandboxes", icon: BoxIcon },
@@ -106,8 +106,17 @@ const TAB_DEFS: { id: TabId; icon: PanelTab<TabId>["icon"] }[] = [
 
 const TAB_IDS: TabId[] = TAB_DEFS.map((tab) => tab.id)
 
-function isTabId(v: string | null): v is TabId {
-  return v !== null && (TAB_IDS as readonly string[]).includes(v)
+/**
+ * `?autoTab=whitelist` predates the merge of the whitelist and the sandbox
+ * automation policy into one Access rules tab. Existing links and bookmarks
+ * still carry it, so it resolves rather than silently falling back to Overview.
+ */
+const LEGACY_TAB_IDS: Readonly<Record<string, TabId>> = { whitelist: "accessRules" }
+
+function resolveTabId(v: string | null): TabId | null {
+  if (v === null) return null
+  if ((TAB_IDS as readonly string[]).includes(v)) return v as TabId
+  return LEGACY_TAB_IDS[v] ?? null
 }
 
 export function AutomationSection() {
@@ -115,7 +124,7 @@ export function AutomationSection() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const requested = searchParams.get("autoTab")
-  const activeTab: TabId = isTabId(requested) ? requested : "overview"
+  const activeTab: TabId = resolveTabId(requested) ?? "overview"
   const tHeader = useTranslations("automation.header")
   const tTabs = useTranslations("automation.tabs")
 
@@ -147,8 +156,8 @@ export function AutomationSection() {
         <TabsContent value="permissions" className="pt-4">
           <PermissionsTab />
         </TabsContent>
-        <TabsContent value="whitelist" className="pt-4">
-          <WhitelistTab />
+        <TabsContent value="accessRules" className="pt-4">
+          <AccessRulesTab />
         </TabsContent>
         <TabsContent value="audit" className="pt-4">
           <AutomationAuditTable />

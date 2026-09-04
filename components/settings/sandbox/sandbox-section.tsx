@@ -23,7 +23,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
 
-import { AutomationPolicyCard } from "./automation-policy-card"
 import { CanvasCodeSandboxCard } from "./canvas-code-sandbox-card"
 import { SandboxEnableCard } from "./sandbox-enable-card"
 import { SandboxPolicyCard } from "./sandbox-policy-card"
@@ -140,7 +139,6 @@ export function SandboxSection() {
       <CanvasCodeSandboxCard />
       <SandboxTierCard />
       <SandboxPolicyCard />
-      <AutomationPolicyCard />
     </div>
   )
 }

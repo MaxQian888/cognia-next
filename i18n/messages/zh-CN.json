@@ -4006,6 +4006,71 @@
     "title": "注意力中心"
   },
   "automation": {
+    "accessRules": {
+      "admit": {
+        "add": "添加",
+        "captureFailed": "读取焦点窗口失败",
+        "captureFocused": "捕获当前焦点窗口",
+        "duplicate": "该条目已在列表中。",
+        "emptyNote": "两个列表都为空，因此这一阶段会准入任何目标。添加条目即可收窄范围。",
+        "emptyProcess": "尚未添加任何进程名称。请在上方添加。",
+        "emptyWindow": "尚未添加任何窗口标题模式。请在上方添加。",
+        "none": "（无）",
+        "processLabel": "进程：",
+        "processNames": "进程名称",
+        "processNamesHint": "不区分大小写的精确匹配目标进程名（例如 notepad.exe）。",
+        "processPlaceholder": "如 notepad.exe",
+        "quickCapture": "快速捕获",
+        "quickCaptureHint": "读取当前焦点窗口并自动填入下方字段。",
+        "removeEntryAria": "移除 {entry}",
+        "titleLabel": "标题：",
+        "updateFailed": "更新失败",
+        "windowPlaceholder": "如 *Chrome*",
+        "windowTitles": "窗口标题模式",
+        "windowTitlesHint": "使用 * 作为通配符的 Glob 模式（例如 *Excel* 或 *记事本*）。"
+      },
+      "description": "自动化在这台机器上可以操作哪些目标。下面两个阶段同时生效，一次调用必须同时满足。",
+      "hardBoundaryNote": "Cognia 自身、终端模拟器、macOS 认证窗口和浏览器安全页面始终被拒绝，这里的任何规则都无法放行。",
+      "restrict": {
+        "add": "添加一行",
+        "allowedProcessNames": {
+          "description": "目标必须匹配的进程名（大小写不敏感）。",
+          "label": "允许的进程",
+          "placeholder": "Chrome"
+        },
+        "allowedUrlPatterns": {
+          "description": "对目标浏览器标签页的 URL 做正则匹配。",
+          "label": "允许的 URL",
+          "placeholder": "^https://"
+        },
+        "allowedWindowTitlePatterns": {
+          "description": "对目标窗口标题做正则匹配。",
+          "label": "允许的窗口标题",
+          "placeholder": "^Visual Studio Code"
+        },
+        "description": "Computer Use 在权限闸门 + 用户同意之后还会过这一层。空列表表示不附加约束；任一非空白名单都会硬性拒绝事实不匹配的动作。",
+        "emptyNote": "未配置任何约束 —— Computer Use 动作仅经过权限闸门和同意代理。",
+        "forbiddenScreenRegions": {
+          "description": "落入这些像素矩形内的点击/拖拽会被拒绝（密码管理器弹窗、系统托盘机密等）。",
+          "height": "高",
+          "label": "禁止的屏幕区域",
+          "width": "宽",
+          "x": "X",
+          "y": "Y"
+        },
+        "regexInvalid": "正则无效",
+        "remove": "删除该行",
+        "rowAriaLabel": "{label} 第 {index} 项",
+        "saveError": "无法保存策略：{error}",
+        "title": "动作级策略"
+      },
+      "saving": "保存中…",
+      "stageAdmitDescription": "在「白名单」层级下生效。两个列表都为空时，任何目标都可准入；一旦有条目，目标只要命中其中任意一条即可准入。",
+      "stageAdmitTitle": "第 1 阶段 · 准入",
+      "stageRestrictDescription": "在你批准之后，对 Computer Use 调用生效。你填写的每一个列表都必须命中，因此它收窄的是一个已经准入的调用能做什么。这里的模式是正则表达式，不是上面那种通配符。",
+      "stageRestrictTitle": "第 2 阶段 · 限制",
+      "title": "访问规则"
+    },
     "audit": {
       "clear": "清除日志",
       "columns": {
@@ -4398,36 +4463,16 @@
       "windowsOnlyNote": "熄屏模式仅支持 Windows。在当前平台上 Computer Use 使用物理显示器。"
     },
     "tabs": {
+      "accessRules": "访问规则",
       "audit": "审计",
       "inspector": "检查器",
       "overview": "概览",
       "permissions": "权限",
-      "sandboxes": "沙箱",
-      "whitelist": "白名单"
+      "sandboxes": "沙箱"
     },
     "unavailable": {
       "description": "控制屏幕、键盘和鼠标是被操作那台机器本身的能力，因此引擎只在那台机器上的 Cognia 桌面端里运行。请到那台机器的「设置 → 自动化」查看或修改这些设置。",
       "title": "自动化只在桌面端运行"
-    },
-    "whitelist": {
-      "add": "添加",
-      "captureFailed": "读取焦点窗口失败",
-      "captureFocused": "捕获当前焦点窗口",
-      "emptyProcess": "尚未添加任何进程名称。请在上方添加。",
-      "emptyWindow": "尚未添加任何窗口标题模式。请在上方添加。",
-      "none": "（无）",
-      "processLabel": "进程：",
-      "processNames": "进程名称",
-      "processNamesHint": "不区分大小写的精确匹配目标进程名（例如 notepad.exe）。",
-      "processPlaceholder": "如 notepad.exe",
-      "quickCapture": "快速捕获",
-      "quickCaptureHint": "读取当前焦点窗口并自动填入下方字段。",
-      "removeEntryAria": "移除 {entry}",
-      "titleLabel": "标题：",
-      "updateFailed": "更新失败",
-      "windowPlaceholder": "如 *Chrome*",
-      "windowTitles": "窗口标题模式",
-      "windowTitlesHint": "使用 * 作为通配符的 Glob 模式（例如 *Excel* 或 *记事本*）。"
     }
   },
   "board": {
@@ -35697,39 +35742,6 @@
       "title": "远程主机"
     },
     "sandbox": {
-      "automationPolicy": {
-        "add": "添加一行",
-        "allowedProcessNames": {
-          "description": "目标必须匹配的进程名（大小写不敏感）。",
-          "label": "允许的进程",
-          "placeholder": "Chrome"
-        },
-        "allowedUrlPatterns": {
-          "description": "对目标浏览器标签页的 URL 做正则匹配。",
-          "label": "允许的 URL",
-          "placeholder": "^https://"
-        },
-        "allowedWindowTitlePatterns": {
-          "description": "对目标窗口标题做正则匹配。",
-          "label": "允许的窗口标题",
-          "placeholder": "^Visual Studio Code"
-        },
-        "description": "Computer Use 在权限闸门 + 用户同意之后还会过这一层。空列表表示不附加约束；任一非空白名单都会硬性拒绝事实不匹配的动作。",
-        "emptyNote": "未配置任何约束 —— Computer Use 动作仅经过权限闸门和同意代理。",
-        "forbiddenScreenRegions": {
-          "description": "落入这些像素矩形内的点击/拖拽会被拒绝（密码管理器弹窗、系统托盘机密等）。",
-          "height": "高",
-          "label": "禁止的屏幕区域",
-          "width": "宽",
-          "x": "X",
-          "y": "Y"
-        },
-        "regexInvalid": "正则无效",
-        "remove": "删除该行",
-        "rowAriaLabel": "{label} 第 {index} 项",
-        "saveError": "无法保存策略：{error}",
-        "title": "动作级策略"
-      },
       "backend": {
         "label": "后端"
       },

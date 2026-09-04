@@ -46,7 +46,14 @@ beforeEach(() => {
 describe("AutomationSection", () => {
   it("renders every tab through the shared strip", () => {
     renderSection()
-    for (const id of ["overview", "permissions", "whitelist", "audit", "inspector", "sandboxes"]) {
+    for (const id of [
+      "overview",
+      "permissions",
+      "accessRules",
+      "audit",
+      "inspector",
+      "sandboxes",
+    ]) {
       expect(screen.getByTestId(`panel-tab-${id}`)).toBeInTheDocument()
     }
   })
@@ -74,6 +81,16 @@ describe("AutomationSection", () => {
     })
   })
 
+  /**
+   * `?autoTab=whitelist` is what links and bookmarks carry from before the
+   * whitelist and the sandbox automation policy merged into Access rules.
+   */
+  it("still resolves the pre-merge whitelist tab id", () => {
+    search = "section=automation&autoTab=whitelist"
+    renderSection()
+    expect(screen.getByTestId("panel-tab-accessRules")).toHaveAttribute("data-state", "active")
+  })
+
   it("explains the missing engine through the shared notice, not a build command", () => {
     renderSection()
     const notice = screen.getByTestId("automation-unavailable")
@@ -90,8 +107,8 @@ describe("AutomationSection", () => {
     pathname = "/me/computer-use"
     search = ""
     renderSection()
-    await userEvent.click(screen.getByTestId("panel-tab-whitelist"))
-    expect(replace).toHaveBeenCalledWith("/me/computer-use?autoTab=whitelist", { scroll: false })
+    await userEvent.click(screen.getByTestId("panel-tab-accessRules"))
+    expect(replace).toHaveBeenCalledWith("/me/computer-use?autoTab=accessRules", { scroll: false })
     expect(replace).not.toHaveBeenCalledWith(
       expect.stringContaining("/settings"),
       expect.anything()

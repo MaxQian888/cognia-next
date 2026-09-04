@@ -50,8 +50,6 @@
     "components/settings/a2ui-section.tsx",
     "components/settings/a2ui/mcp-bridge-tab.tsx",
     "components/settings/appearance/vscode-import-dialog.tsx",
-    "components/settings/automation/automation-section.tsx",
-    "components/settings/automation/whitelist-tab.tsx",
     "components/settings/built-in-skills/index.tsx",
     "components/settings/ccswitch/tabs/index.ts",
     "components/settings/data/data-section.tsx",

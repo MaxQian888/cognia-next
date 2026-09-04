@@ -6,14 +6,12 @@ import { NextIntlClientProvider } from "next-intl"
 
 import { SandboxSection } from "./sandbox-section"
 
+// `isTauri` was missing from this stub, so the suite could not load at all once
+// anything in the import chain reached `createKeyringStore`. Pre-existing on
+// dev, not caused by the card that used to be mocked out below.
 jest.mock("@/lib/tauri", () => ({
   transport: { call: jest.fn() },
-}))
-
-// AutomationPolicyCard is exercised in its own test file; stubbing it here
-// keeps the SandboxSection test focused on the health card and its IPC.
-jest.mock("./automation-policy-card", () => ({
-  AutomationPolicyCard: () => <div data-testid="automation-policy-card-stub" />,
+  isTauri: () => false,
 }))
 
 // The enable + tier cards have their own tests and depend on the settings

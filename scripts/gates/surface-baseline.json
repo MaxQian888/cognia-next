@@ -258,7 +258,6 @@
   "components/settings/artifacts-section.tsx": 1,
   "components/settings/automation/automation-section.tsx": 2,
   "components/settings/automation/inspector-tab.tsx": 4,
-  "components/settings/automation/whitelist-tab.tsx": 1,
   "components/settings/canvas-section.tsx": 1,
   "components/settings/character-pack-update-dialog.tsx": 1,
   "components/settings/character/twin-binding-section.tsx": 2,

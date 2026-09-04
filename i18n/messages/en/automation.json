@@ -1,4 +1,69 @@
 {
+  "accessRules": {
+    "admit": {
+      "add": "Add",
+      "captureFailed": "Failed to read focused window",
+      "captureFocused": "Capture focused window",
+      "duplicate": "Already in the list.",
+      "emptyNote": "Both lists are empty, so this stage admits every target. Add an entry to narrow it.",
+      "emptyProcess": "No process names added yet. Add one above.",
+      "emptyWindow": "No window title patterns added yet. Add one above.",
+      "none": "(none)",
+      "processLabel": "Process:",
+      "processNames": "Process Names",
+      "processNamesHint": "Case-insensitive exact match against the target process name (e.g. notepad.exe).",
+      "processPlaceholder": "e.g. notepad.exe",
+      "quickCapture": "Quick Capture",
+      "quickCaptureHint": "Read the currently focused window and prefill the fields below.",
+      "removeEntryAria": "Remove {entry}",
+      "titleLabel": "Title:",
+      "updateFailed": "Update failed",
+      "windowPlaceholder": "e.g. *Chrome*",
+      "windowTitles": "Window Title Patterns",
+      "windowTitlesHint": "Glob patterns using * as wildcard (e.g. *Excel* or Untitled - Notepad)."
+    },
+    "description": "Which targets automation may touch on this machine. Both stages below apply, and a call has to satisfy both.",
+    "hardBoundaryNote": "Cognia itself, terminal emulators, macOS authentication windows and browser security pages are always refused. No rule here can allow them.",
+    "restrict": {
+      "add": "Add row",
+      "allowedProcessNames": {
+        "description": "Case-insensitive process names the action's target must match.",
+        "label": "Allowed processes",
+        "placeholder": "Chrome"
+      },
+      "allowedUrlPatterns": {
+        "description": "Regular expressions evaluated against the target browser tab's URL.",
+        "label": "Allowed URLs",
+        "placeholder": "^https://"
+      },
+      "allowedWindowTitlePatterns": {
+        "description": "Regular expressions evaluated against the target window's title.",
+        "label": "Allowed window titles",
+        "placeholder": "^Visual Studio Code"
+      },
+      "description": "Extra constraints applied after permission gate + consent for Computer Use actions. Empty lists impose no constraint; any non-empty allowlist hard-fails actions whose facts don't satisfy it.",
+      "emptyNote": "No constraints configured — Computer Use actions follow only the permission gate and consent broker.",
+      "forbiddenScreenRegions": {
+        "description": "Pixel rectangles where clicks and drags are denied (password manager popups, system tray secrets, etc.).",
+        "height": "Height",
+        "label": "Forbidden screen regions",
+        "width": "Width",
+        "x": "X",
+        "y": "Y"
+      },
+      "regexInvalid": "Invalid regex",
+      "remove": "Remove row",
+      "rowAriaLabel": "{label} entry {index}",
+      "saveError": "Could not save policy: {error}",
+      "title": "Per-action policy"
+    },
+    "saving": "Saving…",
+    "stageAdmitDescription": "Consulted under the Whitelist tier. Leaving both lists empty admits every target. With entries, a target is admitted when it matches ANY one of them.",
+    "stageAdmitTitle": "Stage 1 — admission",
+    "stageRestrictDescription": "Applied to Computer Use calls after you approve them. Every list you fill in has to match, so these narrow what an already-admitted call may do. Patterns here are regular expressions, not the wildcards used above.",
+    "stageRestrictTitle": "Stage 2 — restrictions",
+    "title": "Access rules"
+  },
   "audit": {
     "clear": "Clear Log",
     "columns": {
@@ -314,6 +379,7 @@
     "name": "Name",
     "networkMode": "Network mode",
     "networkModeHelp": "Use `none` to cut the machine off from the network. Leave blank for Docker's default.",
+    "noAdapter": "Provider declared, no adapter wired",
     "persistsAfterQuit": "A running machine stays running after you quit the app, and is picked up again on the next launch.",
     "policyCpus": "CPU limit",
     "policyFrozen": "Docker fixes these when the container is created. Changing them needs a new machine.",
@@ -331,17 +397,17 @@
     "save": "Save",
     "start": "Start",
     "state": {
-      "uninitialized": "Not created",
       "creating": "Creating",
-      "stopped": "Stopped",
-      "starting": "Starting",
-      "running": "Running",
-      "suspending": "Suspending",
-      "suspended": "Suspended",
-      "resuming": "Resuming",
-      "stopping": "Stopping",
       "deleting": "Deleting",
-      "error": "Error"
+      "error": "Error",
+      "resuming": "Resuming",
+      "running": "Running",
+      "starting": "Starting",
+      "stopped": "Stopped",
+      "stopping": "Stopping",
+      "suspended": "Suspended",
+      "suspending": "Suspending",
+      "uninitialized": "Not created"
     },
     "statusError": "Error",
     "statusOk": "Reachable",
@@ -356,8 +422,7 @@
     "unsupportedAction": "No live adapter implements this action for the imported provider",
     "workspaceContainerPath": "Path inside the machine",
     "workspaceHostPath": "Host directory to mount",
-    "workspaceMountHelp": "Both are needed together. Without a mount, shell and file work inside the machine cannot reach any host path.",
-    "noAdapter": "Provider declared, no adapter wired"
+    "workspaceMountHelp": "Both are needed together. Without a mount, shell and file work inside the machine cannot reach any host path."
   },
   "screenOff": {
     "activeMonitor": {
@@ -391,35 +456,15 @@
     "windowsOnlyNote": "Screen-off mode is Windows-only. On this platform Computer Use uses the physical display."
   },
   "tabs": {
+    "accessRules": "Access rules",
     "audit": "Audit",
     "inspector": "Inspector",
     "overview": "Overview",
     "permissions": "Permissions",
-    "sandboxes": "Sandboxes",
-    "whitelist": "Whitelist"
+    "sandboxes": "Sandboxes"
   },
   "unavailable": {
     "description": "Controlling a screen, keyboard and mouse is a capability of the machine being driven, so the engine only runs inside the Cognia desktop app on that machine. Open Settings then Automation there to view or change these settings.",
     "title": "Automation runs on the desktop app"
-  },
-  "whitelist": {
-    "add": "Add",
-    "captureFailed": "Failed to read focused window",
-    "captureFocused": "Capture focused window",
-    "emptyProcess": "No process names added yet. Add one above.",
-    "emptyWindow": "No window title patterns added yet. Add one above.",
-    "none": "(none)",
-    "processLabel": "Process:",
-    "processNames": "Process Names",
-    "processNamesHint": "Case-insensitive exact match against the target process name (e.g. notepad.exe).",
-    "processPlaceholder": "e.g. notepad.exe",
-    "quickCapture": "Quick Capture",
-    "quickCaptureHint": "Read the currently focused window and prefill the fields below.",
-    "removeEntryAria": "Remove {entry}",
-    "titleLabel": "Title:",
-    "updateFailed": "Update failed",
-    "windowPlaceholder": "e.g. *Chrome*",
-    "windowTitles": "Window Title Patterns",
-    "windowTitlesHint": "Glob patterns using * as wildcard (e.g. *Excel* or Untitled - Notepad)."
   }
 }
