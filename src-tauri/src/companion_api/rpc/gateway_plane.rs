@@ -250,3 +250,109 @@ pub(super) async fn dispatch(
         _ => Err(RpcError::unknown_command(name)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headless_host() -> super::super::super::dispatch_host::DispatchHost {
+        super::super::super::dispatch_host::DispatchHost::Headless(
+            crate::headless::HeadlessServices::stub_for_tests(),
+        )
+    }
+
+    #[test]
+    fn command_family_is_closed() {
+        assert_eq!(
+            COMMANDS,
+            &[
+                "gateway_status",
+                "gateway_list_models",
+                "gateway_provider_capabilities",
+                "gateway_mint_route_ticket",
+                "gateway_list_route_tickets",
+                "gateway_revoke_route_ticket",
+                "gateway_probe_upstream",
+            ]
+        );
+    }
+
+    /// Every name the family advertises reaches an arm.
+    ///
+    /// A name in `COMMANDS` with no `match` arm falls through to the wildcard
+    /// and answers `unknown_command`, which on a paired device is an
+    /// indistinguishable 404: the command is allowlisted, authorised, routed,
+    /// and then denied for not existing. The repository-wide parity gate
+    /// catches that, but only for commands it can see, so the family pins it
+    /// here too. Missing arguments are fine, and are the point: a validation
+    /// failure proves the arm ran.
+    #[tokio::test]
+    async fn every_advertised_command_reaches_an_arm() {
+        let state = super::super::tests::test_state();
+        let host = headless_host();
+        for name in COMMANDS {
+            let outcome = dispatch(
+                name,
+                serde_json::json!({}),
+                &state,
+                &host,
+                "device-a",
+                None,
+                None,
+            )
+            .await;
+            if let Err((_, Json(error))) = outcome {
+                assert_ne!(
+                    error.code, "unknown_command",
+                    "{name} is advertised in COMMANDS but has no dispatch arm"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_name_outside_the_family_is_refused() {
+        let state = super::super::tests::test_state();
+        let host = headless_host();
+        let (_, Json(error)) = dispatch(
+            "gateway_not_a_command",
+            serde_json::json!({}),
+            &state,
+            &host,
+            "device-a",
+            None,
+            None,
+        )
+        .await
+        .expect_err("an unknown name must be refused, not answered");
+        assert_eq!(error.code, "unknown_command");
+    }
+
+    /// Before the first profile lands there is no snapshot, and both
+    /// projections have to say so rather than claim an empty gateway. A caller
+    /// that cannot tell "no providers configured" from "not loaded yet" would
+    /// render an empty list as a finished answer.
+    #[test]
+    fn the_projections_report_a_missing_snapshot_rather_than_an_empty_one() {
+        let services = crate::headless::HeadlessServices::stub_for_tests();
+        let models = list_models(&services.gateway);
+        assert_eq!(models["snapshot"], serde_json::json!(false));
+        assert_eq!(models["models"], serde_json::json!([]));
+
+        let capabilities = provider_capabilities(&services.gateway);
+        assert_eq!(capabilities["snapshot"], serde_json::json!(false));
+        assert_eq!(capabilities["providers"], serde_json::json!([]));
+    }
+
+    /// The three situations `with_gateway` distinguishes collapse into one
+    /// status on purpose: a caller can retry a 503, and neither "this host has
+    /// no app handle" nor "the desktop never initialised the gateway" is the
+    /// caller's fault.
+    #[test]
+    fn an_absent_gateway_is_a_service_failure_not_a_bad_request() {
+        let (status, Json(error)) = no_gateway("nothing here");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "service_unavailable");
+        assert_eq!(error.message, "nothing here");
+    }
+}

@@ -237,7 +237,10 @@ async fn headless_orchestration_sink_uses_the_service_only_brain_bridge() {
 const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
 const ACCOUNT_ID: &str = "local_acct_a";
 
-fn test_state() -> super::super::SharedState {
+/// Shared with the per-family test modules (`gateway_plane`, ...): they need a
+/// `SharedState` to call `dispatch`, and rebuilding this fifteen-field literal
+/// in each of them would make the next field addition a multi-file edit.
+pub(super) fn test_state() -> super::super::SharedState {
     use crate::companion_api::event_bus::EventBus;
     Arc::new(CompanionState {
         secret: RwLock::new(SECRET.to_vec()),
