@@ -3,8 +3,12 @@
 /**
  * Floating consent overlay for the automation `PerCall` tier.
  *
- * Listens for `automation:consent-request` Tauri events (emitted by the
- * Rust-side `ConsentBroker::request`). Each event payload carries:
+ * The prompt stream itself (subscribe, dedupe by broker id, countdown tick,
+ * expiry sweep, respond) belongs to `useAutomationConsent`, shared with the
+ * mobile `<MobileConsentSheet>`. This file is the desktop presentation only.
+ *
+ * Each `automation:consent-request` payload, emitted by the Rust-side
+ * `ConsentBroker::request`, carries:
  *
  * - `id` — broker token the renderer must echo back via
  *   `automation_consent_respond`.
@@ -27,14 +31,12 @@
  * Closing the overlay (X button) is equivalent to Reject so the broker's
  * pending channel resolves promptly rather than waiting out `timeoutMs`.
  *
- * Multiple concurrent requests are queued — the overlay shows the most
- * recent prompt and exposes a small "N more pending" pill so the user
+ * Multiple concurrent requests are queued oldest-first. The overlay answers the
+ * front of the queue and exposes a small "N more pending" pill so the user
  * knows additional decisions are stacked behind the current one.
  */
 
-import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { ShieldAlertIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -42,105 +44,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
-import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import {
   CONSENT_GRANT_DURATIONS_MS,
   grantDurationMinutes,
 } from "@/lib/automation/consent-durations"
-import {
-  desktop,
-  type ConsentPromptPayload,
-  type ConsentRequestEvent,
-} from "@/lib/automation/client"
-
-interface PendingPrompt extends ConsentRequestEvent {
-  /** Wall-clock deadline for the renderer-side countdown. */
-  expiresAt: number
-}
-
-function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
-  return {
-    command: event.command,
-    surface: event.surface,
-    pluginId: event.pluginId,
-    processName: event.processName,
-    windowTitle: event.windowTitle,
-    commandDetail: event.commandDetail ?? null,
-    // Part of the host's grant key — omitting it would register the grant
-    // under an empty session tag, so it would never match the prompts it was
-    // meant to cover and the user would be re-asked every call.
-    sessionKey: event.sessionKey ?? null,
-  }
-}
+import { useAutomationConsent } from "@/hooks/automation/use-automation-consent"
 
 export function ConsentOverlay() {
   const t = useTranslations("automation.consent")
-  const [queue, setQueue] = useState<PendingPrompt[]>([])
-  const [now, setNow] = useState<number>(() => Date.now())
-
-  // Subscribe to Tauri events. The unsubscribe handle is returned by
-  // `listen()`; the effect cleanup calls it. We do nothing in web mode.
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: UnlistenFn | null = null
-    let cancelled = false
-    listen<ConsentRequestEvent>("automation:consent-request", (event) => {
-      const payload = event.payload
-      setQueue((prev) => {
-        // Dedupe by id — Tauri can fire the same event twice across a
-        // remount or HMR reload. Keep the oldest copy's deadline.
-        if (prev.some((p) => p.id === payload.id)) return prev
-        return [...prev, { ...payload, expiresAt: Date.now() + payload.timeoutMs }]
-      })
-    }).then((u) => {
-      if (cancelled) {
-        // StrictMode mount→unmount→mount can resolve this after cleanup ran;
-        // the raw unlisten may throw on the already-gone registration.
-        safeUnlisten(u)
-      } else {
-        unlisten = u
-      }
-    })
-    return () => {
-      cancelled = true
-      safeUnlisten(unlisten)
-    }
-  }, [])
-
-  // 1Hz tick so the countdown re-renders; also drops expired prompts inline
-  // so we don't trigger a setState cascade from a separate effect. The Rust
-  // broker has its own timeout — this is just UI tidy-up.
-  useEffect(() => {
-    if (queue.length === 0) return
-    const id = window.setInterval(() => {
-      const ts = Date.now()
-      setNow(ts)
-      setQueue((prev) => prev.filter((p) => p.expiresAt > ts - 1000))
-    }, 500)
-    return () => window.clearInterval(id)
-  }, [queue.length])
-
-  const respond = useCallback(
-    async (event: PendingPrompt, allow: boolean, persist: boolean, grantDurationMs?: number) => {
-      // Remove the prompt from the UI immediately — Rust resolves the
-      // channel async, but we don't want the user to be able to click twice.
-      setQueue((prev) => prev.filter((p) => p.id !== event.id))
-      try {
-        await desktop.consentRespond({
-          id: event.id,
-          allow,
-          persist,
-          prompt: persist ? promptOnly(event) : undefined,
-          grantDurationMs: persist ? grantDurationMs : undefined,
-        })
-      } catch (err) {
-        // Best-effort — log but don't re-queue. If `respond` fails the
-        // Rust-side timeout will fire eventually.
-        console.warn("automation_consent_respond failed", err)
-      }
-    },
-    []
-  )
+  // The queue, the countdown tick, the dedupe and the respond call all live in
+  // `useAutomationConsent`, shared with the mobile sheet. This file held a
+  // second copy of all four until they drifted.
+  const { queue, now, respond } = useAutomationConsent({ enabled: isTauri() })
 
   if (!isTauri() || queue.length === 0) return null
 

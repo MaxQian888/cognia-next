@@ -10,16 +10,17 @@ import { desktop } from "@/lib/automation/client"
 // erased, so it survives the module mock below.
 import type { ConsentRequestEvent } from "@/lib/automation/client"
 
+// The overlay reaches the prompt stream through `useAutomationConsent`, which
+// subscribes over `transport`. Stubbing the transport (rather than the hook)
+// keeps the real queue, countdown and respond path under test.
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
+  transport: { subscribe: (...args: unknown[]) => mockSubscribe(...args) },
 }))
 
 const mockedIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 
-const mockListen = jest.fn()
-jest.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
-}))
+const mockSubscribe = jest.fn()
 
 jest.mock("@/lib/automation/client", () => ({
   desktop: {
@@ -34,71 +35,41 @@ beforeEach(() => {
 })
 
 function setupListener() {
-  let onEvent: ((event: { payload: ConsentRequestEvent }) => void) | null = null
-  mockListen.mockImplementation(
-    async (_eventName: string, handler: (e: { payload: ConsentRequestEvent }) => void) => {
+  let onEvent: ((payload: ConsentRequestEvent) => void) | null = null
+  mockSubscribe.mockImplementation(
+    (_eventName: string, handler: (payload: ConsentRequestEvent) => void) => {
       onEvent = handler
       return jest.fn()
     }
   )
   const fire = (payload: ConsentRequestEvent) => {
     if (!onEvent) throw new Error("listener not registered yet")
-    act(() => onEvent!({ payload }))
+    act(() => onEvent!(payload))
   }
   return { fire }
 }
 
 describe("ConsentOverlay", () => {
-  it("survives an unlisten that throws during unmount cleanup (Tauri unlisten race)", async () => {
-    mockedIsTauri.mockReturnValue(true)
-    // Mirrors tauri 2.x `unregisterListener` throwing
-    // `listeners[eventId].handlerId` when the registration eval lost the race.
-    const throwingUnlisten = jest.fn(() => {
-      throw new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
-    })
-    mockListen.mockResolvedValue(throwingUnlisten)
-    const { unmount } = render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
-    await act(async () => {})
-    expect(() => unmount()).not.toThrow()
-    expect(throwingUnlisten).toHaveBeenCalledTimes(1)
-  })
-
-  it("disposes a listener that resolves only after unmount", async () => {
-    mockedIsTauri.mockReturnValue(true)
-    const throwingUnlisten = jest.fn(() => {
-      throw new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
-    })
-    let resolveListen: ((u: () => void) => void) | null = null
-    mockListen.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveListen = resolve
-        })
-    )
-    const { unmount } = render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
-    unmount()
-    await act(async () => {
-      resolveListen!(throwingUnlisten)
-    })
-    // The cancelled path must still dispose the late listener — and swallow
-    // its throw instead of surfacing an unhandled rejection.
-    expect(throwingUnlisten).toHaveBeenCalledTimes(1)
-  })
+  /**
+   * The Tauri unlisten race (a throwing unlisten, a listen that resolves after
+   * unmount) used to be handled by this file's own listener plumbing and pinned
+   * by two cases here. That plumbing is now `TauriTransport.subscribe`, and
+   * `lib/tauri/transport-tauri.test.ts` covers both races there. Re-asserting
+   * them through the overlay would only re-test the stub above.
+   */
 
   it("renders nothing on web mode", () => {
     mockedIsTauri.mockReturnValue(false)
     const { container } = render(<ConsentOverlay />)
     expect(container.firstChild).toBeNull()
-    expect(mockListen).not.toHaveBeenCalled()
+    expect(mockSubscribe).not.toHaveBeenCalled()
   })
 
   it("renders the prompt + i18n-wired action buttons on desktop", async () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-1",
@@ -124,7 +95,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-bash",
@@ -145,7 +116,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-click2",
@@ -164,7 +135,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-unknown",
@@ -183,7 +154,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-allow",
@@ -207,7 +178,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-session",
@@ -245,7 +216,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-15",
@@ -269,7 +240,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-once-nogrant",
@@ -297,7 +268,7 @@ describe("ConsentOverlay", () => {
     mockedIsTauri.mockReturnValue(true)
     const { fire } = setupListener()
     render(<ConsentOverlay />)
-    await waitFor(() => expect(mockListen).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalledTimes(1))
 
     fire({
       id: "evt-reject",

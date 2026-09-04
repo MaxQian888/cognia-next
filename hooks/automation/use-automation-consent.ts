@@ -13,9 +13,10 @@
  *
  * `transport.subscribe` / `transport.call` route over Tauri IPC on desktop and
  * the companion WS / `/api/_rpc/*` on mobile, so this hook is platform
- * neutral. The mobile consent sheet is its only consumer today; the desktop
- * `<ConsentOverlay>` keeps its own Tauri-`listen` path. Logic mirrors that
- * overlay (`components/automation/consent-overlay.tsx`) so the two stay in step.
+ * neutral. Both consent surfaces run on it: the desktop `<ConsentOverlay>`
+ * (`components/automation/consent-overlay.tsx`) and the mobile
+ * `<MobileConsentSheet>`. They used to hold two copies of this queue, which had
+ * already drifted (only the overlay's copy forwarded `commandDetail`).
  *
  * Pass `enabled: false` to skip the subscription entirely (e.g. an observe-only
  * device that may not resolve consent).
@@ -62,6 +63,7 @@ function promptOnly(event: ConsentRequestEvent): ConsentPromptPayload {
     pluginId: event.pluginId,
     processName: event.processName,
     windowTitle: event.windowTitle,
+    commandDetail: event.commandDetail ?? null,
     // Part of the host's grant key — omitting it would register the grant
     // under an empty session tag, so it would never match the prompts it was
     // meant to cover and the user would be re-asked every call.
