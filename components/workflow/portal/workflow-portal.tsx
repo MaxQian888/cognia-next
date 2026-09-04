@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import { createPlatformFetch } from "@/lib/network/platform-fetch"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -142,12 +143,25 @@ async function solveAnonymousChallenge(token: string, difficulty: number): Promi
   throw new Error("anonymous_challenge_unsolved")
 }
 
+/**
+ * Every portal request goes through the shell's transport rather than bare
+ * `fetch`.
+ *
+ * Off Tauri and Capacitor `createPlatformFetch()` IS `(input, init) =>
+ * fetch(input, init)`, so the public page behaves exactly as before. It matters
+ * because the portal also renders in embed mode inside the desktop shell, where
+ * bare fetch would make this the one surface that ignored the configured proxy.
+ */
+function portalFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createPlatformFetch()(input, init)
+}
+
 /** Retry one execution mutation after solving a server-issued adaptive challenge. */
 export async function fetchWithAnonymousChallenge(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> {
-  const response = await fetch(input, init)
+  const response = await portalFetch(input, init)
   if (response.status !== 429) return response
   const envelope = (await response
     .clone()
@@ -170,7 +184,7 @@ export async function fetchWithAnonymousChallenge(
   const headers = new Headers(init?.headers)
   headers.set("x-cognia-challenge-token", offer.challengeToken)
   headers.set("x-cognia-challenge-proof", proof)
-  return fetch(input, { ...init, headers })
+  return portalFetch(input, { ...init, headers })
 }
 
 function readFileText(file: File): Promise<string> {
@@ -296,7 +310,7 @@ export function WorkflowPortal() {
     const bootstrapUrl = appSlug
       ? `${apiBase}/api/apps/${encodeURIComponent(appSlug)}/bootstrap`
       : `${apiBase}/api/portal/bootstrap`
-    void fetch(bootstrapUrl, {
+    void portalFetch(bootstrapUrl, {
       headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : {},
       signal: controller.signal,
     })
@@ -350,7 +364,7 @@ export function WorkflowPortal() {
     const controller = new AbortController()
     const poll = async () => {
       try {
-        const response = await fetch(
+        const response = await portalFetch(
           `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/batches/${encodeURIComponent(batchJob.id)}`,
           {
             headers: { Authorization: `Bearer ${bootstrap.sessionToken}` },
@@ -378,7 +392,7 @@ export function WorkflowPortal() {
     const controller = new AbortController()
     const refresh = async () => {
       try {
-        const response = await fetch(
+        const response = await portalFetch(
           `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/human-input`,
           {
             headers: { Authorization: `Bearer ${bootstrap.sessionToken}` },
@@ -438,7 +452,7 @@ export function WorkflowPortal() {
         const form = new FormData()
         form.append("fieldId", field.id)
         form.append("file", file)
-        const response = await fetch(
+        const response = await portalFetch(
           `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/human-input/${encodeURIComponent(request.id)}/files`,
           {
             method: "POST",
@@ -468,7 +482,7 @@ export function WorkflowPortal() {
     setHumanInputOperation(operationId, true)
     setError(null)
     try {
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/human-input/${encodeURIComponent(request.id)}/submit`,
         {
           method: "POST",
@@ -591,7 +605,7 @@ export function WorkflowPortal() {
     if (!bootstrap) return
     setBatchBusy(true)
     try {
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/batch-template`,
         { headers: { Authorization: `Bearer ${bootstrap.sessionToken}` } }
       )
@@ -633,7 +647,7 @@ export function WorkflowPortal() {
     if (!bootstrap || !batchJob) return
     setBatchBusy(true)
     try {
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/batches/${encodeURIComponent(batchJob.id)}/${action}`,
         {
           method: "POST",
@@ -651,7 +665,7 @@ export function WorkflowPortal() {
     if (!bootstrap || !batchJob) return
     setBatchBusy(true)
     try {
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/batches/${encodeURIComponent(batchJob.id)}/export`,
         { headers: { Authorization: `Bearer ${bootstrap.sessionToken}` } }
       )
@@ -668,7 +682,7 @@ export function WorkflowPortal() {
     setError(null)
     try {
       const correction = feedbackCorrection.trim()
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/feedback`,
         {
           method: "POST",
@@ -708,7 +722,7 @@ export function WorkflowPortal() {
     setResultShareBusy(true)
     setError(null)
     try {
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/runs/${encodeURIComponent(feedbackTarget.runId)}/shares`,
         {
           method: "POST",
@@ -737,7 +751,7 @@ export function WorkflowPortal() {
     setResultShareBusy(true)
     setError(null)
     try {
-      const response = await fetch(
+      const response = await portalFetch(
         `${apiBase}/api/apps/${encodeURIComponent(portalAppSlug)}/result-shares/${encodeURIComponent(resultShare.code)}`,
         {
           method: "DELETE",

@@ -25,6 +25,12 @@
       "note": "Reads a data:/blob: attachment body for the inline text preview."
     },
     {
+      "file": "components/mobile/chat/composer-attachment.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads a staged attachment's blob:/data:/file URI to turn it into a File or a base64 block, the same conversion components/chat/composer.tsx does. Never a network origin."
+    },
+    {
       "file": "components/mobile/chat/composer-plus-menu.tsx",
       "kind": "fetch",
       "reason": "capacitor",
@@ -46,7 +52,7 @@
       "file": "lib/artifacts/react-runtime-loader.ts",
       "kind": "fetch",
       "reason": "resource-read",
-      "note": "Reads the manifest of the bundled artifact runtime under public/artifact-runtime/. Same-origin static asset, resolved against location.href — never a network origin, and the packaged shell's connect-src would refuse one."
+      "note": "Reads the manifest of the bundled artifact runtime under public/artifact-runtime/. Same-origin static asset, resolved against location.href \u2014 never a network origin, and the packaged shell's connect-src would refuse one."
     },
     {
       "file": "lib/browser/remote-stream.ts",
@@ -59,6 +65,12 @@
       "kind": "websocket",
       "reason": "loopback",
       "note": "Collaboration sessions target a loopback or LAN peer the user paired with directly."
+    },
+    {
+      "file": "lib/collab/shared-chat-conversion.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads a message part's local attachment URL before upload. A URL outside LOCAL_ATTACHMENT_SCHEMES goes through assertFetchTargetAllowed first, which permits only public http(s) and refuses loopback, LAN and cloud metadata."
     },
     {
       "file": "lib/data/destinations/http.ts",
@@ -88,7 +100,7 @@
       "file": "lib/network/platform-fetch.ts",
       "kind": "fetch",
       "reason": "transport-impl",
-      "note": "The browser arm of the platform transport itself — this is the call the other paths route around."
+      "note": "The browser arm of the platform transport itself \u2014 this is the call the other paths route around."
     },
     {
       "file": "lib/network/platform-streaming-fetch.ts",
@@ -161,6 +173,12 @@
       "kind": "websocket",
       "reason": "companion-pinned",
       "note": "The remote-terminal socket, reached through the same paired-host channel."
+    },
+    {
+      "file": "packages/companion-client/src/session.ts",
+      "kind": "fetch",
+      "reason": "companion-pinned",
+      "note": "The default for an injectable fetchImpl in a standalone package the App, CLI and browser extension all share, so it cannot import lib/network. Its one caller, browser-extension/src/lib/client.ts, runs in Chrome, where there is no desktop proxy to honour."
     },
     {
       "file": "packages/logging/src/transports/remote-transport.ts",
