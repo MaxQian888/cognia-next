@@ -52,7 +52,7 @@
  *   node scripts/gates/check-network-egress.mjs --write-baseline
  */
 
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execSync } from "node:child_process"
@@ -112,16 +112,44 @@ export function isScaffolding(file) {
   )
 }
 
+/**
+ * Which of `git ls-files`\' lines this gate should actually open.
+ *
+ * `exists` is a required argument rather than a defaulted one because the
+ * whole point of this function is the third filter, and a default would be the
+ * one branch every test stubs away.
+ *
+ * That third filter is not bookkeeping. `git ls-files` still lists a tracked
+ * file that has been deleted from disk but not staged, and reading one threw
+ * ENOENT straight out of `collectFindings` — so the gate CRASHED instead of
+ * reporting. A crash is not a verdict: it says nothing about the egress in the
+ * rest of the tree, and it hid 20 real unmanaged call sites for as long as one
+ * unstaged deletion existed. A tree with unstaged deletions is ordinary
+ * (mid-refactor, or another session sharing the checkout), so a deleted file is
+ * simply not there to scan. `check-static-export.mjs:listSourceFiles` has
+ * carried this same guard from the start.
+ *
+ * @param {string[]} lines raw `git ls-files` output lines
+ * @param {string[]} extensions file suffixes this pass understands
+ * @param {(file: string) => boolean} exists is the path still on disk
+ * @returns {string[]}
+ */
+export function selectScannableFiles(lines, extensions, exists) {
+  return lines
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && extensions.some((ext) => line.endsWith(ext)))
+    .filter((line) => !isScaffolding(line))
+    .filter((line) => exists(line))
+}
+
 function listFiles(roots, extensions) {
   const out = execSync(`git -C "${REPO_ROOT}" ls-files ${roots.map((r) => `"${r}"`).join(" ")}`, {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   })
-  return out
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && extensions.some((ext) => line.endsWith(ext)))
-    .filter((line) => !isScaffolding(line))
+  return selectScannableFiles(out.split("\n"), extensions, (file) =>
+    existsSync(resolve(REPO_ROOT, file))
+  )
 }
 
 /**

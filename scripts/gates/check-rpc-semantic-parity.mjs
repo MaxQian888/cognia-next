@@ -452,6 +452,16 @@ export function parseTauriCommands(rawSource, file) {
  * wrong body to every git command. Same eight-space rustfmt seam that
  * `gen-companion-api.mjs:extractCommandArgumentSchemas` relies on.
  *
+ * The name is matched as `dispatch` OR `dispatch_<suffix>`. Most families put
+ * their arms behind `pub(super) async fn dispatch(`, but SFTP delegates: its
+ * arms live in `sftp_service.rs` as `pub async fn dispatch_sftp(`, because the
+ * desktop's own `#[tauri::command]` wrappers share that function, so it is
+ * named for what it does rather than for the RPC table it happens to serve.
+ * Requiring the bare name made all 14 SFTP commands look arm-less, and the
+ * gate reported 14 runtime 404s that did not exist — which in turn buried the
+ * 18 findings in the same run that were real. `gen-companion-api.mjs` already
+ * carries the same carve-out; this is the parity gate catching up to it.
+ *
  * @param {string} rawSource
  * @param {string} file
  * @returns {Array<{names: string[], body: string, file: string}>}
@@ -459,7 +469,7 @@ export function parseTauriCommands(rawSource, file) {
 export function extractDispatchArms(rawSource, file) {
   const source = stripRustComments(rawSource)
   const dispatchStart = source.search(
-    /(?:pub(?:\s*\([^)]*\))?\s+)?async\s+fn\s+dispatch\s*(?:<[^>]*>)?\s*\(/
+    /(?:pub(?:\s*\([^)]*\))?\s+)?async\s+fn\s+dispatch(?:_[a-z0-9_]+)?\s*(?:<[^>]*>)?\s*\(/
   )
   if (dispatchStart < 0) return []
   const matchStart = source.indexOf("match name {", dispatchStart)
@@ -1292,6 +1302,13 @@ export function collectInputs() {
 
   const rpcSource = read("src-tauri/src/companion_api/rpc.rs")
   const arms = new Map()
+  // `rpc/*.rs` holds every family that dispatches in place. Files listed here
+  // in addition are the ones that dispatch by DELEGATION: `rpc/sftp.rs` is a
+  // one-line hand-off to `sftp_service::dispatch_sftp`, which is where the arms
+  // actually live because the desktop's `#[tauri::command]` wrappers share it.
+  // Omitting it does not under-report — it MIS-reports, as 14 phantom 404s.
+  // `gen-companion-api.mjs:RPC_DISPATCH_SOURCE_PATHS` lists the same file.
+  const DELEGATED_ARM_FILES = ["src-tauri/src/sftp_service.rs"]
   const armFiles = execFileSync("git", ["ls-files", "src-tauri/src/companion_api/rpc/*.rs"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
@@ -1299,6 +1316,10 @@ export function collectInputs() {
     .split("\n")
     .filter(Boolean)
     .filter((f) => !f.endsWith("tests.rs"))
+    .concat(DELEGATED_ARM_FILES)
+    // `git ls-files` still lists a tracked file that has been deleted but not
+    // staged, and reading one throws ENOENT instead of reporting anything.
+    .filter((f) => existsSync(join(REPO_ROOT, f)))
   for (const file of armFiles) {
     for (const arm of extractDispatchArms(read(file), file)) {
       for (const name of arm.names) {

@@ -179,6 +179,50 @@ pub(super) async fn dispatch(name: &str) {
   )
 })
 
+test("extractDispatchArms reads a delegated dispatch fn, not just the bare name", () => {
+  // SFTP is the one family whose arms do not live in `rpc/`. `rpc/sftp.rs` is a
+  // one-line hand-off to `sftp_service::dispatch_sftp`, whose name says what it
+  // does because the desktop's `#[tauri::command]` wrappers share it. While the
+  // anchor demanded the bare name `dispatch`, all 14 SFTP commands parsed as
+  // arm-less and the gate reported 14 runtime 404s that did not exist — burying
+  // the 18 findings in the same run that were real.
+  const source = `
+pub async fn dispatch_sftp(
+    app: Option<&tauri::AppHandle>,
+    name: &str,
+) -> Result<Value, SftpFailure> {
+    match name {
+        "sftp_list_dir" => {
+            let profile_id: String = required(&args, "profileId")?;
+            Ok(json!({ "entries": field(&snapshot, "entries")? }))
+        }
+        _ => Err(SftpFailure::new("unknown_command", name)),
+    }
+}
+`
+  const arms = extractDispatchArms(source, "src-tauri/src/sftp_service.rs")
+  assert.deepEqual(
+    arms.flatMap((a) => a.names),
+    ["sftp_list_dir"]
+  )
+})
+
+test("extractDispatchArms still refuses a fn that merely starts with dispatch-ish text", () => {
+  // The widened anchor accepts `dispatch_<suffix>`, not any identifier that
+  // happens to contain the word — `predispatch` and `dispatching` must not
+  // become dispatch boundaries, or an unrelated `match name` would donate arms
+  // to commands it does not serve.
+  const source = `
+async fn predispatch(name: &str) {
+    let x = match name {
+        "decoy" => 1,
+        _ => 0,
+    };
+}
+`
+  assert.deepEqual(extractDispatchArms(source, "rpc/x.rs"), [])
+})
+
 test("armReadFields covers every field-reader spelling, aliases included", () => {
   const body = `
     let a: String = required(&args, "plugin_id")?;

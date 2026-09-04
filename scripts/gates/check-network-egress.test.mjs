@@ -13,6 +13,7 @@ import {
   isScaffolding,
   isTypedParameter,
   keyOf,
+  selectScannableFiles,
   validateAllowlist,
 } from "./check-network-egress.mjs"
 
@@ -175,4 +176,24 @@ test("diff reports unlisted findings and stale exceptions", () => {
   )
   // A stale exception silently re-opens the next bare call in that file.
   assert.deepEqual(stale, ["old.ts::fetch"])
+})
+
+test("selectScannableFiles drops a tracked file that is no longer on disk", () => {
+  // `git ls-files` lists a deletion until it is staged. Opening one threw
+  // ENOENT out of collectFindings, so the gate crashed rather than reporting —
+  // and while it crashed it said nothing at all about the 20 unmanaged call
+  // sites in the files that DO exist.
+  const gone = "components/plugins/detail/plugin-detail-logs.tsx"
+  const kept = "lib/collab/client.ts"
+  const files = selectScannableFiles([kept, gone, ""], [".ts", ".tsx"], (f) => f !== gone)
+  assert.deepEqual(files, [kept])
+})
+
+test("selectScannableFiles still applies the extension and scaffolding filters", () => {
+  const files = selectScannableFiles(
+    ["lib/a.ts", "lib/a.test.ts", "lib/a.md", "  lib/b.ts  "],
+    [".ts"],
+    () => true
+  )
+  assert.deepEqual(files, ["lib/a.ts", "lib/b.ts"])
 })
