@@ -1,0 +1,256 @@
+{
+  "id": "cognia-honkai-star-rail-theme",
+  "name": "Honkai: Star Rail — Astral Journey (Unofficial)",
+  "version": "1.0.0",
+  "description": "A complete astral appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets.",
+  "type": "frontend",
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-honkai-star-rail-theme/assets/astral-emblem.svg",
+  "screenshots": [
+    "/plugins/cognia-honkai-star-rail-theme/assets/characters/kafka-rain-station.webp",
+    "/plugins/cognia-honkai-star-rail-theme/assets/characters/firefly-hangar-sunrise.webp",
+    "/plugins/cognia-honkai-star-rail-theme/assets/characters/acheron-twilight-bridge.webp",
+    "/plugins/cognia-honkai-star-rail-theme/assets/characters/jingliu-luofu-moon-gate.webp",
+    "/plugins/cognia-honkai-star-rail-theme/assets/characters/robin-penacony-rehearsal.webp"
+  ],
+  "keywords": ["honkai-star-rail", "anime", "space", "theme", "wallpaper"],
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Appearance contributions require an interactive shell."
+    }
+  },
+  "themes": [
+    {
+      "id": "astral-journey-night",
+      "name": "Astral Journey · Night",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#0D1020",
+        "--foreground": "#F8F4EA",
+        "--card": "#171B31",
+        "--card-foreground": "#F8F4EA",
+        "--popover": "#1D223B",
+        "--popover-foreground": "#F8F4EA",
+        "--muted": "#282E4A",
+        "--muted-foreground": "#C0C5DA",
+        "--border": "#444D70",
+        "--input": "#333A59",
+        "--ring": "#E8C36A",
+        "--primary": "#E8C36A",
+        "--primary-foreground": "#181204",
+        "--secondary": "#394260",
+        "--secondary-foreground": "#F8F4EA",
+        "--accent": "#A987FF",
+        "--accent-foreground": "#120A23",
+        "--brand-action": "#72D4E8",
+        "--brand-approval": "#E8C36A",
+        "--brand-wash": "#222A45",
+        "--destructive": "#FF728B",
+        "--destructive-foreground": "#1B050A",
+        "--success": "#72D5A1",
+        "--success-foreground": "#05150D",
+        "--warning": "#E8C36A",
+        "--warning-foreground": "#181204",
+        "--info": "#72C6FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#080A14",
+        "--sidebar-foreground": "#EEEAF5",
+        "--sidebar-primary": "#E8C36A",
+        "--sidebar-primary-foreground": "#181204",
+        "--sidebar-accent": "#282E4A",
+        "--sidebar-accent-foreground": "#F8F4EA",
+        "--sidebar-border": "#353D5C",
+        "--sidebar-ring": "#E8C36A",
+        "--chart-1": "#E8C36A",
+        "--chart-2": "#A987FF",
+        "--chart-3": "#72D4E8",
+        "--chart-4": "#72D5A1",
+        "--chart-5": "#FF728B",
+        "--wf-trigger": "#72D5A1",
+        "--wf-action": "#72C6FF",
+        "--wf-ai": "#A987FF",
+        "--wf-flow": "#E8C36A",
+        "--wf-data": "#FF8399",
+        "--wf-io": "#72D4E8",
+        "--wf-annotation": "#9FA7C0",
+        "--wf-status-idle": "#9FA7C0",
+        "--wf-status-running": "#E8C36A",
+        "--wf-status-succeeded": "#72D5A1",
+        "--wf-status-failed": "#FF728B",
+        "--wf-status-skipped": "#69718A",
+        "--wf-status-waiting": "#72C6FF",
+        "--effort-ultra": "#E8C36A",
+        "--effort-ultra-muted": "#514520"
+      }
+    }
+  ],
+  "wallpapers": [
+    {
+      "id": "kafka-rain-station",
+      "name": "Kafka · Rain Station",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/kafka-rain-station.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "firefly-hangar-sunrise",
+      "name": "Firefly · Hangar Sunrise",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/firefly-hangar-sunrise.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "acheron-twilight-bridge",
+      "name": "Acheron · Twilight Bridge",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/acheron-twilight-bridge.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "jingliu-luofu-moon-gate",
+      "name": "Jingliu · Luofu Moon Gate",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/jingliu-luofu-moon-gate.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "robin-penacony-rehearsal",
+      "name": "Robin · Penacony Rehearsal",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/robin-penacony-rehearsal.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "astral-window",
+      "name": "Astral Window",
+      "source": {
+        "kind": "gradient",
+        "css": "radial-gradient(circle at 80% 20%, rgba(169,135,255,.22), transparent 26%), radial-gradient(circle at 18% 74%, rgba(232,195,106,.12), transparent 24%), linear-gradient(150deg, #080A14 0%, #171B31 55%, #2A2850 100%)"
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "astral-console",
+      "vars": {
+        "--density-spacing": "0.8125rem",
+        "--density-input-height": "2.375rem",
+        "--density-row-padding": "0.5rem",
+        "--density-gap": "0.75rem",
+        "--density-line-height": "1.5"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "kafka-station",
+      "name": "KAFKA // Midnight Platform",
+      "description": "Deep violet transit light, glossy rain reflections, and a composed compact workspace.",
+      "preview": {
+        "light": "/plugins/cognia-honkai-star-rail-theme/assets/characters/kafka-rain-station.webp",
+        "dark": "/plugins/cognia-honkai-star-rail-theme/assets/characters/kafka-rain-station.webp"
+      },
+      "applies": {
+        "themeId": "astral-journey-night",
+        "wallpaperId": "kafka-rain-station",
+        "density": "astral-console",
+        "radius": 0.375,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "firefly-sunrise",
+      "name": "FIREFLY // First Light",
+      "description": "Soft hangar sunrise, gentle teal controls, and a calm reading-focused layout.",
+      "preview": {
+        "light": "/plugins/cognia-honkai-star-rail-theme/assets/characters/firefly-hangar-sunrise.webp",
+        "dark": "/plugins/cognia-honkai-star-rail-theme/assets/characters/firefly-hangar-sunrise.webp"
+      },
+      "applies": {
+        "themeId": "astral-journey-night",
+        "wallpaperId": "firefly-hangar-sunrise",
+        "density": "astral-console",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "acheron-bridge",
+      "name": "ACHERON // Violet Horizon",
+      "description": "A low-motion twilight profile with red accents and generous quiet space.",
+      "preview": {
+        "light": "/plugins/cognia-honkai-star-rail-theme/assets/characters/acheron-twilight-bridge.webp",
+        "dark": "/plugins/cognia-honkai-star-rail-theme/assets/characters/acheron-twilight-bridge.webp"
+      },
+      "applies": {
+        "themeId": "astral-journey-night",
+        "wallpaperId": "acheron-twilight-bridge",
+        "density": "astral-console",
+        "radius": 0.25,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "jingliu-moon-gate",
+      "name": "JINGLIU // Moon Gate",
+      "description": "Cool Luofu moonlight and a restrained low-motion swordkeeper profile.",
+      "preview": {
+        "light": "/plugins/cognia-honkai-star-rail-theme/assets/characters/jingliu-luofu-moon-gate.webp",
+        "dark": "/plugins/cognia-honkai-star-rail-theme/assets/characters/jingliu-luofu-moon-gate.webp"
+      },
+      "applies": {
+        "themeId": "astral-journey-night",
+        "wallpaperId": "jingliu-luofu-moon-gate",
+        "density": "astral-console",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "robin-rehearsal",
+      "name": "ROBIN // Empty Rehearsal",
+      "description": "Soft Penacony stage light with a broad, elegant workspace.",
+      "preview": {
+        "light": "/plugins/cognia-honkai-star-rail-theme/assets/characters/robin-penacony-rehearsal.webp",
+        "dark": "/plugins/cognia-honkai-star-rail-theme/assets/characters/robin-penacony-rehearsal.webp"
+      },
+      "applies": {
+        "themeId": "astral-journey-night",
+        "wallpaperId": "robin-penacony-rehearsal",
+        "density": "astral-console",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    }
+  ]
+}

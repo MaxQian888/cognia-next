@@ -19,6 +19,8 @@
     "/plugins/cognia-arknights-theme/assets/operators/hoshiguma-breacher-night-stall.webp",
     "/plugins/cognia-arknights-theme/assets/operators/yu-courtyard-kitchen.webp",
     "/plugins/cognia-arknights-theme/assets/operators/blaze-igniting-spark-maintenance.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/surtr-rooftop-ice-cream.webp",
+    "/plugins/cognia-arknights-theme/assets/operators/skadi-corrupting-heart-lighthouse.webp",
     "/plugins/cognia-arknights-theme/assets/operations-deck-dark.webp",
     "/plugins/cognia-arknights-theme/assets/operations-deck-light.webp"
   ],
@@ -292,6 +294,28 @@
       }
     },
     {
+      "id": "surtr-rooftop-ice-cream",
+      "name": "史尔特尔 · 天台冰淇淋",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/surtr-rooftop-ice-cream.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "skadi-corrupting-heart-lighthouse",
+      "name": "浊心斯卡蒂 · 灯塔夜曲",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/operators/skadi-corrupting-heart-lighthouse.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
       "id": "operations-deck-dark",
       "name": "Operations Deck · Night",
       "source": {
@@ -366,6 +390,38 @@
         "wallpaperId": "lemuen-rain-transit",
         "density": "rhodes-field",
         "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "surtr-rooftop-break",
+      "name": "SURTR // Rooftop Break",
+      "description": "Warm sunset concrete, a quiet ice-cream break, and a compact graphite workspace.",
+      "preview": {
+        "light": "/plugins/cognia-arknights-theme/assets/operators/surtr-rooftop-ice-cream.webp",
+        "dark": "/plugins/cognia-arknights-theme/assets/operators/surtr-rooftop-ice-cream.webp"
+      },
+      "applies": {
+        "themeId": "rhodes-operations-dark",
+        "wallpaperId": "surtr-rooftop-ice-cream",
+        "density": "rhodes-command",
+        "radius": 0.25,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "skadi-lighthouse-night",
+      "name": "SKADI // Lighthouse Nocturne",
+      "description": "Deep coastal blues and restrained crimson details for a calm low-motion workspace.",
+      "preview": {
+        "light": "/plugins/cognia-arknights-theme/assets/operators/skadi-corrupting-heart-lighthouse.webp",
+        "dark": "/plugins/cognia-arknights-theme/assets/operators/skadi-corrupting-heart-lighthouse.webp"
+      },
+      "applies": {
+        "themeId": "rhodes-operations-dark",
+        "wallpaperId": "skadi-corrupting-heart-lighthouse",
+        "density": "rhodes-field",
+        "radius": 0.5,
         "motionSpeed": 0.5
       }
     },

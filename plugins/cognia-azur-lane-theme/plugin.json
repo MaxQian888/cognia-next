@@ -1,0 +1,256 @@
+{
+  "id": "cognia-azur-lane-theme",
+  "name": "Azur Lane: Azure Anchorage (Unofficial)",
+  "version": "1.0.0",
+  "description": "A complete naval-blue appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets.",
+  "type": "frontend",
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-azur-lane-theme/assets/anchor-emblem.svg",
+  "screenshots": [
+    "/plugins/cognia-azur-lane-theme/assets/characters/enterprise-carrier-dawn.webp",
+    "/plugins/cognia-azur-lane-theme/assets/characters/belfast-rain-lounge.webp",
+    "/plugins/cognia-azur-lane-theme/assets/characters/new-jersey-maintenance-dock.webp",
+    "/plugins/cognia-azur-lane-theme/assets/characters/shinano-moonlit-harbor.webp",
+    "/plugins/cognia-azur-lane-theme/assets/characters/agir-rain-drydock.webp"
+  ],
+  "keywords": ["azur-lane", "anime", "naval", "theme", "wallpaper"],
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Appearance contributions require an interactive shell."
+    }
+  },
+  "themes": [
+    {
+      "id": "azure-anchorage-night",
+      "name": "Azure Anchorage · Night",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#081421",
+        "--foreground": "#F4F8FC",
+        "--card": "#0F2030",
+        "--card-foreground": "#F4F8FC",
+        "--popover": "#13283A",
+        "--popover-foreground": "#F4F8FC",
+        "--muted": "#183247",
+        "--muted-foreground": "#B8CBD8",
+        "--border": "#31516A",
+        "--input": "#213D52",
+        "--ring": "#61D5FF",
+        "--primary": "#61D5FF",
+        "--primary-foreground": "#031018",
+        "--secondary": "#294A63",
+        "--secondary-foreground": "#F4F8FC",
+        "--accent": "#D9B86C",
+        "--accent-foreground": "#171006",
+        "--brand-action": "#61D5FF",
+        "--brand-approval": "#D9B86C",
+        "--brand-wash": "#102C40",
+        "--destructive": "#FF6F7C",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#70D6A2",
+        "--success-foreground": "#04150D",
+        "--warning": "#F1C56A",
+        "--warning-foreground": "#181005",
+        "--info": "#79BFFF",
+        "--info-foreground": "#04111D",
+        "--sidebar": "#050E18",
+        "--sidebar-foreground": "#EAF3F9",
+        "--sidebar-primary": "#61D5FF",
+        "--sidebar-primary-foreground": "#031018",
+        "--sidebar-accent": "#183247",
+        "--sidebar-accent-foreground": "#F4F8FC",
+        "--sidebar-border": "#28465C",
+        "--sidebar-ring": "#61D5FF",
+        "--chart-1": "#61D5FF",
+        "--chart-2": "#D9B86C",
+        "--chart-3": "#8AAFE8",
+        "--chart-4": "#8AD9C2",
+        "--chart-5": "#FF8B9A",
+        "--wf-trigger": "#70D6A2",
+        "--wf-action": "#79BFFF",
+        "--wf-ai": "#A995EE",
+        "--wf-flow": "#D9B86C",
+        "--wf-data": "#FF8B9A",
+        "--wf-io": "#61D5FF",
+        "--wf-annotation": "#94AAB8",
+        "--wf-status-idle": "#94AAB8",
+        "--wf-status-running": "#F1C56A",
+        "--wf-status-succeeded": "#70D6A2",
+        "--wf-status-failed": "#FF6F7C",
+        "--wf-status-skipped": "#617789",
+        "--wf-status-waiting": "#79BFFF",
+        "--effort-ultra": "#61D5FF",
+        "--effort-ultra-muted": "#17485D"
+      }
+    }
+  ],
+  "wallpapers": [
+    {
+      "id": "enterprise-carrier-dawn",
+      "name": "Enterprise · Carrier Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/enterprise-carrier-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "belfast-rain-lounge",
+      "name": "Belfast · Rain Lounge",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/belfast-rain-lounge.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "new-jersey-maintenance-dock",
+      "name": "New Jersey · Maintenance Dock",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/new-jersey-maintenance-dock.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "shinano-moonlit-harbor",
+      "name": "Shinano · Moonlit Harbor",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/shinano-moonlit-harbor.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "agir-rain-drydock",
+      "name": "Ägir · Rain Drydock",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/agir-rain-drydock.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "deep-sea-chart",
+      "name": "Deep Sea Chart",
+      "source": {
+        "kind": "gradient",
+        "css": "radial-gradient(circle at 18% 22%, rgba(97,213,255,.20), transparent 25%), linear-gradient(145deg, #050E18 0%, #0D2538 55%, #173E52 100%)"
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "anchorage-bridge",
+      "vars": {
+        "--density-spacing": "0.875rem",
+        "--density-input-height": "2.375rem",
+        "--density-row-padding": "0.5rem",
+        "--density-gap": "0.75rem",
+        "--density-line-height": "1.5"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "enterprise-dawn",
+      "name": "ENTERPRISE // Carrier Dawn",
+      "description": "Cool carrier-deck light with an open reading field and crisp naval-blue controls.",
+      "preview": {
+        "light": "/plugins/cognia-azur-lane-theme/assets/characters/enterprise-carrier-dawn.webp",
+        "dark": "/plugins/cognia-azur-lane-theme/assets/characters/enterprise-carrier-dawn.webp"
+      },
+      "applies": {
+        "themeId": "azure-anchorage-night",
+        "wallpaperId": "enterprise-carrier-dawn",
+        "density": "anchorage-bridge",
+        "radius": 0.375,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "belfast-rain",
+      "name": "BELFAST // Rain Lounge",
+      "description": "Warm officers' lounge lighting balanced against a quiet rain-blue workspace.",
+      "preview": {
+        "light": "/plugins/cognia-azur-lane-theme/assets/characters/belfast-rain-lounge.webp",
+        "dark": "/plugins/cognia-azur-lane-theme/assets/characters/belfast-rain-lounge.webp"
+      },
+      "applies": {
+        "themeId": "azure-anchorage-night",
+        "wallpaperId": "belfast-rain-lounge",
+        "density": "anchorage-bridge",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "new-jersey-dock",
+      "name": "NEW JERSEY // Dock Shift",
+      "description": "Cyan machinery accents, dusk reflections, and a compact maintenance profile.",
+      "preview": {
+        "light": "/plugins/cognia-azur-lane-theme/assets/characters/new-jersey-maintenance-dock.webp",
+        "dark": "/plugins/cognia-azur-lane-theme/assets/characters/new-jersey-maintenance-dock.webp"
+      },
+      "applies": {
+        "themeId": "azure-anchorage-night",
+        "wallpaperId": "new-jersey-maintenance-dock",
+        "density": "anchorage-bridge",
+        "radius": 0.25,
+        "motionSpeed": 1
+      }
+    },
+    {
+      "id": "shinano-harbor",
+      "name": "SHINANO // Moonlit Harbor",
+      "description": "Quiet moon-blue harbor light with a soft ceremonial reading profile.",
+      "preview": {
+        "light": "/plugins/cognia-azur-lane-theme/assets/characters/shinano-moonlit-harbor.webp",
+        "dark": "/plugins/cognia-azur-lane-theme/assets/characters/shinano-moonlit-harbor.webp"
+      },
+      "applies": {
+        "themeId": "azure-anchorage-night",
+        "wallpaperId": "shinano-moonlit-harbor",
+        "density": "anchorage-bridge",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "agir-drydock",
+      "name": "ÄGIR // Rain Drydock",
+      "description": "Graphite machinery, warm chart light, and a disciplined compact dock profile.",
+      "preview": {
+        "light": "/plugins/cognia-azur-lane-theme/assets/characters/agir-rain-drydock.webp",
+        "dark": "/plugins/cognia-azur-lane-theme/assets/characters/agir-rain-drydock.webp"
+      },
+      "applies": {
+        "themeId": "azure-anchorage-night",
+        "wallpaperId": "agir-rain-drydock",
+        "density": "anchorage-bridge",
+        "radius": 0.25,
+        "motionSpeed": 0.75
+      }
+    }
+  ]
+}

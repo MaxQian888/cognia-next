@@ -1,0 +1,256 @@
+{
+  "id": "cognia-zenless-zone-zero-theme",
+  "name": "Zenless Zone Zero: New Eridu Signal (Unofficial)",
+  "version": "1.0.0",
+  "description": "A complete New Eridu appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets.",
+  "type": "frontend",
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-zenless-zone-zero-theme/assets/signal-emblem.svg",
+  "screenshots": [
+    "/plugins/cognia-zenless-zone-zero-theme/assets/characters/miyabi-training-dawn.webp",
+    "/plugins/cognia-zenless-zone-zero-theme/assets/characters/ellen-neon-break.webp",
+    "/plugins/cognia-zenless-zone-zero-theme/assets/characters/zhu-yuan-rooftop-shift.webp",
+    "/plugins/cognia-zenless-zone-zero-theme/assets/characters/jane-doe-neon-noodle-break.webp",
+    "/plugins/cognia-zenless-zone-zero-theme/assets/characters/astra-yao-rooftop-rehearsal.webp"
+  ],
+  "keywords": ["zenless-zone-zero", "anime", "urban", "theme", "wallpaper"],
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Appearance contributions require an interactive shell."
+    }
+  },
+  "themes": [
+    {
+      "id": "new-eridu-signal",
+      "name": "New Eridu · Signal",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#101214",
+        "--foreground": "#F5F7F0",
+        "--card": "#191D20",
+        "--card-foreground": "#F5F7F0",
+        "--popover": "#202529",
+        "--popover-foreground": "#F5F7F0",
+        "--muted": "#2B3237",
+        "--muted-foreground": "#BDC7C9",
+        "--border": "#465158",
+        "--input": "#353E44",
+        "--ring": "#D7FF32",
+        "--primary": "#D7FF32",
+        "--primary-foreground": "#0D1102",
+        "--secondary": "#3A444A",
+        "--secondary-foreground": "#F5F7F0",
+        "--accent": "#FF5C86",
+        "--accent-foreground": "#1A0309",
+        "--brand-action": "#62D8E8",
+        "--brand-approval": "#D7FF32",
+        "--brand-wash": "#1D2D30",
+        "--destructive": "#FF5C66",
+        "--destructive-foreground": "#1A0305",
+        "--success": "#8DE66C",
+        "--success-foreground": "#071504",
+        "--warning": "#F6C954",
+        "--warning-foreground": "#171003",
+        "--info": "#62D8E8",
+        "--info-foreground": "#041417",
+        "--sidebar": "#090B0C",
+        "--sidebar-foreground": "#EDF1EA",
+        "--sidebar-primary": "#D7FF32",
+        "--sidebar-primary-foreground": "#0D1102",
+        "--sidebar-accent": "#2B3237",
+        "--sidebar-accent-foreground": "#F5F7F0",
+        "--sidebar-border": "#394249",
+        "--sidebar-ring": "#D7FF32",
+        "--chart-1": "#D7FF32",
+        "--chart-2": "#FF5C86",
+        "--chart-3": "#62D8E8",
+        "--chart-4": "#A58BFF",
+        "--chart-5": "#F6C954",
+        "--wf-trigger": "#8DE66C",
+        "--wf-action": "#62D8E8",
+        "--wf-ai": "#A58BFF",
+        "--wf-flow": "#D7FF32",
+        "--wf-data": "#FF5C86",
+        "--wf-io": "#62D8E8",
+        "--wf-annotation": "#9FAAAC",
+        "--wf-status-idle": "#9FAAAC",
+        "--wf-status-running": "#F6C954",
+        "--wf-status-succeeded": "#8DE66C",
+        "--wf-status-failed": "#FF5C66",
+        "--wf-status-skipped": "#6A7478",
+        "--wf-status-waiting": "#62D8E8",
+        "--effort-ultra": "#D7FF32",
+        "--effort-ultra-muted": "#414D16"
+      }
+    }
+  ],
+  "wallpapers": [
+    {
+      "id": "miyabi-training-dawn",
+      "name": "Hoshimi Miyabi · Training Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/miyabi-training-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "ellen-neon-break",
+      "name": "Ellen Joe · Neon Break",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/ellen-neon-break.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "zhu-yuan-rooftop-shift",
+      "name": "Zhu Yuan · Rooftop Shift",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/zhu-yuan-rooftop-shift.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "jane-doe-neon-noodle-break",
+      "name": "Jane Doe · Neon Noodle Break",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/jane-doe-neon-noodle-break.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "astra-yao-rooftop-rehearsal",
+      "name": "Astra Yao · Rooftop Rehearsal",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/astra-yao-rooftop-rehearsal.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "hollow-signal",
+      "name": "Hollow Signal",
+      "source": {
+        "kind": "gradient",
+        "css": "linear-gradient(120deg, transparent 0 54%, rgba(215,255,50,.08) 54% 54.5%, transparent 54.5%), radial-gradient(circle at 82% 22%, rgba(255,92,134,.18), transparent 24%), linear-gradient(150deg, #090B0C 0%, #182225 58%, #27353A 100%)"
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "proxy-console",
+      "vars": {
+        "--density-spacing": "0.75rem",
+        "--density-input-height": "2.25rem",
+        "--density-row-padding": "0.4375rem",
+        "--density-gap": "0.625rem",
+        "--density-line-height": "1.45"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "miyabi-dawn",
+      "name": "MIYABI // First Practice",
+      "description": "Muted dawn light, disciplined teal surfaces, and a focused compact layout.",
+      "preview": {
+        "light": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/miyabi-training-dawn.webp",
+        "dark": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/miyabi-training-dawn.webp"
+      },
+      "applies": {
+        "themeId": "new-eridu-signal",
+        "wallpaperId": "miyabi-training-dawn",
+        "density": "proxy-console",
+        "radius": 0.25,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "ellen-break",
+      "name": "ELLEN // Neon Break",
+      "description": "Cherry-red and cyan night lighting with a relaxed, rounded after-hours profile.",
+      "preview": {
+        "light": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/ellen-neon-break.webp",
+        "dark": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/ellen-neon-break.webp"
+      },
+      "applies": {
+        "themeId": "new-eridu-signal",
+        "wallpaperId": "ellen-neon-break",
+        "density": "proxy-console",
+        "radius": 0.625,
+        "motionSpeed": 1
+      }
+    },
+    {
+      "id": "zhu-yuan-shift",
+      "name": "ZHU YUAN // Blue Hour",
+      "description": "Rain-dark public-security blues, lime signals, and a practical low-motion workspace.",
+      "preview": {
+        "light": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/zhu-yuan-rooftop-shift.webp",
+        "dark": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/zhu-yuan-rooftop-shift.webp"
+      },
+      "applies": {
+        "themeId": "new-eridu-signal",
+        "wallpaperId": "zhu-yuan-rooftop-shift",
+        "density": "proxy-console",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "jane-noodle-break",
+      "name": "JANE // Rain Noodle Break",
+      "description": "Wet New Eridu neon and a relaxed after-hours compact profile.",
+      "preview": {
+        "light": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/jane-doe-neon-noodle-break.webp",
+        "dark": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/jane-doe-neon-noodle-break.webp"
+      },
+      "applies": {
+        "themeId": "new-eridu-signal",
+        "wallpaperId": "jane-doe-neon-noodle-break",
+        "density": "proxy-console",
+        "radius": 0.375,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "astra-rooftop-rehearsal",
+      "name": "ASTRA // Rooftop Rehearsal",
+      "description": "Sunset dressing-room light and a spacious performance profile.",
+      "preview": {
+        "light": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/astra-yao-rooftop-rehearsal.webp",
+        "dark": "/plugins/cognia-zenless-zone-zero-theme/assets/characters/astra-yao-rooftop-rehearsal.webp"
+      },
+      "applies": {
+        "themeId": "new-eridu-signal",
+        "wallpaperId": "astra-yao-rooftop-rehearsal",
+        "density": "proxy-console",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    }
+  ]
+}

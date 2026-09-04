@@ -1,0 +1,1673 @@
+{
+  "id": "cognia-game-worlds-theme",
+  "name": "Game Worlds: Anime Collection (Unofficial)",
+  "version": "1.0.0",
+  "description": "A broad game-wallpaper collection with eight visual worlds, 40 character scenes, complete semantic themes, density controls, and one-click presets.",
+  "type": "frontend",
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-game-worlds-theme/assets/worlds-emblem.svg",
+  "screenshots": [
+    "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
+    "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
+    "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
+    "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/groza-elmo-briefing.webp",
+    "/plugins/cognia-game-worlds-theme/assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
+    "/plugins/cognia-game-worlds-theme/assets/nikke/rapi-red-hood-ark-hangar.webp",
+    "/plugins/cognia-game-worlds-theme/assets/blue-archive/hoshino-abydos-afternoon.webp",
+    "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp"
+  ],
+  "keywords": [
+    "anime",
+    "game",
+    "wallpaper",
+    "theme",
+    "honkai-impact",
+    "wuthering-waves",
+    "punishing-gray-raven",
+    "girls-frontline",
+    "snowbreak",
+    "nikke",
+    "blue-archive",
+    "path-to-nowhere"
+  ],
+  "author": {
+    "name": "cognia-next"
+  },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Appearance contributions require an interactive shell."
+    }
+  },
+  "themes": [
+    {
+      "id": "finality-cosmos",
+      "name": "Finality · Lunar Cosmos",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#111020",
+        "--foreground": "#F4F7FC",
+        "--card": "#1B1930",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#211E38",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#2D2946",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#4C456B",
+        "--input": "#373151",
+        "--ring": "#C8B2FF",
+        "--primary": "#C8B2FF",
+        "--primary-foreground": "#130C22",
+        "--secondary": "#373151",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#89CFFF",
+        "--accent-foreground": "#07151E",
+        "--brand-action": "#C8B2FF",
+        "--brand-approval": "#F0C7A5",
+        "--brand-wash": "#25213D",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#0A0914",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#C8B2FF",
+        "--sidebar-primary-foreground": "#130C22",
+        "--sidebar-accent": "#29243E",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#3C3654",
+        "--sidebar-ring": "#C8B2FF",
+        "--chart-1": "#C8B2FF",
+        "--chart-2": "#89CFFF",
+        "--chart-3": "#F0C7A5",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#C8B2FF",
+        "--wf-ai": "#89CFFF",
+        "--wf-flow": "#F0C7A5",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#F0C7A5",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#C8B2FF",
+        "--effort-ultra": "#89CFFF",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "resonance-tide",
+      "name": "Resonance · Black Shores",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#09151D",
+        "--foreground": "#F4F7FC",
+        "--card": "#10232D",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#142C37",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#1C3944",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#315563",
+        "--input": "#244550",
+        "--ring": "#7FE5E8",
+        "--primary": "#7FE5E8",
+        "--primary-foreground": "#041719",
+        "--secondary": "#244550",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#A8B7FF",
+        "--accent-foreground": "#0A1021",
+        "--brand-action": "#7FE5E8",
+        "--brand-approval": "#E8D29B",
+        "--brand-wash": "#16313D",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#061016",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#7FE5E8",
+        "--sidebar-primary-foreground": "#041719",
+        "--sidebar-accent": "#193541",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#284955",
+        "--sidebar-ring": "#7FE5E8",
+        "--chart-1": "#7FE5E8",
+        "--chart-2": "#A8B7FF",
+        "--chart-3": "#E8D29B",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#7FE5E8",
+        "--wf-ai": "#A8B7FF",
+        "--wf-flow": "#E8D29B",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#E8D29B",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#7FE5E8",
+        "--effort-ultra": "#A8B7FF",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "construct-signal",
+      "name": "Construct · Signal Grey",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#111316",
+        "--foreground": "#F4F7FC",
+        "--card": "#1B1E23",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#22262C",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#2D333B",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#4B535E",
+        "--input": "#383F48",
+        "--ring": "#E7EDF5",
+        "--primary": "#E7EDF5",
+        "--primary-foreground": "#111419",
+        "--secondary": "#353B43",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#76C9FF",
+        "--accent-foreground": "#06141D",
+        "--brand-action": "#E7EDF5",
+        "--brand-approval": "#F5B26D",
+        "--brand-wash": "#252A31",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#090A0D",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#E7EDF5",
+        "--sidebar-primary-foreground": "#111419",
+        "--sidebar-accent": "#292E35",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#3B424B",
+        "--sidebar-ring": "#E7EDF5",
+        "--chart-1": "#E7EDF5",
+        "--chart-2": "#76C9FF",
+        "--chart-3": "#F5B26D",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#E7EDF5",
+        "--wf-ai": "#76C9FF",
+        "--wf-flow": "#F5B26D",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#F5B26D",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#E7EDF5",
+        "--effort-ultra": "#76C9FF",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "elmo-expedition",
+      "name": "Elmo · Expedition Amber",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#17130F",
+        "--foreground": "#F4F7FC",
+        "--card": "#251E18",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#2E251D",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#3B3026",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#5D4B3A",
+        "--input": "#46382C",
+        "--ring": "#F0BE78",
+        "--primary": "#F0BE78",
+        "--primary-foreground": "#1C1005",
+        "--secondary": "#46382C",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#A9D9D3",
+        "--accent-foreground": "#071817",
+        "--brand-action": "#F0BE78",
+        "--brand-approval": "#F0BE78",
+        "--brand-wash": "#31271F",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#0E0B08",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#F0BE78",
+        "--sidebar-primary-foreground": "#1C1005",
+        "--sidebar-accent": "#342A21",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#493B2E",
+        "--sidebar-ring": "#F0BE78",
+        "--chart-1": "#F0BE78",
+        "--chart-2": "#A9D9D3",
+        "--chart-3": "#F0BE78",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#F0BE78",
+        "--wf-ai": "#A9D9D3",
+        "--wf-flow": "#F0BE78",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#F0BE78",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#F0BE78",
+        "--effort-ultra": "#A9D9D3",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "containment-frost",
+      "name": "Containment · Frostline",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#0C141C",
+        "--foreground": "#F4F7FC",
+        "--card": "#14222D",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#192A36",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#223844",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#375664",
+        "--input": "#294552",
+        "--ring": "#83D7FF",
+        "--primary": "#83D7FF",
+        "--primary-foreground": "#05151E",
+        "--secondary": "#294552",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#AAB7FF",
+        "--accent-foreground": "#0A1020",
+        "--brand-action": "#83D7FF",
+        "--brand-approval": "#E4C98D",
+        "--brand-wash": "#182F3B",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#071017",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#83D7FF",
+        "--sidebar-primary-foreground": "#05151E",
+        "--sidebar-accent": "#1D3542",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#2C4A57",
+        "--sidebar-ring": "#83D7FF",
+        "--chart-1": "#83D7FF",
+        "--chart-2": "#AAB7FF",
+        "--chart-3": "#E4C98D",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#83D7FF",
+        "--wf-ai": "#AAB7FF",
+        "--wf-flow": "#E4C98D",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#E4C98D",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#83D7FF",
+        "--effort-ultra": "#AAB7FF",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "ark-scarlet",
+      "name": "Ark · Scarlet Dawn",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#181012",
+        "--foreground": "#F4F7FC",
+        "--card": "#27191D",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#301E23",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#3D292F",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#63414A",
+        "--input": "#493139",
+        "--ring": "#FF8995",
+        "--primary": "#FF8995",
+        "--primary-foreground": "#21070B",
+        "--secondary": "#493139",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#D6B2FF",
+        "--accent-foreground": "#170B24",
+        "--brand-action": "#FF8995",
+        "--brand-approval": "#EBC880",
+        "--brand-wash": "#342127",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#0F090B",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#FF8995",
+        "--sidebar-primary-foreground": "#21070B",
+        "--sidebar-accent": "#382329",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#50333B",
+        "--sidebar-ring": "#FF8995",
+        "--chart-1": "#FF8995",
+        "--chart-2": "#D6B2FF",
+        "--chart-3": "#EBC880",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#FF8995",
+        "--wf-ai": "#D6B2FF",
+        "--wf-flow": "#EBC880",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#EBC880",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#FF8995",
+        "--effort-ultra": "#D6B2FF",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "academy-blue-hour",
+      "name": "Academy · Blue Hour",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#0B1321",
+        "--foreground": "#F4F7FC",
+        "--card": "#121F33",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#172740",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#203653",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#345578",
+        "--input": "#294363",
+        "--ring": "#79D5FF",
+        "--primary": "#79D5FF",
+        "--primary-foreground": "#05141D",
+        "--secondary": "#294363",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#F29DCE",
+        "--accent-foreground": "#230A18",
+        "--brand-action": "#79D5FF",
+        "--brand-approval": "#F3CD7D",
+        "--brand-wash": "#182D49",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#070D18",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#79D5FF",
+        "--sidebar-primary-foreground": "#05141D",
+        "--sidebar-accent": "#1B304C",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#294565",
+        "--sidebar-ring": "#79D5FF",
+        "--chart-1": "#79D5FF",
+        "--chart-2": "#F29DCE",
+        "--chart-3": "#F3CD7D",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#79D5FF",
+        "--wf-ai": "#F29DCE",
+        "--wf-flow": "#F3CD7D",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#F3CD7D",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#79D5FF",
+        "--effort-ultra": "#F29DCE",
+        "--effort-ultra-muted": "#41355F"
+      }
+    },
+    {
+      "id": "minos-noir",
+      "name": "Minos · Rain Noir",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#111013",
+        "--foreground": "#F4F7FC",
+        "--card": "#1D1A20",
+        "--card-foreground": "#F4F7FC",
+        "--popover": "#252129",
+        "--popover-foreground": "#F4F7FC",
+        "--muted": "#312C37",
+        "--muted-foreground": "#B7C1D0",
+        "--border": "#514957",
+        "--input": "#3C3542",
+        "--ring": "#C9AEDC",
+        "--primary": "#C9AEDC",
+        "--primary-foreground": "#180D20",
+        "--secondary": "#3C3542",
+        "--secondary-foreground": "#F4F7FC",
+        "--accent": "#78B9D1",
+        "--accent-foreground": "#07151B",
+        "--brand-action": "#C9AEDC",
+        "--brand-approval": "#DDBD83",
+        "--brand-wash": "#29242D",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#78D7A5",
+        "--success-foreground": "#05150D",
+        "--warning": "#E7C873",
+        "--warning-foreground": "#181204",
+        "--info": "#78C8FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#09080B",
+        "--sidebar-foreground": "#EAF0F8",
+        "--sidebar-primary": "#C9AEDC",
+        "--sidebar-primary-foreground": "#180D20",
+        "--sidebar-accent": "#2C2731",
+        "--sidebar-accent-foreground": "#F4F7FC",
+        "--sidebar-border": "#403A47",
+        "--sidebar-ring": "#C9AEDC",
+        "--chart-1": "#C9AEDC",
+        "--chart-2": "#78B9D1",
+        "--chart-3": "#DDBD83",
+        "--chart-4": "#78D7A5",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#78D7A5",
+        "--wf-action": "#C9AEDC",
+        "--wf-ai": "#78B9D1",
+        "--wf-flow": "#DDBD83",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#72D7E0",
+        "--wf-annotation": "#A8B2C2",
+        "--wf-status-idle": "#A8B2C2",
+        "--wf-status-running": "#DDBD83",
+        "--wf-status-succeeded": "#78D7A5",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#6D7788",
+        "--wf-status-waiting": "#C9AEDC",
+        "--effort-ultra": "#78B9D1",
+        "--effort-ultra-muted": "#41355F"
+      }
+    }
+  ],
+  "wallpapers": [
+    {
+      "id": "kiana-finality-lunar-dawn",
+      "name": "Kiana · Lunar Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "mei-origin-hyperion-rain",
+      "name": "Raiden Mei · Hyperion Rain",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "elysia-ego-crystal-garden",
+      "name": "Elysia · Crystal Garden",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "shorekeeper-black-shores-blue-hour",
+      "name": "Shorekeeper · Black Shores Blue Hour",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "camellya-rain-greenhouse",
+      "name": "Camellya · Rain Greenhouse",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/wuthering-waves/camellya-rain-greenhouse.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "jinhsi-jinzhou-dawn",
+      "name": "Jinhsi · Jinzhou Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/wuthering-waves/jinhsi-jinzhou-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "lucia-crimson-weave-metro-dawn",
+      "name": "Lucia · Metro Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "bianca-stigmata-cathedral-light",
+      "name": "Bianca · Cathedral Light",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "selena-capriccio-empty-stage",
+      "name": "Selena · Empty Stage",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/punishing-gray-raven/selena-capriccio-empty-stage.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "groza-elmo-briefing",
+      "name": "Groza · Elmo Briefing",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/girls-frontline-2/groza-elmo-briefing.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "suomi-snow-outpost",
+      "name": "Suomi · Snow Outpost",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/girls-frontline-2/suomi-snow-outpost.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "makiatto-rain-overwatch",
+      "name": "Makiatto · Rain Overwatch",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/girls-frontline-2/makiatto-rain-overwatch.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "lyfe-infinite-sight-lab-dawn",
+      "name": "Lyfe · Lab Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "chenxing-jade-arc-lantern-rain",
+      "name": "Chenxing · Lantern Rain",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/snowbreak/chenxing-jade-arc-lantern-rain.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "katya-blue-bolt-frost-terminal",
+      "name": "Katya · Frost Terminal",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/snowbreak/katya-blue-bolt-frost-terminal.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "rapi-red-hood-ark-hangar",
+      "name": "Rapi: Red Hood · Ark Hangar",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/nikke/rapi-red-hood-ark-hangar.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "cinderella-glass-observatory",
+      "name": "Cinderella · Glass Observatory",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/nikke/cinderella-glass-observatory.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "dorothy-eden-rain-garden",
+      "name": "Dorothy · Eden Rain Garden",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/nikke/dorothy-eden-rain-garden.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "hoshino-abydos-afternoon",
+      "name": "Hoshino · Abydos Afternoon",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/blue-archive/hoshino-abydos-afternoon.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "aris-millennium-night",
+      "name": "Aris · Millennium Night",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/blue-archive/aris-millennium-night.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "hina-gehenna-before-dawn",
+      "name": "Hina · Gehenna Before Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/blue-archive/hina-gehenna-before-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "shalom-mbcc-rain-corridor",
+      "name": "Shalom · MBCC Rain Corridor",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "adela-fog-salon",
+      "name": "Adela · Fog Salon",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/path-to-nowhere/adela-fog-salon.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "hamel-silent-theater",
+      "name": "Hamel · Silent Theater",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/path-to-nowhere/hamel-silent-theater.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "bronya-truth-snow-workshop",
+      "name": "Bronya · Snow Workshop",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "fu-hua-vicissitude-tea-pavilion",
+      "name": "Fu Hua · Tea Pavilion",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "changli-jinzhou-summer-rain",
+      "name": "Changli · Jinzhou Summer Rain",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/wuthering-waves/changli-jinzhou-summer-rain.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "phoebe-basilica-morning",
+      "name": "Phoebe · Basilica Morning",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/wuthering-waves/phoebe-basilica-morning.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "liv-babylonia-healing-garden",
+      "name": "Liv · Healing Garden",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/punishing-gray-raven/liv-babylonia-healing-garden.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "vera-rozen-night-garage",
+      "name": "Vera Rozen · Night Garage",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/punishing-gray-raven/vera-rozen-night-garage.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "daiyan-elmo-rain-melody",
+      "name": "Daiyan · Elmo Rain Melody",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/girls-frontline-2/daiyan-elmo-rain-melody.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "klukai-safehouse-dawn",
+      "name": "Klukai · Safehouse Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/girls-frontline-2/klukai-safehouse-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "fenny-coronet-training-break",
+      "name": "Fenny Coronet · Training Break",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/snowbreak/fenny-coronet-training-break.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "mauxir-shadow-ka-desert-twilight",
+      "name": "Mauxir Shadow Ka · Desert Twilight",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "scarlet-black-shadow-snow-shrine",
+      "name": "Scarlet: Black Shadow · Snow Shrine",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/nikke/scarlet-black-shadow-snow-shrine.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "modernia-ark-greenhouse",
+      "name": "Modernia · Ark Greenhouse",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/nikke/modernia-ark-greenhouse.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "shiroko-abydos-bike-dawn",
+      "name": "Shiroko · Abydos Bike Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/blue-archive/shiroko-abydos-bike-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "mika-trinity-rain-courtyard",
+      "name": "Mika · Trinity Rain Courtyard",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/blue-archive/mika-trinity-rain-courtyard.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "zoya-syndicate-garage-dawn",
+      "name": "Zoya · Syndicate Garage Dawn",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "cabernet-after-banquet",
+      "name": "Cabernet · After the Banquet",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/path-to-nowhere/cabernet-after-banquet.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "cinematic-calm",
+      "vars": {
+        "--density-spacing": "1rem",
+        "--density-input-height": "2.625rem",
+        "--density-row-padding": "0.625rem",
+        "--density-gap": "0.875rem",
+        "--density-line-height": "1.6"
+      }
+    },
+    {
+      "name": "tactical-compact",
+      "vars": {
+        "--density-spacing": "0.75rem",
+        "--density-input-height": "2.25rem",
+        "--density-row-padding": "0.4375rem",
+        "--density-gap": "0.625rem",
+        "--density-line-height": "1.45"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "kiana-finality-lunar-dawn",
+      "name": "FINALITY // Lunar Dawn",
+      "description": "A quiet violet sunrise beyond the lunar observation deck.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/kiana-finality-lunar-dawn.webp"
+      },
+      "applies": {
+        "themeId": "finality-cosmos",
+        "wallpaperId": "kiana-finality-lunar-dawn",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "mei-origin-hyperion-rain",
+      "name": "ORIGIN // Hyperion Rain",
+      "description": "Rain, tea, and restrained violet light on the garden deck.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/mei-origin-hyperion-rain.webp"
+      },
+      "applies": {
+        "themeId": "finality-cosmos",
+        "wallpaperId": "mei-origin-hyperion-rain",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "elysia-ego-crystal-garden",
+      "name": "EGO // Crystal Garden",
+      "description": "Soft rose crystal light with generous, luminous workspace.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/elysia-ego-crystal-garden.webp"
+      },
+      "applies": {
+        "themeId": "finality-cosmos",
+        "wallpaperId": "elysia-ego-crystal-garden",
+        "density": "cinematic-calm",
+        "radius": 0.875,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "shorekeeper-black-shores-blue-hour",
+      "name": "BLACK SHORES // Blue Hour",
+      "description": "A star-blue coast and a single luminous butterfly.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/shorekeeper-black-shores-blue-hour.webp"
+      },
+      "applies": {
+        "themeId": "resonance-tide",
+        "wallpaperId": "shorekeeper-black-shores-blue-hour",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "camellya-rain-greenhouse",
+      "name": "CAMELLYA // Rain Greenhouse",
+      "description": "Wet glass, quiet foliage, and restrained crimson accents.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/camellya-rain-greenhouse.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/camellya-rain-greenhouse.webp"
+      },
+      "applies": {
+        "themeId": "resonance-tide",
+        "wallpaperId": "camellya-rain-greenhouse",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "jinhsi-jinzhou-dawn",
+      "name": "JINZHOU // Dawn Briefing",
+      "description": "Warm mountain air and pale ceremonial teal at sunrise.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/jinhsi-jinzhou-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/jinhsi-jinzhou-dawn.webp"
+      },
+      "applies": {
+        "themeId": "resonance-tide",
+        "wallpaperId": "jinhsi-jinzhou-dawn",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "lucia-crimson-weave-metro-dawn",
+      "name": "CRIMSON WEAVE // Metro Dawn",
+      "description": "A measured maintenance break in a rain-dark service bay.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/lucia-crimson-weave-metro-dawn.webp"
+      },
+      "applies": {
+        "themeId": "construct-signal",
+        "wallpaperId": "lucia-crimson-weave-metro-dawn",
+        "density": "tactical-compact",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "bianca-stigmata-cathedral-light",
+      "name": "STIGMATA // Cathedral Light",
+      "description": "Graphite surfaces shaped by quiet silver window light.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/bianca-stigmata-cathedral-light.webp"
+      },
+      "applies": {
+        "themeId": "construct-signal",
+        "wallpaperId": "bianca-stigmata-cathedral-light",
+        "density": "tactical-compact",
+        "radius": 0.5,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "selena-capriccio-empty-stage",
+      "name": "CAPRICCIO // Empty Stage",
+      "description": "A dark concert hall balanced by cyan frame light.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/selena-capriccio-empty-stage.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/selena-capriccio-empty-stage.webp"
+      },
+      "applies": {
+        "themeId": "construct-signal",
+        "wallpaperId": "selena-capriccio-empty-stage",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "groza-elmo-briefing",
+      "name": "ELMO // Warm Briefing Bay",
+      "description": "Amber expedition light over disciplined tactical surfaces.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/groza-elmo-briefing.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/groza-elmo-briefing.webp"
+      },
+      "applies": {
+        "themeId": "elmo-expedition",
+        "wallpaperId": "groza-elmo-briefing",
+        "density": "tactical-compact",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "suomi-snow-outpost",
+      "name": "SUOMI // Snow Lantern",
+      "description": "A warm lantern against a blue winter outpost.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/suomi-snow-outpost.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/suomi-snow-outpost.webp"
+      },
+      "applies": {
+        "themeId": "elmo-expedition",
+        "wallpaperId": "suomi-snow-outpost",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "makiatto-rain-overwatch",
+      "name": "MAKIATTO // Rain Overwatch",
+      "description": "A muted rooftop pause with a distant city horizon.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/makiatto-rain-overwatch.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/makiatto-rain-overwatch.webp"
+      },
+      "applies": {
+        "themeId": "elmo-expedition",
+        "wallpaperId": "makiatto-rain-overwatch",
+        "density": "tactical-compact",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "lyfe-infinite-sight-lab-dawn",
+      "name": "INFINITE SIGHT // Lab Dawn",
+      "description": "Crystal-blue calibration light inside a living laboratory.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/lyfe-infinite-sight-lab-dawn.webp"
+      },
+      "applies": {
+        "themeId": "containment-frost",
+        "wallpaperId": "lyfe-infinite-sight-lab-dawn",
+        "density": "tactical-compact",
+        "radius": 0.5,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "chenxing-jade-arc-lantern-rain",
+      "name": "JADE ARC // Lantern Rain",
+      "description": "Warm archive lanterns framed by a rain-blue mountain city.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/chenxing-jade-arc-lantern-rain.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/chenxing-jade-arc-lantern-rain.webp"
+      },
+      "applies": {
+        "themeId": "containment-frost",
+        "wallpaperId": "chenxing-jade-arc-lantern-rain",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "katya-blue-bolt-frost-terminal",
+      "name": "BLUE BOLT // Frost Terminal",
+      "description": "Clean glacial light and a spacious silent terminal.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/katya-blue-bolt-frost-terminal.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/katya-blue-bolt-frost-terminal.webp"
+      },
+      "applies": {
+        "themeId": "containment-frost",
+        "wallpaperId": "katya-blue-bolt-frost-terminal",
+        "density": "tactical-compact",
+        "radius": 0.5,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "rapi-red-hood-ark-hangar",
+      "name": "RED HOOD // Ark Sunrise",
+      "description": "Scarlet equipment light against a warm hangar sunrise.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/rapi-red-hood-ark-hangar.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/rapi-red-hood-ark-hangar.webp"
+      },
+      "applies": {
+        "themeId": "ark-scarlet",
+        "wallpaperId": "rapi-red-hood-ark-hangar",
+        "density": "tactical-compact",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "cinderella-glass-observatory",
+      "name": "CINDERELLA // Glass Observatory",
+      "description": "Moonlit white machinery reflected across silent glass.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/cinderella-glass-observatory.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/cinderella-glass-observatory.webp"
+      },
+      "applies": {
+        "themeId": "ark-scarlet",
+        "wallpaperId": "cinderella-glass-observatory",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "dorothy-eden-rain-garden",
+      "name": "EDEN // After the Rain",
+      "description": "Rose-white garden light and a calm skyline after rain.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/dorothy-eden-rain-garden.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/dorothy-eden-rain-garden.webp"
+      },
+      "applies": {
+        "themeId": "ark-scarlet",
+        "wallpaperId": "dorothy-eden-rain-garden",
+        "density": "cinematic-calm",
+        "radius": 0.875,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "hoshino-abydos-afternoon",
+      "name": "ABYDOS // Sleepy Afternoon",
+      "description": "A warm empty classroom with a gentle pink-cyan balance.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hoshino-abydos-afternoon.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hoshino-abydos-afternoon.webp"
+      },
+      "applies": {
+        "themeId": "academy-blue-hour",
+        "wallpaperId": "hoshino-abydos-afternoon",
+        "density": "cinematic-calm",
+        "radius": 0.875,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "aris-millennium-night",
+      "name": "MILLENNIUM // Night Repair",
+      "description": "Deep blue clubroom light with crisp cyan focus accents.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/aris-millennium-night.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/aris-millennium-night.webp"
+      },
+      "applies": {
+        "themeId": "academy-blue-hour",
+        "wallpaperId": "aris-millennium-night",
+        "density": "tactical-compact",
+        "radius": 0.625,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "hina-gehenna-before-dawn",
+      "name": "GEHENNA // Before Dawn",
+      "description": "A quiet violet office designed for focused late work.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hina-gehenna-before-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/hina-gehenna-before-dawn.webp"
+      },
+      "applies": {
+        "themeId": "academy-blue-hour",
+        "wallpaperId": "hina-gehenna-before-dawn",
+        "density": "tactical-compact",
+        "radius": 0.5,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "shalom-mbcc-rain-corridor",
+      "name": "MBCC // Rain Corridor",
+      "description": "Controlled graphite noir with a restrained wine accent.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/shalom-mbcc-rain-corridor.webp"
+      },
+      "applies": {
+        "themeId": "minos-noir",
+        "wallpaperId": "shalom-mbcc-rain-corridor",
+        "density": "tactical-compact",
+        "radius": 0.25,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "adela-fog-salon",
+      "name": "ADELA // Fog Salon",
+      "description": "Midnight salon mirrors, pale structure, and blue steel.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/adela-fog-salon.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/adela-fog-salon.webp"
+      },
+      "applies": {
+        "themeId": "minos-noir",
+        "wallpaperId": "adela-fog-salon",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "hamel-silent-theater",
+      "name": "HAMEL // Silent Theater",
+      "description": "Violet stage water and a broad meditative workspace.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/hamel-silent-theater.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/hamel-silent-theater.webp"
+      },
+      "applies": {
+        "themeId": "minos-noir",
+        "wallpaperId": "hamel-silent-theater",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "bronya-truth-snow-workshop",
+      "name": "TRUTH // Snow Workshop",
+      "description": "Clean cyan machinery against a broad winter morning.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/bronya-truth-snow-workshop.webp"
+      },
+      "applies": {
+        "themeId": "finality-cosmos",
+        "wallpaperId": "bronya-truth-snow-workshop",
+        "density": "tactical-compact",
+        "radius": 0.5,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "fu-hua-vicissitude-tea-pavilion",
+      "name": "VICISSITUDE // Tea Pavilion",
+      "description": "Warm phoenix dusk and a calm mountain workspace.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/honkai-impact-3rd/fu-hua-vicissitude-tea-pavilion.webp"
+      },
+      "applies": {
+        "themeId": "finality-cosmos",
+        "wallpaperId": "fu-hua-vicissitude-tea-pavilion",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "changli-jinzhou-summer-rain",
+      "name": "CHANGLI // Summer Rain",
+      "description": "A warm strategy room framed by cool Jinzhou rain.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/changli-jinzhou-summer-rain.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/changli-jinzhou-summer-rain.webp"
+      },
+      "applies": {
+        "themeId": "resonance-tide",
+        "wallpaperId": "changli-jinzhou-summer-rain",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "phoebe-basilica-morning",
+      "name": "PHOEBE // Basilica Morning",
+      "description": "Airy gold-blue garden light with generous quiet space.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/phoebe-basilica-morning.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/wuthering-waves/phoebe-basilica-morning.webp"
+      },
+      "applies": {
+        "themeId": "resonance-tide",
+        "wallpaperId": "phoebe-basilica-morning",
+        "density": "cinematic-calm",
+        "radius": 0.875,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "liv-babylonia-healing-garden",
+      "name": "LIV // Healing Garden",
+      "description": "Soft white medical light settling into a living garden.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/liv-babylonia-healing-garden.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/liv-babylonia-healing-garden.webp"
+      },
+      "applies": {
+        "themeId": "construct-signal",
+        "wallpaperId": "liv-babylonia-healing-garden",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "vera-rozen-night-garage",
+      "name": "VERA ROZEN // Night Garage",
+      "description": "Cerberus red task lights over a focused graphite bay.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/vera-rozen-night-garage.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/punishing-gray-raven/vera-rozen-night-garage.webp"
+      },
+      "applies": {
+        "themeId": "construct-signal",
+        "wallpaperId": "vera-rozen-night-garage",
+        "density": "tactical-compact",
+        "radius": 0.25,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "daiyan-elmo-rain-melody",
+      "name": "DAIYAN // Rain Melody",
+      "description": "A quiet cabin melody overlooking a rain-softened route.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/daiyan-elmo-rain-melody.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/daiyan-elmo-rain-melody.webp"
+      },
+      "applies": {
+        "themeId": "elmo-expedition",
+        "wallpaperId": "daiyan-elmo-rain-melody",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "klukai-safehouse-dawn",
+      "name": "KLUKAI // Safehouse Dawn",
+      "description": "Warm blind light and disciplined purple tactical surfaces.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/klukai-safehouse-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/girls-frontline-2/klukai-safehouse-dawn.webp"
+      },
+      "applies": {
+        "themeId": "elmo-expedition",
+        "wallpaperId": "klukai-safehouse-dawn",
+        "density": "tactical-compact",
+        "radius": 0.375,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "fenny-coronet-training-break",
+      "name": "FENNY // Training Break",
+      "description": "A warm empty training hall with bright field accents.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/fenny-coronet-training-break.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/fenny-coronet-training-break.webp"
+      },
+      "applies": {
+        "themeId": "containment-frost",
+        "wallpaperId": "fenny-coronet-training-break",
+        "density": "tactical-compact",
+        "radius": 0.5,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "mauxir-shadow-ka-desert-twilight",
+      "name": "SHADOW KA // Desert Twilight",
+      "description": "Warm desert distance balanced by restrained cyan containment light.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/snowbreak/mauxir-shadow-ka-desert-twilight.webp"
+      },
+      "applies": {
+        "themeId": "containment-frost",
+        "wallpaperId": "mauxir-shadow-ka-desert-twilight",
+        "density": "tactical-compact",
+        "radius": 0.375,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "scarlet-black-shadow-snow-shrine",
+      "name": "BLACK SHADOW // Snow Shrine",
+      "description": "Blue winter silence held beside a low scarlet hearth.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/scarlet-black-shadow-snow-shrine.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/scarlet-black-shadow-snow-shrine.webp"
+      },
+      "applies": {
+        "themeId": "ark-scarlet",
+        "wallpaperId": "scarlet-black-shadow-snow-shrine",
+        "density": "cinematic-calm",
+        "radius": 0.5,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "modernia-ark-greenhouse",
+      "name": "MODERNIA // Ark Greenhouse",
+      "description": "Soft glasshouse daylight across graphite-gold machinery.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/nikke/modernia-ark-greenhouse.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/nikke/modernia-ark-greenhouse.webp"
+      },
+      "applies": {
+        "themeId": "ark-scarlet",
+        "wallpaperId": "modernia-ark-greenhouse",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "shiroko-abydos-bike-dawn",
+      "name": "ABYDOS // Bike Dawn",
+      "description": "Cyan morning air over an open desert-school rooftop.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/shiroko-abydos-bike-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/shiroko-abydos-bike-dawn.webp"
+      },
+      "applies": {
+        "themeId": "academy-blue-hour",
+        "wallpaperId": "shiroko-abydos-bike-dawn",
+        "density": "cinematic-calm",
+        "radius": 0.75,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "mika-trinity-rain-courtyard",
+      "name": "TRINITY // Rain Courtyard",
+      "description": "Pale violet rain and a softly rounded academy workspace.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/blue-archive/mika-trinity-rain-courtyard.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/blue-archive/mika-trinity-rain-courtyard.webp"
+      },
+      "applies": {
+        "themeId": "academy-blue-hour",
+        "wallpaperId": "mika-trinity-rain-courtyard",
+        "density": "cinematic-calm",
+        "radius": 0.875,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "zoya-syndicate-garage-dawn",
+      "name": "SYNDICATE // Garage Dawn",
+      "description": "Hard graphite structure cut by a single warm sunrise.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/zoya-syndicate-garage-dawn.webp"
+      },
+      "applies": {
+        "themeId": "minos-noir",
+        "wallpaperId": "zoya-syndicate-garage-dawn",
+        "density": "tactical-compact",
+        "radius": 0.25,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "cabernet-after-banquet",
+      "name": "CABERNET // After the Banquet",
+      "description": "Wine-red elegance in a quiet New City night kitchen.",
+      "preview": {
+        "light": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/cabernet-after-banquet.webp",
+        "dark": "/plugins/cognia-game-worlds-theme/assets/path-to-nowhere/cabernet-after-banquet.webp"
+      },
+      "applies": {
+        "themeId": "minos-noir",
+        "wallpaperId": "cabernet-after-banquet",
+        "density": "cinematic-calm",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    }
+  ]
+}

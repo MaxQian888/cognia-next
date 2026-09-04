@@ -22,6 +22,11 @@ import workModeManifest from "@/plugins/cognia-work-mode/plugin.json"
 import zhihuContentPipelineManifest from "@/plugins/zhihu-content-pipeline/plugin.json"
 import appearanceDemoManifest from "@/plugins/cognia-appearance-demo/plugin.json"
 import arknightsThemeManifest from "@/plugins/cognia-arknights-theme/plugin.json"
+import azurLaneThemeManifest from "@/plugins/cognia-azur-lane-theme/plugin.json"
+import genshinThemeManifest from "@/plugins/cognia-genshin-theme/plugin.json"
+import gameWorldsThemeManifest from "@/plugins/cognia-game-worlds-theme/plugin.json"
+import honkaiStarRailThemeManifest from "@/plugins/cognia-honkai-star-rail-theme/plugin.json"
+import zenlessZoneZeroThemeManifest from "@/plugins/cognia-zenless-zone-zero-theme/plugin.json"
 import schedulingDemoManifest from "@/plugins/cognia-scheduling-demo/plugin.json"
 import schedulerToolsManifest from "@/plugins/cognia-scheduler-tools/plugin.json"
 import goalInsightsManifest from "@/plugins/cognia-goal-insights/plugin.json"
@@ -63,6 +68,11 @@ import workModeModule from "@/plugins/cognia-work-mode/src/index"
 import zhihuContentPipelineModule from "@/plugins/zhihu-content-pipeline/src/index"
 import appearanceDemoModule from "@/plugins/cognia-appearance-demo/src/index"
 import arknightsThemeModule from "@/plugins/cognia-arknights-theme/src/index"
+import azurLaneThemeModule from "@/plugins/cognia-azur-lane-theme/src/index"
+import genshinThemeModule from "@/plugins/cognia-genshin-theme/src/index"
+import gameWorldsThemeModule from "@/plugins/cognia-game-worlds-theme/src/index"
+import honkaiStarRailThemeModule from "@/plugins/cognia-honkai-star-rail-theme/src/index"
+import zenlessZoneZeroThemeModule from "@/plugins/cognia-zenless-zone-zero-theme/src/index"
 import schedulingDemoModule from "@/plugins/cognia-scheduling-demo/src/index"
 import schedulerToolsModule from "@/plugins/cognia-scheduler-tools/src/index"
 import goalInsightsModule from "@/plugins/cognia-goal-insights/src/index"
@@ -304,6 +314,36 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     path: "builtin://cognia-arknights-theme",
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(arknightsThemeModule),
+  },
+  {
+    manifest: builtinManifest(azurLaneThemeManifest, azurLaneThemeModule),
+    path: "builtin://cognia-azur-lane-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(azurLaneThemeModule),
+  },
+  {
+    manifest: builtinManifest(genshinThemeManifest, genshinThemeModule),
+    path: "builtin://cognia-genshin-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(genshinThemeModule),
+  },
+  {
+    manifest: builtinManifest(gameWorldsThemeManifest, gameWorldsThemeModule),
+    path: "builtin://cognia-game-worlds-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(gameWorldsThemeModule),
+  },
+  {
+    manifest: builtinManifest(honkaiStarRailThemeManifest, honkaiStarRailThemeModule),
+    path: "builtin://cognia-honkai-star-rail-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(honkaiStarRailThemeModule),
+  },
+  {
+    manifest: builtinManifest(zenlessZoneZeroThemeManifest, zenlessZoneZeroThemeModule),
+    path: "builtin://cognia-zenless-zone-zero-theme",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(zenlessZoneZeroThemeModule),
   },
   {
     manifest: builtinManifest(schedulingDemoManifest, schedulingDemoModule),

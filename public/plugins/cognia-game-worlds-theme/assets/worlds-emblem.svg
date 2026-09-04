@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="portal" x1="18" y1="16" x2="111" y2="114" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#79D5FF"/>
+      <stop offset=".48" stop-color="#B79CFF"/>
+      <stop offset="1" stop-color="#FF8995"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="#0B1019"/>
+  <path d="M64 23c22.6 0 41 18.4 41 41s-18.4 41-41 41S23 86.6 23 64 41.4 23 64 23Z" stroke="url(#portal)" stroke-width="7"/>
+  <path d="M36 45c12.2 7.1 43.8 7.1 56 0M36 83c12.2-7.1 43.8-7.1 56 0M64 24c-13.7 11.6-20.5 25-20.5 40S50.3 92.4 64 104M64 24c13.7 11.6 20.5 25 20.5 40S77.7 92.4 64 104" stroke="url(#portal)" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="7" fill="#F4F7FC"/>
+</svg>

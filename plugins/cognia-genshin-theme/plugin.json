@@ -1,0 +1,256 @@
+{
+  "id": "cognia-genshin-theme",
+  "name": "Genshin Impact: Seven Nations (Unofficial)",
+  "version": "1.0.0",
+  "description": "A complete elemental appearance pack with character wallpapers, a full semantic palette, density controls, and one-click presets.",
+  "type": "frontend",
+  "capabilities": ["themes", "theme-pack", "wallpapers", "density-preset"],
+  "main": "src/index.ts",
+  "icon": "/plugins/cognia-genshin-theme/assets/vision-emblem.svg",
+  "screenshots": [
+    "/plugins/cognia-genshin-theme/assets/characters/raiden-shogun-rain-veranda.webp",
+    "/plugins/cognia-genshin-theme/assets/characters/furina-opera-after-rain.webp",
+    "/plugins/cognia-genshin-theme/assets/characters/arlecchino-winter-study.webp",
+    "/plugins/cognia-genshin-theme/assets/characters/nahida-greenhouse-library.webp",
+    "/plugins/cognia-genshin-theme/assets/characters/yae-miko-rain-shrine-study.webp"
+  ],
+  "keywords": ["genshin", "anime", "fantasy", "theme", "wallpaper"],
+  "author": { "name": "cognia-next" },
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "headless": {
+      "availability": "blocked",
+      "reason": "Appearance contributions require an interactive shell."
+    }
+  },
+  "themes": [
+    {
+      "id": "seven-nations-twilight",
+      "name": "Seven Nations · Twilight",
+      "isDark": true,
+      "cssVariables": {
+        "--background": "#12101D",
+        "--foreground": "#F7F3FF",
+        "--card": "#1B182A",
+        "--card-foreground": "#F7F3FF",
+        "--popover": "#211D32",
+        "--popover-foreground": "#F7F3FF",
+        "--muted": "#2B2540",
+        "--muted-foreground": "#C7BDD9",
+        "--border": "#4A4161",
+        "--input": "#362F4C",
+        "--ring": "#C9A4FF",
+        "--primary": "#C9A4FF",
+        "--primary-foreground": "#130B20",
+        "--secondary": "#3B3451",
+        "--secondary-foreground": "#F7F3FF",
+        "--accent": "#7DD9E8",
+        "--accent-foreground": "#061517",
+        "--brand-action": "#7DD9E8",
+        "--brand-approval": "#E4C675",
+        "--brand-wash": "#24213A",
+        "--destructive": "#FF7180",
+        "--destructive-foreground": "#1B0508",
+        "--success": "#7CD8A4",
+        "--success-foreground": "#05150D",
+        "--warning": "#E4C675",
+        "--warning-foreground": "#181204",
+        "--info": "#83C9FF",
+        "--info-foreground": "#06131D",
+        "--sidebar": "#0B0913",
+        "--sidebar-foreground": "#EEE9F8",
+        "--sidebar-primary": "#C9A4FF",
+        "--sidebar-primary-foreground": "#130B20",
+        "--sidebar-accent": "#2B2540",
+        "--sidebar-accent-foreground": "#F7F3FF",
+        "--sidebar-border": "#3C3450",
+        "--sidebar-ring": "#C9A4FF",
+        "--chart-1": "#C9A4FF",
+        "--chart-2": "#7DD9E8",
+        "--chart-3": "#E4C675",
+        "--chart-4": "#7CD8A4",
+        "--chart-5": "#FF7180",
+        "--wf-trigger": "#7CD8A4",
+        "--wf-action": "#83C9FF",
+        "--wf-ai": "#C9A4FF",
+        "--wf-flow": "#E4C675",
+        "--wf-data": "#FF8294",
+        "--wf-io": "#7DD9E8",
+        "--wf-annotation": "#A79DBB",
+        "--wf-status-idle": "#A79DBB",
+        "--wf-status-running": "#E4C675",
+        "--wf-status-succeeded": "#7CD8A4",
+        "--wf-status-failed": "#FF7180",
+        "--wf-status-skipped": "#746B86",
+        "--wf-status-waiting": "#83C9FF",
+        "--effort-ultra": "#C9A4FF",
+        "--effort-ultra-muted": "#453360"
+      }
+    }
+  ],
+  "wallpapers": [
+    {
+      "id": "raiden-shogun-rain-veranda",
+      "name": "Raiden Shogun · Rain Veranda",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/raiden-shogun-rain-veranda.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "furina-opera-after-rain",
+      "name": "Furina · Opera After Rain",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/furina-opera-after-rain.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "arlecchino-winter-study",
+      "name": "Arlecchino · Winter Study",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/arlecchino-winter-study.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "nahida-greenhouse-library",
+      "name": "Nahida · Greenhouse Library",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/nahida-greenhouse-library.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "yae-miko-rain-shrine-study",
+      "name": "Yae Miko · Rain Shrine Study",
+      "source": {
+        "kind": "image",
+        "relPath": "assets/characters/yae-miko-rain-shrine-study.webp",
+        "mime": "image/webp",
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "id": "elemental-night",
+      "name": "Elemental Night",
+      "source": {
+        "kind": "gradient",
+        "css": "radial-gradient(circle at 76% 18%, rgba(201,164,255,.22), transparent 28%), radial-gradient(circle at 18% 78%, rgba(125,217,232,.14), transparent 24%), linear-gradient(150deg, #0B0913 0%, #1D1830 58%, #30254B 100%)"
+      }
+    }
+  ],
+  "densityPresets": [
+    {
+      "name": "adventurer-journal",
+      "vars": {
+        "--density-spacing": "0.9375rem",
+        "--density-input-height": "2.5rem",
+        "--density-row-padding": "0.5625rem",
+        "--density-gap": "0.8125rem",
+        "--density-line-height": "1.55"
+      }
+    }
+  ],
+  "themePacks": [
+    {
+      "id": "raiden-rain",
+      "name": "INAZUMA // Quiet Thunder",
+      "description": "Rain-softened violet surfaces with a calm shrine veranda and measured motion.",
+      "preview": {
+        "light": "/plugins/cognia-genshin-theme/assets/characters/raiden-shogun-rain-veranda.webp",
+        "dark": "/plugins/cognia-genshin-theme/assets/characters/raiden-shogun-rain-veranda.webp"
+      },
+      "applies": {
+        "themeId": "seven-nations-twilight",
+        "wallpaperId": "raiden-shogun-rain-veranda",
+        "density": "adventurer-journal",
+        "radius": 0.5,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "furina-opera",
+      "name": "FONTAINE // After the Curtain",
+      "description": "Hydro-blue theatre light, generous reading space, and an elegant rounded interface.",
+      "preview": {
+        "light": "/plugins/cognia-genshin-theme/assets/characters/furina-opera-after-rain.webp",
+        "dark": "/plugins/cognia-genshin-theme/assets/characters/furina-opera-after-rain.webp"
+      },
+      "applies": {
+        "themeId": "seven-nations-twilight",
+        "wallpaperId": "furina-opera-after-rain",
+        "density": "adventurer-journal",
+        "radius": 0.75,
+        "motionSpeed": 0.75
+      }
+    },
+    {
+      "id": "arlecchino-study",
+      "name": "HEARTH // Winter Correspondence",
+      "description": "A restrained charcoal-and-crimson study profile with low motion and quiet density.",
+      "preview": {
+        "light": "/plugins/cognia-genshin-theme/assets/characters/arlecchino-winter-study.webp",
+        "dark": "/plugins/cognia-genshin-theme/assets/characters/arlecchino-winter-study.webp"
+      },
+      "applies": {
+        "themeId": "seven-nations-twilight",
+        "wallpaperId": "arlecchino-winter-study",
+        "density": "adventurer-journal",
+        "radius": 0.25,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "nahida-greenhouse",
+      "name": "SUMERU // Greenhouse Morning",
+      "description": "Leaf-green morning light and a gentle spacious study profile.",
+      "preview": {
+        "light": "/plugins/cognia-genshin-theme/assets/characters/nahida-greenhouse-library.webp",
+        "dark": "/plugins/cognia-genshin-theme/assets/characters/nahida-greenhouse-library.webp"
+      },
+      "applies": {
+        "themeId": "seven-nations-twilight",
+        "wallpaperId": "nahida-greenhouse-library",
+        "density": "adventurer-journal",
+        "radius": 0.875,
+        "motionSpeed": 0.5
+      }
+    },
+    {
+      "id": "yae-shrine-study",
+      "name": "NARUKAMI // Rain Study",
+      "description": "Warm manuscript light framed by a quiet violet shrine rain.",
+      "preview": {
+        "light": "/plugins/cognia-genshin-theme/assets/characters/yae-miko-rain-shrine-study.webp",
+        "dark": "/plugins/cognia-genshin-theme/assets/characters/yae-miko-rain-shrine-study.webp"
+      },
+      "applies": {
+        "themeId": "seven-nations-twilight",
+        "wallpaperId": "yae-miko-rain-shrine-study",
+        "density": "adventurer-journal",
+        "radius": 0.625,
+        "motionSpeed": 0.5
+      }
+    }
+  ]
+}
