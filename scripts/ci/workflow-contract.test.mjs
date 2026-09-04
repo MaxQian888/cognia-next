@@ -15,7 +15,11 @@ test("CI workflows provision their clean-checkout prerequisites", async () => {
   assert.match(quality, /sudo apt-get install -y[\s\S]*ripgrep/)
   assert.match(quality, /matrix\.group == 'artifacts'[\s\S]*pnpm plugin-node:prepare/)
   assert.match(report, /pnpm\/action-setup@[\w.-]+[\s\S]*pnpm install --frozen-lockfile/)
-  assert.match(testWorkflow, /NODE_OPTIONS: "--max-old-space-size=16384"/)
+  // 3 GB, not 16. NODE_OPTIONS is per process and the shard runs
+  // `--maxWorkers=4`, so a 16 GB ceiling let four workers outgrow a 16 GB
+  // runner before V8 collected and the OOM killer took one. Pinned here so
+  // raising it back has to be a deliberate edit in two places.
+  assert.match(testWorkflow, /NODE_OPTIONS: "--max-old-space-size=3072"/)
   assert.match(testWorkflow, /--maxWorkers=4/)
   assert.match(testWorkflow, /sidecars:build[\s\S]*sidecars:test/)
   assert.match(testWorkflow, /libpipewire-0\.3-dev/)
@@ -36,7 +40,10 @@ test("CI exposes stable and complete verification seams", async () => {
   assert.match(testWorkflow, /docs-build:[\s\S]*pnpm docs:build/)
   assert.match(testWorkflow, /web-build:[\s\S]*pnpm web:build/)
   assert.match(testWorkflow, /mobile-android-build:[\s\S]*assembleDebug/)
-  assert.doesNotMatch(nightly, /build-tauri:[\s\S]*needs: test/)
+  // The nightly Tauri matrix is the most expensive job in the repo and is
+  // gated on `test` for that reason. Asserted, not forbidden: a bundle built
+  // from a red tree proves nothing.
+  assert.match(nightly, /build-tauri:[\s\S]*needs: test/)
 })
 
 test("formatting and lint exclude generated test and extension artifacts", async () => {
