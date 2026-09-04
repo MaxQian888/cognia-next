@@ -5,6 +5,10 @@
  * Covers the capability no-op gate, permission gating (pet:read /
  * pet:interact), the PII-safe summary projection, the emittable-kind
  * whitelist + per-call/daily clamps, event sanitization, and rate limits.
+ *
+ * `interact` and `emitEvent` spend ONE daily budget: the cases below pin that
+ * a nurture debits the ledger, and that a drained budget makes it a no-op
+ * REWARD (needs still settle) rather than a no-op interaction or an error.
  */
 
 import {
@@ -13,7 +17,15 @@ import {
   PetEventKindNotAllowedError,
   PLUGIN_EMITTABLE_PET_EVENT_KINDS,
 } from "./pet-api"
-import { __resetPetBudgetForTesting, PET_DAILY_XP_BUDGET } from "./pet-budget"
+import {
+  __resetPetBudgetForTesting,
+  consumePetBudget,
+  PET_DAILY_COIN_BUDGET,
+  PET_DAILY_XP_BUDGET,
+} from "./pet-budget"
+import { applyPetEvent } from "@/lib/pet/runtime/apply-event"
+import { COIN_AWARD } from "@/lib/pet/economy/coin-table"
+import { XP_AWARD } from "@/lib/pet/xp/award-table"
 import { getPermissionGuard, resetPermissionGuard } from "@/lib/plugin/security"
 import { PermissionError } from "@/lib/plugin/security/permission-guard"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
@@ -136,20 +148,87 @@ describe("getView / getSummary", () => {
 })
 
 describe("interact", () => {
-  it("emits a plugin-sourced interaction with the plugin id", async () => {
+  it("emits a plugin-sourced interaction with the plugin id and explicit rewards", async () => {
     const api = grantedApi()
     await api.interact("played")
     expect(emitPetEvent).toHaveBeenCalledWith({
       source: "plugin",
       kind: "played",
-      meta: { pluginId: PLUGIN },
+      xp: XP_AWARD.played,
+      meta: { pluginId: PLUGIN, coins: COIN_AWARD.played },
     })
     await api.interact("fed", { itemId: "berry" })
     expect(emitPetEvent).toHaveBeenCalledWith({
       source: "plugin",
       kind: "fed",
-      meta: { pluginId: PLUGIN, itemId: "berry" },
+      xp: XP_AWARD.fed,
+      meta: { pluginId: PLUGIN, itemId: "berry", coins: COIN_AWARD.fed },
     })
+  })
+
+  it("spends the same daily ledger as emitEvent", async () => {
+    const api = grantedApi()
+    expect(api.getRemainingBudget()).toEqual({
+      xp: PET_DAILY_XP_BUDGET,
+      coins: PET_DAILY_COIN_BUDGET,
+    })
+    const granted = await api.interact("played")
+    expect(granted).toEqual({ grantedXp: XP_AWARD.played, grantedCoins: COIN_AWARD.played })
+    // The regression pin: this used to stay at a full 50/100 forever, because
+    // interact never called consumePetBudget and fell through to the tables.
+    expect(api.getRemainingBudget()).toEqual({
+      xp: PET_DAILY_XP_BUDGET - XP_AWARD.played!,
+      coins: PET_DAILY_COIN_BUDGET - COIN_AWARD.played!,
+    })
+    // An emitEvent reward draws down the very same remainder.
+    await api.emitEvent("workflowRun", { xp: 5, coins: 5 })
+    expect(api.getRemainingBudget()).toEqual({
+      xp: PET_DAILY_XP_BUDGET - XP_AWARD.played! - 5,
+      coins: PET_DAILY_COIN_BUDGET - COIN_AWARD.played! - 5,
+    })
+  })
+
+  it("grants nothing once the daily budget is drained, without throwing", async () => {
+    const api = grantedApi()
+    // Drain the ledger directly: the pet:interact bucket caps at 10 calls, so
+    // draining 50 XP through interact() would hit the rate limit first and
+    // test the wrong thing.
+    consumePetBudget(PLUGIN, { xp: PET_DAILY_XP_BUDGET, coins: PET_DAILY_COIN_BUDGET })
+    expect(api.getRemainingBudget()).toEqual({ xp: 0, coins: 0 })
+
+    await expect(api.interact("played")).resolves.toEqual({ grantedXp: 0, grantedCoins: 0 })
+    // Still emitted — with explicit 0s, so it cannot fall through to the
+    // host award tables (played would otherwise be worth 4 XP / 3 coins).
+    expect(emitPetEvent).toHaveBeenCalledWith({
+      source: "plugin",
+      kind: "played",
+      xp: 0,
+      meta: { pluginId: PLUGIN, coins: 0 },
+    })
+  })
+
+  it("still settles needs at zero budget (a no-op reward, not a no-op nurture)", async () => {
+    const api = grantedApi()
+    consumePetBudget(PLUGIN, { xp: PET_DAILY_XP_BUDGET, coins: PET_DAILY_COIN_BUDGET })
+    await api.interact("fed")
+    const emitted = emitPetEvent.mock.calls.at(-1)![0] as Omit<PetEvent, "at">
+
+    // Run the event the drained API actually produced through the REAL
+    // progression step. `lastTickAt === now` so decay contributes nothing and
+    // the only movement is the `fed` restore (energy +25, mood +4).
+    const now = Date.UTC(2026, 0, 2, 12, 0, 0)
+    const profile = makeProfile({
+      needs: { energy: 50, mood: 40, bond: 10, lastTickAt: new Date(now).toISOString() },
+    })
+    const result = applyPetEvent(profile, { ...emitted, at: now }, now)
+
+    expect(result.profile.needs.energy).toBe(75)
+    expect(result.profile.needs.mood).toBe(44)
+    // ...and the reward really is zero: no XP, no coins, no level-up dividend.
+    expect(result.profile.xp).toBe(profile.xp)
+    expect(result.coinsEarned).toBe(0)
+    expect(result.profile.coins).toBe(profile.coins)
+    expect(result.oneShots).toContain("fed")
   })
 
   it("rejects non-interaction kinds", async () => {

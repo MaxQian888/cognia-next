@@ -7,10 +7,17 @@
 //      `pet:interact` (fail-closed `createGuardedAPI` proxy).
 //
 // Anti-abuse (the API is open to third-party plugins):
-//   - token-bucket rate limits per plugin ("pet:interact" / "pet:emit")
-//   - a daily XP/coin budget per plugin (lib/plugin/api/pet-budget.ts) —
-//     rewards are CLAMPED to the remainder, and the granted amounts ride the
-//     event as explicit overrides so the award tables can't be farmed
+//   - token-bucket rate limits per plugin ("pet:interact" / "pet:emit") — the
+//     bucket answers "how fast", the budget below answers "how much"
+//   - ONE daily XP/coin budget per plugin (lib/plugin/api/pet-budget.ts) that
+//     BOTH reward paths spend from: `emitEvent` clamps the amount the plugin
+//     asked for, `interact` clamps the kind's host award-table amount. Either
+//     way the granted amounts ride the event as explicit overrides (even 0),
+//     so neither path can fall through to the host award tables.
+//     At zero remaining budget an interaction is a no-op REWARD, not a no-op
+//     interaction: `applyPetEvent` derives need settlement and the flourish
+//     from `kind` alone, so feeding still restores energy/mood — it just
+//     grants nothing, and never throws.
 //   - an emittable-kind whitelist: nurture/neutral kinds only, lifecycle
 //     kinds (hatched/levelUp/evolved/achievementUnlocked/unwell) throw
 //
@@ -30,6 +37,8 @@ import type {
 } from "@/types/pet"
 import { getPetProfile } from "@/lib/db/pet"
 import { computePetView } from "@/lib/pet/runtime/pet-view"
+import { XP_AWARD } from "@/lib/pet/xp/award-table"
+import { COIN_AWARD } from "@/lib/pet/economy/coin-table"
 import { emitPetEvent, getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
@@ -112,8 +121,16 @@ export interface PluginPetAPI {
   onEvent(cb: (event: PluginPetEvent) => void): () => void
   /** Remaining daily reward budget for THIS plugin (for quest UIs). */
   getRemainingBudget(): { xp: number; coins: number }
-  /** Emit a direct nurture interaction (rate-limited). */
-  interact(kind: PluginPetInteractionKind, opts?: { itemId?: string }): Promise<void>
+  /**
+   * Emit a direct nurture interaction (rate-limited). The kind's host award
+   * amounts are spent from the SAME daily budget as `emitEvent`. At zero
+   * remaining budget the interaction still settles needs/mood and plays its
+   * flourish, it just grants nothing. Returns what was actually granted.
+   */
+  interact(
+    kind: PluginPetInteractionKind,
+    opts?: { itemId?: string }
+  ): Promise<{ grantedXp: number; grantedCoins: number }>
   /**
    * Emit a whitelisted event with an optional XP/coin reward, clamped per
    * call and against the daily budget. Returns what was actually granted.
@@ -200,11 +217,27 @@ export function createPetAPI({ pluginId, capabilities }: CreatePetAPIArgs): Plug
     interact: async (kind, opts) => {
       if (!INTERACTION_KINDS.has(kind)) throw new PetEventKindNotAllowedError(kind)
       getPluginRateLimiter().check(pluginId, "pet:interact")
+      // A nurture is worth whatever the host award tables say the kind is
+      // worth — spent from the daily ledger rather than granted for free.
+      const { grantedXp, grantedCoins } = consumePetBudget(pluginId, {
+        xp: XP_AWARD[kind] ?? 0,
+        coins: COIN_AWARD[kind] ?? 0,
+      })
+      // Same invariant as emitEvent: the granted amounts ALWAYS ride the event
+      // (even 0) so a drained budget can't fall through to the award tables.
+      // The event is still emitted at 0 — applyPetEvent settles needs and picks
+      // the flourish from `kind` alone, so a nurture stays a nurture.
       emitPetEvent({
         source: "plugin",
         kind,
-        meta: { pluginId, ...(opts?.itemId ? { itemId: opts.itemId } : {}) },
+        xp: grantedXp,
+        meta: {
+          pluginId,
+          ...(opts?.itemId ? { itemId: opts.itemId } : {}),
+          coins: grantedCoins,
+        },
       })
+      return { grantedXp, grantedCoins }
     },
     emitEvent: async (kind, opts) => {
       if (!PLUGIN_EMITTABLE_PET_EVENT_KINDS.includes(kind)) {
@@ -259,6 +292,7 @@ function noopPetAPI(pluginId: string): PluginPetAPI {
     },
     interact: async () => {
       warnOnce()
+      return { grantedXp: 0, grantedCoins: 0 }
     },
     emitEvent: async () => {
       warnOnce()
