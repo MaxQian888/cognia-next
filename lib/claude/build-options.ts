@@ -4278,20 +4278,24 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     ...skillDelivery.explicit,
     ...skillDelivery.requestScoped,
   ]
-  const deliveredBuiltInRows = deliveredBuiltIns.map((resolved) =>
-    builtInDescriptorSkill(
-      resolved,
-      persistedByBundle.get(resolved.bundleId)?.status ??
-        (resolved.entry.defaultEnabled ? "enabled" : "disabled")
+  // Each row awaits its own body chunk. Only delivered skills are in these
+  // lists, so a turn that delivers nothing loads no prose at all.
+  const deliveredBuiltInRows = await Promise.all(
+    deliveredBuiltIns.map((resolved) =>
+      builtInDescriptorSkill(
+        resolved,
+        persistedByBundle.get(resolved.bundleId)?.status ??
+          (resolved.entry.defaultEnabled ? "enabled" : "disabled")
+      )
     )
   )
-  const fullBuiltInRows = [
-    ...skillDelivery.injected,
-    ...skillDelivery.explicit,
-    ...skillDelivery.requestScoped,
-  ].map((resolved) => builtInDescriptorSkill(resolved, "enabled"))
-  const contextualCatalogRows = skillDelivery.catalog.map((resolved) =>
-    builtInDescriptorSkill(resolved, "enabled")
+  const fullBuiltInRows = await Promise.all(
+    [...skillDelivery.injected, ...skillDelivery.explicit, ...skillDelivery.requestScoped].map(
+      (resolved) => builtInDescriptorSkill(resolved, "enabled")
+    )
+  )
+  const contextualCatalogRows = await Promise.all(
+    skillDelivery.catalog.map((resolved) => builtInDescriptorSkill(resolved, "enabled"))
   )
   const builtInBodySection = fullBuiltInRows
     .map((skill) => `## ${skill.name}\n\n${skill.content.trim()}`)

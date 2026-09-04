@@ -3,6 +3,7 @@ import type { Skill, SkillCategory, SkillStatus } from "@cognia/agent-config-typ
 import {
   BUILT_IN_SKILL_CATALOG,
   builtinSkillId,
+  loadBuiltInSkillContent,
   resolveBuiltinSkillIdentity,
   type BuiltInSkillCapabilityId,
   type BuiltInSkillCapabilityRequirement,
@@ -104,18 +105,25 @@ export interface ResolvedSkillDelivery {
   resourceSkillIds: string[]
 }
 
-/** Project generated descriptor content into the legacy Skill row shape. */
-export function builtInDescriptorSkill(
+/**
+ * Project generated descriptor content into the legacy Skill row shape.
+ *
+ * Async because the body is no longer in the catalog: it is a per-skill chunk
+ * this awaits. Only skills that are actually delivered reach here, which is the
+ * point of the split.
+ */
+export async function builtInDescriptorSkill(
   resolved: ResolvedBuiltInSkill,
   status: SkillStatus = resolved.entry.defaultEnabled ? "enabled" : "disabled"
-): Skill {
+): Promise<Skill> {
+  const content = await loadBuiltInSkillContent(resolved.bundleId)
   return {
     id: resolved.storageId,
     slug: resolved.bundleId,
     canonicalId: resolved.canonicalId,
     name: resolved.entry.name,
     description: resolved.entry.description,
-    content: resolved.entry.content,
+    content,
     allowedTools: resolved.entry.allowedTools,
     tags: resolved.entry.tags,
     category: resolved.entry.category as SkillCategory | undefined,

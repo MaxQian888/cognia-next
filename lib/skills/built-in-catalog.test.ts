@@ -4,6 +4,7 @@ import {
   builtinSkillId,
   canonicalBuiltinSkillId,
   getCatalogSkill,
+  loadBuiltInSkillContent,
   resolveBuiltinSkillIdentity,
   BUILTIN_SKILL_ID_PREFIX,
 } from "./built-in-catalog"
@@ -31,41 +32,43 @@ describe("built-in skills catalog", () => {
     ])
   })
 
-  it("teaches the chart artifact contract the renderer actually enforces", () => {
+  it("teaches the chart artifact contract the renderer actually enforces", async () => {
     const entry = getCatalogSkill("chart-design")!
+    const body = await loadBuiltInSkillContent(entry.id)
     expect(entry.category).toBe("data-analysis")
     expect(entry.surface).toEqual([])
     // Each of these is a real constraint in the pipeline, not style advice:
     // the artifact tool, the series list read from `data[0]` only, the
     // detector's line-count floor, and the palette the renderer owns.
-    expect(entry.content).toContain("`artifact_create`")
-    expect(entry.content).toContain("first row only")
-    expect(entry.content).toContain("at least three lines")
-    expect(entry.content).toContain("Do not specify colours")
+    expect(body).toContain("`artifact_create`")
+    expect(body).toContain("first row only")
+    expect(body).toContain("at least three lines")
+    expect(body).toContain("Do not specify colours")
     // The prohibition survives, now scoped to the branch where it is true.
     // It used to be blanket, which contradicted the host: in `fenced` mode the
     // routing prompt ASKS for a fenced payload, and that is a desktop session
     // with a live dock, not the IM case this sentence is about.
-    expect(entry.content).toContain("do not try to bypass")
-    expect(entry.content).toContain("It offers no artifact route at all")
-    expect(entry.content).toContain("fenced block tagged `json`")
-    expect(entry.content).toContain("Always name the `type`")
+    expect(body).toContain("do not try to bypass")
+    expect(body).toContain("It offers no artifact route at all")
+    expect(body).toContain("fenced block tagged `json`")
+    expect(body).toContain("Always name the `type`")
     // Scatter is the one shape with a different row contract.
-    expect(entry.content).toMatch(/`x` and\s+`y`\*\* as numbers/)
+    expect(body).toMatch(/`x` and\s+`y`\*\* as numbers/)
   })
 
-  it("teaches both structural routes, not only the HTML one", () => {
+  it("teaches both structural routes, not only the HTML one", async () => {
     const entry = getCatalogSkill("diagram-design")!
+    const body = await loadBuiltInSkillContent(entry.id)
     // The mermaid surface had no contract anywhere in the repo, yet it is the
     // default for structural content and the only one that survives an IM
     // thread, where this skill is not even delivered.
-    expect(entry.content).toContain("Quote every label")
-    expect(entry.content).toContain("%%{init}%%")
-    expect(entry.content).toContain("8,000")
+    expect(body).toContain("Quote every label")
+    expect(body).toContain("%%{init}%%")
+    expect(body).toContain("8,000")
     // `-beta` is load-bearing: those grammars do not parse without it.
-    expect(entry.content).toContain("radar-beta")
+    expect(body).toContain("radar-beta")
     // The HTML route stays the deliverable route, and still names its tool.
-    expect(entry.content).toContain('artifact_create` with `type: "html"')
+    expect(body).toContain('artifact_create` with `type: "html"')
   })
 
   it("publishes an orthogonal delivery and activation contract for every skill", () => {
@@ -184,44 +187,46 @@ describe("built-in skills catalog", () => {
     ).toBe("compliance")
   })
 
-  it("pins request scope, proposal-first workflow editing, and exact visual tools in content", () => {
-    expect(getCatalogSkill("cognia-onboarding")!.content).toContain(
-      "at most one\nmissing-input reply"
+  it("pins request scope, proposal-first workflow editing, and exact visual tools in content", async () => {
+    const [onboarding, workflow, chart, diagram] = await Promise.all(
+      ["cognia-onboarding", "workflow-authoring", "chart-design", "diagram-design"].map(
+        loadBuiltInSkillContent
+      )
     )
-    expect(getCatalogSkill("workflow-authoring")!.content).toContain("`wf_propose_batch`")
-    expect(getCatalogSkill("workflow-authoring")!.content).toContain(
-      "Do not call legacy direct-mutation tools"
-    )
-    expect(getCatalogSkill("chart-design")!.content).toContain("artifact_create")
-    expect(getCatalogSkill("diagram-design")!.content).toContain(
-      'artifact_create` with `type: "html"'
-    )
+    expect(onboarding).toContain("at most one\nmissing-input reply")
+    expect(workflow).toContain("`wf_propose_batch`")
+    expect(workflow).toContain("Do not call legacy direct-mutation tools")
+    expect(chart).toContain("artifact_create")
+    expect(diagram).toContain('artifact_create` with `type: "html"')
   })
 
-  it("registers plugin authoring as an opt-in skill with its required tools", () => {
+  it("registers plugin authoring as an opt-in skill with its required tools", async () => {
     const entry = getCatalogSkill("plugin-authoring")!
+    const body = await loadBuiltInSkillContent(entry.id)
     expect(entry.allowedTools).toEqual(["Read", "Glob", "Grep", "Write", "Edit", "Bash"])
     expect(entry.surface).toEqual([])
-    expect(entry.content).toContain("cognia plugin contract")
-    expect(entry.content).toContain("--point <id>")
-    expect(entry.content).toContain("--point-kind <kind>")
-    expect(entry.content).toContain("--permission <permission>")
-    expect(entry.content).toContain("formFactor")
-    expect(entry.content).toContain("deprecated")
-    expect(entry.content).toContain("plugin-owned i18n")
-    expect(entry.content).toContain("shared React")
-    expect(entry.content).toContain("vscode-extension")
-    expect(entry.content).toContain("wasm")
-    expect(entry.content).toContain("support=experimental")
-    expect(entry.content).toContain("cognia plugin sync-types")
-    expect(entry.content).toContain("scaffolded public `cognia` module")
-    expect(entry.content).toContain("only when the user explicitly requests")
+    expect(body).toContain("cognia plugin contract")
+    expect(body).toContain("--point <id>")
+    expect(body).toContain("--point-kind <kind>")
+    expect(body).toContain("--permission <permission>")
+    expect(body).toContain("formFactor")
+    expect(body).toContain("deprecated")
+    expect(body).toContain("plugin-owned i18n")
+    expect(body).toContain("shared React")
+    expect(body).toContain("vscode-extension")
+    expect(body).toContain("wasm")
+    expect(body).toContain("support=experimental")
+    expect(body).toContain("cognia plugin sync-types")
+    expect(body).toContain("scaffolded public `cognia` module")
+    expect(body).toContain("only when the user explicitly requests")
   })
 
-  it("every entry has a name, non-empty body, and a surface array", () => {
+  it("every entry has a name, non-empty body, and a surface array", async () => {
     for (const e of BUILT_IN_SKILL_CATALOG) {
       expect(e.name.trim().length).toBeGreaterThan(0)
-      expect(e.content.trim().length).toBeGreaterThan(0)
+      // Loaded, not read off the entry: the loader is the only route to a body
+      // now, so this also pins that every id in the catalog has a chunk.
+      expect((await loadBuiltInSkillContent(e.id)).trim().length).toBeGreaterThan(0)
       expect(Array.isArray(e.surface)).toBe(true)
     }
   })

@@ -1,4 +1,8 @@
-import { BUILTIN_SKILL_ID_PREFIX, BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
+import {
+  BUILTIN_SKILL_ID_PREFIX,
+  BUILT_IN_SKILL_CATALOG,
+  loadBuiltInSkillContent,
+} from "@/lib/skills/built-in-catalog"
 import { ONBOARDING_SKILL_BUNDLE_ID, onboardingSkillEntry, onboardingSkillRowId } from "./skill"
 import { STARTER_CARDS } from "./starter-cards"
 
@@ -41,22 +45,24 @@ describe("identity cannot be claimed by anything else", () => {
 })
 
 describe("the skill and the cards move together", () => {
-  it("names every starter card's intent in its instructions", () => {
+  it("names every starter card's intent in its instructions", async () => {
     // The skill matches on these three prompts. If a card is added or renamed
     // without updating the script, the first run silently loses its shape.
-    const content = onboardingSkillEntry().content
+    const content = await loadBuiltInSkillContent(onboardingSkillEntry().id)
     expect(STARTER_CARDS).toHaveLength(3)
     expect(content).toMatch(/Read a folder/i)
     expect(content).toMatch(/Extract text from a screenshot/i)
     expect(content).toMatch(/Summarize a web page/i)
   })
 
-  it("forbids the speculative objects a first run cannot justify", () => {
-    const content = onboardingSkillEntry().content
+  it("forbids the speculative objects a first run cannot justify", async () => {
+    const content = await loadBuiltInSkillContent(onboardingSkillEntry().id)
     expect(content).toMatch(/Create nothing else/i)
   })
 
-  it("forbids re-greeting — the user already asked by picking a card", () => {
-    expect(onboardingSkillEntry().content).toMatch(/not being introduced/i)
+  it("forbids re-greeting — the user already asked by picking a card", async () => {
+    expect(await loadBuiltInSkillContent(onboardingSkillEntry().id)).toMatch(
+      /not being introduced/i
+    )
   })
 })

@@ -1,5 +1,9 @@
 import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
-import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
+import {
+  BUILT_IN_SKILL_CATALOG,
+  builtinSkillId,
+  loadBuiltInSkillContent,
+} from "@/lib/skills/built-in-catalog"
 import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
@@ -758,18 +762,23 @@ export async function seedBuiltInSkills(): Promise<void> {
     // enabled by default. Enabled skills still contribute only their compact
     // discovery summary until the model calls load_skill; the full body is not
     // added to every plain chat. The read-merge below preserves user overrides.
-    ...BUILT_IN_SKILL_CATALOG.map((entry): Skill => ({
-      ...baseDefaults,
-      status: (entry.defaultEnabled ? "enabled" : "disabled") as SkillStatus,
-      id: builtinSkillId(entry),
-      name: entry.name,
-      description: entry.description,
-      content: entry.content,
-      tags: entry.tags,
-      category: entry.category as SkillCategory | undefined,
-      allowedTools: entry.allowedTools,
-      canonicalId: `builtin:${entry.id}`,
-    })),
+    // Seeding is the one place that genuinely needs every body at once, and it
+    // runs once per database. The bodies are per-skill chunks now, so this is
+    // where they are pulled in rather than at import.
+    ...(await Promise.all(
+      BUILT_IN_SKILL_CATALOG.map(async (entry): Promise<Skill> => ({
+        ...baseDefaults,
+        status: (entry.defaultEnabled ? "enabled" : "disabled") as SkillStatus,
+        id: builtinSkillId(entry),
+        name: entry.name,
+        description: entry.description,
+        content: await loadBuiltInSkillContent(entry.id),
+        tags: entry.tags,
+        category: entry.category as SkillCategory | undefined,
+        allowedTools: entry.allowedTools,
+        canonicalId: `builtin:${entry.id}`,
+      }))
+    )),
   ]
   const usedBuiltInSlugs = new Set<string>()
   // Use `put` so newly-added defaults are applied to existing rows, but

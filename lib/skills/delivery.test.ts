@@ -131,12 +131,12 @@ describe("resolveSkillDelivery", () => {
     }
   })
 
-  it("projects a generated descriptor into the legacy scoped-loader shape", () => {
+  it("projects a generated descriptor into the legacy scoped-loader shape", async () => {
     const result = resolveSkillDelivery({
       surfaces: ["computer-use"],
       capabilities: { computerUse: { available: true } },
     })
-    expect(builtInDescriptorSkill(result.injected[0]!)).toEqual(
+    await expect(builtInDescriptorSkill(result.injected[0]!)).resolves.toEqual(
       expect.objectContaining({
         id: "skill_builtin_computer_use_safety",
         slug: "computer-use-safety",

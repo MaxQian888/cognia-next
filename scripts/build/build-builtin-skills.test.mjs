@@ -10,6 +10,8 @@ import { transformSync } from "esbuild"
 import {
   parseSkillFile,
   buildCatalog,
+  renderBodyLoaderModule,
+  renderBodyModule,
   renderCatalogModule,
   renderResourceLoaderModule,
   renderResourceModule,
@@ -165,12 +167,31 @@ test("renderCatalogModule is deterministic and idempotent", () => {
   assert.match(a, /defaultEnabled: true/)
 })
 
-test("metadata/body index stays inside the startup performance budget", () => {
+test("the metadata index stays inside the startup performance budget", () => {
   const source = renderCatalogModule(buildCatalog())
   const minified = transformSync(source, { loader: "ts", minify: true, format: "esm" }).code
-  assert.ok(Buffer.byteLength(minified) < 64 * 1024)
-  assert.ok(gzipSync(minified).byteLength < 20 * 1024)
+  // Bodies and resource payloads are per-skill chunks, so this module is facts
+  // only and each new skill costs roughly a kilobyte. The ceiling is tight for
+  // that reason: it is meant to catch a payload creeping back in, which is what
+  // the two shape assertions below name outright.
+  assert.ok(Buffer.byteLength(minified) < 24 * 1024, `minified ${Buffer.byteLength(minified)}`)
+  assert.ok(gzipSync(minified).byteLength < 8 * 1024, `gzip ${gzipSync(minified).byteLength}`)
   assert.doesNotMatch(source, /resources: \[/)
+  // `content: string` still appears, on the resource TYPE. A payload is a
+  // string literal, which is what this rejects.
+  assert.doesNotMatch(source, /content: "/)
+})
+
+test("every skill's body is reachable through its own chunk", () => {
+  const entries = buildCatalog()
+  const loader = renderBodyLoaderModule(entries)
+  for (const entry of entries) {
+    assert.match(loader, new RegExp(`case "${entry.id}":`))
+    assert.match(renderBodyModule(entry), /export const BUILT_IN_SKILL_BODY = "/)
+  }
+  // An id with no chunk is a caller bug, and an empty body would inject silence
+  // into a prompt, so the miss has to be loud.
+  assert.match(loader, /throw new Error\(`Unknown built-in skill bundle id/)
 })
 
 test("parseSkillFile rejects non-boolean metadata.default-enabled", () => {

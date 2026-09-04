@@ -6,7 +6,7 @@ import {
   loadSkillResourceForSession,
   releaseSkillLoadContext,
 } from "./runtime-loader"
-import { getCatalogSkill } from "./built-in-catalog"
+import { getCatalogSkill, loadBuiltInSkillContent } from "./built-in-catalog"
 
 const skill: Skill = {
   id: "skill_allowed",
@@ -156,13 +156,14 @@ describe("session-scoped skill runtime loader", () => {
 
   it("normalizes built-in aliases inside a scoped context", async () => {
     const diagram = getCatalogSkill("diagram-design")!
+    const diagramBody = await loadBuiltInSkillContent(diagram.id)
     const diagramSkill: Skill = {
       id: "skill_builtin_diagram_design",
       slug: "diagram-design",
       canonicalId: "builtin:diagram-design",
       name: diagram.name,
       description: diagram.description,
-      content: diagram.content,
+      content: diagramBody,
       createdAt: 1,
       updatedAt: 1,
     }
@@ -240,12 +241,13 @@ describe("session-scoped skill runtime loader", () => {
 
   it("loads the curated diagram skill progressively, including paged references", async () => {
     const diagram = getCatalogSkill("diagram-design")!
+    const diagramBody = await loadBuiltInSkillContent(diagram.id)
     const diagramSkill: Skill = {
       id: "skill_builtin_diagram_design",
       slug: "diagram-design",
       name: diagram.name,
       description: diagram.description,
-      content: diagram.content,
+      content: diagramBody,
       createdAt: 1,
       updatedAt: 1,
     }
@@ -291,12 +293,13 @@ describe("session-scoped skill runtime loader", () => {
 
   it("filters compliance roles from seeded rows before manifests, inline text, or payload reads", async () => {
     const diagram = getCatalogSkill("diagram-design")!
+    const diagramBody = await loadBuiltInSkillContent(diagram.id)
     const diagramSkill: Skill = {
       id: "skill_builtin_diagram_design",
       slug: "diagram-design",
       canonicalId: diagram.canonicalId,
       name: diagram.name,
-      content: diagram.content,
+      content: diagramBody,
       status: "enabled",
       createdAt: 1,
       updatedAt: 1,
