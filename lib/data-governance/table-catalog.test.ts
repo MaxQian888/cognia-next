@@ -306,3 +306,66 @@ describe("the sync_pull request contract mirrors this catalogue", () => {
     expect([...declared].sort()).toEqual([...COMPANION_SYNC_PROTOCOL_TABLE_NAMES].sort())
   })
 })
+
+describe("desktop pet", () => {
+  it("treats the singleton profile as the irreplaceable row it is", () => {
+    // Name, level, every XP earned since it hatched, coins, streak. Nothing
+    // anywhere can rebuild this, so it is authoritative by declaration rather
+    // than by falling through the default.
+    expect(policyForTable("petProfile")).toMatchObject({
+      owner: "pet",
+      role: "authoritative",
+      accountScope: "account",
+      cleanupPolicy: "protected",
+    })
+  })
+
+  it("names the interaction ledger an audit table, which its suffix hid", () => {
+    // AUDIT_TABLES keys on Events$ / History$ / Recordings$ and friends. This
+    // one ends in `Log`, so it slipped through and was classed authoritative.
+    expect(policyForTable("petActivityLog")).toMatchObject({ role: "audit" })
+  })
+
+  it("declares retention that matches what the domain code actually enforces", () => {
+    // Both were claiming permanent retention while trimming themselves on
+    // every write. A policy that overstates what is kept is still a lie.
+    expect(policyForTable("petActivityLog")?.retentionPolicy).toMatchObject({
+      mode: "cap",
+      maxRows: 2000,
+      enforcement: "domain",
+    })
+    expect(policyForTable("petConversation")?.retentionPolicy).toMatchObject({
+      mode: "cap",
+      maxRows: 200,
+      enforcement: "domain",
+    })
+  })
+
+  it("budgets the binary tables as the large ones they are", () => {
+    // 50 MiB per Live2D model, 25 MiB per sprite atlas. At the "medium"
+    // default they were budgeted like rows of metadata.
+    expect(policyForTable("petModelFiles")?.expectedScale).toBe("large")
+    expect(policyForTable("petSpritePacks")?.expectedScale).toBe("large")
+  })
+
+  it("keeps the whole subsystem out of companion sync, deliberately", () => {
+    // ADR-0059 puts the desktop pet on the far side of a physical boundary:
+    // it does not run on the Capacitor shell at all, so mirroring its rows to
+    // a phone would sync a subsystem with nothing to render them.
+    for (const table of [
+      "petProfile",
+      "petActivityLog",
+      "petConversation",
+      "petAchievements",
+      "petInventory",
+      "petCharacterBindings",
+      "petModels",
+      "petModelFiles",
+      "petSpritePacks",
+    ] as const) {
+      expect(COMPANION_SYNC_TABLES.has(table)).toBe(false)
+      expect(policyForTable(table)?.syncPolicy.mode).toBe("none")
+      expect(policyForTable(table)?.accountScope).toBe("account")
+    }
+  })
+})

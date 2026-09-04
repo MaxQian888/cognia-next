@@ -720,6 +720,10 @@ const DEEP_CLEANUP_TABLES = new Set<CoreTableName>([
 // backup/retention semantics.
 const AUTHORITATIVE_ROLE_OVERRIDES = new Set<CoreTableName>([
   "agentTasks",
+  // The singleton pet row. Authoritative by intent rather than by fall-through:
+  // it is the only record of a pet's name, level, earned XP, coins and streak,
+  // and nothing anywhere can rebuild it.
+  "petProfile",
   "browserRecordings",
   "chatInputHistory",
   "conversationOverrides",
@@ -740,6 +744,11 @@ const AUDIT_TABLES = new Set<CoreTableName>([
   "governanceLineage",
   "governanceProvenance",
   "hostStateActions",
+  // The pet's append-only interaction ledger. The regex above keys on
+  // `Events$` / `History$` and friends, and this one ends in `Log`, so it
+  // needed naming explicitly rather than being left an "authoritative" table
+  // that nothing treats as authoritative.
+  "petActivityLog",
 ])
 
 const QUEUE_TABLES = new Set<CoreTableName>(
@@ -898,6 +907,11 @@ const VERY_LARGE_TABLES = new Set<CoreTableName>([
 ])
 
 const LARGE_TABLES = new Set<CoreTableName>([
+  // Live2D model files and Sprite-v2 atlases: real binaries, capped at 50 MiB
+  // per model and 25 MiB per atlas. Left at the "medium" default they were
+  // budgeted like metadata rows.
+  "petModelFiles",
+  "petSpritePacks",
   "scheduledTaskRuns",
   "a2uiEventHistory",
   // Complete build outputs as `Uint8Array` — the single largest row shape in
@@ -1005,6 +1019,23 @@ const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
 }
 
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
+  // Both pet append tables were claiming permanent retention while the domain
+  // code trimmed them on every write. A policy that overstates what the code
+  // keeps is a policy that lies, in the other direction from the usual one.
+  petActivityLog: {
+    mode: "cap",
+    maxRows: 2000,
+    enforcement: "domain",
+    reason:
+      "`prunePetActivity` trims the ledger to PET_ACTIVITY_CAP on every append, so the newest 2000 interactions are all that ever survive.",
+  },
+  petConversation: {
+    mode: "cap",
+    maxRows: 200,
+    enforcement: "domain",
+    reason:
+      "`appendPetTurn` keeps a rolling window of the most recent turns; older chatter with the pet is dropped as it is written.",
+  },
   // ADR-0115 gives the memory and retrieval control planes differentiated
   // windows: 30 days for a job that succeeded or produced nothing, 90 for one
   // that failed or was quarantined, 180 for content-free audit. The catalog
