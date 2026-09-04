@@ -116,10 +116,13 @@ import {
   recordLoadSuccess,
 } from "@/lib/plugin/core/resilience-telemetry"
 import { getDb } from "@/lib/db/schema"
+import type { PluginDraft } from "@/lib/db/plugins"
+import type { PluginRow } from "@/lib/db/plugin-types"
 import {
   updatePlugin,
   compareAndSetPluginLifecycle,
   upsertPlugin,
+  upsertPlugins,
   getPlugin,
   setPluginEnabled,
   setPluginConfig,
@@ -2303,6 +2306,8 @@ export class PluginManager {
     // directory scan below still leaves the built-ins discovered.
     const discovered: DiscoveredPlugin[] = await this.scanBrowserBuiltins()
     const store = usePluginStore.getState()
+    // Collected, then written once — see `persistDiscoveredPluginRows`.
+    const pendingRows: Array<{ manifest: PluginManifest; source: PluginSource; path: string }> = []
 
     try {
       // Scan local plugin directory via Tauri
@@ -2365,7 +2370,7 @@ export class PluginManager {
           await store.installPlugin(manifest.id)
         }
 
-        await this.persistDiscoveredPluginRow(manifest, projection.source, path)
+        pendingRows.push({ manifest, source: projection.source, path })
 
         this.registerPluginPermissions(manifest.id, manifest.permissions || [])
 
@@ -2379,6 +2384,8 @@ export class PluginManager {
     } catch (error) {
       loggers.manager.error("Failed to scan plugins:", error)
     }
+
+    await this.persistDiscoveredPluginRows(pendingRows)
 
     return discovered
   }
@@ -2404,6 +2411,50 @@ export class PluginManager {
     source: PluginSource,
     path: string
   ): Promise<void> {
+    const draft = await this.buildDiscoveredPluginDraft(manifest, source, path)
+    if (!draft) return
+    try {
+      await upsertPlugin(draft)
+    } catch (error) {
+      loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  /**
+   * Persist a whole discovery pass in ONE Dexie transaction.
+   *
+   * `persistDiscoveredPluginRow` per plugin meant one transaction — and so one
+   * `/plugins` live-query wake-up and one full re-filter/re-sort of the Library
+   * list — per built-in. On a ~50-plugin install that is ~50 renders during
+   * boot, which is what made the list visibly grow and reshuffle. `upsertPlugins`
+   * additionally skips rows whose content did not change, so a warm start writes
+   * nothing at all.
+   */
+  private async persistDiscoveredPluginRows(
+    entries: ReadonlyArray<{ manifest: PluginManifest; source: PluginSource; path: string }>
+  ): Promise<void> {
+    if (entries.length === 0) return
+    const drafts: PluginDraft[] = []
+    for (const entry of entries) {
+      const draft = await this.buildDiscoveredPluginDraft(entry.manifest, entry.source, entry.path)
+      if (draft) drafts.push(draft)
+    }
+    try {
+      await upsertPlugins(drafts)
+    } catch (error) {
+      loggers.manager.warn("[manager] failed to persist discovery rows to Dexie", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  private async buildDiscoveredPluginDraft(
+    manifest: PluginManifest,
+    source: PluginSource,
+    path: string
+  ): Promise<PluginDraft | null> {
     // Some manifests carry LIVE runtime objects with function members — e.g.
     // agent-team-examples' `sharedMemoryAdapters[].write/read/…`. IndexedDB's
     // structured-clone algorithm rejects functions with DataCloneError, so the
@@ -2418,7 +2469,7 @@ export class PluginManager {
       const existing = normalizeGithubDelivery
         ? await getPlugin(serializableManifest.id)
         : undefined
-      await upsertPlugin({
+      return {
         id: serializableManifest.id,
         name: serializableManifest.name,
         version: serializableManifest.version,
@@ -2431,21 +2482,26 @@ export class PluginManager {
           : [],
         ...(normalizeGithubDelivery
           ? {
-              status: existing?.status === "disabled" ? "disabled" : "installed",
+              status: (existing?.status === "disabled"
+                ? "disabled"
+                : "installed") as PluginRow["status"],
               enabled: false,
             }
           : {}),
-      })
+      }
     } catch (error) {
-      loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
+      loggers.manager.warn(`[plugin:${manifest.id}] failed to project discovery row`, {
         error: error instanceof Error ? error.message : String(error),
       })
+      return null
     }
   }
 
   private async scanBrowserBuiltins(): Promise<DiscoveredPlugin[]> {
     const discovered: DiscoveredPlugin[] = []
     const store = usePluginStore.getState()
+    // Collected, then written once — see `persistDiscoveredPluginRows`.
+    const pendingRows: Array<{ manifest: PluginManifest; source: PluginSource; path: string }> = []
 
     for (const entry of getBrowserBuiltinRegistry()) {
       const manifest = entry.manifest
@@ -2495,7 +2551,7 @@ export class PluginManager {
         store.setPluginStatus(manifest.id, "installed")
       }
 
-      await this.persistDiscoveredPluginRow(manifest, "builtin", entry.path)
+      pendingRows.push({ manifest, source: "builtin", path: entry.path })
 
       this.registerPluginPermissions(manifest.id, manifest.permissions || [])
 
@@ -2506,6 +2562,8 @@ export class PluginManager {
         descriptor: projection.descriptor,
       })
     }
+
+    await this.persistDiscoveredPluginRows(pendingRows)
 
     return discovered
   }

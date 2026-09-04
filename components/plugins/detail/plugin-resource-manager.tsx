@@ -6,7 +6,6 @@
 // the most recent analytics counter for the matching key.
 
 import { useTranslations } from "next-intl"
-import { Card } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { GaugeIcon } from "lucide-react"
@@ -33,15 +32,15 @@ export function PluginResourceManager({ pluginId, limits }: Props) {
 
   if (limits.length === 0) {
     return (
-      <Card className="p-4 text-center space-y-1">
+      <div className="space-y-1 rounded-control border border-dashed p-3 text-center">
         <GaugeIcon className="size-8 mx-auto text-muted-foreground" />
         <p className="text-xs text-muted-foreground">{t("noLimits")}</p>
-      </Card>
+      </div>
     )
   }
 
   return (
-    <Card className="p-3 space-y-3">
+    <div className="space-y-3">
       <div className="flex items-center gap-2">
         <GaugeIcon className="size-4" />
         <h3 className="text-sm font-semibold">{t("title")}</h3>
@@ -70,6 +69,6 @@ export function PluginResourceManager({ pluginId, limits }: Props) {
           )
         })}
       </ul>
-    </Card>
+    </div>
   )
 }

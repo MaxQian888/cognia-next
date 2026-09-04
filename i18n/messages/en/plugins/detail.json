@@ -67,6 +67,7 @@
     "clear": "Clear",
     "empty": "No output yet. Lines appear here once the plugin logs through the host, and for a Python plugin once its host runs.",
     "exited": "Host process exited",
+    "openInPanel": "Open this plugin's output in the log panel",
     "runtimeStrip": "Python {version} · {plugins} loaded ({lazy} idle) · {calls} calls",
     "streamEnd": "— stream ended —"
   },
@@ -196,5 +197,8 @@
     "title": "Verification",
     "verifiedAt": "Verified {date}"
   },
+  "viewInfo": "Details",
+  "viewManifest": "Raw JSON",
+  "viewToggleAria": "Switch between plugin details and the raw manifest",
   "workflowTriggers": "Workflow triggers"
 }

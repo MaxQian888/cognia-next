@@ -12,7 +12,7 @@ import { useTranslations } from "next-intl"
 import { ExternalLinkIcon, RefreshCwIcon, TerminalSquareIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { PluginDetailGroup } from "./plugin-detail-group"
 import {
   getPluginBinaryStatuses,
   type PluginBinaryStatus,
@@ -77,17 +77,23 @@ export function PluginCliToolsSection({ manifest }: { manifest: PluginManifest }
   }
 
   return (
-    <Card className="p-3 space-y-2" data-testid="plugin-cli-tools-section">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-xs font-semibold">
-          <TerminalSquareIcon className="size-3.5" />
-          {t("title")}
-        </div>
-        <Button variant="ghost" size="sm" onClick={handleReprobe} disabled={probing}>
-          <RefreshCwIcon className="size-3.5" />
+    <PluginDetailGroup
+      title={t("title")}
+      icon={<TerminalSquareIcon className="size-3.5" />}
+      actions={
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-1.5 text-xs"
+          onClick={handleReprobe}
+          disabled={probing}
+        >
+          <RefreshCwIcon className="mr-1 size-3.5" />
           {t("reprobe")}
         </Button>
-      </div>
+      }
+      testId="plugin-cli-tools-section"
+    >
       <ul className="space-y-2">
         {cliTools.map((def) => {
           const status = def.binary.kind === "requires" ? statuses.get(def.binary.name) : undefined
@@ -130,6 +136,6 @@ export function PluginCliToolsSection({ manifest }: { manifest: PluginManifest }
           )
         })}
       </ul>
-    </Card>
+    </PluginDetailGroup>
   )
 }

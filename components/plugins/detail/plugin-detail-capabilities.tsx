@@ -6,8 +6,8 @@
 // three existing surfaces rather than re-implementing any of them.
 
 import { useTranslations } from "next-intl"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { PluginDetailGroup } from "./plugin-detail-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePluginRow } from "@/hooks/plugins"
 import type { PluginManifest } from "@/types/plugin"
@@ -47,8 +47,7 @@ export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
       {showOverview && (
         <div className="space-y-2">
           {hasCapabilities && (
-            <Card className="p-3 space-y-1">
-              <div className="text-xs font-semibold">{t("capabilitiesTitle")}</div>
+            <PluginDetailGroup title={t("capabilitiesTitle")}>
               <div className="flex flex-wrap gap-1.5">
                 {plugin.capabilities.map((cap) => (
                   <Badge key={cap} variant="outline">
@@ -56,11 +55,10 @@ export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
                   </Badge>
                 ))}
               </div>
-            </Card>
+            </PluginDetailGroup>
           )}
           {contributes.length > 0 && (
-            <Card className="p-3 space-y-1">
-              <div className="text-xs font-semibold">{t("contributes")}</div>
+            <PluginDetailGroup title={t("contributes")}>
               <div className="flex flex-wrap gap-1.5">
                 {contributes.map((key) => (
                   <Badge key={key} variant="outline" className="text-xs">
@@ -68,11 +66,10 @@ export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
                   </Badge>
                 ))}
               </div>
-            </Card>
+            </PluginDetailGroup>
           )}
           {activations.length > 0 && (
-            <Card className="p-3 space-y-1">
-              <div className="text-xs font-semibold">{t("activation")}</div>
+            <PluginDetailGroup title={t("activation")}>
               <div className="flex flex-wrap gap-1.5">
                 {activations.map((ev) => (
                   <Badge key={ev} variant="outline" className="text-xs">
@@ -80,7 +77,7 @@ export function PluginDetailCapabilities({ pluginId }: { pluginId: string }) {
                   </Badge>
                 ))}
               </div>
-            </Card>
+            </PluginDetailGroup>
           )}
         </div>
       )}

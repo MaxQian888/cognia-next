@@ -43,8 +43,15 @@ export type PluginLibrarySubFilter = "all" | "enabled" | "updates" | "configurab
 
 export type PluginGovernanceView = "permissions" | "scheduled" | "analytics" | "audit" | "policy"
 
-export type PluginDetailSubTab =
-  "overview" | "capabilities" | "configure" | "permissions" | "data" | "logs"
+/**
+ * The expandable sections of the detail pane, and only those.
+ *
+ * No `"logs"`: that entry navigates to `/logs` rather than expanding in place
+ * (`plugin-detail-pane.tsx`), so there is no section for this value to open.
+ * Leaving it in the union advertised a state that renders every section
+ * collapsed with nothing saying why.
+ */
+export type PluginDetailSubTab = "overview" | "capabilities" | "configure" | "permissions" | "data"
 
 export type PluginListViewMode = "list" | "card"
 

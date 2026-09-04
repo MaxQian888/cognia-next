@@ -22,7 +22,6 @@ import { useFormatter, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { listApprovedBinaries, revokeBinaryApproval } from "@/lib/db/approved-binaries"
 
 export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
@@ -46,7 +45,7 @@ export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
     <div className="space-y-1">
       <h3 className="text-xs font-semibold">{t("title")}</h3>
       <p className="text-[11px] text-muted-foreground">{t("description")}</p>
-      <Card className="p-0">
+      <div className="overflow-hidden rounded-control border">
         {rows.length === 0 ? (
           <p className="p-3 text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
@@ -83,7 +82,7 @@ export function PluginApprovedBinariesCard({ pluginId }: { pluginId: string }) {
             ))}
           </ul>
         )}
-      </Card>
+      </div>
     </div>
   )
 }

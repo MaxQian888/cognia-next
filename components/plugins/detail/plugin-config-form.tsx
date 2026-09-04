@@ -37,9 +37,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Surface } from "@/components/surface/surface"
 import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
+import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 /**
@@ -444,6 +445,7 @@ function SchemaConfigBody({
   onClose: () => void
 }) {
   const t = useTranslations("plugins.configForm")
+  const tDetail = useTranslations("plugins.detail")
   const schema = useMemo(
     () =>
       parseSchema((plugin.manifest as { configSchema?: Record<string, unknown> })?.configSchema),
@@ -470,20 +472,27 @@ function SchemaConfigBody({
   }
 
   if (schema.unknown || Object.keys(schema.fields).length === 0) {
+    // A plugin with no parseable schema has nothing to edit. It used to get a
+    // header, a read-only `{}` in a code block, and a Close button, which reads
+    // as a settings editor that refuses to work. Say the truth instead: there
+    // are no settings. The raw block is kept ONLY when the plugin actually
+    // carries persisted config, because then there is something to look at.
+    const persisted = plugin.config ?? {}
+    const hasPersisted = Object.keys(persisted).length > 0
+    if (!hasPersisted) {
+      return <PluginDetailNone message={tDetail("noConfigSchema")} testId="plugin-config-none" />
+    }
     return (
-      <>
-        <FormHeader title={plugin.name} description={t("noSchema")} version={null} />
-        <Card className="p-0">
-          <ScrollArea className="max-h-[40vh]">
-            <pre className="p-3 text-xs font-mono">
-              {JSON.stringify(plugin.config ?? {}, null, 2)}
-            </pre>
-          </ScrollArea>
-        </Card>
-        <FormFooter>
-          <Button onClick={onClose}>{t("close")}</Button>
-        </FormFooter>
-      </>
+      <PluginDetailGroup title={t("noSchema")} testId="plugin-config-raw">
+        <Surface
+          asChild
+          layer="base"
+          radius="control"
+          className="max-h-[40vh] min-w-0 overflow-auto border p-2 font-mono text-[11px]"
+        >
+          <pre>{JSON.stringify(persisted, null, 2)}</pre>
+        </Surface>
+      </PluginDetailGroup>
     )
   }
 

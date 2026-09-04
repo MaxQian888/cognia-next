@@ -36,6 +36,8 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { PlugIcon } from "lucide-react"
 
+import { PLUGIN_RAIL_WIDTH } from "./plugin-rail-width"
+
 // Dialog hosts — all driven by store targets, mounted once at the panel root.
 import { PluginBatchActionsBar } from "./plugin-batch-actions-bar"
 import { PluginFilterSheet } from "./dialogs/plugin-filter-sheet"
@@ -289,12 +291,16 @@ function NewShellLayout({ onCheckUpdates, onSyncRegistry, syncing }: NewShellLay
       leftPane={{
         label: t("library"),
         content: <PluginNavSidebar />,
-        // Keep the nav rail compact by default — its rows are short labels
-        // ("已安装" / Discover / Governance), so a wide column just wastes
-        // horizontal space the center list needs.
-        defaultSize: 14,
-        minSize: 12,
-        maxSize: 24,
+        // Pinned, not proportional. Its rows are short labels ("已安装" /
+        // Discover / Governance), so a percentage column grows with the window
+        // for no reason and, worse, drifts away from the Library's capability
+        // rail immediately to its right, which is a fixed Tailwind width. One
+        // constant in the unit both mechanisms accept keeps the two rails equal
+        // at every window size. The bounds are lengths too: a percentage max
+        // would clamp the pinned default below itself on a narrow window.
+        defaultSize: PLUGIN_RAIL_WIDTH,
+        minSize: "10rem",
+        maxSize: "20rem",
       }}
       // Library / Discover / Governance all keep the right pane mounted, so
       // moving between them never changes the pane count and never discards

@@ -4,6 +4,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react"
 
 import { detectPlatform } from "@/lib/platform/detect"
 import { installPackWarningRefreshWiring } from "@/lib/plugin/character-pack/warning-refresh-wiring"
+import { installPluginRuntimeLogBridge } from "@/lib/plugin/devtools/plugin-log-bridge"
 import { loggers } from "@cognia/logging"
 import { SystemEvents, emitSystemBusEvent } from "@/lib/plugin/messaging/message-bus"
 import { disposeMicrovmAdapters } from "@/lib/sandbox/microvm-bridge"
@@ -81,6 +82,15 @@ export function PluginRuntimeInitializer({
   useEffect(() => {
     if (!shouldRun) return
     return installPackWarningRefreshWiring()
+  }, [shouldRun])
+
+  // A plugin's own output only reaches `/logs` because this forwards it. The
+  // detail pane's Logs entry is a link into that panel filtered to the plugin
+  // source, and nothing in the app emitted an entry carrying it, so without
+  // this bridge that link opens an empty list for every plugin.
+  useEffect(() => {
+    if (!shouldRun) return
+    return installPluginRuntimeLogBridge()
   }, [shouldRun])
 
   useEffect(() => {

@@ -12,6 +12,7 @@ import {
   listPluginsBySource,
   getPlugin,
   upsertPlugin,
+  upsertPlugins,
   updatePlugin,
   compareAndSetPluginLifecycle,
   setPluginEnabled,
@@ -89,6 +90,78 @@ describe("plugins CRUD", () => {
     expect(second.createdAt).toBe(first.createdAt)
     expect(second.updatedAt).toBeGreaterThanOrEqual(first.updatedAt)
     expect(second.name).toBe("Renamed")
+  })
+
+  it("skips the write when re-discovery would change nothing", async () => {
+    // Discovery re-upserts every plugin on every launch. Writing an identical
+    // row wakes the /plugins live-query and resets `updatedAt`, so the Library
+    // list re-rendered once per plugin at boot and "Last updated" reported the
+    // last app start instead of the last real change.
+    const first = await upsertPlugin(makeDraft())
+    await new Promise((r) => setTimeout(r, 5))
+    const second = await upsertPlugin(makeDraft())
+    expect(second.updatedAt).toBe(first.updatedAt)
+    expect((await getPlugin("p1"))?.updatedAt).toBe(first.updatedAt)
+  })
+
+  it("still writes when re-discovery carries a real change", async () => {
+    const first = await upsertPlugin(makeDraft())
+    await new Promise((r) => setTimeout(r, 5))
+    const second = await upsertPlugin(makeDraft({ version: "1.1.0" }))
+    expect(second.version).toBe("1.1.0")
+    expect(second.updatedAt).toBeGreaterThan(first.updatedAt)
+  })
+
+  it("treats a re-serialized manifest with reordered keys as unchanged", async () => {
+    const first = await upsertPlugin(
+      makeDraft({ manifest: { id: "p1", name: "Test Plugin", version: "1.0.0" } })
+    )
+    await new Promise((r) => setTimeout(r, 5))
+    // The manifest is rebuilt from the module on every scan, so key order is
+    // not stable. Comparing raw JSON would call every boot a change.
+    const second = await upsertPlugin(
+      makeDraft({ manifest: { version: "1.0.0", name: "Test Plugin", id: "p1" } })
+    )
+    expect(second.updatedAt).toBe(first.updatedAt)
+  })
+
+  it("still writes a manifest JSON cannot serialize", async () => {
+    // IndexedDB stores by structured clone, which takes a cycle. The
+    // unchanged-comparison is `JSON.stringify`, which throws on one. That
+    // comparison exists to SKIP a write, so it must never be able to fail one
+    // that used to go straight through.
+    await upsertPlugin(makeDraft())
+    const cyclic: Record<string, unknown> = { id: "p1", name: "Test Plugin" }
+    cyclic.self = cyclic
+
+    const second = await upsertPlugin(makeDraft({ manifest: cyclic, version: "1.2.0" }))
+
+    expect(second.version).toBe("1.2.0")
+    expect((await getPlugin("p1"))?.version).toBe("1.2.0")
+  })
+
+  it("upsertPlugins writes a whole discovery pass and preserves prior state", async () => {
+    await upsertPlugin(makeDraft({ id: "p1", enabled: true, status: "enabled" }))
+    const rows = await upsertPlugins([
+      makeDraft({ id: "p1", version: "2.0.0" }),
+      makeDraft({ id: "p2", name: "Second" }),
+    ])
+    expect(rows.map((row) => row.id)).toEqual(["p1", "p2"])
+    // An upsert that omits enable state must never disable an enabled plugin.
+    expect(rows[0]?.enabled).toBe(true)
+    expect(rows[0]?.version).toBe("2.0.0")
+    expect(await getPlugin("p2")).toBeDefined()
+  })
+
+  it("upsertPlugins leaves unchanged rows untouched", async () => {
+    const first = await upsertPlugin(makeDraft())
+    await new Promise((r) => setTimeout(r, 5))
+    const [row] = await upsertPlugins([makeDraft()])
+    expect(row?.updatedAt).toBe(first.updatedAt)
+  })
+
+  it("upsertPlugins is a no-op for an empty pass", async () => {
+    await expect(upsertPlugins([])).resolves.toEqual([])
   })
 
   it("persists non-indexed lifecycle control-plane state without a schema migration", async () => {

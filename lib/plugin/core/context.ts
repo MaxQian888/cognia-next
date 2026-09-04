@@ -491,8 +491,22 @@ export function isFullPluginContext(
 // =============================================================================
 
 function createLogger(pluginId: string): PluginLogger {
-  const logger = createPluginSystemLogger(pluginId)
-  return logger
+  // Tagged at the source, so `/logs`'s `plugin` facet sees every line a plugin
+  // writes rather than only the ones a debug session happened to be recording.
+  //
+  // `getLogSource()` in `components/logging/log-panel.tsx` keys off the entry's
+  // `origin`/`runtime`, which the bare plugin child logger never set, so a
+  // plugin's own output was filed as ordinary `frontend` noise and the detail
+  // pane's Logs deep link (`src=plugin`) matched none of it. Routing that
+  // through the devtools ring instead would only have covered plugins running
+  // with `enableDebug`, which is developer mode AND non-builtin, so in a
+  // default install it covered nothing at all. `withContext` merges into every
+  // entry's data and the two keys are hoisted to the entry itself.
+  return createPluginSystemLogger(pluginId).withContext({
+    runtime: "plugin",
+    origin: "plugin",
+    pluginId,
+  })
 }
 
 // =============================================================================

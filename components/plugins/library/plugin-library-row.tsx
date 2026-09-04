@@ -102,7 +102,12 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
   return (
     <div
       className={cn(
-        "group relative flex items-center gap-2 border-b px-2 py-1.5 text-sm",
+        // `min-w-0` + `overflow-hidden`: the row is a flex child of a column
+        // that must never grow past the pane. Without both, a plugin with long
+        // capability chips widened every row, and the list's scroll container
+        // answered with a horizontal scrollbar that shifted the WHOLE list
+        // sideways, names and all.
+        "group relative flex min-w-0 items-center gap-2 overflow-hidden border-b px-2 py-1.5 text-sm",
         "transition-colors hover:bg-accent/40",
         // Active = selected detail target, so render a 3px primary accent bar
         // via a pseudo-element. It composes with the errored left border
@@ -179,23 +184,30 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
               />
             )}
             <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
-            <span className="relative z-10">
-              <PluginActivationProgress
-                pluginId={plugin.id}
-                pluginName={plugin.name}
-                variant="row"
-              />
-            </span>
           </div>
         </div>
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          {author && <span className="truncate">{author}</span>}
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
+          {author && <span className="max-w-[40%] shrink-0 truncate">{author}</span>}
           {author && contributions.length > 0 && (
             <span aria-hidden className="shrink-0">
               ·
             </span>
           )}
-          <div className="relative z-10 hidden min-w-0 items-center gap-1 @sm/plugin-list:flex">
+          {/*
+            The chips scroll INSIDE their own strip.
+
+            They are fixed-width pills that cannot truncate, so in a narrow
+            pane they used to run off the end of the row and force the list's
+            scroll container into a horizontal scrollbar. Clipping them instead
+            would hide capabilities with no way to reach them. A local
+            overflow-x keeps the row at the pane's width and still lets the
+            chips be read, and the scrollbar itself is hidden because a visible
+            one on every row is louder than the content.
+          */}
+          <div
+            className="relative z-10 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain [scrollbar-width:none] @sm/plugin-list:flex [&::-webkit-scrollbar]:hidden"
+            data-testid="plugin-library-row-capabilities"
+          >
             {contributions.slice(0, 3).map((contribution) => (
               <CapabilityHoverChip
                 key={contribution.capability}
@@ -226,6 +238,19 @@ export const PluginLibraryRow = memo(function PluginLibraryRow({
           )}
         </div>
       </div>
+      {/* Pinned to the row's bottom edge rather than sitting in the status
+          cluster. An activation bar that joins the inline flow shifts every
+          badge beside it the moment it appears and shifts them back when the
+          activation ends, and a cold start activates plugins one after another
+          — which is the row-level half of the "the list jitters while it
+          loads" report. Out of flow, the bar can come and go without moving
+          anything. */}
+      <PluginActivationProgress
+        pluginId={plugin.id}
+        pluginName={plugin.name}
+        variant="row"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 mt-0"
+      />
       <PluginRowActionsMenu
         plugin={plugin}
         onOpen={onOpen}

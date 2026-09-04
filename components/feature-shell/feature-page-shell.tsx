@@ -49,18 +49,24 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { useBreakpoint } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
+import { centerPaneSize, paneSize } from "./pane-size"
 
 export interface FeaturePaneConfig {
   /** Pane content. */
   content: React.ReactNode
   /** Accessible label for the Sheet trigger on mobile (and the panel root). */
   label: string
-  /** Default panel size in percent. */
-  defaultSize?: number
-  /** Minimum panel size in percent. */
-  minSize?: number
-  /** Maximum panel size in percent. */
-  maxSize?: number
+  /**
+   * Panel sizes. A number is a percentage of the group (the historical
+   * contract). A string is passed to `react-resizable-panels` verbatim, so it
+   * may carry any CSS unit — `"13rem"` pins a rail to a fixed width instead of
+   * letting it grow with the window, which is what a short-label nav rail wants.
+   */
+  defaultSize?: number | string
+  /** Minimum panel size — number = percent, string = CSS length. */
+  minSize?: number | string
+  /** Maximum panel size — number = percent, string = CSS length. */
+  maxSize?: number | string
   /** Sheet width override on mobile. */
   mobileWidthClass?: string
   /**
@@ -152,9 +158,9 @@ export function FeaturePageShell({
             <>
               <ResizablePanel
                 id={`pane-${storageId}-left`}
-                defaultSize={`${leftPane.defaultSize ?? DEFAULT_LEFT_SIZE}%`}
-                minSize={`${leftPane.minSize ?? DEFAULT_LEFT_MIN}%`}
-                maxSize={`${leftPane.maxSize ?? DEFAULT_LEFT_MAX}%`}
+                defaultSize={paneSize(leftPane.defaultSize, DEFAULT_LEFT_SIZE)}
+                minSize={paneSize(leftPane.minSize, DEFAULT_LEFT_MIN)}
+                maxSize={paneSize(leftPane.maxSize, DEFAULT_LEFT_MAX)}
               >
                 <aside
                   aria-label={leftPane.label}
@@ -169,11 +175,16 @@ export function FeaturePageShell({
 
           <ResizablePanel
             id={`pane-${storageId}-center`}
-            defaultSize={`${
-              100 -
-              (leftPane?.defaultSize ?? (leftPane ? DEFAULT_LEFT_SIZE : 0)) -
-              (rightPane?.defaultSize ?? (rightPane ? DEFAULT_RIGHT_SIZE : 0))
-            }%`}
+            // A CSS-length sibling has no percentage to subtract, so the center
+            // is left unsized and the library auto-assigns it the remainder.
+            defaultSize={centerPaneSize({
+              left: leftPane?.defaultSize,
+              hasLeft: Boolean(leftPane),
+              right: rightPane?.defaultSize,
+              hasRight: Boolean(rightPane),
+              leftFallback: DEFAULT_LEFT_SIZE,
+              rightFallback: DEFAULT_RIGHT_SIZE,
+            })}
             minSize={`${DEFAULT_CENTER_MIN}%`}
           >
             <div
@@ -189,9 +200,9 @@ export function FeaturePageShell({
               <ResizableHandle withHandle />
               <ResizablePanel
                 id={`pane-${storageId}-right`}
-                defaultSize={`${rightPane.defaultSize ?? DEFAULT_RIGHT_SIZE}%`}
-                minSize={`${rightPane.minSize ?? DEFAULT_RIGHT_MIN}%`}
-                maxSize={`${rightPane.maxSize ?? DEFAULT_RIGHT_MAX}%`}
+                defaultSize={paneSize(rightPane.defaultSize, DEFAULT_RIGHT_SIZE)}
+                minSize={paneSize(rightPane.minSize, DEFAULT_RIGHT_MIN)}
+                maxSize={paneSize(rightPane.maxSize, DEFAULT_RIGHT_MAX)}
               >
                 <aside
                   aria-label={rightPane.label}

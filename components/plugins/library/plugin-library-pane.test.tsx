@@ -17,6 +17,7 @@ jest.mock("../dialogs/plugin-category-sheet", () => ({
 }))
 
 import { PluginLibraryPane } from "./plugin-library-pane"
+import { PLUGIN_RAIL_WIDTH_CLASS } from "../plugin-rail-width"
 
 describe("PluginLibraryPane", () => {
   it("renders the capability rail and the list side-by-side", () => {
@@ -51,6 +52,16 @@ describe("PluginLibraryPane", () => {
     expect(gate.className).toContain("@xl/plugin-pane:hidden")
     const rail = screen.getByTestId("plugin-library-capability-rail")
     expect(rail.className).toContain("@xl/plugin-pane:block")
+  })
+
+  it("sizes the capability rail from the shared rail constant", () => {
+    render(<PluginLibraryPane />)
+    const rail = screen.getByTestId("plugin-library-capability-rail")
+    // The section nav pane on its left is sized from the same constant. A
+    // hand-written width here is how the two rails drifted apart.
+    expect(rail.className).toContain(PLUGIN_RAIL_WIDTH_CLASS)
+    expect(rail.className).not.toMatch(/\bw-40\b/)
+    expect(rail.className).not.toMatch(/\bw-52\b/)
   })
 
   it("scopes the list body to its own container so cards/rows size to the pane", () => {

@@ -17,6 +17,8 @@
 // compose as AND.
 
 import { useTranslations } from "next-intl"
+import { cn } from "@/lib/utils"
+import { PLUGIN_RAIL_WIDTH_CLASS } from "../plugin-rail-width"
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
 import { PluginCategorySidebar } from "../plugin-category-sidebar"
 import { PluginLibraryList } from "./plugin-library-list"
@@ -26,7 +28,12 @@ export function PluginLibraryPane() {
   return (
     <div className="@container/plugin-pane flex h-full min-h-0" data-testid="plugin-library-pane">
       <aside
-        className="hidden @xl/plugin-pane:block w-40 @4xl/plugin-pane:w-52 shrink-0 overflow-y-auto border-r p-2"
+        className={cn(
+          "hidden @xl/plugin-pane:block shrink-0 overflow-y-auto border-r p-2",
+          // Same constant as the section-nav pane on its left, so the two
+          // rails read as one column pair instead of two arbitrary widths.
+          PLUGIN_RAIL_WIDTH_CLASS
+        )}
         aria-label={t("categoriesButton")}
         data-testid="plugin-library-capability-rail"
       >

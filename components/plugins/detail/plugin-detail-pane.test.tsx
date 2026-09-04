@@ -36,9 +36,6 @@ jest.mock("./plugin-detail-permissions", () => ({
 jest.mock("./plugin-detail-data", () => ({
   PluginDetailData: () => <div data-testid="data" />,
 }))
-jest.mock("./plugin-detail-logs", () => ({
-  PluginDetailLogs: () => <div data-testid="logs" />,
-}))
 jest.mock("./plugin-detail-empty", () => ({
   PluginDetailEmpty: () => <div data-testid="empty" />,
 }))
@@ -106,7 +103,7 @@ describe("PluginDetailPane", () => {
   })
 
   it.each(["frontend", "python", "hybrid"] as const)(
-    "shows the Logs section for %s, whose host has an output channel",
+    "links to the log panel for %s, whose host has an output channel",
     (type) => {
       // It used to be python-only, which hid the frontend half of a hybrid
       // plugin's output and left frontend authors with no log surface here at
@@ -118,11 +115,23 @@ describe("PluginDetailPane", () => {
     }
   )
 
+  it("carries the plugin filter into the log panel rather than reading logs itself", () => {
+    mockPlugin = { ...makePlugin(), type: "python" }
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    render(<PluginDetailPane />)
+    const link = screen.getByTestId("plugin-detail-section-logs")
+    const href = link.getAttribute("href") ?? ""
+    const url = new URL(href, "http://localhost")
+    expect(url.pathname).toBe("/logs")
+    expect(url.searchParams.get("src")).toBe("plugin")
+    expect(url.searchParams.get("q")).toBe("alpha")
+  })
+
   it.each(["wasm", "vscode-extension"] as const)(
-    "hides the Logs section for %s, whose host serves no output channel",
+    "hides the log link for %s, whose host serves no output channel",
     (type) => {
-      // An empty tab would read as a broken reader rather than an absent
-      // channel, so the tab is withheld instead.
+      // A link into a panel that can only ever be empty for this runtime reads
+      // as a broken reader, so the entry is withheld instead.
       mockPlugin = { ...makePlugin(), type }
       usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
       render(<PluginDetailPane />)

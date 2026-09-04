@@ -67,6 +67,7 @@
     "clear": "清空",
     "empty": "还没有输出。插件通过宿主打日志后会出现在这里；Python 插件则要等它的宿主跑起来。",
     "exited": "宿主进程已退出",
+    "openInPanel": "在日志面板中查看该插件的输出",
     "runtimeStrip": "Python {version} · 已加载 {plugins}（{lazy} 空闲）· {calls} 次调用",
     "streamEnd": "— 流结束 —"
   },
@@ -196,5 +197,8 @@
     "title": "运行校验",
     "verifiedAt": "校验时间 {date}"
   },
+  "viewInfo": "信息",
+  "viewManifest": "原始 JSON",
+  "viewToggleAria": "在插件信息与原始 manifest 之间切换",
   "workflowTriggers": "工作流触发"
 }

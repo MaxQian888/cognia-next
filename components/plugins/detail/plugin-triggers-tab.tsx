@@ -11,8 +11,8 @@
 import { useMemo, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 
-import { Card } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
+import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
 import {
   Table,
   TableBody,
@@ -80,13 +80,10 @@ export function PluginTriggersTab({ pluginId }: Props) {
   }, [pluginId, rev])
 
   return (
-    <Card className="p-3 space-y-3">
-      <header className="space-y-1">
-        <h3 className="text-sm font-semibold">{t("title")}</h3>
-        <p className="text-xs text-muted-foreground">{t("muteHint")}</p>
-      </header>
+    <PluginDetailGroup title={t("title")}>
+      <p className="mb-1.5 text-xs text-muted-foreground">{t("muteHint")}</p>
       {subscriptions.length === 0 ? (
-        <p className="text-center text-xs text-muted-foreground py-6">{t("empty")}</p>
+        <PluginDetailNone message={t("empty")} />
       ) : (
         <Table>
           <TableHeader>
@@ -122,6 +119,6 @@ export function PluginTriggersTab({ pluginId }: Props) {
           </TableBody>
         </Table>
       )}
-    </Card>
+    </PluginDetailGroup>
   )
 }

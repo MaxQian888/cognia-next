@@ -7,7 +7,6 @@
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { BarChart3Icon, ZapIcon, TimerIcon, AlertCircleIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -41,10 +40,10 @@ export function PluginAnalytics({ pluginId }: Props) {
 
   if (filtered.length === 0) {
     return (
-      <Card className="p-6 text-center space-y-2">
+      <div className="space-y-2 rounded-control border border-dashed p-4 text-center">
         <BarChart3Icon className="size-10 mx-auto text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      </Card>
+      </div>
     )
   }
 
@@ -69,7 +68,7 @@ export function PluginAnalytics({ pluginId }: Props) {
         />
       </div>
 
-      <Card className="p-0 flex flex-col max-h-[60vh] md:max-h-[70vh]">
+      <div className="flex max-h-[60vh] flex-col overflow-hidden rounded-control border md:max-h-[70vh]">
         <ScrollArea className="flex-1 min-h-0">
           <div className="overflow-x-auto">
             <Table>
@@ -114,7 +113,7 @@ export function PluginAnalytics({ pluginId }: Props) {
             </Table>
           </div>
         </ScrollArea>
-      </Card>
+      </div>
     </div>
   )
 }
@@ -131,7 +130,7 @@ function SummaryCard({
   variant?: "destructive"
 }) {
   return (
-    <Card className="p-3 space-y-1">
+    <div className="space-y-1 rounded-control border p-2.5">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Icon className="size-3.5" />
         {label}
@@ -144,6 +143,6 @@ function SummaryCard({
           </Badge>
         )}
       </div>
-    </Card>
+    </div>
   )
 }

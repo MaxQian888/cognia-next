@@ -6,7 +6,7 @@
 // permissions / Uninstall). Also surfaces the latest plugin-point
 // diagnostic entries inline so failures aren't buried behind the Data tab.
 
-import { useState } from "react"
+import { useState, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertCircleIcon,
@@ -82,107 +82,109 @@ export function PluginDetailHeader({ plugin }: Props) {
   }
 
   return (
-    <header className="shrink-0 border-b px-4 py-3 space-y-3">
-      <div className="flex items-start gap-3">
+    <header
+      className="@container/plugin-detail-header shrink-0 space-y-1.5 border-b px-2.5 py-2"
+      data-testid="plugin-detail-header"
+    >
+      <div className="flex items-start gap-2">
         <PluginAvatar
           name={plugin.name}
           icon={(plugin.manifest as { icon?: string })?.icon}
           pluginRoot={plugin.path}
           seed={plugin.id}
-          size={36}
-          className="mt-0.5"
+          size={24}
+          className="mt-0.5 shrink-0"
         />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <h2 className="text-base font-semibold truncate">{plugin.name}</h2>
-            <span className="text-muted-foreground text-sm font-normal shrink-0">
+          <div className="flex min-w-0 items-baseline gap-1.5">
+            <h2 className="min-w-0 truncate text-sm leading-tight font-semibold">{plugin.name}</h2>
+            <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
               v{plugin.version}
             </span>
           </div>
           {description ? (
-            <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{description}</p>
+            // One line in a narrow pane, two once there is room. The description
+            // is context, not the reason the pane is open, so it must not push
+            // the status and the actions below the fold on a 280px rail.
+            <p className="mt-0.5 line-clamp-1 text-xs leading-snug text-muted-foreground @sm/plugin-detail-header:line-clamp-2">
+              {description}
+            </p>
           ) : null}
-          <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
-            {lifecycleActual && lifecycleActual !== "active" && lifecycleActual !== "inactive" && (
-              <Badge variant={lifecycleActual === "dirty" ? "destructive" : "secondary"}>
-                {t(`lifecycle.${lifecycleActual}`)}
-              </Badge>
-            )}
-            <PluginActivationProgress
-              pluginId={plugin.id}
-              pluginName={plugin.name}
-              variant="detail"
-            />
-            <PluginSignatureBadge state={signatureState} compact />
-            {/*
-              This used to render `plugin.source` raw, so the header read
-              "dev" / "marketplace" in English regardless of locale, and a dev
-              build looked no different from a released one.
-            */}
-            <PluginSourceBadge source={plugin.source} observedSources={observedSources} />
-            {/* Both of these were being produced and shown nowhere: the
-                compatibility diagnostic had no reader at all, and the loader's
-                degraded-runtime markers were rendered only by the card grid. */}
-            <PluginCompatibilityBadge manifest={plugin.manifest} />
-            <PluginRuntimeWarnings plugin={plugin} />
-          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Switch
-            checked={plugin.enabled}
-            onCheckedChange={(next) => void setPluginEnabledForHost(plugin.id, next)}
-            aria-label={plugin.enabled ? tCard("disable") : tCard("enable")}
-            data-testid="plugin-detail-enable-toggle"
+        <Switch
+          checked={plugin.enabled}
+          onCheckedChange={(next) => void setPluginEnabledForHost(plugin.id, next)}
+          aria-label={plugin.enabled ? tCard("disable") : tCard("enable")}
+          data-testid="plugin-detail-enable-toggle"
+          className="mt-0.5 shrink-0"
+        />
+      </div>
+
+      {/*
+        Badges and actions share ONE wrapping row.
+
+        They used to be two rows, and the second one held a single right-aligned
+        Uninstall button, so a whole line of a pane that is often 280px wide was
+        spent on one destructive action nobody is looking for. Wrapping them
+        together means each control takes only the space it needs and the row
+        count follows the pane width instead of being fixed at two.
+      */}
+      <div className="flex flex-wrap items-center gap-1">
+        <PluginStatusPill status={plugin.status} enabled={plugin.enabled} loading={isLoading} />
+        {lifecycleActual && lifecycleActual !== "active" && lifecycleActual !== "inactive" && (
+          <Badge variant={lifecycleActual === "dirty" ? "destructive" : "secondary"}>
+            {t(`lifecycle.${lifecycleActual}`)}
+          </Badge>
+        )}
+        <PluginSignatureBadge state={signatureState} compact />
+        {/*
+          This used to render `plugin.source` raw, so the header read
+          "dev" / "marketplace" in English regardless of locale, and a dev
+          build looked no different from a released one.
+        */}
+        <PluginSourceBadge source={plugin.source} observedSources={observedSources} />
+        {/* Both of these were being produced and shown nowhere: the
+            compatibility diagnostic had no reader at all, and the loader's
+            degraded-runtime markers were rendered only by the card grid. */}
+        <PluginCompatibilityBadge manifest={plugin.manifest} />
+        <PluginRuntimeWarnings plugin={plugin} />
+
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          {hasConfigSchema && (
+            <HeaderAction
+              icon={SettingsIcon}
+              label={tCard("configure")}
+              onClick={() => openConfigure(plugin.id)}
+            />
+          )}
+          {hasPermissions && (
+            <HeaderAction
+              icon={ShieldCheckIcon}
+              label={tCard("reviewPermissions")}
+              onClick={() => openPermissionReview(plugin.id)}
+            />
+          )}
+          {lifecycleActual === "dirty" && (
+            <HeaderAction
+              icon={RotateCcwIcon}
+              iconClassName={recovering ? "animate-spin" : undefined}
+              label={recovering ? t("lifecycle.retrying") : t("lifecycle.retryCleanup")}
+              disabled={recovering}
+              onClick={() => void recoverRuntime()}
+            />
+          )}
+          <HeaderAction
+            icon={Trash2Icon}
+            label={tCard("uninstall")}
+            destructive
+            onClick={() => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
           />
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {hasConfigSchema && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => openConfigure(plugin.id)}
-          >
-            <SettingsIcon className="size-3.5 mr-1.5" />
-            {tCard("configure")}
-          </Button>
-        )}
-        {hasPermissions && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => openPermissionReview(plugin.id)}
-          >
-            <ShieldCheckIcon className="size-3.5 mr-1.5" />
-            {tCard("reviewPermissions")}
-          </Button>
-        )}
-        {lifecycleActual === "dirty" && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            disabled={recovering}
-            onClick={() => void recoverRuntime()}
-          >
-            <RotateCcwIcon className={cn("size-3.5 mr-1.5", recovering && "animate-spin")} />
-            {recovering ? t("lifecycle.retrying") : t("lifecycle.retryCleanup")}
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 text-xs text-destructive ml-auto"
-          onClick={() => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
-        >
-          <Trash2Icon className="size-3.5 mr-1.5" />
-          {tCard("uninstall")}
-        </Button>
-      </div>
+      {/* The activation bar spans the header rather than sitting between two
+          badges, where its own width fought the badges for the row. */}
+      <PluginActivationProgress pluginId={plugin.id} pluginName={plugin.name} variant="detail" />
 
       {recoveryFailed && (
         <p className="text-xs text-destructive" role="status">
@@ -192,6 +194,55 @@ export function PluginDetailHeader({ plugin }: Props) {
 
       {diagnostics.length > 0 && <DiagnosticsPreview entries={diagnostics} t={t} />}
     </header>
+  )
+}
+
+interface HeaderActionProps {
+  icon: ComponentType<{ className?: string }>
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  destructive?: boolean
+  iconClassName?: string
+}
+
+/**
+ * A header action that spends the space it has.
+ *
+ * Icon-only until the header is wide enough for words, with the label always
+ * reachable through the tooltip and the accessible name. The labelled buttons
+ * ("Review permissions", "Retry cleanup") are long enough that three of them
+ * forced a wrap on any pane narrower than about 460px, which is the common
+ * case for this rail.
+ */
+function HeaderAction({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  destructive,
+  iconClassName,
+}: HeaderActionProps) {
+  return (
+    // `title` + `aria-label` rather than a Radix Tooltip: this header is
+    // mounted in the right pane, in the phone Sheet, and in unit tests, and a
+    // Tooltip throws wherever no TooltipProvider happens to be above it. The
+    // label is what matters, and both attributes carry it either way.
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "h-6 gap-1 px-1.5 text-xs",
+        destructive && "text-destructive hover:text-destructive"
+      )}
+    >
+      <Icon className={cn("size-3.5 shrink-0", iconClassName)} />
+      <span className="hidden @lg/plugin-detail-header:inline">{label}</span>
+    </Button>
   )
 }
 

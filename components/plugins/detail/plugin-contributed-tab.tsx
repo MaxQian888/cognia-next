@@ -27,7 +27,7 @@
 import { useTranslations } from "next-intl"
 import { useSyncExternalStore } from "react"
 import { Badge } from "@/components/ui/badge"
-import { Card } from "@/components/ui/card"
+import { PluginDetailGroup, PluginDetailNone } from "./plugin-detail-group"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import {
   listPluginThemes,
@@ -198,37 +198,38 @@ export function PluginContributedTab({ pluginId }: Props) {
   const populated = sections.filter((s) => s.items.length > 0)
 
   if (populated.length === 0) {
-    return (
-      <Card className="p-6 text-center">
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      </Card>
-    )
+    return <PluginDetailNone message={t("empty")} testId="plugin-contributed-empty" />
   }
 
   return (
-    <div className="space-y-3" data-testid="plugin-contributed-tab">
+    <div className="space-y-2" data-testid="plugin-contributed-tab">
       {populated.map((section) => (
-        <ContributionCard key={section.key} labelKey={section.key} items={section.items} />
+        <ContributionGroup key={section.key} labelKey={section.key} items={section.items} />
       ))}
     </div>
   )
 }
 
-interface ContributionCardProps {
+interface ContributionGroupProps {
   labelKey: ContributionLabelKey
   items: string[]
 }
 
-function ContributionCard({ labelKey, items }: ContributionCardProps) {
+// Flat, not a card. These groups already sit inside a collapsible section
+// inside the detail pane, so a bordered box here was the third nested frame
+// around a row of chips.
+function ContributionGroup({ labelKey, items }: ContributionGroupProps) {
   const t = useTranslations("plugins.detail.contributed")
   return (
-    <Card className="p-3 space-y-2" data-testid={`contributed-${labelKey}`}>
-      <div className="flex items-center justify-between gap-2">
-        <h4 className="text-xs font-semibold">{t(labelKey)}</h4>
+    <PluginDetailGroup
+      title={t(labelKey)}
+      actions={
         <Badge variant="outline" className="text-xs">
           {t("countBadge", { count: items.length })}
         </Badge>
-      </div>
+      }
+      testId={`contributed-${labelKey}`}
+    >
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => (
           <Badge key={item} variant="secondary" className="font-mono text-xs">
@@ -236,6 +237,6 @@ function ContributionCard({ labelKey, items }: ContributionCardProps) {
           </Badge>
         ))}
       </div>
-    </Card>
+    </PluginDetailGroup>
   )
 }

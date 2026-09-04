@@ -169,6 +169,10 @@ describe("determinate progress (Epic 3 / ADR-0096)", () => {
     })
   }
 
+  /** Matches only on-screen text, never the sr-only live region's copy of it. */
+  const visibleDetail = (text: string) =>
+    screen.queryAllByText(new RegExp(text)).filter((el) => !el.closest('[role="status"]'))
+
   beforeEach(() => {
     jest.useFakeTimers()
   })
@@ -260,5 +264,46 @@ describe("determinate progress (Epic 3 / ADR-0096)", () => {
     advanceToIndicator()
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
     expect(screen.getByRole("status")).toHaveTextContent("Loading sessions")
+  })
+
+  it("keeps the visible detail line off when showDetail is false", () => {
+    // A hairline region inside a one-line list row cannot afford a text line:
+    // it is taller than the row, so it either pushes the row's own content
+    // around or prints over it.
+    setup({
+      label: "Enabling Alpha",
+      progress: { processed: 4, total: 7, phaseLabel: "Starting the plugin" },
+      showDetail: false,
+    })
+    advanceToIndicator()
+
+    expect(screen.getByRole("progressbar")).toBeInTheDocument()
+    expect(visibleDetail("Starting the plugin")).toHaveLength(0)
+  })
+
+  it("still announces the detail to a screen reader when the line is hidden", () => {
+    setup({
+      label: "Enabling Alpha",
+      progress: { processed: 4, total: 7, phaseLabel: "Starting the plugin" },
+      showDetail: false,
+    })
+    advanceToIndicator()
+
+    const status = screen.getByRole("status")
+    expect(status).toHaveTextContent("Starting the plugin")
+    expect(status).toHaveTextContent("4/7")
+  })
+
+  it("keeps the detail row when a cancel button lives inside it", () => {
+    // Hiding the row would take the only escape hatch with it.
+    setup({
+      label: "Enabling Alpha",
+      progress: { processed: 4, total: 7, phaseLabel: "Starting the plugin" },
+      showDetail: false,
+      onCancel: () => {},
+    })
+    advanceToIndicator()
+
+    expect(visibleDetail("Starting the plugin")).toHaveLength(1)
   })
 })

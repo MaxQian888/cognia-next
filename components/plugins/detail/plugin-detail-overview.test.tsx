@@ -98,16 +98,40 @@ describe("PluginDetailOverview", () => {
     expect(usePluginsStore.getState().rollbackTarget).toBe("alpha")
   })
 
-  it("renders the View raw manifest dialog with a highlighted JSON code block", () => {
+  it("swaps the details body for the raw manifest in place, without a dialog", () => {
     codeBlockPropsMock.mockClear()
     render(<PluginDetailOverview pluginId="alpha" />)
-    fireEvent.click(screen.getByText("rawManifest"))
-    expect(screen.getByText("rawManifestTitle")).toBeInTheDocument()
+    // Details is the landing view, so the meta list is what renders first.
+    expect(screen.getByText("metaId")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-detail-raw-manifest")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText("viewManifest"))
+
+    expect(screen.getByTestId("plugin-detail-raw-manifest")).toBeInTheDocument()
     // The manifest is handed to the CodeBlock as JSON for syntax highlighting.
     expect(codeBlockPropsMock).toHaveBeenCalledWith(
       expect.objectContaining({ language: "json", filename: "alpha.json" })
     )
     expect(screen.getByTestId("manifest-code").textContent).toContain('"alpha"')
+    // In place means the details it replaced are gone, not covered by a modal.
+    expect(screen.queryByText("metaId")).not.toBeInTheDocument()
+  })
+
+  it("returns to the details view from the raw manifest", () => {
+    render(<PluginDetailOverview pluginId="alpha" />)
+    fireEvent.click(screen.getByText("viewManifest"))
+    fireEvent.click(screen.getByText("viewInfo"))
+    expect(screen.getByText("metaId")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-detail-raw-manifest")).not.toBeInTheDocument()
+  })
+
+  it("keeps a view selected when the active toggle is clicked again", () => {
+    render(<PluginDetailOverview pluginId="alpha" />)
+    fireEvent.click(screen.getByText("viewManifest"))
+    // Radix deselects a pressed single-value item. The pane has no third state,
+    // so the empty value must be ignored rather than blanking the body.
+    fireEvent.click(screen.getByText("viewManifest"))
+    expect(screen.getByTestId("plugin-detail-raw-manifest")).toBeInTheDocument()
   })
 
   it("hides the Verification card when no snapshot exists in memory", () => {

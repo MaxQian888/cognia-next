@@ -17,6 +17,12 @@ jest.mock("../_shared/plugin-compatibility-badge", () => ({
   PluginCompatibilityBadge: () => <div data-testid="compatibility-badge-stub" />,
 }))
 
+jest.mock("../plugin-activation-progress", () => ({
+  PluginActivationProgress: ({ className }: { className?: string }) => (
+    <div data-testid="activation-progress" className={className} />
+  ),
+}))
+
 import { PluginLibraryRow } from "./plugin-library-row"
 
 const baseRow: PluginRow = {
@@ -279,5 +285,52 @@ describe("PluginLibraryRow", () => {
       />
     )
     expect(screen.queryByTestId(`plugin-source-badge-${source}`)).not.toBeInTheDocument()
+  })
+
+  it("keeps the activation bar out of the row's layout flow", () => {
+    const h = handlers()
+    render(
+      <PluginLibraryRow
+        plugin={{ ...baseRow, status: "enabling" }}
+        selected={false}
+        active={false}
+        {...h}
+      />
+    )
+    const bar = screen.getByTestId("activation-progress")
+    // A bar that joins the status cluster shifts every badge beside it when an
+    // activation starts and shifts them back when it ends. A cold start
+    // activates plugins one after another, so the whole list twitched.
+    expect(bar.className).toContain("absolute")
+    expect(bar.className).toContain("bottom-0")
+    expect(bar.className).toContain("pointer-events-none")
+  })
+
+  it("mounts the bar as a sibling of the row rather than inside the status cluster", () => {
+    const h = handlers()
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+    const bar = screen.getByTestId("activation-progress")
+    const row = screen.getByText("Test Plugin").closest("[data-plugin-id]")
+    expect(bar.parentElement).toBe(row)
+  })
+
+  it("clips the row so one long plugin cannot widen the whole list", () => {
+    const h = handlers()
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+    const row = screen.getByText("Test Plugin").closest("[data-plugin-id]") as HTMLElement
+    // Capability chips are fixed-width pills that cannot truncate. Without
+    // both of these the row grew past the pane and the list's scroll container
+    // answered with a horizontal scrollbar that shifted every row sideways.
+    expect(row.className).toContain("min-w-0")
+    expect(row.className).toContain("overflow-hidden")
+  })
+
+  it("scrolls the capability chips inside their own strip", () => {
+    const h = handlers()
+    render(<PluginLibraryRow plugin={baseRow} selected={false} active={false} {...h} />)
+    const strip = screen.getByTestId("plugin-library-row-capabilities")
+    // Clipping instead would hide capabilities with no way to reach them.
+    expect(strip.className).toContain("overflow-x-auto")
+    expect(strip.className).toContain("min-w-0")
   })
 })

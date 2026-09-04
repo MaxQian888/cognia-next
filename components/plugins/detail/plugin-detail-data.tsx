@@ -103,7 +103,7 @@ function DataSubSection({
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="rounded-md border">
       <CollapsibleTrigger
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold hover:bg-accent/40 focus-visible:outline-2 focus-visible:outline-ring"
+        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold hover:bg-accent/40 focus-visible:outline-2 focus-visible:outline-ring"
         data-testid={testId}
         data-state={open ? "open" : "closed"}
       >
@@ -112,7 +112,7 @@ function DataSubSection({
         />
         <span className="flex-1 text-left">{title}</span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="p-3 pt-2">{children}</CollapsibleContent>
+      <CollapsibleContent className="px-2.5 pt-1 pb-2">{children}</CollapsibleContent>
     </Collapsible>
   )
 }

@@ -10,7 +10,6 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckCircle2Icon, CircleHelpIcon, XCircleIcon } from "lucide-react"
-import { Card } from "@/components/ui/card"
 import {
   PackageInfo,
   PackageInfoHeader,
@@ -89,7 +88,10 @@ export function PluginDependencyPanel({ manifest, className }: Props) {
   if (isEmpty) return null
 
   return (
-    <Card className={`p-3 space-y-3 ${className ?? ""}`} data-testid="plugin-dependency-panel">
+    <section
+      className={`space-y-3 border-t pt-2 ${className ?? ""}`}
+      data-testid="plugin-dependency-panel"
+    >
       <h3 className="text-xs font-semibold">{t("title")}</h3>
 
       {(required.length > 0 || optional.length > 0) && (
@@ -172,7 +174,7 @@ export function PluginDependencyPanel({ manifest, className }: Props) {
           </div>
         </div>
       )}
-    </Card>
+    </section>
   )
 }
 

@@ -172,4 +172,48 @@ describe("localized phase labels", () => {
     showIndicator()
     expect(screen.getByText(label)).toBeInTheDocument()
   })
+
+  it("prints no phase text in the row variant, which is one line tall", () => {
+    // The shared region's detail line is taller than a list row, so it either
+    // pushed the row's badges around or printed over the row below it.
+    __resetPluginActivationProgressStoreForTesting()
+    beginPluginActivationProgress("p")
+    advancePluginActivationProgress("p", "runtime")
+    render(<PluginActivationProgress pluginId="p" pluginName="Alpha" variant="row" />)
+    showIndicator()
+
+    const visible = screen
+      .queryAllByText(/Starting the plugin/)
+      .filter((el) => !el.closest('[role="status"]'))
+    expect(visible).toHaveLength(0)
+    // The bar itself still renders, and the announcement still carries both.
+    expect(screen.getByRole("progressbar")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Starting the plugin")
+  })
+
+  it("thins and tints the bar in the row variant so it is not read as a divider", () => {
+    __resetPluginActivationProgressStoreForTesting()
+    beginPluginActivationProgress("p")
+    advancePluginActivationProgress("p", "runtime")
+    const { container } = render(<PluginActivationProgress pluginId="p" variant="row" />)
+    showIndicator()
+
+    const region = container.querySelector("[data-slot='loading-region']")
+    // The shared 4px solid-primary bar at a dense row's edge reads as a heavy
+    // black rule sitting on the row divider rather than as progress.
+    expect(region?.className).toContain("[&_[data-slot=progress]]:h-0.5")
+    expect(region?.className).toContain("[&_[data-slot=progress-indicator]]:bg-primary/60")
+  })
+
+  it("keeps the full-size bar and the phase text in the detail variant", () => {
+    __resetPluginActivationProgressStoreForTesting()
+    beginPluginActivationProgress("p")
+    advancePluginActivationProgress("p", "runtime")
+    const { container } = render(<PluginActivationProgress pluginId="p" variant="detail" />)
+    showIndicator()
+
+    const region = container.querySelector("[data-slot='loading-region']")
+    expect(region?.className ?? "").not.toContain("[&_[data-slot=progress]]:h-0.5")
+    expect(screen.getAllByText(/Starting the plugin/).length).toBeGreaterThan(0)
+  })
 })

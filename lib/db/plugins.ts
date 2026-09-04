@@ -67,10 +67,12 @@ export type PluginDraft = Pick<
     >
   >
 
-export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
-  const now = Date.now()
-  const existing = await getDb().plugins.get(draft.id)
-  const row: PluginRow = {
+/**
+ * Merge a draft over the persisted row. Pure — the write decision is made by
+ * the callers below, which is what lets discovery skip a `put` entirely.
+ */
+function mergeDraft(draft: PluginDraft, existing: PluginRow | undefined, now: number): PluginRow {
+  return {
     id: draft.id || newId(),
     name: draft.name.trim() || "Unnamed plugin",
     version: draft.version,
@@ -91,8 +93,97 @@ export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   }
+}
+
+/**
+ * True when the merged row would change nothing but `updatedAt`.
+ *
+ * Plugin discovery re-runs on EVERY launch and re-upserts every built-in, so
+ * without this every boot wrote ~50 identical rows. Each write commits its own
+ * Dexie transaction, each transaction wakes the `/plugins` live-query, and the
+ * Library list therefore re-rendered (and, under `sort: "updated"`, re-ordered)
+ * once per plugin while the panel was being read — the visible "list keeps
+ * shuffling while loading". It also reset `updatedAt` on every launch, so the
+ * detail pane's "Last updated" reported the last app start rather than the last
+ * time the plugin actually changed.
+ */
+function isUnchanged(next: PluginRow, existing: PluginRow | undefined): boolean {
+  if (!existing) return false
+  const { updatedAt: _nextUpdatedAt, ...nextRest } = next
+  const { updatedAt: _prevUpdatedAt, ...prevRest } = existing
+  const a = stableStringify(nextRest)
+  const b = stableStringify(prevRest)
+  // A row this comparison cannot read is not a row it may call unchanged. This
+  // is an optimization, so its failure mode has to be the write it was skipping.
+  if (a === null || b === null) return false
+  return a === b
+}
+
+/**
+ * Key-order-independent JSON so a re-serialized manifest doesn't read as a
+ * change, or null when the value cannot be serialized at all.
+ *
+ * IndexedDB stores by structured clone, which accepts cycles and BigInt, and
+ * `JSON.stringify` throws on both. Every write that reaches here used to go
+ * straight to `put` without being serialized, so letting the throw escape would
+ * fail installs that used to succeed, over a comparison whose only job is to
+ * skip work.
+ */
+function stableStringify(value: unknown): string | null {
+  try {
+    return JSON.stringify(value, (_key, val) => {
+      if (val && typeof val === "object" && !Array.isArray(val)) {
+        const record = val as Record<string, unknown>
+        const sorted: Record<string, unknown> = {}
+        for (const key of Object.keys(record).sort()) sorted[key] = record[key]
+        return sorted
+      }
+      return val as unknown
+    })
+  } catch {
+    return null
+  }
+}
+
+export async function upsertPlugin(draft: PluginDraft): Promise<PluginRow> {
+  const now = Date.now()
+  const existing = await getDb().plugins.get(draft.id)
+  const row = mergeDraft(draft, existing, now)
+  if (isUnchanged(row, existing)) return existing as PluginRow
   await getDb().plugins.put(row)
   return row
+}
+
+/**
+ * Upsert a batch of drafts inside ONE Dexie transaction, skipping rows that
+ * would not change (see `isUnchanged`).
+ *
+ * Discovery persists every plugin it finds. Doing that one `upsertPlugin` at a
+ * time meant N transactions and therefore N live-query wake-ups, so on a cold
+ * start the Library list grew (and re-sorted) row by row instead of appearing
+ * at once. One transaction fires the observers once.
+ */
+export async function upsertPlugins(drafts: readonly PluginDraft[]): Promise<PluginRow[]> {
+  if (drafts.length === 0) return []
+  const now = Date.now()
+  const db = getDb()
+  return db.transaction("rw", db.plugins, async () => {
+    const existingRows = await db.plugins.bulkGet(drafts.map((draft) => draft.id))
+    const merged: PluginRow[] = []
+    const changed: PluginRow[] = []
+    drafts.forEach((draft, index) => {
+      const existing = existingRows[index]
+      const row = mergeDraft(draft, existing, now)
+      if (isUnchanged(row, existing)) {
+        merged.push(existing as PluginRow)
+        return
+      }
+      merged.push(row)
+      changed.push(row)
+    })
+    if (changed.length > 0) await db.plugins.bulkPut(changed)
+    return merged
+  })
 }
 
 export async function updatePlugin(

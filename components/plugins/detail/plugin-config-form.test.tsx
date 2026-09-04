@@ -178,13 +178,42 @@ describe("PluginConfigFormContent", () => {
     expect(screen.getByText("Your **API** token")).toBeInTheDocument()
   })
 
-  it("renders the noSchema fallback when manifest has no configSchema", () => {
+  it("says there is nothing to configure when there is no schema and no config", () => {
+    // The old fallback rendered a header, a read-only `{}` code block and a
+    // Close button, which reads as a settings editor that refuses to work.
     mockPlugin = {
       ...schemaPlugin,
       manifest: { id: "p_conf" },
+      config: undefined,
     }
     renderForm()
+    expect(screen.getByTestId("plugin-config-none")).toBeInTheDocument()
+    expect(screen.getByText("noConfigSchema")).toBeInTheDocument()
+    expect(screen.queryByTestId("plugin-config-raw")).not.toBeInTheDocument()
+    expect(screen.queryByText("{}")).not.toBeInTheDocument()
+  })
+
+  it("treats an empty persisted config the same as none at all", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: { id: "p_conf" },
+      config: {},
+    }
+    renderForm()
+    expect(screen.getByTestId("plugin-config-none")).toBeInTheDocument()
+  })
+
+  it("keeps the raw block only when there is persisted config to look at", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: { id: "p_conf" },
+      config: { token: "abc" },
+    }
+    renderForm()
+    expect(screen.getByTestId("plugin-config-raw")).toBeInTheDocument()
     expect(screen.getByText("noSchema")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-config-raw").textContent).toContain("token")
+    expect(screen.queryByTestId("plugin-config-none")).not.toBeInTheDocument()
   })
 
   it("uses the localized arrayPlaceholder for array-typed fields", () => {

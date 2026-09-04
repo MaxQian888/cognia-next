@@ -137,7 +137,14 @@ export function PluginLibraryList() {
   return (
     <>
       {selectAllBar}
-      <div role="list" className="divide-y" data-testid="plugin-library-list">
+      {/* `overflow-x-hidden`: the rows clip their own content, and this makes
+          the guarantee structural. A single row that manages to overflow must
+          not be able to give the whole list a horizontal scrollbar. */}
+      <div
+        role="list"
+        className="min-w-0 divide-y overflow-x-hidden"
+        data-testid="plugin-library-list"
+      >
         {filtered.map((row) => (
           <PluginLibraryRow
             key={row.id}

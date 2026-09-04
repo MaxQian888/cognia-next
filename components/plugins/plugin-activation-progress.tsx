@@ -65,8 +65,21 @@ export function PluginActivationProgress({
           total: progress.total,
           phaseLabel,
         }}
-        // The bar IS the indicator; there is no separate skeleton to swap in.
+        // A list row is one line tall. The region's own detail line is taller
+        // than that, so in `row` it either shoved the row's badges around or
+        // printed over them. The bar alone is the whole indicator there, and
+        // the polite announcement still carries the phase and the count.
+        showDetail={showText}
+        // The bar IS the indicator, so there is no separate skeleton to swap in.
         fallback={null}
+        className={cn(
+          // The shared region draws a 4px solid-primary bar, which at the edge
+          // of a dense list row reads as a heavy black rule rather than as
+          // progress, and is easily mistaken for the row divider it sits on.
+          // Halve it and tint it in `row` only.
+          variant === "row" &&
+            "[&_[data-slot=progress]]:h-0.5 [&_[data-slot=progress]]:bg-primary/15 [&_[data-slot=progress-indicator]]:bg-primary/60"
+        )}
       />
       {showText ? (
         // aria-hidden: LoadingRegion's status element already announced both.

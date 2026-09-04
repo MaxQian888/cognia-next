@@ -64,12 +64,18 @@ jest.mock("./logger", () => ({
   loggers: {
     manager: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
   },
-  createPluginSystemLogger: jest.fn(() => ({
-    info: (...args: unknown[]) => console.info(...args),
-    warn: (...args: unknown[]) => console.warn(...args),
-    error: (...args: unknown[]) => console.error(...args),
-    debug: (...args: unknown[]) => console.debug(...args),
-  })),
+  createPluginSystemLogger: jest.fn(() => {
+    const base = {
+      info: (...args: unknown[]) => console.info(...args),
+      warn: (...args: unknown[]) => console.warn(...args),
+      error: (...args: unknown[]) => console.error(...args),
+      debug: (...args: unknown[]) => console.debug(...args),
+      // The real wrapper returns a logger carrying the context. Record it so a
+      // test can read back what the plugin logger was tagged with.
+      withContext: (context: Record<string, unknown>) => ({ ...base, context }),
+    }
+    return base
+  }),
 }))
 
 // Mock rate limiter
@@ -328,6 +334,21 @@ describe("createPluginContext", () => {
     const context = createPluginContext(plugin, mockManager)
 
     expect(context.pluginId).toBe("test-plugin")
+  })
+
+  it("tags ctx.logger as the plugin log source, debug session or not", () => {
+    // `getLogSource()` in the log panel keys off `origin`/`runtime`, so an
+    // untagged logger files a plugin's own output as ordinary frontend noise
+    // and the detail pane's `src=plugin` deep link matches none of it. Tagging
+    // it here rather than bridging the devtools ring is what makes that true
+    // for a built-in plugin with developer mode off, which is the default.
+    const context = createPluginContext(createMockPlugin(), mockManager)
+
+    expect((context.logger as unknown as { context: Record<string, unknown> }).context).toEqual({
+      runtime: "plugin",
+      origin: "plugin",
+      pluginId: "test-plugin",
+    })
   })
 
   it("tags debug sessions with the activation generation", () => {

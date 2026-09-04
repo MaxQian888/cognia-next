@@ -135,6 +135,7 @@ jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(async () => undefined),
   updatePlugin: jest.fn(async () => undefined),
   upsertPlugin: jest.fn(async () => undefined),
+  upsertPlugins: jest.fn(async () => []),
   getPythonHostSettings: jest.fn(async () => undefined),
   setPythonHostSettings: jest.fn(async () => undefined),
   setPluginEnabled: jest.fn(async () => undefined),
@@ -158,7 +159,7 @@ jest.mock("@/lib/plugin/security/wasm-grant", () => ({
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { DEFAULT_POLICY, readPolicy, writePolicy } from "@/lib/plugin/core/plugins-policy-storage"
-import { getPlugin, updatePlugin, upsertPlugin } from "@/lib/db/plugins"
+import { getPlugin, updatePlugin, upsertPlugin, upsertPlugins } from "@/lib/db/plugins"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
@@ -264,6 +265,7 @@ describe("PluginManager", () => {
     mockCanUseTauriInvoke.mockReturnValue(true)
     ;(getPlugin as jest.Mock).mockReset().mockResolvedValue(undefined)
     ;(upsertPlugin as jest.Mock).mockReset().mockResolvedValue(undefined)
+    ;(upsertPlugins as jest.Mock).mockReset().mockResolvedValue([])
     mockApplyWasmCapabilityGrant.mockClear()
     mockClearWasmCapabilityGrant.mockClear()
     mockReconcileWasmGrantLedgerWithManifest.mockClear()
@@ -703,7 +705,7 @@ describe("PluginManager", () => {
         }),
       }
       mockGetState.mockReturnValue(store)
-      ;(upsertPlugin as jest.Mock).mockClear()
+      ;(upsertPlugins as jest.Mock).mockClear()
 
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
@@ -714,8 +716,16 @@ describe("PluginManager", () => {
       // Every built-in surfaced by the registry walk must land in Dexie, or the
       // Dexie-backed Library + marketplace "Built-in" section render nothing.
       expect(discovered.length).toBeGreaterThan(0)
-      expect(upsertPlugin).toHaveBeenCalledTimes(discovered.length)
-      expect(upsertPlugin).toHaveBeenCalledWith(
+      // ONE call for the whole pass. Per-plugin writes meant one Dexie
+      // transaction each, so the /plugins live-query woke once per built-in and
+      // the Library list re-rendered and re-sorted its way through boot.
+      expect(upsertPlugins).toHaveBeenCalledTimes(1)
+      const drafts = (upsertPlugins as jest.Mock).mock.calls[0]![0] as Array<{
+        source: string
+        type: string
+      }>
+      expect(drafts).toHaveLength(discovered.length)
+      expect(drafts[0]).toEqual(
         expect.objectContaining({ source: "builtin", type: expect.any(String) })
       )
     })
@@ -727,8 +737,8 @@ describe("PluginManager", () => {
         installPlugin: jest.fn(async () => undefined),
       }
       mockGetState.mockReturnValue(store)
-      ;(upsertPlugin as jest.Mock).mockClear()
-      ;(upsertPlugin as jest.Mock).mockRejectedValue(new Error("IndexedDB closed"))
+      ;(upsertPlugins as jest.Mock).mockClear()
+      ;(upsertPlugins as jest.Mock).mockRejectedValue(new Error("IndexedDB closed"))
 
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
@@ -738,8 +748,8 @@ describe("PluginManager", () => {
 
       // A persistence hiccup must not abort the in-memory discovery walk.
       expect(discovered.length).toBeGreaterThan(0)
-      expect(upsertPlugin).toHaveBeenCalled()
-      ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
+      expect(upsertPlugins).toHaveBeenCalled()
+      ;(upsertPlugins as jest.Mock).mockResolvedValue([])
     })
 
     it.each([
@@ -794,14 +804,18 @@ describe("PluginManager", () => {
       }
       mockGetState.mockReturnValue(store)
       ;(getPlugin as jest.Mock).mockResolvedValue({ status: "enabled", enabled: true })
-      ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
+      ;(upsertPlugins as jest.Mock).mockClear()
+      ;(upsertPlugins as jest.Mock).mockResolvedValue([])
 
       await new PluginManager({
         pluginDirectory: "/plugins",
         runtimeProfile: "browser",
       }).scanPlugins()
 
-      expect(upsertPlugin).toHaveBeenCalledWith(
+      const drafts = (upsertPlugins as jest.Mock).mock.calls[0]![0] as Array<
+        Record<string, unknown>
+      >
+      expect(drafts).toContainEqual(
         expect.objectContaining({ id: "github-delivery", status: "installed", enabled: false })
       )
     })

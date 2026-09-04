@@ -70,6 +70,17 @@ export interface LoadingRegionProps {
    * as a second announcement.
    */
   progress?: LoadingRegionProgress | null
+  /**
+   * Show the visible detail line ("Starting the plugin - 4/7", "Still
+   * working... (23s)"). Defaults to true.
+   *
+   * Pass false where the region is a hairline inside something else, such as a
+   * one-line list row: a text line there is taller than the row it describes,
+   * so it either pushes the row's content around or overlaps it. The polite
+   * live region still announces the same detail, so turning the line off costs
+   * nothing to a screen reader.
+   */
+  showDetail?: boolean
   children?: ReactNode
   className?: string
 }
@@ -81,6 +92,7 @@ export function LoadingRegion({
   fallback,
   onCancel,
   progress,
+  showDetail = true,
   children,
   className,
 }: LoadingRegionProps) {
@@ -95,7 +107,12 @@ export function LoadingRegion({
       className={className}
     >
       {showIndicator ? (
-        <LoadingRegionStatus label={label} onCancel={onCancel} progress={progress} />
+        <LoadingRegionStatus
+          label={label}
+          onCancel={onCancel}
+          progress={progress}
+          showDetail={showDetail}
+        />
       ) : null}
       {showIndicator ? fallback : children}
     </div>
@@ -106,6 +123,7 @@ interface LoadingRegionStatusProps {
   label?: string
   onCancel?: () => void
   progress?: LoadingRegionProgress | null
+  showDetail?: boolean
 }
 
 /**
@@ -116,7 +134,12 @@ interface LoadingRegionStatusProps {
  * prolonged threshold re-announces once — which is the whole point of
  * escalating — without interrupting whatever the user is doing.
  */
-function LoadingRegionStatus({ label, onCancel, progress }: LoadingRegionStatusProps) {
+function LoadingRegionStatus({
+  label,
+  onCancel,
+  progress,
+  showDetail = true,
+}: LoadingRegionStatusProps) {
   const t = useLoadingI18n()
   const { phase, elapsedMs, offline } = useLoadingPhase({ canEscalate: Boolean(onCancel) })
 
@@ -147,7 +170,9 @@ function LoadingRegionStatus({ label, onCancel, progress }: LoadingRegionStatusP
   // Determinate regions speak on every phase boundary (at most 7 times); the
   // indeterminate ones only once the wait becomes prolonged.
   const announceDetail = determinate || prolonged
-  const showDetailRow = prolonged || determinate
+  // The announcement is unconditional. Only the visible line is suppressed,
+  // and never when there is a cancel button to reach inside it.
+  const showDetailRow = (prolonged || determinate) && (showDetail || Boolean(onCancel))
 
   return (
     <>

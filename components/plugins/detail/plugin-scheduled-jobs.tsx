@@ -19,7 +19,6 @@ import {
   ArrowUpDownIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -168,7 +167,7 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
 
   if (jobs.length === 0) {
     return (
-      <Card className="p-6 text-center space-y-3">
+      <div className="space-y-3 rounded-control border border-dashed p-4 text-center">
         <ClockIcon className="size-10 mx-auto text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{t("empty")}</p>
         <Button asChild size="sm" variant="outline">
@@ -177,7 +176,7 @@ export function PluginScheduledJobs({ jobsOverride, pluginId }: PluginScheduledJ
             <ArrowRightIcon className="ml-1.5 size-3.5" />
           </Link>
         </Button>
-      </Card>
+      </div>
     )
   }
 

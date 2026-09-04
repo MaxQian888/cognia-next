@@ -16,7 +16,6 @@ import { usePluginPermissions, usePluginRow } from "@/hooks/plugins"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PermissionRow } from "../plugin-permission-review"
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { AuditLogEntry } from "../audit-log-entry"
 import { PluginApprovedBinariesCard } from "./plugin-approved-binaries-card"
@@ -88,7 +87,7 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
   return (
     <div className="space-y-3">
       {trustCard}
-      <Card className="p-0 overflow-hidden">
+      <div className="overflow-hidden rounded-md border">
         <Table className="table-fixed">
           <TableHeader className="hidden sm:table-header-group">
             <TableRow>
@@ -128,13 +127,13 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
             })}
           </TableBody>
         </Table>
-      </Card>
+      </div>
 
       <PluginApprovedBinariesCard pluginId={pluginId} />
 
       <div className="space-y-1">
         <h3 className="text-xs font-semibold">{t("auditLogTitle")}</h3>
-        <Card className="p-0">
+        <div className="rounded-md border">
           <ScrollArea className="max-h-[20vh]">
             {auditLog.length === 0 ? (
               <p className="p-3 text-xs text-muted-foreground">{t("auditEmpty")}</p>
@@ -146,7 +145,7 @@ export function PluginDetailPermissions({ pluginId }: { pluginId: string }) {
               </ul>
             )}
           </ScrollArea>
-        </Card>
+        </div>
       </div>
     </div>
   )

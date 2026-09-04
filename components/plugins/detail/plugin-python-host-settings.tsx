@@ -17,7 +17,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, DownloadIcon, PackageIcon, ServerCogIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -283,7 +282,7 @@ export function PluginPythonHostSettings({
   }
 
   return (
-    <Card className="p-4 space-y-4" data-testid="python-host-settings">
+    <div className="space-y-3" data-testid="python-host-settings">
       <div className="flex items-center gap-2">
         <ServerCogIcon className="size-4 text-muted-foreground" />
         <div>
@@ -600,6 +599,6 @@ export function PluginPythonHostSettings({
           )}
         </div>
       )}
-    </Card>
+    </div>
   )
 }
