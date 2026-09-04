@@ -207,3 +207,31 @@ export interface BotEventDeliveryRow {
   /** When the delivery reached a terminal status. Drives retention. */
   settledAt?: number
 }
+
+/**
+ * One durable step checkpoint for a Bot handler.
+ *
+ * Deliberately NOT the run journal. `runEventJournal` redacts every string in
+ * an event payload, which is exactly right for a human-readable timeline and
+ * exactly wrong for a memoized value: a step that returned a repository URL or
+ * an address would come back redacted after a resume, and the handler would
+ * carry on with corrupted data it has no way to notice.
+ *
+ * The journal still gets `step.started` and `step.completed` events for the
+ * timeline. Two writes, two purposes.
+ */
+export interface BotRunStepRow {
+  /** `${runId}::${name}`. The memoization key, so it is the primary key. */
+  id: string
+  runId: string
+  /** Stable across re-entries, unique within the run. */
+  name: string
+  status: "running" | "completed" | "failed"
+  /** The memoized output, stored verbatim. Absent until the step completes. */
+  output?: unknown
+  error?: string
+  /** How many times the handler has entered this step. */
+  attempt: number
+  startedAt: number
+  updatedAt: number
+}

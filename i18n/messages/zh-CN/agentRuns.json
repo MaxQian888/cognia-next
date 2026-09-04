@@ -92,6 +92,7 @@
   },
   "kind": {
     "agentTurn": "对话",
+    "bot": "Bot",
     "chat": "对话",
     "connector": "连接器",
     "delegation": "委派",

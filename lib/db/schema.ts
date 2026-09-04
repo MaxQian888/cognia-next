@@ -395,7 +395,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 221
+export const CURRENT_SCHEMA_VERSION = 222
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -919,6 +919,11 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
     "&id, definitionId, definitionSource, status, workspaceId, projectId, [definitionId+status], [workspaceId+status], [projectId+status], updatedAt",
   botEventDeliveries:
     "&id, &dedupKey, eventId, installationId, triggerId, status, [status+nextAttemptAt], [installationId+status], concurrencyKey, correlation, runId, leaseExpiresAt, receivedAt, settledAt",
+  // v222 — durable step checkpoints for a Bot handler. NOT the run journal:
+  // `runEventJournal` redacts every string in an event payload, which is right
+  // for a timeline and fatal for a memoized value a resumed handler must get
+  // back byte for byte.
+  botRunSteps: "&id, runId, [runId+name], status, updatedAt",
 }
 
 let databaseConnectionSequence = 0
@@ -1436,6 +1441,7 @@ export class CogniaDB extends Dexie {
   botDefinitions!: Table<import("./bot-types").BotDefinitionRow, string>
   botInstallations!: Table<import("./bot-types").BotInstallationRow, string>
   botEventDeliveries!: Table<import("./bot-types").BotEventDeliveryRow, string>
+  botRunSteps!: Table<import("./bot-types").BotRunStepRow, string>
 
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)

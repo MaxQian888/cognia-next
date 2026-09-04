@@ -115,6 +115,7 @@ const EN: ActivityI18n = {
       delegation: "Delegated task",
       job: "Background task",
       "security-scan": "Security scan",
+      bot: "Bot",
     })[kind],
   activityLabel: (activity) =>
     ({
@@ -194,6 +195,7 @@ const ZH: ActivityI18n = {
       delegation: "委派任务",
       job: "后台任务",
       "security-scan": "安全扫描",
+      bot: "Bot",
     })[kind],
   activityLabel: (activity) =>
     ({

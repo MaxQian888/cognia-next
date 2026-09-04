@@ -420,6 +420,11 @@ export const EXECUTION_FILTER_KINDS = [
   // reachable once `security-scan-bridge.ts` started projecting the Strix
   // plugin's runs.
   "security-scan",
+  // Reachable once `bot-run.ts` starts creating runs. A Bot run is a queue
+  // entry with a face, so being able to filter it apart from the agent turns
+  // it may spawn is the difference between reading the cockpit and scrolling
+  // it.
+  "bot",
 ] as const
 
 export type ExecutionFilterKind = (typeof EXECUTION_FILTER_KINDS)[number]

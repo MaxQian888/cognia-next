@@ -19,6 +19,7 @@
   "filteredEmpty": "No executions match your filters.",
   "kind": {
     "agentTurn": "Chat",
+    "bot": "Bot",
     "chat": "Chat",
     "connector": "Connector",
     "delegation": "Delegation",

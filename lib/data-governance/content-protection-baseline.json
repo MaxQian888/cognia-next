@@ -38,6 +38,7 @@
   "botDefinitions": "encrypted-content",
   "botEventDeliveries": "encrypted-content",
   "botInstallations": "encrypted-content",
+  "botRunSteps": "encrypted-content",
   "browserAnnotations": "metadata-only",
   "browserDomainGrants": "metadata-only",
   "browserProfiles": "metadata-only",

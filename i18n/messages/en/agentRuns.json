@@ -92,6 +92,7 @@
   },
   "kind": {
     "agentTurn": "Chat",
+    "bot": "Bot",
     "chat": "Chat",
     "connector": "Connector",
     "delegation": "Delegation",

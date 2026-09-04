@@ -45,6 +45,21 @@ export type ExecutionRunKind =
    * special case.
    */
   | "security-scan"
+  /**
+   * One installed Bot reacting to one event.
+   *
+   * Its own kind rather than a `job` because of what the delivery behind it
+   * means: a Bot run is the visible half of a queue entry that was leased,
+   * may be retried, and may be dead-lettered, and every surface that reads run
+   * status has to be able to answer "will this be tried again" without
+   * consulting a second system. It also parks on human decisions the way a
+   * workflow does, which a job never has.
+   *
+   * Stoppable and retryable, never steerable: a Bot run has no live input lane
+   * a person is typing into, which `allowedActions` yields without a special
+   * case.
+   */
+  | "bot"
 
 export type ExecutionRunStatus =
   | "queued"
@@ -424,6 +439,13 @@ export interface ExecutionRunInterrupt {
     | "human_handoff"
     /** A delegation held back from starting (quiet hours, operator sign-off). */
     | "delegation_approval"
+    /**
+     * A Bot run parked on a person mid-handler. Its own type because the
+     * question is not a tool call and not a workflow node: it is "here is what
+     * I intend to do next", asked by something nobody is watching, so the
+     * surfaces that route pending decisions have to be able to tell it apart.
+     */
+    | "bot_approval"
   status: ExecutionRunInterruptStatus
   title: string
   toolName?: string

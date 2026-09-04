@@ -220,6 +220,7 @@ export function buildCockpitRows(input: BuildCockpitRowsInput): UnifiedExecution
  */
 const KIND_LABEL_KEYS: Record<string, string> = {
   "agent-turn": "agentTurn",
+  bot: "bot",
   chat: "chat",
   connector: "connector",
   delegation: "delegation",

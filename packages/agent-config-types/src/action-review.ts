@@ -45,6 +45,8 @@ export type ActionReviewChannel =
   | "github-delivery"
   /** Stranded thread-handoff ticket adjudication (ADR-0103). */
   | "thread-handoff"
+  /** A Bot handler's `step.waitForApproval`. */
+  | "bot-step"
   /** Anything reaching the generic approval bus without a richer channel. */
   | "generic"
 
@@ -57,6 +59,7 @@ export const ACTION_REVIEW_CHANNELS: readonly ActionReviewChannel[] = [
   "connector-workflow",
   "github-delivery",
   "thread-handoff",
+  "bot-step",
   "generic",
 ]
 

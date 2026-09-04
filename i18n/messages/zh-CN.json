@@ -2261,7 +2261,8 @@
       "subagent": "子智能体",
       "team": "团队",
       "workflow": "工作流",
-      "workflowStep": "工作流步骤"
+      "workflowStep": "工作流步骤",
+      "bot": "Bot"
     },
     "live": "进行中",
     "loadMore": "加载更多",
@@ -11415,7 +11416,8 @@
       "subagent": "子代理",
       "team": "团队",
       "workflow": "工作流",
-      "workflowStep": "工作流步骤"
+      "workflowStep": "工作流步骤",
+      "bot": "Bot"
     },
     "runningCount": "{count, plural, =0 {空闲} other {# 个运行中}}",
     "sort": {

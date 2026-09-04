@@ -84,6 +84,7 @@ export const CORE_TABLE_NAMES = [
   "botDefinitions",
   "botEventDeliveries",
   "botInstallations",
+  "botRunSteps",
   "browserAnnotations",
   "browserDomainGrants",
   "browserProfiles",
@@ -1229,6 +1230,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     reason:
       "Two-role cross-host handoff journal (ADR-0103). Expired tickets are retired in place by the sweep, not removed; rows leave only with the owning account database.",
   },
+  botRunSteps: {
+    mode: "ttl",
+    days: 14,
+    enforcement: "domain",
+    reason:
+      "Checkpoints are useful only while their run can still be resumed or read back, and are dropped alongside the delivery that produced them.",
+  },
   botEventDeliveries: {
     mode: "ttl",
     days: 14,
@@ -1349,6 +1357,9 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // The envelope is a verbatim projection of somebody's pull-request body, IM
   // message or webhook payload. It is the least metadata-shaped row here.
   botEventDeliveries: "encrypted-content",
+  // A step's memoized output is whatever the handler returned, stored verbatim
+  // because a redacted replay would be corrupted data the handler cannot see.
+  botRunSteps: "encrypted-content",
   // What the user actually said to their pet, and what it said back. The name
   // matches none of the content-ish spellings the heuristic looks for, and it
   // sat in AUTO_INCREMENT_METADATA_TABLES besides, so it stored a private

@@ -62,6 +62,10 @@ export const DEFAULT_ACTION_REVIEW_ADAPTERS: Record<
   },
   "thread-handoff": { interruptType: "human_handoff", defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
   "connector-workflow": { interruptType: null, defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
+  // A real interrupt type, deliberately unlike `connector-workflow` above:
+  // a Bot's approval MUST produce something a person can answer, or the run
+  // waits forever for a decision that never appears anywhere.
+  "bot-step": { interruptType: "bot_approval", defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
   generic: { interruptType: "tool_approval", defaultTtlMs: DEFAULT_ACTION_REVIEW_TTL_MS },
 }
 
