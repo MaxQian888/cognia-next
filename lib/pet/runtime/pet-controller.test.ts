@@ -27,6 +27,7 @@ import { usePetStore } from "@/stores/pet/pet-store"
 import { listPetActivity } from "@/lib/db/pet"
 import { INTERACTION_COOLDOWN_MS } from "@/lib/pet/interaction/gate"
 import { XP_AWARD } from "@/lib/pet/xp/award-table"
+import { loggers } from "@cognia/logging"
 import type { PetEvent } from "@/types/pet"
 
 afterEach(() => {
@@ -402,6 +403,42 @@ describe("handlePetEvent", () => {
     ])
     await whenPetEventsSettled()
     expect((await getPetProfile())?.xp).toBe(15) // 3 × 5, none lost to a race
+  })
+})
+
+describe("failure reporting", () => {
+  it("keeps the chain alive after a failure, and does not swallow it silently", async () => {
+    const warn = jest.spyOn(loggers.app, "warn").mockImplementation(() => {})
+    try {
+      // The chain's catch is load-bearing: without it one rejection would
+      // poison every later event. It used to be empty, so a failed write
+      // vanished and the caller was told the interaction had succeeded.
+      const boom = jest
+        .spyOn(getDb().petProfile, "get")
+        .mockRejectedValueOnce(new Error("disk on fire"))
+      await handlePetEvent({ source: "user", kind: "fed", at: 1000 })
+      await whenPetEventsSettled()
+      expect(warn).toHaveBeenCalledWith(
+        "pet event handling failed",
+        expect.objectContaining({
+          kind: "fed",
+          error: "disk on fire",
+        })
+      )
+      boom.mockRestore()
+
+      // The next event is still processed.
+      await upsertPetProfile({
+        ...createDefaultProfile("acct-1", 0),
+        soul: { name: "Boba", personality: "x", hatchDate: "" },
+        stage: "baby",
+      })
+      await handlePetEvent({ source: "user", kind: "fed", at: 2000 })
+      await whenPetEventsSettled()
+      expect((await getPetProfile())!.xp).toBeGreaterThan(0)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 

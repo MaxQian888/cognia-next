@@ -29,6 +29,7 @@ import { checkAchievements } from "@/lib/pet/achievements/check"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { usePetStore } from "@/stores/pet/pet-store"
+import { loggers } from "@cognia/logging"
 
 /**
  * Event kinds whose resting state should honor a persistent care condition.
@@ -230,9 +231,25 @@ async function process(event: PetEvent): Promise<void> {
 
 let chain: Promise<void> = Promise.resolve()
 
-/** Handle one event, serialized after any in-flight handling. */
+/**
+ * Handle one event, serialized after any in-flight handling.
+ *
+ * The catch is load-bearing: an unhandled rejection would poison the chain and
+ * every later event would be dropped. But it used to be empty, so a failed
+ * profile write, a failed ledger append or a thrown reducer vanished without a
+ * trace, and every caller was told the interaction had succeeded. The chain
+ * still survives, the failure is no longer invisible.
+ */
 export function handlePetEvent(event: PetEvent): Promise<void> {
-  chain = chain.then(() => process(event)).catch(() => {})
+  chain = chain
+    .then(() => process(event))
+    .catch((err: unknown) => {
+      loggers.app.warn("pet event handling failed", {
+        kind: event.kind,
+        source: event.source,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
   return chain
 }
 
