@@ -30,6 +30,13 @@ import type { ArtifactRow, ArtifactVersionRow } from "@/lib/db/artifact-types"
 import type { A2UIAppRow, A2UITemplateRow, A2UIEventHistoryRow } from "@/lib/db/a2ui-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
 import type { Memory } from "@/types/memory/memory"
+import type {
+  PetAchievementRecord,
+  PetCharacterBinding,
+  PetInventoryRow,
+  PetProfile,
+} from "@/types/pet"
+import type { PetModelRow } from "@/lib/db/pet-models"
 import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
@@ -139,6 +146,33 @@ export interface BackupPayloadV3 {
    * build adds before this one learns about it.
    */
   scheduledTasks?: DBScheduledTask[]
+  /**
+   * The desktop pet (ADR-0058, schema v220). Its name, the level and every XP
+   * it earned since it hatched, its coins and its daily-care streak. This is
+   * the one pet row and nothing anywhere can rebuild it, so before it became
+   * portable a restore onto a new machine simply lost the pet.
+   *
+   * `petConversation` is NOT here. It is the user's talk history with the pet,
+   * a rolling 200-turn window of chatter, and it is encrypted at rest for a
+   * reason. Carrying it would mean decrypting it into a package that travels.
+   */
+  petProfile?: PetProfile
+  /** Unlocked badges. Union-merged on import: an unlock is monotonic. */
+  petAchievements?: PetAchievementRecord[]
+  /** Owned items and their quantities. */
+  petInventory?: PetInventoryRow[]
+  /** Per-character appearance and voice bindings. */
+  petCharacterBindings?: PetCharacterBinding[]
+  /**
+   * Live2D model METADATA only: the user's own transform tuning and motion
+   * overrides, which are real hand-work. The model files and sprite atlases
+   * themselves are deliberately absent. They are Blobs, and the v3 package is
+   * JSON.stringify, so they would serialize to `{}` and produce a backup that
+   * claims to carry the assets and restores empty rows pointing at nothing,
+   * which is strictly worse than not carrying them. They are also up to 50 MiB
+   * each, and re-importable from the file the user picked.
+   */
+  petModels?: PetModelRow[]
   /** Unified portable template data. Device bindings and migration rollback snapshots stay local. */
   templateDefinitions?: TemplateDefinitionRow[]
   templatePackages?: TemplatePackageRow[]
@@ -278,6 +312,22 @@ export interface ImportSummary {
   syncResults?: SyncProjectionReport[]
   /** Profile ids whose wrapped DEKs were restored before ciphertext rows. */
   restoredRetrievalKeyProfiles?: string[]
+  /**
+   * Set when the package carried a DIFFERENT pet than the one on this machine.
+   *
+   * A pet is a singular thing. None of the three generic merge strategies is
+   * right for it: `duplicate` would mint a second row that `getPetProfile()`
+   * can never read, `overwrite` would silently delete a pet someone has raised
+   * for months, and `skip` would tell the user their pet was restored when it
+   * was not. So the import keeps the local pet, reports the collision, and
+   * lets the user decide.
+   */
+  petProfileConflict?: {
+    localName: string | null
+    localLevel: number
+    incomingName: string | null
+    incomingLevel: number
+  }
 }
 
 export interface LocalStorageImportReport {

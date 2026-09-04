@@ -1336,3 +1336,117 @@ describe("applyBackupPackage — encrypted retrieval content", () => {
     )
   })
 })
+
+describe("applyBackupPackage — the desktop pet", () => {
+  const pet = (over: Record<string, unknown> = {}) =>
+    ({
+      id: "global",
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      xp: 1200,
+      level: 7,
+      stage: "adult",
+      needs: { energy: 70, mood: 70, bond: 70, lastTickAt: "2026-01-01T00:00:00.000Z" },
+      accountFingerprint: "acct-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      ...over,
+    }) as never
+
+  it("adopts the pet outright on a machine that has none", async () => {
+    // The overwhelmingly common case: a restore onto a new laptop. Before the
+    // pet was portable this is exactly where it was lost.
+    const summary = await applyBackupPackage(pkg({ petProfile: pet() }), {
+      mergeStrategy: "skip",
+    })
+    const restored = await getDb().petProfile.get("global")
+    expect(restored?.soul?.name).toBe("Boba")
+    expect(restored?.xp).toBe(1200)
+    expect(summary.added.petProfile).toBe(1)
+    expect(summary.petProfileConflict).toBeUndefined()
+  })
+
+  it("takes the newer side when it is the same pet on a second device", async () => {
+    await getDb().petProfile.put(pet({ xp: 10, level: 1, updatedAt: "2025-01-01T00:00:00.000Z" }))
+    const summary = await applyBackupPackage(
+      pkg({ petProfile: pet({ xp: 1200, level: 7, updatedAt: "2026-06-01T00:00:00.000Z" }) }),
+      { mergeStrategy: "overwrite" }
+    )
+    expect((await getDb().petProfile.get("global"))?.xp).toBe(1200)
+    expect(summary.overwritten.petProfile).toBe(1)
+    expect(summary.petProfileConflict).toBeUndefined()
+  })
+
+  it("never rolls the same pet backwards to an older snapshot", async () => {
+    await getDb().petProfile.put(
+      pet({ xp: 5000, level: 20, updatedAt: "2026-06-01T00:00:00.000Z" })
+    )
+    await applyBackupPackage(
+      pkg({ petProfile: pet({ xp: 10, level: 1, updatedAt: "2025-01-01T00:00:00.000Z" }) }),
+      { mergeStrategy: "overwrite" }
+    )
+    expect((await getDb().petProfile.get("global"))?.xp).toBe(5000)
+  })
+
+  it("keeps the local pet and reports the collision when they are different pets", async () => {
+    // A pet is a singular thing. Silently overwriting one someone raised for
+    // months is not a decision an importer gets to make.
+    await getDb().petProfile.put(
+      pet({
+        accountFingerprint: "acct-LOCAL",
+        soul: { name: "Pip", personality: "x", hatchDate: "" },
+        level: 3,
+      })
+    )
+    const summary = await applyBackupPackage(
+      pkg({ petProfile: pet({ accountFingerprint: "acct-OTHER", level: 40 }) }),
+      { mergeStrategy: "overwrite" }
+    )
+    expect((await getDb().petProfile.get("global"))?.soul?.name).toBe("Pip")
+    expect(summary.petProfileConflict).toEqual({
+      localName: "Pip",
+      localLevel: 3,
+      incomingName: "Boba",
+      incomingLevel: 40,
+    })
+  })
+
+  it("leaves the other pet's trophies behind when the local pet is kept", async () => {
+    // Otherwise the user ends up with a level-3 pet holding a level-40 case.
+    await getDb().petProfile.put(pet({ accountFingerprint: "acct-LOCAL" }))
+    await applyBackupPackage(
+      pkg({
+        petProfile: pet({ accountFingerprint: "acct-OTHER" }),
+        petAchievements: [{ id: "first-xp", unlockedAt: 1 }] as never,
+        petInventory: [{ id: "berry", qty: 9, acquiredAt: 1 }] as never,
+      }),
+      { mergeStrategy: "overwrite" }
+    )
+    expect(await getDb().petAchievements.count()).toBe(0)
+    expect(await getDb().petInventory.count()).toBe(0)
+  })
+
+  it("brings the trophies along when the pet is adopted", async () => {
+    await applyBackupPackage(
+      pkg({
+        petProfile: pet(),
+        petAchievements: [{ id: "first-xp", unlockedAt: 1 }] as never,
+        petInventory: [{ id: "berry", qty: 9, acquiredAt: 1 }] as never,
+        petCharacterBindings: [{ characterId: "c1", skinOverride: null }] as never,
+        petModels: [{ id: "pm_1", name: "Hiyori", source: "import" }] as never,
+      }),
+      { mergeStrategy: "skip" }
+    )
+    expect(await getDb().petAchievements.count()).toBe(1)
+    expect(await getDb().petInventory.count()).toBe(1)
+    expect(await getDb().petCharacterBindings.count()).toBe(1)
+    // Metadata only: the model FILE is deliberately not in the package.
+    expect(await getDb().petModels.count()).toBe(1)
+    expect(await getDb().petModelFiles.count()).toBe(0)
+  })
+
+  it("is a no-op for an account that never hatched one", async () => {
+    const summary = await applyBackupPackage(pkg({}), { mergeStrategy: "overwrite" })
+    expect(await getDb().petProfile.get("global")).toBeUndefined()
+    expect(summary.petProfileConflict).toBeUndefined()
+  })
+})

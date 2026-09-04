@@ -21,6 +21,8 @@ import type {
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 import type { DBScheduledTask } from "@/lib/db/scheduled-task-types"
+import type { PetAchievementRecord, PetCharacterBinding, PetInventoryRow } from "@/types/pet"
+import type { PetModelRow } from "@/lib/db/pet-models"
 import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
 import type { TemplateInstanceRecord } from "@/lib/templates/repository"
 import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
@@ -178,6 +180,11 @@ export async function applyBackupPackage(
       db.retrievalEncryptedContent,
       db.chatTemplates,
       db.scheduledTasks,
+      db.petProfile,
+      db.petAchievements,
+      db.petInventory,
+      db.petCharacterBindings,
+      db.petModels,
       db.templateDefinitions,
       db.templatePackages,
       db.templateInstances,
@@ -257,6 +264,89 @@ export async function applyBackupPackage(
         idPrefix: "tpl",
         respectBuiltIn: false,
       })
+      // --- the desktop pet (singleton + what it earned) -------------------
+      //
+      // A pet is a singular thing, so none of the three generic strategies is
+      // right. `duplicate` would mint a second row `getPetProfile()` can never
+      // read, `overwrite` would delete a pet someone raised for months, and
+      // `skip` would report a restore that did not happen.
+      //
+      // No local pet is the overwhelmingly common case (a fresh machine), and
+      // there the incoming one is simply adopted. A local pet with the same
+      // `accountFingerprint` is the same pet on a second device, so the newer
+      // `updatedAt` wins. A different fingerprint means two genuinely different
+      // pets: keep the local one and report the collision for the user to
+      // resolve, because this is not a choice an importer should make quietly.
+      let adoptedPet = false
+      if (env.petProfile) {
+        const incoming = { ...env.petProfile, id: "global" as const }
+        const existing = await db.petProfile.get("global")
+        if (!existing) {
+          await db.petProfile.put(incoming)
+          incrementCounter(summary.added, "petProfile")
+          adoptedPet = true
+        } else if (existing.accountFingerprint === incoming.accountFingerprint) {
+          const incomingIsNewer = (incoming.updatedAt ?? "") >= (existing.updatedAt ?? "")
+          if (opts.mergeStrategy === "skip" || !incomingIsNewer) {
+            incrementCounter(summary.skipped, "petProfile")
+          } else {
+            await db.petProfile.put({ ...existing, ...incoming })
+            incrementCounter(summary.overwritten, "petProfile")
+            adoptedPet = true
+          }
+        } else {
+          incrementCounter(summary.skipped, "petProfile")
+          summary.petProfileConflict = {
+            localName: existing.soul?.name ?? null,
+            localLevel: existing.level,
+            incomingName: incoming.soul?.name ?? null,
+            incomingLevel: incoming.level,
+          }
+        }
+      }
+
+      // These belong to whichever pet won. Importing a level-40 trophy case
+      // onto a level-3 pet the user kept would be worse than importing nothing.
+      if (adoptedPet || !env.petProfile) {
+        await applyKeyedCollection<PetAchievementRecord>({
+          rows: env.petAchievements,
+          table: db.petAchievements,
+          kind: "petAchievements",
+          opts,
+          summary,
+          // An unlock is monotonic: it never un-unlocks, so a union is the
+          // whole merge rule and an existing row needs no overwrite.
+          keyOf: (row) => row.id,
+        })
+        await applyKeyedCollection<PetInventoryRow>({
+          rows: env.petInventory,
+          table: db.petInventory,
+          kind: "petInventory",
+          opts,
+          summary,
+          keyOf: (row) => row.id,
+        })
+        await applyKeyedCollection<PetCharacterBinding>({
+          rows: env.petCharacterBindings,
+          table: db.petCharacterBindings,
+          kind: "petCharacterBindings",
+          opts,
+          summary,
+          keyOf: (row) => row.characterId,
+        })
+        // Metadata only. The model FILES are not in the package, so a restored
+        // row points at bytes this machine does not have. `resolveEffectiveSkin`
+        // already falls back to the SVG skin when an asset cannot render.
+        await applyKeyedCollection<PetModelRow>({
+          rows: env.petModels,
+          table: db.petModels,
+          kind: "petModels",
+          opts,
+          summary,
+          keyOf: (row) => row.id,
+        })
+      }
+
       // Imported schedules land PAUSED. An archive can be months old, and a
       // restore that silently armed every cron in it would start firing work
       // the moment the import finished, on a machine the user may have just

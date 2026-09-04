@@ -445,6 +445,17 @@ export const PORTABLE_BACKUP_BINDINGS = {
   // it stays out of the headless snapshot: it is append-heavy and rebuilding it
   // on another machine would be meaningless anyway.
   scheduledTasks: "scheduledTasks",
+  // The desktop pet. The profile is a singleton nothing can rebuild, and the
+  // three tables below it are what that pet has earned and been given. The
+  // model files and sprite atlases stay device-local: they are Blobs, which
+  // JSON.stringify turns into `{}`, so a package "carrying" them would restore
+  // empty rows pointing at nothing. `petModels` carries the metadata around
+  // them, which is where the user's own transform tuning lives.
+  petProfile: "petProfile",
+  petAchievements: "petAchievements",
+  petInventory: "petInventory",
+  petCharacterBindings: "petCharacterBindings",
+  petModels: "petModels",
   templateDefinitions: "templateDefinitions",
   templatePackages: "templatePackages",
   templateInstances: "templateInstances",

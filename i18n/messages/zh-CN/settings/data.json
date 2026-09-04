@@ -27,6 +27,9 @@
     },
     "title": "本地持久化运行时"
   },
+  "summaryPetConflict": "宠物未被替换",
+  "summaryPetConflictDetail": "这个备份里是另一只宠物 {incomingName}（{incomingLevel} 级）。已保留本机的 {localName}（{localLevel} 级）。",
+  "summaryPetUnnamed": "一只未孵化的宠物",
   "workspaceMaintenance": {
     "description": "按照宿主生命周期策略协调受管工作区、回收受保护快照并清理过期 blob。",
     "error": "工作区维护失败：{error}",

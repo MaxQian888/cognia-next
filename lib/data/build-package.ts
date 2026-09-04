@@ -104,6 +104,11 @@ export async function buildBackupPackage(
     pluginAnalytics,
     chatTemplates,
     scheduledTasks,
+    petProfile,
+    petAchievements,
+    petInventory,
+    petCharacterBindings,
+    petModels,
     templateDefinitions,
     templatePackages,
     templateInstances,
@@ -149,6 +154,11 @@ export async function buildBackupPackage(
     readTable(db.pluginAnalytics),
     readTable(db.chatTemplates),
     readTable(db.scheduledTasks),
+    db.petProfile.get("global"),
+    readTable(db.petAchievements),
+    readTable(db.petInventory),
+    readTable(db.petCharacterBindings),
+    readTable(db.petModels),
     readTable(db.templateDefinitions),
     readTable(db.templatePackages),
     readTable(db.templateInstances),
@@ -232,6 +242,18 @@ export async function buildBackupPackage(
     chatTemplates,
     // Configuration only. Run history stays on the machine that ran it.
     scheduledTasks,
+    // The desktop pet. The profile is the singleton nothing can rebuild; the
+    // rest is what it has earned. Model FILES and sprite atlases stay behind
+    // (Blobs do not survive JSON.stringify), so `petModels` travels as the
+    // metadata around them, carrying the user's transform and motion tuning.
+    // Always keyed, even with no pet on this machine. `JSON.stringify` drops
+    // an undefined value, so an account that never hatched one ships nothing
+    // extra, while the field stays part of the declared payload shape.
+    petProfile,
+    petAchievements,
+    petInventory,
+    petCharacterBindings,
+    petModels,
     templateDefinitions,
     templatePackages,
     templateInstances,
@@ -280,6 +302,11 @@ export async function buildBackupPackage(
       "retrievalProfileDeks",
       "chatTemplates",
       "scheduledTasks",
+      "petProfile",
+      "petAchievements",
+      "petInventory",
+      "petCharacterBindings",
+      "petModels",
       "templateDefinitions",
       "templatePackages",
       "templateInstances",

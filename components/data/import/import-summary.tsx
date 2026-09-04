@@ -24,6 +24,7 @@ export function ImportSummary({ summary }: { summary: Summary }) {
           {summary.restoredRetrievalKeyProfiles.join(", ")}
         </p>
       )}
+      <PetConflictRow summary={summary} />
       <LocalStorageReport summary={summary} />
       <SyncProjectionReportRow summary={summary} />
     </div>
@@ -37,6 +38,30 @@ function SummaryGroup({ label, map }: { label: string; map: Record<string, numbe
     <p className="text-muted-foreground">
       <span className="font-medium">{label}:</span>{" "}
       {entries.map(([k, v]) => `${k}=${v}`).join(", ")}
+    </p>
+  )
+}
+
+/**
+ * The package carried a different pet than the one on this machine.
+ *
+ * A pet is a singular thing, so the import kept the local one rather than
+ * quietly picking. Saying so is the whole point: a silent skip would read as
+ * "your pet was restored" when it was not.
+ */
+function PetConflictRow({ summary }: { summary: Summary }) {
+  const t = useTranslations("settings.data")
+  const conflict = summary.petProfileConflict
+  if (!conflict) return null
+  return (
+    <p className="border-t pt-1 text-muted-foreground">
+      <span className="font-medium">{t("summaryPetConflict")}:</span>{" "}
+      {t("summaryPetConflictDetail", {
+        localName: conflict.localName ?? t("summaryPetUnnamed"),
+        localLevel: conflict.localLevel,
+        incomingName: conflict.incomingName ?? t("summaryPetUnnamed"),
+        incomingLevel: conflict.incomingLevel,
+      })}
     </p>
   )
 }
