@@ -214,10 +214,56 @@ describe("ensurePluginRuntime", () => {
       initManager: async () => void calls.push("init"),
       applyDisabled: () => {},
       registerDisk: () => {},
+      installOsSandbox: () => void calls.push("os-sandbox"),
       manifestCount: () => 53,
     })
     expect(result).toEqual({ ok: true, toolCount: 53 })
-    expect(calls).toEqual(["shims", "idb", "guard", "init"])
+    expect(calls).toEqual(["shims", "idb", "os-sandbox", "guard", "init"])
+  })
+
+  it("registers the OS sandbox executor before any plugin tool can dispatch", async () => {
+    // Without this the `sandbox_*` tools resolve to `transport.call`, which on
+    // the CLI's stdio transport answers `unsupported command "sandbox_exec"`.
+    // The session ceiling would still clamp every request against a policy that
+    // nothing enforces, which is the dishonest state ADR-0028 forbids.
+    let installed = 0
+    let initialisedAfter = -1
+    await ensurePluginRuntime({
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      installOsSandbox: () => void installed++,
+      configureGuard: () => {},
+      initManager: async () => {
+        initialisedAfter = installed
+      },
+      applyDisabled: () => {},
+      registerDisk: () => {},
+      manifestCount: () => 0,
+    })
+    expect(installed).toBe(1)
+    expect(initialisedAfter).toBe(1)
+  })
+
+  it("installs a real executor into the shared bridge by default", async () => {
+    // The default path is the one production takes, and an injected-deps module
+    // whose default is never exercised is a default nobody has run.
+    const { getOsSandboxExec, __resetOsSandboxBridgeForTesting } =
+      await import("@/lib/sandbox/os-exec-bridge")
+    __resetOsSandboxBridgeForTesting()
+    await ensurePluginRuntime({
+      installShims: () => {},
+      installIndexedDb: async () => {},
+      configureGuard: () => {},
+      initManager: async () => {},
+      applyDisabled: () => {},
+      registerDisk: () => {},
+      manifestCount: () => 0,
+    })
+    const executor = getOsSandboxExec()
+    expect(executor).not.toBeNull()
+    // It answers the confinement question rather than assuming an answer.
+    await expect(executor!.probe()).resolves.toMatchObject({ confined: expect.any(Boolean) })
+    __resetOsSandboxBridgeForTesting()
   })
 
   it("caches — a second call does not re-run the bootstrap", async () => {

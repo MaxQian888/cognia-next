@@ -16,6 +16,7 @@
  */
 
 import { transport } from "@/lib/tauri"
+import { getOsSandboxExec } from "@/lib/sandbox/os-exec-bridge"
 import { updateOsSandboxAvailability } from "@/lib/sandbox/runtime-availability"
 
 export interface CodeSandboxStatus {
@@ -39,6 +40,16 @@ let cached: Promise<CodeSandboxStatus> | null = null
 
 async function probe(): Promise<CodeSandboxStatus> {
   try {
+    // A Node host registers its own executor because `sandbox_health_check` is
+    // a Tauri `invoke` and its transport refuses the name. Asking the executor
+    // that will actually run the commands is the only way its answer describes
+    // the sandbox the session will get, rather than the desktop's.
+    const hostExecutor = getOsSandboxExec()
+    if (hostExecutor) {
+      const status = await hostExecutor.probe()
+      updateOsSandboxAvailability(status)
+      return status
+    }
     const raw = await transport.call<RawProbeReport>("sandbox_health_check")
     const status = {
       confined: raw?.confined === true,

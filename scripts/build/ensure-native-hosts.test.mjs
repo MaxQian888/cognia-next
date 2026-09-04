@@ -18,11 +18,16 @@ test("isStale: missing output, or any newer source, means stale", () => {
   assert.equal(isStale(100, [250], 200), true)
 })
 
-test("plan skips under COGNIA_SKIP_NATIVE_HOSTS=1 and names the two hosts otherwise", () => {
+test("plan skips under COGNIA_SKIP_NATIVE_HOSTS=1 and names every host otherwise", () => {
   assert.deepEqual(plan(process.cwd(), { COGNIA_SKIP_NATIVE_HOSTS: "1" }), { skipped: true, stale: [] })
   assert.deepEqual(
     NATIVE_HOSTS.map((h) => h.bin),
-    ["cognia-external-agent-launcher", "cognia-task-workspace-worker"]
+    [
+      "cognia-external-agent-launcher",
+      // The OS sandbox tier has no implementation on this host without it.
+      "cognia-sandbox-exec",
+      "cognia-task-workspace-worker",
+    ]
   )
 })
 

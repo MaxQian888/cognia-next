@@ -1,7 +1,15 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+
+import {
+  bundledCandidates,
+  defaultNativeCandidates,
+  findNativeBinary,
+  isDevCheckout as isRepoCheckout,
+  isExecutable as isExecutableFile,
+  nativeBinaryName,
+} from "../native-binary"
 
 import type { ExternalAgentLaunch, NodeExternalAgentSpawnConfig } from "./node-backend"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
@@ -10,6 +18,9 @@ import {
   agentStateWritableRoots as policyAgentStateWritableRoots,
   isAgentStateFileRoot,
 } from "@/lib/ai/agent/external/security-policy"
+
+/** Base name of the launcher binary built from `crates/cognia-automation`. */
+const LAUNCHER_BASE_NAME = "cognia-external-agent-launcher"
 
 export interface SandboxLauncherRuntime {
   platform: NodeJS.Platform
@@ -25,44 +36,27 @@ export interface SandboxLauncherRuntime {
 /** Platform-correct launcher filename. `platform` is a parameter so the Windows
  * spelling is reachable from a test on any host. */
 export const launcherName = (platform: NodeJS.Platform = process.platform): string =>
-  platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
+  nativeBinaryName(LAUNCHER_BASE_NAME, platform)
 
 /** Resolve launcher locations for both a single-file bundle and a split `chunks/` bundle. */
 export function bundledLauncherCandidates(moduleUrl: string, name: string): string[] {
-  const moduleDir = path.dirname(fileURLToPath(moduleUrl))
-  return [path.join(moduleDir, name), path.join(moduleDir, "..", name)]
+  return bundledCandidates(moduleUrl, name)
 }
 
 function defaultCandidates(): string[] {
-  const name = launcherName()
-  const explicit = process.env.COGNIA_EXTERNAL_AGENT_LAUNCHER
-  return [
-    explicit,
-    ...bundledLauncherCandidates(import.meta.url, name),
-    path.join(path.dirname(process.execPath), name),
-    path.join(process.cwd(), "cli", "dist", "native", `${process.platform}-${process.arch}`, name),
-    path.join(process.cwd(), "target", "release", name),
-    path.join(process.cwd(), "target", "debug", name),
-  ].filter((candidate): candidate is string => Boolean(candidate))
+  return defaultNativeCandidates({
+    base: LAUNCHER_BASE_NAME,
+    envVar: "COGNIA_EXTERNAL_AGENT_LAUNCHER",
+    moduleUrl: import.meta.url,
+  })
 }
 
-function isExecutable(candidate: string): boolean {
-  try {
-    fs.accessSync(candidate, fs.constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
-}
+const isExecutable = isExecutableFile
 
 /** Is this an in-repo checkout (where `pnpm cli:external-host:build` is a real
  * remedy) rather than an installed CLI (where it is noise)? */
 export function isDevCheckout(): boolean {
-  try {
-    return fs.existsSync(path.join(process.cwd(), "cli", "package.json"))
-  } catch {
-    return false
-  }
+  return isRepoCheckout()
 }
 
 /**
@@ -91,7 +85,7 @@ export function findSandboxLauncher(
     isExecutable,
   }
 ): string | undefined {
-  return runtime.candidates.find(runtime.isExecutable)
+  return findNativeBinary(runtime.candidates, runtime.isExecutable)
 }
 
 /**

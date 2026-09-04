@@ -2,6 +2,8 @@
 
 import fs from "node:fs"
 import path from "node:path"
+
+import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { fileURLToPath } from "node:url"
 import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 import {
@@ -82,24 +84,26 @@ if (claudeBinary && !fs.statSync(claudeBinary, { throwIfNoEntry: false })?.isFil
 }
 
 const executableSuffix = target.name === "win32-x64" ? ".exe" : ""
-const externalHostLauncherName = `cognia-external-agent-launcher${executableSuffix}`
-const workspaceHelperName = `cognia-task-workspace-worker${executableSuffix}`
-const externalHostLauncher =
-  process.env.COGNIA_EXTERNAL_AGENT_LAUNCHER_PATH ||
-  path.join(root, "target", "release", externalHostLauncherName)
-const workspaceHelper =
-  process.env.COGNIA_TASK_WORKSPACE_WORKER_PATH ||
-  path.join(root, "target", "release", workspaceHelperName)
+// One table for what gets built and what gets staged. `target/release` on this
+// runner holds the HOST architecture, so a cross-target build has to be handed
+// target-native binaries through the per-helper override vars.
+const nativeHosts = nativeHostFiles(root, { suffix: executableSuffix })
 
-if (target.name !== hostTarget && !process.env.COGNIA_EXTERNAL_AGENT_LAUNCHER_PATH) {
-  throw new Error(
-    `build-cli-bun: cross-target ${target.name} requires target-native helper paths; build on a native runner or set COGNIA_EXTERNAL_AGENT_LAUNCHER_PATH and COGNIA_TASK_WORKSPACE_WORKER_PATH`
-  )
-}
-for (const helper of [externalHostLauncher, workspaceHelper]) {
-  if (!fs.statSync(helper, { throwIfNoEntry: false })?.isFile()) {
-    throw new Error(`build-cli-bun: missing native helper ${path.relative(root, helper)}`)
+if (target.name !== hostTarget) {
+  const unpinned = nativeHosts.filter((helper) => !helper.overridden)
+  if (unpinned.length > 0) {
+    throw new Error(
+      `build-cli-bun: cross-target ${target.name} requires target-native helper paths. ` +
+        `Build on a native runner, or set ${unpinned.map((h) => h.overrideEnv).join(", ")}`
+    )
   }
+}
+for (const helper of missingNativeHosts(nativeHosts, (source) =>
+  Boolean(fs.statSync(source, { throwIfNoEntry: false })?.isFile())
+)) {
+  throw new Error(
+    `build-cli-bun: missing native helper ${path.relative(root, helper.source)}, run ${helper.hint}`
+  )
 }
 
 function resolveSourcePath(candidate) {
@@ -425,8 +429,7 @@ async function archiveLayout(layoutRoot, variant) {
       const nativeNames = new Set([
         target.executable,
         target.claudeBinary,
-        externalHostLauncherName,
-        workspaceHelperName,
+        ...nativeHosts.map((helper) => helper.name),
       ])
       if (target.archive !== "zip" && nativeNames.has(path.basename(entry.name))) {
         entry.mode = 0o755
@@ -453,11 +456,10 @@ for (const variant of variants) {
   fs.mkdirSync(layoutRoot, { recursive: true })
 
   const executable = path.join(layoutRoot, target.executable)
-  const launcher = path.join(layoutRoot, externalHostLauncherName)
-  const worker = path.join(layoutRoot, workspaceHelperName)
   copyRequired(coreExecutable, executable, { executable: true })
-  copyRequired(externalHostLauncher, launcher, { executable: true })
-  copyRequired(workspaceHelper, worker, { executable: true })
+  for (const helper of nativeHosts) {
+    copyRequired(helper.source, path.join(layoutRoot, helper.name), { executable: true })
+  }
   // Shared with build-cli-binary.mjs so the two layouts cannot drift on the
   // Pi extension again (the Node/pkg path shipped without it for a while, and
   // a brain image built from that layout could not start any Pi session). The

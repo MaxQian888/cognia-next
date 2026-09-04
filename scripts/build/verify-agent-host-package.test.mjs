@@ -24,7 +24,11 @@ function fixture(target, executable) {
       files: ["bin", INTEGRITY_MANIFEST, "README.md"],
     })
   )
-  for (const helperName of ["cognia-external-agent-launcher", "cognia-task-workspace-worker"]) {
+  for (const helperName of [
+    "cognia-external-agent-launcher",
+    "cognia-sandbox-exec",
+    "cognia-task-workspace-worker",
+  ]) {
     const helper = path.join(
       packageRoot,
       "bin",

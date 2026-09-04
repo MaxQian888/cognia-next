@@ -227,6 +227,10 @@ export function verifyAgentHostPackage(root, targetName) {
 
   for (const [helperBaseName, purpose] of [
     ["cognia-external-agent-launcher", "external agent dispatch requires its native launcher"],
+    [
+      "cognia-sandbox-exec",
+      "the OS sandbox tier has no implementation on this host without it, and a sandboxed tool call is refused rather than run unconfined",
+    ],
     ["cognia-task-workspace-worker", "worker dispatch requires Task Workspace"],
   ]) {
     const helperName = `${helperBaseName}${targetName === "win32-x64" ? ".exe" : ""}`

@@ -197,15 +197,42 @@ export interface PluginRuntimeDeps {
   registerDev?: () => void | Promise<void>
   /** Resolved repo `plugins/` directory to load as dev plugins. Absent ⇒ skip. */
   devPluginsDir?: string
+  /** Registers the host's OS-tier sandbox executor. Injected in tests. */
+  installOsSandbox?: () => void | Promise<void>
   manifestCount?: () => number | Promise<number>
 }
 
 let cached: Promise<PluginRuntimeResult> | null = null
 
+/**
+ * Register the CLI's OS-tier sandbox executor with the shared bridge.
+ *
+ * Registered even when the helper binary is missing: the executor then refuses
+ * with the reason and the remedy, which is the same fail-closed outcome as
+ * registering nothing but says why. Dynamic import so the Node-only spawn path
+ * never enters a bundle that does not run it.
+ */
+async function installOsSandboxExecutor(): Promise<void> {
+  const [{ setOsSandboxExec }, { createNodeOsSandboxExecutor }] = await Promise.all([
+    import("@/lib/sandbox/os-exec-bridge"),
+    import("../runtime/sandbox/os-sandbox-exec"),
+  ])
+  setOsSandboxExec(createNodeOsSandboxExecutor())
+}
+
 async function bootstrap(deps: PluginRuntimeDeps): Promise<PluginRuntimeResult> {
   try {
     ;(deps.installShims ?? installPluginRuntimeShims)()
     await (deps.installIndexedDb ?? installFakeIndexedDb)()
+
+    // The OS sandbox tier has to exist before the first `sandbox_*` tool call.
+    // `transport.call("sandbox_exec")` is a Tauri `invoke` and this host has no
+    // Tauri, so without a registered executor the tier is simply absent while
+    // the session ceiling still clamps every request against a policy nothing
+    // enforces. This is the choke point every rail already passes through
+    // before it can dispatch a plugin tool, which is what the sandboxed tools
+    // are.
+    await (deps.installOsSandbox ?? installOsSandboxExecutor)()
 
     const configureGuard =
       deps.configureGuard ??

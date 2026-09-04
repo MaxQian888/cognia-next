@@ -1,6 +1,6 @@
-// Build the two native host binaries the CLI bundle copies (the external-agent
-// launcher and the task-workspace worker) only when their Rust sources are
-// newer than the last release build.
+// Build the native host binaries the CLI bundle copies (the external-agent
+// launcher, the one-shot sandbox executor, and the task-workspace worker) only
+// when their Rust sources are newer than the last release build.
 //
 // `precli:dev` used to run `cargo build --release` for both crates on EVERY
 // `pnpm cli:dev`, which made a one-line TypeScript iteration pay a Rust
@@ -21,6 +21,11 @@ export const NATIVE_HOSTS = [
   {
     crate: "cognia-automation",
     bin: "cognia-external-agent-launcher",
+    dir: "crates/cognia-automation",
+  },
+  {
+    crate: "cognia-automation",
+    bin: "cognia-sandbox-exec",
     dir: "crates/cognia-automation",
   },
   {

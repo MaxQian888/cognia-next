@@ -31,6 +31,8 @@
 import { fileURLToPath } from "node:url"
 import { execFileSync } from "node:child_process"
 import path from "node:path"
+
+import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import fs from "node:fs"
 import { createCliExternalAgentAliasPlugin } from "./cli-external-agent-aliases.mjs"
 import {
@@ -62,10 +64,11 @@ const cliBundle = path.join(binDir, "cli.mjs")
 const pkgBootstrap = path.join(binDir, "pkg-bootstrap.cjs")
 const sidecarOutDir = path.join(binDir, "sidecar")
 const vscodeHostOutDir = path.join(sidecarOutDir, "vscode-ext-host")
-const externalHostLauncherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
-const externalHostLauncher = path.join(root, "target", "release", externalHostLauncherName)
-const workspaceHelperName = process.platform === "win32" ? "cognia-task-workspace-worker.exe" : "cognia-task-workspace-worker"
-const workspaceHelper = path.join(root, "target", "release", workspaceHelperName)
+// One table for what gets built and what gets staged, so the pkg layout cannot
+// ship without a helper the CLI refuses to run without.
+const nativeHosts = nativeHostFiles(root, {
+  suffix: process.platform === "win32" ? ".exe" : "",
+})
 
 // Deps the sidecar bundle keeps external (resolved from the copied node_modules
 // at runtime): claude-agent-sdk does dynamic requires / spawns the `claude`
@@ -146,12 +149,10 @@ if (!LAYOUT_ONLY) {
   }
 }
 
-if (!fs.existsSync(externalHostLauncher)) {
-  console.error(`build-cli-binary: missing ${path.relative(root, externalHostLauncher)} — run pnpm cli:external-host:build`)
-  process.exit(1)
-}
-if (!fs.existsSync(workspaceHelper)) {
-  console.error(`build-cli-binary: missing ${path.relative(root, workspaceHelper)} — run pnpm cli:worker-workspace:build`)
+for (const helper of missingNativeHosts(nativeHosts, (source) => fs.existsSync(source))) {
+  console.error(
+    `build-cli-binary: missing ${path.relative(root, helper.source)}, run ${helper.hint}`
+  )
   process.exit(1)
 }
 
@@ -470,10 +471,11 @@ if (LAYOUT_ONLY) {
     recursive: true,
     dereference: true,
   })
-  fs.cpSync(externalHostLauncher, path.join(layoutDir, externalHostLauncherName))
-  fs.cpSync(workspaceHelper, path.join(layoutDir, workspaceHelperName))
-  if (process.platform !== "win32") fs.chmodSync(path.join(layoutDir, externalHostLauncherName), 0o755)
-  if (process.platform !== "win32") fs.chmodSync(path.join(layoutDir, workspaceHelperName), 0o755)
+  for (const helper of nativeHosts) {
+    const destination = path.join(layoutDir, helper.name)
+    fs.cpSync(helper.source, destination)
+    if (process.platform !== "win32") fs.chmodSync(destination, 0o755)
+  }
   console.log(`build-cli-binary: assembled layout ${path.relative(root, layoutDir)}`)
   process.exit(0)
 }
@@ -552,10 +554,11 @@ for (const t of TARGETS) {
       (process.platform === "linux" && process.arch === "x64" && t.dist === "cognia-agent-linux-x64") ||
       (process.platform === "win32" && process.arch === "x64" && t.dist === "cognia-agent-win-x64")
     if (nativeTarget) {
-      fs.cpSync(externalHostLauncher, path.join(distDir, externalHostLauncherName))
-      fs.cpSync(workspaceHelper, path.join(distDir, workspaceHelperName))
-      if (process.platform !== "win32") fs.chmodSync(path.join(distDir, externalHostLauncherName), 0o755)
-      if (process.platform !== "win32") fs.chmodSync(path.join(distDir, workspaceHelperName), 0o755)
+      for (const helper of nativeHosts) {
+        const destination = path.join(distDir, helper.name)
+        fs.cpSync(helper.source, destination)
+        if (process.platform !== "win32") fs.chmodSync(destination, 0o755)
+      }
     }
     console.log(`build-cli-binary: assembled ${path.relative(root, distDir)}`)
 

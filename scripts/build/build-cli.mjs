@@ -11,7 +11,9 @@
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import fs from "node:fs"
+
 import { cliEsbuildOptions, loadEsbuild } from "./esbuild-shared.mjs"
+import { missingNativeHosts, nativeHostFiles } from "./native-host-files.mjs"
 import { stagePiExtension } from "./lib/stage-pi-extension.mjs"
 import { stageBuiltinPluginAssets } from "./lib/stage-builtin-plugin-assets.mjs"
 
@@ -36,20 +38,21 @@ if (jsOnly) {
   process.exit(0)
 }
 
-const launcherName = process.platform === "win32" ? "cognia-external-agent-launcher.exe" : "cognia-external-agent-launcher"
-const launcherSource = path.join(root, "target", "release", launcherName)
-const workspaceHelperName = process.platform === "win32" ? "cognia-task-workspace-worker.exe" : "cognia-task-workspace-worker"
-const workspaceHelperSource = path.join(root, "target", "release", workspaceHelperName)
-if (!fs.existsSync(launcherSource)) {
-  throw new Error(`build-cli: missing ${path.relative(root, launcherSource)}; run pnpm cli:external-host:build`)
+// The helper set comes from the same table that decides what gets built, so a
+// layout cannot ship without a helper it was supposed to carry.
+const nativeHosts = nativeHostFiles(root, {
+  suffix: process.platform === "win32" ? ".exe" : "",
+})
+for (const helper of missingNativeHosts(nativeHosts, (source) => fs.existsSync(source))) {
+  throw new Error(
+    `build-cli: missing ${path.relative(root, helper.source)}, run ${helper.hint}`
+  )
 }
-fs.copyFileSync(launcherSource, path.join(outdir, launcherName))
-if (process.platform !== "win32") fs.chmodSync(path.join(outdir, launcherName), 0o755)
-if (!fs.existsSync(workspaceHelperSource)) {
-  throw new Error(`build-cli: missing ${path.relative(root, workspaceHelperSource)}; run pnpm cli:worker-workspace:build`)
+for (const helper of nativeHosts) {
+  const destination = path.join(outdir, helper.name)
+  fs.copyFileSync(helper.source, destination)
+  if (process.platform !== "win32") fs.chmodSync(destination, 0o755)
 }
-fs.copyFileSync(workspaceHelperSource, path.join(outdir, workspaceHelperName))
-if (process.platform !== "win32") fs.chmodSync(path.join(outdir, workspaceHelperName), 0o755)
 
 // The bundled Pi extension (ADR-0119) and its digest. Staged into `dist/` so
 // the published package ships it under the existing `files: ["dist"]` entry,

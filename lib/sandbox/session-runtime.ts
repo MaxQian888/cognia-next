@@ -9,6 +9,7 @@ import type { CallContext } from "@/lib/automation/client"
 import type { AutomationAuditLogRow } from "@/lib/automation/audit"
 import { getSandboxConnection } from "@/lib/db/sandbox-connections"
 import { transport } from "@/lib/tauri"
+import { getOsSandboxExec } from "@/lib/sandbox/os-exec-bridge"
 import type { SandboxConnectionRow, SandboxSessionBinding } from "@/types/sandbox"
 
 import { validateSandboxSessionBinding } from "./binding"
@@ -680,6 +681,15 @@ async function executeOsSandbox(payload: MicrovmExecPayload): Promise<MicrovmRes
   }
   if (osSandboxExecOverride) {
     return osSandboxExecOverride(osPayload as unknown as MicrovmExecPayload)
+  }
+  // A Node host (the CLI, the supervised brain) registers an executor at
+  // bootstrap because `transport.call("sandbox_exec")` is a Tauri `invoke` and
+  // its stdio transport refuses the name outright. Preferring the registered
+  // one is the whole difference between the OS tier existing on that host and
+  // not. The desktop registers none and keeps the `invoke` path.
+  const hostExecutor = getOsSandboxExec()
+  if (hostExecutor) {
+    return hostExecutor.execute(osPayload as unknown as MicrovmExecPayload)
   }
   return transport.call<MicrovmResult>(
     "sandbox_exec",
