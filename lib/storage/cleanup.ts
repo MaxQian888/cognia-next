@@ -20,6 +20,16 @@ const DEEP_CLEANUP_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
 /** Estimate per-row byte cost; identical to the storage-manager helper. */
 function rowSize(row: unknown): number {
+  // A row that declares its own footprint is telling the truth about bytes
+  // JSON cannot see. `JSON.stringify` turns a Blob into `{}`, so a 25 MiB
+  // sprite atlas measured this way reported about two bytes, and the largest
+  // thing on disk was the one the breakdown claimed was empty.
+  if (row && typeof row === "object" && "totalBytes" in row) {
+    const declared = (row as { totalBytes?: unknown }).totalBytes
+    if (typeof declared === "number" && Number.isFinite(declared) && declared >= 0) {
+      return declared
+    }
+  }
   try {
     return JSON.stringify(row).length
   } catch {

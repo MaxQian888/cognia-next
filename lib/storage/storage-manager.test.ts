@@ -370,3 +370,32 @@ describe("clearAllCogniaData table-clear failures (storage-manager.ts:180-181)",
     spy.mockRestore()
   })
 })
+
+describe("row size estimation", () => {
+  it("believes a row that declares its own byte count", async () => {
+    // JSON.stringify turns a Blob into `{}`, so a 25 MiB sprite atlas measured
+    // that way reported about two bytes: the largest thing on disk was the one
+    // the breakdown claimed was empty. The rows carrying binaries are exactly
+    // the ones that record `totalBytes`, and that number is the honest one.
+    const db = getDb()
+    await db.petSpritePacks.put({
+      id: "sp_1",
+      displayName: "Blobby",
+      createdAt: 1,
+      totalBytes: 25 * 1024 * 1024,
+      spritesheet: new Blob([new Uint8Array(8)]),
+    } as never)
+
+    const stats = await StorageManager.getStats()
+    const pet = stats.byCategory.find((row) => row.category === "pet")
+    expect(pet).toBeDefined()
+    expect(pet!.totalSize).toBeGreaterThanOrEqual(25 * 1024 * 1024)
+  })
+
+  it("still falls back to serialization for a row with no declared size", async () => {
+    await getDb().petAchievements.put({ id: "first-xp", unlockedAt: 1 } as never)
+    const stats = await StorageManager.getStats()
+    const pet = stats.byCategory.find((row) => row.category === "pet")
+    expect(pet!.totalSize).toBeGreaterThan(0)
+  })
+})

@@ -344,7 +344,8 @@
     },
     "import": "导入 v2 精灵图宠物",
     "importHint": "同时选择 pet.json 与对应的 spritesheet.webp 或 spritesheet.png。安装前 Cognia 会校验 v2 清单和 1536×2288 图集。",
-    "installed": "精灵图宠物已安装并启用。"
+    "installed": "精灵图宠物已安装并启用。",
+    "storageUsage": "{count} 个包 · {size}"
   },
   "title": "宠物",
   "twinAwareness": {

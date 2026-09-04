@@ -341,6 +341,24 @@ describe("desktop pet", () => {
     })
   })
 
+  it("gives the subsystem its own storage bucket", () => {
+    // Two of these tables hold real binaries. Reporting them under "other"
+    // left the biggest thing a pet owner stores invisible in the breakdown.
+    for (const table of [
+      "petProfile",
+      "petActivityLog",
+      "petConversationV2",
+      "petAchievements",
+      "petInventory",
+      "petCharacterBindings",
+      "petModels",
+      "petModelFiles",
+      "petSpritePacks",
+    ] as const) {
+      expect(policyForTable(table)?.storageCategory).toBe("pet")
+    }
+  })
+
   it("budgets the binary tables as the large ones they are", () => {
     // 50 MiB per Live2D model, 25 MiB per sprite atlas. At the "medium"
     // default they were budgeted like rows of metadata.

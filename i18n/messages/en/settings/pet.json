@@ -344,7 +344,8 @@
     },
     "import": "Import v2 sprite pet",
     "importHint": "Select pet.json and its spritesheet.webp or spritesheet.png together. Cognia validates the v2 manifest and 1536×2288 atlas before installing.",
-    "installed": "Sprite pet installed and activated."
+    "installed": "Sprite pet installed and activated.",
+    "storageUsage": "{count} packs · {size}"
   },
   "title": "Pet",
   "twinAwareness": {

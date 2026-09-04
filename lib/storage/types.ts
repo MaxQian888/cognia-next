@@ -23,6 +23,7 @@ export type StorageCategory =
   | "ttsKey"
   | "backupHistory"
   | "vector"
+  | "pet"
   | "system"
   | "other"
 
@@ -32,7 +33,8 @@ export interface StorageCategoryInfo {
   displayName: string
   /** Number of rows aggregated across the underlying tables. */
   itemCount: number
-  /** Estimated bytes via `JSON.stringify(row).length` summed across rows. */
+  /** Estimated bytes summed across rows: a row's own `totalBytes` when it
+   *  declares one (binaries JSON cannot see), else `JSON.stringify` length. */
   totalSize: number
   /** Names of the underlying Dexie tables (for tooltips / debug). */
   sources: string[]

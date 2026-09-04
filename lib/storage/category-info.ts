@@ -27,6 +27,11 @@ export const CATEGORY_INFO: Record<StorageCategory, CategoryDescriptor> = {
     defaultName: "Settings",
     tables: tableNamesForCategory("settings"),
   },
+  pet: {
+    i18nKey: "pet",
+    defaultName: "Desktop pet",
+    tables: tableNamesForCategory("pet"),
+  },
   session: {
     i18nKey: "session",
     defaultName: "Sessions",

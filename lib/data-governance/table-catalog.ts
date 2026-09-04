@@ -955,6 +955,19 @@ const LARGE_TABLES = new Set<CoreTableName>([
 
 const STORAGE_CATEGORY_OVERRIDES: Partial<Record<CoreTableName, StorageCategory>> = {
   settings: "settings",
+  // The desktop pet. Its own bucket because two of its tables hold real
+  // binaries (a Live2D model runs to 50 MiB, a sprite atlas to 25 MiB) and
+  // reporting them under "other" left the biggest thing a pet owner stores
+  // invisible in the storage breakdown.
+  petProfile: "pet",
+  petActivityLog: "pet",
+  petConversationV2: "pet",
+  petAchievements: "pet",
+  petInventory: "pet",
+  petCharacterBindings: "pet",
+  petModels: "pet",
+  petModelFiles: "pet",
+  petSpritePacks: "pet",
   sessions: "session",
   messages: "chat",
   messageMediaRefs: "chat",

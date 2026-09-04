@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
+import { formatBytes } from "@/lib/agent/utils"
 import { SparklesIcon, Trash2Icon } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -29,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   addPetSpritePack,
   deletePetSpritePack,
+  getPetSpritePackStorageUsage,
   listPetSpritePacks,
 } from "@/lib/db/pet-sprite-packs"
 import {
@@ -85,6 +87,13 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
   const t = useTranslations("settings.pet.spriteV2")
   const router = useRouter()
   const packs = useLiveQuery(() => listPetSpritePacks(), [], [])
+  // An atlas runs to 25 MiB. The model manager has shown its own footprint
+  // since it shipped; this side had the accessor and no caller, so the larger
+  // half of a pet's disk usage was never on screen.
+  const usage = useLiveQuery(() => getPetSpritePackStorageUsage(), [packs], {
+    packs: 0,
+    totalBytes: 0,
+  })
   const [concept, setConcept] = useState("")
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<SpriteImportStatus>("idle")
@@ -196,6 +205,11 @@ export function PetSpritePackManager({ settings, onPatch }: PetSpritePackManager
 
       <FieldSeparator />
       <Field>
+        {packs.length > 0 && (
+          <FieldDescription className="text-right">
+            {t("storageUsage", { count: usage.packs, size: formatBytes(usage.totalBytes) })}
+          </FieldDescription>
+        )}
         {packs.length === 0 ? (
           <Empty className="py-6">
             <EmptyDescription>{t("empty")}</EmptyDescription>
