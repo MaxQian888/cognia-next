@@ -26,6 +26,7 @@ jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
 import {
   PlatformWebSocketHeadersUnsupportedError,
   createPlatformWebSocket,
+  withSubprotocolHeader,
 } from "./platform-websocket"
 
 const HANDLE_ID = "00000000-0000-4000-8000-000000000001"
@@ -60,6 +61,21 @@ describe("createPlatformWebSocket on Tauri", () => {
     )
     expect(socket.kind).toBe("native")
     expect(socket.id).toBe(HANDLE_ID)
+  })
+
+  it("carries subprotocols as the handshake header the native path can send", async () => {
+    // The renderer has no way to name a subprotocol on the native command, but
+    // on the wire a subprotocol IS a header, so it goes across as one.
+    await createPlatformWebSocket("wss://collab.example.com/stream", {
+      headers: { Authorization: "Bearer t" },
+      protocols: ["cognia.chat.v1", "st_ticket"],
+    })
+
+    expect(connectorsWsOpen).toHaveBeenCalledWith(
+      "wss://collab.example.com/stream",
+      { Authorization: "Bearer t", "Sec-WebSocket-Protocol": "cognia.chat.v1, st_ticket" },
+      HANDLE_ID
+    )
   })
 
   it("surfaces text, binary and error frames on their own callbacks", async () => {
@@ -270,6 +286,25 @@ describe("createPlatformWebSocket off Tauri", () => {
     expect(socket.closeCalls).toBe(0)
   })
 
+  it("hands subprotocols to the platform constructor", async () => {
+    // The browser cannot send handshake headers, so a protocol that carries its
+    // credential as a subprotocol reaches the server only through this argument.
+    const socket = fakeSocket()
+    const factory = jest.fn(() => socket)
+    const pending = createPlatformWebSocket(
+      "wss://collab.example.com/stream",
+      { protocols: ["cognia.chat.v1", "st_ticket"] },
+      { socketFactory: factory }
+    )
+    socket.__open()
+    await pending
+
+    expect(factory).toHaveBeenCalledWith("wss://collab.example.com/stream", [
+      "cognia.chat.v1",
+      "st_ticket",
+    ])
+  })
+
   it("honours the injected shell probe over the ambient one", async () => {
     mockIsTauri.mockReturnValue(true)
     const socket = fakeSocket()
@@ -282,5 +317,27 @@ describe("createPlatformWebSocket off Tauri", () => {
 
     expect((await pending).kind).toBe("browser")
     expect(connectorsWsOpen).not.toHaveBeenCalled()
+  })
+})
+
+describe("withSubprotocolHeader", () => {
+  it("sends the same comma-separated list the browser constructor would", () => {
+    expect(withSubprotocolHeader(undefined, ["cognia.chat.v1", "st_ticket"])).toEqual({
+      "Sec-WebSocket-Protocol": "cognia.chat.v1, st_ticket",
+    })
+  })
+
+  it("keeps the caller's headers beside it", () => {
+    expect(withSubprotocolHeader({ Authorization: "Bearer x" }, ["p"])).toEqual({
+      Authorization: "Bearer x",
+      "Sec-WebSocket-Protocol": "p",
+    })
+  })
+
+  it("leaves the headers untouched when there is no subprotocol", () => {
+    expect(withSubprotocolHeader({ Authorization: "Bearer x" }, [])).toEqual({
+      Authorization: "Bearer x",
+    })
+    expect(withSubprotocolHeader(undefined, undefined)).toBeUndefined()
   })
 })

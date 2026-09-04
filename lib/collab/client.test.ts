@@ -335,7 +335,8 @@ describe("CollabClient", () => {
   })
 
   it("opens realtime chat with a one-time subprotocol ticket", async () => {
-    const sockets: { url: string; protocols: string[] }[] = []
+    const sockets: { url: string; protocols: readonly string[] | undefined }[] = []
+    const messages: string[] = []
     const client = new CollabClient({
       baseUrl: "https://collab.test",
       accessToken: async () => "logto-token",
@@ -344,13 +345,19 @@ describe("CollabClient", () => {
           ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
           : jsonResponse({ ticket: "st_one_time", expiresAt: 30_000 }),
       now: () => 0,
-      webSocketFactory: (url, protocols) => {
-        sockets.push({ url, protocols })
-        return {} as WebSocket
+      openWebSocket: async (url, options) => {
+        sockets.push({ url, protocols: options.protocols })
+        options.onMessage?.("hello")
+        return {
+          id: "test",
+          kind: "browser",
+          send: async () => undefined,
+          close: async () => undefined,
+        }
       },
     })
 
-    await client.openSessionStream(ORG, "ses_1")
+    await client.openSessionStream(ORG, "ses_1", { onMessage: (data) => messages.push(data) })
     expect(sockets).toEqual([
       {
         url: `wss://collab.test/v1/orgs/${ORG}/chat-sessions/ses_1/stream`,
@@ -358,6 +365,8 @@ describe("CollabClient", () => {
       },
     ])
     expect(sockets[0].url).not.toContain("st_one_time")
+    // The caller's handlers survive the ticket being folded in beside them.
+    expect(messages).toEqual(["hello"])
   })
 
   it("keeps one-time attachment credentials in headers", async () => {

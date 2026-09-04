@@ -20,6 +20,12 @@
  */
 
 import { normalizeServiceUrl } from "@/lib/diagnostic-service/client"
+import {
+  createPlatformWebSocket,
+  type PlatformWebSocket,
+  type PlatformWebSocketHandlers,
+  type PlatformWebSocketOptions,
+} from "@/lib/network/platform-websocket"
 
 import type { CollabRunKind } from "@/lib/db/collab-run-mirror-types"
 import type { PlanStatus } from "@/types/agent/plan"
@@ -266,7 +272,7 @@ export interface CollabClientOptions {
   /** Injectable so the grant cache can be tested without waiting. */
   now?: () => number
   /** Injectable so realtime behavior can be verified outside a browser. */
-  webSocketFactory?: (url: string, protocols: string[]) => WebSocket
+  openWebSocket?: (url: string, options: PlatformWebSocketOptions) => Promise<PlatformWebSocket>
 }
 
 export interface CollabIdentity {
@@ -413,7 +419,10 @@ export class CollabClient {
   private readonly accessToken: () => Promise<string | null>
   private readonly fetchImpl: CollabFetch
   private readonly now: () => number
-  private readonly webSocketFactory: (url: string, protocols: string[]) => WebSocket
+  private readonly openWebSocket: (
+    url: string,
+    options: PlatformWebSocketOptions
+  ) => Promise<PlatformWebSocket>
   /** Cached per org: a grant is scoped to one, so one slot would thrash. */
   private readonly grants = new Map<string, MintedGrant>()
 
@@ -422,8 +431,7 @@ export class CollabClient {
     this.accessToken = options.accessToken
     this.fetchImpl = options.fetchImpl
     this.now = options.now ?? (() => Date.now())
-    this.webSocketFactory =
-      options.webSocketFactory ?? ((url, protocols) => new WebSocket(url, protocols))
+    this.openWebSocket = options.openWebSocket ?? createPlatformWebSocket
   }
 
   /** Drop a cached grant, e.g. after signing out. */
@@ -795,7 +803,24 @@ export class CollabClient {
     )
   }
 
-  async openSessionStream(orgId: string, sessionId: string): Promise<WebSocket> {
+  /**
+   * Open the realtime channel for one shared session.
+   *
+   * The one-time ticket rides as a subprotocol rather than a query parameter,
+   * so it never lands in a URL that a proxy or a server log would keep. That is
+   * also why this goes through the shell transport instead of `new WebSocket`:
+   * a bare socket in the renderer misses the desktop proxy settings entirely,
+   * and the transport carries the subprotocol on both shells.
+   *
+   * Handlers are passed in rather than attached to the returned socket because
+   * the native path subscribes before the handshake, so a server that speaks
+   * first cannot outrun the listener.
+   */
+  async openSessionStream(
+    orgId: string,
+    sessionId: string,
+    handlers: PlatformWebSocketHandlers = {}
+  ): Promise<PlatformWebSocket> {
     const { ticket } = await this.json<{ ticket: string; expiresAt: number }>(
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/chat-sessions/${encodeURIComponent(sessionId)}/stream-tickets`,
@@ -806,7 +831,10 @@ export class CollabClient {
       this.baseUrl
     )
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-    return this.webSocketFactory(url.toString(), ["cognia.chat.v1", ticket])
+    return this.openWebSocket(url.toString(), {
+      ...handlers,
+      protocols: ["cognia.chat.v1", ticket],
+    })
   }
 
   async acquireSessionRunLease(

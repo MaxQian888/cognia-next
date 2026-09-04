@@ -14,6 +14,7 @@ import {
   replaceCollabChatMembers,
   replaceCollabChatSessions,
 } from "@/lib/db/collab-chat-mirror"
+import type { PlatformWebSocket } from "@/lib/network/platform-websocket"
 import { CollabError, type CollabClient } from "./client"
 import { assertSharedChatClientEnabled } from "./shared-chat-feature"
 
@@ -318,7 +319,7 @@ export async function syncSharedSession(
 }
 
 export interface SharedChatStreamController {
-  socket: WebSocket
+  socket: PlatformWebSocket
   close(): void
 }
 
@@ -329,7 +330,6 @@ export async function connectSharedSessionStream(
 ): Promise<SharedChatStreamController> {
   assertSharedChatClientEnabled()
   await syncSharedSession(client, orgId, sharedSessionId)
-  const socket = await client.openSessionStream(orgId, sharedSessionId)
   let stopped = false
   let serial = Promise.resolve()
 
@@ -346,34 +346,43 @@ export async function connectSharedSessionStream(
     })
   }
 
-  socket.addEventListener("open", () => void updateConnection(true))
-  socket.addEventListener("message", (message) => {
-    serial = serial
-      .then(async () => {
-        const event = JSON.parse(String(message.data)) as SessionEvent
-        const state = await getDb().collabChatSyncStates.get(sharedSessionId)
-        if (event.sequence !== (state?.lastSequence ?? 0) + 1) {
-          await syncSharedSession(client, orgId, sharedSessionId)
-          return
-        }
-        const remote = await client.getSharedSession(orgId, sharedSessionId)
-        const local = await ensureLocalProjection(remote)
-        await appendCollabChatEvents([{ ...event, orgId, fetchedAt: Date.now() }])
-        await projectEvents(local, remote, [event])
-      })
-      .catch((error: unknown) =>
-        updateConnection(false, error instanceof Error ? error.message : String(error))
-      )
+  // Every write goes through `serial` so the connection flag cannot overtake an
+  // event that arrived first. On the native transport the listeners exist
+  // before the handshake, so a server that speaks immediately is delivered
+  // before `openSessionStream` resolves.
+  const socket = await client.openSessionStream(orgId, sharedSessionId, {
+    onMessage: (data) => {
+      serial = serial
+        .then(async () => {
+          const event = JSON.parse(data) as SessionEvent
+          const state = await getDb().collabChatSyncStates.get(sharedSessionId)
+          if (event.sequence !== (state?.lastSequence ?? 0) + 1) {
+            await syncSharedSession(client, orgId, sharedSessionId)
+            return
+          }
+          const remote = await client.getSharedSession(orgId, sharedSessionId)
+          const local = await ensureLocalProjection(remote)
+          await appendCollabChatEvents([{ ...event, orgId, fetchedAt: Date.now() }])
+          await projectEvents(local, remote, [event])
+        })
+        .catch((error: unknown) =>
+          updateConnection(false, error instanceof Error ? error.message : String(error))
+        )
+    },
+    onClose: () => {
+      if (stopped) return
+      serial = serial.then(() => updateConnection(false))
+    },
   })
-  socket.addEventListener("close", () => {
-    if (!stopped) void updateConnection(false)
-  })
+
+  // The transport resolves on open, which is the event the DOM socket reported.
+  if (!stopped) serial = serial.then(() => updateConnection(true))
 
   return {
     socket,
     close() {
       stopped = true
-      socket.close(1000, "client closed")
+      void socket.close()
       void updateConnection(false)
     },
   }

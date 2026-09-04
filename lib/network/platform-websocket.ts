@@ -61,6 +61,17 @@ export interface PlatformWebSocketOptions extends PlatformWebSocketHandlers {
    * asked for.
    */
   headers?: Record<string, string>
+  /**
+   * Handshake subprotocols, in preference order.
+   *
+   * Unlike `headers`, both shells can carry these: the browser constructor
+   * takes them directly, and on the handshake they are one header, so the
+   * native path sends `Sec-WebSocket-Protocol` itself. That matters because a
+   * subprotocol is how a protocol that cannot use a header carries its
+   * credential, and without this such a caller had to open a bare socket and
+   * miss the proxy entirely.
+   */
+  protocols?: readonly string[]
 }
 
 export interface PlatformWebSocket {
@@ -169,13 +180,13 @@ async function openNative(
 function openBrowser(
   url: string,
   options: PlatformWebSocketOptions,
-  factory: (url: string) => WebSocket
+  factory: (url: string, protocols?: readonly string[]) => WebSocket
 ): Promise<PlatformWebSocket> {
   if (options.headers && Object.keys(options.headers).length > 0) {
     throw new PlatformWebSocketHeadersUnsupportedError()
   }
   return new Promise((resolve, reject) => {
-    const socket = factory(url)
+    const socket = factory(url, options.protocols)
     let settled = false
     let closed = false
 
@@ -239,6 +250,20 @@ function openBrowser(
 }
 
 /**
+ * Fold subprotocols into the handshake header the native path sends.
+ *
+ * `Sec-WebSocket-Protocol` is a comma-separated list, which is what the browser
+ * constructor builds from its array too, so the two shells send the same bytes.
+ */
+export function withSubprotocolHeader(
+  headers: Record<string, string> | undefined,
+  protocols: readonly string[] | undefined
+): Record<string, string> | undefined {
+  if (!protocols || protocols.length === 0) return headers
+  return { ...headers, "Sec-WebSocket-Protocol": protocols.join(", ") }
+}
+
+/**
  * Open a WebSocket through this shell's proxy-aware transport.
  *
  * `deps` exists so tests can pin a shell and a socket factory; production
@@ -249,7 +274,7 @@ export async function createPlatformWebSocket(
   options: PlatformWebSocketOptions = {},
   deps: {
     isTauri?: () => boolean
-    socketFactory?: (url: string) => WebSocket
+    socketFactory?: (url: string, protocols?: readonly string[]) => WebSocket
     nativeOpen?: (handleId: string) => Promise<string>
     createHandleId?: () => string
     onNativePrepared?: (socket: PlatformWebSocket) => void
@@ -257,7 +282,8 @@ export async function createPlatformWebSocket(
 ): Promise<PlatformWebSocket> {
   const onTauri = deps.isTauri ?? isTauri
   if (onTauri()) {
-    const open = deps.nativeOpen ?? ((handleId) => connectorsWsOpen(url, options.headers, handleId))
+    const headers = withSubprotocolHeader(options.headers, options.protocols)
+    const open = deps.nativeOpen ?? ((handleId) => connectorsWsOpen(url, headers, handleId))
     return openNative(
       options,
       open,
@@ -265,6 +291,11 @@ export async function createPlatformWebSocket(
       deps.onNativePrepared
     )
   }
-  const factory = deps.socketFactory ?? ((target: string) => new WebSocket(target))
+  const factory =
+    deps.socketFactory ??
+    ((target: string, protocols?: readonly string[]) =>
+      protocols && protocols.length > 0
+        ? new WebSocket(target, [...protocols])
+        : new WebSocket(target))
   return openBrowser(url, options, factory)
 }
