@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { onBrowserUrlRequest, requestBrowserUrl } from "./open-url-request"
+import { onBrowserUrlRequest, onBrowserUrlReveal, requestBrowserUrl } from "./open-url-request"
 
 describe("browser open-url request", () => {
   it("reports false when nothing is listening, so the caller can fall back", () => {
@@ -42,5 +42,38 @@ describe("browser open-url request", () => {
     onBrowserUrlRequest(handler)()
     expect(requestBrowserUrl("https://x.dev")).toBe(false)
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it("falls through to a host that can reveal a pane", () => {
+    const seen: string[] = []
+    const off = onBrowserUrlReveal((url) => {
+      seen.push(url)
+      return true
+    })
+    expect(requestBrowserUrl("https://x.dev/first-click")).toBe(true)
+    expect(seen).toEqual(["https://x.dev/first-click"])
+    off()
+  })
+
+  it("prefers a visible pane over a host reveal", () => {
+    const pane = jest.fn(() => true)
+    const host = jest.fn(() => true)
+    // Registered host-first on purpose. The pane has to win because it is
+    // already on screen, not because it subscribed earlier.
+    const offHost = onBrowserUrlReveal(host)
+    const offPane = onBrowserUrlRequest(pane)
+    expect(requestBrowserUrl("https://x.dev")).toBe(true)
+    expect(pane).toHaveBeenCalled()
+    expect(host).not.toHaveBeenCalled()
+    offHost()
+    offPane()
+  })
+
+  it("stays unclaimed when the host declines as well", () => {
+    const offPane = onBrowserUrlRequest(() => false)
+    const offHost = onBrowserUrlReveal(() => false)
+    expect(requestBrowserUrl("https://x.dev")).toBe(false)
+    offPane()
+    offHost()
   })
 })

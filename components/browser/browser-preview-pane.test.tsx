@@ -106,6 +106,7 @@ let mockReadyCallback: (() => void) | undefined
 let mockWebviewErrorCallback: ((error: unknown) => void) | undefined
 let mockWebviewVisible: boolean | undefined
 let mockPaneUrl: string | null | undefined
+let mockPaneNavigateNonce: number | undefined
 const mockRefreshBounds = jest.fn()
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => mockTauri }))
@@ -120,6 +121,7 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
     opts: {
       url?: string | null
       visible?: boolean
+      navigateNonce?: number
       onReady?: () => void
       onError?: (error: unknown) => void
       onRectChange?: (r: ElementRect) => void
@@ -128,6 +130,7 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
     const onReady = opts.onReady
     mockWebviewVisible = opts?.visible
     mockPaneUrl = opts?.url
+    mockPaneNavigateNonce = opts?.navigateNonce
     mockOnRectChange = opts?.onRectChange
     mockReadyCallback = onReady
     mockWebviewErrorCallback = opts.onError
@@ -365,6 +368,10 @@ it("replaces the web iframe with remote Canvas after explicit opt-in", () => {
       chatSessionId: "active-chat",
       workspaceId: "active-workspace",
       initialUrl: "https://example.com/",
+      // The live address the surfaces follow, seeded from `initialUrl`.
+      requestedUrl: "https://example.com/",
+      // …and the token that makes re-stating the same address a new request.
+      requestNonce: 0,
     })
   )
   expect(screen.queryByTestId("browser-web-preview")).not.toBeInTheDocument()
@@ -1203,6 +1210,25 @@ describe("⌘-click link claim", () => {
     expect(claim("https://example.com/docs")).toBe(true)
     expect(reveal).not.toHaveBeenCalled()
   })
+
+  it("re-states an address it already holds as a NEW request", () => {
+    // Open a link, browse on inside the surface, click the same link again.
+    // The address the pane passes down is identical, so on the web and remote
+    // branches — which follow the prop, not the toolbar — nothing re-rendered
+    // and the link looked broken. The request token is what makes the second
+    // claim distinguishable from the first.
+    mockTauri = false
+    mockRemoteBrowserEnabled = true
+    renderPane(<BrowserPreviewPane />)
+    const nonceOf = () =>
+      JSON.parse(screen.getByTestId("remote-browser-preview").getAttribute("data-props") ?? "{}")
+        .requestNonce as number | undefined
+
+    expect(claim("https://example.com/docs")).toBe(true)
+    const first = nonceOf()
+    expect(claim("https://example.com/docs")).toBe(true)
+    expect(nonceOf()).toBeGreaterThan(first as number)
+  })
 })
 
 // D1: the pane used to read only its `sessionId` prop while the hook it calls
@@ -1468,5 +1494,65 @@ describe("navigation model", () => {
     renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Stop loading" })).toBeNull()
+  })
+})
+
+describe("re-requesting the address the pane already holds", () => {
+  // Native Tauri only ever watched `committedUrl`. Asking for A again while the
+  // page had drifted to B wrote the identical value, React bailed out of the
+  // setState, and the embedded webview stayed on B — while the web and remote
+  // surfaces, which consume the request nonce, went back to A.
+  it("hands the native webview a fresh nonce for a repeated requestedUrl", () => {
+    const { rerender } = renderPane(
+      <BrowserPreviewPane requestedUrl="http://a.test/" requestId={1} />
+    )
+    expect(mockPaneUrl).toBe("http://a.test/")
+    const first = mockPaneNavigateNonce
+
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane requestedUrl="http://a.test/" requestId={2} />
+      </TooltipProvider>
+    )
+
+    expect(mockPaneUrl).toBe("http://a.test/")
+    expect(mockPaneNavigateNonce).toBeGreaterThan(first!)
+  })
+
+  it("keeps the nonce and the address in step across a run of requests", () => {
+    const { rerender } = renderPane(
+      <BrowserPreviewPane requestedUrl="http://a.test/" requestId={1} />
+    )
+    const first = mockPaneNavigateNonce!
+
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane requestedUrl="http://b.test/" requestId={2} />
+      </TooltipProvider>
+    )
+    expect(mockPaneUrl).toBe("http://b.test/")
+    const second = mockPaneNavigateNonce!
+    expect(second).toBeGreaterThan(first)
+
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane requestedUrl="http://a.test/" requestId={3} />
+      </TooltipProvider>
+    )
+    expect(mockPaneUrl).toBe("http://a.test/")
+    expect(mockPaneNavigateNonce!).toBeGreaterThan(second)
+  })
+
+  it("leaves the nonce alone while nothing is requested", () => {
+    const { rerender } = renderPane(
+      <BrowserPreviewPane requestedUrl="http://a.test/" requestId={1} />
+    )
+    const first = mockPaneNavigateNonce
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane requestedUrl="http://a.test/" requestId={1} />
+      </TooltipProvider>
+    )
+    expect(mockPaneNavigateNonce).toBe(first)
   })
 })

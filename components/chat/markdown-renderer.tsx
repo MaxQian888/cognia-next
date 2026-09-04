@@ -516,7 +516,7 @@ function buildComponents(
       // `target="_blank"` — Android blocks new-window creation, WKWebView is
       // inconsistent). Non-http hrefs (anchors, mailto:) pass through untouched.
       return (
-        <ExternalLink href={href ?? ""} className="text-primary hover:underline">
+        <ExternalLink href={href ?? ""} className="text-primary hover:underline" preferEmbedded>
           {children}
         </ExternalLink>
       )

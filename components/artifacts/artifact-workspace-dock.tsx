@@ -20,6 +20,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { onBrowserUrlReveal } from "@/lib/browser/open-url-request"
 import { isProIdePanePinnedWithin } from "@/lib/codeserver/pane-manager"
 import {
   SHELL_DOCK_CLEANUP_SLACK_MS,
@@ -264,9 +265,38 @@ function useDockContentMounted(
   return !retracted
 }
 
+/**
+ * Answer "open this link beside the conversation" for the whole chat surface.
+ *
+ * It has to live out here, on the host that is mounted for as long as the chat
+ * is, rather than inside the panel catalogue. A collapsed dock with no
+ * persistent rail does not mount `<ArtifactDock />` at all, and the browser
+ * panel is `retention: "stateful"`, so it does not exist until it has been
+ * activated once. Either way the very first link a user clicks in a
+ * conversation finds nothing subscribed, which is precisely the click that most
+ * needs to work.
+ *
+ * `openBrowser` already knows how to put that panel on screen from outside the
+ * workbench (it is what the Views menu uses); carrying the address with it is
+ * all this adds. A pane that is already visible answers the earlier round in
+ * `requestBrowserUrl` and this never runs.
+ */
+function useSideBrowserReveal(): void {
+  const openBrowser = useArtifactDockLayoutStore((state) => state.openBrowser)
+  useEffect(
+    () =>
+      onBrowserUrlReveal((url) => {
+        openBrowser(url)
+        return true
+      }),
+    [openBrowser]
+  )
+}
+
 export function ArtifactWorkspaceDock({ children }: { children: ReactNode }) {
   useArtifactDockShortcuts()
   useDockAttentionSignal()
+  useSideBrowserReveal()
   const breakpoint = useBreakpoint()
 
   // Tablet takes the Sheet, not a side-by-side dock, and that is deliberate

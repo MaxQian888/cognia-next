@@ -45,7 +45,16 @@ jest.mock("@/lib/files/workspace-backend", () => ({
   hasWorkspaceFsBackend: () => backendAvailable,
 }))
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+// The factory owns the flag rather than closing over a module-level `let`:
+// `jest.mock` is hoisted above every declaration in this file, and `isTauri()`
+// is called during module load (the keyring store reads it), so a `let` is
+// still in its temporal dead zone by then and the whole suite fails to load.
+jest.mock("@/lib/tauri", () => {
+  const state = { inTauri: true }
+  return { isTauri: () => state.inTauri, __setInTauri: (next: boolean) => (state.inTauri = next) }
+})
+const setInTauri = (next: boolean) =>
+  (jest.requireMock("@/lib/tauri") as { __setInTauri: (v: boolean) => void }).__setInTauri(next)
 // Task Workspace is GA (no developer flag), so the task-discovery effect runs
 // on every mount. These tests cover the editor dock, not task scope: resolve to
 // "this session has no task workspace" and the dock renders its normal surface.
@@ -101,6 +110,12 @@ jest.mock("@/components/editor/project/code-server-pane", () => ({
     const clean = relative.replace(/^[/\\]+/, "")
     return clean ? `${base}/${clean}` : base
   },
+}))
+
+jest.mock("@/components/editor/project/code-server-web-pane", () => ({
+  CodeServerWebPane: ({ root }: { root: string }) => (
+    <div data-testid="mock-code-server-web" data-root={root} />
+  ),
 }))
 
 jest.mock("@/hooks/data", () => ({
@@ -269,6 +284,7 @@ import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-ses
 import { PROJECT_EDITOR_GOTO_EVENT } from "@/components/editor/project/editor-events"
 
 beforeEach(() => {
+  setInTauri(true)
   backendAvailable = true
   session = { id: "session-1", projectId: "project-1" }
   projects = [{ id: "project-1", roots: [{ id: "root-1", path: "/repo", isPrimary: true }] }]
@@ -660,6 +676,31 @@ describe("DockWorkspace", () => {
       "session:session-1"
     )
     expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+  })
+
+  it("offers Pro IDE to a browser paired with a host, and mounts the frame pane", async () => {
+    // The gate is "is there a host that can run a workbench", not "is this the
+    // desktop shell". A browser on the host's own machine reaches the workbench
+    // over loopback, and `CodeServerWebPane` states the reason when it cannot.
+    setInTauri(false)
+    supportedMock.mockResolvedValue(true)
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    await waitFor(() => expect(screen.getByTestId("mock-engine-toggle")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("mock-engine-toggle"))
+
+    expect(screen.getByTestId("mock-code-server-web")).toHaveAttribute("data-root", "/repo")
+    expect(screen.queryByTestId("mock-code-server")).not.toBeInTheDocument()
+  })
+
+  it("keeps Pro IDE off a shell with no host at all", async () => {
+    setInTauri(false)
+    backendAvailable = false
+    supportedMock.mockResolvedValue(true)
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    await waitFor(() => expect(screen.getByTestId("workspace-unavailable")).toBeInTheDocument())
+    expect(screen.queryByTestId("mock-engine-toggle")).not.toBeInTheDocument()
   })
 
   it("routes a file reveal to code-server (not Monaco) when Pro IDE is the engine", async () => {

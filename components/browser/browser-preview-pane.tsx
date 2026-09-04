@@ -115,6 +115,8 @@ export function BrowserPreviewPane({
   workspaceId,
   profileId,
   initialUrl,
+  requestedUrl,
+  requestId,
   ownerId,
   onRequestReveal,
 }: {
@@ -123,6 +125,25 @@ export function BrowserPreviewPane({
   workspaceId?: string
   profileId?: string
   initialUrl?: string
+  /**
+   * An address a host is asking this pane to go to *now*, e.g. the link a user
+   * just clicked in the conversation.
+   *
+   * Distinct from `initialUrl`, which seeds the pane once and is meaningless
+   * afterwards. A host whose panel was never mounted cannot route a link
+   * through `onBrowserUrlRequest` (there is nothing subscribed yet), so it
+   * reveals the panel and states the address here instead. Every change is
+   * applied, and only the native branch shares state with the toolbar, which
+   * is why this is threaded down to the web and remote surfaces rather than
+   * left in `committedUrl`.
+   */
+  requestedUrl?: string
+  /**
+   * Which request `requestedUrl` belongs to. Re-stating the same address is a
+   * new request, and only this distinguishes the two — see
+   * `browserRequestId` in `artifact-dock-layout-store`.
+   */
+  requestId?: number
   ownerId?: string
   /**
    * Bring this pane's surface to the front, returning whether it worked. Only
@@ -140,6 +161,46 @@ export function BrowserPreviewPane({
   const [urlInput, setUrlInput] = useState(normalizedInitialUrl ?? "")
   const [editingUrl, setEditingUrl] = useState(false)
   const [committedUrl, setCommittedUrl] = useState<string | null>(normalizedInitialUrl)
+  /**
+   * The address the web and remote surfaces follow.
+   *
+   * They render their own toolbars and never read `committedUrl`, which only
+   * the native branch shares with the toolbar above it, so this is the one
+   * field all three branches agree on. Both routes write it: the `requestedUrl`
+   * prop below, and `openQuickUrl` when a visible pane claims a link itself.
+   */
+  const [surfaceRequest, setSurfaceRequest] = useState<{ url: string; nonce: number } | null>(
+    normalizedInitialUrl ? { url: normalizedInitialUrl, nonce: 0 } : null
+  )
+  /**
+   * Which request has already been consumed.
+   *
+   * Kept apart from `surfaceRequest` deliberately. Folding the two together let
+   * the prop win back a page the user had just navigated away from: a claim
+   * through `openQuickUrl` moved the shared field, the prop no longer matched
+   * it, and the very next render "re-applied" the stale address on top of the
+   * new one.
+   *
+   * Keyed on the request token as well as the address, because the same link
+   * clicked twice is two requests. Comparing addresses alone made the second
+   * click a no-op whenever the user had browsed elsewhere in between — the very
+   * case where re-opening it is the whole point.
+   */
+  const normalizedRequestedUrl = requestedUrl ? normalizePreviewUrl(requestedUrl) : null
+  const requestKey = normalizedRequestedUrl ? `${requestId ?? 0}:${normalizedRequestedUrl}` : null
+  const [consumedRequestKey, setConsumedRequestKey] = useState<string | null>(null)
+  // Applied during render rather than from an effect: the address is a prop and
+  // this state is derived from it. An effect would paint one frame of the
+  // previous page first, which on the native branch is a real navigation.
+  if (normalizedRequestedUrl && requestKey !== consumedRequestKey) {
+    setConsumedRequestKey(requestKey)
+    setUrlInput(normalizedRequestedUrl)
+    setCommittedUrl(normalizedRequestedUrl)
+    setSurfaceRequest((previous) => ({
+      url: normalizedRequestedUrl,
+      nonce: (previous?.nonce ?? 0) + 1,
+    }))
+  }
   const [comment, setComment] = useState("")
   const [acceptedAdjustment, setAcceptedAdjustment] = useState<{
     pageUrl: string
@@ -254,6 +315,11 @@ export function BrowserPreviewPane({
     onError: handleWebviewError,
     onRectChange: handleRectChange,
     visible: !!committedUrl && hasPainted && regionVisible,
+    // The same nonce the web and remote surfaces follow. `committedUrl` alone
+    // cannot express "go to A again": React bails out of the identical
+    // `setState`, so a pane whose page had drifted to B (an in-page navigation,
+    // a redirect) stayed on B while every other backend went back to A.
+    navigateNonce: surfaceRequest?.nonce ?? 0,
   })
   const devtools = useBrowserDevtools({ paneId: "browser-embed", enabled: owned })
   const { selection, selections, navigated, selectMode, setSelectMode, clearSelection } =
@@ -578,6 +644,12 @@ export function BrowserPreviewPane({
   const openQuickUrl = useCallback((url: string) => {
     setUrlInput(url)
     setCommittedUrl(url)
+    // Left out, a claim made by a *visible* pane on the web or remote shell set
+    // state that nothing rendered, and the link looked like it did nothing.
+    // The nonce is what makes re-claiming the address the pane already holds a
+    // real state change: without it, going A → (browse to B) → A again wrote
+    // the identical value, React bailed out, and the surface stayed on B.
+    setSurfaceRequest((previous) => ({ url, nonce: (previous?.nonce ?? 0) + 1 }))
   }, [])
 
   // ⌘-clicking a link in the composer lands here rather than in the OS browser.
@@ -650,6 +722,8 @@ export function BrowserPreviewPane({
         workspaceId={workspaceId ?? activeProjectId ?? "default"}
         profileId={profileId}
         initialUrl={normalizedInitialUrl ?? undefined}
+        requestedUrl={surfaceRequest?.url}
+        requestNonce={surfaceRequest?.nonce}
       />
     )
   }
@@ -657,6 +731,8 @@ export function BrowserPreviewPane({
     return (
       <BrowserWebFallback
         initialUrl={normalizedInitialUrl ?? undefined}
+        requestedUrl={surfaceRequest?.url}
+        requestNonce={surfaceRequest?.nonce}
         unreachableReason={
           backend.reason === "no-remote-host" ? t("remote.needsRemoteHost") : undefined
         }

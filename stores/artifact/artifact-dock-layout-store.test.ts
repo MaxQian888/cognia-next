@@ -311,6 +311,30 @@ describe("useArtifactDockLayoutStore", () => {
       expect(readPersisted()?.state).not.toHaveProperty("revealIntent")
     })
 
+    it("counts each stated address as its own request", () => {
+      // The pane and the surfaces under it follow the address prop. Clicking
+      // the same link twice must reach them twice — the string does not change,
+      // so the token is the only thing that says "again".
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+
+      act(() => result.current.openBrowser("https://example.com/docs"))
+      const first = result.current.browserRequestId
+      act(() => result.current.openBrowser("https://example.com/docs"))
+
+      expect(result.current.browserRequestUrl).toBe("https://example.com/docs")
+      expect(result.current.browserRequestId).toBe(first + 1)
+    })
+
+    it("does not count a bare reveal as a new address request", () => {
+      const { result } = renderHook(() => useArtifactDockLayoutStore())
+
+      act(() => result.current.openBrowser("https://example.com/docs"))
+      const stated = result.current.browserRequestId
+      act(() => result.current.openBrowser())
+
+      expect(result.current.browserRequestId).toBe(stated)
+    })
+
     it("consumes an intent only for the panel that actually handled it", () => {
       const { result } = renderHook(() => useArtifactDockLayoutStore())
       act(() => result.current.openBrowser())

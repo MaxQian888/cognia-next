@@ -426,3 +426,69 @@ describe("lease ownership", () => {
     only.unmount()
   })
 })
+
+describe("a repeated request for the address the pane already holds", () => {
+  // The regression: committed url is A, the page navigates itself to B, then
+  // the user asks for A again. The web and remote surfaces consume a request
+  // nonce, but the native branch only watched `url` — which never changed — so
+  // React bailed out of the identical setState and the webview stayed on B.
+  it("navigates again when only the nonce moves", async () => {
+    const { rerender } = renderHook(
+      ({ nonce }: { nonce: number }) =>
+        useBrowserPaneWebview(ref, { url: "http://a.test/", navigateNonce: nonce }),
+      { initialProps: { nonce: 1 } }
+    )
+    deliverRect()
+    await settle()
+    expect(browserClient.embedCreate).toHaveBeenCalledWith("http://a.test/", RECT)
+    // Creating IS the first navigation; it must not also navigate.
+    expect(browserClient.embedNavigate).not.toHaveBeenCalled()
+
+    rerender({ nonce: 2 })
+
+    expect(browserClient.embedNavigate).toHaveBeenCalledTimes(1)
+    expect(browserClient.embedNavigate).toHaveBeenCalledWith("http://a.test/")
+  })
+
+  it("stays put while the nonce does, however often it re-renders", async () => {
+    const { rerender } = renderHook(
+      ({ nonce }: { nonce: number }) =>
+        useBrowserPaneWebview(ref, { url: "http://a.test/", navigateNonce: nonce }),
+      { initialProps: { nonce: 1 } }
+    )
+    deliverRect()
+    await settle()
+
+    rerender({ nonce: 1 })
+    rerender({ nonce: 1 })
+
+    expect(browserClient.embedNavigate).not.toHaveBeenCalled()
+  })
+
+  it("navigates once when a request changes the address as well", async () => {
+    const { rerender } = renderHook(
+      ({ nonce, url }: { nonce: number; url: string }) =>
+        useBrowserPaneWebview(ref, { url, navigateNonce: nonce }),
+      { initialProps: { nonce: 1, url: "http://a.test/" } }
+    )
+    deliverRect()
+    await settle()
+
+    rerender({ nonce: 2, url: "http://b.test/" })
+
+    expect(browserClient.embedNavigate).toHaveBeenCalledTimes(1)
+    expect(browserClient.embedNavigate).toHaveBeenCalledWith("http://b.test/")
+  })
+
+  it("does not navigate before the webview exists", () => {
+    const { rerender } = renderHook(
+      ({ nonce }: { nonce: number }) =>
+        useBrowserPaneWebview(ref, { url: "http://a.test/", navigateNonce: nonce }),
+      { initialProps: { nonce: 1 } }
+    )
+    // No rect yet, so nothing was created and this pane holds no lease.
+    rerender({ nonce: 2 })
+    expect(browserClient.embedNavigate).not.toHaveBeenCalled()
+    expect(browserClient.embedCreate).not.toHaveBeenCalled()
+  })
+})

@@ -17,6 +17,8 @@ import type { Artifact } from "@/types/artifact/artifact"
 import type { Project, Session } from "@/types/plugin/_compat"
 
 const navigatePanel = jest.fn()
+const smartReveal = jest.fn(() => true)
+const setDockCollapsed = jest.fn()
 let jumpToMessage: ((id: string, a?: unknown, b?: unknown) => boolean) | null = null
 const toastError = jest.fn()
 
@@ -27,8 +29,17 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("@/stores/context-workbench/context-workbench-store", () => ({
-  useContextWorkbenchStore: { getState: () => ({ navigatePanel }) },
+  useContextWorkbenchStore: { getState: () => ({ navigatePanel, smartReveal }) },
 }))
+
+let browserRequestUrl: string | null = null
+let browserRequestId = 0
+jest.mock("@/stores/artifact/artifact-dock-layout-store", () => {
+  const store = (selector: (state: unknown) => unknown) =>
+    selector({ browserRequestUrl, browserRequestId })
+  store.getState = () => ({ setDockCollapsed })
+  return { useArtifactDockLayoutStore: store }
+})
 
 jest.mock("@/stores/chat/chat-viewport-store", () => ({
   useChatViewportStore: (selector: (state: unknown) => unknown) => selector({ jumpToMessage }),
@@ -117,8 +128,24 @@ jest.mock("@/components/context-workbench/session-sources-panel", () => ({
 }))
 
 jest.mock("@/components/browser/browser-preview-pane", () => ({
-  BrowserPreviewPane: ({ sessionId }: { sessionId?: string }) => (
-    <div data-testid="browser" data-session={sessionId ?? "none"} />
+  BrowserPreviewPane: ({
+    sessionId,
+    requestedUrl,
+    requestId,
+    onRequestReveal,
+  }: {
+    sessionId?: string
+    requestedUrl?: string
+    requestId?: number
+    onRequestReveal?: () => boolean
+  }) => (
+    <div
+      data-testid="browser"
+      data-session={sessionId ?? "none"}
+      data-requested={requestedUrl ?? ""}
+      data-request-id={String(requestId ?? "")}
+      onClick={() => onRequestReveal?.()}
+    />
   ),
 }))
 
@@ -304,6 +331,8 @@ function panelById(panels: ContextPanelDefinition[], id: string): ContextPanelDe
 beforeEach(() => {
   jest.clearAllMocks()
   jumpToMessage = null
+  browserRequestUrl = null
+  browserRequestId = 0
 })
 
 describe("useArtifactSurfacePanels", () => {
@@ -460,6 +489,54 @@ describe("useArtifactSurfacePanels", () => {
     expect(screen.getByTestId("browser")).toHaveAttribute("data-session", "none")
     renderPanel(panelById(panels, "artifacts"), ARTIFACT_RESOURCE)
     expect(screen.getByTestId("artifact-list")).toHaveAttribute("data-session", "none")
+  })
+})
+
+describe("opening a link beside the conversation", () => {
+  /** Mount the hook for real and keep its browser panel on screen. */
+  function mountBrowserPanel() {
+    function Harness() {
+      const panels = useSessionSurfacePanels(sessionInput())
+      const Renderer = panelById(panels, "browser").renderer as ComponentType<{
+        workbenchInstanceId: string
+        resource: ContextResource
+        active: boolean
+      }>
+      return <Renderer workbenchInstanceId="wb" resource={SESSION_RESOURCE} active />
+    }
+    return render(<Harness />)
+  }
+
+  it("uncollapses the dock when a hidden pane asks to be revealed", () => {
+    mountBrowserPanel()
+    fireEvent.click(screen.getByTestId("browser"))
+    expect(smartReveal).toHaveBeenCalledWith(expect.any(String), "browser", "wide")
+    expect(setDockCollapsed).toHaveBeenCalledWith(false)
+  })
+
+  it("leaves a pinned workbench pinned, so the caller falls back to the OS browser", () => {
+    smartReveal.mockReturnValueOnce(false)
+    mountBrowserPanel()
+    fireEvent.click(screen.getByTestId("browser"))
+    expect(setDockCollapsed).not.toHaveBeenCalled()
+  })
+
+  it("hands the pane the address the dock host recorded", () => {
+    // The host (`artifact-workspace-dock`) answers for a dock that is collapsed
+    // or has never shown this panel, and parks the address on the store. The
+    // catalogue's only job is to pass it down to the pane it mounts.
+    browserRequestUrl = "https://x.dev/first"
+    mountBrowserPanel()
+    expect(screen.getByTestId("browser")).toHaveAttribute("data-requested", "https://x.dev/first")
+  })
+
+  it("passes the request token down alongside the address", () => {
+    // The address alone cannot tell a repeat click apart from a re-render, so
+    // the pane needs the store's token to know the link was clicked again.
+    browserRequestUrl = "https://x.dev/first"
+    browserRequestId = 7
+    mountBrowserPanel()
+    expect(screen.getByTestId("browser")).toHaveAttribute("data-request-id", "7")
   })
 })
 

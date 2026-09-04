@@ -103,6 +103,21 @@ export interface RemoteBrowserPreviewProps {
   workspaceId: string
   profileId?: string
   initialUrl?: string
+  /**
+   * An address the host is asking this surface to go to now, e.g. a link the
+   * user clicked in the conversation. See `BrowserPreviewPane`'s prop of the
+   * same name.
+   *
+   * Deliberately not folded into `initialUrl`: that one is a dependency of the
+   * connect effect, so writing a live address into it would tear down and
+   * rebuild the whole remote session on every click.
+   */
+  requestedUrl?: string
+  /**
+   * Which request `requestedUrl` belongs to. The same address stated twice is
+   * two requests; without this the second one deduplicated away.
+   */
+  requestNonce?: number
   createStream?: (options: RemoteBrowserStreamOptions) => StreamLike
 }
 
@@ -168,6 +183,8 @@ export function RemoteBrowserPreview({
   workspaceId,
   profileId,
   initialUrl,
+  requestedUrl,
+  requestNonce,
   createStream = (options) => new RemoteBrowserStream(options),
 }: RemoteBrowserPreviewProps) {
   const t = useTranslations("browser.remote")
@@ -398,6 +415,50 @@ export function RemoteBrowserPreview({
       pushHistory(active.url)
     }
   }
+
+  // Follow an address the host states. Recorded during render so the toolbar
+  // shows it on the same frame the panel appears, then navigated once an engine
+  // exists, which is what lets a link clicked before the stream finished
+  // connecting still arrive instead of being dropped.
+  //
+  // Tracked by request token, not by address: the user can navigate away inside
+  // this surface, and re-stating the page they left is then a real request that
+  // an address-only comparison threw away.
+  const [applied, setApplied] = useState<{ key: string; url: string } | null>(null)
+  const requestKey = requestedUrl ? `${requestNonce ?? 0}:${requestedUrl}` : null
+  if (requestedUrl && requestKey !== applied?.key) {
+    setApplied({ key: requestKey as string, url: requestedUrl })
+    setUrlInput(requestedUrl)
+  }
+  const appliedKey = applied?.key ?? null
+  const appliedRequestedUrl = applied?.url ?? null
+  /**
+   * The request key this surface has already navigated for.
+   *
+   * `engine` is a dependency below because a link clicked before the stream
+   * finished connecting has to arrive once one exists. That alone would also
+   * replay the request on every RECONNECT, though: the connect effect swaps the
+   * engine, and a delivered address would be navigated again, dragging the user
+   * back from wherever they had browsed to. The key says which of the two this
+   * is, so waiting for an engine and re-serving a delivered request stay
+   * separable.
+   */
+  const deliveredKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!appliedRequestedUrl || !engine) return
+    if (deliveredKeyRef.current === appliedKey) return
+    deliveredKeyRef.current = appliedKey
+    void engine
+      .navigate(appliedRequestedUrl)
+      .then(() => {
+        pushHistory(appliedRequestedUrl)
+      })
+      .catch((error: unknown) =>
+        setErrorCode(error instanceof Error ? error.message : "browser_navigation_failed")
+      )
+    // `appliedKey` is the dependency that makes a repeat of the same address
+    // re-run this effect. `appliedRequestedUrl` alone would not change.
+  }, [appliedKey, appliedRequestedUrl, engine, pushHistory])
 
   const navigate = async (event: FormEvent) => {
     event.preventDefault()

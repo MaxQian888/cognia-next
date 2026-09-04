@@ -204,6 +204,7 @@ import {
   WORKSPACE_DOCK_BOUNDS,
   useArtifactDockLayoutStore,
 } from "@/stores/artifact/artifact-dock-layout-store"
+import { requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
@@ -356,6 +357,42 @@ describe("ArtifactWorkspaceDock", () => {
     // The resizable two-column host must be absent, not merely collapsed.
     expect(screen.queryByTestId("artifact-workspace-dock")).not.toBeInTheDocument()
     expect(screen.getByTestId("artifact-workspace-dock-mobile")).toBeInTheDocument()
+  })
+
+  it("opens the browser panel at a link the conversation handed it", async () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => useArtifactDockLayoutStore.getState().setDockCollapsed(true))
+
+    let claimed = false
+    act(() => {
+      claimed = requestBrowserUrl("https://example.com/cited")
+    })
+
+    // The point of answering here rather than inside the panel catalogue: with
+    // the dock collapsed the panel is not mounted, so nothing deeper is
+    // listening, and that is exactly the first click of a conversation.
+    expect(claimed).toBe(true)
+    const layout = useArtifactDockLayoutStore.getState()
+    expect(layout.dockCollapsed).toBe(false)
+    expect(layout.browserRequestUrl).toBe("https://example.com/cited")
+    expect(layout.revealIntent).toEqual({ panelId: "browser", mode: "wide" })
+  })
+
+  it("keeps the link for the conversation it was clicked in", async () => {
+    render(
+      <ArtifactWorkspaceDock>
+        <div data-testid="chat" />
+      </ArtifactWorkspaceDock>
+    )
+    act(() => {
+      requestBrowserUrl("https://example.com/cited")
+    })
+    act(() => useArtifactDockLayoutStore.getState().clearSessionScopedReveals())
+    expect(useArtifactDockLayoutStore.getState().browserRequestUrl).toBeNull()
   })
 
   it("raises the single Sheet when a Workspace reveal arrives on mobile", async () => {

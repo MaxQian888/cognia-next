@@ -61,6 +61,19 @@ export interface UseBrowserPaneWebviewOptions {
    * yield to a loading state / modal / hidden route. Defaults to true.
    */
   visible?: boolean
+  /**
+   * Counts requests to be AT `url`, not changes of it.
+   *
+   * A repeated request is a real one: the page may have moved on its own since
+   * it was granted — an in-page navigation, a redirect, a link the user
+   * followed — while `url` still names where the pane was asked to be. Without
+   * this the second request for the address the pane already holds does
+   * nothing at all: React bails out of the identical `setState`, the url effect
+   * below never re-runs, and `sync()` would compare `target` against
+   * `lastUrlRef` and find them equal. The web and remote surfaces already carry
+   * a nonce for exactly this; the native branch was the one that did not.
+   */
+  navigateNonce?: number
 }
 
 let activeLease: { token: string; ownerId: string } | null = null
@@ -132,6 +145,7 @@ export function useBrowserPaneWebview(
     onRectChange,
     visible = true,
     ownerId = "browser-preview",
+    navigateNonce = 0,
   } = options
   // Per-pane identity for the process-wide lease. `useState` rather than a ref
   // because `owned` is derived during render, and a ref may not be read there.
@@ -145,6 +159,9 @@ export function useBrowserPaneWebview(
   const lastUrlRef = useRef<string | null>(null)
   const rectRef = useRef<ElementRect | null>(null)
   const urlRef = useRef(url)
+  /** The request `sync` is being asked to satisfy, and the last it satisfied. */
+  const navigateNonceRef = useRef(navigateNonce)
+  const appliedNonceRef = useRef(navigateNonce)
   const visibleRef = useRef(visible)
   const onReadyRef = useRef(onReady)
   const onErrorRef = useRef(onError)
@@ -201,6 +218,9 @@ export function useBrowserPaneWebview(
       if (!acquireLease(leaseToken, ownerId)) return
       createdRef.current = true
       lastUrlRef.current = target
+      // Creating IS the navigation, so the pending request is satisfied here
+      // too — otherwise the first render after creation would navigate again.
+      appliedNonceRef.current = navigateNonceRef.current
       void browserClient.embedCreate(target, rect).then(
         () => {
           retryAttemptRef.current = 0
@@ -228,8 +248,12 @@ export function useBrowserPaneWebview(
           }
         }
       )
-    } else if (target !== lastUrlRef.current) {
+    } else if (
+      target !== lastUrlRef.current ||
+      navigateNonceRef.current !== appliedNonceRef.current
+    ) {
       lastUrlRef.current = target
+      appliedNonceRef.current = navigateNonceRef.current
       void browserClient.embedNavigate(target).catch((error: unknown) => {
         onErrorRef.current?.(error)
       })
@@ -257,10 +281,13 @@ export function useBrowserPaneWebview(
 
   useElementRect(ref, onRect, { trackState: false })
 
+  // One effect for both inputs, so a request that ALSO changes the address
+  // navigates once rather than twice.
   useEffect(() => {
     urlRef.current = url
+    navigateNonceRef.current = navigateNonce
     sync()
-  }, [url, sync])
+  }, [url, navigateNonce, sync])
 
   useEffect(() => {
     leaseWaiters.add(sync)
@@ -278,6 +305,8 @@ export function useBrowserPaneWebview(
       const wasCreated = createdRef.current
       createdRef.current = false
       lastUrlRef.current = null
+      // Re-acquiring goes through the create branch, which re-states both.
+      appliedNonceRef.current = navigateNonceRef.current
       if (wasCreated) void browserClient.embedDestroy().catch(() => {})
       releaseLease(leaseToken, false)
     }

@@ -102,6 +102,7 @@ export function WebFetchCard({ part }: { part: ToolUIPart }) {
               href={url}
               className="block break-all font-mono text-[11px] text-primary hover:underline"
               data-testid="mcp-webfetch-url"
+              preferEmbedded
             >
               {url}
             </ExternalLink>

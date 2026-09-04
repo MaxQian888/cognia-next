@@ -210,6 +210,93 @@ it("ensures a user-gated session and connects through a one-time ticket", async 
   })
 })
 
+it("follows an address the host states after connecting", async () => {
+  const { rerender } = render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(connect).toHaveBeenCalled())
+  navigate.mockClear()
+
+  rerender(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      requestedUrl="https://example.com/clicked"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith("https://example.com/clicked"))
+  expect(screen.getByRole("textbox", { name: "browser.url.placeholder" })).toHaveValue(
+    "https://example.com/clicked"
+  )
+})
+
+it("navigates again when the host re-states the address it already applied", async () => {
+  // A repeat of the same link is a second request, not a duplicate: the user
+  // has browsed on inside the surface since. Deduplicating on the address alone
+  // made that click do nothing at all.
+  const { rerender } = render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      requestedUrl="https://example.com/clicked"
+      requestNonce={1}
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith("https://example.com/clicked"))
+  navigate.mockClear()
+
+  rerender(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      requestedUrl="https://example.com/clicked"
+      requestNonce={2}
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith("https://example.com/clicked"))
+})
+
+it("does not replay a delivered request when the stream reconnects", async () => {
+  // The effect waits for an engine so a link clicked before the stream
+  // finished connecting still arrives. A reconnect swaps that engine, and
+  // without a delivered marker the address was navigated a second time,
+  // dragging the user back from wherever they had browsed to since.
+  const { rerender } = render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      requestedUrl="https://example.com/clicked"
+      requestNonce={1}
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith("https://example.com/clicked"))
+  navigate.mockClear()
+
+  // `profileId` is a dependency of the connect effect, so changing it tears the
+  // engine down and stands a new one up, which is what a reconnect does.
+  rerender(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      profileId="profile-2"
+      requestedUrl="https://example.com/clicked"
+      requestNonce={1}
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+
+  expect(navigate).not.toHaveBeenCalledWith("https://example.com/clicked")
+})
+
 it("takes human control before forwarding pointer input", async () => {
   render(
     <RemoteBrowserPreview

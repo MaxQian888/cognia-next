@@ -68,6 +68,77 @@ describe("BrowserWebFallback", () => {
     expect(frame).not.toHaveAttribute("src")
   })
 
+  it("follows an address the host states after the first render", () => {
+    const { rerender } = render(<BrowserWebFallback initialUrl="https://example.com/one" />)
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).toHaveAttribute(
+      "src",
+      "https://example.com/one"
+    )
+
+    rerender(
+      <BrowserWebFallback
+        initialUrl="https://example.com/one"
+        requestedUrl="https://example.com/clicked"
+      />
+    )
+    const address = screen.getByRole("textbox", { name: "browser.url.placeholder" })
+    expect(address).toHaveValue("https://example.com/clicked")
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).toHaveAttribute(
+      "src",
+      "https://example.com/clicked"
+    )
+    // A stated address is a real navigation, so back has somewhere to go.
+    expect(screen.getByRole("button", { name: "browser.actions.back" })).toBeEnabled()
+  })
+
+  it("follows the SAME address again when the host states it as a new request", () => {
+    // The user opens a link, browses on inside the frame, and clicks the same
+    // link again. The address is unchanged, so an address-only comparison threw
+    // the second request away and the frame stayed where the user had browsed
+    // to — the link reading as broken.
+    const { rerender } = render(
+      <BrowserWebFallback
+        initialUrl="https://example.com/one"
+        requestedUrl="https://example.com/clicked"
+        requestNonce={1}
+      />
+    )
+    fireEvent.change(screen.getByRole("textbox", { name: "browser.url.placeholder" }), {
+      target: { value: "https://example.com/elsewhere" },
+    })
+    fireEvent.submit(screen.getByRole("textbox", { name: "browser.url.placeholder" }))
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).toHaveAttribute(
+      "src",
+      "https://example.com/elsewhere"
+    )
+
+    rerender(
+      <BrowserWebFallback
+        initialUrl="https://example.com/one"
+        requestedUrl="https://example.com/clicked"
+        requestNonce={2}
+      />
+    )
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).toHaveAttribute(
+      "src",
+      "https://example.com/clicked"
+    )
+  })
+
+  it("stays where it is when the host drops its request", () => {
+    const { rerender } = render(
+      <BrowserWebFallback
+        initialUrl="https://example.com/one"
+        requestedUrl="https://example.com/clicked"
+      />
+    )
+    rerender(<BrowserWebFallback initialUrl="https://example.com/one" />)
+    expect(screen.getByTitle("browser.webFallback.frameTitle")).toHaveAttribute(
+      "src",
+      "https://example.com/clicked"
+    )
+  })
+
   it("opens the current URL externally and links to the existing companion setting", () => {
     render(<BrowserWebFallback initialUrl="https://example.com/current" />)
 

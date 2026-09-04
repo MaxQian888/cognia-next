@@ -477,6 +477,7 @@ const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem 
       <ExternalLink
         className="block rounded px-1 py-0.5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         href={source.url}
+        preferEmbedded
       >
         {body}
       </ExternalLink>

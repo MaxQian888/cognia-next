@@ -9,6 +9,7 @@ import type { SessionExecutionContext } from "@/types/execution-context"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
+import { CodeServerWebPane } from "@/components/editor/project/code-server-web-pane"
 import { EditorEngineToggle } from "@/components/editor/project/editor-engine-toggle"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import { ProjectEditorTabs } from "@/components/editor/project/project-editor-tabs"
@@ -205,7 +206,14 @@ function WorkspaceEditorBody({
     (state) => state.sessions[scopeKey]?.proIdeProfile
   )
   const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
-  const proIdeAllowed = isTauri() && layout !== "mobile"
+  // Pro IDE needs a HOST that can run a workbench, not a desktop shell. Gating
+  // on `isTauri()` said "not supported on this platform" to every browser and
+  // phone, including a tab on the host's own machine that can reach the
+  // workbench over loopback. `hasWorkspaceFsBackend` is the same "is there a
+  // host" question the workspace panel around this already answers with, and
+  // `CodeServerWebPane` states the remaining reason when a browser cannot show
+  // it. Phones stay out on width, which is a layout decision, not a reach one.
+  const proIdeAllowed = hasWorkspaceFsBackend() && layout !== "mobile"
   const activeTask = useTaskWorkspaceStore((state) => state.activeBySession[sessionId])
   const activateTask = useTaskWorkspaceStore((state) => state.activate)
   const hasTaskScope = Boolean(activeTask)
@@ -547,14 +555,24 @@ function WorkspaceEditorBody({
               data-testid="workspace-code-server-host"
               data-active={visibleSurface === "file"}
             >
-              <CodeServerPane
-                root={rootPath}
-                ownerId={scopeKey}
-                profile={proIdeProfile}
-                beforeOpen={showFileSurface}
-                onRevoked={() => setEngine("monaco")}
-                onCancelled={() => setEngine("monaco")}
-              />
+              {isTauri() ? (
+                <CodeServerPane
+                  root={rootPath}
+                  ownerId={scopeKey}
+                  profile={proIdeProfile}
+                  beforeOpen={showFileSurface}
+                  onRevoked={() => setEngine("monaco")}
+                  onCancelled={() => setEngine("monaco")}
+                />
+              ) : (
+                // No native webview to pin, and no shared pane to hand off, so
+                // none of the desktop pane's ownership plumbing applies here.
+                <CodeServerWebPane
+                  root={rootPath}
+                  profile={proIdeProfile}
+                  beforeOpen={showFileSurface}
+                />
+              )}
             </div>
           ) : null}
 

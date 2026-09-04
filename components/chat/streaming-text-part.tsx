@@ -237,7 +237,12 @@ export function createStreamingComponents(
         )
       }
       return (
-        <ExternalLink href={href ?? ""} className="text-primary hover:underline" {...props}>
+        <ExternalLink
+          href={href ?? ""}
+          className="text-primary hover:underline"
+          preferEmbedded
+          {...props}
+        >
           {children}
         </ExternalLink>
       )

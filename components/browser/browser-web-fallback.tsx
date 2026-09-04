@@ -20,6 +20,18 @@ import { openExternal } from "@/lib/tauri/opener"
 export interface BrowserWebFallbackProps {
   initialUrl?: string
   /**
+   * An address the host is asking this surface to go to now, e.g. a link the
+   * user clicked in the conversation. See `BrowserPreviewPane`'s prop of the
+   * same name. Every change is a fresh navigation, so it goes onto the
+   * back/forward stack exactly like typing one in.
+   */
+  requestedUrl?: string
+  /**
+   * Which request `requestedUrl` belongs to. The same address stated twice is
+   * two requests; without this the second one deduplicated away.
+   */
+  requestNonce?: number
+  /**
    * Why the cloud browser is not being used. Absent means "not switched on",
    * which is the existing invitation to switch it on; present means it IS on
    * and something else is missing, so inviting again would be nonsense.
@@ -41,7 +53,12 @@ function normalizeWebUrl(input: string): string | null {
  * Best-effort Web browser surface. It deliberately keeps its own submitted
  * history because cross-origin iframe navigation is opaque to the host page.
  */
-export function BrowserWebFallback({ initialUrl, unreachableReason }: BrowserWebFallbackProps) {
+export function BrowserWebFallback({
+  initialUrl,
+  requestedUrl,
+  requestNonce,
+  unreachableReason,
+}: BrowserWebFallbackProps) {
   const t = useTranslations("browser")
   const toolbarRef = useRef<HTMLDivElement>(null)
   const frameViewportRef = useRef<HTMLDivElement>(null)
@@ -57,18 +74,33 @@ export function BrowserWebFallback({ initialUrl, unreachableReason }: BrowserWeb
   const [draftUrl, setDraftUrl] = useState(normalizedInitialUrl ?? "")
   const [reloadKey, setReloadKey] = useState(0)
 
-  // Seed the stack with the initial address exactly once.
-  const [seeded, setSeeded] = useState(false)
-  if (!seeded) {
-    setSeeded(true)
-    if (normalizedInitialUrl) push(normalizedInitialUrl)
-  }
-
   /** Open a brand-new address (quick-open chip): a push, not a traversal. */
   const goToNew = (url: string) => {
     push(url)
     setCurrentUrl(url)
     setDraftUrl(url)
+  }
+
+  // Seed the stack with the initial address, then follow every address the host
+  // states afterwards. This used to be a one-shot `seeded` flag, which is why a
+  // link clicked in the conversation reached the pane and then went nowhere:
+  // the parent held it in state this surface does not read.
+  //
+  // Keyed on the request token, not the address alone: the user browses on
+  // inside this surface, so re-stating the page they came from is a real
+  // request. Comparing addresses made that second click a no-op.
+  const normalizedRequestedUrl = requestedUrl ? normalizeWebUrl(requestedUrl) : null
+  const [applied, setApplied] = useState<{ key: string; url: string } | null>(null)
+  // The seed only applies while nothing has been applied yet. Falling back to
+  // it whenever `requestedUrl` goes absent would drag the user back to the
+  // pane's first page the moment a host cleared its request.
+  const nextAddress = normalizedRequestedUrl ?? (applied === null ? normalizedInitialUrl : null)
+  const nextKey = normalizedRequestedUrl
+    ? `${requestNonce ?? 0}:${normalizedRequestedUrl}`
+    : `seed:${nextAddress ?? ""}`
+  if (nextAddress && nextKey !== applied?.key) {
+    setApplied({ key: nextKey, url: nextAddress })
+    goToNew(nextAddress)
   }
 
   const goTo = (url: string | null) => {

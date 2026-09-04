@@ -135,6 +135,26 @@ export interface ArtifactDockLayoutState {
   dockProfile: DockProfile
   /** Runtime-only one-shot panel request published from outside the workbench. */
   revealIntent: DockRevealIntent | null
+  /**
+   * Runtime-only address the browser panel should be showing, if a surface
+   * outside it named one. Retained after the reveal is consumed, the way
+   * `workspaceContext` is, so the panel keeps showing the page rather than
+   * snapping back the moment the intent clears. Dropped on a conversation
+   * switch by `clearSessionScopedReveals`.
+   */
+  browserRequestUrl: string | null
+  /**
+   * Bumped every time a surface states a browser address, so re-stating the
+   * SAME one is still a distinct request.
+   *
+   * Without it the whole chain — this store, the pane, and the web/remote
+   * surfaces below it — deduplicated on the URL string alone. Open a link,
+   * browse on to another page inside the pane, click the first link again: the
+   * value never changed, so React saw no new state, nothing re-rendered, and
+   * the link read as broken. Same reason `workspaceRevealRequest` carries
+   * `nextRevealId()`.
+   */
+  browserRequestId: number
   /** Runtime-only reveal queue consumed after the workspace dock mounts. */
   workspaceRevealRequest: WorkspaceRevealRequest | null
   /** Runtime-only workspace target retained after a reveal request is consumed. */
@@ -212,8 +232,17 @@ export interface ArtifactDockLayoutState {
   requestReveal: (intent: DockRevealIntent) => void
   /** Clear a consumed intent, but only if it is still the one that was published. */
   consumeRevealIntent: (panelId: string) => void
-  /** Reveal the browser panel in the expanded chat right rail. */
-  openBrowser: () => void
+  /**
+   * Reveal the browser panel in the expanded chat right rail, optionally at a
+   * given address.
+   *
+   * The address is what makes this reachable from a link in the conversation.
+   * A pane can only claim a URL once it is mounted, and this panel is
+   * `retention: "stateful"`, so it does not exist until it has been activated
+   * once. Routing through the reveal intent means the pane is handed its
+   * address by the time it first renders.
+   */
+  openBrowser: (url?: string) => void
   /** Reveal the active session's sidechat without carrying workspace state. */
   revealSidechat: () => void
   revealWorkspaceFile: (request: {
@@ -344,6 +373,8 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       workspaceRevealRequest: null,
       workspaceContext: null,
       revealIntent: null,
+      browserRequestUrl: null,
+      browserRequestId: 0,
       dockSizeRequest: 0,
 
       requestDockSize: (pct) =>
@@ -438,16 +469,20 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
       requestReveal: (revealIntent) => set({ revealIntent, unreadArtifact: false }),
       consumeRevealIntent: (panelId) =>
         set((state) => (state.revealIntent?.panelId === panelId ? { revealIntent: null } : state)),
-      openBrowser: () =>
-        set({
+      openBrowser: (url) =>
+        set((state) => ({
           revealIntent: { panelId: "browser", mode: "wide" },
+          browserRequestUrl: url ?? null,
+          // Only a stated address is a request. A bare reveal must not bump the
+          // token, or it would re-navigate the pane to whatever it last showed.
+          browserRequestId: url ? state.browserRequestId + 1 : state.browserRequestId,
           dockCollapsed: false,
           userDismissed: false,
           unreadArtifact: false,
           mobileSheetOpen: true,
           workspaceRevealRequest: null,
           workspaceContext: null,
-        }),
+        })),
       revealSidechat: () =>
         set({
           revealIntent: { panelId: SIDECHAT_PANEL_ID, mode: "narrow" },
@@ -500,9 +535,15 @@ export const useArtifactDockLayoutStore = create<ArtifactDockLayoutState>()(
         set((state) =>
           state.revealIntent === null &&
           state.workspaceRevealRequest === null &&
-          state.workspaceContext === null
+          state.workspaceContext === null &&
+          state.browserRequestUrl === null
             ? state
-            : { revealIntent: null, workspaceRevealRequest: null, workspaceContext: null }
+            : {
+                revealIntent: null,
+                workspaceRevealRequest: null,
+                workspaceContext: null,
+                browserRequestUrl: null,
+              }
         ),
       setMobileSnapPoint: (snapPoint) => set({ mobileSnapPoint: normalizeSnapPoint(snapPoint) }),
       setMobileSheetOpen: (open) =>

@@ -96,6 +96,7 @@ export function WebSearchCard({ part }: { part: ToolUIPart }) {
                       <ExternalLink
                         href={r.url}
                         className="block truncate text-[12px] font-medium text-primary hover:underline"
+                        preferEmbedded
                       >
                         {r.title ? unwrapUntrustedContent(r.title) : r.url}
                       </ExternalLink>

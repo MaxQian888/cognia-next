@@ -36,7 +36,7 @@ import {
   ListChecksIcon,
   UsersIcon,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { UIMessage } from "ai"
@@ -47,6 +47,7 @@ import { buildAsideContext } from "@/lib/chat/session-aside-context"
 import { SIDECHAT_PANEL_ID } from "@/lib/tasks/spawn-task-core"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
 import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
 import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
@@ -111,6 +112,39 @@ export interface ArtifactSurfacePanelsInput {
   onWidthHint: (mode: ContextPanelMode, panelId?: string) => void
 }
 
+/**
+ * The panel's half of "open this link beside the conversation".
+ *
+ * The other half is `useSideBrowserReveal` in `artifact-workspace-dock.tsx`,
+ * which answers for a dock that is collapsed or has never shown this panel.
+ * This half is for the case that one cannot reach: the pane is mounted (the
+ * panel is `retention: "stateful"`, so it stays alive behind whichever tab is
+ * showing) but hidden.
+ *
+ * `smartReveal` alone is not enough there. It moves the workbench's active
+ * panel and knows nothing about the dock shell around it, so on a collapsed
+ * dock the pane claimed the link and the screen did not change, which reads
+ * exactly like the link doing nothing. Uncollapsing is what makes the claim
+ * true, and declining when `smartReveal` refuses is what keeps a pinned
+ * workbench pinned while the caller falls back to the OS browser.
+ */
+function useSideBrowserRequest(scopeKey: string): {
+  requestedUrl: string | undefined
+  requestId: number
+  revealBrowserPanel: () => boolean
+} {
+  const requestedUrl = useArtifactDockLayoutStore((state) => state.browserRequestUrl)
+  // Carried alongside the address so a link clicked twice reaches the pane
+  // twice. The store bumps it per request; the URL on its own does not change.
+  const requestId = useArtifactDockLayoutStore((state) => state.browserRequestId)
+  const revealBrowserPanel = useCallback(() => {
+    if (!useContextWorkbenchStore.getState().smartReveal(scopeKey, "browser", "wide")) return false
+    useArtifactDockLayoutStore.getState().setDockCollapsed(false)
+    return true
+  }, [scopeKey])
+  return { requestedUrl: requestedUrl ?? undefined, requestId, revealBrowserPanel }
+}
+
 /** The dock's artifact-surface panel catalogue. */
 export function useArtifactSurfacePanels({
   artifactId,
@@ -130,6 +164,7 @@ export function useArtifactSurfacePanels({
   onWidthHint,
 }: ArtifactSurfacePanelsInput): ContextPanelDefinition[] {
   const tWorkbench = useTranslations("contextWorkbench")
+  const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
 
   return useMemo<ContextPanelDefinition[]>(
     () => [
@@ -239,12 +274,12 @@ export function useArtifactSurfacePanels({
         renderer: () => (
           <BrowserPreviewPane
             sessionId={activeSessionId ?? undefined}
+            requestedUrl={requestedUrl}
+            requestId={requestId}
             // `retention: "stateful"` keeps this panel mounted behind whichever
-            // tab is showing, so a ⌘-clicked link must bring it to the front
-            // before it may claim the URL — otherwise the link reads as a no-op.
-            onRequestReveal={() =>
-              useContextWorkbenchStore.getState().smartReveal(scopeKey, "browser", "wide")
-            }
+            // tab is showing, so a clicked link must bring it to the front
+            // before it may claim the URL, otherwise the link reads as a no-op.
+            onRequestReveal={revealBrowserPanel}
           />
         ),
       },
@@ -378,6 +413,9 @@ export function useArtifactSurfacePanels({
       pendingRunLearningCount,
       pendingSelectionComment,
       onPendingSelectionComment,
+      requestedUrl,
+      requestId,
+      revealBrowserPanel,
       sessionProject,
       scopeKey,
       tWorkbench,
@@ -424,6 +462,7 @@ export function useSessionSurfacePanels({
   onWidthHint,
 }: SessionSurfacePanelsInput): ContextPanelDefinition[] {
   const tWorkbench = useTranslations("contextWorkbench")
+  const { requestedUrl, requestId, revealBrowserPanel } = useSideBrowserRequest(scopeKey)
 
   return useMemo<ContextPanelDefinition[]>(
     () => [
@@ -494,12 +533,12 @@ export function useSessionSurfacePanels({
         renderer: () => (
           <BrowserPreviewPane
             sessionId={activeSessionId ?? undefined}
+            requestedUrl={requestedUrl}
+            requestId={requestId}
             // `retention: "stateful"` keeps this panel mounted behind whichever
-            // tab is showing, so a ⌘-clicked link must bring it to the front
-            // before it may claim the URL — otherwise the link reads as a no-op.
-            onRequestReveal={() =>
-              useContextWorkbenchStore.getState().smartReveal(scopeKey, "browser", "wide")
-            }
+            // tab is showing, so a clicked link must bring it to the front
+            // before it may claim the URL, otherwise the link reads as a no-op.
+            onRequestReveal={revealBrowserPanel}
           />
         ),
       },
@@ -704,6 +743,9 @@ export function useSessionSurfacePanels({
       onWidthHint,
       pendingRunLearningCount,
       messageCount,
+      requestedUrl,
+      requestId,
+      revealBrowserPanel,
       session,
       sessionMessages,
       sessionProject,
