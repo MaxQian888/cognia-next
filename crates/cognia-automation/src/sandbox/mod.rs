@@ -28,6 +28,7 @@ pub mod output;
 pub mod paths;
 pub mod policy;
 pub mod protected;
+mod sbpl;
 #[cfg(target_os = "linux")]
 pub mod seccomp;
 pub mod traits;
@@ -196,7 +197,32 @@ fn forbidden_deny_roots() -> Vec<std::path::PathBuf> {
     if let Some(d) = dirs::data_dir() {
         roots.push(d.join("cognia"));
     }
-    roots
+    with_resolved_twins(roots)
+}
+
+/// Add each deny root's symlink-resolved spelling alongside the literal one.
+///
+/// `reject_forbidden_paths` compares a CANONICALIZED candidate against these,
+/// and on macOS the system roots are symlinks: `/etc` is `private/etc`, `/var`
+/// is `private/var`. A caller asking for `writable: ["/etc"]` arrived as
+/// `/private/etc`, which does not start with `/etc`, so the floor let it
+/// through and only `/usr`, `/bin` and `/sbin` (real directories there) were
+/// ever refused. Resolving both spellings closes that without changing what the
+/// list means. A root that cannot be resolved keeps only its literal form, so
+/// the floor never shrinks.
+fn with_resolved_twins(roots: Vec<std::path::PathBuf>) -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = Vec::with_capacity(roots.len() * 2);
+    for root in roots {
+        if let Ok(resolved) = crate::sandbox::paths::safe_canonicalize(&root) {
+            if resolved != root && !out.contains(&resolved) {
+                out.push(resolved);
+            }
+        }
+        if !out.contains(&root) {
+            out.push(root);
+        }
+    }
+    out
 }
 
 /// Reject — before any spawn — a cwd / writable / write-target path that aims
@@ -716,6 +742,49 @@ mod tests {
         let policy = bash_policy(NetworkPolicy::Off, vec![PathBuf::from("/etc/cron.d")]);
         let err = reject_forbidden_paths(&std::env::temp_dir(), &policy, &deny).unwrap_err();
         assert!(matches!(err, SandboxError::InvalidPolicy { .. }));
+    }
+
+    #[test]
+    fn forbidden_roots_carry_their_symlink_resolved_spelling() {
+        // The dispatcher canonicalizes the candidate before comparing, so a
+        // deny root that is itself a symlink has to appear in resolved form or
+        // it matches nothing. macOS is the case that matters: `/etc` is
+        // `private/etc` there, and before this the floor accepted
+        // `writable: ["/etc"]` while correctly refusing `/usr` and `/bin`.
+        let roots = forbidden_deny_roots();
+        for literal in ["/etc", "/usr", "/bin"] {
+            let path = PathBuf::from(literal);
+            if !path.exists() {
+                continue;
+            }
+            let resolved = crate::sandbox::paths::safe_canonicalize(&path).unwrap();
+            assert!(
+                roots.contains(&resolved),
+                "{literal} resolves to {} which is not in the deny roots: {roots:?}",
+                resolved.display()
+            );
+            // The literal spelling survives too, so the floor never shrinks.
+            assert!(
+                roots.contains(&path),
+                "{literal} was dropped from {roots:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_symlinked_system_root_is_refused_as_a_writable_root() {
+        let deny = forbidden_deny_roots();
+        for literal in ["/etc", "/var/run"] {
+            let path = PathBuf::from(literal);
+            if !path.exists() {
+                continue;
+            }
+            let canonical = crate::sandbox::paths::safe_canonicalize(&path).unwrap();
+            let policy = bash_policy(NetworkPolicy::Off, vec![canonical.clone()]);
+            let err = reject_forbidden_paths(&std::env::temp_dir(), &policy, &deny)
+                .expect_err(&format!("{literal} must not be a writable root"));
+            assert!(matches!(err, SandboxError::InvalidPolicy { .. }));
+        }
     }
 
     #[test]

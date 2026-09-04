@@ -31,7 +31,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::sandbox::launcher::push_loopback_proxy_network_rule;
+use crate::sandbox::sbpl;
+use crate::sandbox::sbpl::push_loopback_proxy_network_rule;
 use crate::sandbox::traits::SandboxedExec;
 use crate::sandbox::types::{
     NetworkPolicy, SandboxCommand, SandboxError, SandboxHealth, SandboxPolicy, SandboxResult,
@@ -279,12 +280,17 @@ fn rlimits_for(policy: &SandboxPolicy) -> crate::sandbox::limits::ResolvedLimits
 /// the C library, temp-file handling, ttys, and preference lookups all hit
 /// paths/services that a bare `(deny default)` blocks.
 fn push_base_policy(out: &mut String) {
-    out.push_str("(allow process-fork)\n");
-    out.push_str("(allow process-exec)\n");
-    out.push_str("(allow process-info* (target self))\n");
+    // The rules that decide whether a confined binary can load at all, shared
+    // with `launcher.rs` so the two SBPL producers cannot drift again. They had:
+    // the launcher learned that a scoped read list aborts every confined binary
+    // on modern macOS and switched to a global read allow, this renderer kept
+    // the narrow list, and every one-shot sandbox call on macOS died with
+    // SIGABRT while the cheap health probe still reported "Active".
+    sbpl::push_loadability_base(out);
     out.push_str("(allow signal (target self))\n");
-    // Read-only system surface: dyld cache, frameworks, libs, CA bundles,
-    // homebrew prefixes, the user-lookup db.
+    // The system surface a confined toolchain needs. Documentation now that
+    // reads are open globally, and the scope this profile returns to if a
+    // future macOS makes an enumerable read set viable again.
     out.push_str("(allow file-read*\n");
     for p in [
         "/usr/lib",
@@ -316,8 +322,6 @@ fn push_base_policy(out: &mut String) {
     out.push_str("(allow file-read* file-write* file-ioctl (regex #\"^/dev/ttys[0-9]+\"))\n");
     out.push_str("(allow file-ioctl (literal \"/dev/tty\"))\n");
     // Service lookups dyld / Security / cfprefs / DNS need.
-    out.push_str("(allow mach-lookup)\n");
-    out.push_str("(allow sysctl-read)\n");
     out.push_str("(allow user-preference-read)\n");
     // POSIX shared memory + semaphores for OpenMP / threaded runtimes.
     out.push_str("(allow ipc-posix-shm*)\n");
@@ -377,7 +381,25 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
         }
     }
 
+    // Last matching rules in the profile, so they win over every allow above,
+    // including the global `(allow file-read*)` the base policy needs.
+    push_baseline_secret_read_denies(&mut out);
+
     Ok(out)
+}
+
+/// Deny reads of every credential store the profile knows about, anchored at
+/// the paths that exist whether or not the caller declared them.
+///
+/// The base policy has to allow `file-read*` globally for a confined command to
+/// load at all, which means the caller's `readable` list no longer bounds what
+/// can be read. `push_secret_read_denies` only hides secrets nested under a
+/// root the caller happened to pass, so on its own it would leave `~/.ssh`,
+/// `~/.aws` and cognia's own credential store readable to any session whose
+/// workspace sits elsewhere. This anchors the same deny set at the home
+/// directory and the app data directory unconditionally.
+fn push_baseline_secret_read_denies(out: &mut String) {
+    sbpl::push_baseline_secret_read_denies(out)
 }
 
 /// Emit deny rules for every protected path under each writable root. ALL
@@ -389,18 +411,7 @@ fn render_profile(policy: &SandboxPolicy, proxy_port: Option<u16>) -> Result<Str
 /// last-match-wins and these come after the writable allow, so they win
 /// regardless of whether the path currently exists.
 fn push_protected_denies(out: &mut String, writable: &[std::path::PathBuf]) {
-    for root in writable {
-        for (protected, _kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
-            let p = escape_sbpl(&protected.to_string_lossy());
-            out.push_str(&format!("(deny file-write* (subpath \"{p}\"))\n"));
-            out.push_str(&format!("(deny file-write* (literal \"{p}\"))\n"));
-            out.push_str(&format!("(deny file-write-unlink (literal \"{p}\"))\n"));
-            if secret {
-                out.push_str(&format!("(deny file-read* (subpath \"{p}\"))\n"));
-                out.push_str(&format!("(deny file-read* (literal \"{p}\"))\n"));
-            }
-        }
-    }
+    sbpl::push_protected_denies(out, writable)
 }
 
 /// Emit `(deny file-read* …)` for SECRET stores reachable through the READABLE
@@ -410,15 +421,7 @@ fn push_protected_denies(out: &mut String, writable: &[std::path::PathBuf]) {
 /// wins (SBPL last-match). Write-protected control files need no extra rule
 /// here: a readable root grants read only.
 fn push_secret_read_denies(out: &mut String, readable: &[std::path::PathBuf]) {
-    for root in readable {
-        for (protected, _kind, secret) in crate::sandbox::protected::protected_entries_under(root) {
-            if secret {
-                let p = escape_sbpl(&protected.to_string_lossy());
-                out.push_str(&format!("(deny file-read* (subpath \"{p}\"))\n"));
-                out.push_str(&format!("(deny file-read* (literal \"{p}\"))\n"));
-            }
-        }
-    }
+    sbpl::push_secret_read_denies(out, readable)
 }
 
 fn push_readable(out: &mut String, paths: &[std::path::PathBuf]) {
@@ -509,10 +512,9 @@ fn push_network(out: &mut String, policy: &NetworkPolicy, proxy_port: Option<u16
     }
 }
 
+/// Delegates to the shared renderer so both SBPL producers escape identically.
 fn escape_sbpl(s: &str) -> String {
-    // SBPL strings need backslash + quote escaping. Paths on macOS are
-    // unlikely to contain either but we handle them safely.
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    sbpl::escape(s)
 }
 
 #[cfg(test)]
@@ -668,6 +670,81 @@ mod tests {
             .find("(deny file-read* (subpath \"/home/u/.ssh\")")
             .unwrap();
         assert!(deny_idx > allow_idx);
+    }
+
+    #[test]
+    fn base_policy_allows_reads_globally_so_a_confined_binary_can_load() {
+        // A scoped read list aborts every confined command on current macOS
+        // (`/bin/echo` dies with SIGABRT before it execs), which is what made
+        // `sandbox_health_check` report `confined: false` while the cheap probe
+        // still said "Active". Pinning the bare allow keeps a future narrowing
+        // from silently re-breaking every macOS sandbox call.
+        let p = render_profile(
+            &SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(
+            p.contains("(allow file-read*)\n"),
+            "the base policy must allow reads globally:\n{p}"
+        );
+    }
+
+    #[test]
+    fn credential_stores_are_read_denied_even_when_no_root_declares_them() {
+        // The global read allow means the caller's `readable` list no longer
+        // bounds reads, so the deny set is anchored at $HOME rather than at
+        // whatever the caller happened to pass. A session whose workspace sits
+        // outside home must still not be able to read `~/.ssh`.
+        let Some(home) = dirs::home_dir() else {
+            return; // No home on this host, nothing to anchor.
+        };
+        let p = render_profile(
+            &SandboxPolicy::Bash {
+                writable: vec![PathBuf::from("/workspace")],
+                readable: vec![],
+                network: NetworkPolicy::Off,
+                max_cpu_seconds: 0,
+                max_memory_mb: 0,
+            },
+            None,
+        )
+        .unwrap();
+        let ssh = escape_sbpl(&home.join(".ssh").to_string_lossy());
+        let deny = format!("(deny file-read* (subpath \"{ssh}\"))");
+        assert!(p.contains(&deny), "expected {deny} in:\n{p}");
+        // Last-match-wins: every deny has to sit after every read allow.
+        let last_allow = p.rfind("(allow file-read*").unwrap();
+        assert!(
+            p.find(&deny).unwrap() > last_allow,
+            "the baseline denies must be the last matching rules:\n{p}"
+        );
+    }
+
+    #[test]
+    fn the_app_credential_store_is_read_denied() {
+        let Some(data) = dirs::data_dir() else {
+            return;
+        };
+        let p = render_profile(
+            &SandboxPolicy::Write {
+                target_files: vec![PathBuf::from("/workspace/a.txt")],
+                readable: vec![],
+            },
+            None,
+        )
+        .unwrap();
+        let store = escape_sbpl(&data.join("cognia").to_string_lossy());
+        assert!(
+            p.contains(&format!("(deny file-read* (subpath \"{store}\"))")),
+            "the app's own keyring / vault directory must not be readable:\n{p}"
+        );
     }
 
     #[test]

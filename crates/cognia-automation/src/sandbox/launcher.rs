@@ -21,6 +21,7 @@
 use std::path::Path;
 
 use crate::sandbox::protected::{protected_entries_under, ProtKind};
+use crate::sandbox::sbpl;
 
 /// Filesystem + network scope for a sandboxed interactive launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,9 +169,7 @@ pub fn sandbox_exec_network_proxy_prefix(proxy_port: u16) -> Vec<String> {
 /// port. Both one-shot allowlist sandboxes and the generic agent proxy launcher
 /// use this renderer so the kernel-enforced boundary cannot drift.
 pub(crate) fn push_loopback_proxy_network_rule(out: &mut String, proxy_port: u16) {
-    out.push_str(&format!(
-        "(allow network-outbound (remote tcp \"localhost:{proxy_port}\"))\n"
-    ));
+    sbpl::push_loopback_proxy_network_rule(out, proxy_port)
 }
 
 /// SBPL profile for an interactive launch — mirrors `MacOsSandboxBackend`'s
@@ -178,18 +177,10 @@ pub(crate) fn push_loopback_proxy_network_rule(out: &mut String, proxy_port: u16
 /// network gate).
 pub fn render_sbpl(scope: &LaunchScope) -> String {
     let mut out = String::from("(version 1)\n(deny default)\n");
-    // Modern macOS dyld aborts even trivial binaries unless process metadata
-    // operations are allowed in addition to fork/exec. `process*` is the
-    // canonical Seatbelt family used by Codex; filesystem/network remain
-    // independently scoped below.
-    out.push_str("(allow process*)\n");
-    out.push_str("(allow mach-lookup)\n(allow sysctl-read)\n");
-    // Workspace-write semantics: modern macOS processes consult runtime files
-    // outside the stable system prefixes (dyld/cache locations change across
-    // releases), and denying those reads aborts even `/usr/bin/true`. Permit
-    // reads globally, then apply the SECRET-store read denies below as the
-    // final matching rules. Writes remain scoped to the explicit workspace.
-    out.push_str("(allow file-read*)\n");
+    // Process metadata, service lookup and the global read allow, shared with
+    // `macos.rs` so the one-shot and interactive profiles cannot disagree about
+    // whether a confined binary can load. Writes and network stay scoped below.
+    sbpl::push_loadability_base(&mut out);
     out.push_str("(allow file-read*\n");
     for p in MACOS_RO_SYSTEM {
         out.push_str(&format!("  (subpath \"{}\")\n", escape_sbpl(p)));
@@ -220,6 +211,11 @@ pub fn render_sbpl(scope: &LaunchScope) -> String {
     // closes).
     push_protected_denies(&mut out, &writable);
     push_secret_read_denies(&mut out, &scope.readable);
+    // Anchored at $HOME and the app data directory rather than at whatever the
+    // caller declared readable. With reads open globally, a scope that does not
+    // name home left `~/.ssh` and cognia's own vault readable to the launched
+    // agent, which is the same hole the one-shot backend had.
+    sbpl::push_baseline_secret_read_denies(&mut out);
     if scope.network {
         out.push_str("(allow network*)\n");
     } else {
@@ -244,7 +240,7 @@ fn writable_set(scope: &LaunchScope) -> Vec<String> {
 }
 
 fn escape_sbpl(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    sbpl::escape(s)
 }
 
 /// Bind an EMPTY read-only source over `dest` (a directory shadowed by
@@ -299,33 +295,14 @@ fn push_protected_binds(
 /// mirrors `MacOsSandboxBackend::push_protected_denies`. ALL protected paths get
 /// write + unlink denies; SECRET stores additionally get read denies.
 fn push_protected_denies(out: &mut String, writable: &[String]) {
-    for root in writable {
-        for (protected, _kind, secret) in protected_entries_under(Path::new(root)) {
-            let p = escape_sbpl(&protected.to_string_lossy());
-            out.push_str(&format!("(deny file-write* (subpath \"{p}\"))\n"));
-            out.push_str(&format!("(deny file-write* (literal \"{p}\"))\n"));
-            out.push_str(&format!("(deny file-write-unlink (literal \"{p}\"))\n"));
-            if secret {
-                out.push_str(&format!("(deny file-read* (subpath \"{p}\"))\n"));
-                out.push_str(&format!("(deny file-read* (literal \"{p}\"))\n"));
-            }
-        }
-    }
+    sbpl::push_protected_denies(out, writable)
 }
 
 /// Emit `(deny file-read* …)` for SECRET stores reachable through the readable
 /// roots — mirrors `MacOsSandboxBackend::push_secret_read_denies`. Comes after
 /// the readable allow so the deny wins (SBPL last-match).
 fn push_secret_read_denies(out: &mut String, readable: &[String]) {
-    for root in readable {
-        for (protected, _kind, secret) in protected_entries_under(Path::new(root)) {
-            if secret {
-                let p = escape_sbpl(&protected.to_string_lossy());
-                out.push_str(&format!("(deny file-read* (subpath \"{p}\"))\n"));
-                out.push_str(&format!("(deny file-read* (literal \"{p}\"))\n"));
-            }
-        }
-    }
+    sbpl::push_secret_read_denies(out, readable)
 }
 
 #[cfg(test)]
