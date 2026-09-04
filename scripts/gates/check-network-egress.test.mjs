@@ -29,6 +29,16 @@ test("ignores a property access that ends in fetch", () => {
   assert.deepEqual(findFetchCalls("await cloudFetch({ url })"), [])
 })
 
+test("finds the global reached through globalThis, window or self", () => {
+  // `globalThis.fetch(url)` is the same unmanaged call, and it is the form that
+  // survives a search-and-replace away from the bare one.
+  for (const receiver of ["globalThis", "window", "self"]) {
+    const hits = findFetchCalls(`await ${receiver}.fetch(url, init)`)
+    assert.equal(hits.length, 1, receiver)
+    assert.equal(hits[0].kind, "fetch")
+  }
+})
+
 test("ignores method and interface declarations named fetch", () => {
   // The three shapes a naive regex reads as calls.
   assert.deepEqual(findFetchCalls("async fetch(ref: RemoteDocRef): Promise<Doc> {"), [])
@@ -58,6 +68,13 @@ test("isTypedParameter recognizes annotations and not object properties", () => 
 
 test("finds WebSocket and EventSource constructors", () => {
   const hits = findConstructorCalls("const ws = new WebSocket(u)\nconst es = new EventSource(v)")
+  assert.deepEqual(hits.map((hit) => hit.kind).sort(), ["eventsource", "websocket"])
+})
+
+test("finds a constructor reached through a global receiver", () => {
+  const hits = findConstructorCalls(
+    "const ws = new globalThis.WebSocket(u)\nconst es = new window.EventSource(v)"
+  )
   assert.deepEqual(hits.map((hit) => hit.kind).sort(), ["eventsource", "websocket"])
 })
 

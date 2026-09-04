@@ -280,12 +280,27 @@ export function isTypedParameter(segment) {
   return /^\s*\.{0,3}\s*[A-Za-z_$][\w$]*\s*\??\s*:/.test(segment)
 }
 
+/**
+ * The objects a caller can reach the *global* `fetch`, `WebSocket` or
+ * `EventSource` through.
+ *
+ * `globalThis.fetch(url)` is the same unmanaged call as `fetch(url)`, and it is
+ * the form that survives a search for the bare one, so the gate has to see both
+ * or an exception quietly stops matching the file it was written for. Any other
+ * receiver is a caller's own field (`this.fetchImpl`, `deps.fetch`) and stays
+ * out.
+ */
+const GLOBAL_RECEIVER = String.raw`(?:(?:globalThis|window|self)\s*\.\s*)?`
+
 export function findFetchCalls(code) {
   const findings = []
-  const pattern = /(^|[^\w$.])fetch\s*\(/g
+  const pattern = new RegExp(String.raw`(^|[^\w$])${GLOBAL_RECEIVER}fetch\s*\(`, "g")
   let match
   while ((match = pattern.exec(code)) !== null) {
     const nameStart = match.index + match[1].length
+    // A dot the alternation did not consume means some other object owns this
+    // `fetch`, so it is not the global one.
+    if (code[nameStart - 1] === ".") continue
     const before = code.slice(Math.max(0, nameStart - 24), nameStart)
     if (/\b(?:async|function)\s*$/.test(before)) continue
 
@@ -307,8 +322,8 @@ export function findFetchCalls(code) {
 export function findConstructorCalls(code) {
   const findings = []
   for (const [kind, pattern] of [
-    ["websocket", /new\s+WebSocket\s*\(/g],
-    ["eventsource", /new\s+EventSource\s*\(/g],
+    ["websocket", new RegExp(String.raw`new\s+${GLOBAL_RECEIVER}WebSocket\s*\(`, "g")],
+    ["eventsource", new RegExp(String.raw`new\s+${GLOBAL_RECEIVER}EventSource\s*\(`, "g")],
   ]) {
     let match
     while ((match = pattern.exec(code)) !== null) {

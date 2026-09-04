@@ -31,12 +31,6 @@
       "note": "Reads a staged attachment's blob:/data:/file URI to turn it into a File or a base64 block, the same conversion components/chat/composer.tsx does. Never a network origin."
     },
     {
-      "file": "components/mobile/chat/composer-plus-menu.tsx",
-      "kind": "fetch",
-      "reason": "capacitor",
-      "note": "Reads Capacitor file URIs (camera, gallery, voice recording) into blobs inside the mobile WebView."
-    },
-    {
       "file": "crates/cognia-gateway/src/server.rs",
       "kind": "reqwest-client-new",
       "reason": "server-side",
@@ -95,6 +89,12 @@
       "kind": "fetch",
       "reason": "resource-read",
       "note": "Turns an already-fetched blob:/data:/same-origin media URL into a saved file; the anchor path does no request."
+    },
+    {
+      "file": "lib/logging/bootstrap.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "createWebPostHogFetch is the else half of an isTauri() fork: on the desktop the same AI-observability export goes out through createTauriOtlpFetch. Web and mobile have no native leg to take."
     },
     {
       "file": "lib/network/platform-fetch.ts",
@@ -161,6 +161,12 @@
       "kind": "websocket",
       "reason": "companion-pinned",
       "note": "The companion transport's own socket, paired with the TLS-pinned fetch in pinned-fetch.ts."
+    },
+    {
+      "file": "lib/telemetry/posthog-product.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "The default postJson, used only when bootstrap.ts injects none. It injects the Rust leg on the desktop, so this runs on web, mobile and the headless brain, where the process environment carries the proxy."
     },
     {
       "file": "lib/terminal/host-connection.ts",
