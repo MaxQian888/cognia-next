@@ -35,8 +35,8 @@
 import { isTauri } from "@/lib/platform/detect"
 
 /** `sessionStorage` key for one account's remembered secret. */
-export function devSessionUnlockStorageKey(accountId: string): string {
-  return `cognia.dev-session-unlock.${accountId}`
+export function devSessionUnlockStorageKey(localAccountId: string): string {
+  return `cognia.dev-session-unlock.${localAccountId}`
 }
 
 /**
@@ -65,22 +65,22 @@ function sessionStore(): Storage | null {
 }
 
 /** Remember a secret that has ALREADY unlocked this account in this tab. */
-export function rememberDevSessionUnlock(accountId: string, password: string): void {
+export function rememberDevSessionUnlock(localAccountId: string, password: string): void {
   if (!isDevSessionUnlockEnabled()) return
-  if (!accountId || !password) return
+  if (!localAccountId || !password) return
   try {
-    sessionStore()?.setItem(devSessionUnlockStorageKey(accountId), password)
+    sessionStore()?.setItem(devSessionUnlockStorageKey(localAccountId), password)
   } catch {
     // Quota or a hardened profile. Losing the convenience is not an error.
   }
 }
 
 /** The remembered secret for this account, or null. */
-export function readDevSessionUnlock(accountId: string): string | null {
+export function readDevSessionUnlock(localAccountId: string): string | null {
   if (!isDevSessionUnlockEnabled()) return null
-  if (!accountId) return null
+  if (!localAccountId) return null
   try {
-    const value = sessionStore()?.getItem(devSessionUnlockStorageKey(accountId))
+    const value = sessionStore()?.getItem(devSessionUnlockStorageKey(localAccountId))
     return value && value.length > 0 ? value : null
   } catch {
     return null
@@ -95,12 +95,12 @@ export function readDevSessionUnlock(accountId: string): string | null {
  * browser, and leaving a sibling account's secret behind would let the very
  * next boot re-unlock into a different account.
  */
-export function forgetDevSessionUnlock(accountId?: string): void {
+export function forgetDevSessionUnlock(localAccountId?: string): void {
   const store = sessionStore()
   if (!store) return
   try {
-    if (accountId) {
-      store.removeItem(devSessionUnlockStorageKey(accountId))
+    if (localAccountId) {
+      store.removeItem(devSessionUnlockStorageKey(localAccountId))
       return
     }
     const prefix = devSessionUnlockStorageKey("")

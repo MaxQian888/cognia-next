@@ -111,7 +111,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
     out.error("serve: COGNIA_SERVICE_TOKEN is not set (env-only by design)\n")
     return 2
   }
-  const accountId =
+  const localAccountId =
     stringFlag(args, "account") ?? env.COGNIA_LOCAL_ACCOUNT_ID ?? HEADLESS_LOCAL_ACCOUNT_ID
   const bridgeUrl = env.COGNIA_BRIDGE_URL ?? deriveBridgeUrl(serverUrl)
   const home =
@@ -126,20 +126,22 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   await installFakeIndexedDb()
 
   // ── 2. Account ─────────────────────────────────────────────────────────────
-  await ensureHeadlessAccount(accountId)
-  out.write(`serve: account ${accountId} unlocked\n`)
+  await ensureHeadlessAccount(localAccountId)
+  out.write(`serve: account ${localAccountId} unlocked\n`)
 
   // Optional read-only collaboration plane. Credentials are loaded from the
   // CLI's existing 0600 Logto session; no bearer token is accepted in env.
   const cliHome = resolveHome(env, os.homedir())
   const collabConfig = resolveServeCollabConfig(env, cliHome)
   const collabReader = collabConfig
-    ? await startHeadlessCollabReader({ accountId, cliHome, config: collabConfig }).catch(
-        (cause) => {
-          out.error(`serve: collaboration reader failed: ${String(cause)}\n`)
-          return null
-        }
-      )
+    ? await startHeadlessCollabReader({
+        accountId: localAccountId,
+        cliHome,
+        config: collabConfig,
+      }).catch((cause) => {
+        out.error(`serve: collaboration reader failed: ${String(cause)}\n`)
+        return null
+      })
     : null
   if (collabReader?.status === "active") out.write("serve: collaboration reader active\n")
   if (collabReader?.status === "not-signed-in") {
@@ -149,7 +151,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   // ── 3. Durability ──────────────────────────────────────────────────────────
   const durability = await startDurability({
     home,
-    accountId,
+    accountId: localAccountId,
     debounceMs: flushDebounce,
     proc,
   })
@@ -159,7 +161,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   const configProvider = (): CompanionConfig => ({
     baseUrl: serverUrl,
     serviceToken: currentToken,
-    deviceId: `brain-${accountId}`,
+    deviceId: `brain-${localAccountId}`,
     serverVersion: "headless",
   })
   const transport = new CompanionTransport({
@@ -187,7 +189,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   const bridge = new BridgeClient({
     url: bridgeUrl,
     token: currentToken,
-    accountId,
+    accountId: localAccountId,
     brainVersion: VERSION,
     wsFactory: deps.wsFactory,
     onTokenRefresh: (token) => {
@@ -217,7 +219,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   const resolveMessage = await loadMessageResolver("en")
   const runtimes = await bootstrapHeadlessRuntimes({
     host: "brain",
-    accountId,
+    accountId: localAccountId,
     bridge,
     notifyDbWrite: durability.notifyDbWrite,
     backupFilesystem: createNodeBackupFilesystem(),

@@ -37,9 +37,9 @@ describe("unlock progress signal", () => {
     publishUnlockStage("acct_alpha", "ready")
     unsubscribe()
     expect(seen).toEqual([
-      { accountId: "acct_alpha", stage: "verifying" },
-      { accountId: "acct_alpha", stage: "opening-database" },
-      { accountId: "acct_alpha", stage: "ready" },
+      { localAccountId: "acct_alpha", stage: "verifying" },
+      { localAccountId: "acct_alpha", stage: "opening-database" },
+      { localAccountId: "acct_alpha", stage: "ready" },
     ])
   })
 

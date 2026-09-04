@@ -27,7 +27,7 @@ jest.mock("@/lib/ai/eval/runtime-context", () => ({
   loadEvalAppSettings: jest.fn(async () => ({ defaultProvider: "local" })),
   loadEvalRuntimeContext: jest.fn(async () => ({
     settings: { defaultProvider: "local" },
-    accountId: "account",
+    localAccountId: "account",
   })),
 }))
 jest.mock("@/lib/ai/eval/project-service", () => ({

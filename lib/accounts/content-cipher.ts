@@ -3,13 +3,22 @@ import { assertAccountId } from "./account-types"
 export interface EncryptedContentEnvelope {
   version: 1
   algorithm: "AES-256-GCM"
+  /**
+   * The LocalProfile this row belongs to.
+   *
+   * Deliberately still `accountId` while everything around it says
+   * `localAccountId` (ADR-0149): this key is written into every encrypted row
+   * on disk and re-read by `lib/db/encrypted-content-middleware.ts`, so
+   * renaming it is a data migration rather than a vocabulary fix. Rename it
+   * only alongside one.
+   */
   accountId: string
   iv: string
   ciphertext: string
 }
 
 export interface AccountContentCipherContract {
-  readonly accountId: string
+  readonly localAccountId: string
   readonly databaseName: string
   encrypt<T>(
     table: string,
@@ -32,19 +41,19 @@ export class AccountContentCipher implements AccountContentCipherContract {
   private key: CryptoKey | null
 
   constructor(
-    readonly accountId: string,
+    readonly localAccountId: string,
     readonly databaseName: string,
     key: CryptoKey
   ) {
-    assertAccountId(accountId)
-    if (!databaseName.startsWith(`cognia-account-${accountId}`)) {
+    assertAccountId(localAccountId)
+    if (!databaseName.startsWith(`cognia-account-${localAccountId}`)) {
       throw new Error("Content cipher database does not belong to the account.")
     }
     this.key = key
   }
 
   static async fromRawKey(
-    accountId: string,
+    localAccountId: string,
     databaseName: string,
     rawKey: Uint8Array
   ): Promise<AccountContentCipher> {
@@ -56,12 +65,15 @@ export class AccountContentCipher implements AccountContentCipherContract {
       false,
       ["encrypt", "decrypt"]
     )
-    return new AccountContentCipher(accountId, databaseName, key)
+    return new AccountContentCipher(localAccountId, databaseName, key)
   }
 
-  static createForTesting(accountId: string, databaseName: string): Promise<AccountContentCipher> {
+  static createForTesting(
+    localAccountId: string,
+    databaseName: string
+  ): Promise<AccountContentCipher> {
     if (process.env.NODE_ENV !== "test") throw new Error("Test cipher factory is test-only.")
-    return AccountContentCipher.fromRawKey(accountId, databaseName, randomBytes(32))
+    return AccountContentCipher.fromRawKey(localAccountId, databaseName, randomBytes(32))
   }
 
   async encrypt<T>(
@@ -89,7 +101,7 @@ export class AccountContentCipher implements AccountContentCipherContract {
       return {
         version: 1,
         algorithm: "AES-256-GCM",
-        accountId: this.accountId,
+        accountId: this.localAccountId,
         iv: encodeBase64Url(iv),
         ciphertext: encodeBase64Url(new Uint8Array(ciphertext)),
       }
@@ -106,7 +118,7 @@ export class AccountContentCipher implements AccountContentCipherContract {
     schemaVersion: number,
     envelope: EncryptedContentEnvelope
   ): Promise<T> {
-    if (envelope.accountId !== this.accountId) {
+    if (envelope.accountId !== this.localAccountId) {
       throw new Error("Encrypted content belongs to another account.")
     }
     if (envelope.version !== 1 || envelope.algorithm !== "AES-256-GCM") {

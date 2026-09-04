@@ -47,7 +47,7 @@ describe("eval runtime context", () => {
     accountState.unlockedAccountId = "acct-1"
     await expect(loadEvalRuntimeContext()).resolves.toEqual({
       settings: { theme: "dark" },
-      accountId: "acct-1",
+      localAccountId: "acct-1",
     })
   })
 })

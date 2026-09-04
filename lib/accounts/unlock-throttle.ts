@@ -43,8 +43,8 @@ export interface UnlockThrottleStatus {
 
 const EMPTY: UnlockThrottleState = { failures: 0, lastFailureAt: 0, cooldownUntil: 0 }
 
-function storageKey(accountId: string): string {
-  return `${STORAGE_PREFIX}${accountId}`
+function storageKey(localAccountId: string): string {
+  return `${STORAGE_PREFIX}${localAccountId}`
 }
 
 function storage(): Storage | null {
@@ -102,15 +102,15 @@ export function throttleStatusOf(state: UnlockThrottleState, now: number): Unloc
   }
 }
 
-export function readUnlockThrottle(accountId: string, now = Date.now()): UnlockThrottleStatus {
-  return throttleStatusOf(parse(storage()?.getItem(storageKey(accountId)) ?? null), now)
+export function readUnlockThrottle(localAccountId: string, now = Date.now()): UnlockThrottleStatus {
+  return throttleStatusOf(parse(storage()?.getItem(storageKey(localAccountId)) ?? null), now)
 }
 
-export function recordFailedUnlock(accountId: string, now = Date.now()): UnlockThrottleStatus {
+export function recordFailedUnlock(localAccountId: string, now = Date.now()): UnlockThrottleStatus {
   const store = storage()
-  const next = nextThrottleState(parse(store?.getItem(storageKey(accountId)) ?? null), now)
+  const next = nextThrottleState(parse(store?.getItem(storageKey(localAccountId)) ?? null), now)
   try {
-    store?.setItem(storageKey(accountId), JSON.stringify(next))
+    store?.setItem(storageKey(localAccountId), JSON.stringify(next))
   } catch {
     // Quota / blocked storage — the in-memory result is still returned so the
     // current screen shows the warning even if it cannot survive a reload.
@@ -118,9 +118,9 @@ export function recordFailedUnlock(accountId: string, now = Date.now()): UnlockT
   return throttleStatusOf(next, now)
 }
 
-export function clearUnlockFailures(accountId: string): void {
+export function clearUnlockFailures(localAccountId: string): void {
   try {
-    storage()?.removeItem(storageKey(accountId))
+    storage()?.removeItem(storageKey(localAccountId))
   } catch {
     // Nothing to do: a stale entry expires on its own after RESET_AFTER_MS.
   }

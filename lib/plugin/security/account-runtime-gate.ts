@@ -7,15 +7,15 @@ let activeAccountId: string | null = null
 let blocked = true
 let enforced = false
 
-export function activatePluginRuntimeAccount(accountId: string): void {
-  if (!accountId.trim()) throw new Error("Plugin runtime account is required.")
-  activeAccountId = accountId
+export function activatePluginRuntimeAccount(localAccountId: string): void {
+  if (!localAccountId.trim()) throw new Error("Plugin runtime account is required.")
+  activeAccountId = localAccountId
   blocked = false
   enforced = true
 }
 
-export function blockPluginRuntimeAccount(accountId?: string): void {
-  if (accountId && activeAccountId && accountId !== activeAccountId) return
+export function blockPluginRuntimeAccount(localAccountId?: string): void {
+  if (localAccountId && activeAccountId && localAccountId !== activeAccountId) return
   blocked = true
   enforced = true
 }

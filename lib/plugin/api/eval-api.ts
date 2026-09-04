@@ -140,7 +140,7 @@ export function createEvalAPI(): PluginEvalAPI {
         })
         void createBrowserEvalOrchestrator({
           appSettings: runtime.settings,
-          artifactKey: await loadOrCreateEvalArtifactKey(runtime.accountId),
+          artifactKey: await loadOrCreateEvalArtifactKey(runtime.localAccountId),
         }).run(experiment.id)
         return { experimentId: experiment.id, state: experiment.state }
       }
@@ -160,7 +160,7 @@ export function createEvalAPI(): PluginEvalAPI {
         await service.resume(args.experimentId)
         void createBrowserEvalOrchestrator({
           appSettings: runtime.settings,
-          artifactKey: await loadOrCreateEvalArtifactKey(runtime.accountId),
+          artifactKey: await loadOrCreateEvalArtifactKey(runtime.localAccountId),
         }).run(args.experimentId)
       }
       return args.action === "report"

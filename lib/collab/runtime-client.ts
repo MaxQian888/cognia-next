@@ -60,7 +60,8 @@ export async function resolveCurrentCollabContext(
   if (!connection) return null
   const binding = await (deps.registry ?? new UserBindingRegistry()).get(localAccountId)
   if (!binding?.orgId || !binding.userId) return null
-  const token = deps.accessToken ?? ((accountId: string) => readActiveAccessToken(accountId))
+  const token =
+    deps.accessToken ?? ((localAccountId: string) => readActiveAccessToken(localAccountId))
   return {
     localAccountId,
     orgId: binding.orgId,

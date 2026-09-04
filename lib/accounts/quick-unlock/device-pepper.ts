@@ -35,8 +35,8 @@ const PEPPER_STORE = "pepper"
 const PEPPER_DB_VERSION = 1
 
 /** One pepper per account, so removing an account removes its pepper. */
-function pepperKey(accountId: string): string {
-  return `pepper:${accountId}`
+function pepperKey(localAccountId: string): string {
+  return `pepper:${localAccountId}`
 }
 
 /**
@@ -63,12 +63,12 @@ function subtle(): SubtleCrypto {
  * IndexedDB stores the key object by structured clone and preserves that flag,
  * so a later read gets a usable handle and never the bytes.
  */
-export async function getOrCreateDeviceKey(accountId: string): Promise<CryptoKey> {
-  const existing = await pepperStore.get(pepperKey(accountId))
+export async function getOrCreateDeviceKey(localAccountId: string): Promise<CryptoKey> {
+  const existing = await pepperStore.get(pepperKey(localAccountId))
   if (existing) return existing
 
   const key = await subtle().generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-  await pepperStore.put(pepperKey(accountId), key)
+  await pepperStore.put(pepperKey(localAccountId), key)
   return key
 }
 
@@ -79,8 +79,8 @@ export async function getOrCreateDeviceKey(accountId: string): Promise<CryptoKey
  * never persisted anywhere: the KEY is persisted, and the bytes are recomputed
  * from it on demand.
  */
-export async function deriveDevicePepper(accountId: string): Promise<Uint8Array> {
-  const key = await getOrCreateDeviceKey(accountId)
+export async function deriveDevicePepper(localAccountId: string): Promise<Uint8Array> {
+  const key = await getOrCreateDeviceKey(localAccountId)
   const signature = await subtle().sign("HMAC", key, PEPPER_MESSAGE)
   return new Uint8Array(signature)
 }
@@ -92,8 +92,8 @@ export async function deriveDevicePepper(accountId: string): Promise<Uint8Array>
  * method. Dropping it makes every existing wrap permanently unopenable, which
  * is the desired outcome in both cases.
  */
-export async function clearDeviceKey(accountId: string): Promise<void> {
-  await pepperStore.delete(pepperKey(accountId))
+export async function clearDeviceKey(localAccountId: string): Promise<void> {
+  await pepperStore.delete(pepperKey(localAccountId))
 }
 
 /**

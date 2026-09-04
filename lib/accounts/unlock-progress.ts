@@ -55,17 +55,17 @@ export function unlockStagesFor(usesBrowserVault: boolean): AccountUnlockStage[]
 
 export interface AccountUnlockProgressDetail {
   stage: AccountUnlockStage
-  accountId: string
+  localAccountId: string
 }
 
 export type AccountUnlockProgressHandler = (detail: AccountUnlockProgressDetail) => void
 
 /** Announce the stage the unlock pipeline just entered. No-op outside a browser. */
-export function publishUnlockStage(accountId: string, stage: AccountUnlockStage): void {
+export function publishUnlockStage(localAccountId: string, stage: AccountUnlockStage): void {
   if (typeof window === "undefined") return
   window.dispatchEvent(
     new CustomEvent<AccountUnlockProgressDetail>(ACCOUNT_UNLOCK_PROGRESS_EVENT, {
-      detail: { accountId, stage },
+      detail: { localAccountId, stage },
     })
   )
 }

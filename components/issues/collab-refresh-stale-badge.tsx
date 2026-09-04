@@ -13,13 +13,13 @@ import {
 
 export function CollabRefreshStaleBadge() {
   const t = useTranslations("issues.freshness")
-  const accountId = getActiveAccountId()
+  const localAccountId = getActiveAccountId()
   useSyncExternalStore(
     subscribeCollabRefreshState,
-    () => getCollabRefreshState(accountId),
-    () => getCollabRefreshState(accountId)
+    () => getCollabRefreshState(localAccountId),
+    () => getCollabRefreshState(localAccountId)
   )
-  if (!isCollabRefreshStale(accountId)) return null
+  if (!isCollabRefreshStale(localAccountId)) return null
   return (
     <Badge variant="outline" className="border-amber-500/60" data-testid="collab-refresh-stale">
       {t("stale")}

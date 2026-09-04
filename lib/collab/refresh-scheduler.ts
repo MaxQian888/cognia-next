@@ -23,8 +23,8 @@ const EMPTY_REFRESH_STATE: CollabRefreshState = {
   inFlight: false,
 }
 
-function setRefreshState(accountId: string, state: CollabRefreshState): void {
-  states.set(accountId, state)
+function setRefreshState(localAccountId: string, state: CollabRefreshState): void {
+  states.set(localAccountId, state)
   for (const listener of listeners) listener()
 }
 
@@ -33,8 +33,8 @@ export function subscribeCollabRefreshState(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-export function getCollabRefreshState(accountId: string): CollabRefreshState {
-  return states.get(accountId) ?? EMPTY_REFRESH_STATE
+export function getCollabRefreshState(localAccountId: string): CollabRefreshState {
+  return states.get(localAccountId) ?? EMPTY_REFRESH_STATE
 }
 
 /**
@@ -45,48 +45,48 @@ export function getCollabRefreshState(accountId: string): CollabRefreshState {
  * has not attempted anything yet is still reported fresh — there is nothing to
  * warn about before the scheduler's first tick.
  */
-export function isCollabRefreshStale(accountId: string, now = Date.now()): boolean {
-  const { lastSuccessAt, lastAttemptAt, failures, inFlight } = getCollabRefreshState(accountId)
+export function isCollabRefreshStale(localAccountId: string, now = Date.now()): boolean {
+  const { lastSuccessAt, lastAttemptAt, failures, inFlight } = getCollabRefreshState(localAccountId)
   if (lastSuccessAt === null) return lastAttemptAt !== null && !inFlight && failures > 0
   return now - lastSuccessAt > COLLAB_REFRESH_STALE_AFTER_MS
 }
 
 export async function requestCollabRefresh(
-  accountId: string,
-  refresh: (accountId: string) => Promise<RefreshCollabPlaneResult | null> = (id) =>
+  localAccountId: string,
+  refresh: (localAccountId: string) => Promise<RefreshCollabPlaneResult | null> = (id) =>
     refreshCollabPlaneQuietly({ localAccountId: id }),
   now: () => number = Date.now
 ): Promise<RefreshCollabPlaneResult | null> {
-  const active = inFlight.get(accountId)
+  const active = inFlight.get(localAccountId)
   if (active) return active
-  const previous = getCollabRefreshState(accountId)
-  setRefreshState(accountId, { ...previous, lastAttemptAt: now(), inFlight: true })
-  const promise = refresh(accountId)
+  const previous = getCollabRefreshState(localAccountId)
+  setRefreshState(localAccountId, { ...previous, lastAttemptAt: now(), inFlight: true })
+  const promise = refresh(localAccountId)
     .then((result) => {
-      const current = getCollabRefreshState(accountId)
+      const current = getCollabRefreshState(localAccountId)
       if (result?.status === "refreshed") {
-        setRefreshState(accountId, {
+        setRefreshState(localAccountId, {
           lastAttemptAt: current.lastAttemptAt,
           lastSuccessAt: now(),
           failures: 0,
           inFlight: false,
         })
       } else {
-        setRefreshState(accountId, { ...current, inFlight: false })
+        setRefreshState(localAccountId, { ...current, inFlight: false })
       }
       return result
     })
     .catch(() => {
-      const current = getCollabRefreshState(accountId)
-      setRefreshState(accountId, {
+      const current = getCollabRefreshState(localAccountId)
+      setRefreshState(localAccountId, {
         ...current,
         failures: current.failures + 1,
         inFlight: false,
       })
       return null
     })
-    .finally(() => inFlight.delete(accountId))
-  inFlight.set(accountId, promise)
+    .finally(() => inFlight.delete(localAccountId))
+  inFlight.set(localAccountId, promise)
   return promise
 }
 
@@ -98,9 +98,9 @@ export function collabRefreshDelay(failures: number): number {
 }
 
 export function installCollabRefreshScheduler(
-  accountId: string,
+  localAccountId: string,
   deps: {
-    refresh?: (accountId: string) => Promise<RefreshCollabPlaneResult | null>
+    refresh?: (localAccountId: string) => Promise<RefreshCollabPlaneResult | null>
     window?: Pick<
       Window,
       "addEventListener" | "removeEventListener" | "setTimeout" | "clearTimeout"
@@ -116,14 +116,17 @@ export function installCollabRefreshScheduler(
   const schedule = () => {
     if (stopped) return
     if (timer !== undefined) windowRef.clearTimeout(timer)
-    timer = windowRef.setTimeout(run, collabRefreshDelay(getCollabRefreshState(accountId).failures))
+    timer = windowRef.setTimeout(
+      run,
+      collabRefreshDelay(getCollabRefreshState(localAccountId).failures)
+    )
   }
   const run = () => {
     if (stopped || documentRef.visibilityState !== "visible") {
       schedule()
       return
     }
-    void requestCollabRefresh(accountId, deps.refresh).finally(schedule)
+    void requestCollabRefresh(localAccountId, deps.refresh).finally(schedule)
   }
   const onVisible = () => {
     if (documentRef.visibilityState === "visible") run()

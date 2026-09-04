@@ -6,7 +6,7 @@ import { blockPluginRuntimeAccount, clearPluginRuntimeAccount } from "./account-
 import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 
 interface PluginAccountTeardownDependencies {
-  block: (accountId: string) => void
+  block: (localAccountId: string) => void
   rejectPendingConsent: () => void
   runtimePluginIds: () => string[]
   unload: (pluginId: string) => Promise<void>
@@ -40,11 +40,11 @@ function defaultDependencies(): PluginAccountTeardownDependencies {
  * keeps a profile switch fail-closed while account lock can still complete.
  */
 export async function teardownPluginAccountRuntime(
-  accountId: string,
+  localAccountId: string,
   overrides: Partial<PluginAccountTeardownDependencies> = {}
 ): Promise<void> {
   const deps = { ...defaultDependencies(), ...overrides }
-  deps.block(accountId)
+  deps.block(localAccountId)
   deps.rejectPendingConsent()
   const failures: unknown[] = []
   for (const pluginId of deps.runtimePluginIds()) {

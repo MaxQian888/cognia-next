@@ -26,7 +26,7 @@ export async function loadEvalAppSettings(): Promise<AppSettings | null> {
 
 export interface EvalRuntimeContext {
   settings: AppSettings
-  accountId: string
+  localAccountId: string
 }
 
 /**
@@ -42,7 +42,7 @@ export async function loadEvalRuntimeContext(): Promise<EvalRuntimeContext | nul
     import("@/stores/account/account-store"),
   ])
   const settings = useSettingsStore.getState().settings
-  const accountId = useAccountStore.getState().unlockedAccountId
-  if (!settings || !accountId) return null
-  return { settings, accountId }
+  const localAccountId = useAccountStore.getState().unlockedAccountId
+  if (!settings || !localAccountId) return null
+  return { settings, localAccountId }
 }

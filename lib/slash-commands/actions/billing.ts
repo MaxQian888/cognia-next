@@ -60,26 +60,26 @@ async function readQuotaSnapshot(
     notes.push({ id: "web-mode" })
     return null
   }
-  let accountId: string | null = null
+  let providerAccountId: string | null = null
   try {
-    accountId = (await getActiveAccount("anthropic")).activeAccountId ?? null
+    providerAccountId = (await getActiveAccount("anthropic")).activeAccountId ?? null
   } catch {
     // Keyring/IPC unavailable — indistinguishable from "no account" here.
   }
-  if (!accountId) {
+  if (!providerAccountId) {
     notes.push({ id: "no-account" })
     return null
   }
 
   let snapshot: ProviderLimitsRow | null = null
   try {
-    snapshot = await latestLimitsSnapshot("anthropic", accountId)
+    snapshot = await latestLimitsSnapshot("anthropic", providerAccountId)
   } catch {
     // Dexie read failed; a refresh below may still produce a snapshot.
   }
 
   const enabledAccounts = useSettingsStore.getState().settings?.limitsQueryEnabledAccounts
-  const queryEnabled = isLimitsQueryEnabled(enabledAccounts, "anthropic", accountId)
+  const queryEnabled = isLimitsQueryEnabled(enabledAccounts, "anthropic", providerAccountId)
   const stale = usageWindowsStale({ fetchedAt: snapshot?.fetchedAt ?? null }, now)
 
   if (!queryEnabled) {
@@ -89,7 +89,7 @@ async function readQuotaSnapshot(
   if (!stale) return snapshot
 
   try {
-    const fresh = await queryAccountLimitsCoalesced("anthropic", accountId)
+    const fresh = await queryAccountLimitsCoalesced("anthropic", providerAccountId)
     if (fresh) snapshot = await recordLimitsSnapshot(fresh)
   } catch (err) {
     notes.push({ id: "quota-error", detail: err instanceof Error ? err.message : String(err) })
