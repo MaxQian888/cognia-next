@@ -49,6 +49,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
+import { Surface } from "@/components/surface/surface"
 import { authorizeSessionAction } from "@/lib/collab/session-permissions"
 import { convertLocalSessionToShared } from "@/lib/collab/shared-chat-conversion"
 import { isSharedChatClientEnabled } from "@/lib/collab/shared-chat-feature"
@@ -409,7 +410,7 @@ export function SharedSessionPanel({ session }: Props) {
             <p className="py-6 text-sm text-muted-foreground">{t("notConfigured")}</p>
           ) : !isShared ? (
             <div className="space-y-4 py-4">
-              <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+              <Surface layer="raised" className="rounded-lg border p-3 text-sm">
                 <p className="font-medium">{t("historyWarningTitle")}</p>
                 <p className="mt-1 text-muted-foreground">
                   {t("historyWarning", {
@@ -417,7 +418,7 @@ export function SharedSessionPanel({ session }: Props) {
                     attachments: summary.attachments,
                   })}
                 </p>
-              </div>
+              </Surface>
               <div className="space-y-2 rounded-lg border p-3">
                 <Label htmlFor="shared-invite-token">{t("inviteToken")}</Label>
                 <Input

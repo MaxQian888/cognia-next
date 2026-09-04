@@ -25,6 +25,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Surface } from "@/components/surface/surface"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { cn } from "@/lib/utils"
 
@@ -166,34 +167,36 @@ export function BrowserToolbar({
       <form onSubmit={onSubmit} className="min-w-0 flex-1">
         <div className="relative">
           <SchemeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            ref={urlInputRef}
-            type="text"
-            inputMode="url"
-            autoComplete="off"
-            spellCheck={false}
-            value={url}
-            onChange={(event) => onUrlChange(event.target.value)}
-            onFocus={(event) => {
-              setUrlFocused(true)
-              onUrlFocus?.()
-              event.target.select()
-            }}
-            onBlur={() => {
-              setUrlFocused(false)
-              onUrlBlur?.()
-            }}
-            onKeyDown={onUrlKeyDown}
-            placeholder={t("url.placeholder")}
-            aria-label={t("url.placeholder")}
-            className={cn(
-              "h-8 rounded-full border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background",
-              // Read mode paints the pretty form over the field instead of
-              // rewriting `value`, so copying still yields the real URL and
-              // focusing reveals it without a reformat flicker.
-              display && "text-transparent"
-            )}
-          />
+          <Surface asChild layer="raised" radius="pill">
+            <Input
+              ref={urlInputRef}
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              value={url}
+              onChange={(event) => onUrlChange(event.target.value)}
+              onFocus={(event) => {
+                setUrlFocused(true)
+                onUrlFocus?.()
+                event.target.select()
+              }}
+              onBlur={() => {
+                setUrlFocused(false)
+                onUrlBlur?.()
+              }}
+              onKeyDown={onUrlKeyDown}
+              placeholder={t("url.placeholder")}
+              aria-label={t("url.placeholder")}
+              className={cn(
+                "h-8 border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background",
+                // Read mode paints the pretty form over the field instead of
+                // rewriting `value`, so copying still yields the real URL and
+                // focusing reveals it without a reformat flicker.
+                display && "text-transparent"
+              )}
+            />
+          </Surface>
           {display && (
             <div
               aria-hidden

@@ -210,7 +210,7 @@ function GroupRow({
         />
         <span
           className={cn(
-            "size-2 shrink-0 rounded-[3px]",
+            "size-2 shrink-0 rounded-pill",
             GROUP_COLOR[group.id],
             group.deferred && "opacity-40"
           )}

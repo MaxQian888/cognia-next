@@ -45,6 +45,7 @@ import {
 } from "@/lib/usage-dock/types"
 import { formatGlanceMetric } from "@/lib/usage/usage-glance-format"
 import { cn } from "@/lib/utils"
+import { Surface } from "@/components/surface/surface"
 
 /** Gauge fill per severity. Same vocabulary as the tray badge colours. */
 const SEVERITY_FILL: Record<UsageDockRow["severity"], string> = {
@@ -188,13 +189,15 @@ export function UsageDockView() {
         if (event.target === event.currentTarget) setPinnedRow(null)
       }}
     >
-      <div
+      <Surface
+        layer="overlay"
+        elevation={3}
         ref={railRef}
         data-testid="usage-dock-rail"
         data-edge={edge}
         data-expanded={expanded ? "true" : "false"}
         className={cn(
-          "flex items-stretch gap-1 rounded-xl border bg-popover/95 p-1.5 text-popover-foreground shadow-lg backdrop-blur",
+          "flex items-stretch gap-1 rounded-xl border p-1.5 text-popover-foreground backdrop-blur",
           vertical ? "flex-col" : "flex-row"
         )}
         aria-label={t("title")}
@@ -277,7 +280,7 @@ export function UsageDockView() {
             {headline}
           </button>
         )}
-      </div>
+      </Surface>
 
       {activeRow && expanded && (
         <div

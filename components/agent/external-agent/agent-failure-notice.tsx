@@ -20,6 +20,7 @@ import { useTranslations } from "next-intl"
 import { AlertTriangle, Copy, RotateCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 import { failureLines, type ExternalAgentFailure } from "@/lib/ai/agent/external/agent-failure"
 
@@ -65,13 +66,12 @@ export function AgentFailureNotice({
   }, [lines, stamp])
 
   return (
-    <div
+    <Surface
+      layer="raised"
+      radius="control"
       role="alert"
       data-testid={`agent-failure-${failure.agentId}`}
-      className={cn(
-        "mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2",
-        className
-      )}
+      className={cn("mt-2 border border-destructive/30 bg-destructive/5 px-2.5 py-2", className)}
     >
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
@@ -137,6 +137,6 @@ export function AgentFailureNotice({
           {tCommon("dismiss")}
         </Button>
       </div>
-    </div>
+    </Surface>
   )
 }

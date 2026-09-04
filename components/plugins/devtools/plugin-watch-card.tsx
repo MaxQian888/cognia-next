@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { PluginEmptyState } from "@/components/plugins/_shared/plugin-empty-state"
+import { Surface } from "@/components/surface/surface"
 import { isTauri } from "@/lib/tauri"
 import {
   startPluginFileWatch,
@@ -91,15 +92,18 @@ export function PluginWatchCard({ className }: { className?: string }) {
 
   return (
     <Card
-      className={cn("gap-0 overflow-hidden border-border/70 py-0 shadow-sm", className)}
+      className={cn("gap-0 overflow-hidden border-border/70 py-0", className)}
       data-testid="plugin-watch-card"
     >
       <div className="flex h-full flex-col gap-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <Surface
+              layer="raised"
+              className="flex size-9 shrink-0 items-center justify-center rounded-lg border "
+            >
               <EyeIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-            </div>
+            </Surface>
             <div className="min-w-0 space-y-1">
               <h3 className="truncate text-sm font-semibold tracking-tight">{t("title")}</h3>
               <p className="text-xs text-muted-foreground">{t("description")}</p>
@@ -141,22 +145,23 @@ export function PluginWatchCard({ className }: { className?: string }) {
             <h4 className="text-xs font-semibold text-muted-foreground">{t("skippedHeading")}</h4>
             <ul className="space-y-1.5">
               {skipped.map((row) => (
-                <li
-                  key={row.id}
-                  className="rounded-md border bg-card px-2.5 py-1.5 text-xs"
-                  data-testid={`plugin-watch-skipped-${row.id}`}
-                  data-reason={row.eligibility.watchable ? undefined : row.eligibility.reason}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-medium">{row.name}</span>
-                    <Badge variant="outline" className="shrink-0 text-[10px]">
-                      {row.id}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-muted-foreground">
-                    {!row.eligibility.watchable && t(`reason.${row.eligibility.reason}` as never)}
-                  </p>
-                </li>
+                <Surface asChild key={row.id} layer="raised">
+                  <li
+                    className="rounded-md border px-2.5 py-1.5 text-xs"
+                    data-testid={`plugin-watch-skipped-${row.id}`}
+                    data-reason={row.eligibility.watchable ? undefined : row.eligibility.reason}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium">{row.name}</span>
+                      <Badge variant="outline" className="shrink-0 text-[10px]">
+                        {row.id}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-muted-foreground">
+                      {!row.eligibility.watchable && t(`reason.${row.eligibility.reason}` as never)}
+                    </p>
+                  </li>
+                </Surface>
               ))}
             </ul>
           </div>

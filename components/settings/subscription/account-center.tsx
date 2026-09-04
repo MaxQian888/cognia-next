@@ -26,6 +26,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
+import { Surface } from "@/components/surface/surface"
 import {
   accountCapabilities,
   providerDisplayOrder,
@@ -185,36 +186,38 @@ export function AccountCenter() {
                       : undefined)
                   return (
                     <li key={accountKey(account)}>
-                      <button
-                        type="button"
-                        className="flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left hover:bg-muted/40 data-[active=true]:border-primary/50 data-[active=true]:bg-primary/5"
-                        data-active={
-                          selected?.id === account.id && selected.provider === account.provider
-                        }
-                        data-testid={`account-center-row-${account.provider}-${account.id}`}
-                        onClick={() => openAccount(account)}
-                      >
-                        <HealthIcon health={account.health} />
-                        <span className="min-w-0 flex-1">
-                          <span className="flex flex-wrap items-center gap-1">
-                            <span className="truncate text-sm font-medium">
-                              {accountName(account)}
+                      <Surface asChild layer="raised" radius="control">
+                        <button
+                          type="button"
+                          className="flex w-full items-start gap-2 border px-2.5 py-2 text-left hover:bg-muted/40 data-[active=true]:border-primary/50 data-[active=true]:bg-primary/5"
+                          data-active={
+                            selected?.id === account.id && selected.provider === account.provider
+                          }
+                          data-testid={`account-center-row-${account.provider}-${account.id}`}
+                          onClick={() => openAccount(account)}
+                        >
+                          <HealthIcon health={account.health} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-1">
+                              <span className="truncate text-sm font-medium">
+                                {accountName(account)}
+                              </span>
+                              {state.activeAccountId === account.id && (
+                                <Badge className="text-[10px]">{t("badges.active")}</Badge>
+                              )}
+                              {defaultId === account.id && (
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {t("badges.default")}
+                                </Badge>
+                              )}
                             </span>
-                            {state.activeAccountId === account.id && (
-                              <Badge className="text-[10px]">{t("badges.active")}</Badge>
-                            )}
-                            {defaultId === account.id && (
-                              <Badge variant="secondary" className="text-[10px]">
-                                {t("badges.default")}
-                              </Badge>
-                            )}
+                            <span className="block truncate text-[11px] text-muted-foreground">
+                              {t(`providers.${account.provider}`)} · {account.authMode} ·{" "}
+                              {account.credentialSource}
+                            </span>
                           </span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {t(`providers.${account.provider}`)} · {account.authMode} ·{" "}
-                            {account.credentialSource}
-                          </span>
-                        </span>
-                      </button>
+                        </button>
+                      </Surface>
                     </li>
                   )
                 })}
@@ -402,10 +405,10 @@ function AccountDetailPanel({
           {account.plan && <Info label={t("fields.plan")} value={account.plan} />}
         </div>
 
-        <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+        <Surface layer="raised" className="rounded-md border p-3 text-xs text-muted-foreground">
           <p>{t("activeHelp")}</p>
           <p className="mt-1">{t("defaultHelp")}</p>
-        </div>
+        </Surface>
 
         {account.reauthReason && (
           <SettingsAlert title={t("health.reauth_required")}>

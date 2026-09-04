@@ -146,7 +146,7 @@ paints a second `::before` layer and doubles the wallpaper's effective opacity.
 
 `pnpm audit:surfaces` refuses new bare panel containers (a `div` carrying
 radius + border + background) and new radius/shadow values no setting can reach.
-816 existing occurrences across 454 files go into a baseline that may shrink and
+The existing occurrences go into a baseline that may shrink and
 never grow, with per-file counts so paying debt down in one place cannot fund a
 new panel elsewhere.
 
@@ -174,7 +174,7 @@ matches nothing passes just as green as one that finds nothing.
 - Unifying the four independent editor/chart theme channels (Monaco,
   CodeMirror, chart.js, Mermaid). Four separate migrations, and code-server is a
   native child window CSS cannot reach at all.
-- Migrating the 816 baselined occurrences. The gate holds the line; the debt is
+- Migrating the baselined occurrences. The gate holds the line, and the debt is
   paid down opportunistically.
 - Renaming the background scope vocabulary (`chat` is used as a generic content
   scope). The functional gap it caused is fixed by decision 7; the rename is

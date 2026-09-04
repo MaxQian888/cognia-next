@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
+import { Surface } from "@/components/surface/surface"
 import { isInvitationTokenShaped } from "@/lib/identity/pending-invitation"
 
 import type { CollabAccountMembership } from "@/lib/collab/client"
@@ -112,13 +113,15 @@ export function CloudSignInScreen(props: CloudSignInScreenProps) {
         ) : null}
 
         {error ? (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive"
-            data-testid="cloud-sign-in-error"
-          >
-            {error}
-          </p>
+          <Surface asChild layer="raised" radius="control">
+            <p
+              role="alert"
+              className="border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive"
+              data-testid="cloud-sign-in-error"
+            >
+              {error}
+            </p>
+          </Surface>
         ) : null}
 
         {props.personName && (view.kind === "choose" || view.kind === "unaffiliated") ? (

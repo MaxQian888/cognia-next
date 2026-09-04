@@ -79,6 +79,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Surface } from "@/components/surface/surface"
 import { APP_VERSION } from "@/lib/app-version"
 import { useRunConfigOptions } from "@/hooks/eval/use-run-config-options"
 import { collectModelOptions } from "@/lib/ai/model-options"
@@ -2924,12 +2925,12 @@ export function EvalLabWorkspace() {
               )
             })}
           </div>
-          <div className="mt-auto rounded-lg border bg-background p-3">
+          <Surface layer="raised" className="mt-auto rounded-lg border p-3">
             <p className="text-xs font-medium">{t("lab.rail.evidence")}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               {t("lab.rail.evidenceHint", { count: preflight.issues.length })}
             </p>
-          </div>
+          </Surface>
         </nav>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-hidden">

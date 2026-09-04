@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Surface } from "@/components/surface/surface"
 import { useCogniaCliStatus } from "@/hooks/plugins/use-cognia-cli-status"
 import {
   clearPluginRuntimeLogs,
@@ -236,23 +237,25 @@ export function PluginDevSessionWorkbench() {
           aria-label={t("timeline.ariaLabel")}
         >
           {STAGES.map((stage) => (
-            <li
-              key={stage}
-              className={
-                stageSet.has(stage)
-                  ? "rounded-md border border-primary/40 bg-primary/5 px-2 py-2 text-xs font-medium"
-                  : "rounded-md border border-dashed px-2 py-2 text-xs text-muted-foreground"
-              }
-              data-active={stageSet.has(stage) || undefined}
-            >
-              {t(`stage.${stage}`)}
-            </li>
+            <Surface asChild key={stage} layer="raised" radius="control">
+              <li
+                className={
+                  stageSet.has(stage)
+                    ? "border border-primary/40 bg-primary/5 px-2 py-2 text-xs font-medium"
+                    : "border border-dashed px-2 py-2 text-xs text-muted-foreground"
+                }
+                data-active={stageSet.has(stage) || undefined}
+              >
+                {t(`stage.${stage}`)}
+              </li>
+            </Surface>
           ))}
         </ol>
 
         {attempt?.activationProof && (
-          <div
-            className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-3"
+          <Surface
+            layer="raised"
+            className="grid gap-2 rounded-md border p-3 text-xs sm:grid-cols-3"
             data-testid="dev-session-activation-proof"
           >
             <span>{t("proof.generation", { generation: attempt.activationProof.generation })}</span>
@@ -260,7 +263,7 @@ export function PluginDevSessionWorkbench() {
             <code className="truncate" title={attempt.activationProof.artifactRevision}>
               {attempt.activationProof.artifactRevision}
             </code>
-          </div>
+          </Surface>
         )}
       </Card>
 

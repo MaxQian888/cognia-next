@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Surface } from "@/components/surface/surface"
 import { executeCdpCommand, grantCdpAccess, revokeCdpAccess } from "@/lib/browser/cdp-client"
 import { listCdpAuditEvents } from "@/lib/db/browser-cdp"
 import type { CdpAuditEvent, CdpCapability, CdpGrant } from "@/types/browser-developer"
@@ -274,11 +275,13 @@ export function BrowserCdpControls({
                 {t("copy")}
               </Button>
             </div>
-            <ScrollArea className="max-h-40 rounded-md border bg-muted/40">
-              <pre className="whitespace-pre-wrap break-all p-2 font-mono text-[10px]">
-                {formatCdpValue(result.value).text}
-              </pre>
-            </ScrollArea>
+            <Surface asChild layer="raised">
+              <ScrollArea className="max-h-40 rounded-md border">
+                <pre className="whitespace-pre-wrap break-all p-2 font-mono text-[10px]">
+                  {formatCdpValue(result.value).text}
+                </pre>
+              </ScrollArea>
+            </Surface>
             {formatCdpValue(result.value).truncated && (
               <p className="text-[10px] text-muted-foreground">{t("valueTruncated")}</p>
             )}

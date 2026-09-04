@@ -63,6 +63,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Surface } from "@/components/surface/surface"
 import { SearchIcon, Trash2Icon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import type { CustomTheme, ResolvedThemeColors, ThemeColors } from "@/types/plugin/plugin"
@@ -557,8 +558,9 @@ export function CustomThemeTab() {
               control above: "the palette I'm painting right now" and "the side
               this theme opens in" are different questions, and collapsing them
               into one switch is what made the dark variant unreachable. */}
-          <div
-            className="flex items-center gap-2 rounded-md border bg-muted/30 p-1"
+          <Surface
+            layer="raised"
+            className="flex items-center gap-2 rounded-md border p-1"
             role="group"
             aria-label={t("variant.editingLabel")}
           >
@@ -580,7 +582,7 @@ export function CustomThemeTab() {
                 )}
               </Button>
             ))}
-          </div>
+          </Surface>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={handleSaveClick} disabled={!draft.name.trim()}>

@@ -80,6 +80,7 @@ import {
 } from "@/components/ui/sheet"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { Surface } from "@/components/surface/surface"
 import { useCrashLogs } from "@/hooks/logging/use-crash-logs"
 import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
 import type {
@@ -281,10 +282,10 @@ function DiagnosticsField({
   mono?: boolean
 }) {
   return (
-    <div className="min-w-0 rounded-md border bg-muted/30 px-2.5 py-1.5">
+    <Surface layer="raised" className="min-w-0 rounded-md border px-2.5 py-1.5">
       <div className="text-[10px] tracking-wide text-muted-foreground uppercase">{label}</div>
       <div className={cn("mt-0.5 text-sm", mono && "font-mono text-xs break-all")}>{children}</div>
-    </div>
+    </Surface>
   )
 }
 

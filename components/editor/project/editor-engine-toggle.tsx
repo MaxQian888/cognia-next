@@ -20,6 +20,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Surface } from "@/components/surface/surface"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
 import type { CodeServerSupportStatus } from "@/hooks/codeserver/use-code-server-supported"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
@@ -178,13 +179,15 @@ export function EditorEngineToggle({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <span
-                className="inline-flex h-7 items-center gap-1 rounded-pill border border-warning/40 bg-warning/10 px-2 text-xs text-muted-foreground"
-                data-testid="pro-ide-remote-workbench"
-              >
-                <InfoIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
-                {t("proIde.remoteWorkbenchLabel")}
-              </span>
+              <Surface asChild layer="raised" radius="pill">
+                <span
+                  className="inline-flex h-7 items-center gap-1 border border-warning/40 bg-warning/10 px-2 text-xs text-muted-foreground"
+                  data-testid="pro-ide-remote-workbench"
+                >
+                  <InfoIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
+                  {t("proIde.remoteWorkbenchLabel")}
+                </span>
+              </Surface>
             </TooltipTrigger>
             <TooltipContent className="max-w-sm">
               {t("proIde.remoteWorkbenchTooltip")}

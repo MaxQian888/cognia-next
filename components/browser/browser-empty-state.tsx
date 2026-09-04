@@ -27,7 +27,7 @@ export function BrowserEmptyState({ onOpen }: { onOpen: (url: string) => void })
       className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center animate-in fade-in duration-200"
       data-testid="browser-empty-state"
     >
-      <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
+      <div className="flex size-12 items-center justify-center rounded-stage bg-muted">
         <GlobeIcon className="size-6 text-muted-foreground" />
       </div>
       <div className="space-y-1">

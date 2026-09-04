@@ -24,6 +24,7 @@ import {
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
+import { Surface } from "@/components/surface/surface"
 import {
   listUsageDockMonitors,
   setUsageDockMonitor,
@@ -107,7 +108,7 @@ export function UsageDockCard() {
   )
 
   return (
-    <div className="space-y-4 rounded-md border bg-card p-4">
+    <Surface layer="raised" className="space-y-4 rounded-md border p-4">
       <div>
         <h3 className="text-sm font-semibold">{t("title")}</h3>
         <p className="text-sm text-muted-foreground">{t("description")}</p>
@@ -234,7 +235,7 @@ export function UsageDockCard() {
       <Button type="button" variant="outline" size="sm" onClick={reset}>
         {t("reset")}
       </Button>
-    </div>
+    </Surface>
   )
 }
 

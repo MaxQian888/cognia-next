@@ -42,6 +42,7 @@ import { useOverflowFold } from "./use-overflow-fold"
 import { useStagedAttachments } from "./staged-attachment-store"
 import type { InputSegment } from "@/lib/slash-commands/parse-segments"
 import type { CommandError } from "@/lib/slash-commands/run-segments"
+import { Surface } from "@/components/surface/surface"
 
 export type ContextChipBarProps = AttachmentPreviewProps & {
   /**
@@ -107,23 +108,25 @@ export function ContextChipBar(props: ContextChipBarProps = {}) {
           ) : null}
         </div>
         {fold.hiddenCount > 0 ? (
-          <button
-            type="button"
-            data-testid="composer-context-fold"
-            onClick={fold.toggle}
-            aria-expanded={fold.expanded}
-            aria-label={
-              fold.expanded ? t("foldCollapse") : t("foldExpand", { count: fold.hiddenCount })
-            }
-            className="absolute end-2 top-2 inline-flex h-7 items-center gap-0.5 rounded-md border bg-background/80 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-          >
-            {fold.expanded ? (
-              <ChevronUpIcon className="size-3" aria-hidden />
-            ) : (
-              <ChevronDownIcon className="size-3" aria-hidden />
-            )}
-            {fold.expanded ? t("foldCollapseShort") : `+${fold.hiddenCount}`}
-          </button>
+          <Surface asChild layer="raised">
+            <button
+              type="button"
+              data-testid="composer-context-fold"
+              onClick={fold.toggle}
+              aria-expanded={fold.expanded}
+              aria-label={
+                fold.expanded ? t("foldCollapse") : t("foldExpand", { count: fold.hiddenCount })
+              }
+              className="absolute end-2 top-2 inline-flex h-7 items-center gap-0.5 rounded-md border px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              {fold.expanded ? (
+                <ChevronUpIcon className="size-3" aria-hidden />
+              ) : (
+                <ChevronDownIcon className="size-3" aria-hidden />
+              )}
+              {fold.expanded ? t("foldCollapseShort") : `+${fold.hiddenCount}`}
+            </button>
+          </Surface>
         ) : null}
       </div>
     </Collapse>

@@ -30,6 +30,7 @@ import { CheckIcon, CopyIcon, HardDriveIcon, KeyRoundIcon, LinkIcon } from "luci
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Surface } from "@/components/surface/surface"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { useProvisioningOffer } from "@/hooks/workspace/use-provisioning-offer"
 import {
@@ -94,8 +95,9 @@ export function ProjectEnvironmentProvisioning({ projectId, executionRoot, deps 
   )
 
   return (
-    <div
-      className="space-y-2 rounded-md border bg-background/40 p-3"
+    <Surface
+      layer="raised"
+      className="space-y-2 rounded-md border p-3"
       data-testid="project-environment-provisioning"
       data-state={loading ? "loading" : candidates.length ? "offered" : "empty"}
     >
@@ -219,6 +221,6 @@ export function ProjectEnvironmentProvisioning({ projectId, executionRoot, deps 
           ))}
         </div>
       ) : null}
-    </div>
+    </Surface>
   )
 }

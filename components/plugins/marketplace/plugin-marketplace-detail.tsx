@@ -60,6 +60,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Surface } from "@/components/surface/surface"
 
 interface DetailEntry extends PluginMarketplaceEntry {
   capabilities?: string[]
@@ -299,8 +300,9 @@ function InstallSection({
         variant="default"
       />
       {(selectedVersion?.changelog || selectedVersion?.publishedAt) && (
-        <div
-          className="basis-full space-y-1 rounded-md border bg-muted/30 p-2 text-xs"
+        <Surface
+          layer="raised"
+          className="basis-full space-y-1 rounded-md border p-2 text-xs"
           data-testid="plugin-marketplace-version-notes"
         >
           {selectedVersion.publishedAt && (
@@ -311,7 +313,7 @@ function InstallSection({
           {selectedVersion.changelog && (
             <p className="line-clamp-6 whitespace-pre-wrap">{selectedVersion.changelog}</p>
           )}
-        </div>
+        </Surface>
       )}
     </>
   )

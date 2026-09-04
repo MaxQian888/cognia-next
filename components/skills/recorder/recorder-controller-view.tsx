@@ -19,6 +19,7 @@ import { useTranslations } from "next-intl"
 import { CircleIcon, PauseIcon, PlayIcon, SquareIcon, Undo2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 import {
   RECORDER_CONTROLLER_EVENT,
@@ -108,10 +109,12 @@ export function RecorderControllerView() {
 
   if (collapsed) {
     return (
-      <div
+      <Surface
+        layer="overlay"
+        elevation={3}
         data-testid="recorder-controller-collapsed"
         onPointerDown={() => void recorderControllerBeginDrag().catch(() => {})}
-        className="bg-background/95 rounded-pill flex h-10 w-[120px] items-center gap-2 border px-3 shadow-lg backdrop-blur"
+        className="rounded-pill flex h-10 w-[120px] items-center gap-2 border px-3 backdrop-blur"
       >
         <CircleIcon
           className={cn(
@@ -129,12 +132,14 @@ export function RecorderControllerView() {
         >
           <PlayIcon className="size-3" />
         </Button>
-      </div>
+      </Surface>
     )
   }
 
   return (
-    <div
+    <Surface
+      layer="overlay"
+      elevation={3}
       data-testid="recorder-controller"
       onPointerDown={(event) => {
         // Only the strip itself drags. A pointer-down on a control must reach
@@ -142,7 +147,7 @@ export function RecorderControllerView() {
         if ((event.target as HTMLElement).closest("button")) return
         void recorderControllerBeginDrag().catch(() => {})
       }}
-      className="bg-background/95 flex h-14 w-[420px] items-center gap-3 rounded-xl border px-3 shadow-lg backdrop-blur"
+      className="flex h-14 w-[420px] items-center gap-3 rounded-xl border px-3 backdrop-blur"
       aria-label={t("moveController")}
     >
       <CircleIcon
@@ -200,7 +205,7 @@ export function RecorderControllerView() {
           </span>
         </Button>
       </div>
-    </div>
+    </Surface>
   )
 }
 

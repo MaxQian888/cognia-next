@@ -65,6 +65,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { Surface } from "@/components/surface/surface"
 import { useStacks, type StackRow } from "@/hooks/git/use-stacks"
 import { useStackForge, type StackForgeOutcome } from "@/hooks/git/use-stack-forge"
 import { gitCreateBranch, gitIdentity } from "@/lib/git/commands"
@@ -153,8 +154,9 @@ function StackCard({
   const anyBusy = busy || forgeBusy
 
   return (
-    <div
-      className="space-y-2 rounded-md border bg-background/40 p-3"
+    <Surface
+      layer="raised"
+      className="space-y-2 rounded-md border p-3"
       data-testid={`stack-${row.stack.id}`}
       data-ok={row.verdict.ok ? "true" : "false"}
     >
@@ -290,7 +292,7 @@ function StackCard({
           {t("land")}
         </Button>
       </div>
-    </div>
+    </Surface>
   )
 }
 

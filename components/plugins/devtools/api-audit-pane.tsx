@@ -40,6 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { PluginEmptyState } from "@/components/plugins/_shared/plugin-empty-state"
+import { Surface } from "@/components/surface/surface"
 import {
   clearPluginApiAuditEvents,
   getRecentPluginApiAuditEvents,
@@ -139,9 +140,12 @@ export function ApiAuditPane({ className }: { className?: string }) {
     <Card className={cn("space-y-3 p-4", className)} data-testid="api-audit-pane">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+          <Surface
+            layer="raised"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg border "
+          >
             <NetworkIcon className="size-4 text-muted-foreground" aria-hidden="true" />
-          </div>
+          </Surface>
           <div className="min-w-0 space-y-1">
             <h3 className="truncate text-sm font-semibold tracking-tight">{t("title")}</h3>
             <p className="text-xs text-muted-foreground">{t("description")}</p>

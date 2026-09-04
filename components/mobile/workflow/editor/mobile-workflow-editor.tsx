@@ -36,6 +36,7 @@ import {
 } from "@/lib/workflow/editor/clipboard"
 
 import { SelectionToolbar } from "@/components/workflow/editor/selection-toolbar"
+import { Surface } from "@/components/surface/surface"
 
 import { MobileCanvas, type MobileCanvasMode, type WorkflowFlowInstance } from "./mobile-canvas"
 import { MobileCanvasActionSheet } from "./mobile-canvas-action-sheet"
@@ -243,14 +244,16 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             the narrow view. This says so, once, and tapping it re-locks. The
             copy existed since the lock shipped and was rendered by nothing. */}
         {!orientationLocked && portrait ? (
-          <button
-            type="button"
-            onClick={() => setOrientationLocked(true)}
-            className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-pill border bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur"
-            data-testid="mobile-editor-landscape-hint"
-          >
-            {tWorkflow("landscapeHint")}
-          </button>
+          <Surface asChild layer="overlay" elevation={1}>
+            <button
+              type="button"
+              onClick={() => setOrientationLocked(true)}
+              className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-pill border px-3 py-1 text-xs text-muted-foreground backdrop-blur"
+              data-testid="mobile-editor-landscape-hint"
+            >
+              {tWorkflow("landscapeHint")}
+            </button>
+          </Surface>
         ) : null}
         {/* The desktop selection toolbar, in its touch layout. Duplicating its
             duplicate / group / align / distribute / delete / extract handlers

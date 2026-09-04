@@ -188,7 +188,7 @@ function ComparisonBlock({
   // an arbitrary value, and Tailwind sorts those after named utilities, so the
   // tier tint would quietly beat the recessed fill these two blocks want.
   return (
-    <div className="min-h-0 rounded-panel border bg-background/70 p-2">
+    <Surface layer="raised" className="min-h-0 rounded-panel border p-2">
       <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
@@ -200,7 +200,7 @@ function ComparisonBlock({
       >
         {text}
       </div>
-    </div>
+    </Surface>
   )
 }
 

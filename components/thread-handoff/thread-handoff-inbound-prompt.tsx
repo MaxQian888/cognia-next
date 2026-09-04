@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Surface } from "@/components/surface/surface"
 import { getDb } from "@/lib/db/schema"
 import { isCapacitor } from "@/lib/platform/detect"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
@@ -77,9 +78,11 @@ export function ThreadHandoffInboundPrompt({
               `prepared`, and comparing its absent fidelity against the ticket's
               rendered this warning on every resume with an undefined value. */}
           {prepared && prepared.preflight.achievableFidelity !== ticket.continuation.fidelity ? (
-            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
-              {t("fidelityLoss", { fidelity: prepared.preflight.achievableFidelity })}
-            </p>
+            <Surface asChild layer="raised" radius="control">
+              <p className="border border-amber-500/40 bg-amber-500/10 p-3">
+                {t("fidelityLoss", { fidelity: prepared.preflight.achievableFidelity })}
+              </p>
+            </Surface>
           ) : null}
           {blockers.length > 0 ? (
             <ul className="space-y-1 rounded-md border p-3" aria-label={t("blockersLabel")}>

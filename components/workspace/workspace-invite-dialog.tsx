@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Surface } from "@/components/surface/surface"
 import { useCopy } from "@/hooks/ui/use-copy"
 import { ORG_ROLES, WORKSPACE_ROLES, type OrgRole, type WorkspaceRole } from "@/types/identity"
 
@@ -149,12 +150,14 @@ function InviteForm({
       {issued ? (
         <div className="flex flex-col gap-3" data-testid="workspace-invite-issued">
           <p className="text-sm">{t("issuedHint")}</p>
-          <code
-            className="select-all break-all rounded-md border bg-muted p-3 font-mono text-xs"
-            data-testid="workspace-invite-token"
-          >
-            {issued.token}
-          </code>
+          <Surface asChild layer="raised">
+            <code
+              className="select-all break-all rounded-md border p-3 font-mono text-xs"
+              data-testid="workspace-invite-token"
+            >
+              {issued.token}
+            </code>
+          </Surface>
           <p className="text-xs text-muted-foreground">
             {t("expires", { date: new Date(issued.expiresAt).toLocaleString() })}
           </p>

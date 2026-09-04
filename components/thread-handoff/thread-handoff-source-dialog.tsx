@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Surface } from "@/components/surface/surface"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getThreadHandoffTicket } from "@/lib/db/thread-handoff-tickets"
 import { getDb } from "@/lib/db/schema"
@@ -123,11 +124,13 @@ export function ThreadHandoffSourceDialog({
 
         {locked ? (
           <div className="space-y-3 text-sm">
-            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
-              {session.handoffLock?.state === "committed"
-                ? t("committedReadonly")
-                : t("frozenReadonly")}
-            </p>
+            <Surface asChild layer="raised" radius="control">
+              <p className="border border-amber-500/40 bg-amber-500/10 p-3">
+                {session.handoffLock?.state === "committed"
+                  ? t("committedReadonly")
+                  : t("frozenReadonly")}
+              </p>
+            </Surface>
             {!snapshot?.dispatch ||
             snapshot.dispatch.status === "deadletter" ||
             snapshot?.dispatch?.status === "failed" ? (

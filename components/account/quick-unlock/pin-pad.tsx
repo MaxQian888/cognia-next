@@ -235,7 +235,7 @@ function PadButton({
       variant={variant}
       // 64px square: comfortably above the 44px touch-target floor, and big
       // enough to hit without looking.
-      className={cn("size-16 rounded-2xl text-xl font-normal tabular-nums", small && "text-xs")}
+      className={cn("size-16 rounded-stage text-xl font-normal tabular-nums", small && "text-xs")}
       disabled={disabled}
       onClick={onPress}
       aria-label={label}

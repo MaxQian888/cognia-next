@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Surface } from "@/components/surface/surface"
 import { getDb } from "@/lib/db/schema"
 import { localDayString } from "@/lib/db/provider-cost-daily"
 import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
@@ -90,7 +91,7 @@ export function UsageFindingsCard() {
   }, [rows, fromMs, now])
 
   return (
-    <div className="space-y-4 rounded-md border bg-card p-4">
+    <Surface layer="raised" className="space-y-4 rounded-md border p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold">{t("title")}</h3>
@@ -159,7 +160,7 @@ export function UsageFindingsCard() {
           ))}
         </ul>
       )}
-    </div>
+    </Surface>
   )
 }
 

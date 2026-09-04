@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Surface } from "@/components/surface/surface"
 import { listWorkspaceRoots } from "@/lib/files/workspace-fs"
 import type { WorkspaceRoot } from "@/lib/files/types"
 
@@ -75,17 +76,21 @@ export function WorkspaceRootsCard() {
         ) : (
           <ul className="space-y-2" aria-label={t("title")}>
             {roots.map((root) => (
-              <li key={root.path} className="rounded-md border bg-muted/20 px-3 py-2">
-                <p className="font-mono text-xs break-all">{root.path}</p>
-                <p className="pt-1 text-xs text-muted-foreground">
-                  {root.source === "headless-workspaces-dir"
-                    ? t("sourceHeadless")
-                    : t("sourceDesktop")}
-                </p>
-                <p className="pt-0.5 text-xs text-muted-foreground">
-                  {root.source === "headless-workspaces-dir" ? t("hintHeadless") : t("hintDesktop")}
-                </p>
-              </li>
+              <Surface asChild key={root.path} layer="raised">
+                <li className="rounded-md border px-3 py-2">
+                  <p className="font-mono text-xs break-all">{root.path}</p>
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    {root.source === "headless-workspaces-dir"
+                      ? t("sourceHeadless")
+                      : t("sourceDesktop")}
+                  </p>
+                  <p className="pt-0.5 text-xs text-muted-foreground">
+                    {root.source === "headless-workspaces-dir"
+                      ? t("hintHeadless")
+                      : t("hintDesktop")}
+                  </p>
+                </li>
+              </Surface>
             ))}
           </ul>
         )}

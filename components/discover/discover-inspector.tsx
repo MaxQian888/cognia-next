@@ -58,6 +58,7 @@ import {
   DocsProviderNotice,
   useDocsProviderReach,
 } from "@/components/docs-providers/docs-provider-notice"
+import { Surface } from "@/components/surface/surface"
 
 export interface DiscoverInspectorProps {
   category: DiscoverView
@@ -827,9 +828,11 @@ function SlashCommandInspector({ command }: { command: SlashCommandDefinition })
         {command.category ? <Badge variant="secondary">{command.category}</Badge> : null}
         {command.shortcut ? <Badge variant="outline">{command.shortcut}</Badge> : null}
       </div>
-      <p className="rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs">
-        /{command.name}
-      </p>
+      <Surface asChild layer="raised">
+        <p className="rounded-md border border-border px-3 py-2 font-mono text-xs">
+          /{command.name}
+        </p>
+      </Surface>
       <Button
         asChild
         variant="default"
