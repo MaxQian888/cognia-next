@@ -4405,6 +4405,10 @@
       "sandboxes": "Sandboxes",
       "whitelist": "Whitelist"
     },
+    "unavailable": {
+      "description": "Controlling a screen, keyboard and mouse is a capability of the machine being driven, so the engine only runs inside the Cognia desktop app on that machine. Open Settings then Automation there to view or change these settings.",
+      "title": "Automation runs on the desktop app"
+    },
     "whitelist": {
       "add": "Add",
       "captureFailed": "Failed to read focused window",

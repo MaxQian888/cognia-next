@@ -398,6 +398,10 @@
     "sandboxes": "沙箱",
     "whitelist": "白名单"
   },
+  "unavailable": {
+    "description": "控制屏幕、键盘和鼠标是被操作那台机器本身的能力，因此引擎只在那台机器上的 Cognia 桌面端里运行。请到那台机器的「设置 → 自动化」查看或修改这些设置。",
+    "title": "自动化只在桌面端运行"
+  },
   "whitelist": {
     "add": "添加",
     "captureFailed": "读取焦点窗口失败",

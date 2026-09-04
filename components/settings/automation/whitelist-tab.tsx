@@ -31,9 +31,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { isTauri } from "@/lib/tauri"
+import { AutomationUnavailableNotice } from "./automation-unavailable-notice"
 import {
   desktop,
   defaultAutomationSettings,
@@ -150,16 +150,7 @@ export function WhitelistTab() {
     }
   }
 
-  if (!isTauri()) {
-    return (
-      <Alert>
-        <AlertDescription>
-          Desktop automation requires the Tauri runtime. Web mode renders the form but no data is
-          persisted.
-        </AlertDescription>
-      </Alert>
-    )
-  }
+  if (!isTauri()) return <AutomationUnavailableNotice />
 
   if (loading || !settings) {
     return <Skeleton className="h-72 w-full" />

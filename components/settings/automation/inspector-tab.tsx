@@ -38,6 +38,7 @@ import type {
   UiTreeNode,
 } from "@/lib/automation/types"
 import { isTauri } from "@/lib/tauri"
+import { AutomationUnavailableNotice } from "./automation-unavailable-notice"
 
 const INSPECTOR_SESSION_ID = "settings:automation-inspector"
 const INSPECTOR_CONTEXT: CallContext = {
@@ -265,13 +266,7 @@ export function InspectorTab() {
     }
   }, [captureState, currentState, pushEvent, selected, t])
 
-  if (!isTauri()) {
-    return (
-      <Alert>
-        <AlertDescription>{t("requiresTauri")}</AlertDescription>
-      </Alert>
-    )
-  }
+  if (!isTauri()) return <AutomationUnavailableNotice />
 
   if (!caps) return <Skeleton className="h-72 w-full" />
 

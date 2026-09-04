@@ -1,8 +1,17 @@
 "use client"
 
 /**
- * Settings → Automation. Five-tab shell (`?autoTab=`) — Overview, Permissions,
- * Whitelist, Audit, Inspector.
+ * Settings → Automation. Six-tab shell (`?autoTab=`): Overview, Permissions,
+ * Whitelist, Audit, Inspector, Sandboxes.
+ *
+ * The tab strip is `PanelTabStrip`, not a bare `TabsList`. Six triggers with
+ * the base `whitespace-nowrap` overflow a narrow viewport, and this section is
+ * also mounted outside the settings shell (`app/me/computer-use/page.tsx`)
+ * where the `[data-settings-panel]` rules that would have contained them do
+ * not apply.
+ *
+ * Tab selection is written to the CURRENT route, not to `/settings`. Writing
+ * `/settings` navigated the mobile page away the moment a tab was tapped.
  *
  * The data plane:
  *   - Capabilities + settings load from the Rust state on mount.
@@ -16,11 +25,20 @@
  */
 
 import { useCallback, useEffect, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ActivityIcon, AlertOctagonIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  AlertOctagonIcon,
+  BoxIcon,
+  ListChecksIcon,
+  ScrollTextIcon,
+  SearchCheckIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { TabsContent } from "@/components/ui/tabs"
+import { PanelTabStrip, type PanelTab } from "@/components/common/panel-tab-strip"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -48,6 +66,7 @@ import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
 import { BehaviorCard } from "./behavior-card"
 import { PlatformCapabilitiesCard } from "./platform-capabilities-card"
+import { AutomationUnavailableNotice } from "./automation-unavailable-notice"
 
 interface BackendInitFailure {
   platform: string
@@ -72,7 +91,20 @@ const METRICS_REFRESH_MS = 60_000
 
 type TabId = "overview" | "permissions" | "whitelist" | "audit" | "inspector" | "sandboxes"
 
-const TAB_IDS: TabId[] = ["overview", "permissions", "whitelist", "audit", "inspector", "sandboxes"]
+/**
+ * Tab order and iconography in one table, so the strip, the id guard and the
+ * content panels cannot drift apart.
+ */
+const TAB_DEFS: { id: TabId; icon: PanelTab<TabId>["icon"] }[] = [
+  { id: "overview", icon: ActivityIcon },
+  { id: "permissions", icon: ShieldCheckIcon },
+  { id: "whitelist", icon: ListChecksIcon },
+  { id: "audit", icon: ScrollTextIcon },
+  { id: "inspector", icon: SearchCheckIcon },
+  { id: "sandboxes", icon: BoxIcon },
+]
+
+const TAB_IDS: TabId[] = TAB_DEFS.map((tab) => tab.id)
 
 function isTabId(v: string | null): v is TabId {
   return v !== null && (TAB_IDS as readonly string[]).includes(v)
@@ -80,6 +112,7 @@ function isTabId(v: string | null): v is TabId {
 
 export function AutomationSection() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const requested = searchParams.get("autoTab")
   const activeTab: TabId = isTabId(requested) ? requested : "overview"
@@ -89,8 +122,16 @@ export function AutomationSection() {
   const setTab = (tab: TabId) => {
     const next = new URLSearchParams(searchParams.toString())
     next.set("autoTab", tab)
-    router.replace(`/settings?${next.toString()}`, { scroll: false })
+    // Stay on whichever route mounted this section. Hard-coding `/settings`
+    // navigated `/me/computer-use` away on the first tap.
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false })
   }
+
+  const tabs: PanelTab<TabId>[] = TAB_DEFS.map((tab) => ({
+    id: tab.id,
+    label: tTabs(tab.id),
+    icon: tab.icon,
+  }))
 
   return (
     <div className="space-y-6">
@@ -99,16 +140,7 @@ export function AutomationSection() {
         <p className="text-sm text-muted-foreground">{tHeader("description")}</p>
       </header>
 
-      <Tabs value={activeTab} onValueChange={(t) => setTab(t as TabId)}>
-        <TabsList>
-          <TabsTrigger value="overview">{tTabs("overview")}</TabsTrigger>
-          <TabsTrigger value="permissions">{tTabs("permissions")}</TabsTrigger>
-          <TabsTrigger value="whitelist">{tTabs("whitelist")}</TabsTrigger>
-          <TabsTrigger value="audit">{tTabs("audit")}</TabsTrigger>
-          <TabsTrigger value="inspector">{tTabs("inspector")}</TabsTrigger>
-          <TabsTrigger value="sandboxes">{tTabs("sandboxes")}</TabsTrigger>
-        </TabsList>
-
+      <PanelTabStrip tabs={tabs} value={activeTab} onValueChange={setTab}>
         <TabsContent value="overview" className="pt-4">
           <OverviewTab />
         </TabsContent>
@@ -127,7 +159,7 @@ export function AutomationSection() {
         <TabsContent value="sandboxes" className="pt-4">
           <SandboxConnectionsTab />
         </TabsContent>
-      </Tabs>
+      </PanelTabStrip>
     </div>
   )
 }
@@ -223,18 +255,7 @@ function OverviewTab() {
     }
   }
 
-  if (!isTauri()) {
-    return (
-      <Alert>
-        <ShieldAlertIcon className="size-4" />
-        <AlertDescription>
-          Desktop automation requires the Tauri desktop runtime. Web mode shows the settings shell
-          but the actual engine only runs under <code>pnpm tauri dev</code> /{" "}
-          <code>pnpm tauri build</code>.
-        </AlertDescription>
-      </Alert>
-    )
-  }
+  if (!isTauri()) return <AutomationUnavailableNotice />
 
   if (loading || !settings) {
     return (
