@@ -22,6 +22,7 @@ import { rpcCommand as defaultRpc } from "./rpc-command"
 import { workerCommand as defaultWorker } from "./worker-command"
 import { securityCommand as defaultSecurity } from "./security-command"
 import { providerCommand as defaultProvider } from "./provider-command"
+import { updateCommand as defaultUpdate } from "./update-command"
 import {
   attachCommand as defaultAttach,
   detachCommand as defaultDetach,
@@ -55,6 +56,8 @@ Usage:
   cognia-agent detach                       leave attached mode; keep standalone JSONL
   cognia-agent sync status                  show attached HostState status
   cognia-agent resume <id> ["<prompt>"]     continue a desktop hand-back (prompts on TTY)
+  cognia-agent update [check] [--yes] [--json]         upgrade the CLI through its
+                                                       own package manager
   cognia-agent auth <login|status|logout> [--provider p] [--api-key k]
   cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
@@ -148,6 +151,7 @@ const KNOWN_COMMANDS = new Set([
   "backend",
   "security",
   "provider",
+  "update",
 ])
 
 export interface MainDeps {
@@ -172,6 +176,7 @@ export interface MainDeps {
   backend?: typeof defaultBackend
   security?: typeof defaultSecurity
   provider?: typeof defaultProvider
+  update?: typeof defaultUpdate
   out?: OutputSink
 }
 
@@ -257,6 +262,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.syncStatus ?? defaultSyncStatus)(args, { out })
     case "security":
       return (deps.security ?? defaultSecurity)(args, { out })
+    case "update":
+      return (deps.update ?? defaultUpdate)(args, { out })
     case "provider":
       return (deps.provider ?? defaultProvider)(args, { out })
     default:

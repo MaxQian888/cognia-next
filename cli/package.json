@@ -1,8 +1,22 @@
 {
   "name": "@cognia/agent-cli",
   "version": "0.1.0",
-  "private": true,
   "description": "Standalone, desktop-independent Cognia coding agent for the terminal. Reuses the desktop agent loop via the sidecar.",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MaxQian888/cognia-next.git",
+    "directory": "cli"
+  },
+  "keywords": [
+    "cognia",
+    "agent",
+    "cli",
+    "coding-agent"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "cognia-agent": "./dist/cognia-agent.mjs"
