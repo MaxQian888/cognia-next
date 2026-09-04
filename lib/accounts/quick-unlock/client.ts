@@ -21,9 +21,8 @@
  * the enrollment record.
  */
 
-import { invoke } from "@tauri-apps/api/core"
-
 import { isTauri } from "@/lib/platform/detect"
+import { transport } from "@/lib/tauri/transport-instance"
 import type { PasswordVerifierRecord } from "@/lib/accounts/account-types"
 import {
   enrollBrowserVaultQuickUnlock,
@@ -42,8 +41,6 @@ import {
 export const QUICK_UNLOCK_CREATE_COMMAND = "account_quick_unlock_create_verifier"
 export const QUICK_UNLOCK_VERIFY_COMMAND = "account_quick_unlock_verify"
 export const QUICK_UNLOCK_CLEAR_COMMAND = "account_quick_unlock_clear"
-
-type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 
 /** Why an unlock attempt did not open the account. */
 export type QuickUnlockFailure =
@@ -76,10 +73,11 @@ export async function enrollQuickUnlock(args: EnrollArgs): Promise<QuickUnlockEn
   const now = args.now ?? Date.now()
 
   if (isTauri()) {
-    const verifier = await (invoke as InvokeFn)<Record<string, unknown>>(
-      QUICK_UNLOCK_CREATE_COMMAND,
-      { accountId: args.accountId, method: args.method, secret: args.canonicalSecret }
-    )
+    const verifier = await transport.call<Record<string, unknown>>(QUICK_UNLOCK_CREATE_COMMAND, {
+      accountId: args.accountId,
+      method: args.method,
+      secret: args.canonicalSecret,
+    })
     return { method: args.method, verifier, createdAt: now, failedAttempts: 0 }
   }
 
@@ -130,7 +128,7 @@ export async function verifyQuickUnlock(args: VerifyArgs): Promise<QuickUnlockOu
 
   try {
     const matched = isTauri()
-      ? await (invoke as InvokeFn)<boolean>(QUICK_UNLOCK_VERIFY_COMMAND, {
+      ? await transport.call<boolean>(QUICK_UNLOCK_VERIFY_COMMAND, {
           accountId: args.accountId,
           verifier: enrollment.verifier,
           passwordVerifier: args.passwordVerifier,
@@ -195,7 +193,7 @@ export async function removeQuickUnlock(
  */
 export async function clearQuickUnlockDeviceMaterial(accountId: string): Promise<void> {
   if (isTauri()) {
-    await (invoke as InvokeFn)<void>(QUICK_UNLOCK_CLEAR_COMMAND, { accountId })
+    await transport.call<void>(QUICK_UNLOCK_CLEAR_COMMAND, { accountId })
     return
   }
   const { clearDeviceKey } = await import("./device-pepper")

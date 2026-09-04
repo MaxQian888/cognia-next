@@ -5,13 +5,22 @@
 
 const invokeMock = jest.fn()
 const emitToMock = jest.fn()
-const listenMock = jest.fn(async () => () => {})
+const subscribeMock = jest.fn(() => () => {})
 let tauri = false
 
-jest.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invokeMock(...a) }))
+// Commands and event subscriptions go through the transport seam, so a
+// non-Tauri host gets a rejected promise rather than a throw on a missing
+// global (host-parity class A). `emitTo` has no seam equivalent — it addresses
+// a sibling WINDOW, not a runtime — so the module reaches it by dynamic import,
+// which this mock still intercepts.
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: {
+    call: (...a: unknown[]) => invokeMock(...a),
+    subscribe: (...a: unknown[]) => subscribeMock(...(a as [])),
+  },
+}))
 jest.mock("@tauri-apps/api/event", () => ({
   emitTo: (...a: unknown[]) => emitToMock(...a),
-  listen: (...a: unknown[]) => listenMock(...(a as [])),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: () => tauri }))
 
@@ -41,7 +50,7 @@ import { DEFAULT_USAGE_DOCK_PREFERENCES } from "./types"
 beforeEach(() => {
   invokeMock.mockReset().mockResolvedValue(undefined)
   emitToMock.mockReset().mockResolvedValue(undefined)
-  listenMock.mockClear()
+  subscribeMock.mockClear()
   tauri = true
 })
 
@@ -85,7 +94,7 @@ describe("outside Tauri", () => {
     const offHover = await onUsageDockHover(() => {})
     expect(() => off()).not.toThrow()
     expect(() => offHover()).not.toThrow()
-    expect(listenMock).not.toHaveBeenCalled()
+    expect(subscribeMock).not.toHaveBeenCalled()
   })
 })
 

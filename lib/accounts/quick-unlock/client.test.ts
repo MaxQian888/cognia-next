@@ -7,8 +7,11 @@ let tauri = false
 jest.mock("@/lib/platform/detect", () => ({ isTauri: () => tauri }))
 
 const invoke = jest.fn()
-jest.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => invoke(...args),
+// The client reaches Rust through the transport seam, not `@tauri-apps/api`
+// directly, so that a non-Tauri host gets a rejected promise instead of a
+// throw on a missing global (ADR-0059, host-parity class A).
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: { call: (...args: unknown[]) => invoke(...args) },
 }))
 
 const enrollBrowserVaultQuickUnlock = jest.fn(async () => ({ createdAt: 5 }))

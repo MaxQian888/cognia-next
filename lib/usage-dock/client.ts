@@ -7,11 +7,10 @@
 // exist there. The window itself is opened from the main window and driven
 // from inside the dock window, so both sides live here.
 
-import { emitTo, listen } from "@tauri-apps/api/event"
-import { invoke } from "@tauri-apps/api/core"
 import { loggers } from "@cognia/logging"
 
 import { isTauri } from "@/lib/tauri"
+import { transport } from "@/lib/tauri/transport-instance"
 
 import type {
   DockEdge,
@@ -38,11 +37,27 @@ export const USAGE_DOCK_OPEN_FULL_EVENT = "usage-dock://open-full"
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!isTauri()) return null
   try {
-    return await invoke<T>(command, args)
+    return await transport.call<T>(command, args)
   } catch (error) {
     loggers.tray?.warn?.(`${command} failed`, { error: String(error) })
     return null
   }
+}
+
+/**
+ * Deliver an event to another window, by label.
+ *
+ * `Transport` has `call` and `subscribe` and deliberately no emit: every other
+ * caller is talking to a runtime, and this is talking to a sibling WINDOW.
+ * There is no host-neutral meaning for "send this to the window labelled
+ * usage-dock" on a host that has one window, so the import is dynamic and sits
+ * behind the `isTauri()` guard every caller already has, which also keeps
+ * `@tauri-apps/api/event` out of the browser and mobile bundles.
+ * `lib/pet/reveal.ts` reaches the window API the same way, for the same reason.
+ */
+async function emitToWindow(label: string, event: string, payload: unknown): Promise<void> {
+  const { emitTo } = await import("@tauri-apps/api/event")
+  await emitTo(label, event, payload)
 }
 
 /* ── Main-window side ──────────────────────────────────────────────────── */
@@ -99,7 +114,7 @@ export async function usageDockCapabilities(): Promise<UsageDockCapabilities> {
 export async function sendUsageDockState(state: UsageDockState): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await emitTo(USAGE_DOCK_WINDOW_LABEL, USAGE_DOCK_STATE_EVENT, state)
+    await emitToWindow(USAGE_DOCK_WINDOW_LABEL, USAGE_DOCK_STATE_EVENT, state)
     return true
   } catch {
     // The dock is usually closed. Pushing to a window that is not there is the
@@ -111,13 +126,13 @@ export async function sendUsageDockState(state: UsageDockState): Promise<boolean
 /** Main-window side: the dock asking to be seeded. */
 export async function onUsageDockStateRequest(handler: () => void): Promise<() => void> {
   if (!isTauri()) return () => {}
-  return listen(USAGE_DOCK_STATE_REQUEST_EVENT, () => handler())
+  return transport.subscribe(USAGE_DOCK_STATE_REQUEST_EVENT, () => handler())
 }
 
 /** Main-window side: the dock asking to open the full usage view. */
 export async function onUsageDockOpenFull(handler: () => void): Promise<() => void> {
   if (!isTauri()) return () => {}
-  return listen(USAGE_DOCK_OPEN_FULL_EVENT, () => handler())
+  return transport.subscribe(USAGE_DOCK_OPEN_FULL_EVENT, () => handler())
 }
 
 /* ── Dock-window side ──────────────────────────────────────────────────── */
@@ -145,7 +160,7 @@ export async function snapUsageDock(x: number, y: number): Promise<DockEdge | nu
 export async function requestUsageDockState(): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await emitTo(MAIN_WINDOW_LABEL, USAGE_DOCK_STATE_REQUEST_EVENT, null)
+    await emitToWindow(MAIN_WINDOW_LABEL, USAGE_DOCK_STATE_REQUEST_EVENT, null)
     return true
   } catch (error) {
     loggers.tray?.warn?.("requestUsageDockState failed", { error: String(error) })
@@ -156,7 +171,7 @@ export async function requestUsageDockState(): Promise<boolean> {
 export async function requestUsageDockOpenFull(): Promise<boolean> {
   if (!isTauri()) return false
   try {
-    await emitTo(MAIN_WINDOW_LABEL, USAGE_DOCK_OPEN_FULL_EVENT, null)
+    await emitToWindow(MAIN_WINDOW_LABEL, USAGE_DOCK_OPEN_FULL_EVENT, null)
     return true
   } catch {
     return false
@@ -167,13 +182,13 @@ export async function onUsageDockState(
   handler: (state: UsageDockState) => void
 ): Promise<() => void> {
   if (!isTauri()) return () => {}
-  return listen<UsageDockState>(USAGE_DOCK_STATE_EVENT, (event) => handler(event.payload))
+  return transport.subscribe<UsageDockState>(USAGE_DOCK_STATE_EVENT, handler)
 }
 
 export async function onUsageDockHover(handler: (hovering: boolean) => void): Promise<() => void> {
   if (!isTauri()) return () => {}
-  return listen<{ hovering: boolean }>(USAGE_DOCK_HOVER_EVENT, (event) =>
-    handler(event.payload.hovering)
+  return transport.subscribe<{ hovering: boolean }>(USAGE_DOCK_HOVER_EVENT, (payload) =>
+    handler(payload.hovering)
   )
 }
 
@@ -181,5 +196,5 @@ export async function onUsageDockGeometry(
   handler: (geometry: UsageDockGeometry) => void
 ): Promise<() => void> {
   if (!isTauri()) return () => {}
-  return listen<UsageDockGeometry>(USAGE_DOCK_GEOMETRY_EVENT, (event) => handler(event.payload))
+  return transport.subscribe<UsageDockGeometry>(USAGE_DOCK_GEOMETRY_EVENT, handler)
 }

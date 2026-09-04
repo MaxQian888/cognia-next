@@ -8,9 +8,6 @@
     "app/page.tsx": {
       "classification": "ui-assumption"
     },
-    "components/agent": {
-      "classification": "ui-assumption"
-    },
     "components/app-shell-mobile.tsx": {
       "classification": "ui-assumption"
     },
@@ -440,6 +437,10 @@
     },
     "lib/twin": {
       "classification": "unmigrated"
+    },
+    "lib/usage-dock": {
+      "classification": "physically-impossible",
+      "note": "OS overlay window (ADR-0165 Phase 2). The Capacity Dock is a second Tauri window, label \"usage-dock\", opened from the main window and driven from inside itself. The nine guards in lib/usage-dock/client.ts are what let the browser and mobile shells import the module without a guard at every call site; a host with no second window to place has nothing to migrate here."
     },
     "lib/vector": {
       "classification": "unmigrated",
