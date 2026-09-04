@@ -16,7 +16,8 @@ import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
-import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { isPetAvailable } from "@/lib/pet/access/availability"
 import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
 import {
   isPetWindowOpen,
@@ -38,24 +39,20 @@ export function PetMount() {
 
   // Resolve the window role once: the shared root layout mounts PetMount in
   // every webview, but the controller (event bus + XP awards) and the widget
-  // must live only in the main window. Both secondary pet windows — the
-  // transparent overlay (`/pet-overlay`, label "pet") and the click popup
-  // (`/pet-popup`, label "pet-popup") — render presentation only, so here they
-  // must contribute nothing; otherwise XP double-awards.
+  // must live only in the main window. The whole decision (window role, host,
+  // and the user's setting) belongs to `resolvePetAvailability`, so the command
+  // registry, the agent tools, and the access gate answer it exactly the way
+  // this mount does. Getting it wrong in a secondary window double-awards XP.
   const role = useMemo(() => getPetWindowRole(), [])
-  const secondary = isSecondaryOverlayRole(role)
+  const platform = usePlatform()
 
-  // The floating in-app widget is a desktop / web affordance only. On the
-  // Capacitor mobile shell it would dock to a viewport corner with a 96px hit
-  // area that sits on top of page content — most visibly covering bottom-right
-  // action buttons (e.g. the preset editor's Save / Create), which is then
-  // untappable. Exclude the whole subsystem on mobile, mirroring the Perf HUD.
-  const isMobile = usePlatform() === "mobile"
-  const widgetEnabled = enabled && !secondary && !isMobile
-  // The main desktop window — where the global-hotkey → command dispatch lives.
-  // Independent of `enabled`: the toggle-window hotkey must summon the pet even
-  // when the widget is currently off.
-  const isMainDesktopWindow = !secondary && !isMobile && isTauri()
+  const widgetEnabled = isPetAvailable({ enabled, role, platform })
+  // The main desktop window, where the global-hotkey to command dispatch
+  // lives. Structurally allowed here and running under Tauri, but deliberately
+  // independent of `enabled`: a chord the user bound to the toggle-window
+  // command must still summon the pet when the widget is currently off, so
+  // this asks the predicate with the setting held on.
+  const isMainDesktopWindow = isPetAvailable({ enabled: true, role, platform }) && isTauri()
   const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
 
   usePetEventBus(widgetEnabled, pet.twinAwareness)
