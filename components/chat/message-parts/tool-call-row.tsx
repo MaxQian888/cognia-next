@@ -52,7 +52,7 @@ import {
   type ToolResultDescriptor,
 } from "@/lib/chat/tool-result-summary"
 import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
-import { ToolSemanticBadges } from "@/components/ai-elements/tool-semantic-badges"
+import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
 import { cn } from "@/lib/utils"
 
 const ICON_MAP: Record<ToolIconKey, LucideIcon> = {

@@ -46,7 +46,10 @@
     {
       "name": "code-block",
       "status": "adopted",
-      "consumers": ["components/chat/tool-approval-dialog.tsx"]
+      "consumers": [
+        "components/agent/external-agent/tool-approval-dialog.tsx",
+        "components/chat/decisions/tool-decision-content.tsx"
+      ]
     },
     {
       "name": "commit",
@@ -56,7 +59,7 @@
     {
       "name": "confirmation",
       "status": "adopted",
-      "consumers": ["components/chat/tool-approval-dialog.tsx"]
+      "consumers": ["components/chat/decisions/pending-decision-surface.tsx"]
     },
     {
       "name": "connection",
@@ -121,7 +124,7 @@
     {
       "name": "model-selector",
       "status": "adopted",
-      "consumers": ["components/chat/composer/model-picker.tsx"]
+      "consumers": ["components/shared/model-select.tsx"]
     },
     {
       "name": "node",
@@ -153,11 +156,15 @@
       "status": "adopted",
       "consumers": ["components/agent/external-agent/plan.tsx"]
     },
-    { "name": "prompt-input", "status": "adopted", "consumers": ["components/chat/composer.tsx"] },
+    {
+      "name": "prompt-input",
+      "status": "adopted",
+      "consumers": ["components/chat/composer.tsx"]
+    },
     {
       "name": "queue",
       "status": "adopted",
-      "consumers": ["components/chat/composer/command-queue-bar.tsx"]
+      "consumers": ["components/chat/composer/failed-command-chips.tsx"]
     },
     {
       "name": "reasoning",
@@ -182,7 +189,7 @@
     {
       "name": "snippet",
       "status": "adopted",
-      "consumers": ["components/settings/remote-control/tabs/inbound-tab.tsx"]
+      "consumers": ["components/settings/gateway/gateway-keys-card.tsx"]
     },
     {
       "name": "sources",
@@ -202,8 +209,16 @@
         "components/error/error-parsed-view.tsx"
       ]
     },
-    { "name": "suggestion", "status": "adopted", "consumers": ["components/chat/empty-state.tsx"] },
-    { "name": "task", "status": "adopted", "consumers": ["components/chat/todo-list.tsx"] },
+    {
+      "name": "suggestion",
+      "status": "adopted",
+      "consumers": ["components/chat/empty-state.tsx"]
+    },
+    {
+      "name": "task",
+      "status": "adopted",
+      "consumers": ["components/chat/todo-list.tsx"]
+    },
     {
       "name": "terminal",
       "status": "adopted",
@@ -214,7 +229,11 @@
       "status": "adopted",
       "consumers": ["components/chat/session-insights/session-report-view.tsx"]
     },
-    { "name": "tool", "status": "adopted", "consumers": ["components/chat/message-renderer.tsx"] },
+    {
+      "name": "tool",
+      "status": "adopted",
+      "consumers": ["components/chat/message-renderer.tsx"]
+    },
     {
       "name": "toolbar",
       "status": "adopted",

@@ -22,7 +22,7 @@ import { DiffBlock } from "@/components/chat/renderers/diff-block"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { ErrorParsedView } from "@/components/error/error-parsed-view"
 import { inferLanguageFromPath, resolveToolOutputRender } from "@/lib/chat/tool-output-format"
-import { ToolSemanticBadges } from "@/components/ai-elements/tool-semantic-badges"
+import { ToolSemanticBadges } from "@/components/chat/message-parts/tool-semantic-badges"
 
 export type ToolProps = ComponentProps<typeof Collapsible>
 
