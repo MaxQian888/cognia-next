@@ -10,6 +10,7 @@ import { AutoModeInitializer } from "./auto-mode-initializer"
 import { AutomationAuditMirrorInitializer } from "./automation-audit-mirror-initializer"
 import { AutomationPolicyInitializer } from "./automation-policy-initializer"
 import { BackgroundTaskInitializer } from "./background-task-initializer"
+import { BotRuntimeInitializer } from "./bot-runtime-initializer"
 import { CodeAdoptionTrackerInitializer } from "./code-adoption-tracker-initializer"
 import { GoalVerificationInitializer } from "./goal-verification-initializer"
 
@@ -18,6 +19,7 @@ export function WorkflowAutomationBootInitializers() {
   return (
     <>
       <BackgroundTaskInitializer />
+      <BotRuntimeInitializer />
       <GoalVerificationInitializer />
       <AutomationPolicyInitializer />
       <AutomationAuditMirrorInitializer />

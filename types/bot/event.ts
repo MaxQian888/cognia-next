@@ -14,7 +14,15 @@
  */
 
 /** Which producer an event came from. Mirrors `PluginBotEventSource`. */
-export type BotEventSource = "integration" | "workflow" | "connector" | "desktop" | "bot" | "manual"
+export type BotEventSource =
+  | "integration"
+  | "workflow"
+  | "connector"
+  | "desktop"
+  | "bot"
+  | "manual"
+  /** A timed trigger firing: `schedule`, `poll` or `derivedState`. */
+  | "schedule"
 
 /** Who or what caused the event on the source side. */
 export interface BotEventActor {

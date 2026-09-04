@@ -71,6 +71,17 @@ beforeEach(async () => {
   await seedRun()
 }, 15_000)
 
+async function waitForInterrupt(interruptId: string) {
+  // The wait loop creates the row asynchronously. Polling for it is what makes
+  // this test deterministic instead of racing a fixed number of ticks.
+  for (let i = 0; i < 200; i++) {
+    const row = await getDb().executionRunInterrupts.get(interruptId)
+    if (row) return row
+    await new Promise((r) => setTimeout(r, 0))
+  }
+  throw new Error(`interrupt ${interruptId} was never created`)
+}
+
 describe("botApprovalInterruptId", () => {
   it("is derived, so a re-entry finds the same pending decision", () => {
     expect(botApprovalInterruptId("run_1", "send")).toBe(botApprovalInterruptId("run_1", "send"))
@@ -150,14 +161,11 @@ describe("step.waitForApproval", () => {
   it("parks on a pending interrupt and resolves when a person answers", async () => {
     const pending = api().waitForApproval("send", { title: "Post the digest?" })
 
-    // Let the loop poll once, then answer.
-    await Promise.resolve()
-    await new Promise((r) => setTimeout(r, 0))
     const interruptId = botApprovalInterruptId(RUN_ID, "send")
-    const row = await getDb().executionRunInterrupts.get(interruptId)
-    expect(row?.type).toBe("bot_approval")
+    const row = await waitForInterrupt(interruptId)
+    expect(row.type).toBe("bot_approval")
     await getDb().executionRunInterrupts.put({
-      ...row!,
+      ...row,
       status: "approved",
       resolvedAt: NOW + 10,
       resolvedBy: { displayName: "Ada" },
@@ -192,24 +200,20 @@ describe("step.waitForApproval", () => {
     const first = api(controller.signal)
       .waitForApproval("send", { title: "Post?", timeoutMs: 60_000 })
       .catch(() => undefined)
-    await Promise.resolve()
+    const created = await waitForInterrupt(botApprovalInterruptId(RUN_ID, "send"))
     controller.abort()
     await first
 
-    const created = await getDb().executionRunInterrupts.get(botApprovalInterruptId(RUN_ID, "send"))
-    const originalExpiry = created?.expiresAt
+    const originalExpiry = created.expiresAt
 
     clock = NOW + 30_000
     const resumed = api()
       .waitForApproval("send", { title: "Post?", timeoutMs: 60_000 })
       .catch(() => undefined)
-    await Promise.resolve()
-    await new Promise((r) => setTimeout(r, 0))
-
-    const after = await getDb().executionRunInterrupts.get(botApprovalInterruptId(RUN_ID, "send"))
+    const after = await waitForInterrupt(botApprovalInterruptId(RUN_ID, "send"))
     // A wait that silently extends itself on every restart never ends.
-    expect(after?.expiresAt).toBe(originalExpiry)
-    await getDb().executionRunInterrupts.put({ ...after!, status: "denied", resolvedAt: clock })
+    expect(after.expiresAt).toBe(originalExpiry)
+    await getDb().executionRunInterrupts.put({ ...after, status: "denied", resolvedAt: clock })
     await resumed
   })
 })

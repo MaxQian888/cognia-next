@@ -31,6 +31,7 @@ import {
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
+import { writeBotTriggerState } from "@/lib/db/bot-installations"
 import { projectBotComposition } from "@/lib/bot/composition/project-bot-composition"
 import { defaultsFromConfigSchema, resolveBotConfig } from "@/lib/bot/config/resolve-effective"
 import type { InstalledBot } from "@/lib/bot/installed-bot"
@@ -89,6 +90,33 @@ async function settleRun(runId: string, status: ExecutionRunStatus, ts: number):
   const run = await db.executionRuns.get(runId)
   if (!run) return
   await db.executionRuns.put({ ...run, status, updatedAt: ts, endedAt: ts })
+}
+
+/**
+ * Carry a timed trigger's state forward from the handler's result.
+ *
+ * The host cannot compute a poll cursor or evaluate a derived-state predicate,
+ * because neither belongs to it. What it CAN do is remember the last answer
+ * across evaluations, which is the whole difference between a Bot that reports
+ * a change and one that notifies on every tick.
+ */
+async function persistTimedTriggerState(
+  resolved: InstalledBot,
+  triggerId: string,
+  result: BotHandlerResultV1 | undefined,
+  ts: number
+): Promise<void> {
+  const trigger = resolved.definition.triggers.find((candidate) => candidate.id === triggerId)
+  if (!trigger || (trigger.kind !== "poll" && trigger.kind !== "derivedState")) return
+
+  const output = result?.output
+  const patch: Parameters<typeof writeBotTriggerState>[2] = { lastFiredAt: ts }
+  if (output && typeof output === "object") {
+    const shaped = output as { cursor?: unknown; edgeValue?: unknown }
+    if (typeof shaped.cursor === "string") patch.cursor = shaped.cursor
+    if (typeof shaped.edgeValue === "boolean") patch.lastEdgeValue = shaped.edgeValue
+  }
+  await writeBotTriggerState(resolved.installation.id, triggerId, patch, ts).catch(() => undefined)
 }
 
 export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRunOutcome> {
@@ -203,6 +231,7 @@ export async function runBotDelivery(input: RunBotDeliveryInput): Promise<BotRun
   try {
     const result = (await executor(ctx)) ?? undefined
     const endedAt = now()
+    await persistTimedTriggerState(resolved, delivery.triggerId, result, endedAt)
     await settleRun(runId, "completed", endedAt)
     await runEventJournal
       .append(

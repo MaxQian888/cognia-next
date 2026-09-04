@@ -99,6 +99,9 @@ describe("Integration event publication", () => {
 
     await expect(publishIntegrationEvent("example-delivery", event)).resolves.toEqual({
       inserted: true,
+      // No Bot is installed in this fixture. Zero is the honest count, not a
+      // sign the Bot plane was skipped.
+      botDeliveries: 0,
       workflowDispatches: 1,
       inboxProjections: 1,
     })
@@ -106,6 +109,7 @@ describe("Integration event publication", () => {
       inserted: false,
       workflowDispatches: 0,
       inboxProjections: 0,
+      botDeliveries: 0,
     })
 
     expect(findMatchingWorkflows).toHaveBeenCalledWith("trigger.integration.event", {

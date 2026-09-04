@@ -245,6 +245,59 @@ describe("runBotDelivery", () => {
     expect(events.filter((e) => e.type === "run.started")).toHaveLength(1)
   })
 
+  it("carries a poll cursor forward from the handler's result", async () => {
+    const { delivery, resolved } = await seed()
+    resolved.definition.triggers = [{ id: "opened", kind: "poll", everyMs: 60_000 }]
+    const { readBotTriggerState } = await import("@/lib/db/bot-installations")
+
+    await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: async () => ({ output: { cursor: "page-3" } }) },
+    })
+
+    // The host cannot compute a cursor, but remembering the last one is the
+    // difference between polling forward and polling the same page forever.
+    expect(await readBotTriggerState("boti_1", "opened")).toMatchObject({
+      cursor: "page-3",
+      lastFiredAt: NOW,
+    })
+  })
+
+  it("carries a derived-state edge forward, so the handler can tell a change", async () => {
+    const { delivery, resolved } = await seed()
+    resolved.definition.triggers = [
+      { id: "opened", kind: "derivedState", everyMs: 60_000, state: "stale" },
+    ]
+    const { readBotTriggerState } = await import("@/lib/db/bot-installations")
+
+    await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: async () => ({ output: { edgeValue: true } }) },
+    })
+
+    expect(await readBotTriggerState("boti_1", "opened")).toMatchObject({ lastEdgeValue: true })
+  })
+
+  it("writes no trigger state for a trigger that is not timed", async () => {
+    const { delivery, resolved } = await seed()
+    const { readBotTriggerState } = await import("@/lib/db/bot-installations")
+
+    await runBotDelivery({
+      delivery,
+      resolved,
+      now,
+      executors: { handler: async () => ({ output: { cursor: "page-3" } }) },
+    })
+
+    // A manual or event trigger has no cursor to carry, and inventing one
+    // would make an unrelated output look like scheduler state.
+    expect(await readBotTriggerState("boti_1", "opened")).toBeUndefined()
+  })
+
   it("cancelLiveBotRun reports whether the run was running here", async () => {
     expect(cancelLiveBotRun("run_bot_nope")).toBe(false)
   })

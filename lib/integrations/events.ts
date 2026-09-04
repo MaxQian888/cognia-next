@@ -22,6 +22,13 @@ export interface PublishIntegrationEventResult {
   inserted: boolean
   workflowDispatches: number
   inboxProjections: number
+  /**
+   * Bot deliveries enqueued for this event. Zero when no Bot matched, and also
+   * zero when the Bot plane could not be reached at all, which is deliberate:
+   * routing a Bot is best-effort and must never fail the publish that the
+   * workflow triggers and inbox projections depend on.
+   */
+  botDeliveries: number
 }
 
 function subscriptionMatches(
@@ -124,7 +131,7 @@ export async function publishIntegrationEvent(
   }
   const inserted = await insertIntegrationEvent(event)
   if (!inserted.inserted) {
-    return { inserted: false, workflowDispatches: 0, inboxProjections: 0 }
+    return { inserted: false, workflowDispatches: 0, inboxProjections: 0, botDeliveries: 0 }
   }
 
   await reconcileGithubLifecycle(event)
@@ -158,6 +165,18 @@ export async function publishIntegrationEvent(
     })
   )
   const workflowDispatches = matches.length
+
+  // Bots are a third consumer alongside workflow triggers and inbox
+  // projections, and the weakest of the three: best-effort, because a Bot that
+  // cannot be routed must not take the other two down with it.
+  let botDeliveries = 0
+  try {
+    const { dispatchIntegrationEventToBots } = await import("@/lib/bot/sources/integration-event")
+    botDeliveries = (await dispatchIntegrationEventToBots(event)).enqueued.length
+  } catch {
+    botDeliveries = 0
+  }
+
   let inboxProjections = 0
   for (const subscription of subscriptions) {
     if (subscription.inboxProjectionId) {
@@ -181,7 +200,8 @@ export async function publishIntegrationEvent(
       deliveryId: event.deliveryId,
       workflowDispatches,
       inboxProjections,
+      botDeliveries,
     },
   })
-  return { inserted: true, workflowDispatches, inboxProjections }
+  return { inserted: true, workflowDispatches, inboxProjections, botDeliveries }
 }

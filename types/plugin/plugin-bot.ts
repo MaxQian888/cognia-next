@@ -114,11 +114,17 @@ export interface PluginBotPollTrigger extends PluginBotTriggerBase {
 }
 
 /**
- * The Bot watches a predicate over state it can already read, and fires when
+ * The Bot watches a predicate over state it can already read, and acts when
  * the answer CHANGES. An SLA breach and a stale pull request are this shape.
  *
- * `edge` defaults to `rising`. Firing on every evaluation is what turns a
- * derived state into a notification loop, so a level trigger is not offered.
+ * The host cannot evaluate a predicate it does not own, so the division is
+ * explicit: the host CARRIES the last answer across evaluations and hands it
+ * to the handler in the event payload, and the handler reports the new one in
+ * its result. That is what lets the handler tell a change from a state instead
+ * of notifying on every tick, which is how a derived state becomes a
+ * notification loop.
+ *
+ * `edge` defaults to `rising`. A level trigger is deliberately not offered.
  */
 export interface PluginBotDerivedStateTrigger extends PluginBotTriggerBase {
   kind: "derivedState"

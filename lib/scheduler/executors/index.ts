@@ -65,6 +65,7 @@ import { executeRadarReportTask } from "./radar-report-executor"
 import { executeAgentTeamTask } from "./team-executor"
 import { executeGoalTask } from "./goal-executor"
 import { executePlanTask } from "./plan-executor"
+import { executeBotTask } from "./bot-executor"
 import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
 import { executeScript } from "../script-executor"
 import { sendPrompt, onClaudeMessage, interruptSession } from "@/lib/claude/ipc"
@@ -998,6 +999,7 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("agent-team", executeAgentTeamTask)
   registerTaskExecutor("goal", executeGoalTask)
   registerTaskExecutor("plan", executePlanTask)
+  registerTaskExecutor("bot", executeBotTask)
   registerTaskExecutor("test", executeTestTask)
   registerTaskExecutor("workflow", executeWorkflowTask)
   registerTaskExecutor("im-push", executeImPushTask)

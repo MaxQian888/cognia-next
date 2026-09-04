@@ -50,6 +50,10 @@ export type ScheduledTaskType =
   | "agent-team"
   | "goal"
   | "plan"
+  // Fires one installed Bot's timed trigger (`schedule`, `poll` or
+  // `derivedState`). Registered in `lib/scheduler/executors/index.ts`; see
+  // `lib/scheduler/executors/bot-executor.ts`.
+  | "bot"
   // Twin subsystem registers `"twin"` via `registerTaskExecutor` in
   // `lib/scheduler/executors/twin-executor.ts`. Surfaced here so cron-
   // driven Twin ingest/distill rows are typed properly across the codebase.

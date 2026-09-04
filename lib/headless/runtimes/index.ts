@@ -30,6 +30,9 @@
  *   `/ws/events`, including webhook, polling, reverse/forward WS, gateway,
  *   long-connection, and IMAP/SMTP transports (T-A5).
  *
+ * - `bot-delivery-runner` — drains the Bot delivery queue. The brain is
+ *   awake when nobody is at a desktop, and integration ingress only exists
+ *   there and here.
  * - `backup-scheduler` — the shared encrypted local/WebDAV scheduler with an
  *   injected host filesystem and the server secret-store auto-key (T-A6).
  * - `plugin-runtime` — boots the canonical Node PluginManager and serially
@@ -141,5 +144,6 @@ import "./issue-tracker"
 import "./collab-refresh"
 import "./plan-notification"
 import "./sftp-transfer-pump"
+import "./bots"
 
 export {}
