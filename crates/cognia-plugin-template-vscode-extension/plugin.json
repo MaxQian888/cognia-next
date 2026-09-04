@@ -2,7 +2,7 @@
   "id": "cognia-plugin-template-vscode-extension",
   "name": "Cognia Plugin Template VS Code Extension",
   "version": "0.1.0",
-  "description": "VS Code-extension plugin template — runs a CommonJS extension entry in the Cognia sidecar. Replace this manifest with your own plugin's metadata.",
+  "description": "VS Code-extension plugin template — a command, a configuration read and a completion provider, all running in the Cognia sidecar. Replace this manifest with your own plugin's metadata.",
   "type": "vscode-extension",
   "capabilities": [],
   "vscodeMain": "extension/out/extension.js",

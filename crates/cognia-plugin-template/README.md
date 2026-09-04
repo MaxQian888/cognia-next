@@ -1,7 +1,12 @@
 # Cognia Plugin Template
 
 Minimal starter for a `type: "wasm"` cognia plugin compiled to a
-WebAssembly component against the cognia v0.1 WIT contract.
+WebAssembly component against the cognia v0.2 WIT contract.
+
+The sample implements all four guest exports, declares one agent tool and one
+workflow node so neither export is dead weight, and reads an optional
+per-plugin secret on activation to show how a denied or unavailable capability
+is meant to be handled.
 
 ## Prerequisites
 
@@ -32,7 +37,7 @@ The artifact lands at
 | File            | Purpose                                                                                                                      |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `Cargo.toml`    | Crate manifest. `[package.metadata.component]` points cargo-component at `wit/world.wit` so the bindings are auto-generated. |
-| `wit/world.wit` | A copy of the cognia v0.1 WIT contract. Do not edit.                                                                         |
+| `wit/world.wit` | A copy of the cognia v0.2 WIT contract. Do not edit.                                                                         |
 | `src/lib.rs`    | Your plugin code. Implement `Guest` and re-export.                                                                           |
 | `plugin.json`   | Cognia manifest — install metadata, capabilities, declared permissions.                                                      |
 
@@ -45,6 +50,12 @@ The artifact lands at
   `plugin.json` and dispatch in `tool_execute` by the `name` argument.
 - **Register a workflow node.** Declare it under `workflows.nodes[]`
   and dispatch in `workflow_node_execute` by the `kind` argument.
+- **Handle host errors by code.** Every `result<..., string>` carries
+  `"<CODE>: <message>"` with a fixed set of codes (`CAPABILITY_DENIED`,
+  `HOST_UNAVAILABLE`, `TIMEOUT`, `INVALID_REQUEST`, `PAYLOAD_TOO_LARGE`,
+  `CANCELLED`, `PROVIDER_ERROR`, `WORKFLOW_REJECTED`). The codes are stable for
+  the life of the 0.2 contract and the text is not, so branch on the code. See
+  `split_host_error` in `src/lib.rs`.
 - **Sign the bundle.** Generate a keypair with
   `cognia plugin keygen` (TODO M3.1), embed the public key in
   `author.publicKey`, then `cognia plugin sign target/.../bundle.zip`

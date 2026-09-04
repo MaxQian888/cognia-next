@@ -16,6 +16,16 @@
         "command": "cogniaPluginTemplate.hello",
         "title": "Cognia Template: Hello"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Cognia Plugin Template",
+      "properties": {
+        "cogniaPluginTemplate.greeting": {
+          "type": "string",
+          "default": "Hello",
+          "description": "Word the template command opens with."
+        }
+      }
+    }
   }
 }

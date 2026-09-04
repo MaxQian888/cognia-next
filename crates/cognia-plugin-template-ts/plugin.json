@@ -2,9 +2,16 @@
   "id": "cognia-plugin-template-ts",
   "name": "Cognia Plugin Template TS",
   "version": "0.1.0",
-  "description": "Frontend TypeScript plugin template — registers one tool and one slash command. Replace this manifest with your own plugin's metadata.",
+  "description": "Frontend TypeScript plugin template — a tool, a slash command, a quick action, a UI slot, a workflow node and trigger, and its own settings. Replace this manifest with your own plugin's metadata.",
   "type": "frontend",
-  "capabilities": ["tools", "commands"],
+  "capabilities": [
+    "tools",
+    "commands",
+    "quick-action",
+    "configuration",
+    "workflow",
+    "workflow-trigger"
+  ],
   "main": "dist/index.js",
   "styles": "src/panel.css",
   "bundle_include": ["src/panel.css"],
@@ -15,7 +22,13 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["extension:ui", "theme:read"],
+  "permissions": ["extension:ui", "theme:read", "settings:read", "extension:workflow"],
+  "permissionJustifications": {
+    "extension:ui": "Mounts the template panel into the chat composer's action row.",
+    "theme:read": "Reads the user's motion preference before animating the panel.",
+    "settings:read": "Reads this plugin's own greeting prefix and echo-uppercase settings.",
+    "extension:workflow": "Contributes the template workflow node and trigger to the visual workflow editor."
+  },
   "activationEvents": ["onStartup"],
   "runtimeCompatibility": {
     "browser": {
@@ -27,6 +40,23 @@
       "entrypoint": "dist/index.js"
     }
   },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "greetingPrefix": {
+        "type": "string",
+        "default": "Hello",
+        "title": "Greeting prefix",
+        "description": "Word the /template-greet command opens with."
+      },
+      "shoutEcho": {
+        "type": "boolean",
+        "default": false,
+        "title": "Shout the echo",
+        "description": "Uppercase what template_echo sends back."
+      }
+    }
+  },
   "commands": [
     {
       "id": "template-greet",
@@ -34,10 +64,72 @@
       "description": "Print a greeting back to the chat. Replace with your own command."
     }
   ],
+  "quickActions": [
+    {
+      "id": "greet",
+      "title": "Template Greet",
+      "labelKey": "action.greet",
+      "description": "Run the template's greeting command from the palette, composer or tray.",
+      "icon": "Sparkles",
+      "slash": "template-greet"
+    }
+  ],
   "tools": [
     {
       "name": "template_echo",
       "description": "Echo the supplied message back to the agent. Replace with your own tool."
     }
-  ]
+  ],
+  "workflows": {
+    "nodes": [
+      {
+        "kind": "action.echo",
+        "typeVersion": 1,
+        "category": "plugin",
+        "label": "Template Echo",
+        "description": "Echo its input downstream. Replace with your own node.",
+        "iconName": "Repeat",
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "title": "Message",
+              "description": "Text to pass downstream."
+            }
+          },
+          "required": ["message"],
+          "additionalProperties": false
+        },
+        "defaultParams": {
+          "message": ""
+        },
+        "retryable": true
+      }
+    ],
+    "triggers": [
+      {
+        "kind": "trigger.ticker",
+        "typeVersion": 1,
+        "label": "Template Ticker",
+        "description": "Emit one event every N seconds. Replace with your own trigger source.",
+        "iconName": "Timer",
+        "paramsSchema": {
+          "type": "object",
+          "properties": {
+            "intervalMs": {
+              "type": "number",
+              "title": "Interval (ms)",
+              "description": "Milliseconds between ticks.",
+              "minimum": 1000
+            }
+          },
+          "additionalProperties": false
+        },
+        "defaultParams": {
+          "intervalMs": 60000
+        }
+      }
+    ]
+  }
 }

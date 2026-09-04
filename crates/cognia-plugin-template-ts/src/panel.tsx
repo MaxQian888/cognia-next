@@ -13,10 +13,10 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Badge, Button } from "@cognia/plugin-ui"
-import type { ExtensionProps, FullPluginContext } from "@cognia/plugin-sdk"
+import type { ExtensionProps, PluginContext } from "@cognia/plugin-sdk"
 
 export interface PanelProps extends ExtensionProps {
-  ctx: FullPluginContext
+  ctx: PluginContext
 }
 
 export function TemplatePanel({ formFactor, ctx }: PanelProps) {

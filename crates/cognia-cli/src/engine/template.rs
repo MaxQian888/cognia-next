@@ -526,6 +526,199 @@ mod tests {
         assert!(pj.content.contains(r#""id": "hello-wasm""#));
     }
 
+    /// Working Rule 7 across every kind, not just wasm: a declared capability
+    /// whose contribution field is empty is a scaffold that ships a dormant
+    /// tag, and `cognia plugin lint` warns on exactly that. Reading the pairing
+    /// from `CAPABILITY_FIELDS` rather than a local list means a new capability
+    /// cannot quietly escape the invariant.
+    #[test]
+    fn every_template_backs_its_declared_capabilities_with_contributions() {
+        let mut checked = 0usize;
+        for kind in TemplateKind::ALL {
+            let files = files_for(kind, "probe");
+            let manifest: serde_json::Value =
+                serde_json::from_str(&find_file(&files, "plugin.json").content).unwrap();
+            let declared: Vec<&str> = manifest["capabilities"]
+                .as_array()
+                .expect("capabilities is an array")
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect();
+            for capability in declared {
+                let Some((_, fields)) = crate::engine::contract::CAPABILITY_FIELDS
+                    .iter()
+                    .find(|(id, _)| *id == capability)
+                else {
+                    // `configuration` and `python` gate on a manifest field the
+                    // capability table does not pair them with. Nothing to check.
+                    continue;
+                };
+                let populated = fields.iter().any(|field| match manifest.get(*field) {
+                    Some(serde_json::Value::Array(entries)) => !entries.is_empty(),
+                    Some(serde_json::Value::Object(block)) if *field == "workflows" => {
+                        ["nodes", "triggers"].iter().any(|key| {
+                            block
+                                .get(*key)
+                                .and_then(serde_json::Value::as_array)
+                                .is_some_and(|entries| !entries.is_empty())
+                        })
+                    }
+                    _ => false,
+                });
+                assert!(
+                    populated,
+                    "{kind:?} declares capability \"{capability}\" but every one of its \
+                     contribution fields {fields:?} is empty"
+                );
+                checked += 1;
+            }
+        }
+        // A walk that saw nothing passes every assertion inside it, so pin that
+        // the walk actually had something to check.
+        assert!(
+            checked >= 8,
+            "expected the templates to declare capabilities worth checking, saw {checked}"
+        );
+    }
+
+    /// The reverse direction: a populated contribution field with no capability
+    /// tag is the other half of the same lint rule.
+    #[test]
+    fn every_template_declares_a_capability_for_each_contribution_it_ships() {
+        for kind in TemplateKind::ALL {
+            let files = files_for(kind, "probe");
+            let manifest: serde_json::Value =
+                serde_json::from_str(&find_file(&files, "plugin.json").content).unwrap();
+            let declared: Vec<&str> = manifest["capabilities"]
+                .as_array()
+                .expect("capabilities is an array")
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect();
+            for (capability, fields) in crate::engine::contract::CAPABILITY_FIELDS {
+                if declared.contains(capability) {
+                    continue;
+                }
+                for field in fields.iter() {
+                    let populated = match manifest.get(*field) {
+                        Some(serde_json::Value::Array(entries)) => !entries.is_empty(),
+                        Some(serde_json::Value::Object(block)) if *field == "workflows" => {
+                            ["nodes", "triggers"].iter().any(|key| {
+                                block
+                                    .get(*key)
+                                    .and_then(serde_json::Value::as_array)
+                                    .is_some_and(|entries| !entries.is_empty())
+                            })
+                        }
+                        _ => false,
+                    };
+                    let covered = crate::engine::contract::CAPABILITY_FIELDS
+                        .iter()
+                        .filter(|(_, candidates)| candidates.contains(field))
+                        .any(|(id, _)| declared.contains(id));
+                    assert!(
+                        !populated || covered,
+                        "{kind:?} ships \"{field}\" entries but declares none of the \
+                         capabilities that gate it"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every permission a template asks for has to be one the host knows, and
+    /// has to say why. A scaffold that ships an unexplained grant teaches the
+    /// habit of shipping unexplained grants.
+    #[test]
+    fn every_template_permission_is_known_and_justified() {
+        for kind in TemplateKind::ALL {
+            let files = files_for(kind, "probe");
+            let manifest: serde_json::Value =
+                serde_json::from_str(&find_file(&files, "plugin.json").content).unwrap();
+            let Some(permissions) = manifest["permissions"].as_array() else {
+                continue;
+            };
+            for permission in permissions.iter().filter_map(serde_json::Value::as_str) {
+                assert!(
+                    crate::engine::contract::VALID_PERMISSIONS.contains(&permission),
+                    "{kind:?} asks for unknown permission \"{permission}\""
+                );
+                assert!(
+                    manifest["permissionJustifications"]
+                        .get(permission)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|reason| !reason.trim().is_empty()),
+                    "{kind:?} asks for \"{permission}\" with no permissionJustifications entry"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ts_template_wires_the_surfaces_its_manifest_declares() {
+        let source = ts::SRC_INDEX_TS;
+        for call in [
+            "ctx.agent.registerTool",
+            "ctx.extensions.registerExtension",
+            "ctx.workflow.registerNode",
+            "ctx.workflow.registerTrigger",
+            "ctx.settings.get",
+            "ctx.settings.onChange",
+            "ctx.storage.get",
+            "ctx.lifecycle.onDispose",
+            "onConfigChange",
+        ] {
+            assert!(
+                source.contains(call),
+                "TS template should demonstrate {call}"
+            );
+        }
+        // The quick action dispatches the slash command rather than carrying a
+        // second handler, so the two ids must agree.
+        let manifest: serde_json::Value = serde_json::from_str(ts::PLUGIN_JSON).unwrap();
+        assert_eq!(
+            manifest["quickActions"][0]["slash"].as_str(),
+            manifest["commands"][0]["id"].as_str(),
+            "the quick action must dispatch a command the manifest declares"
+        );
+    }
+
+    #[test]
+    fn hybrid_template_crosses_the_runtime_seam() {
+        // The point of the hybrid kind is that one half can call the other. A
+        // template whose halves never talk teaches nothing the two single-runtime
+        // templates do not already teach.
+        assert!(
+            hybrid::FRONTEND_INDEX_JS.contains("ctx.python.call(\"word_count\""),
+            "hybrid frontend should call into its own Python backend"
+        );
+        assert!(
+            hybrid::BACKEND_MAIN_PY.contains("def word_count("),
+            "hybrid backend should expose the module-level callable the frontend calls"
+        );
+    }
+
+    #[test]
+    fn python_template_registers_a_hook_for_its_declared_panel() {
+        // A declarative A2UI panel is built by `activateTool` and answered by
+        // the `onA2UIAction` hook. Declaring the panel without the hook ships a
+        // panel whose buttons do nothing.
+        let manifest: serde_json::Value = serde_json::from_str(python::PLUGIN_JSON).unwrap();
+        let activate_tool = manifest["contextPanels"][0]["activateTool"]
+            .as_str()
+            .expect("the declared panel names an activateTool");
+        assert!(
+            manifest["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"].as_str() == Some(activate_tool)),
+            "the panel's activateTool must be a declared tool"
+        );
+        assert!(python::MAIN_PY.contains(&format!("def {activate_tool}(")));
+        assert!(python::MAIN_PY.contains("@hook(\"onA2UIAction\")"));
+    }
+
     #[test]
     fn wasm_template_ships_a_live_capability() {
         // Working Rule 7: no dormant scaffolds. The wasm template's
@@ -581,7 +774,8 @@ mod tests {
         assert!(pj.content.contains(r#""type": "python""#));
         assert!(pj.content.contains(r#""pythonMain": "main.py""#));
         let main = find_file(&files, "main.py");
-        assert!(main.content.contains("from cognia import tool"));
+        assert!(main.content.contains("from cognia import "));
+        assert!(main.content.contains(", tool"));
         assert!(main.content.contains("template_echo"));
     }
 
@@ -627,6 +821,52 @@ mod tests {
             .contains(r#""vscodeMain": "extension/out/extension.js""#));
         assert!(pj.content.contains(r#""styles": "styles.css""#));
         assert!(pj.content.contains(r#""bundle_include": ["package.json"]"#));
+    }
+
+    #[test]
+    fn python_templates_report_progress_as_a_percentage() {
+        // `pct` is 0-100. The host renders it verbatim with a `%` suffix
+        // (`lib/plugin/devtools/runtime-log-stream.ts`), so a template that
+        // reports 0.5 / 1.0 shows an author "1%" for a finished call and
+        // teaches a scale nothing in the runtime uses. The behavioural twin of
+        // this check drives the asset itself:
+        // `plugin-sdk/python/tests/test_template_plugin.py`.
+        for (label, source) in [
+            ("python", python::MAIN_PY),
+            ("hybrid", hybrid::BACKEND_MAIN_PY),
+        ] {
+            assert!(
+                !source.contains("progress(0."),
+                "{label} template reports a fractional progress value"
+            );
+            assert!(
+                !source.contains("progress(1.0"),
+                "{label} template reports 1.0 for a finished call"
+            );
+        }
+        assert!(python::MAIN_PY.contains(r#"progress(50, "writing note")"#));
+        assert!(python::MAIN_PY.contains(r#"progress(100, "done")"#));
+    }
+
+    /// The host merges the module's manifest OVER `plugin.json`
+    /// (`lib/plugin/core/browser-builtin-registry.ts:builtinManifest`), so the
+    /// code's list is the one that survives. A tag the file declares and the
+    /// code drops is a contribution the running plugin never claims, and the
+    /// dormancy tests above only read the file, so they cannot see it.
+    #[test]
+    fn ts_template_declares_the_same_capabilities_in_both_halves() {
+        let manifest: serde_json::Value = serde_json::from_str(ts::PLUGIN_JSON).unwrap();
+        for capability in manifest["capabilities"]
+            .as_array()
+            .expect("capabilities is an array")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+        {
+            assert!(
+                ts::SRC_INDEX_TS.contains(&format!("\"{capability}\"")),
+                "plugin.json declares \"{capability}\" but src/index.ts's manifest omits it"
+            );
+        }
     }
 
     #[test]

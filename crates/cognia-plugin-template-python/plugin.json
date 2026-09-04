@@ -2,19 +2,78 @@
   "id": "cognia-plugin-template-python",
   "name": "Cognia Plugin Template Python",
   "version": "0.1.0",
-  "description": "Python plugin template — registers one tool. Replace this manifest with your own plugin's metadata.",
+  "description": "Python plugin template — two agent tools, a settings schema, and an A2UI context panel whose clicks come back through a hook. Replace this manifest with your own plugin's metadata.",
   "type": "python",
-  "capabilities": ["tools", "python"],
+  "capabilities": ["tools", "python", "context-panel"],
   "pythonMain": "main.py",
   "author": {
     "name": "Your Name"
   },
   "license": "MIT",
   "engines": {
-    "cognia": ">=0.1.0"
+    "cognia": ">=0.1.0",
+    "python": ">=3.10"
   },
-  "permissions": [],
+  "permissions": ["python:execute", "filesystem:read", "filesystem:write", "session:read"],
+  "permissionJustifications": {
+    "python:execute": "Runs this plugin's tools in the desktop Python host.",
+    "filesystem:read": "Reads the plugin's own data directory, which is where the note file lives.",
+    "filesystem:write": "Writes that note file.",
+    "session:read": "The context panel is declared for chat sessions, and every resource kind a panel names is gated on its own read permission."
+  },
   "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "tauri": { "availability": "supported" },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host, which mobile does not have."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "shoutEcho": {
+        "type": "boolean",
+        "default": false,
+        "title": "Shout the echo",
+        "description": "Uppercase what template_echo sends back."
+      }
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "panel.title": "Template",
+        "panel.note": "Note",
+        "panel.save": "Save note",
+        "panel.empty": "No note yet."
+      },
+      "zh-CN": {
+        "panel.title": "模板",
+        "panel.note": "备注",
+        "panel.save": "保存备注",
+        "panel.empty": "还没有备注。"
+      }
+    }
+  },
+  "contextPanels": [
+    {
+      "id": "template",
+      "kind": "a2ui",
+      "label": "Template",
+      "labelKey": "panel.title",
+      "icon": "Sparkles",
+      "surface": "cognia-plugin-template-python:{resourceKey}",
+      "activateTool": "template_build_panel",
+      "resourceKinds": ["session"],
+      "activity": "workspace",
+      "order": 10
+    }
+  ],
   "tools": [
     {
       "name": "template_echo",
@@ -28,6 +87,33 @@
           }
         },
         "required": ["message"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "template_note",
+      "description": "Read or replace the plugin's saved note. Shows how a Python tool reaches the host through ctx.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "New note text. Omit to read the current note."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "template_build_panel",
+      "description": "Build the context panel's A2UI surface. Invoked by the host when the panel is first shown.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "surfaceId": { "type": "string", "description": "Surface the host wants painted." },
+          "resource": { "type": "object", "description": "Resource the panel was opened for." }
+        },
+        "required": ["surfaceId"],
         "additionalProperties": false
       }
     }

@@ -2,9 +2,9 @@
   "id": "cognia-plugin-template-hybrid",
   "name": "Cognia Plugin Template Hybrid",
   "version": "0.1.0",
-  "description": "Hybrid plugin template — combines a frontend lifecycle entry with one Python tool. Replace this manifest with your own plugin's metadata.",
+  "description": "Hybrid plugin template — a Python tool, a frontend tool that calls into that same Python backend, and a slash command. Replace this manifest with your own plugin's metadata.",
   "type": "hybrid",
-  "capabilities": ["tools", "python"],
+  "capabilities": ["tools", "python", "commands"],
   "main": "frontend/index.js",
   "pythonMain": "backend/main.py",
   "styles": "styles.css",
@@ -13,10 +13,43 @@
   },
   "license": "MIT",
   "engines": {
-    "cognia": ">=0.1.0"
+    "cognia": ">=0.1.0",
+    "python": ">=3.10"
   },
-  "permissions": [],
+  "permissions": ["python:execute"],
+  "permissionJustifications": {
+    "python:execute": "The backend half of this plugin runs in the desktop Python host."
+  },
   "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "tauri": { "availability": "supported", "entrypoint": "frontend/index.js" },
+    "browser": {
+      "availability": "blocked",
+      "reason": "The Python half runs in the desktop subprocess host."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "The Python half runs in the desktop subprocess host, which mobile does not have."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "shoutEcho": {
+        "type": "boolean",
+        "default": false,
+        "title": "Shout the echo",
+        "description": "Uppercase what the Python backend sends back."
+      }
+    }
+  },
+  "commands": [
+    {
+      "id": "template-wordcount",
+      "name": "Template Word Count",
+      "description": "Count the words in the rest of the line, using the Python backend."
+    }
+  ],
   "tools": [
     {
       "name": "template_echo",
@@ -30,6 +63,21 @@
           }
         },
         "required": ["message"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "template_word_count",
+      "description": "Count words in a string. Registered by the frontend half, computed by the Python half.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Text to count words in."
+          }
+        },
+        "required": ["text"],
         "additionalProperties": false
       }
     }

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 
 import { fireEvent, render, screen } from "@testing-library/react"
-import type { FullPluginContext } from "@cognia/plugin-sdk"
+import type { PluginContext } from "@cognia/plugin-sdk"
 import { TemplatePanel } from "./panel"
 
 jest.mock("@cognia/plugin-ui", () => ({
@@ -25,7 +25,7 @@ function makeContext() {
       onLocaleChange,
       t: translate,
     },
-  } as unknown as FullPluginContext
+  } as unknown as PluginContext
 
   return { ctx, translate, onLocaleChange }
 }
