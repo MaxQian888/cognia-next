@@ -9,6 +9,9 @@
 
 import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
+import { usePlatform } from "@/hooks/use-platform"
+import { getPetWindowRole } from "@/lib/pet/window-role"
+import { resolvePetAvailability } from "@/lib/pet/access/availability"
 import {
   BookOpenIcon,
   HeartIcon,
@@ -156,7 +159,30 @@ export function PetConsole({ initialTab }: PetConsoleProps = {}) {
   // The "Plugins" tab is host-owned and appears only while ≥1 plugin has
   // registered a `pet.console.tab` extension.
   const hasPluginTabs = usePluginSlotHasExtensions("pet.console.tab")
+  const platform = usePlatform()
+  // The STRUCTURAL question only, the way `PetMount` asks it for the main
+  // desktop window. Whether the user has the pet switched off is deliberately
+  // not asked: the widget and the overlay are what `enabled` turns off, while
+  // the console is where the record of the pet lives and is worth reading
+  // either way.
+  const availability = resolvePetAvailability({
+    enabled: true,
+    role: getPetWindowRole(),
+    platform,
+  })
   const visibleTabs = hasPluginTabs ? TABS : TABS.filter((id) => id !== "plugins")
+
+  // "Cannot run here" and "has not loaded yet" used to render the same
+  // spinner. The surface contract lists /pet as a navigable route, and on the
+  // Capacitor shell `PetMount` refuses to initialize the profile at all, so a
+  // phone reaching this page waited at a spinner that could never resolve.
+  if (!availability.available) {
+    return (
+      <div data-testid="pet-console-unavailable" className="p-6 text-muted-foreground">
+        {t("console.unavailable.unsupportedHost")}
+      </div>
+    )
+  }
 
   if (!profile || !view) {
     return (

@@ -202,7 +202,6 @@
   },
   "chat": {
     "degrade": {
-      "disabled": "宠物聊天当前已关闭。",
       "empty": "唔，这个我暂时没什么好说的。",
       "error": "连接模型时出错了，要不再试一次？",
       "noClient": "还没有配置聊天模型——去宠物设置里看看吧。",
@@ -253,7 +252,10 @@
       "plugins": "插件",
       "shop": "商店"
     },
-    "title": "你的宠物"
+    "title": "你的宠物",
+    "unavailable": {
+      "unsupportedHost": "桌面宠物不在移动端运行。请在桌面端打开 Cognia 来照顾它。"
+    }
   },
   "customize": {
     "appearance": {

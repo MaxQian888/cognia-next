@@ -20650,7 +20650,10 @@
         "plugins": "Plugins",
         "shop": "Shop"
       },
-      "title": "Your Pet"
+      "title": "Your Pet",
+      "unavailable": {
+        "unsupportedHost": "The desktop pet does not run on mobile. Open Cognia on your desktop to look after it."
+      }
     },
     "customize": {
       "appearance": {

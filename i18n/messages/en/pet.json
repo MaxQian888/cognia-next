@@ -209,7 +209,6 @@
   },
   "chat": {
     "degrade": {
-      "disabled": "Pet chat is off right now.",
       "empty": "Hmm, I didn't have anything to say to that.",
       "error": "Something went wrong reaching the model. Try again?",
       "noClient": "No chat model is configured yet — check the pet settings.",
@@ -260,7 +259,10 @@
       "plugins": "Plugins",
       "shop": "Shop"
     },
-    "title": "Your Pet"
+    "title": "Your Pet",
+    "unavailable": {
+      "unsupportedHost": "The desktop pet does not run on mobile. Open Cognia on your desktop to look after it."
+    }
   },
   "customize": {
     "appearance": {

@@ -1,5 +1,10 @@
 import { render, screen, fireEvent, act } from "@testing-library/react"
 
+const mockUsePlatform = jest.fn(() => "tauri")
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => mockUsePlatform(),
+}))
+
 jest.mock("@/hooks/pet/use-pet")
 let settingsValue: unknown = {}
 jest.mock("@/stores/settings", () => ({
@@ -256,5 +261,26 @@ describe("PetConsole", () => {
     fireEvent.change(input, { target: { value: "Mochi" } })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(renamePet).toHaveBeenCalledWith("Mochi")
+  })
+})
+
+describe("hosts where the pet cannot run", () => {
+  it("explains itself on the mobile shell instead of spinning forever", () => {
+    // The surface contract lists /pet as a navigable route, and `PetMount`
+    // refuses to initialize the profile on the Capacitor shell, so a phone
+    // reaching this page used to wait at a spinner that never resolved.
+    mockUsePlatform.mockReturnValue("mobile")
+    mockUsePet.mockReturnValue(petResult(null))
+    render(<PetConsole />)
+    expect(screen.getByTestId("pet-console-unavailable")).toBeInTheDocument()
+    expect(screen.queryByTestId("pet-console-loading")).not.toBeInTheDocument()
+  })
+
+  it("renders the console normally on a host that does run the pet", () => {
+    mockUsePlatform.mockReturnValue("tauri")
+    mockUsePet.mockReturnValue(petResult(null))
+    render(<PetConsole />)
+    expect(screen.queryByTestId("pet-console-unavailable")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pet-console")).toBeInTheDocument()
   })
 })

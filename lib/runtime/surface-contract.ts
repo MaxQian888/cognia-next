@@ -177,10 +177,16 @@ export const SURFACE_CONTRACTS = [
   },
   {
     id: "pet",
+    // The desktop pet is a renderer subsystem excluded from the Capacitor
+    // shell outright (ADR-0059), so a companion cannot drive it through the
+    // host the way `"remote"` promises. It said `"remote"` while `PetMount`
+    // refused to initialize the profile on mobile and the console rendered a
+    // loading state that could never resolve: a route the user could reach and
+    // then wait at forever. `"explain"` is what it actually is.
     route: "/pet",
     navigation: true,
     standalone: "full",
-    companion: "remote",
+    companion: "explain",
     offline: "local",
   },
   {

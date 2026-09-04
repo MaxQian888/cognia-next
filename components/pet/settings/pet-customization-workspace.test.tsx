@@ -26,6 +26,11 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: settingsValue, save }),
 }))
 
+const destroyPetWindow = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/tauri/pet-window", () => ({
+  destroyPetWindow: () => destroyPetWindow(),
+}))
+
 const resetPet = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/pet", () => ({ resetPet: () => resetPet() }))
 
@@ -82,6 +87,7 @@ import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
 describe("PetCustomizationWorkspace", () => {
   beforeEach(() => {
     save.mockClear()
+    destroyPetWindow.mockClear()
     resetPet.mockClear()
     rendererProps.mockClear()
     settingsValue = {
@@ -159,6 +165,25 @@ describe("PetCustomizationWorkspace", () => {
 
     expect(rendererProps).toHaveBeenCalledWith(
       expect.objectContaining({ renderPriority: "configuration" })
+    )
+  })
+})
+
+describe("the master switch", () => {
+  it("destroys the desktop window and clears its intent when the pet is turned off", async () => {
+    // It used to write `enabled: false` and nothing else, which unmounted the
+    // controller and the bridge but left the always-on-top sprite sitting on
+    // the desktop, frozen, with no visible way to be rid of it.
+    render(<PetCustomizationWorkspace />)
+    fireEvent.click(document.querySelector("#pet-enabled") as HTMLElement)
+    expect(destroyPetWindow).toHaveBeenCalledTimes(1)
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        petSettings: expect.objectContaining({
+          enabled: false,
+          desktopPet: expect.objectContaining({ enabled: false }),
+        }),
+      })
     )
   })
 })

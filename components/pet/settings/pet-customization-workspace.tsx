@@ -44,7 +44,13 @@ import { resetPet } from "@/lib/db/pet"
 import { toPetAssetDiagnostics } from "@/lib/pet/live2d/compatibility-diagnostics"
 import { getPetSkinRuntime } from "@/lib/pet/skin-runtime"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_PET_SETTINGS, type PetAssetDiagnostic, type PetSettings } from "@/types/pet"
+import { destroyPetWindow } from "@/lib/tauri/pet-window"
+import {
+  DEFAULT_PET_DESKTOP_OVERLAY,
+  DEFAULT_PET_SETTINGS,
+  type PetAssetDiagnostic,
+  type PetSettings,
+} from "@/types/pet"
 
 import { PetRenderer } from "../pet-renderer"
 import { resolveEffectiveSkinSelection } from "../skins/resolve-effective-skin"
@@ -70,6 +76,28 @@ export function PetCustomizationWorkspace() {
   const save = useSettingsStore((state) => state.save)
   const pet: PetSettings = settings?.petSettings ?? DEFAULT_PET_SETTINGS
   const patch = (next: Partial<PetSettings>) => void save({ petSettings: { ...pet, ...next } })
+
+  /**
+   * Turning the whole subsystem off has to take the desktop window with it.
+   *
+   * The master switch only ever wrote `enabled: false`, while
+   * `destroyPetWindow` lived on the separate desktop-overlay toggle. Disabling
+   * from here unmounted the controller and the cross-window bridge but left
+   * the always-on-top sprite sitting on the desktop, frozen and unresponsive,
+   * with no visible way to get rid of it. The nested desktop intent is cleared
+   * too, so re-enabling later does not silently re-summon it.
+   */
+  const setPetEnabled = (enabled: boolean) => {
+    if (enabled) {
+      patch({ enabled })
+      return
+    }
+    void destroyPetWindow()
+    patch({
+      enabled,
+      desktopPet: { ...(pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY), enabled: false },
+    })
+  }
 
   const { profile, view } = usePet()
   const { modelId, row: activeModel, coreReady } = useActiveLive2dModel(pet)
@@ -119,11 +147,7 @@ export function PetCustomizationWorkspace() {
                 <FieldLabel htmlFor="pet-enabled">{t("enabled.label")}</FieldLabel>
                 <FieldDescription>{t("enabled.description")}</FieldDescription>
               </FieldContent>
-              <Switch
-                id="pet-enabled"
-                checked={pet.enabled}
-                onCheckedChange={(enabled) => patch({ enabled })}
-              />
+              <Switch id="pet-enabled" checked={pet.enabled} onCheckedChange={setPetEnabled} />
             </Field>
           </FieldGroup>
         </SettingsBlock>

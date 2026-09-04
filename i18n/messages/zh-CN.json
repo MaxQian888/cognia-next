@@ -20650,7 +20650,10 @@
         "plugins": "插件",
         "shop": "商店"
       },
-      "title": "你的宠物"
+      "title": "你的宠物",
+      "unavailable": {
+        "unsupportedHost": "桌面宠物不在移动端运行。请在桌面端打开 Cognia 来照顾它。"
+      }
     },
     "customize": {
       "appearance": {
