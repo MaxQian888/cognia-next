@@ -42,6 +42,7 @@ export * from "./transcript"
 export * from "./working-set"
 export * from "./host-state"
 export * from "./onboarding"
+export * from "./updates"
 
 // ---- Outbound (UI → Tauri → sidecar) -------------------------------------
 
@@ -3354,13 +3355,20 @@ export interface AppSettings {
     autoSync?: boolean
   }
   /**
-   * Desktop self-update preferences. `autoCheck` drives the boot-time (and
-   * periodic) background update check in `UpdateCheckInitializer`; the manual
-   * Settings → About check is always available regardless. Undefined ≡ on.
+   * Self-update scheduling. `autoCheck` drives the boot-time and periodic
+   * sweep in `UpdateCenterInitializer`. The manual Settings to Updates check
+   * is always available regardless. Undefined means on.
    * Merged forward by `getSettings()` so older installs pick up the default
    * without a migration. No-op off the Tauri desktop shell.
    */
   updates?: UpdateSettings
+  /**
+   * Update Center preferences (channel, catalog endpoint, per-asset
+   * snapshots). Distinct from `updates`, which stays the desktop Tauri
+   * updater's own scheduling policy. Undefined means the defaults in
+   * `DEFAULT_UPDATE_CENTER_SETTINGS`.
+   */
+  updateCenter?: UpdateCenterSettings
   /**
    * Mobile runtime mode (ADR: standalone BYOK mobile). Decides whether the
    * Capacitor shell drives a paired desktop ("paired") or runs chat / search /
