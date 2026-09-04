@@ -13,6 +13,7 @@ import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
 import { useActiveCharacterId } from "@/hooks/pet/use-active-character-id"
 import { useActivityTracker } from "@/hooks/pet/use-activity-tracker"
 import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
+import { usePetInteractionRefusal } from "@/hooks/pet/use-pet-interaction-refusal"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
 import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
@@ -61,6 +62,9 @@ export function PetMount() {
   useActivityTracker(widgetEnabled)
   // Gentle care notification when the pet first becomes unwell (main window only).
   usePetCareAlert(widgetEnabled)
+  // Turns a refused interaction into a bubble so a cooldown is legible instead
+  // of looking like a dead button or a dead hotkey.
+  usePetInteractionRefusal(widgetEnabled)
 
   useEffect(() => {
     if (!widgetEnabled) return

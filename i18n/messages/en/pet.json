@@ -160,6 +160,14 @@
     "levelUp": ["Level up!", "Getting stronger!"],
     "petted": ["Purr…", "That's nice.", "♥"],
     "played": ["So fun!", "Again!", "Wheee!"],
+    "refused": {
+      "cooldown": [
+        "Give me a moment!",
+        "I'm still enjoying the last one.",
+        "Not just yet, let me catch up."
+      ],
+      "notHatched": ["I haven't hatched yet!", "Still an egg here. Hatch me first?"]
+    },
     "review": ["Take a look?", "Ready for review."],
     "scheduledRunDue": [
       "Reminder! Your scheduled task is due.",
