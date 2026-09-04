@@ -89,4 +89,44 @@ describe("PanelTabStrip", () => {
     )
     expect(screen.getByTestId("panel-body")).toBeInTheDocument()
   })
+
+  /**
+   * Truncating six labels into "O.." and "P.." stops the strip overflowing
+   * without making it readable. Below `sm` the icons carry the inactive tabs
+   * and only the selected one keeps its text.
+   */
+  it("keeps only the selected label when the strip is narrow", () => {
+    const Icon = () => <svg />
+    render(
+      <PanelTabStrip
+        tabs={TABS.map((tab) => ({ ...tab, icon: Icon }))}
+        value="audit"
+        onValueChange={() => {}}
+      />
+    )
+    const label = (id: string) => screen.getByTestId(`panel-tab-${id}`).querySelector("span")
+    expect(label("audit")?.className).not.toContain("max-sm:hidden")
+    expect(label("overview")?.className).toContain("max-sm:hidden")
+    expect(label("inspector")?.className).toContain("max-sm:hidden")
+  })
+
+  it("keeps the text of a tab that has no icon to fall back to", () => {
+    render(<PanelTabStrip tabs={TABS} value="audit" onValueChange={() => {}} />)
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab.querySelector("span")?.className).not.toContain("max-sm:hidden")
+    }
+  })
+
+  it("names every tab in full even where the label is not painted", () => {
+    const Icon = () => <svg />
+    render(
+      <PanelTabStrip
+        tabs={TABS.map((tab) => ({ ...tab, icon: Icon }))}
+        value="audit"
+        onValueChange={() => {}}
+      />
+    )
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Inspector" })).toBeInTheDocument()
+  })
 })

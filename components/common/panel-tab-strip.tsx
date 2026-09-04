@@ -14,6 +14,12 @@
  * - **Triggers shrink instead.** `min-w-0 flex-initial` overrides the base
  *   `flex-1`, and the label truncates: compact when there is room, narrow when
  *   there isn't, never scrolling.
+ * - **Below `sm`, only the selected tab keeps its label.** Six triggers sharing
+ *   375px truncate to "O..", "P..", "Ac..", which is not a readable strip, only
+ *   a non-overflowing one. Icons carry the rest, and the accessible name stays
+ *   the full label so nothing is lost to a screen reader or a tooltip. A tab
+ *   with no icon always keeps its text, because hiding it would leave a blank
+ *   target.
  *
  * `TabsList` still inherits `[[data-settings-panel]_&]:overflow-x-auto` from
  * `tabsListVariants` when it renders inside the settings shell. That rule is
@@ -69,15 +75,22 @@ export function PanelTabStrip<TId extends string>({
     <TabsList className="max-w-full">
       {tabs.map((tab) => {
         const Icon = tab.icon
+        const keepsLabelWhenNarrow = !Icon || tab.id === value
         return (
           <TabsTrigger
             key={tab.id}
             value={tab.id}
+            // The accessible name is the full label whether or not the text is
+            // painted, so a hidden label never costs a screen reader the tab.
+            aria-label={tab.label}
+            title={tab.label}
             className="min-w-0 flex-initial text-xs"
             data-testid={`panel-tab-${tab.id}`}
           >
             {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
-            <span className="truncate">{tab.label}</span>
+            <span className={cn("truncate", !keepsLabelWhenNarrow && "max-sm:hidden")}>
+              {tab.label}
+            </span>
             {tab.badge}
           </TabsTrigger>
         )
