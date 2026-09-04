@@ -100,6 +100,18 @@ describe("issue.* skill family — registration smoke", () => {
     expect(issueSkills()).toHaveLength(DOCUMENTED.length)
   })
 
+  it("reaches a desktop session's tool manifest, not just the registry", async () => {
+    // Registering is not the same as being offered. This repo's recurrent
+    // defect is a fully-built surface nothing ever exposes, so the census is
+    // taken against the manifest the assistant actually sees.
+    const { buildBuiltInSkillManifest } = await import("../manifest")
+    const offered = buildBuiltInSkillManifest({ platform: undefined })
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith("issue_"))
+
+    expect(offered.sort()).toEqual(DOCUMENTED.map((id) => id.replace(/\./g, "_")).sort())
+  })
+
   it("documents in the barrel every skill it registers", async () => {
     // The header table is the family's contract. A tool added without a row
     // there is a tool nobody reviewing this directory knows exists.

@@ -48,7 +48,8 @@ import "./lark"
 import "./im"
 // Desktop-only, workspace-confined plugin conversion tools.
 import "./plugin-conversion"
-// Issue tracker (ADR-0132 slice ③): file issues from chat, resolve projects.
+// Issue tracker (ADR-0132): read and work the board, its containers and its
+// runs. Every write goes through the board's own capability and run guards.
 import "./issues"
 // Scheduler: read, author and amend the user's own schedule. Gated on the
 // user's SchedulerPermissionPolicy as well as the dispatcher's HITL card.
