@@ -1,4 +1,15 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import type { MicrovmExecPayload } from "@cognia/plugin-sdk/api/sandbox"
+
+import { __resetOsSandboxBridgeForTesting, setOsSandboxExec } from "@/lib/sandbox/os-exec-bridge"
+import {
+  __resetSandboxSessionRuntimeForTesting,
+  HOST_FALLBACK_RUNTIME_REF,
+  sandboxSessionRuntime,
+} from "@/lib/sandbox/session-runtime"
 
 import {
   createNodeOsSandboxExecutor,
@@ -313,5 +324,89 @@ describe("createNodeOsSandboxExecutor", () => {
     await expect(first).resolves.toMatchObject({ stdout: "hi\n" })
     await expect(second).resolves.toMatchObject({ exit_code: 7, stdout: "second" })
     expect(calls).toHaveLength(2)
+  })
+})
+
+/**
+ * The whole path, end to end: the session runtime, the bridge, this executor,
+ * the helper binary, and the kernel. Everything above asserts on a fake child,
+ * which proves the mapping and nothing about whether a command is confined.
+ *
+ * Skipped where the helper has not been built (`pnpm cli:sandbox-exec:build`),
+ * which is honest about what was checked rather than passing on a stub.
+ */
+const binary = findSandboxExecBinary()
+const maybe = binary ? describe : describe.skip
+
+maybe("end to end through the real helper and the real kernel", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-sbx-e2e-"))
+  beforeAll(() => setOsSandboxExec(createNodeOsSandboxExecutor()))
+  afterAll(() => {
+    __resetOsSandboxBridgeForTesting()
+    __resetSandboxSessionRuntimeForTesting()
+    fs.rmSync(ws, { recursive: true, force: true })
+  })
+
+  const run = (script: string, writable = [ws]) =>
+    sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, {
+      tool: "sandbox_bash",
+      command: {
+        argv: ["/bin/bash", "-c", script],
+        cwd: ws,
+        env: { PATH: "/usr/bin:/bin", HOME: ws },
+        stdin: null,
+        timeout: 30,
+      },
+      request: {
+        writable,
+        readable: [],
+        targetFiles: [],
+        maxCpuSeconds: 30,
+        maxMemoryMb: 1024,
+        network: "off",
+        networkHosts: [],
+      },
+    })
+
+  it("runs a command and returns its output", async () => {
+    const r = await run("echo end-to-end")
+    expect(r.exit_code).toBe(0)
+    expect(r.stdout).toContain("end-to-end")
+  })
+
+  it("writes inside the workspace", async () => {
+    const r = await run(`echo written > ${ws}/f.txt && cat ${ws}/f.txt`)
+    expect(r.exit_code).toBe(0)
+    expect(r.stdout).toContain("written")
+  })
+
+  it("refuses a write outside the workspace", async () => {
+    const outside = path.join(os.homedir(), "cognia-sbx-should-not-exist.txt")
+    const r = await run(`echo pwned > ${outside}`)
+    expect(r.exit_code).not.toBe(0)
+    expect(fs.existsSync(outside)).toBe(false)
+  })
+
+  it("refuses to read a credential store", async () => {
+    const r = await run(`ls ${path.join(os.homedir(), ".ssh")} 2>&1 || true`)
+    expect(`${r.stdout}${r.stderr}`).toMatch(/not permitted|No such file/)
+  })
+
+  it("has no network when the policy says off", async () => {
+    const r = await run("getent hosts example.com 2>&1 || echo NO-DNS")
+    expect(`${r.stdout}${r.stderr}`).toMatch(/NO-DNS|not permitted|not found/)
+  })
+
+  it("refuses a forbidden writable root before spawning", async () => {
+    await expect(run("echo x", ["/etc"])).rejects.toThrow(/protected system/)
+  })
+
+  it("reports confinement through the same bridge the status RPC reads", async () => {
+    const { __resetCodeSandboxStatus, codeSandboxStatus } =
+      await import("@/lib/ai/code-mode/sandbox-status")
+    __resetCodeSandboxStatus()
+    const status = await codeSandboxStatus()
+    expect(status.confined).toBe(true)
+    expect(status.backend).toMatch(/sandbox-exec|bwrap|cognia-sandbox/)
   })
 })

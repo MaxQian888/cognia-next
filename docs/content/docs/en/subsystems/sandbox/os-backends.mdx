@@ -8,12 +8,14 @@ description: "The Rust execution-sandbox crate: the SandboxedExec trait, the pur
 <Status variant="beta" />
 
 <TLDR>
-  `src-tauri/src/sandbox/` is the Tier-1 OS execution sandbox. The `sandbox_exec` Tauri command
+  `crates/cognia-automation/src/sandbox/` is the Tier-1 OS execution sandbox. The `sandbox_exec` Tauri command
   derives a `SandboxPolicy` from the tool name via `policy.rs:policy_for`, selects a per-platform
   backend via `current_backend()`, and runs the command under that backend. **Linux (`bwrap`),
   macOS (`sandbox-exec`), and Windows (`cognia-sandbox-runner.exe`) are real backends**. The
   Windows runner is the bundled restricted-token + low-integrity + Job Object crate and captures
   stdout/stderr through its JSON contract. Both Tauri commands are registered (`lib.rs:349-350`).
+  The Tauri command is not the only door: `cognia-sandbox-exec` calls the same `run_confined` for
+  hosts without Tauri IPC, which is how the CLI and the headless brain reach the tier at all.
 </TLDR>
 
 ## The trait — `traits.rs`
@@ -21,7 +23,7 @@ description: "The Rust execution-sandbox crate: the SandboxedExec trait, the pur
 Every backend implements one async trait. `health()` is live today (polled by the Settings tab);
 `run()` / `first_time_setup()` are consumed by the dispatcher.
 
-```rust title="src-tauri/src/sandbox/traits.rs:19-43"
+```rust title="crates/cognia-automation/src/sandbox/traits.rs:19-43"
 #[async_trait]
 pub trait SandboxedExec: Send + Sync {
     async fn run(
@@ -51,7 +53,7 @@ pub trait SandboxedExec: Send + Sync {
 | `SandboxError`   | `types.rs:153-181`       | `Unavailable` · `SetupRequired` · `InvalidPolicy` · `BackendFailed` · `Timeout` |
 | `SandboxHealth`  | `types.rs:186-202`       | `available`, `backend`, `version`, `last_error`                       |
 
-```rust title="src-tauri/src/sandbox/types.rs:60-73"
+```rust title="crates/cognia-automation/src/sandbox/types.rs:60-73"
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NetworkPolicy {
     Off,
@@ -69,7 +71,7 @@ pub enum NetworkPolicy {
 `PolicyRequest` into a `SandboxPolicy`. It applies bash defaults, rejects an empty writable set, and
 validates the network shape.
 
-```rust title="src-tauri/src/sandbox/policy.rs:55-79 (bash branch)"
+```rust title="crates/cognia-automation/src/sandbox/policy.rs:55-79 (bash branch)"
 "bash" => {
     let network = parse_network(req.network.as_deref(), req.network_hosts)?;
     let (default_cpu, default_mem) = bash_defaults();
@@ -96,7 +98,7 @@ validates the network shape.
 through the renderer. It derives the policy, dispatches to `current_backend().run(...)`, and records
 the outcome to the audit ring as `Surface::Sandbox`.
 
-```rust title="src-tauri/src/sandbox/mod.rs:40-59 (backend selection)"
+```rust title="crates/cognia-automation/src/sandbox/mod.rs:40-59 (backend selection)"
 pub fn current_backend() -> Arc<dyn SandboxedExec> {
     #[cfg(target_os = "windows")]
     { Arc::new(windows::WindowsSandboxBackend::new()) }
@@ -109,7 +111,7 @@ pub fn current_backend() -> Arc<dyn SandboxedExec> {
 }
 ```
 
-```rust title="src-tauri/src/sandbox/mod.rs:66-69 (read-only health probe)"
+```rust title="crates/cognia-automation/src/sandbox/mod.rs:66-69 (read-only health probe)"
 #[tauri::command]
 pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
     Ok(current_backend().health())
@@ -146,7 +148,7 @@ sequenceDiagram
 `LinuxSandboxBackend` resolves a `bwrap` binary (bundled at `<resource_dir>/bwrap/bwrap` first, else
 `$PATH`) and actually spawns it with namespace + bind flags, piping stdin and enforcing the timeout.
 
-```rust title="src-tauri/src/sandbox/linux.rs:231-247 (isolation baseline)"
+```rust title="crates/cognia-automation/src/sandbox/linux.rs:231-247 (isolation baseline)"
 args.push("--unshare-user".into());
 args.push("--unshare-pid".into());
 args.push("--unshare-ipc".into());
@@ -159,7 +161,7 @@ args.push("--dev".into());   args.push("/dev".into());
 args.push("--tmpfs".into()); args.push("/tmp".into());
 ```
 
-```rust title="src-tauri/src/sandbox/linux.rs:314-328 (network → namespace flag)"
+```rust title="crates/cognia-automation/src/sandbox/linux.rs:314-328 (network → namespace flag)"
 NetworkPolicy::Off  => args.push("--unshare-net".into()),
 NetworkPolicy::On   => args.push("--share-net".into()),
 NetworkPolicy::Allowlist { hosts: _ } => {
@@ -181,7 +183,7 @@ NetworkPolicy::Allowlist { hosts: _ } => {
 `MacOsSandboxBackend` renders an SBPL profile per policy and runs
 `/usr/bin/sandbox-exec -p '<profile>' -- <argv>`.
 
-```rust title="src-tauri/src/sandbox/macos.rs:271-289 (network in SBPL)"
+```rust title="crates/cognia-automation/src/sandbox/macos.rs:271-289 (network in SBPL)"
 NetworkPolicy::Off => out.push_str("(deny network*)\n"),
 NetworkPolicy::On  => out.push_str("(allow network*)\n"),
 NetworkPolicy::Allowlist { hosts: _ } =>
@@ -190,6 +192,16 @@ NetworkPolicy::Allowlist { hosts: _ } =>
 
 - `health().backend == "macos-sandbox-exec"`, `version == "system"`.
 - Edit/Write/TextEditor allow `(literal "<file>")` writes only — a single file, never a subtree.
+- **Reads are allowed globally, then credential stores are denied again as the last matching
+  rules.** This is not a loosening someone chose; it is what makes the sandbox work at all. A
+  profile that scopes `file-read*` to a list of system prefixes aborts every confined binary on
+  current macOS before it execs — `/bin/echo` under the full prefix set dies with `SIGABRT` —
+  because dyld consults runtime files whose locations move across releases. The one-shot backend
+  shipped with the narrow list for a while, so `sandbox_bash` returned exit `-1` with no output and
+  `sandbox_health_check` reported `confined: false` while the cheap probe still said "Active".
+  `sbpl.rs` now owns those rules for both the one-shot and interactive profiles so they cannot
+  disagree again, and `push_baseline_secret_read_denies` anchors the deny set at `$HOME` and the app
+  data directory rather than at whatever the caller declared readable.
 - **Caveat:** allowlist degrades to full network at the SBPL layer (the renderer is the real host
   gate); CPU / memory caps are enforced by the shared `pre_exec` rlimit hook, not by SBPL.
 
@@ -221,6 +233,38 @@ future optional per-SID Firewall follow-up; it is no longer in the critical path
 - `MockSandboxBackend` (`mock.rs`) — records every `(command, policy)` for assertions, returns a
   canned result (LIFO override via `set_next_result`); `health().backend == "mock"`.
 
+## The second door — `cognia-sandbox-exec`
+
+`run_confined` is a plain `async fn` with no Tauri parameters, but for a long time its only caller
+was a `#[tauri::command]`. That made the tier desktop-only by accident rather than by decision:
+`transport.call("sandbox_exec")` resolves to a Tauri `invoke`, so the CLI's stdio transport answered
+`unsupported command` and no companion transport carried the name at all. A CLI session still bound
+a ceiling and clamped every request against it, which is the shape of a sandbox with nothing behind
+it.
+
+`crates/cognia-automation/src/bin/cognia-sandbox-exec.rs` is the same dispatcher body without the
+Tauri plumbing. It reads one JSON document on stdin and writes one on stdout:
+
+```text
+  stdin  {"tool":"bash","command":{...SandboxCommand},"request":{...PolicyRequest}}
+  stdout {"ok":true,"result":{...SandboxResult}}
+       | {"ok":false,"error":{"kind":"invalid_policy","reason":"..."}}
+  --health  {"ok":true,"health":{...SandboxHealth}}   (cheap, no spawn)
+  --probe   {"ok":true,"probe":{...ProbeReport}}      (spawns real commands)
+```
+
+The request arrives on stdin rather than argv because it carries the caller's environment, which
+routinely holds tokens, and argv is world-readable through `ps`. The exit code is 0 whenever an
+envelope was produced, including a refusal and including a child that exited non-zero; a non-zero
+exit means the protocol failed and stdout may be empty, so a missing envelope must never be read as
+"ran fine".
+
+Because it calls the same `run_confined`, a CLI session gets byte-identical confinement rather than
+a second implementation: the availability gate, path canonicalization, the forbidden-root floor,
+env scrubbing, the unenforceable-network downgrade, the filtering proxy, seccomp, rlimits and output
+capping all still happen on the Rust side. The renderer side registers it through
+`lib/sandbox/os-exec-bridge`; see [Execution overview](./execution-overview).
+
 ## Implementation-status summary
 
 | Backend     | `health().backend` (live) | State                  | Real OS exec?                                                                 |
@@ -229,6 +273,11 @@ future optional per-SID Firewall follow-up; it is no longer in the critical path
 | macOS       | `macos-sandbox-exec`      | Real                   | Yes — execs `/usr/bin/sandbox-exec` with rendered SBPL. Allowlist → On.      |
 | Windows     | `windows-cognia-sandbox`  | Real                   | Yes — bundled restricted-token + low-integrity + Job Object runner captures stdout/stderr. |
 | Uninstalled | `uninstalled-<os>`        | Deny stub              | No — always Unavailable / SetupRequired.                                     |
+
+The forbidden-writable floor compares a **canonicalized** candidate against its deny roots, so those
+roots carry their symlink-resolved spelling too. On macOS `/etc` is `private/etc` and `/var` is
+`private/var`, and without the resolved twin a request naming `/etc` or `/var/run` as a writable
+root passed the floor while `/usr` and `/bin` (real directories there) were correctly refused.
 | Mock        | `mock`                    | Test fixture           | No — records calls, canned results.                                          |
 
 ## Tests

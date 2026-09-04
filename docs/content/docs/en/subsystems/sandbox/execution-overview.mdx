@@ -175,13 +175,67 @@ flowchart TD
 
   Done -.->|"model calls sandbox_bash"| Plugin["cognia-sandboxed-tools.execute()"]
   Plugin --> Router{"executeSandbox(ref, payload)"}
-  Router -->|os| OSExec["transport.call('sandbox_exec') → Rust backend"]
+  Router -->|os| OSExec["registered host executor,<br/>else transport.call('sandbox_exec')"]
+  OSExec --> Confined["run_confined → per-platform backend"]
   Router -->|microvm| MV["getMicrovmExec() → e2b (strict: throw if unregistered)"]
   Router -->|unplaced| Refuse["throw placement-unavailable"]
 
   classDef on fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class Deny,Filter,Tier,Bind,Stamp,Hint on
 ```
+
+## The OS tier on a host without Tauri
+
+`executeSandbox`'s `os` branch used to be `transport.call("sandbox_exec")` and nothing else, which
+is a Tauri `invoke`. On the `cognia-agent` CLI that transport answers `unsupported command`, and no
+companion transport carried the name because it is `target: client` in the companion catalog. The
+tier therefore did not exist off the desktop, while a CLI session still bound a ceiling, clamped
+every model request against it, and reported the sandbox as enabled.
+
+`lib/sandbox/os-exec-bridge` is the seam that fixes it, shaped exactly like the microVM bridge
+beside it. A Node host registers an executor at bootstrap and the router prefers it; the desktop
+registers none and keeps its `invoke` path byte-for-byte. The active confinement probe follows the
+same rule, because asking the desktop's `sandbox_health_check` about a CLI session describes the
+wrong machine.
+
+```ts title="lib/sandbox/session-runtime.ts"
+const hostExecutor = getOsSandboxExec()
+if (hostExecutor) return hostExecutor.execute(osPayload)
+return await transport.call<MicrovmResult>("sandbox_exec", osPayload)
+```
+
+The CLI's executor spawns [`cognia-sandbox-exec`](./os-backends) and hands it the payload the
+`cognia-sandboxed-tools` plugin already builds, so policy resolution and every hardening step stay
+on the Rust side. Refusals reuse the Rust `#[error]` strings verbatim, so a denial reads identically
+on both rails. An executor is registered even when the helper binary is missing: it then refuses
+with the reason and the remedy, which is the same fail-closed outcome as registering nothing but is
+something an operator can act on.
+
+Because whether a backend exists is a runtime fact and a plugin manifest can only state a static
+one, `cognia-sandboxed-tools` is offered on every host that could carry a backend and the call
+refuses where none does. Declaring `browser: blocked` instead hid the tools from the CLI, which
+resolves to the `browser` profile despite being a Node host with a real backend, and left a
+sandbox-enabled session with neither the sandboxed tools nor the unsandboxed builtins that sandbox
+mode denies.
+
+### Turning it on from the CLI
+
+The CLI feeds the same three rungs the desktop reads off `AppSettings`, so one ladder resolves both
+rails:
+
+```jsonc title="cognia-agent config"
+{
+  "sandbox": {
+    "enabled": true,
+    "tier": "os",
+    "policy": { "network": "off", "maxMemoryMb": 2048, "writableRoots": ["/work"] }
+  }
+}
+```
+
+`sandbox/status` reports what the active confinement probe observed rather than whether a policy
+field was filled in; the old meaning keeps its own `policyConfigured` field so a
+configured-but-unenforced ceiling stays visible instead of being flattened into either answer.
 
 ## Strict mode — no bypass
 
@@ -197,7 +251,7 @@ throws rather than silently falling back to the OS tier (see [Sandboxed tools](.
 Every OS and E2B sandbox call is recorded with a dedicated audit surface. The Rust `Surface` enum carries a
 `Sandbox` variant (`src-tauri/src/automation/permission.rs:53`); the dispatcher records an
 allow/deny/error `AuditEntry` for each `sandbox_exec` call and emits an `automation:event`
-(`src-tauri/src/sandbox/mod.rs:99-158`). Because the sandbox owns its own strict-mode policy, the
+(`crates/cognia-automation/src/sandbox/mod.rs:99-158`). Because the sandbox owns its own strict-mode policy, the
 shared permission gate short-circuits it — `Surface::Sandbox => Decision::Allow`
 (`permission.rs:325`) — while the global kill-switch still blocks for defence in depth. The
 Diagnostics tab renders these via `SandboxAuditCard`; see [Observability & UI](./observability-and-ui).

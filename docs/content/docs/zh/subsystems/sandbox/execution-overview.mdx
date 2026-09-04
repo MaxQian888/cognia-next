@@ -171,13 +171,59 @@ flowchart TD
 
   Done -.->|"model calls sandbox_bash"| Plugin["cognia-sandboxed-tools.execute()"]
   Plugin --> Router{"executeSandbox(ref, payload)"}
-  Router -->|os| OSExec["transport.call('sandbox_exec') → Rust backend"]
+  Router -->|os| OSExec["已注册的宿主执行器，<br/>否则 transport.call('sandbox_exec')"]
+  OSExec --> Confined["run_confined → 各平台后端"]
   Router -->|microvm| MV["getMicrovmExec() → e2b (strict: throw if unregistered)"]
   Router -->|unplaced| Refuse["throw placement-unavailable"]
 
   classDef on fill:#7c2d12,stroke:#fb923c,color:#fed7aa
   class Deny,Filter,Tier,Bind,Stamp,Hint on
 ```
+
+## 没有 Tauri 的宿主上的 OS 层
+
+`executeSandbox` 的 `os` 分支过去只有 `transport.call("sandbox_exec")` 一条路，而它就是 Tauri 的
+`invoke`。在 `cognia-agent` CLI 上，那条 stdio 传输会直接回答 `unsupported command`；伴侣传输也从未
+携带这个命令名，因为它在伴侣目录里是 `target: client`。于是这一层在桌面之外根本不存在——而 CLI 会话
+仍然绑定了资源天花板、仍然按它裁剪模型的每一次请求，并且把沙盒报告为已启用。
+
+`lib/sandbox/os-exec-bridge` 就是补上的那道接缝，形状与旁边的 microVM 桥完全一致：Node 宿主在启动时
+注册一个执行器，路由优先用它；桌面不注册任何东西，`invoke` 那条路一字未动。主动约束探针遵循同一条
+规则——拿桌面的 `sandbox_health_check` 去回答一个 CLI 会话，描述的是另一台机器。
+
+```ts title="lib/sandbox/session-runtime.ts"
+const hostExecutor = getOsSandboxExec()
+if (hostExecutor) return hostExecutor.execute(osPayload)
+return await transport.call<MicrovmResult>("sandbox_exec", osPayload)
+```
+
+CLI 的执行器会拉起 [`cognia-sandbox-exec`](./os-backends)，并把 `cognia-sandboxed-tools` 插件本就
+构造好的载荷原样递过去，所以策略解析和每一步硬化都留在 Rust 侧。拒绝理由直接复用 Rust 的
+`#[error]` 字符串，两条轨道上读到的是同一句话。即使 helper 二进制缺失，执行器仍然会被注册：它会带着
+原因和补救方式拒绝——与不注册是同样的 fail-closed 结果，但这一句话是运维能据以行动的。
+
+后端是否存在是一个运行期事实，而插件 manifest 只能声明静态事实，因此 `cognia-sandboxed-tools` 会在
+每一个"可能带后端"的宿主上被提供，由调用本身在没有后端时拒绝。此前声明 `browser: blocked` 反而把这些
+工具从 CLI 上藏了起来——CLI 虽然是带真实后端的 Node 宿主，却解析到 `browser` profile——于是一个启用了
+沙盒的会话既没有沙盒工具，也没有被沙盒模式禁掉的那些未受限内置工具。
+
+### 从 CLI 打开它
+
+CLI 填的就是桌面从 `AppSettings` 读的那三级，因此两条轨道用的是同一条阶梯：
+
+```jsonc title="cognia-agent 配置"
+{
+  "sandbox": {
+    "enabled": true,
+    "tier": "os",
+    "policy": { "network": "off", "maxMemoryMb": 2048, "writableRoots": ["/work"] }
+  }
+}
+```
+
+`sandbox/status` 报告的是主动约束探针观测到的结果，而不是"策略字段填没填"；旧含义保留在自己的
+`policyConfigured` 字段里，这样"配了天花板但没人执行"这种状态是可见的，而不会被压平成两个答案中的
+任意一个。
 
 ## 严格模式——没有旁路
 
@@ -193,7 +239,7 @@ runner 以非零退出），工具调用会**严格拒绝**。在策略层既没
 每一次 OS 和 E2B 沙盒调用都会被记录到专门的审计面。Rust 的 `Surface` 枚举带有一个
 `Sandbox` 变体（`src-tauri/src/automation/permission.rs:53`）；调度器会为每次
 `sandbox_exec` 调用记录一条 allow/deny/error 的 `AuditEntry` 并发出一个 `automation:event`
-（`src-tauri/src/sandbox/mod.rs:99-158`）。由于沙盒拥有自己的严格模式策略，
+（`crates/cognia-automation/src/sandbox/mod.rs:99-158`）。由于沙盒拥有自己的严格模式策略，
 共享权限门会对其短路——`Surface::Sandbox => Decision::Allow`
 （`permission.rs:325`）——同时全局 kill-switch 仍会出于纵深防御而拦截。
 诊断标签页通过 `SandboxAuditCard` 渲染这些记录；见 [可观测性与 UI](./observability-and-ui)。
