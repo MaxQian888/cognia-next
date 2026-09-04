@@ -169,9 +169,9 @@ test.describe("workflow editor — connections", () => {
       "[data-testid='wf-node-trigger.manual'] .react-flow__handle[data-handlepos='right']",
       "[data-testid='wf-node-flow.set'] .react-flow__handle[data-handlepos='left']"
     )
-    // React Flow renders edges asynchronously; allow a tick before counting.
-    await page.waitForTimeout(150)
-    const edges = await page.evaluate(() => document.querySelectorAll(".react-flow__edge").length)
-    expect(edges).toBeGreaterThanOrEqual(1)
+    // React Flow renders edges asynchronously. A fixed 150ms was both flaky and
+    // slow: too short on a loaded machine, and a wasted wait when the edge is
+    // already there. The locator assertion retries until it is.
+    await expect(page.locator(".react-flow__edge")).not.toHaveCount(0)
   })
 })

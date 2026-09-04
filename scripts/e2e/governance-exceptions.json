@@ -19,8 +19,8 @@
       "file": "tests/e2e/mobile/composer-plus/voice.spec.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 1,
-      "reason": "The mocked recorder currently exposes no completion event after the minimum voice capture duration.",
-      "reviewAfter": "2026-08-31"
+      "reason": "The mocked recorder exposes no completion event after the minimum voice capture duration, so the stop button's readiness cannot be awaited. Reviewed 2026-09-04: still true. The seam this needs is a resolved state on the mock recorder that the stop control reflects, at which point the sleep becomes an ordinary toBeEnabled().",
+      "reviewAfter": "2026-12-31"
     },
     {
       "file": "tests/e2e/mobile/chat-render-perf.spec.ts",
@@ -33,36 +33,29 @@
       "file": "tests/e2e/mobile/deeplink-pair.spec.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 1,
-      "reason": "The Capacitor App listener mock currently has no observable subscription-ready signal before event delivery.",
-      "reviewAfter": "2026-08-31"
+      "reason": "Asserts that pushing a cognia:// URL produces no console errors, and \"nothing happened\" has no event to await. Reviewed 2026-09-04: still true. It stops being a sleep once the deep-link handler exposes a settled signal the spec can wait for before reading the error list.",
+      "reviewAfter": "2026-12-31"
     },
     {
       "file": "tests/e2e/mobile/interactions/long-press.spec.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 3,
-      "reason": "The legacy long-press spec mixes intentional hold time with post-action settling and needs an event seam.",
-      "reviewAfter": "2026-08-31"
+      "reason": "Three occurrences, and only two are waits. The 900ms between mouse.down and mouse.up IS the long press: a hold shorter than the threshold is a different gesture, so no seam can remove it and it should not be read as debt. The other two are the 2s entrance-stagger + liveQuery settle before the hold (a row remount mid-hold unmounts the LongPress span and clears its timer) and the 1s spacing between retries. Reviewed 2026-09-04: the settle needs a list-ready signal.",
+      "reviewAfter": "2026-12-31"
     },
     {
       "file": "tests/e2e/mobile/interactions/swipe-row.spec.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 2,
-      "reason": "The swipe-row transition and persistence path currently lack observable transition-end and save-complete seams.",
-      "reviewAfter": "2026-08-31"
+      "reason": "The 2s is the entrance stagger plus the post-seed liveQuery refresh settling, because a row remount mid-gesture resets SwipeRow's reveal state; the 1s is retry spacing. The gesture's own completion is already awaited deterministically through data-open. Reviewed 2026-09-04: the settle needs the same list-ready signal as long-press and should be paid down with it.",
+      "reviewAfter": "2026-12-31"
     },
     {
       "file": "tests/e2e/workflows/editor/copilot-and-i18n-guard.spec.ts",
       "rule": "arbitrary-timeout",
       "occurrences": 1,
-      "reason": "The copilot hydration guard currently waits for a quiet console window and has no explicit settled signal.",
-      "reviewAfter": "2026-08-31"
-    },
-    {
-      "file": "tests/e2e/workflows/editor-connection.spec.ts",
-      "rule": "arbitrary-timeout",
-      "occurrences": 1,
-      "reason": "The rejected connection drag currently exposes no semantic completion event after pointer release.",
-      "reviewAfter": "2026-08-31"
+      "reason": "Flushes deferred translation calls before reading the collected missing-key errors. The assertion is about the ABSENCE of console output, which has no event. Reviewed 2026-09-04: still true; it needs the copilot panel to report hydration-settled.",
+      "reviewAfter": "2026-12-31"
     },
     {
       "file": "tests/e2e/workflows/nodes/action-character/send.spec.ts",
