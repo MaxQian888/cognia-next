@@ -20,6 +20,8 @@ jest.mock("@/lib/tauri/pet-window", () => ({
 let mockIsTauriValue = true
 jest.mock("@/lib/platform/detect", () => ({
   isTauri: () => mockIsTauriValue,
+  // The access gate resolves availability from the platform too.
+  detectPlatform: () => (mockIsTauriValue ? "tauri" : "web"),
 }))
 
 const save = jest.fn()
@@ -140,6 +142,16 @@ describe("registerPetCommands", () => {
     expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "cleaned" })
     byId["pet.treat"]()
     expect(emitPetEvent).toHaveBeenCalledWith({ source: "user", kind: "treated" })
+  })
+
+  it("refuses the interaction when the pet is switched off", async () => {
+    // The regression pin: a chord bound to pet.feed used to reach the bus with
+    // no checks at all, so a hotkey could nurture a pet the user had disabled.
+    settingsValue = { petSettings: { enabled: false } }
+    registerPetCommands()
+    const feed = registerCommand.mock.calls.find((c) => c[0].id === "pet.feed")![0]
+    await feed.handler()
+    expect(emitPetEvent).not.toHaveBeenCalled()
   })
 
   it("pet.toggle-window handler delegates to toggleDesktopPetWindow", async () => {
