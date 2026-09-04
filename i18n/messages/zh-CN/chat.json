@@ -1350,6 +1350,8 @@
       "title": "列出目录"
     },
     "openInReview": "在审阅中打开",
+    "openInWorkspace": "在工作区面板中打开",
+    "openInWorkspaceOutOfScope": "该文件不在当前会话的工作区内。",
     "plan": {
       "title": "计划"
     },

@@ -1,4 +1,5 @@
 const revealWorkspaceReview = jest.fn()
+const revealWorkspaceFile = jest.fn()
 
 let backend = true
 let session: { projectId?: string; executionContext?: Record<string, unknown> } | undefined
@@ -10,13 +11,18 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: { getState: () => ({ projects }) },
 }))
 jest.mock("@/stores/artifact/artifact-dock-layout-store", () => ({
-  useArtifactDockLayoutStore: { getState: () => ({ revealWorkspaceReview }) },
+  useArtifactDockLayoutStore: { getState: () => ({ revealWorkspaceReview, revealWorkspaceFile }) },
 }))
 
-import { canOfferWorkbenchReview, openEditInWorkbenchReview } from "./edit-review-bridge"
+import {
+  canOfferWorkbenchReview,
+  openEditInWorkbenchReview,
+  openFileInWorkbenchWorkspace,
+} from "./edit-review-bridge"
 
 beforeEach(() => {
   revealWorkspaceReview.mockClear()
+  revealWorkspaceFile.mockClear()
   backend = true
   session = { projectId: "p1" }
   projects = [{ id: "p1", roots: [{ id: "r1", path: "/repo", isPrimary: true }] }]
@@ -77,6 +83,43 @@ describe("openEditInWorkbenchReview", () => {
   })
 })
 
+describe("windows roots", () => {
+  // The agent reports `C:\\repo\\a.ts`; the root may be recorded with either
+  // separator. Matching `${base}/` by hand put every Windows path outside its
+  // own root, and the caller's only signal is a silent `false`.
+  it("locates a backslash path inside a backslash root", async () => {
+    projects = [{ id: "p1", roots: [{ id: "r1", path: "C:\\repo", isPrimary: true }] }]
+    expect(
+      await openEditInWorkbenchReview({ sessionId: "s1", absolutePath: "C:\\repo\\src\\a.ts" })
+    ).toBe(true)
+    expect(revealWorkspaceReview).toHaveBeenCalledWith({
+      sessionId: "s1",
+      rootPath: "C:\\repo",
+      relPath: "src/a.ts",
+    })
+  })
+
+  it("matches across mixed separators, case and a trailing slash", async () => {
+    projects = [{ id: "p1", roots: [{ id: "r1", path: "C:/Repo/", isPrimary: true }] }]
+    expect(
+      await openEditInWorkbenchReview({ sessionId: "s1", absolutePath: "c:\\repo\\src\\a.ts" })
+    ).toBe(true)
+    expect(revealWorkspaceReview).toHaveBeenCalledWith({
+      sessionId: "s1",
+      rootPath: "C:/Repo/",
+      relPath: "src/a.ts",
+    })
+  })
+
+  it("still refuses a sibling directory that merely shares a prefix", async () => {
+    projects = [{ id: "p1", roots: [{ id: "r1", path: "C:\\repo", isPrimary: true }] }]
+    expect(
+      await openEditInWorkbenchReview({ sessionId: "s1", absolutePath: "C:\\repo-other\\a.ts" })
+    ).toBe(false)
+    expect(revealWorkspaceReview).not.toHaveBeenCalled()
+  })
+})
+
 describe("a conversation running in a managed worktree", () => {
   const worktreeContext = {
     location: "managedWorktree",
@@ -131,5 +174,136 @@ describe("a conversation running in a managed worktree", () => {
       rootPath: "/repo",
       relPath: "src/a.ts",
     })
+  })
+})
+
+describe("openFileInWorkbenchWorkspace", () => {
+  it("reveals the named file in the dock's editor, carrying the caret", async () => {
+    const routed = await openFileInWorkbenchWorkspace({
+      sessionId: "s1",
+      path: "/repo/src/a.ts",
+      line: 42,
+      column: 7,
+    })
+    expect(routed).toBe(true)
+    expect(revealWorkspaceFile).toHaveBeenCalledWith({
+      sessionId: "s1",
+      rootPath: "/repo",
+      relPath: "src/a.ts",
+      line: 42,
+      column: 7,
+    })
+    // A read is not a change, so it must never open the diff surface.
+    expect(revealWorkspaceReview).not.toHaveBeenCalled()
+  })
+
+  it("refuses under exactly the conditions the review twin refuses under", async () => {
+    backend = false
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "/repo/a.ts" })).toBe(false)
+
+    backend = true
+    session = undefined
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "/repo/a.ts" })).toBe(false)
+
+    session = { projectId: "p1" }
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "/elsewhere/a.ts" })).toBe(
+      false
+    )
+
+    expect(revealWorkspaceFile).not.toHaveBeenCalled()
+  })
+
+  it("follows the worktree a conversation is bound to", async () => {
+    session = {
+      projectId: "p1",
+      executionContext: {
+        location: "managedWorktree",
+        projectRoot: "/repo",
+        workspaceBinding: { kind: "managed", workspaceId: "ws-1" },
+        managedWorkspace: { availability: "available", localRoot: "/repo/.wt/feature" },
+      },
+    }
+    expect(
+      await openFileInWorkbenchWorkspace({
+        sessionId: "s1",
+        path: "/repo/.wt/feature/src/a.ts",
+      })
+    ).toBe(true)
+    expect(revealWorkspaceFile).toHaveBeenCalledWith({
+      sessionId: "s1",
+      rootPath: "/repo/.wt/feature",
+      relPath: "src/a.ts",
+      line: undefined,
+      column: undefined,
+    })
+  })
+})
+
+describe("relative paths reported by Read / Glob / Grep", () => {
+  // Built-in `Read` accepts a relative `file_path`, and `Glob`/`Grep` report
+  // paths relative to the session's working directory. Refusing them made the
+  // majority of tool-card paths inert while the execution root — the very thing
+  // they are relative to — was already resolved right here.
+  it("resolves a relative path against the conversation's execution root", async () => {
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "src/a.ts", line: 9 })).toBe(
+      true
+    )
+    expect(revealWorkspaceFile).toHaveBeenCalledWith({
+      sessionId: "s1",
+      rootPath: "/repo",
+      relPath: "src/a.ts",
+      line: 9,
+      column: undefined,
+    })
+  })
+
+  it("resolves a `./`-prefixed path to the same file", async () => {
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "./src/a.ts" })).toBe(true)
+    expect(revealWorkspaceFile).toHaveBeenCalledWith(
+      expect.objectContaining({ rootPath: "/repo", relPath: "src/a.ts" })
+    )
+  })
+
+  it("resolves against the worktree a conversation is bound to, not the workspace", async () => {
+    session = {
+      projectId: "p1",
+      executionContext: {
+        location: "managedWorktree",
+        projectRoot: "/repo",
+        workspaceBinding: { kind: "managed", workspaceId: "ws-1" },
+        managedWorkspace: { availability: "available", localRoot: "/repo/.wt/feature" },
+      },
+    }
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "src/a.ts" })).toBe(true)
+    expect(revealWorkspaceFile).toHaveBeenCalledWith(
+      expect.objectContaining({ rootPath: "/repo/.wt/feature", relPath: "src/a.ts" })
+    )
+  })
+
+  it("still refuses a relative path that climbs out of the root", async () => {
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "../elsewhere/a.ts" })).toBe(
+      false
+    )
+    expect(revealWorkspaceFile).not.toHaveBeenCalled()
+  })
+
+  it("refuses the root itself, which names no file", async () => {
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "." })).toBe(false)
+    expect(revealWorkspaceFile).not.toHaveBeenCalled()
+  })
+
+  it("joins a relative path onto a Windows root with the root's own separator", async () => {
+    projects = [{ id: "p1", roots: [{ id: "r1", path: "C:\\repo", isPrimary: true }] }]
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "src\\a.ts" })).toBe(true)
+    expect(revealWorkspaceFile).toHaveBeenCalledWith(
+      expect.objectContaining({ rootPath: "C:\\repo", relPath: "src/a.ts" })
+    )
+  })
+
+  it("keeps refusing an absolute path outside the root", async () => {
+    expect(await openFileInWorkbenchWorkspace({ sessionId: "s1", path: "/elsewhere/a.ts" })).toBe(
+      false
+    )
+    expect(revealWorkspaceFile).not.toHaveBeenCalled()
   })
 })

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl"
 import { SearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, useParsedOutput } from "./common"
+import { WorkbenchFileLink } from "./workbench-file-link"
 
 interface GrepInput {
   pattern?: string
@@ -19,6 +20,54 @@ interface GrepOutput {
   lines?: string[]
 }
 
+/** POSIX root (`/…`) or a Windows drive root (`C:\…`, `C:/…`). */
+const ABSOLUTE_HEAD = /^(?:\/|[A-Za-z]:[\\/])/
+
+/**
+ * Whether the head of a result line names a file rather than prose.
+ *
+ * An absolute head is taken as-is, spaces included — a path can legitimately
+ * contain one and the root already proves it is a path. A relative head has no
+ * such proof, so it must be a single token that carries a separator or a dotted
+ * extension. That is what keeps `count` mode's `12 matches`, a grouped-output
+ * `--` separator, and a heading-mode `42:text` line (whose head is a bare
+ * number) out of the link.
+ */
+function isFilePathHead(head: string): boolean {
+  if (head === "") return false
+  if (ABSOLUTE_HEAD.test(head)) return true
+  if (/\s/.test(head)) return false
+  return /[\\/]/.test(head) || /\.[A-Za-z0-9_+-]+$/.test(head)
+}
+
+/**
+ * Split a ripgrep-style result line into the file it names and the rest.
+ *
+ * `content` mode emits `path:line:text`, `files_with_matches` emits the bare
+ * path, and both are common enough that handling only one leaves half the
+ * results unreachable. The path may be relative: `Grep` reports paths relative
+ * to the session's working directory by default, so an absolute-only reading
+ * left the usual output entirely unlinked.
+ *
+ * A line whose head is not path-shaped is returned whole and stays plain text,
+ * which covers the `count` mode's totals, grouped output's separators, and any
+ * line the tool wrapped or truncated.
+ */
+export function splitGrepMatch(line: string): { path: string; line?: number; rest: string } | null {
+  // A Windows drive's own colon is part of the path, never a location suffix.
+  const from = /^[A-Za-z]:[\\/]/.test(line) ? 2 : 0
+  const cut = line.indexOf(":", from)
+  const path = cut === -1 ? line : line.slice(0, cut)
+  if (!isFilePathHead(path)) return null
+  const rest = cut === -1 ? "" : line.slice(cut)
+  const lineNo = /^:(\d+)(?::|$)/.exec(rest)
+  return {
+    path,
+    line: lineNo ? Number(lineNo[1]) : undefined,
+    rest,
+  }
+}
+
 /**
  * Structured renderer for the Claude built-in `Grep` tool. Shows the pattern +
  * scope (path / glob / output mode) as context and the matched files or content
@@ -26,7 +75,7 @@ interface GrepOutput {
  * generic ToolBody (by returning `null`) when there is neither a pattern nor any
  * parsable matches.
  */
-export function GrepCard({ part }: { part: ToolUIPart }) {
+export function GrepCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.grep")
   const input = (part.input ?? {}) as GrepInput
   const parsed = useParsedOutput<GrepOutput>(part.output)
@@ -48,7 +97,7 @@ export function GrepCard({ part }: { part: ToolUIPart }) {
 
   return (
     <McpCardShell
-      title="Grep"
+      title={/* i18n-exempt: the tool's own name, identical in every locale */ "Grep"}
       badge={input.pattern ?? `${lines.length} matches`}
       testId="mcp-grep-card"
     >
@@ -72,11 +121,26 @@ export function GrepCard({ part }: { part: ToolUIPart }) {
               className="mt-1 max-h-60 overflow-auto rounded border bg-muted/50 px-2 py-1 font-mono text-[11px]"
               data-testid="mcp-grep-list"
             >
-              {lines.map((m, i) => (
-                <li key={i} data-testid="mcp-grep-match" className="truncate">
-                  {m}
-                </li>
-              ))}
+              {lines.map((m, i) => {
+                const hit = splitGrepMatch(m)
+                return (
+                  <li key={i} data-testid="mcp-grep-match" className="truncate">
+                    {hit ? (
+                      <>
+                        <WorkbenchFileLink
+                          sessionId={sessionId}
+                          path={hit.path}
+                          line={hit.line}
+                          data-testid="mcp-grep-match-link"
+                        />
+                        {hit.rest}
+                      </>
+                    ) : (
+                      m
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>

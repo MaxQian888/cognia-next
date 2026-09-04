@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ToolUIPart } from "ai"
 import { ReadCard } from "./read-card"
 import type { McpResultBlock } from "@/lib/claude/parts-extensions"
@@ -18,6 +18,16 @@ jest.mock("@/components/chat/renderers/image-block", () => ({
     <img data-testid="img" src={src} alt={alt ?? ""} />
   ),
 }))
+jest.mock("next-intl", () => ({
+  useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
+}))
+jest.mock("@/lib/files/edit-review-bridge", () => ({
+  canOfferWorkbenchReview: () => canOfferWorkbenchReview(),
+  openFileInWorkbenchWorkspace: (args: unknown) => openFileInWorkbenchWorkspace(args),
+}))
+
+const canOfferWorkbenchReview = jest.fn(() => true)
+const openFileInWorkbenchWorkspace = jest.fn(async (_args: unknown) => true)
 
 function readPart(overrides: Partial<ToolUIPart> & { mcpContent?: McpResultBlock[] }): ToolUIPart {
   return {
@@ -28,6 +38,10 @@ function readPart(overrides: Partial<ToolUIPart> & { mcpContent?: McpResultBlock
     ...overrides,
   } as unknown as ToolUIPart
 }
+
+beforeEach(() => {
+  canOfferWorkbenchReview.mockReturnValue(true)
+})
 
 describe("ReadCard", () => {
   it("renders the file contents as a code block for a text read", () => {
@@ -140,5 +154,36 @@ describe("ReadCard", () => {
       />
     )
     expect(container).toBeEmptyDOMElement()
+  })
+  it("makes the file reachable in the workspace panel", () => {
+    render(<ReadCard sessionId="s1" part={readPart({ output: "const a = 1" })} />)
+    expect(screen.getByTestId("mcp-read-path-link")).toHaveTextContent("/tmp/a.ts")
+  })
+
+  it("leaves the path as plain text with no conversation to open it in", () => {
+    render(<ReadCard part={readPart({ output: "const a = 1" })} />)
+    expect(screen.queryByTestId("mcp-read-path-link")).toBeNull()
+    expect(screen.getByTestId("mcp-read-path").textContent).toContain("/tmp/a.ts")
+  })
+
+  it("makes a relative file_path reachable, which built-in Read accepts", async () => {
+    openFileInWorkbenchWorkspace.mockClear()
+    render(
+      <ReadCard
+        sessionId="s1"
+        part={readPart({ input: { file_path: "src/a.ts", offset: 12 }, output: "const a = 1" })}
+      />
+    )
+    const link = screen.getByTestId("mcp-read-path-link")
+    expect(link).toHaveTextContent("src/a.ts")
+    fireEvent.click(link)
+    await waitFor(() =>
+      expect(openFileInWorkbenchWorkspace).toHaveBeenCalledWith({
+        sessionId: "s1",
+        path: "src/a.ts",
+        line: 12,
+        column: undefined,
+      })
+    )
   })
 })

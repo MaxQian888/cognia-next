@@ -8,6 +8,7 @@ import { blockMediaSrc, McpCardShell, languageFromPath, useParsedOutput } from "
 import { CodeBlock } from "@/components/chat/renderers/code-block"
 import { ImageBlock } from "@/components/chat/renderers/image-block"
 import { hasMcpContent } from "@/lib/claude/parts-extensions"
+import { WorkbenchFileLink } from "./workbench-file-link"
 
 interface ReadInput {
   path?: string
@@ -22,7 +23,7 @@ interface ReadOutput {
   startLine?: number
 }
 
-export function ReadCard({ part }: { part: ToolUIPart }) {
+export function ReadCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.read")
   const input = (part.input ?? {}) as ReadInput
   const path = input.path ?? input.file_path
@@ -58,7 +59,12 @@ export function ReadCard({ part }: { part: ToolUIPart }) {
         <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[11px] text-muted-foreground" data-testid="mcp-read-path">
-            {path}
+            <WorkbenchFileLink
+              sessionId={sessionId}
+              path={path}
+              line={input.offset}
+              data-testid="mcp-read-path-link"
+            />
             {input.offset !== undefined && ` · offset ${input.offset}`}
             {input.limit !== undefined && ` · limit ${input.limit}`}
           </p>

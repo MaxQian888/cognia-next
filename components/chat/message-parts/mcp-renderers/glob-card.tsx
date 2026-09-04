@@ -5,13 +5,14 @@ import { useTranslations } from "next-intl"
 import { FileSearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell, useParsedOutput } from "./common"
+import { WorkbenchFileLink } from "./workbench-file-link"
 
 interface GlobOutput {
   matches?: string[]
   files?: string[]
 }
 
-export function GlobCard({ part }: { part: ToolUIPart }) {
+export function GlobCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const t = useTranslations("chat.mcp.glob")
   const input = (part.input ?? {}) as { pattern?: string; path?: string }
   const parsed = useParsedOutput<GlobOutput>(part.output)
@@ -31,7 +32,7 @@ export function GlobCard({ part }: { part: ToolUIPart }) {
 
   return (
     <McpCardShell
-      title="Glob"
+      title={/* i18n-exempt: the tool's own name, identical in every locale */ "Glob"}
       badge={input.pattern ?? `${matches.length} matches`}
       testId="mcp-glob-card"
     >
@@ -56,7 +57,12 @@ export function GlobCard({ part }: { part: ToolUIPart }) {
             >
               {matches.map((m, i) => (
                 <li key={i} data-testid="mcp-glob-match" className="truncate">
-                  {m}
+                  <WorkbenchFileLink
+                    sessionId={sessionId}
+                    path={m}
+                    className="block truncate"
+                    data-testid="mcp-glob-match-link"
+                  />
                 </li>
               ))}
             </ul>

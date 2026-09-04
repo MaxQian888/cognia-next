@@ -4,6 +4,7 @@ import { NotebookPenIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 import { McpCardShell } from "./common"
 import { CodeBlock } from "@/components/chat/renderers/code-block"
+import { WorkbenchFileLink } from "./workbench-file-link"
 
 interface NotebookEditInput {
   notebook_path?: string
@@ -24,7 +25,7 @@ function basename(path: string): string {
  * code block (python or markdown by cell type). Technical params are shown raw,
  * matching ReadCard. Returns `null` (→ generic ToolBody) without a notebook path.
  */
-export function NotebookEditCard({ part }: { part: ToolUIPart }) {
+export function NotebookEditCard({ part, sessionId }: { part: ToolUIPart; sessionId?: string }) {
   const input = (part.input ?? {}) as NotebookEditInput
   if (!input.notebook_path) return null
 
@@ -35,7 +36,7 @@ export function NotebookEditCard({ part }: { part: ToolUIPart }) {
 
   return (
     <McpCardShell
-      title="NotebookEdit"
+      title={/* i18n-exempt: the tool's own name, identical in every locale */ "NotebookEdit"}
       badge={basename(input.notebook_path)}
       testId="mcp-notebookedit-card"
     >
@@ -43,7 +44,11 @@ export function NotebookEditCard({ part }: { part: ToolUIPart }) {
         <NotebookPenIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[11px] text-foreground" data-testid="mcp-notebookedit-path">
-            {input.notebook_path}
+            <WorkbenchFileLink
+              sessionId={sessionId}
+              path={input.notebook_path}
+              data-testid="mcp-notebookedit-path-link"
+            />
           </p>
           {meta && <p className="text-[11px] text-muted-foreground">{meta}</p>}
           {input.new_source && (

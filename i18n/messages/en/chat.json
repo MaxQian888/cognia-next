@@ -1350,6 +1350,8 @@
       "title": "List directory"
     },
     "openInReview": "Open in review",
+    "openInWorkspace": "Open in the workspace panel",
+    "openInWorkspaceOutOfScope": "That file is outside this conversation's workspace.",
     "plan": {
       "title": "Plan"
     },
