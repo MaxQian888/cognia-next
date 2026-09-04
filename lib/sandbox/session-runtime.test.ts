@@ -15,6 +15,7 @@ import { defaultSandboxCapabilities } from "./connection-capabilities"
 import type { SandboxConnectionRow } from "@/types/sandbox"
 import type { MicrovmExecPayload } from "./microvm-bridge"
 import { __resetMicrovmBridgeForTesting, setMicrovmExec } from "./microvm-bridge"
+import { __resetOsSandboxBridgeForTesting, setOsSandboxExec } from "./os-exec-bridge"
 
 const payload = {
   tool: "sandbox_bash",
@@ -930,5 +931,80 @@ describe("SandboxSessionRuntime", () => {
         /cannot claim \/bundles\/alias-b/
       )
     })
+  })
+})
+
+describe("the production OS-tier route", () => {
+  // The singleton wires the module-level `executeOsSandbox`, which every other
+  // test in this file replaces through injected deps. An injected-deps default
+  // nobody exercises is a default nobody has run.
+  const okResult = {
+    exit_code: 0,
+    stdout: "ok",
+    stderr: "",
+    duration: 0,
+    timed_out: false,
+  }
+
+  afterEach(() => {
+    __resetOsSandboxBridgeForTesting()
+    __resetSandboxSessionRuntimeForTesting()
+    jest.clearAllMocks()
+  })
+
+  it("prefers a registered host executor over the Tauri transport", async () => {
+    const execute = jest.fn(async () => okResult)
+    setOsSandboxExec({ execute, probe: async () => ({ confined: true, backend: "t", detail: "" }) })
+    await expect(
+      sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    ).resolves.toMatchObject({ stdout: "ok" })
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(transport.call).not.toHaveBeenCalled()
+  })
+
+  it("encodes stdin as bytes for whichever route runs it", async () => {
+    // The Rust `SandboxCommand.stdin` is `Option<Vec<u8>>`, so the string the
+    // plugin carries has to become a byte array on both routes or the desktop
+    // and the CLI would disagree about what the child reads.
+    const execute = jest.fn(async () => okResult)
+    setOsSandboxExec({ execute, probe: async () => ({ confined: true, backend: "t", detail: "" }) })
+    await sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, {
+      ...payload,
+      command: { ...payload.command, stdin: "hi" },
+    })
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      command: expect.objectContaining({ stdin: [104, 105] }),
+    })
+  })
+
+  it("falls back to the Tauri transport when no executor is registered", async () => {
+    ;(transport.call as jest.Mock).mockResolvedValueOnce(okResult)
+    await expect(
+      sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    ).resolves.toMatchObject({ stdout: "ok" })
+    expect(transport.call).toHaveBeenCalledWith("sandbox_exec", expect.any(Object))
+  })
+
+  it("names the missing backend when neither route exists", async () => {
+    // The sandboxed tools are offered wherever a backend COULD exist, because a
+    // manifest states a static fact and this one is a runtime fact. A host with
+    // neither must refuse in words a reader can act on, not with the
+    // transport's `tauri-only command from web mode`.
+    ;(transport.call as jest.Mock).mockRejectedValueOnce(
+      new Error("tauri-only command from web mode: sandbox_exec")
+    )
+    await expect(
+      sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    ).rejects.toMatchObject({
+      code: "placement-unavailable",
+      message: expect.stringContaining("no OS sandbox backend"),
+    })
+  })
+
+  it("keeps the underlying transport error in the refusal", async () => {
+    ;(transport.call as jest.Mock).mockRejectedValueOnce(new Error("boom"))
+    await expect(
+      sandboxSessionRuntime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    ).rejects.toThrow(/boom/)
   })
 })

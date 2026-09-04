@@ -691,10 +691,28 @@ async function executeOsSandbox(payload: MicrovmExecPayload): Promise<MicrovmRes
   if (hostExecutor) {
     return hostExecutor.execute(osPayload as unknown as MicrovmExecPayload)
   }
-  return transport.call<MicrovmResult>(
-    "sandbox_exec",
-    osPayload as unknown as Record<string, unknown>
-  )
+  try {
+    return await transport.call<MicrovmResult>(
+      "sandbox_exec",
+      osPayload as unknown as Record<string, unknown>
+    )
+  } catch (error) {
+    // The sandboxed tools are offered on every host that could have a backend,
+    // because whether one is present is a runtime fact and a plugin manifest
+    // can only state a static one. A host with neither the Tauri command nor a
+    // registered executor lands here, and `tauri-only command from web mode:
+    // sandbox_exec` explains nothing to whoever reads the tool result. Naming
+    // the missing thing is the difference between a refusal a user can act on
+    // and one that reads like a bug.
+    throw new SandboxRuntimeError(
+      "placement-unavailable",
+      `This host has no OS sandbox backend, so the call was refused rather than run unconfined. ` +
+        `The desktop app provides one; the cognia-agent CLI provides one through its ` +
+        `cognia-sandbox-exec helper. Underlying error: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+    )
+  }
 }
 
 async function recordSandboxAudit(row: AutomationAuditLogRow): Promise<void> {

@@ -10,6 +10,7 @@ import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import type { MicrovmExecPayload, MicrovmResult } from "@cognia/plugin-sdk/api/sandbox"
 import type { SandboxResourcePolicy } from "@cognia/plugin-sdk/api/sandbox"
 
+import manifestJson from "../plugin.json"
 import definition, { SANDBOXED_TOOL_NAMES } from "./index"
 import type { PluginTool, PluginToolContext } from "@cognia/plugin-sdk"
 const OK: MicrovmResult = { exit_code: 0, stdout: "", stderr: "", duration: 1, timed_out: false }
@@ -325,5 +326,33 @@ describe("placement recovery — a lost envelope ref never becomes an unpoliced 
       .get("sandbox_write")!
       .execute({ path: "/repo/out.txt", content: "hi" }, { config: {} })
     expect(calls).toHaveLength(1)
+  })
+})
+
+describe("runtime reach", () => {
+  // Which hosts can load these tools at all. The manifest states a STATIC fact
+  // and whether a sandbox backend exists is a RUNTIME one, so the manifest
+  // offers the tools wherever a backend could be present and the call itself
+  // refuses where none is. Declaring `browser: blocked` instead hid the tools
+  // from the cognia-agent CLI, which resolves to the `browser` profile despite
+  // being a Node host with a real backend, and the model was left with neither
+  // the sandboxed tools nor the unsandboxed builtins that sandbox mode denies.
+  it("is offered on every host that can carry an OS sandbox backend", () => {
+    // The shipped manifest is the JSON, which the builtin registry merges over
+    // the partial the module exports.
+    const compatibility = manifestJson.runtimeCompatibility
+    expect(compatibility.tauri.availability).toBe("supported")
+    expect(compatibility.headless.availability).toBe("supported")
+    expect(compatibility.browser.availability).toBe("supported")
+  })
+
+  it("stays blocked on mobile, which has no backend and no way to gain one", () => {
+    expect(manifestJson.runtimeCompatibility.mobile.availability).toBe("blocked")
+  })
+
+  it("says what a host needs, so a refusal is not mistaken for a bug", () => {
+    const hint = manifestJson.runtimeCompatibility.browser.hint
+    expect(hint).toMatch(/cognia-sandbox-exec/)
+    expect(hint).toMatch(/refused/)
   })
 })

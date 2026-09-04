@@ -1498,7 +1498,7 @@ describe("PluginManager", () => {
 
       // Every plugin in the browser builtin registry must DECLARE its browser
       // runtime compatibility with a valid availability value. An explicit
-      // `blocked` (e.g. cognia-sandboxed-tools, desktop-only by design) is
+      // `blocked` (e.g. cognia-computer-use, which needs a desktop to drive) is
       // fine — what must never recur is a missing block (workspace-tools /
       // web-tools) or an out-of-enum value (workflow-ai's "available",
       // screenshot's "partial"), both of which silently blocked the plugin

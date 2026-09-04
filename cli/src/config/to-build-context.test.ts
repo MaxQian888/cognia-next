@@ -568,3 +568,59 @@ describe("toBuildContext — opt-in auto routing", () => {
     expect(ctx.routingContextHint).toBeUndefined()
   })
 })
+
+describe("toBuildContext — sandbox settings", () => {
+  it("leaves every sandbox field absent when the config says nothing", () => {
+    // Absent must resolve to off through the shared ladder, not to a CLI
+    // default that diverges from the desktop's.
+    const appSettings = toBuildContext({ sessionId: "s1", now: NOW, config: cfg() })
+      .appSettings as unknown as Record<string, unknown>
+    expect("sandboxDefaultEnabled" in appSettings).toBe(false)
+    expect("sandboxTier" in appSettings).toBe(false)
+    expect("sandboxPolicy" in appSettings).toBe(false)
+  })
+
+  it("feeds enabled / tier / policy onto the rung resolveSendOptions reads", () => {
+    const appSettings = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({
+        sandbox: {
+          enabled: true,
+          tier: "os",
+          policy: { network: "off", maxMemoryMb: 512, writableRoots: ["/work"] },
+        },
+      }),
+    }).appSettings as unknown as Record<string, unknown>
+    expect(appSettings.sandboxDefaultEnabled).toBe(true)
+    expect(appSettings.sandboxTier).toBe("os")
+    expect(appSettings.sandboxPolicy).toEqual({
+      network: "off",
+      maxMemoryMb: 512,
+      writableRoots: ["/work"],
+    })
+  })
+
+  it("carries an explicit false rather than dropping it", () => {
+    // `enabled: false` has to reach the ladder as false: dropping it would let
+    // a lower rung turn the sandbox back on against the operator's instruction.
+    const appSettings = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ sandbox: { enabled: false } }),
+    }).appSettings as unknown as Record<string, unknown>
+    expect(appSettings.sandboxDefaultEnabled).toBe(false)
+  })
+
+  it("carries a policy ceiling even when the sandbox itself is off", () => {
+    // The ceiling also clamps native Computer Use confinement, which does not
+    // depend on the shell tier being sandboxed.
+    const appSettings = toBuildContext({
+      sessionId: "s1",
+      now: NOW,
+      config: cfg({ sandbox: { policy: { network: "off" } } }),
+    }).appSettings as unknown as Record<string, unknown>
+    expect(appSettings.sandboxPolicy).toEqual({ network: "off" })
+    expect("sandboxDefaultEnabled" in appSettings).toBe(false)
+  })
+})

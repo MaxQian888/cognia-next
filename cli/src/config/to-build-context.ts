@@ -306,6 +306,18 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     providerSettings: buildProviderSettings(config),
     customProviders: buildCustomProviders(config),
     webTools: { enabled: config.webTools !== false },
+    // The same three rungs the desktop reads off AppSettings. Feeding them here
+    // rather than inventing a CLI-specific gate means `resolveSendOptions`
+    // applies one ladder: the session and character rungs above still win, the
+    // unsandboxed Bash / Edit / Write are denied by the same block, and the
+    // model is steered to the same `sandbox_*` tools. Absent config leaves
+    // `sandboxDefaultEnabled` undefined, which resolves to off exactly as
+    // before.
+    ...(config.sandbox?.enabled === undefined
+      ? {}
+      : { sandboxDefaultEnabled: config.sandbox.enabled }),
+    ...(config.sandbox?.tier ? { sandboxTier: config.sandbox.tier } : {}),
+    ...(config.sandbox?.policy ? { sandboxPolicy: config.sandbox.policy } : {}),
     ...buildSearchAppSettings(config),
     selfInvokeTools: {
       skill: config.skillTool === true,

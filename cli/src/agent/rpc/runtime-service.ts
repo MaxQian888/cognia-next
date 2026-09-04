@@ -1393,9 +1393,21 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         const session = materialize(requireString(params, "sessionId"))
         const persisted = session.durableState.read(session.id)
         const policy = persisted.sandboxPolicy as SandboxResourcePolicy | null
+        // `enabled` used to mean "a ceiling is configured", which is not the
+        // question a caller asks it. On this host the OS tier had no
+        // implementation at all, so a session with a policy answered
+        // `enabled: true` while every tool call ran unconfined. It now reports
+        // what the active confinement probe observed, and the old meaning keeps
+        // its own field so a configured-but-unenforced ceiling is visible
+        // rather than being flattened into either answer.
+        const { codeSandboxStatus } = await import("@/lib/ai/code-mode/sandbox-status")
+        const confinement = await codeSandboxStatus()
         return result({
-          enabled: policy !== null,
+          enabled: confinement.confined,
+          policyConfigured: policy !== null,
           policy,
+          backend: confinement.backend,
+          detail: confinement.detail,
           workspace: session.config.cwd,
           snapshotCount: Object.keys(persisted.sandboxSnapshots).length,
         })

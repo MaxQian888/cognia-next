@@ -2,7 +2,7 @@
   "id": "cognia-sandboxed-tools",
   "name": "Sandboxed Tools",
   "version": "0.1.0",
-  "description": "OS-level sandboxed Bash / Edit / Write / text_editor tools (ADR-0028). When a session enables sandbox mode the SDK builtins are replaced by these, which route through the platform sandbox backend (bwrap / sandbox-exec) via the sandbox_exec command.",
+  "description": "OS-level sandboxed Bash / Edit / Write / text_editor tools (ADR-0028). When a session enables sandbox mode the SDK builtins are replaced by these, which route through the host's sandbox backend: the sandbox_exec command on the Tauri desktop, or the cognia-sandbox-exec helper on a Node host. A host with neither refuses the call instead of running it unconfined.",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",
@@ -16,8 +16,9 @@
   "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "blocked",
-      "hint": "OS sandbox backends (bwrap / sandbox-exec) run in the Tauri desktop shell — sandboxed exec is unavailable in the browser."
+      "availability": "supported",
+      "entrypoint": "src/index.ts",
+      "hint": "Sandboxed execution needs an OS sandbox backend on the host. The Tauri desktop has one, and a Node host (the cognia-agent CLI, the supervised brain) registers the cognia-sandbox-exec helper at bootstrap. Where neither is present, such as a plain browser tab, every call is refused with that reason rather than running unconfined."
     },
     "tauri": {
       "availability": "supported",
@@ -26,6 +27,10 @@
     "mobile": {
       "availability": "blocked",
       "reason": "OS sandbox backends (bwrap / sandbox-exec) run in the desktop shell — unavailable on mobile."
+    },
+    "headless": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
     }
   }
 }

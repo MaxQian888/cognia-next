@@ -334,8 +334,20 @@ export type ExternalToolResponse =
   | { kind: "error"; error: { code: string; message?: string; retryable?: boolean } }
 
 export interface SandboxStatus {
+  /**
+   * Whether sandboxed execution is actually enforcing on this host, as observed
+   * by the active confinement probe. Not "a ceiling is configured": a host with
+   * no sandbox backend answers `false` even with a policy in force, because a
+   * policy nothing enforces is not a sandbox.
+   */
   enabled: boolean
+  /** Whether a resource ceiling is configured, enforced or not. */
+  policyConfigured?: boolean
   policy?: Record<string, unknown>
+  /** Backend id behind the answer (`macos-sandbox-exec`, `linux-bwrap`, ...). */
+  backend?: string
+  /** Why confinement is unavailable, when it is. */
+  detail?: string
   workspace?: string
   [key: string]: unknown
 }

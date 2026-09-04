@@ -661,11 +661,65 @@ describe("createAgentRuntimeService", () => {
     expect(
       await service.handle("sandbox/status", { sessionId: "session-1" }, context as never)
     ).toMatchObject({
-      enabled: true,
+      // `policyConfigured` is the old meaning of `enabled`: a ceiling exists.
+      // `enabled` now answers whether anything enforces it.
+      policyConfigured: true,
       snapshotCount: 1,
       policy: { network: "off", writableRoots: [home], maxMemoryMb: 512 },
     })
     await service.close()
+  })
+
+  it("does not report a configured ceiling as an enforcing sandbox", async () => {
+    // The bug this pins: `enabled` used to mean `policy !== null`, so a host
+    // with no sandbox backend at all answered "enabled" while every tool call
+    // ran unconfined. A caller reading that field is asking whether their work
+    // is confined, not whether someone filled in a settings form.
+    const { setOsSandboxExec, __resetOsSandboxBridgeForTesting } =
+      await import("@/lib/sandbox/os-exec-bridge")
+    const { __resetCodeSandboxStatus } = await import("@/lib/ai/code-mode/sandbox-status")
+    const sessionRoot = path.join(home, "sessions")
+    const statePath = path.join(sessionRoot, "session-1", "rpc-state.json")
+    mkdirSync(path.dirname(statePath), { recursive: true })
+    writeFileSync(
+      statePath,
+      JSON.stringify({ sandboxPolicy: { network: "off", writableRoots: [home] } })
+    )
+    const service = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      sessionDirOverride: sessionRoot,
+      mintSessionId: () => "session-1",
+    })
+    await service.handle("session/create", {}, context as never)
+
+    try {
+      __resetCodeSandboxStatus()
+      setOsSandboxExec({
+        execute: async () => {
+          throw new Error("not used")
+        },
+        probe: async () => ({ confined: false, backend: "", detail: "helper not found" }),
+      })
+      expect(
+        await service.handle("sandbox/status", { sessionId: "session-1" }, context as never)
+      ).toMatchObject({ enabled: false, policyConfigured: true, detail: "helper not found" })
+
+      __resetCodeSandboxStatus()
+      setOsSandboxExec({
+        execute: async () => {
+          throw new Error("not used")
+        },
+        probe: async () => ({ confined: true, backend: "macos-sandbox-exec", detail: "ok" }),
+      })
+      expect(
+        await service.handle("sandbox/status", { sessionId: "session-1" }, context as never)
+      ).toMatchObject({ enabled: true, policyConfigured: true, backend: "macos-sandbox-exec" })
+    } finally {
+      __resetOsSandboxBridgeForTesting()
+      __resetCodeSandboxStatus()
+      await service.close()
+    }
   })
 
   it("binds the persisted ceiling before a turn can dispatch tools", async () => {

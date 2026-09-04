@@ -656,6 +656,40 @@ const searchProvidersSchema = z
   })
 
 /** Non-secret search policy stored under `config.json.search`. */
+/**
+ * Sandbox settings, shaped to feed the shared `resolveSendOptions` ladder.
+ *
+ * The desktop reads the same three values off `AppSettings`; the CLI's config
+ * is the same rung of the same ladder rather than a parallel mechanism, so a
+ * session, a character and the app default resolve here exactly as they do
+ * there.
+ */
+const sandboxPolicySchema = z
+  .object({
+    maxCpuSeconds: z.number().int().min(0).optional(),
+    maxMemoryMb: z.number().int().min(0).optional(),
+    network: z.enum(["off", "on", "allowlist"]).optional(),
+    networkAllowlist: z.array(z.string().min(1)).optional(),
+    writableRoots: z.array(z.string().min(1)).optional(),
+    readableRoots: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
+const sandboxConfigSchema = z
+  .object({
+    /** Turn sandboxed execution on for every session this CLI runs. */
+    enabled: z.boolean().optional(),
+    /**
+     * Which tier carries the shell. `os` is this machine's kernel sandbox.
+     * `microvm` needs a registered e2b adapter and refuses without one rather
+     * than quietly running on the host.
+     */
+    tier: z.enum(["os", "microvm"]).optional(),
+    /** Resource / path / network ceiling the model can narrow but never widen. */
+    policy: sandboxPolicySchema.optional(),
+  })
+  .strict()
+
 export const searchConfigSchema = z
   .object({
     defaultProvider: z.enum(CLI_SEARCH_PROVIDER_IDS).optional(),
@@ -680,6 +714,9 @@ export const searchConfigSchema = z
   .strict()
 
 export type CliSearchConfig = z.infer<typeof searchConfigSchema>
+
+/** Sandbox settings as resolved from the CLI's config layers. */
+export type CliSandboxConfig = z.infer<typeof sandboxConfigSchema>
 
 /**
  * What we remember for one external agent backend.
@@ -843,6 +880,19 @@ export const cliConfigFileSchema = z
      * provider configured (otherwise it returns a clean "no provider" error).
      */
     webTools: z.boolean().optional(),
+    /**
+     * OS-level sandboxing for the model's shell and file tools (ADR-0028).
+     *
+     * Off by default. When on, `resolveSendOptions` denies the unsandboxed
+     * Bash / Edit / Write (and the sidecar's lowercase twins and the
+     * process-execution escape hatches) and steers the model to the four
+     * `sandbox_*` tools, which run through the `cognia-sandbox-exec` helper.
+     * A host with no sandbox backend refuses those calls rather than running
+     * them unconfined, so turning this on can leave a session with no shell at
+     * all. That is the intended failure: `/doctor` reports whether the backend
+     * is present.
+     */
+    sandbox: sandboxConfigSchema.optional(),
     /** Provider-backed web search settings for the desktop-independent CLI. */
     search: searchConfigSchema.optional(),
     /**
@@ -1142,6 +1192,8 @@ export interface ResolvedConfig {
   devPluginsDir?: string
   /** First-class web tools (web_search / web_fetch). On unless set false. */
   webTools?: boolean
+  /** OS-level sandboxing for the model's shell and file tools. Off by default. */
+  sandbox?: CliSandboxConfig
   /** Fully layered search policy and provider credentials. */
   search?: CliSearchConfig
   /** Opt-in automatic tier routing for one-shot/headless runs. Default off. */
