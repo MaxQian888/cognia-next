@@ -4,6 +4,8 @@ import test from "node:test"
 import {
   analyze,
   collectChannelReferences,
+  selectArmFiles,
+  DELEGATED_ARM_FILES,
   collectEmittedChannels,
   matchesEventCatalog,
   parseEventChannelCatalog,
@@ -223,6 +225,72 @@ pub async fn ${fn}(name: &str) {
 `
     assert.deepEqual(extractDispatchArms(source, "rpc/x.rs"), [], fn)
   }
+})
+
+test("extractDispatchArms reads every SFTP arm out of the delegated function", () => {
+  // The real shape: one `dispatch_sftp` holding an or-pattern arm, a plain arm
+  // and a wildcard. All three must land the same way they do for a bare
+  // `dispatch`, because nothing downstream knows which file an arm came from.
+  const source = `
+pub async fn dispatch_sftp(
+    app: Option<&tauri::AppHandle>,
+    name: &str,
+    args: &Value,
+) -> Result<Value, SftpFailure> {
+    match name {
+        "sftp_list_dir"
+        | "sftp_stat" => {
+            let profile_id: String = required(&args, "profileId")?;
+            Ok(json!({ "entries": [] }))
+        }
+        "sftp_download" => {
+            let remote: String = required(&args, "remotePath")?;
+            Ok(json!({}))
+        }
+        _ => Err(SftpFailure::new("unknown_command", name)),
+    }
+}
+`
+  const arms = extractDispatchArms(source, "src-tauri/src/sftp_service.rs")
+  assert.deepEqual(
+    arms.flatMap((a) => a.names),
+    ["sftp_list_dir", "sftp_stat", "sftp_download"]
+  )
+  assert.deepEqual(
+    arms.map((a) => a.file),
+    ["src-tauri/src/sftp_service.rs", "src-tauri/src/sftp_service.rs"]
+  )
+  assert.match(arms[0].body, /profileId/)
+})
+
+test("selectArmFiles adds the delegated sources and drops test modules", () => {
+  // Without the delegated file every SFTP command parses as arm-less, and the
+  // gate reports 14 runtime 404s that do not exist.
+  const selected = selectArmFiles(
+    ["src-tauri/src/companion_api/rpc/chat.rs", "src-tauri/src/companion_api/rpc/tests.rs", ""],
+    { exists: () => true }
+  )
+  assert.deepEqual(selected, [
+    "src-tauri/src/companion_api/rpc/chat.rs",
+    "src-tauri/src/sftp_service.rs",
+  ])
+  assert.deepEqual(DELEGATED_ARM_FILES, ["src-tauri/src/sftp_service.rs"])
+})
+
+test("selectArmFiles skips a tracked file that is no longer on disk", () => {
+  // `git ls-files` still lists a tracked file that was deleted but not staged.
+  // Reading one throws ENOENT out of the middle of the scan, so the gate
+  // crashes instead of reporting — and a crash is not a verdict.
+  const selected = selectArmFiles(["gone.rs", "here.rs"], {
+    delegated: ["delegated.rs"],
+    exists: (file) => file !== "gone.rs",
+  })
+  assert.deepEqual(selected, ["here.rs", "delegated.rs"])
+})
+
+test("selectArmFiles scans a delegated file once even if git already listed it", () => {
+  const selected = selectArmFiles(["src-tauri/src/sftp_service.rs"], { exists: () => true })
+  assert.deepEqual(selected, ["src-tauri/src/sftp_service.rs"])
 })
 
 test("armReadFields covers every field-reader spelling, aliases included", () => {

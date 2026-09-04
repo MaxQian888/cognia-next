@@ -72,6 +72,26 @@ export function isHeadlessHost(): boolean {
 }
 
 /**
+ * True inside the standalone `cognia-agent` CLI process.
+ *
+ * Like {@link isHeadlessHost} this is a HOST property, not a webview kind, and
+ * for the same reason it is a marker rather than a sniff: the CLI is a Node
+ * process with no `window` of its own, which is indistinguishable from SSR by
+ * inspection alone. `cli/src/cli/entry.ts` sets `__COGNIA_CLI__` on the CLI
+ * role before any `@/lib` module is imported.
+ *
+ * Deliberately NOT folded into {@link detectPlatform}: the CLI resolves to
+ * `web` there, sixty call sites branch on that answer, and re-labelling the
+ * runtime to fix one gate would change all of them at once. What the CLI
+ * actually needs said about it is narrower — it owns a process table — and
+ * that is asked and answered where it matters
+ * (`lib/ai/agent/external/process-plane.ts`).
+ */
+export function isCliHost(): boolean {
+  return (globalThis as Record<string, unknown>).__COGNIA_CLI__ === true
+}
+
+/**
  * True when the resolved runtime is native mobile. Uses {@link detectPlatform}
  * precedence (so a stray Tauri marker downgrades it to non-mobile). This is the
  * predicate viewport hooks use to pin themselves to the mobile layout.

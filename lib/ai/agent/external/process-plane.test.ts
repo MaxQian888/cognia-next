@@ -7,6 +7,7 @@ import {
   canDetectInstalledAgents,
   canStartExternalAgentProcess,
   externalAgentProcessPlane,
+  externalAgentProcessPlaneScope,
   PROCESS_PLANE_COMMANDS,
   PROCESS_PLANE_FEATURE,
   PROCESS_SPAWN_CAPABILITY,
@@ -261,5 +262,27 @@ describe("externalAgentProcessPlane", () => {
     // environment there is no Tauri, no host and no paired target, so the
     // honest answer is `no-host`, and it is reached without throwing.
     expect(externalAgentProcessPlane()).toEqual({ ok: false, reason: "no-host" })
+  })
+
+  it("answers `local` through the real defaults inside the CLI process", () => {
+    // The regression this pins: the CLI has no `window`, so the capability
+    // baseline it is handed is the browser's and `hasCapability("shell")` is
+    // false. Every stdio agent started from `cognia-agent chat --backend …`
+    // was refused with the "desktop app, or a paired Host" message, about a
+    // child the CLI spawns itself. Marker set by cli/src/runtime/
+    // cli-host-marker.ts, and read here through the production defaults.
+    ;(globalThis as Record<string, unknown>).__COGNIA_CLI__ = true
+    try {
+      expect(externalAgentProcessPlane(PROCESS_PLANE_COMMANDS.spawn)).toEqual({
+        ok: true,
+        via: "local",
+      })
+      expect(canStartExternalAgentProcess()).toBe(true)
+      expect(canDetectInstalledAgents()).toBe(true)
+      // One machine, so the model-surface cache stays keyed to this process.
+      expect(externalAgentProcessPlaneScope()).toBe("local")
+    } finally {
+      delete (globalThis as Record<string, unknown>).__COGNIA_CLI__
+    }
   })
 })

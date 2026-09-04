@@ -5,6 +5,7 @@ import {
   detectInputCapabilities,
   detectPlatform,
   isCapacitor,
+  isCliHost,
   isNativeMobile,
   isTauri,
 } from "./detect"
@@ -31,6 +32,7 @@ function setCapacitor(state: "native" | "web" | "absent" | "broken") {
 
 afterEach(() => {
   delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+  delete (globalThis as Record<string, unknown>).__COGNIA_CLI__
   setTauri(false)
   setCapacitor("absent")
   Object.defineProperty(window, "matchMedia", {
@@ -106,6 +108,30 @@ describe("isCapacitor", () => {
     setTauri(true)
     setCapacitor("native")
     expect(isCapacitor()).toBe(true)
+  })
+})
+
+describe("isCliHost", () => {
+  it("is false with no marker", () => {
+    expect(isCliHost()).toBe(false)
+  })
+
+  it("is true only for the exact `true` marker", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_CLI__ = "yes"
+    expect(isCliHost()).toBe(false)
+    ;(globalThis as Record<string, unknown>).__COGNIA_CLI__ = true
+    expect(isCliHost()).toBe(true)
+  })
+
+  it("stays out of the platform vocabulary: the CLI is still `web` and not headless", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_CLI__ = true
+
+    // Deliberate. Sixty call sites branch on `detectPlatform()`, and the CLI
+    // has always read as `web` there. The marker answers a narrower question
+    // (this process owns a process table) and must not silently re-label the
+    // runtime or borrow the headless host's server-backed behavior.
+    expect(detectPlatform()).toBe("web")
+    expect(isTauri()).toBe(false)
   })
 })
 

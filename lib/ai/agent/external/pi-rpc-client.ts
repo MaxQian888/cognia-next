@@ -1123,10 +1123,33 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {
     const record = this.requireProcess(sessionId)
     const { provider, modelId: id } = parsePiModel(modelId)
-    await record.peer.sendCommand(
-      "set_model",
-      provider ? { provider, modelId: id } : { modelId: id }
-    )
+    try {
+      await record.peer.sendCommand(
+        "set_model",
+        provider ? { provider, modelId: id } : { modelId: id }
+      )
+    } catch (error) {
+      throw new Error(this.explainModelRefusal(modelId, error), { cause: error })
+    }
+  }
+
+  /**
+   * Say why a model Pi advertises elsewhere is not in THIS session's catalog.
+   *
+   * `Model not found` is the whole message Pi gives, and under the default
+   * `isolated` policy it is usually not about the id at all: the session runs
+   * `--no-extensions`, and a provider contributed by one of the user's own Pi
+   * extensions simply does not exist inside it. Without this the user reads
+   * "not found" about a model `pi --list-models` had just printed for them.
+   *
+   * Host-neutral on purpose. The desktop changes this in the agent's settings
+   * and the CLI in its config file, so the message names the setting rather
+   * than a command only one of them has.
+   */
+  private explainModelRefusal(modelId: string, error: unknown): string {
+    const detail = error instanceof Error ? error.message : String(error)
+    if (this.extensionPolicy() !== "isolated" || !/not found/i.test(detail)) return detail
+    return `${detail} — this session runs with your own Pi extensions disabled (extension policy "isolated"), so a model contributed by one of them is not in its catalog. Set this agent's Pi extension policy to "global" to load them.`
   }
 
   /**
@@ -1371,7 +1394,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   async listModelProviders(): Promise<PiProviderListing> {
     const config = this._config
     if (!config) return { status: "unreadable" }
-    const { stdout } = await this.runCliProbe(config, ["--list-models"], "models", 20000)
+    const { stdout } = await this.runCliProbe(config, this.listModelsArgs(), "models", 20000)
     return parsePiModelProviders(stdout)
   }
 
@@ -1386,8 +1409,28 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   async listAgentModels(): Promise<PiModelListing> {
     const config = this._config
     if (!config) return { status: "unreadable" }
-    const { stdout } = await this.runCliProbe(config, ["--list-models"], "models", 20000)
+    const { stdout } = await this.runCliProbe(config, this.listModelsArgs(), "models", 20000)
     return parsePiModelListing(stdout)
+  }
+
+  /**
+   * `--list-models` under the SAME isolation the session will run with.
+   *
+   * A bare `pi --list-models` reads the user's whole stack, extensions
+   * included. A Cognia session runs `isolated` by default, which is
+   * `--no-extensions`, and an extension-contributed provider is simply not in
+   * that process's catalog: on this machine the bare listing offers 70 models
+   * and the isolated session can select 3. The picker showed all 70, `set_model`
+   * answered "Model not found" for the other 67, the manager logged that and
+   * moved on, and the turn ran on Pi's default model instead. The user picked a
+   * model, the banner named it, and a different one answered.
+   *
+   * So the probe carries the policy flags. What the picker lists is then
+   * exactly what the session can select, and a model missing from it is a real
+   * fact about this configuration rather than an artefact of how it was read.
+   */
+  private listModelsArgs(): string[] {
+    return ["--list-models", ...extensionPolicyArgs(this.extensionPolicy())]
   }
 
   /**

@@ -193,11 +193,56 @@ export interface PiPermissionMarkerPayload {
   tool: string
   /** The permission mode that produced the `ask`, for the audit trail. */
   mode: string
+  /**
+   * The call's own arguments, when they fit.
+   *
+   * Without them the approval read "Allow bash?" and nothing else: the command
+   * about to run was not on screen, and for `write`/`edit` neither was the
+   * change. Every other agent Cognia drives sends its tool input with the
+   * request, so this is the field that lets Pi's approval render the same
+   * summary and the same diff instead of a bare tool name.
+   *
+   * Optional because it is carried inside a dialog title, which is not the
+   * place for an unbounded payload — see {@link PI_PERMISSION_INPUT_LIMIT}. A
+   * caller that drops it still gets the human-readable message.
+   */
+  input?: Record<string, unknown>
 }
+
+/**
+ * How much serialized tool input an approval may carry.
+ *
+ * The arguments ride inside a dialog title on Pi's stdio wire, so a 5 MB file
+ * body would push a single frame through the transport for a preview nobody
+ * can read. Past this the input is dropped and the prompt falls back to the
+ * message the extension wrote, which names the tool and its target.
+ */
+export const PI_PERMISSION_INPUT_LIMIT = 16_000
 
 /** Build the `title` for a native-tool approval dialog. */
 export function encodePiPermissionTitle(payload: PiPermissionMarkerPayload): string {
-  return `${PI_PERMISSION_MARKER} ${JSON.stringify(payload)}`
+  return `${PI_PERMISSION_MARKER} ${JSON.stringify(withBoundedInput(payload))}`
+}
+
+/**
+ * Drop the tool input when it does not fit the title.
+ *
+ * Fails toward a smaller prompt, never toward an unsendable frame: an approval
+ * that cannot be transmitted blocks the tool with no way for the user to answer.
+ */
+export function withBoundedInput(payload: PiPermissionMarkerPayload): PiPermissionMarkerPayload {
+  if (!payload.input) return payload
+  let serialized: string
+  try {
+    serialized = JSON.stringify(payload.input)
+  } catch {
+    // Circular or otherwise unserializable: the message still describes the call.
+    const { input: _dropped, ...rest } = payload
+    return rest
+  }
+  if (serialized.length <= PI_PERMISSION_INPUT_LIMIT) return payload
+  const { input: _tooBig, ...rest } = payload
+  return rest
 }
 
 /**
@@ -214,9 +259,17 @@ export function decodePiPermissionTitle(title: unknown): PiPermissionMarkerPaylo
   try {
     const parsed = JSON.parse(title.slice(PI_PERMISSION_MARKER.length + 1)) as unknown
     if (!parsed || typeof parsed !== "object") return undefined
-    const { tool, mode } = parsed as Partial<PiPermissionMarkerPayload>
+    const { tool, mode, input } = parsed as Partial<PiPermissionMarkerPayload>
     if (typeof tool !== "string" || !tool) return undefined
-    return { tool, mode: typeof mode === "string" ? mode : "unknown" }
+    return {
+      tool,
+      mode: typeof mode === "string" ? mode : "unknown",
+      // An older extension sends no input at all, and a hostile one could send
+      // anything: only a plain object becomes tool arguments.
+      ...(input && typeof input === "object" && !Array.isArray(input)
+        ? { input: input as Record<string, unknown> }
+        : {}),
+    }
   } catch {
     return undefined
   }

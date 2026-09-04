@@ -6,6 +6,7 @@ import {
   decodePiPermissionTitle,
   decodePiToolPolicy,
   encodePiPermissionTitle,
+  PI_PERMISSION_INPUT_LIMIT,
   encodePiToolPolicy,
   resolvePiToolPolicy,
 } from "./pi-permission"
@@ -147,6 +148,11 @@ describe("bundled extension parity", () => {
       decisions: Record<string, string>
       fallback: string
     }
+    __markerPayloadForTests?: (
+      toolName: string,
+      mode: string,
+      input: Record<string, unknown> | undefined
+    ) => Record<string, unknown>
     COGNIA_PI_EXTENSION_VERSION: number
     COGNIA_PERMISSION_MARKER: string
   }
@@ -162,6 +168,30 @@ describe("bundled extension parity", () => {
    */
   it("uses the same approval marker the mapper matches on", () => {
     expect(extension.COGNIA_PERMISSION_MARKER).toBe(PI_PERMISSION_MARKER)
+  })
+
+  it("sends an approval payload the app-side decoder reads back whole", () => {
+    const build = extension.__markerPayloadForTests
+    if (!build) throw new Error("extension did not export its payload builder for testing")
+
+    const decoded = decodePiPermissionTitle(
+      `${PI_PERMISSION_MARKER} ${JSON.stringify(build("bash", "acceptEdits", { command: "ls" }))}`
+    )
+    expect(decoded).toEqual({ tool: "bash", mode: "acceptEdits", input: { command: "ls" } })
+  })
+
+  it("applies the same input ceiling the app-side encoder does", () => {
+    // Two copies of one limit: if the extension's were the larger, it would send
+    // a frame the decoder accepts but the transport should never have carried.
+    const build = extension.__markerPayloadForTests!
+    const huge = { content: "x".repeat(PI_PERMISSION_INPUT_LIMIT + 1) }
+    expect(build("write", "default", huge)).toEqual({ tool: "write", mode: "default" })
+    const justFits = { content: "x".repeat(PI_PERMISSION_INPUT_LIMIT - 100) }
+    expect(build("write", "default", justFits)).toEqual({
+      tool: "write",
+      mode: "default",
+      input: justFits,
+    })
   })
 
   it("reads a policy identically to the app-side decoder", () => {
@@ -225,6 +255,42 @@ describe("native-tool approval marker", () => {
     ]) {
       expect(decodePiPermissionTitle(title)).toBeUndefined()
     }
+  })
+
+  it("carries the call's arguments so the prompt can show what it approves", () => {
+    // "Allow bash?" with no command was the whole prompt before this: the user
+    // had to approve something that was never on screen.
+    const title = encodePiPermissionTitle({
+      tool: "bash",
+      mode: "acceptEdits",
+      input: { command: "echo hi" },
+    })
+    expect(decodePiPermissionTitle(title)).toEqual({
+      tool: "bash",
+      mode: "acceptEdits",
+      input: { command: "echo hi" },
+    })
+  })
+
+  it("drops arguments too big for a dialog title instead of sending them", () => {
+    // The payload rides inside a title on Pi's stdio wire. A whole file body
+    // would push one enormous frame for a preview nobody can read, so it is
+    // dropped and the prompt falls back to the extension's own line.
+    const huge = "x".repeat(PI_PERMISSION_INPUT_LIMIT + 1)
+    const decoded = decodePiPermissionTitle(
+      encodePiPermissionTitle({ tool: "write", mode: "default", input: { content: huge } })
+    )
+    expect(decoded).toEqual({ tool: "write", mode: "default" })
+  })
+
+  it("refuses arguments that are not a plain object", () => {
+    // An older extension sends none at all; nothing else may become tool input.
+    expect(
+      decodePiPermissionTitle(`${PI_PERMISSION_MARKER} {"tool":"bash","input":["rm","-rf"]}`)
+    ).toEqual({ tool: "bash", mode: "unknown" })
+    expect(
+      decodePiPermissionTitle(`${PI_PERMISSION_MARKER} {"tool":"bash","input":"echo"}`)
+    ).toEqual({ tool: "bash", mode: "unknown" })
   })
 
   it("defaults an absent mode rather than dropping the approval", () => {

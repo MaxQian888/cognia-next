@@ -221,6 +221,17 @@ export const COGNIA_PERMISSION_MARKER = "cognia-permission/v1"
  */
 export const __readPolicyForTests = readPolicy
 
+/**
+ * Exported for the same reason as {@link __readPolicyForTests}: the payload the
+ * extension puts on the wire has to keep agreeing with the decoder that reads
+ * it, and a silent disagreement costs the user the command they are approving.
+ */
+export const __markerPayloadForTests = (
+  toolName: string,
+  mode: string,
+  input: Record<string, unknown> | undefined
+) => markerPayload(toolName, mode, input)
+
 export default function cogniaPiExtension(pi: PiExtensionApi): void {
   const env = process.env
   const policy = readPolicy(env.COGNIA_TOOLHOST_PI_POLICY)
@@ -256,6 +267,26 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
   })
 
   /**
+   * One approval at a time, and nothing else while one is open.
+   *
+   * Pi issues several tool calls from one assistant message, so a call that the
+   * policy allows outright used to run while the user was still answering an
+   * approval about a different one: the dialog asked whether to allow a
+   * command, and the work behind it had already happened. This is a mutex, not
+   * a policy. The decisions themselves are still a lookup in the table the app
+   * computed.
+   */
+  let approvals: Promise<unknown> = Promise.resolve()
+  const behindApprovals = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = approvals.then(work, work)
+    approvals = run.then(
+      () => undefined,
+      () => undefined
+    )
+    return run
+  }
+
+  /**
    * Intercept every native Pi tool call.
    *
    * Returning `{ block: true }` refuses the call; returning nothing allows it.
@@ -266,7 +297,12 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
     try {
       const decision = policy.decisions[call.toolName] ?? policy.fallback
 
-      if (decision === "allow") return undefined
+      if (decision === "allow") {
+        // Wait behind any approval the user has not answered. Awaiting the
+        // chain rather than joining it, so allowed calls never delay each other.
+        await approvals
+        return undefined
+      }
       if (decision === "deny") {
         return { block: true, reason: `Blocked by Cognia (${policy.mode} mode)` }
       }
@@ -282,12 +318,13 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
       // the parity test pins the two together. The marker never reaches the
       // user — the mapper rebuilds a clean title — and `message` stays
       // human-readable so an unrecognised version degrades to a real question.
-      const approved = await ctx.ui.confirm(
-        `${COGNIA_PERMISSION_MARKER} ${JSON.stringify({
-          tool: call.toolName,
-          mode: policy.mode,
-        })}`,
-        describeCall(call.toolName, call.input)
+      const approved = await behindApprovals(() =>
+        ctx.ui.confirm(
+          `${COGNIA_PERMISSION_MARKER} ${JSON.stringify(
+            markerPayload(call.toolName, policy.mode, call.input)
+          )}`,
+          describeCall(call.toolName, call.input)
+        )
       )
       return approved ? undefined : { block: true, reason: "Denied by the user" }
     } catch (error) {
@@ -301,6 +338,38 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
   if (broker) {
     void registerProjectedTools(pi, broker)
   }
+}
+
+/**
+ * Serialized input ceiling, mirroring `PI_PERMISSION_INPUT_LIMIT` in
+ * `lib/ai/agent/external/pi-permission.ts` (the parity test pins the pair).
+ */
+const COGNIA_PERMISSION_INPUT_LIMIT = 16_000
+
+/**
+ * The approval payload: which tool, under which mode, with which arguments.
+ *
+ * The arguments are what makes the prompt answerable. Without them the user saw
+ * "Allow bash?" and had to approve a command that was never shown; with them
+ * the host renders the same summary and diff it renders for every other agent.
+ * Dropped when they do not fit, since a dialog title is not a place for an
+ * unbounded payload, and dropped is still readable: the message names the tool
+ * and its target.
+ */
+function markerPayload(
+  toolName: string,
+  mode: string,
+  input: Record<string, unknown> | undefined
+): { tool: string; mode: string; input?: Record<string, unknown> } {
+  const payload = { tool: toolName, mode }
+  if (!input) return payload
+  try {
+    const serialized = JSON.stringify(input)
+    if (serialized.length > COGNIA_PERMISSION_INPUT_LIMIT) return payload
+  } catch {
+    return payload
+  }
+  return { ...payload, input }
 }
 
 function describeCall(toolName: string, input: Record<string, unknown> | undefined): string {

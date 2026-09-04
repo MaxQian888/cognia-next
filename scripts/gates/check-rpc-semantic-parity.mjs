@@ -1292,6 +1292,54 @@ function listRustFiles() {
 const read = (p) => readFileSync(join(REPO_ROOT, p), "utf8")
 const readJson = (p) => JSON.parse(read(p))
 
+/**
+ * Dispatch sources whose arms do NOT live under `companion_api/rpc/`.
+ *
+ * `rpc/sftp.rs` is a one-line hand-off to `sftp_service::dispatch_sftp`, and
+ * that function is where the arms actually are, because the desktop's own
+ * `#[tauri::command]` wrappers share it — so it is named for what it does
+ * rather than for the RPC table it happens to serve.
+ * `gen-companion-api.mjs:RPC_DISPATCH_SOURCE_PATHS` lists the same file.
+ */
+export const DELEGATED_ARM_FILES = ["src-tauri/src/sftp_service.rs"]
+
+/**
+ * The files to scan for dispatch arms: every tracked `companion_api/rpc/*.rs`
+ * that is not a test module, plus {@link DELEGATED_ARM_FILES}, minus anything
+ * that is not actually on disk.
+ *
+ * Both subtractions are load-bearing, and neither is a tidy-up:
+ *
+ *   - Dropping a delegated file does not merely under-report. It MIS-reports:
+ *     all 14 SFTP commands parse as arm-less and the gate names 14 runtime
+ *     404s that do not exist, which is how the 18 real findings in the same
+ *     run got buried.
+ *   - `git ls-files` still lists a tracked file that has been deleted but not
+ *     staged. Reading one throws ENOENT out of the middle of the scan, so the
+ *     gate crashes instead of returning a verdict — and a crash says nothing
+ *     about the files that DO exist. The existence filter therefore belongs to
+ *     the selection, not to a caller who might forget it.
+ *
+ * Pure apart from the injectable `exists` probe, so both rules are testable
+ * without a working tree in a particular state.
+ *
+ * @param {string[]} trackedRpcFiles raw `git ls-files` lines
+ * @param {{ delegated?: string[], exists?: (file: string) => boolean }} [options]
+ * @returns {string[]}
+ */
+export function selectArmFiles(trackedRpcFiles, options = {}) {
+  const delegated = options.delegated ?? DELEGATED_ARM_FILES
+  const exists = options.exists ?? ((file) => existsSync(join(REPO_ROOT, file)))
+  const selected = []
+  for (const file of [...trackedRpcFiles, ...delegated]) {
+    if (!file || file.endsWith("tests.rs")) continue
+    if (selected.includes(file)) continue
+    if (!exists(file)) continue
+    selected.push(file)
+  }
+  return selected
+}
+
 /** Gather every input the analysis needs from disk. */
 export function collectInputs() {
   const emitSources = listEmitSourceFiles()
@@ -1307,24 +1355,12 @@ export function collectInputs() {
 
   const rpcSource = read("src-tauri/src/companion_api/rpc.rs")
   const arms = new Map()
-  // `rpc/*.rs` holds every family that dispatches in place. Files listed here
-  // in addition are the ones that dispatch by DELEGATION: `rpc/sftp.rs` is a
-  // one-line hand-off to `sftp_service::dispatch_sftp`, which is where the arms
-  // actually live because the desktop's `#[tauri::command]` wrappers share it.
-  // Omitting it does not under-report — it MIS-reports, as 14 phantom 404s.
-  // `gen-companion-api.mjs:RPC_DISPATCH_SOURCE_PATHS` lists the same file.
-  const DELEGATED_ARM_FILES = ["src-tauri/src/sftp_service.rs"]
-  const armFiles = execFileSync("git", ["ls-files", "src-tauri/src/companion_api/rpc/*.rs"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  })
-    .split("\n")
-    .filter(Boolean)
-    .filter((f) => !f.endsWith("tests.rs"))
-    .concat(DELEGATED_ARM_FILES)
-    // `git ls-files` still lists a tracked file that has been deleted but not
-    // staged, and reading one throws ENOENT instead of reporting anything.
-    .filter((f) => existsSync(join(REPO_ROOT, f)))
+  const armFiles = selectArmFiles(
+    execFileSync("git", ["ls-files", "src-tauri/src/companion_api/rpc/*.rs"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    }).split("\n")
+  )
   for (const file of armFiles) {
     for (const arm of extractDispatchArms(read(file), file)) {
       for (const name of arm.names) {

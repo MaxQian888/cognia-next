@@ -421,6 +421,53 @@ describe("BaseProtocolAdapter.execute", () => {
     expect(result.error).toBe("broken")
   })
 
+  it("does not let a settling 'done' erase an error the turn never answered", async () => {
+    // Pi's shape: the provider refuses, `message_end` carries the reason, and
+    // the run still settles with `agent_settled` -> `done{success:true}`.
+    // Trusting `done` there returned a successful turn with an empty reply,
+    // which the CLI printed as nothing at all.
+    const a = new TestAdapter()
+    a.events = [
+      { type: "error", error: "402 Insufficient Balance", timestamp: new Date() },
+      { type: "done", success: true, timestamp: new Date() },
+    ] as ExternalAgentEvent[]
+    const s = await a.createSession()
+    const result = await a.execute(s.id, {
+      id: "m",
+      role: "user",
+      content: [{ type: "text", text: "x" }],
+      timestamp: new Date(),
+    })
+    expect(result.success).toBe(false)
+    expect(result.error).toBe("402 Insufficient Balance")
+    expect(result.finalResponse).toBe("")
+  })
+
+  it("keeps a recovered turn successful when the agent did answer", async () => {
+    // The other half of the rule: an error the agent recovered from, followed
+    // by real text, is the success its `done` says it is. Downgrading it would
+    // turn every retried turn into a failure.
+    const a = new TestAdapter()
+    a.events = [
+      { type: "error", error: "rate limited, retrying", timestamp: new Date() },
+      {
+        type: "message_delta",
+        delta: { type: "text", text: "recovered answer" },
+        timestamp: new Date(),
+      },
+      { type: "done", success: true, timestamp: new Date() },
+    ] as ExternalAgentEvent[]
+    const s = await a.createSession()
+    const result = await a.execute(s.id, {
+      id: "m",
+      role: "user",
+      content: [{ type: "text", text: "x" }],
+      timestamp: new Date(),
+    })
+    expect(result.success).toBe(true)
+    expect(result.finalResponse).toBe("recovered answer")
+  })
+
   it("captures tokenUsage from the done event", async () => {
     const a = new TestAdapter()
     a.events = [

@@ -627,7 +627,15 @@ describe("credential diagnostics", () => {
         ].join("\n"),
       }
     )
-    expect(args).toEqual(["--list-models"])
+    // The isolation flags travel with the probe: the listing has to describe
+    // the process the session will actually be, not the user's whole stack.
+    expect(args).toEqual([
+      "--list-models",
+      "--no-extensions",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-approve",
+    ])
     expect(result).toEqual({ status: "ok", providers: ["deepseek"] })
   })
 
@@ -1436,6 +1444,32 @@ describe("PiRpcClientAdapter — controls", () => {
     })
   })
 
+  it("explains a refusal that the isolation policy caused, not the model id", async () => {
+    // Pi says only "Model not found", which reads as a typo. Under the default
+    // isolated policy the real cause is that the model belongs to a provider one
+    // of the user's own Pi extensions contributes, and those are not loaded.
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const setting = adapter.setSessionModel("sess-1", "commandcode/z-ai/glm-5.3-flash")
+    await Promise.resolve()
+    replyTo(host, "set_model", null, {
+      success: false,
+      error: "Model not found: commandcode/z-ai/glm-5.3-flash",
+    })
+    await expect(setting).rejects.toThrow(/extension policy "isolated"/)
+    await expect(setting).rejects.toThrow(/Model not found/)
+  })
+
+  it("passes an unrelated refusal through unembellished", async () => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const setting = adapter.setSessionModel("sess-1", "deepseek/deepseek-v4-pro")
+    await Promise.resolve()
+    replyTo(host, "set_model", null, { success: false, error: "provider unreachable" })
+    await expect(setting).rejects.toThrow(/provider unreachable/)
+    await expect(setting).rejects.not.toThrow(/extension policy/)
+  })
+
   it("aborts before killing so a tool call can finish cleanly", async () => {
     const host = createFakeHost()
     const adapter = await session(host)
@@ -1765,6 +1799,10 @@ describe("session listing and the session-less catalog", () => {
     await Promise.resolve()
     const probe = host.spawns.find((spawn) => spawn.args.includes("--list-models"))!
     expect(probe).toBeDefined()
+    // Same isolation the session runs under, so the picker cannot offer a model
+    // that `set_model` will refuse. Without it the listing read the user's whole
+    // stack (extensions included) while the session had none of it.
+    expect(probe.args).toContain("--no-extensions")
     host.emitStdoutLines(
       probe.id,
       "provider  model  context  max-out  thinking  images\ndeepseek  deepseek-v4-pro  1M  384K  yes  no\n"

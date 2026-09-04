@@ -257,6 +257,22 @@ function inferBranchOutcomeFromReason(
   return eligibility === "blocked" ? "blocked" : "external"
 }
 
+/**
+ * The turn-ending error for a model the agent would not switch to.
+ *
+ * Phrased for the person who picked it: which model, what the agent said, and
+ * the one action that resolves it. The agent's own words are kept because they
+ * are the diagnosis (`Model not found` reads very differently from a transport
+ * timeout), and the raw error is chained so nothing above loses the cause.
+ */
+function modelRefusedError(model: string, cause: unknown): Error {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  return new Error(
+    `The agent refused the model "${model}" (${detail}). Pick another model, or run the turn on the agent's current one.`,
+    { cause }
+  )
+}
+
 export interface ExternalAgentLifecycleEvent {
   agentId: string
   connectionStatus: ExternalAgentConnectionStatus
@@ -2344,10 +2360,20 @@ export class ExternalAgentManager {
   /**
    * Switch an already-created session onto a newly requested model.
    *
-   * Best-effort by design: an adapter with no model concept has nothing to
-   * switch, and a rejected model id should not kill an execution that can still
-   * run on the session's current model. Both cases are logged rather than
-   * thrown, matching how the rest of session resolution degrades.
+   * An adapter with no model axis at all has nothing to switch, and that stays
+   * a silent no-op: the configured model is simply not a thing that agent has.
+   *
+   * A REFUSAL is different, and used to be logged and swallowed. The turn then
+   * ran on whatever model the agent happened to be on while every surface named
+   * the one the user picked. Pi makes this concrete: a Cognia session runs
+   * `--no-extensions`, so an extension-contributed model answers
+   * `set_model: Model not found`, and the turn quietly went to Pi's default
+   * provider. What came back was that other model's answer, or that other
+   * provider's billing error, under the chosen model's name.
+   *
+   * So a refusal now fails the turn and says which model was refused and why.
+   * The user can pick another; nobody is charged for an answer they did not
+   * ask for.
    */
   private async applyModelToSession(
     adapter: ProtocolAdapter,
@@ -2370,13 +2396,12 @@ export class ExternalAgentManager {
         await adapter.setConfigOption(session.id, modelOption.id, model)
         session.metadata = { ...(session.metadata ?? {}), selectedModel: model }
       } catch (error) {
-        // Best effort: the agent can reject an unknown or unavailable model, but
-        // the current session remains usable on its existing model.
         externalAgentManagerLogger.warn("setConfigOption failed for model", {
           sessionId: session.id,
           model,
           error: error instanceof Error ? error.message : String(error),
         })
+        throw modelRefusedError(model, error)
       }
       return
     }
@@ -2393,6 +2418,7 @@ export class ExternalAgentManager {
         model,
         error: error instanceof Error ? error.message : String(error),
       })
+      throw modelRefusedError(model, error)
     }
   }
 
@@ -2838,28 +2864,7 @@ export class ExternalAgentManager {
       }
       instance.tools = adapter.tools ?? instance.tools
     } catch (error) {
-      instance.stats.failedExecutions++
-      const errorMessage = this.normalizeErrorMessage(error)
-      const timeout = this.isTimeoutErrorMessage(errorMessage)
-      this.recordLastRun(instance, {
-        terminalOutcome: "error",
-        branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
-        branchOutcome: "fallback",
-        diagnosticText: errorMessage,
-      })
-      this.updateInstanceState(agentId, instance, {
-        status: timeout ? "timeout" : "failed",
-        lastError: errorMessage,
-        validity: {
-          executable: false,
-          source: "execution",
-          checkedAt: new Date(),
-          blockingReasonCode: timeout ? "external_unavailable" : "execution_failed",
-          blockingReason: errorMessage,
-        },
-        branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
-        branchReason: errorMessage,
-      })
+      const { timeout } = this.recordExecutionFailure(instance, agentId, error)
       await traceBridge.onError(
         Object.assign(error instanceof Error ? error : new Error(String(error)), {
           branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
@@ -2868,6 +2873,70 @@ export class ExternalAgentManager {
       )
       throw error
     }
+  }
+
+  /**
+   * Ask the agent to stop the current turn, never throwing.
+   *
+   * Both callers are already handling something else going wrong (the user
+   * aborted, the turn timed out), so a cancel that itself fails must not
+   * replace that outcome with a second error.
+   */
+  private async cancelSessionQuietly(
+    agentId: string,
+    sessionId: string,
+    reason: string
+  ): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter) return
+    try {
+      await adapter.cancel(sessionId)
+    } catch (error) {
+      externalAgentManagerLogger.warn("Cancellation failed", {
+        agentId,
+        sessionId,
+        reason,
+        error: this.normalizeErrorMessage(error),
+      })
+    }
+  }
+
+  /**
+   * Book a failed turn against the agent: stats, last-run record, instance
+   * state.
+   *
+   * Shared by the two places a turn can die, which is the point. The
+   * preparation step (session resolution, permission mode) sits outside the
+   * main try and used to leave the instance stuck in `executing` when it threw.
+   */
+  private recordExecutionFailure(
+    instance: ExternalAgentInstance,
+    agentId: string,
+    error: unknown
+  ): { errorMessage: string; timeout: boolean } {
+    instance.stats.failedExecutions++
+    const errorMessage = this.normalizeErrorMessage(error)
+    const timeout = this.isTimeoutErrorMessage(errorMessage)
+    this.recordLastRun(instance, {
+      terminalOutcome: "error",
+      branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
+      branchOutcome: "fallback",
+      diagnosticText: errorMessage,
+    })
+    this.updateInstanceState(agentId, instance, {
+      status: timeout ? "timeout" : "failed",
+      lastError: errorMessage,
+      validity: {
+        executable: false,
+        source: "execution",
+        checkedAt: new Date(),
+        blockingReasonCode: timeout ? "external_unavailable" : "execution_failed",
+        blockingReason: errorMessage,
+      },
+      branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
+      branchReason: errorMessage,
+    })
+    return { errorMessage, timeout }
   }
 
   /**
@@ -2893,18 +2962,31 @@ export class ExternalAgentManager {
     instance.stats.totalExecutions++
     const startTime = Date.now()
 
-    const session = await this.resolveExecutionSession(adapter, instance, options)
+    // Everything before the trace bridge exists still happens INSIDE a turn the
+    // caller is waiting on, and a throw here used to escape all of the failure
+    // bookkeeping below: the instance stayed `executing` forever, its row kept
+    // a spinner, and the next turn was measured against a run that had already
+    // died. Preparing the session is now accounted for like the turn it is part
+    // of. A refused model (see `applyModelToSession`) is the case that made this
+    // reachable in practice.
+    let session: ExternalAgentSession
+    try {
+      session = await this.resolveExecutionSession(adapter, instance, options)
 
-    const effectivePermissionMode = this.resolveEffectivePermissionMode(
-      instance,
-      options?.permissionMode
-    )
-    if (
-      effectivePermissionMode &&
-      adapter.setSessionMode &&
-      session.permissionMode !== effectivePermissionMode
-    ) {
-      await adapter.setSessionMode(session.id, effectivePermissionMode)
+      const effectivePermissionMode = this.resolveEffectivePermissionMode(
+        instance,
+        options?.permissionMode
+      )
+      if (
+        effectivePermissionMode &&
+        adapter.setSessionMode &&
+        session.permissionMode !== effectivePermissionMode
+      ) {
+        await adapter.setSessionMode(session.id, effectivePermissionMode)
+      }
+    } catch (error) {
+      this.recordExecutionFailure(instance, agentId, error)
+      throw error
     }
 
     const traceBridge = this.createTraceBridge(agentId, instance, session, options)
@@ -2981,22 +3063,25 @@ export class ExternalAgentManager {
             },
           }
 
+          // The caller's abort has to REACH the agent. It was read once per
+          // attempt and never again, so a signal that fired mid-turn (the TUI's
+          // Esc, a cancelled headless run) left the agent running: it finished
+          // its turn, ran its tools and answered into a conversation the user
+          // had already stopped. The timeout path below was the only thing that
+          // ever cancelled the agent, and a person pressing Esc is the more
+          // common case by far.
+          const stopAgent = () => this.cancelSessionQuietly(agentId, session.id, "abort")
+          const abortSignal = options?.signal
+          if (abortSignal?.aborted) void stopAgent()
+          abortSignal?.addEventListener("abort", stopAgent, { once: true })
           const attemptResult = await this.withTimeout(
             adapter.execute(session.id, message, wrappedOptions),
             executionTimeoutMs,
             `External agent execution timed out after ${executionTimeoutMs}ms`,
             async () => {
-              try {
-                await adapter.cancel(session.id)
-              } catch (cancelError) {
-                externalAgentManagerLogger.warn("Cancellation failed during execution timeout", {
-                  agentId,
-                  sessionId: session.id,
-                  error: this.normalizeErrorMessage(cancelError),
-                })
-              }
+              await this.cancelSessionQuietly(agentId, session.id, "execution timeout")
             }
-          )
+          ).finally(() => abortSignal?.removeEventListener("abort", stopAgent))
 
           if (
             !attemptResult.success &&

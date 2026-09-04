@@ -703,7 +703,19 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
             break
 
           case "done":
-            success = event.success
+            // A `done` frame cannot un-say a refusal the agent already
+            // reported and never answered. Pi settles EVERY turn with
+            // `agent_settled` -> `done{success: true}`, including one whose
+            // `message_end` carried `stopReason: "error"` (an insufficient
+            // balance, a model outside the plan). Taking `done` at its word
+            // there overwrote the failure and returned a successful turn with
+            // an empty `finalResponse`, so the CLI printed nothing at all and
+            // exited 0, and a headless `run` reported no error to report.
+            //
+            // Narrow on purpose: only a turn that produced NO assistant text
+            // is downgraded. An agent that hits a recoverable error, retries
+            // and then answers still settles as the success it is.
+            success = event.success && !(error !== undefined && currentText === "")
             if (event.tokenUsage) finalUsage = event.tokenUsage
             break
         }

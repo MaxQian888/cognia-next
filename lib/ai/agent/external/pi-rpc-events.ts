@@ -372,9 +372,19 @@ function mapExtensionUiRequest(
           requestId: id,
           sessionId: base.sessionId,
           title: `Allow ${approval.tool}?`,
-          toolInfo: { id: approval.tool, name: approval.tool },
-          // The human-readable description the extension built; the marker
-          // itself never reaches the user.
+          toolInfo: {
+            id: approval.tool,
+            name: approval.tool,
+            // The line the extension wrote ("bash: echo hi"). It is the only
+            // thing on the prompt when the arguments did not fit, and it used
+            // to be carried in `reason` alone, which no surface renders — so
+            // the approval said "Allow bash?" and nothing else.
+            ...(message ? { description: message } : {}),
+          },
+          // The call's own arguments, when the extension could send them. This
+          // is what lets the prompt render the command it is about to run, and
+          // the diff for a write or an edit.
+          ...(approval.input ? { rawInput: approval.input } : {}),
           reason: message,
           options: [
             { optionId: "allow", name: "Allow", kind: "allow_once" },

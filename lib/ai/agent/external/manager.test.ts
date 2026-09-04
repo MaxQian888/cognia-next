@@ -1347,19 +1347,75 @@ describe("execute — model selection", () => {
     expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
   })
 
-  it("still executes when the adapter rejects the model switch", async () => {
-    // Best-effort: a rejected model id must not kill a run that can proceed on
-    // the session's current model.
+  it("tells the agent to stop when the caller aborts mid-turn", async () => {
+    // The signal used to be read once per attempt and never again, so pressing
+    // Esc stopped the local turn while the agent ran on: it finished its work
+    // and its tools, answering into a conversation the user had already ended.
+    const m = await connectedManager()
+    const controller = new AbortController()
+    let release: (() => void) | undefined
+    currentMock.executeImpl = jest.fn(
+      () =>
+        new Promise<ExternalAgentResult>((resolve) => {
+          release = () =>
+            resolve({
+              success: true,
+              sessionId: "s_1",
+              finalResponse: "",
+              messages: [],
+              steps: [],
+              toolCalls: [],
+              duration: 1,
+            })
+        })
+    )
+    const running = m.execute("agent-1", "one", { signal: controller.signal })
+    // Wait for the turn to actually be in flight: the abort listener is armed
+    // around the adapter call, which several awaits (readiness, session
+    // resolution, trace bridge) precede.
+    while (!release) await new Promise((resolve) => setTimeout(resolve, 1))
+    expect(currentMock.cancelImpl).not.toHaveBeenCalled()
+
+    controller.abort()
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    expect(currentMock.cancelImpl).toHaveBeenCalledWith("s_1")
+
+    release()
+    await running
+  })
+
+  it("fails the turn when the adapter refuses the requested model", async () => {
+    // This used to be swallowed as best-effort, and the turn then ran on
+    // whatever model the session was already on while every surface named the
+    // one the user picked. Pi made it concrete: an extension-contributed model
+    // is not in an isolated session's catalog, `set_model` answered "Model not
+    // found", and the answer (and the bill) came from another provider under
+    // the chosen model's name.
     const m = await connectedManager()
     const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
     currentMock.setSessionModelImpl.mockRejectedValueOnce(new Error("unknown model"))
 
-    const result = await m.execute("agent-1", "two", {
-      sessionId: first.sessionId,
-      model: "bogus-model",
-    })
+    await expect(
+      m.execute("agent-1", "two", { sessionId: first.sessionId, model: "bogus-model" })
+    ).rejects.toThrow(/refused the model "bogus-model" \(unknown model\)/)
+  })
 
-    expect(result.success).toBe(true)
+  it("books a turn that died while being prepared as a failed run", async () => {
+    // The failure bookkeeping used to live entirely below session resolution,
+    // so a throw from it left the agent reading `executing` with nothing
+    // running and no `lastError` to explain the empty screen.
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockRejectedValueOnce(new Error("unknown model"))
+
+    await expect(
+      m.execute("agent-1", "two", { sessionId: first.sessionId, model: "bogus-model" })
+    ).rejects.toThrow()
+
+    const agent = m.getAgent("agent-1")
+    expect(agent?.status).toBe("failed")
+    expect(agent?.lastError).toMatch(/refused the model/)
+    expect(agent?.stats.failedExecutions).toBe(1)
   })
 })
 

@@ -43,6 +43,7 @@
  */
 
 import { hasCapability } from "@/lib/platform/capabilities"
+import { isCliHost } from "@/lib/platform/detect"
 import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 import { supportsHostFeatureOperation } from "@/lib/platform/host-feature-manifest"
 import { getRuntimeSnapshot, subscribeRuntimeSnapshot } from "@/lib/runtime/runtime-snapshot-store"
@@ -122,7 +123,16 @@ const defaultDeps: ProcessPlaneDeps = {
   // brain and the CLI must answer `true` here too. An active remote host does
   // not subtract from it: `agentInvoke` keeps sending the spawn to this
   // machine's own process table.
-  hasLocalProcessTable: () => hasCapability("shell"),
+  //
+  // The CLI needs the second term: `detectPlatform()` resolves it to `web`
+  // (a Node process has no `window`, which is what SSR looks like too), so the
+  // capability baseline it gets is the browser's — `["webview"]`, no `shell`.
+  // The CLI does own a process table and spawns the child itself through
+  // `cli/src/runtime/external/node-backend.ts`, so asking the baseline alone
+  // told every `cognia-agent chat --backend <agent>` that a stdio agent needs
+  // "the desktop app, or a paired Host" while the spawn it refused would have
+  // succeeded on the spot.
+  hasLocalProcessTable: () => hasCapability("shell") || isCliHost(),
   getRuntimeSnapshot,
   activeHostFeatureManifest,
 }
