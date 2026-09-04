@@ -452,8 +452,13 @@ export function parseTauriCommands(rawSource, file) {
  * wrong body to every git command. Same eight-space rustfmt seam that
  * `gen-companion-api.mjs:extractCommandArgumentSchemas` relies on.
  *
- * The name is matched as `dispatch` OR `dispatch_<suffix>`. Most families put
- * their arms behind `pub(super) async fn dispatch(`, but SFTP delegates: its
+ * The name is matched as `dispatch` or the one named exception, `dispatch_sftp`.
+ * It is an explicit alternative and not `dispatch\w*` on purpose: the tree also
+ * holds `dispatch_bridge`, `dispatch_dify`, `dispatch_browser_rpc` and
+ * `dispatch_canonical`, and since `search` takes the FIRST match, a wildcard
+ * would let any of them anchor the scan and donate its arms to commands it does
+ * not serve. Most families put
+ * their arms behind `pub(super) async fn dispatch(`; SFTP delegates: its
  * arms live in `sftp_service.rs` as `pub async fn dispatch_sftp(`, because the
  * desktop's own `#[tauri::command]` wrappers share that function, so it is
  * named for what it does rather than for the RPC table it happens to serve.
@@ -469,7 +474,7 @@ export function parseTauriCommands(rawSource, file) {
 export function extractDispatchArms(rawSource, file) {
   const source = stripRustComments(rawSource)
   const dispatchStart = source.search(
-    /(?:pub(?:\s*\([^)]*\))?\s+)?async\s+fn\s+dispatch(?:_[a-z0-9_]+)?\s*(?:<[^>]*>)?\s*\(/
+    /(?:pub(?:\s*\([^)]*\))?\s+)?async\s+fn\s+dispatch(?:_sftp)?\s*(?:<[^>]*>)?\s*\(/
   )
   if (dispatchStart < 0) return []
   const matchStart = source.indexOf("match name {", dispatchStart)

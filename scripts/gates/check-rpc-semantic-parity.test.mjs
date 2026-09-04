@@ -207,20 +207,22 @@ pub async fn dispatch_sftp(
   )
 })
 
-test("extractDispatchArms still refuses a fn that merely starts with dispatch-ish text", () => {
-  // The widened anchor accepts `dispatch_<suffix>`, not any identifier that
-  // happens to contain the word — `predispatch` and `dispatching` must not
-  // become dispatch boundaries, or an unrelated `match name` would donate arms
-  // to commands it does not serve.
-  const source = `
-async fn predispatch(name: &str) {
+test("extractDispatchArms names dispatch_sftp explicitly, and admits no other dispatch_*", () => {
+  // The anchor is `dispatch` OR `dispatch_sftp`, never `dispatch\\w*`. These are
+  // real functions in this tree, and because `search` takes the FIRST match a
+  // wildcard would let any of them anchor the scan and donate its arms to
+  // commands it does not serve.
+  for (const fn of ["dispatch_bridge", "dispatch_dify", "dispatch_browser_rpc", "predispatch"]) {
+    const source = `
+pub async fn ${fn}(name: &str) {
     let x = match name {
         "decoy" => 1,
         _ => 0,
     };
 }
 `
-  assert.deepEqual(extractDispatchArms(source, "rpc/x.rs"), [])
+    assert.deepEqual(extractDispatchArms(source, "rpc/x.rs"), [], fn)
+  }
 })
 
 test("armReadFields covers every field-reader spelling, aliases included", () => {
