@@ -1,3 +1,8 @@
+/** @cognia-host-integration-test */
+// The theme is checked AGAINST the host's contract, which is the only way
+// to check it: THEME_TOKEN_CSS_VARS is the set a pack must cover exactly,
+// and wcagContrast is the ratio the shell will actually render at. A copy
+// of either here would pass while the real thing drifted.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
