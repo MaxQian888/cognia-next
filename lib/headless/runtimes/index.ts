@@ -37,6 +37,8 @@
  * - `workflow-trigger-bridge` — subscribes to `workflow:trigger` on the brain's
  *   events plane so the Rust cron daemon / webhook router in cognia-server
  *   actually start workflow runs (host-neutral `installTriggerBridge`).
+ * - `sftp-transfer-pump` — drains the durable SFTP transfer queue so a row an
+ *   agent queues on the brain actually moves (ADR-0162).
  * - `issue-tracker` — the ADR-0132 board's runtime half: four issue sources,
  *   the run bridge that dispatches an issue to an agent engine, the lifecycle →
  *   Notification Center watcher, label seeding and the GitHub refresh schedule
@@ -138,5 +140,6 @@ import "./workflow-trigger-bridge"
 import "./issue-tracker"
 import "./collab-refresh"
 import "./plan-notification"
+import "./sftp-transfer-pump"
 
 export {}
