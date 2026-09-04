@@ -27,7 +27,10 @@
         "backgroundColor": "#0a0a0a",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 14 },
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 14
+        },
         "dragDropEnabled": false
       }
     ],
@@ -88,7 +91,7 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "http://timestamp.digicert.com"
     },
     "macOS": {
       "hardenedRuntime": true,
@@ -98,9 +101,13 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://update.cognia.cn/v1/tauri/{{target}}/{{arch}}/{{current_version}}",
         "https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQzVDOTEyQTMwODhDMgpSV1RDaURBcWtWd01EY1VhMGpzdFljVTRhV3p2eU40d0VNVk02VDB3M2lmRlVRcytCNFFMQW1BcAo="
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQzVDOTEyQTMwODhDMgpSV1RDaURBcWtWd01EY1VhMGpzdFljVTRhV3p2eU40d0VNVk02VDB3M2lmRlVRcytCNFFMQW1BcAo=",
+      "windows": {
+        "installMode": "passive"
+      }
     },
     "deep-link": {
       "mobile": [],

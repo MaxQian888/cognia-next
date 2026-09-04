@@ -383,13 +383,22 @@ export function installUpdate(options: InstallUpdateOptions = {}): Promise<Insta
     if (downloadResult !== "downloaded") return downloadResult
     const handle = pendingUpdate
     if (!handle) return "noLongerAvailable" as const
+
+    // The Windows NSIS installer terminates this process as part of the
+    // install, so anything after `await install()` may simply never run. Mark
+    // the version as installed-pending-restart BEFORE handing control to the
+    // installer and roll the marker back only if the call actually returns an
+    // error. Relying on the post-await line is how a successful Windows
+    // install came back looking like it never happened.
+    const previousMarker = installedVersionAwaitingRestart
+    setInstalledVersionAwaitingRestart(handle.version)
     try {
       await handle.install()
     } catch (error) {
+      setInstalledVersionAwaitingRestart(previousMarker)
       throw classifyError(error, "install")
     }
 
-    setInstalledVersionAwaitingRestart(handle.version)
     pendingUpdate = null
     pendingUpdateAt = 0
     pendingDownloaded = false

@@ -1,0 +1,49 @@
+# Cloudflare Worker for the Cognia update control plane.
+#
+# Dev:    wrangler dev
+# Test:   vitest run              (miniflare + local D1, no account needed)
+# Deploy: wrangler deploy
+#
+# Deliberately a separate Worker from the share service. They have different
+# blast radiuses: a bug in share links leaks a document, a bug here decides
+# what code every install runs.
+#
+# One-time provisioning by the operator:
+#   wrangler d1 create cognia-updates
+#   wrangler d1 migrations apply cognia-updates --remote
+#   wrangler secret put UPDATE_ADMIN_SECRET
+# then paste the database id below.
+name = "cognia-update"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Must match the app's `DEFAULT_CATALOG_URL` (lib/updates/catalog-client.ts)
+# and the Tauri updater endpoint in src-tauri/tauri.conf.json.
+routes = [{ pattern = "update.cognia.cn/v1/*", zone_name = "cognia.cn" }]
+
+[[d1_databases]]
+binding = "UPDATE_DB"
+database_name = "cognia-updates"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+# Seconds a catalog response may be cached at the edge. Short on purpose: an
+# abort has to reach devices in minutes, not hours.
+CATALOG_CACHE_SECONDS = "60"
+
+[observability]
+enabled = true
+
+[env.staging]
+name = "cognia-update-staging"
+
+[[env.staging.d1_databases]]
+binding = "UPDATE_DB"
+database_name = "cognia-updates-staging"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[env.staging.vars]
+CATALOG_CACHE_SECONDS = "60"
