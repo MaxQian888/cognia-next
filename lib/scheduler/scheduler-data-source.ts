@@ -207,6 +207,18 @@ function hydrateExecution(execution: ExecutionWire): TaskExecution {
   } as TaskExecution
 }
 
+/**
+ * Whether a transport failure means "this host does not know that command".
+ *
+ * Matched on the message because the bridge does not carry a typed code for it.
+ * Deliberately narrow: anything else is rethrown, since reporting a dropped
+ * connection as "unsupported" would send the user looking at the wrong machine.
+ */
+function isUnknownCommandError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /unknown (desktop-write )?command|unsupported command|method not found/i.test(message)
+}
+
 class RemoteSchedulerDataSource implements SchedulerDataSource {
   readonly host = "remote" as const
 
@@ -324,17 +336,29 @@ class RemoteSchedulerDataSource implements SchedulerDataSource {
   }
 
   /**
-   * A paired host's runs cannot be cancelled from here yet.
+   * Ask the paired host to stop one of its runs.
    *
-   * Every other verb on this interface has a `scheduled_task_*` command behind
-   * it. Cancellation does not, because the abort controller lives in the
-   * process running the execution and there is no command that reaches it. This
-   * refuses in the shape the caller already handles instead of resolving to
-   * something that reads like success, which is the failure mode that leaves a
-   * user watching a run they believe they stopped.
+   * The abort controller lives in the process running the execution, so this
+   * is a request rather than an action, and the host's own outcome is returned
+   * verbatim. That matters: `already-settled` and `not-owned-here` are answers
+   * only the owning host can give, and flattening them into a local guess is
+   * how a user ends up watching a run they believe they stopped.
    */
-  async cancelExecution(_executionId: string): Promise<CancelExecutionOutcome> {
-    return { cancelled: false, reason: "unsupported-on-remote" }
+  async cancelExecution(executionId: string): Promise<CancelExecutionOutcome> {
+    try {
+      return await transport.call<CancelExecutionOutcome>("scheduled_task_cancel_run", {
+        runId: executionId,
+      })
+    } catch (error) {
+      // A paired host on an older build has no such command, and its refusal
+      // arrives as a transport error rather than an outcome. Reported as
+      // `unsupported-on-remote` so the user is told the other machine cannot do
+      // this, not that their run had finished or that the network failed.
+      if (isUnknownCommandError(error)) {
+        return { cancelled: false, reason: "unsupported-on-remote" }
+      }
+      throw error
+    }
   }
 }
 

@@ -285,10 +285,10 @@ export type CancelExecutionOutcome =
   | { cancelled: false; reason: "requested" }
   | { cancelled: false; reason: "not-owned-here" }
   /**
-   * The schedule on screen belongs to a paired host and there is no
-   * `scheduled_task_cancel_run` RPC to carry the request to it. Named rather
-   * than folded into `not-owned-here` because the fix is different: this one is
-   * a missing command, not a run that moved.
+   * The schedule on screen belongs to a paired host whose build does not know
+   * the `scheduled_task_cancel_run` command. Named rather than folded into
+   * `not-owned-here` because the fix is different: this one is an out-of-date
+   * machine, not a run that moved.
    */
   | { cancelled: false; reason: "unsupported-on-remote" }
 

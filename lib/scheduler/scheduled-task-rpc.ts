@@ -18,6 +18,7 @@ const COMMANDS = new Set([
   "scheduled_task_pause",
   "scheduled_task_resume",
   "scheduled_task_run_now",
+  "scheduled_task_cancel_run",
   "scheduled_task_backfill",
   "scheduled_task_statistics",
   "scheduled_task_upcoming",
@@ -139,6 +140,11 @@ export async function dispatchScheduledTaskRpc(
             ? (payload.triggerSource as TaskExecutionTriggerSource)
             : "run-now",
       })
+    case "scheduled_task_cancel_run":
+      // Answers the same outcome shape the local source does, so a caller does
+      // not have to tell "the run was already finished" from "this host has no
+      // such command" by inspecting an error string.
+      return scheduler.cancelExecution(stringField(payload, "runId"))
     case "scheduled_task_backfill":
       return scheduler.backfillTask(stringField(payload, "taskId"), {
         start: dateField(payload, "start"),

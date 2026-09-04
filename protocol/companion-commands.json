@@ -10959,6 +10959,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "scheduled_task_cancel_run",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "scheduler.manage",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "scheduled_task_cleanup",
       "target": "execution",
       "operation": "write",

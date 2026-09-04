@@ -12,6 +12,7 @@ const scheduler = {
   exportTasks: jest.fn(),
   importTasks: jest.fn(),
   triggerEventTask: jest.fn(),
+  cancelExecution: jest.fn(),
 }
 jest.mock("./task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 jest.mock("./scheduler-db", () => {
@@ -121,5 +122,41 @@ it("forwards remote host events into event-triggered tasks", async () => {
   })
   expect(scheduler.triggerEventTask).toHaveBeenCalledWith("job:exited", "job-1", {
     jobId: "job-1",
+  })
+})
+
+describe("scheduled_task_cancel_run", () => {
+  it("is part of the family, so the bridge routes it here", () => {
+    expect(isScheduledTaskRpc("scheduled_task_cancel_run")).toBe(true)
+  })
+
+  it("stops the run the caller named", async () => {
+    scheduler.cancelExecution.mockResolvedValue({ cancelled: true })
+
+    await expect(
+      dispatchScheduledTaskRpc("scheduled_task_cancel_run", { runId: "run-9" })
+    ).resolves.toEqual({ cancelled: true })
+    expect(scheduler.cancelExecution).toHaveBeenCalledWith("run-9")
+  })
+
+  it("passes the host's own outcome back verbatim", async () => {
+    // The distinction a remote caller cannot make for itself: only this host
+    // knows whether the run had already settled.
+    scheduler.cancelExecution.mockResolvedValue({
+      cancelled: false,
+      reason: "already-settled",
+      status: "completed",
+    })
+
+    await expect(
+      dispatchScheduledTaskRpc("scheduled_task_cancel_run", { runId: "run-9" })
+    ).resolves.toMatchObject({ reason: "already-settled", status: "completed" })
+  })
+
+  it("refuses a call with no run id rather than cancelling something else", async () => {
+    await expect(dispatchScheduledTaskRpc("scheduled_task_cancel_run", {})).rejects.toThrow(
+      /runId is required/
+    )
+    expect(scheduler.cancelExecution).not.toHaveBeenCalled()
   })
 })

@@ -30672,6 +30672,91 @@
       "outputTyped": true
     },
     {
+      "name": "scheduled_task_cancel_run",
+      "category": "automation",
+      "resource": "scheduled-tasks",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "scheduler.manage",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "scheduled_task_cancel_run (scheduler.manage)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "zod-contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "runId"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "cancelled"
+            ],
+            "properties": {
+              "cancelled": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "cancelled",
+              "reason"
+            ],
+            "properties": {
+              "cancelled": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "not-found",
+                  "already-settled",
+                  "requested",
+                  "not-owned-here",
+                  "unsupported-on-remote"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "running",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "skipped"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "outputTyped": true
+    },
+    {
       "name": "scheduled_task_cleanup",
       "category": "automation",
       "resource": "scheduled-tasks",
@@ -46882,5 +46967,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "ad343410324399e35d98d2d888f8f112bb82765f8469ef1ac5947c48fdcf3230"
+  "catalogHash": "4f3e332bebf8f33dee22b8412c7287608dfe65cf60ee2d62c548902b0f5cc739"
 }

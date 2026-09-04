@@ -501,6 +501,9 @@ const schemas = {
     taskId: z.string().min(1),
     triggerSource: taskTriggerSource.optional(),
   }),
+  scheduled_task_cancel_run: z.object({
+    runId: z.string().min(1),
+  }),
   scheduled_task_backfill: z.object({
     taskId: z.string().min(1),
     start: z.string().min(1),

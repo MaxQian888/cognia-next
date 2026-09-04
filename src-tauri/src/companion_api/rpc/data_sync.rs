@@ -92,6 +92,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "scheduled_task_pause",
     "scheduled_task_resume",
     "scheduled_task_run_now",
+    "scheduled_task_cancel_run",
     "scheduled_task_backfill",
     "scheduled_task_import",
     "scheduled_task_cleanup",
@@ -748,6 +749,7 @@ pub(super) async fn dispatch(
         | "scheduled_task_pause"
         | "scheduled_task_resume"
         | "scheduled_task_run_now"
+        | "scheduled_task_cancel_run"
         | "scheduled_task_backfill"
         | "scheduled_task_import"
         | "scheduled_task_cleanup"

@@ -675,6 +675,46 @@
       },
       "additionalProperties": false
     },
+    "CancelExecutionOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["cancelled"],
+          "properties": {
+            "cancelled": {
+              "type": "boolean",
+              "enum": [true]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["cancelled", "reason"],
+          "properties": {
+            "cancelled": {
+              "type": "boolean",
+              "enum": [false]
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "not-found",
+                "already-settled",
+                "requested",
+                "not-owned-here",
+                "unsupported-on-remote"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": ["pending", "running", "completed", "failed", "cancelled", "skipped"]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "CodeServerActiveEditor": {
       "type": "object",
       "x-cognia-wire-source": "sidecar/codeserver-agent-ext/src/extension.mjs readActive",
@@ -7848,6 +7888,9 @@
     },
     "scheduled_task_backfill": {
       "$ref": "#/$defs/TaskExecutionList"
+    },
+    "scheduled_task_cancel_run": {
+      "$ref": "#/$defs/CancelExecutionOutcome"
     },
     "scheduled_task_cleanup": {
       "$ref": "#/$defs/IntegerResult"

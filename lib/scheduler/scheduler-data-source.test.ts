@@ -32,6 +32,7 @@ jest.mock("./task-scheduler", () => ({
     backfillTask: jest.fn(),
     exportTasks: jest.fn(),
     importTasks: jest.fn(),
+    cancelExecution: jest.fn(async () => ({ cancelled: true })),
   })),
 }))
 
@@ -128,5 +129,52 @@ it("sends task provenance hints with remote mutations", async () => {
     taskId: "task-1",
     taskType: "agent",
     triggerSource: "run-now",
+  })
+})
+
+describe("cancelling a run on a paired host", () => {
+  it("carries the request over the scheduled_task_cancel_run command", async () => {
+    remoteActive = true
+    setPreferredSchedulerHostTarget("paired")
+    call.mockResolvedValue({ cancelled: true })
+
+    await expect(getSchedulerDataSource().cancelExecution("run-9")).resolves.toEqual({
+      cancelled: true,
+    })
+    expect(call).toHaveBeenCalledWith("scheduled_task_cancel_run", { runId: "run-9" })
+  })
+
+  it("returns the host's own outcome rather than a local guess", async () => {
+    remoteActive = true
+    setPreferredSchedulerHostTarget("paired")
+    // Only the owning host knows this. Flattening it into a local answer is how
+    // a user ends up watching a run they believe they stopped.
+    call.mockResolvedValue({ cancelled: false, reason: "already-settled", status: "failed" })
+
+    await expect(getSchedulerDataSource().cancelExecution("run-9")).resolves.toMatchObject({
+      reason: "already-settled",
+      status: "failed",
+    })
+  })
+
+  it("reports an older paired host as unsupported, not as a finished run", async () => {
+    remoteActive = true
+    setPreferredSchedulerHostTarget("paired")
+    call.mockRejectedValue(new Error("unknown desktop-write command: scheduled_task_cancel_run"))
+
+    await expect(getSchedulerDataSource().cancelExecution("run-9")).resolves.toEqual({
+      cancelled: false,
+      reason: "unsupported-on-remote",
+    })
+  })
+
+  it("rethrows a dropped connection instead of blaming the other machine", async () => {
+    remoteActive = true
+    setPreferredSchedulerHostTarget("paired")
+    call.mockRejectedValue(new Error("transport closed"))
+
+    await expect(getSchedulerDataSource().cancelExecution("run-9")).rejects.toThrow(
+      "transport closed"
+    )
   })
 })
