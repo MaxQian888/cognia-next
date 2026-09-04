@@ -28,13 +28,18 @@ jest.mock("@/hooks/chat/use-effective-cwd", () => ({
 }))
 
 import { ChatTemplatesSection } from "./chat-templates-section"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createChatTemplate, getChatTemplate, listChatTemplates } from "@/lib/db/chat-templates"
 import {
   parseRepoTemplate,
   serializeChatTemplate,
   type RepoChatTemplate,
 } from "@/lib/chat/template/repo-templates"
+
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
+afterAll(dbFixture.dispose)
 
 beforeEach(async () => {
   toastSuccess.mockClear()
@@ -44,11 +49,8 @@ beforeEach(async () => {
   saveToRepoMock.mockResolvedValue({ ok: true, path: ".cognia/templates/review.md" })
   loadRepoMock.mockReset()
   loadRepoMock.mockResolvedValue([])
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-}, 30_000)
+  await dbFixture.restore()
+})
 
 /** jsdom's Blob has no `.text()`, and the app does not use it either. */
 function readBlobText(blob: Blob): Promise<string> {

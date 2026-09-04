@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { getDb } from "./schema"
+import { createDbTestFixture } from "./test-fixture"
 import {
   createChatTemplate,
   deleteChatTemplate,
@@ -11,12 +12,13 @@ import {
   updateChatTemplate,
 } from "./chat-templates"
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-}, 30_000)
+  await dbFixture.restore()
+})
+afterAll(dbFixture.dispose)
 
 describe("createChatTemplate", () => {
   it("derives the declarations from the body when none are supplied", async () => {

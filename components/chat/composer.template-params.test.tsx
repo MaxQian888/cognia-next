@@ -40,7 +40,7 @@ import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
-import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { flushDebouncedDraftWrites, getDraft, setDraft } from "@/lib/db/chat-drafts"
 import { createChatTemplate, listChatTemplates } from "@/lib/db/chat-templates"
 import { requestTemplateRerun } from "@/lib/chat/template/rerun-request"
@@ -128,14 +128,14 @@ async function submit(ta: HTMLTextAreaElement) {
 /** The popover's field — `getByRole("textbox")` also matches the composer itself. */
 const paramInput = () => within(screen.getByTestId("template-param-popover")).getByRole("textbox")
 
+const dbFixture = createDbTestFixture()
+
+beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   useChatStore.getState().clear()
-  await getDb().delete()
-  __resetDbForTesting()
-  getDb()
-  await whenSeeded()
-  // Dexie teardown/rebuild routinely runs past Jest's 5s default under load.
-}, 30_000)
+  await dbFixture.restore()
+})
+afterAll(dbFixture.dispose)
 
 describe("Composer — {{parameter}} chips", () => {
   it("paints a typed parameter as an empty chip", async () => {
