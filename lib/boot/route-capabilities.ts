@@ -43,27 +43,39 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
   ["/me/external-agents", "desktop-tools"],
 ]
 
-const SETTINGS_CAPABILITIES: Readonly<Record<string, BootCapability>> = {
+/**
+ * Which bundle a Settings section needs, keyed by `?section=`.
+ *
+ * Keys must be real `SettingsSectionId` values. Seven of them were not, so a
+ * third of this table never fired and those sections mounted against whatever
+ * the route had already requested: `scheduler` (the id is `scheduled-tasks`),
+ * `integrations` and `connectors` (the id is `connections`), `computer-use`
+ * (the id is `automation`), plus `twin`, `agent-teams` and `external-agents`,
+ * which are routes rather than sections and are already covered by
+ * `ROUTE_PREFIXES`. `route-capabilities.test.ts` pins the whole key set against
+ * the nav config now, because the type here is deliberately not
+ * `Record<SettingsSectionId, _>`: that would drag the nav config's icon imports
+ * into the boot path.
+ */
+export const SETTINGS_CAPABILITIES: Readonly<Record<string, BootCapability>> = {
   desktop: "desktop-tools",
   plugins: "plugin-runtime",
   workflows: "workflow-automation",
-  scheduler: "workflow-automation",
-  automation: "workflow-automation",
-  integrations: "integrations",
-  connectors: "integrations",
+  "scheduled-tasks": "workflow-automation",
+  // Desktop UI automation, not the workflow engine. This section administers
+  // the same engine `/me/computer-use` and the automation commands belong to,
+  // and every one of those ships in `desktop-tools`.
+  automation: "desktop-tools",
+  connections: "integrations",
   mcp: "integrations",
   memory: "knowledge-agents",
-  twin: "knowledge-agents",
   squads: "knowledge-agents",
-  "agent-teams": "knowledge-agents",
   characters: "knowledge-agents",
   skills: "knowledge-agents",
   ocr: "knowledge-agents",
   a2ui: "workflow-automation",
   terminal: "desktop-tools",
-  "computer-use": "desktop-tools",
   "agent-runtime": "desktop-tools",
-  "external-agents": "desktop-tools",
 }
 
 export function resolveRouteBootCapabilities(pathname: string, search = ""): BootCapability[] {
