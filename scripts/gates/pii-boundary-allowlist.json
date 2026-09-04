@@ -12,12 +12,6 @@
     "protection": "User-directed provider request; derived-data review remains in the PII auditor."
   },
   {
-    "file": "lib/agent-team/runtime-streamers.ts",
-    "boundaries": ["ai"],
-    "reason": "Low-level team streaming adapter receives prepared prompts.",
-    "protection": "Agent-team orchestration gates derived shared-memory content before this adapter."
-  },
-  {
     "file": "lib/ai/agent/agent-executor.ts",
     "boundaries": ["ai"],
     "reason": "Core user-configured agent execution boundary.",
@@ -55,7 +49,8 @@
       "@ai-sdk/xai",
       "@ai-sdk/togetherai",
       "@ai-sdk/fireworks",
-      "@ai-sdk/deepinfra"
+      "@ai-sdk/deepinfra",
+      "@ai-sdk/deepseek"
     ],
     "reason": "Constructs provider clients; it does not assemble derived payloads.",
     "protection": "Payload gates live at higher-level feature boundaries."
@@ -77,12 +72,6 @@
     "boundaries": ["@cognia/provider-embedding/embedding"],
     "reason": "Routing uses the shared embedding adapter.",
     "protection": "Routing queries are user-authored; local candidate metadata is application-owned."
-  },
-  {
-    "file": "lib/plugin/api/ai-provider-api.ts",
-    "boundaries": ["ai"],
-    "reason": "Plugin AI API is wrapped by the plugin PII gate contract.",
-    "protection": "lib/plugin/api/plugin-pii-gate.ts validates plugin-derived prompt content."
   },
   {
     "file": "lib/plugin/vscode-shim/lm-handler.ts",
@@ -243,7 +232,8 @@
       "@ai-sdk/mistral",
       "@ai-sdk/cohere",
       "@ai-sdk/azure",
-      "@ai-sdk/amazon-bedrock"
+      "@ai-sdk/amazon-bedrock",
+      "@ai-sdk/deepseek"
     ],
     "reason": "Low-level sidecar protocol adapter receives fully assembled user turns.",
     "protection": "Application feature boundaries gate derived context before sidecar dispatch."
@@ -283,5 +273,11 @@
     "boundaries": ["ai", "@langfuse/vercel-ai-sdk"],
     "reason": "Registers the process-wide official Langfuse AI SDK 7 telemetry integration before the first model call.",
     "protection": "Per-call capture flags default off, Langfuse model and tool content policies are enforced independently, and generic OTLP/PostHog exporters always strip content."
+  },
+  {
+    "file": "lib/plugin/runtime/renderer-host-runtime.ts",
+    "boundaries": ["ai"],
+    "reason": "The ambient plugin host runtime (renderer, Tauri, Capacitor). It executes an already-gated ctx.ai.chat payload and assembles nothing of its own. The boundary MOVED here out of lib/plugin/api/ai-provider-api.ts in 17ef13615 (ADR-0155, plugins reach the host through one door); the gate stayed above the seam and the allowlist entry did not follow, which is what this entry repairs.",
+    "protection": "lib/plugin/api/ai-provider-api.ts:253 calls assertNoLeakingPii (lib/plugin/api/plugin-pii-gate.ts, which imports @cognia/redact hasNoLeakingPii) as the FIRST statement of ctx.ai.chat, above both the custom-provider branch and resolvePluginHostRuntime, so no runtime can be the one that forgot. ctx.ai.embed is gated the same way at :273. The module is host-private (not re-exported through @cognia/plugin-sdk) and its only production importer is lib/plugin/runtime/host-runtime.ts:183. The ordering is pinned by lib/plugin/api/ai-provider-api.test.ts, which mocks `ai` and asserts the throw precedes streamText."
   }
 ]

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { UIMessage } from "ai"
 import { useTranslations } from "next-intl"
 import {
   AudioLinesIcon,
@@ -193,7 +194,7 @@ export function LiveVoiceDialog({ disabled, onUserTranscript }: LiveVoiceDialogP
   const triggerDisabled = Boolean(disabled || chatBusy || unavailableReason)
 
   const upsertPersistedMessages = useCallback(
-    (messages: readonly import("ai").UIMessage[]) => {
+    (messages: readonly UIMessage[]) => {
       if (sessionId && messages.length > 0) {
         useChatStore.getState().upsertSessionMessages(sessionId, messages)
       }
