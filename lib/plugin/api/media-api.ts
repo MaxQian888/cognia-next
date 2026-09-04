@@ -32,6 +32,18 @@ import {
   type MediaCatalogWriter,
   type PluginMediaAssetInput,
 } from "@/lib/media/media-ingest"
+import {
+  applyAdjustments,
+  decodeBlobToPixelBuffer,
+  decodeUrlToPixelBuffer,
+  fromImageData,
+  pixelBufferToBlob,
+  pixelBufferToDataUrlSync,
+  resizeBuffer,
+  toImageData,
+  transformBuffer,
+  type PixelBuffer,
+} from "@/lib/images"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
@@ -462,30 +474,22 @@ function createOffscreenCanvas(width: number, height: number): OffscreenCanvas {
   return new OffscreenCanvas(width, height)
 }
 
+/**
+ * Adopt an `ImageData` as the shared engine's `PixelBuffer`.
+ *
+ * The two shapes are identical, so this is a view rather than a copy. It exists
+ * to make each delegation below read in one direction.
+ */
+function asBuffer(imageData: ImageData): PixelBuffer {
+  return fromImageData(imageData)
+}
+
 async function loadImage(source: string | Blob | File): Promise<ImageData> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = "anonymous"
-
-    img.onload = () => {
-      const canvas = createOffscreenCanvas(img.width, img.height)
-      const ctx = canvas.getContext("2d")
-      if (!ctx) {
-        reject(new Error("Failed to get canvas context"))
-        return
-      }
-      ctx.drawImage(img, 0, 0)
-      resolve(ctx.getImageData(0, 0, img.width, img.height))
-    }
-
-    img.onerror = () => reject(new Error("Failed to load image"))
-
-    if (typeof source === "string") {
-      img.src = source
-    } else {
-      img.src = URL.createObjectURL(source)
-    }
-  })
+  const buffer =
+    typeof source === "string"
+      ? await decodeUrlToPixelBuffer(source)
+      : await decodeBlobToPixelBuffer(source)
+  return toImageData(buffer)
 }
 
 function imageDataToDataUrl(
@@ -493,27 +497,18 @@ function imageDataToDataUrl(
   format: "png" | "jpeg" | "webp" = "png",
   quality = 0.92
 ): string {
-  const canvas = createOffscreenCanvas(imageData.width, imageData.height)
-  const ctx = canvas.getContext("2d")
-  if (!ctx) throw new Error("Failed to get canvas context")
-
-  ctx.putImageData(imageData, 0, 0)
-
-  // OffscreenCanvas uses convertToBlob, need to use regular canvas for toDataURL
-  const tempCanvas = document.createElement("canvas")
-  tempCanvas.width = imageData.width
-  tempCanvas.height = imageData.height
-  const tempCtx = tempCanvas.getContext("2d")
-  if (!tempCtx) throw new Error("Failed to get temp canvas context")
-  tempCtx.putImageData(imageData, 0, 0)
-
-  return tempCanvas.toDataURL(`image/${format}`, quality)
+  return pixelBufferToDataUrlSync(asBuffer(imageData), format, quality)
 }
 
 async function dataUrlToImageData(dataUrl: string): Promise<ImageData> {
   return loadImage(dataUrl)
 }
 
+/**
+ * Fit-then-resample. The aspect fitting is this API's own contract (a plugin
+ * asks for a bounding box, not for exact pixels), so it stays here. The
+ * resampling itself is the engine's.
+ */
 function resizeImageData(
   imageData: ImageData,
   targetWidth: number,
@@ -532,176 +527,25 @@ function resizeImageData(
     }
   }
 
-  const sourceCanvas = createOffscreenCanvas(imageData.width, imageData.height)
-  const sourceCtx = sourceCanvas.getContext("2d")
-  if (!sourceCtx) throw new Error("Failed to get source canvas context")
-  sourceCtx.putImageData(imageData, 0, 0)
-
-  const targetCanvas = createOffscreenCanvas(finalWidth, finalHeight)
-  const targetCtx = targetCanvas.getContext("2d")
-  if (!targetCtx) throw new Error("Failed to get target canvas context")
-
-  targetCtx.drawImage(sourceCanvas, 0, 0, finalWidth, finalHeight)
-  return targetCtx.getImageData(0, 0, finalWidth, finalHeight)
+  return toImageData(resizeBuffer(asBuffer(imageData), finalWidth, finalHeight))
 }
 
 function transformImageData(imageData: ImageData, options: ImageTransformOptions): ImageData {
-  const canvas = createOffscreenCanvas(imageData.width, imageData.height)
-  const ctx = canvas.getContext("2d")
-  if (!ctx) throw new Error("Failed to get canvas context")
-
-  // Create source canvas
-  const sourceCanvas = createOffscreenCanvas(imageData.width, imageData.height)
-  const sourceCtx = sourceCanvas.getContext("2d")
-  if (!sourceCtx) throw new Error("Failed to get source canvas context")
-  sourceCtx.putImageData(imageData, 0, 0)
-
-  // Apply transforms
-  ctx.save()
-  ctx.translate(canvas.width / 2, canvas.height / 2)
-
-  if (options.rotate) {
-    ctx.rotate((options.rotate * Math.PI) / 180)
-  }
-
-  if (options.scale) {
-    ctx.scale(options.scale, options.scale)
-  }
-
-  if (options.flipHorizontal) {
-    ctx.scale(-1, 1)
-  }
-
-  if (options.flipVertical) {
-    ctx.scale(1, -1)
-  }
-
-  ctx.translate(-canvas.width / 2, -canvas.height / 2)
-  ctx.drawImage(sourceCanvas, 0, 0)
-  ctx.restore()
-
-  let result = ctx.getImageData(0, 0, canvas.width, canvas.height)
-
-  // Apply crop
-  if (options.cropRegion) {
-    const { x, y, width, height } = options.cropRegion
-    const cropCanvas = createOffscreenCanvas(width, height)
-    const cropCtx = cropCanvas.getContext("2d")
-    if (!cropCtx) throw new Error("Failed to get crop canvas context")
-    cropCtx.putImageData(result, -x, -y)
-    result = cropCtx.getImageData(0, 0, width, height)
-  }
-
-  return result
+  return toImageData(transformBuffer(asBuffer(imageData), options))
 }
 
+/**
+ * Every adjustment this API advertises now actually runs.
+ *
+ * Until the shared engine existed, only brightness, contrast, saturation and
+ * hue were implemented here. Exposure, gamma, vibrance, temperature, tint, blur
+ * and sharpen were declared in `ImageAdjustmentOptions`, accepted, and dropped
+ * on the floor. The contrast curve was also wrong past about plus or minus 40,
+ * where its factor went negative and inverted the image before clipping it. See
+ * `lib/images/adjust.ts` for both.
+ */
 function adjustImageData(imageData: ImageData, adjustments: ImageAdjustmentOptions): ImageData {
-  const data = new Uint8ClampedArray(imageData.data)
-
-  for (let i = 0; i < data.length; i += 4) {
-    let r = data[i]
-    let g = data[i + 1]
-    let b = data[i + 2]
-
-    // Brightness
-    if (adjustments.brightness) {
-      const brightness = adjustments.brightness * 2.55
-      r = Math.min(255, Math.max(0, r + brightness))
-      g = Math.min(255, Math.max(0, g + brightness))
-      b = Math.min(255, Math.max(0, b + brightness))
-    }
-
-    // Contrast
-    if (adjustments.contrast) {
-      const contrast = (adjustments.contrast + 100) / 100
-      const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255))
-      r = Math.min(255, Math.max(0, factor * (r - 128) + 128))
-      g = Math.min(255, Math.max(0, factor * (g - 128) + 128))
-      b = Math.min(255, Math.max(0, factor * (b - 128) + 128))
-    }
-
-    // Saturation
-    if (adjustments.saturation) {
-      const saturation = (adjustments.saturation + 100) / 100
-      const gray = 0.2989 * r + 0.587 * g + 0.114 * b
-      r = Math.min(255, Math.max(0, gray + saturation * (r - gray)))
-      g = Math.min(255, Math.max(0, gray + saturation * (g - gray)))
-      b = Math.min(255, Math.max(0, gray + saturation * (b - gray)))
-    }
-
-    // Hue shift
-    if (adjustments.hue) {
-      const hueShift = adjustments.hue / 180
-      const [h, s, l] = rgbToHsl(r, g, b)
-      const [newR, newG, newB] = hslToRgb((h + hueShift + 1) % 1, s, l)
-      r = newR
-      g = newG
-      b = newB
-    }
-
-    data[i] = r
-    data[i + 1] = g
-    data[i + 2] = b
-  }
-
-  return new ImageData(data, imageData.width, imageData.height)
-}
-
-// Color conversion utilities
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-  r /= 255
-  g /= 255
-  b /= 255
-
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
-  let h = 0
-  let s = 0
-  const l = (max + min) / 2
-
-  if (max !== min) {
-    const d = max - min
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
-
-    switch (max) {
-      case r:
-        h = ((g - b) / d + (g < b ? 6 : 0)) / 6
-        break
-      case g:
-        h = ((b - r) / d + 2) / 6
-        break
-      case b:
-        h = ((r - g) / d + 4) / 6
-        break
-    }
-  }
-
-  return [h, s, l]
-}
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  let r: number, g: number, b: number
-
-  if (s === 0) {
-    r = g = b = l
-  } else {
-    const hue2rgb = (p: number, q: number, t: number): number => {
-      if (t < 0) t += 1
-      if (t > 1) t -= 1
-      if (t < 1 / 6) return p + (q - p) * 6 * t
-      if (t < 1 / 2) return q
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6
-      return p
-    }
-
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s
-    const p = 2 * l - q
-    r = hue2rgb(p, q, h + 1 / 3)
-    g = hue2rgb(p, q, h)
-    b = hue2rgb(p, q, h - 1 / 3)
-  }
-
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]
+  return toImageData(applyAdjustments(asBuffer(imageData), adjustments))
 }
 
 function getHistogram(imageData: ImageData): {
@@ -982,14 +826,7 @@ function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
 }
 
 async function imageDataToPngFile(imageData: ImageData, filename: string): Promise<File> {
-  const canvas = createOffscreenCanvas(imageData.width, imageData.height)
-  const ctx = canvas.getContext("2d")
-  if (!ctx) {
-    throw new Error("Failed to get canvas context")
-  }
-  ctx.putImageData(imageData, 0, 0)
-
-  const blob = await canvas.convertToBlob({ type: "image/png" })
+  const blob = await pixelBufferToBlob(asBuffer(imageData), "png")
   return new File([blob], filename, { type: "image/png" })
 }
 
