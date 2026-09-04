@@ -83,6 +83,12 @@ export interface BotInstallationScope {
 export interface BotCredentialBinding {
   integrationAccountId?: string
   authSessionId?: string
+  /**
+   * Connector adapter instance, for a slot that binds an IM account rather
+   * than an integration one. A slot is bound when it names ANY of the three,
+   * because which one it needs is the integration's business, not this table's.
+   */
+  adapterId?: string
 }
 
 /**

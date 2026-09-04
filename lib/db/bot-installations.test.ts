@@ -50,11 +50,14 @@ describe("unboundCredentialSlots", () => {
     expect(unboundCredentialSlots([REPO_SLOT], { repo: {} })).toEqual(["repo"])
   })
 
-  it("accepts either an account or a session binding", () => {
+  it("accepts an account, a session or a connector adapter", () => {
+    // Which of the three a slot needs is the integration's business, not this
+    // table's, so any one of them counts as bound.
     expect(unboundCredentialSlots([REPO_SLOT], { repo: { integrationAccountId: "acct" } })).toEqual(
       []
     )
     expect(unboundCredentialSlots([REPO_SLOT], { repo: { authSessionId: "sess" } })).toEqual([])
+    expect(unboundCredentialSlots([REPO_SLOT], { repo: { adapterId: "lark_1" } })).toEqual([])
   })
 })
 

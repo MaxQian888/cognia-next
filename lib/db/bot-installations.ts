@@ -54,7 +54,7 @@ export function unboundCredentialSlots(
     .filter((slot) => {
       if (slot.optional) return false
       const binding = bindings?.[slot.id]
-      return !binding?.integrationAccountId && !binding?.authSessionId
+      return !binding?.integrationAccountId && !binding?.authSessionId && !binding?.adapterId
     })
     .map((slot) => slot.id)
 }
