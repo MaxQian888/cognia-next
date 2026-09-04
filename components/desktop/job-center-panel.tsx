@@ -25,6 +25,7 @@ import { redispatchBackgroundRun } from "@/lib/background-tasks/redispatch"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
 import { jobExecutionRunId } from "@/lib/execution/job-bridge"
+import { resolveScheduledTaskNames } from "@/lib/scheduler/task-processes"
 import { clearSettledBackgroundTasks, listBackgroundTaskRecords } from "@/lib/db/background-tasks"
 import {
   cancelBackgroundMonitor,
@@ -290,22 +291,84 @@ function SupervisorList({
   monitors,
   now,
   onChanged,
+  resolveTaskNames = resolveScheduledTaskNames,
 }: {
   jobs: BackgroundJobRecord[]
   monitors: BackgroundMonitorRecord[]
   now: number
   onChanged: () => Promise<void>
+  /** Injected in tests, so the suite needs no scheduler database. */
+  resolveTaskNames?: (taskIds: readonly string[]) => Promise<Map<string, string>>
 }) {
   const t = useTranslations("desktop.jobCenter")
+  const router = useRouter()
   const [tails, setTails] = useState<Record<string, string>>({})
+
+  // A `scheduledTask` owner arrives as a bare id. This list is the only place
+  // these processes can be stopped, and "scheduledTask xR9k2…" is not a thing
+  // a user can act on, so the schedule's own name is fetched for the label.
+  const [taskNames, setTaskNames] = useState<Map<string, string>>(new Map())
+  const scheduledOwnerIds = [...jobs, ...monitors]
+    .map((row) => (row.owner.kind === "scheduledTask" ? row.owner.taskId : null))
+    .filter((id): id is string => id !== null)
+  const scheduledOwnerKey = Array.from(new Set(scheduledOwnerIds)).sort().join(",")
+
+  useEffect(() => {
+    const ids = scheduledOwnerKey ? scheduledOwnerKey.split(",") : []
+    // No eager clear when the list empties. Setting state synchronously here
+    // would cascade a render, and a stale name is unreachable anyway: the map
+    // is only consulted for owner ids that are currently on screen.
+    if (ids.length === 0) return
+    let cancelled = false
+    void resolveTaskNames(ids).then((names) => {
+      if (!cancelled) setTaskNames(names)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [scheduledOwnerKey, resolveTaskNames])
+
+  /**
+   * The owner label, and for a schedule a way back to it.
+   *
+   * A deleted task keeps its id as the label rather than vanishing: an orphan
+   * process outliving its schedule is exactly when this list earns its keep.
+   */
   const displayOwner = (owner: BackgroundJobRecord["owner"]) => {
     switch (owner.kind) {
       case "session":
-        return t("supervisor.owner.session", { id: owner.sessionId })
-      case "scheduledTask":
-        return t("supervisor.owner.scheduledTask", { id: owner.taskId })
+        return (
+          <Badge variant="outline">{t("supervisor.owner.session", { id: owner.sessionId })}</Badge>
+        )
+      case "scheduledTask": {
+        const taskId = owner.taskId
+        const name = taskNames.get(taskId)
+        return (
+          <Badge
+            variant="outline"
+            asChild
+            className="cursor-pointer hover:bg-accent"
+            data-testid="job-owner-scheduled-task"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                // Selection is store state on /scheduler rather than a URL
+                // param, so it is set before navigating, the same way
+                // `run-artifact-links` opens a session.
+                void import("@/stores/scheduler/scheduler-store").then(({ useSchedulerStore }) => {
+                  useSchedulerStore.getState().selectTask(taskId)
+                  router.push("/scheduler")
+                })
+              }}
+            >
+              {t("supervisor.owner.scheduledTask", { id: name ?? taskId })}
+            </button>
+          </Badge>
+        )
+      }
       default:
-        return t("supervisor.owner.app")
+        return <Badge variant="outline">{t("supervisor.owner.app")}</Badge>
     }
   }
   const displayDuration = (startedAt: number, endedAt?: number) => {
@@ -377,7 +440,7 @@ function SupervisorList({
                       <Badge variant={job.status === "running" ? "secondary" : "outline"}>
                         {t(`supervisor.jobStatus.${job.status}`)}
                       </Badge>
-                      <Badge variant="outline">{displayOwner(job.owner)}</Badge>
+                      {displayOwner(job.owner)}
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">{job.cwd}</p>
                     <p className="text-xs text-muted-foreground">
@@ -435,7 +498,7 @@ function SupervisorList({
                     <Badge variant={monitor.status === "waiting" ? "secondary" : "outline"}>
                       {t(`supervisor.monitorStatus.${monitor.status}`)}
                     </Badge>
-                    <Badge variant="outline">{displayOwner(monitor.owner)}</Badge>
+                    {displayOwner(monitor.owner)}
                   </div>
                   {monitor.detail ? (
                     <p className="mt-1 text-xs text-muted-foreground">{monitor.detail}</p>

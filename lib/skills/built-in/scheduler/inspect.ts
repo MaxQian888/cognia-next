@@ -5,6 +5,13 @@
  * and is almost never wanted for every task at once. It is also the half that
  * answers "why did this stop working", which needs the terminal reason and the
  * error text, not just a success count.
+ *
+ * For the two task types that reach the host's process supervisor it also
+ * reports what is still running. A `background-command` run completes in
+ * milliseconds because its job is to START the process, so a run history of
+ * green ticks says nothing about whether the command is still going. Without
+ * this the assistant would confidently report a finished build that was still
+ * running.
  */
 
 import { z } from "zod"
@@ -45,6 +52,14 @@ const skill: BuiltInSkill<typeof schema> = {
       args.runLimit > 0
         ? await getTaskScheduler().getTaskExecutions(args.taskId, args.runLimit)
         : []
+    // Only asked for the types that can have processes, so an ordinary chat
+    // task does not pay a supervisor round trip to be told "none".
+    const { listTaskProcesses, taskTypeSpawnsProcesses } =
+      await import("@/lib/scheduler/task-processes")
+    const processes = taskTypeSpawnsProcesses(task.type)
+      ? await listTaskProcesses({ id: task.id, type: task.type })
+      : undefined
+
     return {
       task: {
         ...toAgentVisibleTask(task),
@@ -67,6 +82,30 @@ const skill: BuiltInSkill<typeof schema> = {
         ...(run.terminalReason ? { terminalReason: run.terminalReason } : {}),
         ...(run.error ? { error: run.error } : {}),
       })),
+      // Absent for a task type that cannot spawn one, which is different from
+      // an empty list, which is different again from a host that cannot answer.
+      // Collapsing the three would let the assistant report "nothing running"
+      // for a machine it simply cannot see.
+      ...(processes === undefined
+        ? {}
+        : processes.supported
+          ? {
+              processes: {
+                jobs: processes.jobs.map((job) => ({
+                  id: job.id,
+                  command: job.command,
+                  status: job.status,
+                  ...(job.pid !== undefined ? { pid: job.pid } : {}),
+                  ...(job.exitCode !== undefined ? { exitCode: job.exitCode } : {}),
+                })),
+                monitors: processes.monitors.map((monitor) => ({
+                  id: monitor.id,
+                  status: monitor.status,
+                  condition: monitor.condition.kind,
+                })),
+              },
+            }
+          : { processesUnavailable: processes.reason }),
     }
   },
 }

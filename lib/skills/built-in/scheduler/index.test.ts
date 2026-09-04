@@ -71,7 +71,7 @@ beforeEach(() => {
 })
 
 describe("the schedule family", () => {
-  it("registers all eight skills under one family", () => {
+  it("registers all nine skills under one family", () => {
     expect(
       registry
         .listByFamily("schedule")
@@ -85,6 +85,7 @@ describe("the schedule family", () => {
       "schedule.list",
       "schedule.run_now",
       "schedule.set_status",
+      "schedule.stop_process",
       "schedule.update",
     ])
   })
@@ -102,6 +103,14 @@ describe("the schedule family", () => {
     // Stopping is the recoverable direction, so unlike delete it is not gated
     // behind a channel opt-in.
     expect(skill("schedule.cancel_run").imAccess).toBe("always")
+  })
+
+  it("keeps stop_process destructive, because a signalled process leaves work half-done", () => {
+    // Cancelling a run records a cancelled execution and can be re-run.
+    // Killing a process mid-write leaves whatever it was doing part-done with
+    // nothing to inspect afterwards.
+    expect(skill("schedule.stop_process").mutation).toBe("destructive")
+    expect(skill("schedule.stop_process").imAccess).toBe("opt-in")
   })
 
   it("keeps delete destructive and behind a channel opt-in", () => {

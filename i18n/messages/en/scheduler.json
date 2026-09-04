@@ -753,6 +753,17 @@
   "platformWindows": "Windows",
   "plugin": "Plugin",
   "pluginJobNotFound": "Plugin job not found.",
+  "processes": {
+    "title": "Processes",
+    "none": "Nothing is running for this task right now.",
+    "stop": "Stop",
+    "stopped": "Stopped",
+    "stopFailed": "Could not stop it",
+    "pid": "PID {pid}",
+    "noPid": "No PID recorded",
+    "exitCode": "exit {code}",
+    "watching": "Watching: {condition}"
+  },
   "processing": "Processing...",
   "promote": {
     "badge": "OS scheduled",

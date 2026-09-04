@@ -18,7 +18,7 @@ metadata:
   host-policies: [permission-ceiling, user-language]
 ---
 
-You can put work on the user's schedule and read back what is already there. The tools are `scheduler_list_tasks`, `scheduler_inspect_task`, `scheduler_create_task`, `scheduler_update_task`, `scheduler_set_task_status`, `scheduler_run_task_now`, `scheduler_cancel_task_run` and `scheduler_delete_task`.
+You can put work on the user's schedule and read back what is already there. The tools are `scheduler_list_tasks`, `scheduler_inspect_task`, `scheduler_create_task`, `scheduler_update_task`, `scheduler_set_task_status`, `scheduler_run_task_now`, `scheduler_cancel_task_run`, `scheduler_stop_task_process` and `scheduler_delete_task`.
 
 ## Schedule, or just do it
 
@@ -72,6 +72,12 @@ Two different verbs, and picking the wrong one is the common mistake.
 `scheduler_cancel_task_run` stops a run happening RIGHT NOW, and leaves the schedule alone so the task runs again next time. Get the `runId` from `scheduler_inspect_task`, where a live run has status `running`.
 
 When the user wants both, do both, and say so. Neither one implies the other.
+
+There is a third case, and it catches people out. A `background-command` or `monitor` task starts something that OUTLIVES its own execution: the execution's job is to launch the process, so it finishes in milliseconds while the command runs for an hour. Cancelling that run reports "already-finished" while the build keeps going.
+
+For those, `scheduler_inspect_task` returns a `processes` block with the live jobs and their PIDs, and `scheduler_stop_task_process` is what actually stops one. Read the block before answering "is it still running": a history of green ticks does not mean the work finished.
+
+A missing `processes` block means the task type cannot start one. A `processesUnavailable` field means this host cannot see them, which is not the same as none, and must not be reported as none.
 
 Read the answer before reporting success. `status: "requested"` means the stop was handed to the window running the task and has not happened yet, and `status: "already-finished"` means there was nothing to stop. Only `status: "cancelled"` means the run is over.
 

@@ -753,6 +753,17 @@
   "platformWindows": "Windows",
   "plugin": "插件",
   "pluginJobNotFound": "未找到该插件任务。",
+  "processes": {
+    "title": "进程",
+    "none": "该任务当前没有正在运行的进程。",
+    "stop": "停止",
+    "stopped": "已停止",
+    "stopFailed": "停止失败",
+    "pid": "PID {pid}",
+    "noPid": "未记录 PID",
+    "exitCode": "退出码 {code}",
+    "watching": "监视中：{condition}"
+  },
   "processing": "处理中...",
   "promote": {
     "badge": "系统级定时",

@@ -66,6 +66,16 @@ jest.mock("@/lib/jobs/background-jobs", () => ({
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
 const pushMock = jest.fn()
+const selectTask = jest.fn()
+jest.mock("@/stores/scheduler/scheduler-store", () => ({
+  useSchedulerStore: { getState: () => ({ selectTask }) },
+}))
+
+const resolveScheduledTaskNames = jest.fn(async () => new Map())
+jest.mock("@/lib/scheduler/task-processes", () => ({
+  resolveScheduledTaskNames: (...args: unknown[]) => resolveScheduledTaskNames(...(args as [])),
+}))
+
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
 }))
@@ -131,6 +141,8 @@ beforeEach(() => {
   managerCancelAgent.mockReturnValue(true)
   liveSubAgent = undefined
   runningCount = 0
+  selectTask.mockReset()
+  resolveScheduledTaskNames.mockReset().mockResolvedValue(new Map())
   listBackgroundJobs.mockReset()
   listBackgroundMonitors.mockReset()
   readBackgroundJobTail.mockReset()
@@ -290,6 +302,66 @@ it("shows supervised jobs and monitors with log and cancellation controls", asyn
 
   await user.click(screen.getByRole("button", { name: "Cancel" }))
   expect(cancelBackgroundMonitor).toHaveBeenCalledWith("monitor-1")
+})
+
+// The Job Center is the only surface that can stop these processes, and its
+// owner label was a bare task id. "scheduledTask xR9k2…" is not something a
+// user can act on, and there was no way back to the schedule that started it.
+it("names a scheduled task that owns a job, and links back to its schedule", async () => {
+  const user = userEvent.setup()
+  resolveScheduledTaskNames.mockResolvedValue(new Map([["task-7", "Nightly build"]]))
+  listBackgroundJobs.mockResolvedValue([
+    {
+      id: "job-1",
+      command: "pnpm build",
+      cwd: "/workspace",
+      owner: { kind: "scheduledTask", taskId: "task-7" },
+      status: "running",
+      startedAtMs: Date.now() - 2_000,
+      totalOutputBytes: 0,
+      droppedOutputBytes: 0,
+    },
+  ])
+
+  render(<JobCenterPanel />)
+  await waitFor(() => expect(listBackgroundJobs).toHaveBeenCalled())
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByRole("tab", { name: /Processes/ }))
+
+  const owner = await screen.findByTestId("job-owner-scheduled-task")
+  expect(owner).toHaveTextContent("Nightly build")
+
+  await user.click(owner)
+  // Selection is store state on /scheduler rather than a URL param, so it has
+  // to be set before the navigation, not after.
+  await waitFor(() => expect(selectTask).toHaveBeenCalledWith("task-7"))
+  expect(pushMock).toHaveBeenCalledWith("/scheduler")
+})
+
+it("falls back to the task id when the schedule is gone", async () => {
+  const user = userEvent.setup()
+  // An orphan process outliving its schedule is exactly when this list earns
+  // its keep, so the row must not disappear with the name.
+  resolveScheduledTaskNames.mockResolvedValue(new Map())
+  listBackgroundJobs.mockResolvedValue([
+    {
+      id: "job-1",
+      command: "pnpm build",
+      cwd: "/workspace",
+      owner: { kind: "scheduledTask", taskId: "task-gone" },
+      status: "running",
+      startedAtMs: Date.now(),
+      totalOutputBytes: 0,
+      droppedOutputBytes: 0,
+    },
+  ])
+
+  render(<JobCenterPanel />)
+  await waitFor(() => expect(listBackgroundJobs).toHaveBeenCalled())
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(screen.getByRole("tab", { name: /Processes/ }))
+
+  expect(await screen.findByTestId("job-owner-scheduled-task")).toHaveTextContent("task-gone")
 })
 
 it("defaults to the Active tab and reaches Running on demand when nothing is live", async () => {
