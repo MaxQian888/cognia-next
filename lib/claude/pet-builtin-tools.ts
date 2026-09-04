@@ -230,6 +230,8 @@ export interface PetToolDeps {
   listAchievements: () => Promise<unknown[]>
   listInventory: () => Promise<unknown[]>
   bubblesMuted: () => boolean
+  /** Whether the pet may act on this host right now. */
+  isAvailable: () => boolean
   now: () => number
 }
 
@@ -250,15 +252,17 @@ export function __setPetToolDepsForTesting(factory: (() => PetToolDeps) | null):
  */
 export async function resolvePetToolDeps(): Promise<PetToolDeps> {
   if (testDepsFactory) return testDepsFactory()
-  const [db, summary, gate, say, commands, consoleRequest, settings] = await Promise.all([
-    import("@/lib/db/pet"),
-    import("@/lib/pet/access/summary"),
-    import("@/lib/pet/access/gate"),
-    import("@/lib/pet/bubbles/say"),
-    import("@/lib/pet/commands"),
-    import("@/lib/pet/console-request"),
-    import("@/stores/settings"),
-  ])
+  const [db, summary, gate, say, commands, consoleRequest, settings, availability] =
+    await Promise.all([
+      import("@/lib/db/pet"),
+      import("@/lib/pet/access/summary"),
+      import("@/lib/pet/access/gate"),
+      import("@/lib/pet/bubbles/say"),
+      import("@/lib/pet/commands"),
+      import("@/lib/pet/console-request"),
+      import("@/stores/settings"),
+      import("@/lib/pet/access/availability"),
+    ])
   const subject = { kind: "agent" } as const
   return {
     getProfile: () => db.getPetProfile(),
@@ -274,6 +278,10 @@ export async function resolvePetToolDeps(): Promise<PetToolDeps> {
     listInventory: () => db.listPetInventory(),
     bubblesMuted: () =>
       settings.useSettingsStore.getState().settings?.petSettings?.mutedBubbles === true,
+    isAvailable: () =>
+      availability.resolveLivePetAvailability(
+        settings.useSettingsStore.getState().settings?.petSettings?.enabled !== false
+      ).available,
     now: () => Date.now(),
   }
 }
@@ -424,6 +432,14 @@ export async function runPetBuiltinTool(
       }
 
       case PET_SHOW_TOOL_NAME: {
+        // The only tool that does not route through the access gate, because it
+        // opens a window rather than driving the pet. It still has to ask: with
+        // the pet switched off nothing subscribes to the console request, so
+        // this returned `opened: true` while doing nothing, and the overlay
+        // branch would recreate the very window the master switch destroys.
+        if (!deps.isAvailable()) {
+          return fail("pet_disabled", "The desktop pet is switched off in Settings.")
+        }
         const target = str(args, "target") ?? "console"
         const tabRaw = str(args, "tab")
         const tab = CONSOLE_TABS.includes(tabRaw as PetConsoleTab)

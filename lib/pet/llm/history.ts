@@ -3,6 +3,7 @@
 // IndexedDB and the speak path can never be broken by a storage failure — every
 // operation degrades to "no history".
 
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { PetConversationRow } from "@/types/pet"
 
 export interface PetHistoryDeps {
@@ -40,7 +41,23 @@ export async function loadHistoryForPrompt(
   }
 }
 
-/** Render history as prompt lines ("User: …\nYou: …"); "" when empty. */
+/**
+ * Render history as prompt lines ("User: …\nYou: …"), or "" when empty.
+ *
+ * Every turn passes the PII gate before it can be replayed. The user's half was
+ * already gated when it was first sent, but the pet's REPLY never was, and the
+ * TTS path gates that same reply on the stated premise that a model can echo
+ * back a fact recalled from long-term memory. Storing an ungated reply and
+ * replaying it into the next prompt let exactly that fact back out, to whatever
+ * provider is configured by then, which may not be the one that produced it.
+ *
+ * Filtering happens on READ so rows written before the gate existed are covered
+ * too. A turn that trips it is dropped on its own rather than degrading the
+ * whole history layer.
+ */
 export function formatHistoryLines(turns: PetConversationRow[]): string {
-  return turns.map((t) => `User: ${t.userText}\nYou: ${t.reply}`).join("\n")
+  return turns
+    .filter((t) => hasNoLeakingPii(t.userText) && hasNoLeakingPii(t.reply))
+    .map((t) => `User: ${t.userText}\nYou: ${t.reply}`)
+    .join("\n")
 }

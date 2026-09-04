@@ -29,10 +29,15 @@ describe("lib/storage/types", () => {
       "trustedWorkspace",
       "ttsKey",
       "backupHistory",
+      "artifact",
+      "vector",
+      "pet",
       "system",
       "other",
     ]
-    expect(new Set(categories).size).toBe(14)
+    // Restated as a value so a widened union without a bucket here fails.
+    // `artifact` and `vector` were already missing when `pet` was added.
+    expect(new Set(categories).size).toBe(17)
   })
 
   it("StorageCategoryInfo aggregates breakdown data", () => {

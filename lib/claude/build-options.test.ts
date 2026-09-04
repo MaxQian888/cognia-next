@@ -5469,6 +5469,25 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / sessi
     expect(on.permissionRuleset?.pet_show).toBe("ask")
   })
 
+  it("withholds BOTH the tools and their tier on the mobile shell", async () => {
+    // The pet is excluded from the Capacitor shell outright, so surfacing the
+    // tier there would leave ten permission rules governing zero tools: the
+    // inert payload this file warns about twice.
+    const mobile = isNativeMobile as jest.Mock
+    mobile.mockReturnValue(true)
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: { selfInvokeTools: { pet: true } } as AppSettings,
+      })
+      expect(toolNames(opts)).not.toContain("pet_status")
+      expect(opts.permissionRuleset?.pet_status).toBeUndefined()
+      expect(opts.permissionRuleset?.pet_show).toBeUndefined()
+    } finally {
+      mobile.mockReturnValue(false)
+    }
+  })
+
   it("appends spawn_task only when opted in and not on native mobile", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", characterId: "c1" }),

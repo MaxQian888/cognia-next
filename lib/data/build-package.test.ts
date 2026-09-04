@@ -803,3 +803,84 @@ describe("buildBackupPackage — learned memory", () => {
     expect(pkg.payload.memoryAuditEvents).toBeUndefined()
   })
 })
+
+describe("the desktop pet", () => {
+  it("carries the pet the user raised, and leaves the binaries behind", async () => {
+    // The whole point of making the pet portable. Only the import half was
+    // pinned before this, so dropping the pet from the export would not have
+    // failed anything.
+    const db = getDb()
+    await db.petProfile.put({
+      id: "global",
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      xp: 1200,
+      level: 7,
+      stage: "adult",
+      needs: { energy: 70, mood: 70, bond: 70, lastTickAt: "2026-01-01T00:00:00.000Z" },
+      accountFingerprint: "acct-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as never)
+    await db.petAchievements.put({ id: "first-xp", unlockedAt: 1 } as never)
+    await db.petInventory.put({ id: "berry", qty: 2, acquiredAt: 1, updatedAt: 1 } as never)
+    await db.petCharacterBindings.put({ characterId: "c1", updatedAt: 1 } as never)
+    await db.petModels.put({
+      id: "pm_1",
+      name: "Hiyori",
+      source: "import",
+      totalBytes: 10,
+    } as never)
+    await db.petModelFiles.put({
+      id: "pmf_1",
+      modelId: "pm_1",
+      path: "a.moc3",
+      blob: new Blob([new Uint8Array(4)]),
+    } as never)
+
+    const backup = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: false,
+      includeMemories: false,
+      includeSettings: false,
+      includeCoreData: true,
+      includePlugins: false,
+    })
+
+    expect(backup.payload.petProfile).toMatchObject({ level: 7, xp: 1200 })
+    expect(backup.payload.petAchievements).toHaveLength(1)
+    expect(backup.payload.petInventory).toHaveLength(1)
+    expect(backup.payload.petCharacterBindings).toHaveLength(1)
+    expect(backup.payload.petModels).toHaveLength(1)
+    // A Blob does not survive JSON.stringify, so shipping the files would
+    // produce a package that claims the assets and restores empty rows.
+    expect(backup.payload).not.toHaveProperty("petModelFiles")
+    expect(backup.payload).not.toHaveProperty("petSpritePacks")
+    // The talk transcript is encrypted at rest and deliberately stays home.
+    expect(backup.payload).not.toHaveProperty("petConversation")
+    expect(backup.payload).not.toHaveProperty("petConversationV2")
+  })
+
+  it("drops the pet with the rest of the core data when it is excluded", async () => {
+    await getDb().petProfile.put({
+      id: "global",
+      soul: null,
+      xp: 0,
+      level: 1,
+      stage: "egg",
+      needs: { energy: 50, mood: 50, bond: 50, lastTickAt: "2026-01-01T00:00:00.000Z" },
+      accountFingerprint: "acct-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as never)
+    const backup = await buildBackupPackage({
+      includeSessions: false,
+      includeApiKey: false,
+      includeMemories: false,
+      includeSettings: false,
+      includeCoreData: false,
+      includePlugins: false,
+    })
+    expect(backup.payload.petProfile).toBeUndefined()
+    expect(backup.payload.petAchievements).toBeUndefined()
+  })
+})

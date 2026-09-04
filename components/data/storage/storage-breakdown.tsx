@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ChevronDownIcon } from "lucide-react"
+import { ChevronDownIcon, PawPrintIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { StorageCategory, StorageCategoryInfo } from "@/lib/storage"
 
@@ -48,6 +48,8 @@ const CATEGORY_ICONS: Record<StorageCategory, LucideIcon> = {
   ttsKey: KeyRoundIcon,
   backupHistory: HistoryIcon,
   vector: DatabaseIcon,
+  artifact: FileTextIcon,
+  pet: PawPrintIcon,
   system: CogIcon,
   other: MoreHorizontalIcon,
 }
@@ -66,6 +68,8 @@ const CATEGORY_COLORS: Record<StorageCategory, string> = {
   ttsKey: "bg-pink-500",
   backupHistory: "bg-teal-500",
   vector: "bg-violet-500",
+  artifact: "bg-violet-500",
+  pet: "bg-pink-500",
   system: "bg-slate-500",
   other: "bg-zinc-500",
 }

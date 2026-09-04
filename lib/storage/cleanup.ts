@@ -235,6 +235,18 @@ export async function deepCleanup(): Promise<CleanupResult> {
 
 /** Categories the dialog offers via the "Custom" tab. We hide `settings` and
  *  the seed-driven categories so users can't accidentally wipe their config. */
+/**
+ * Categories the Custom cleanup tab may offer.
+ *
+ * `artifact`, `character`, `vector` and `pet` are absent on purpose, and the
+ * reason is structural rather than taste: `cleanupTableNames` short-circuits
+ * with `if (!allowedPolicies && category !== "other") return tableNames`, so a
+ * non-`other` category offered here deletes EVERY table in it regardless of
+ * `cleanupPolicy: "protected"`. Offering the pet would put "delete the pet you
+ * raised, its badges and its imported models" behind a checkbox labelled
+ * "Desktop pet". The pet's own destructive reset lives in Settings, behind a
+ * confirmation, where it can say what it does.
+ */
 export function selectableCategories(): StorageCategory[] {
   return [
     "session",

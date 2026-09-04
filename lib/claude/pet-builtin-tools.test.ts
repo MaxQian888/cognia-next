@@ -38,6 +38,7 @@ function deps(over: Partial<PetToolDeps> = {}): PetToolDeps {
     listAchievements: async () => [{ id: "first-xp" }],
     listInventory: async () => [{ id: "berry", qty: 2 }],
     bubblesMuted: () => false,
+    isAvailable: () => true,
     now: () => NOW,
     ...over,
   }
@@ -261,6 +262,19 @@ describe("pet_show", () => {
   it("raises the overlay when asked", async () => {
     const res = await runPetBuiltinTool("pet_show", { target: "overlay" }, deps())
     expect(res).toMatchObject({ ok: true, target: "overlay", opened: true })
+  })
+
+  it("refuses when the pet is switched off, instead of reporting a window it never opened", async () => {
+    // Nothing subscribes to the console request with the pet off, and the
+    // overlay branch would recreate the exact window the master switch
+    // destroys. It used to return `opened: true` either way.
+    const res = await runPetBuiltinTool(
+      "pet_show",
+      { target: "console" },
+      deps({ isAvailable: () => false })
+    )
+    expect(res).toMatchObject({ ok: false, code: "pet_disabled" })
+    expect(consoleOpened).toEqual([])
   })
 
   it("explains that the floating pet needs the desktop app", async () => {

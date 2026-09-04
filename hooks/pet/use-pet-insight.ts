@@ -13,7 +13,7 @@
 import { useEffect, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getLatestRadarReport } from "@/lib/db/radar-reports"
-import { usePetStore } from "@/stores/pet/pet-store"
+import { sayAsPet } from "@/lib/pet/bubbles/say"
 import { useSettingsStore } from "@/stores/settings"
 
 export function usePetInsight(widgetEnabled: boolean): void {
@@ -43,7 +43,12 @@ export function usePetInsight(widgetEnabled: boolean): void {
     if (id && id !== seenRef.current) {
       seenRef.current = id
       const text = latest?.verdict?.trim() || latest?.atAGlance?.[0]?.trim() || ""
-      if (text) usePetStore.getState().setBubble({ text, origin: "system" })
+      // Through `sayAsPet` rather than straight into the store: a radar verdict
+      // is model-derived text about what the user has been reading, so it takes
+      // the PII gate and the shared speak budget like every other authored
+      // line, and the bubble clears itself instead of sitting there until
+      // something else happens to replace it.
+      if (text) sayAsPet(text, { origin: "system" }, { muted: false })
     }
   }, [enabled, latest])
 }

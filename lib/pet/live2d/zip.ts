@@ -35,7 +35,6 @@ export type ExtractZipResult =
  * walk at the first entry that crosses a line.
  */
 export const MAX_ZIP_ENTRIES = 2000
-export const MAX_ZIP_ENTRY_BYTES = MAX_MODEL_BYTES
 export const MAX_ZIP_TOTAL_BYTES = MAX_MODEL_BYTES
 
 /**
@@ -88,8 +87,10 @@ export async function extractModelZip(blob: Blob, deps: ZipDeps = {}): Promise<E
       if (normalizePath(stripped) === "") continue
       const fileBlob = await obj.async("blob")
       // Checked as the walk proceeds, so a compression bomb stops here rather
-      // than after the whole archive has been expanded into memory.
-      if (fileBlob.size > MAX_ZIP_ENTRY_BYTES) return { ok: false, code: "tooLarge" }
+      // than after the whole archive has been expanded into memory. One cap
+      // rather than a per-entry one as well: the model limit IS the ceiling
+      // for the whole package, so a single oversized member trips the running
+      // total on its own and a second constant would only be redundant.
       totalBytes += fileBlob.size
       if (totalBytes > MAX_ZIP_TOTAL_BYTES) return { ok: false, code: "tooLarge" }
       const mime = inferredMime(stripped)

@@ -77,3 +77,28 @@ describe("formatHistoryLines", () => {
     expect(formatHistoryLines([])).toBe("")
   })
 })
+
+describe("the PII gate on replayed history", () => {
+  const turn = (userText: string, reply: string) => ({ id: "pc_1", at: 1, userText, reply })
+
+  it("drops a turn whose stored REPLY carries PII", () => {
+    // The reply was never gated when it was written, and the TTS path refuses
+    // that same string on the premise that a model can echo back a recalled
+    // fact. Replaying it into the next prompt let the fact back out.
+    const lines = formatHistoryLines([
+      turn("what do you remember?", "your SSN is 123-45-6789"),
+      turn("hello", "hi there!"),
+    ])
+    expect(lines).not.toContain("123-45-6789")
+    expect(lines).toContain("hi there!")
+  })
+
+  it("drops a turn whose stored user text carries PII", () => {
+    const lines = formatHistoryLines([turn("SSN 123-45-6789", "noted")])
+    expect(lines).toBe("")
+  })
+
+  it("keeps an ordinary exchange intact", () => {
+    expect(formatHistoryLines([turn("hey", "hey yourself")])).toBe("User: hey\nYou: hey yourself")
+  })
+})

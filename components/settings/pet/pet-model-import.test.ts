@@ -65,6 +65,14 @@ describe("filesToEntries", () => {
     expect(result).toEqual({ ok: false, code: "zipFailed" })
   })
 
+  it("passes a size refusal through instead of calling it unreadable", async () => {
+    // Collapsing every failure to zipFailed sent a user whose archive was
+    // merely too big looking for a corrupt file.
+    extractModelZip.mockResolvedValue({ ok: false, code: "tooLarge" })
+    const result = await filesToEntries([file("huge.zip")])
+    expect(result).toEqual({ ok: false, code: "tooLarge" })
+  })
+
   it("maps folder files using webkitRelativePath", async () => {
     const result = await filesToEntries([file("Hiyori.model3.json", "Hiyori/Hiyori.model3.json")])
     expect(result).toEqual({

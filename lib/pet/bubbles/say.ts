@@ -8,8 +8,9 @@
 // is already the shared budget across every talk source, so an agent that
 // wants the pet to say something cannot out-talk the person using it.
 //
-// The bubble clears itself. `usePetInsight` previously set one that never did,
-// so a teaser could sit on screen indefinitely.
+// The bubble clears itself. `usePetInsight` used to set one straight into the
+// store that never did, so a radar teaser could sit on screen until something
+// else happened to replace it.
 
 import { sanitizeReply } from "@/lib/pet/bubbles/speak"
 import { getSpeakLimiter } from "@/lib/pet/bubbles/speak-limiter"

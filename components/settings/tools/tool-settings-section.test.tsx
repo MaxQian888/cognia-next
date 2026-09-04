@@ -16,6 +16,7 @@ const setVectorToolEnabled = jest.fn()
 const setSpawnTaskToolEnabled = jest.fn()
 const setSessionMessagingToolEnabled = jest.fn()
 const setTemplateToolsEnabled = jest.fn()
+const setPetToolsEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -62,6 +63,7 @@ const settingsState = {
   setSpawnTaskToolEnabled,
   setSessionMessagingToolEnabled,
   setTemplateToolsEnabled,
+  setPetToolsEnabled,
   toggleAlwaysAllow,
 }
 
@@ -258,5 +260,15 @@ describe("ToolSettingsSection", () => {
   it("renders the always-allow list", () => {
     render(<ToolSettingsSection />)
     expect(screen.getByText("mcp__cognia-tools__git_status")).toBeInTheDocument()
+  })
+})
+
+describe("the desktop pet tools switch", () => {
+  it("is off until the user turns it on, and persists the flip", () => {
+    render(<ToolSettingsSection />)
+    const petSwitch = screen.getByLabelText("toggleAriaLabel:petToolsTitle")
+    expect(petSwitch).not.toBeChecked()
+    fireEvent.click(petSwitch)
+    expect(setPetToolsEnabled).toHaveBeenCalledWith(true)
   })
 })

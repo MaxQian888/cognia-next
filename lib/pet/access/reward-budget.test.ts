@@ -106,8 +106,16 @@ describe("consumePetBudget", () => {
   })
 
   it("recovers from a corrupted ledger", () => {
+    // The previous shape of this test read `[...store.keys()][0]` from an
+    // EMPTY map and wrote its garbage to the key "unused", so the real day key
+    // was never corrupted and `readLedger`'s try/catch was never exercised.
     const deps = makeDeps(NOON)
-    deps.store.set([...deps.store.keys()][0] ?? "unused", "{not json")
+    consumePetBudget("p1", { xp: 1 }, deps)
+    const dayKey = [...deps.store.keys()][0]
+    expect(dayKey).toBeDefined()
+    deps.store.set(dayKey, "{not json")
+    // A ledger it cannot parse is treated as a fresh day, not as a throw.
     expect(consumePetBudget("p1", { xp: 2 }, deps).grantedXp).toBe(2)
+    expect(getRemainingPetBudget("p1", deps).xp).toBe(PET_DAILY_XP_BUDGET - 2)
   })
 })

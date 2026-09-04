@@ -3,7 +3,7 @@
 import JSZip from "jszip"
 
 import { readBlobText } from "./read-blob-text"
-import { MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES, MAX_ZIP_TOTAL_BYTES, extractModelZip } from "./zip"
+import { MAX_ZIP_ENTRIES, MAX_ZIP_TOTAL_BYTES, extractModelZip } from "./zip"
 
 function fakeZip(files: Record<string, { dir: boolean; content?: string }>) {
   return {
@@ -159,12 +159,12 @@ describe("bounds applied during extraction", () => {
     expect(result).toEqual({ ok: false, code: "tooLarge" })
   })
 
-  it("stops on the first entry that is itself over the cap", async () => {
+  it("stops on a single oversized member", async () => {
     const result = await extractModelZip(new Blob(), {
       loadAsync: async () =>
         fakeZip({
           "m/a.png": { size: 8 },
-          "m/bomb.png": { size: MAX_ZIP_ENTRY_BYTES + 1 },
+          "m/bomb.png": { size: MAX_ZIP_TOTAL_BYTES + 1 },
         }) as never,
     })
     expect(result).toEqual({ ok: false, code: "tooLarge" })

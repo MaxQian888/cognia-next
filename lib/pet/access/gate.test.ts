@@ -217,3 +217,57 @@ describe("rewards", () => {
     })
   })
 })
+
+describe("the user exemption is consistent across both entry points", () => {
+  it("does not spend the ledger on a reward either, matching what it reports", () => {
+    // `remainingPetAllowance` reports an unbounded allowance for a user, so
+    // spending one here would make the two halves of the API disagree.
+    const subject = { kind: "user" } as const
+    expect(remainingPetAllowance(subject).xp).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it("grants the user the full clamped ask without touching the ledger", async () => {
+    const res = await requestPetReward({ kind: "user" }, "workflowRun", { xp: 4, coins: 3 }, deps())
+    expect(res).toEqual({ ok: true, grantedXp: 4, grantedCoins: 3 })
+    expect(remainingPetAllowance({ kind: "user" })).toEqual({
+      xp: Number.POSITIVE_INFINITY,
+      coins: Number.POSITIVE_INFINITY,
+    })
+  })
+
+  it("still clamps the user to the per-call ceiling", async () => {
+    const res = await requestPetReward({ kind: "user" }, "workflowRun", { xp: 9999 }, deps())
+    expect(res).toMatchObject({ grantedXp: MAX_XP_PER_REWARD })
+  })
+})
+
+describe("event meta is sanitized by whatever emits it", () => {
+  it("strips free-form text before it reaches the bus", async () => {
+    // The sanitizer used to sit in `pet-api.ts` right before its own emit.
+    // When the emit moved in here it was left behind at one caller, leaving
+    // the gate's `meta` parameter an unfiltered path onto the bus for the
+    // callers that arrived after.
+    await requestPetReward(
+      { kind: "agent" },
+      "workflowRun",
+      { meta: { itemId: "berry", userText: "secret words", nested: { x: 1 } } },
+      deps()
+    )
+    expect(emitted.at(-1)?.meta).toEqual({ itemId: "berry", coins: 0 })
+  })
+
+  it("keeps the id-shaped keys it is meant to carry", async () => {
+    await requestPetReward(
+      { kind: "plugin", id: "p1" },
+      "workflowRun",
+      { meta: { goalId: "g1", level: 4, stage: "adult" } },
+      deps()
+    )
+    expect(emitted.at(-1)?.meta).toMatchObject({
+      goalId: "g1",
+      level: 4,
+      stage: "adult",
+      pluginId: "p1",
+    })
+  })
+})

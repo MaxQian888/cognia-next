@@ -21,9 +21,15 @@ describe("CATEGORY_INFO", () => {
       "trustedWorkspace",
       "ttsKey",
       "backupHistory",
+      "artifact",
+      "vector",
+      "pet",
       "system",
       "other",
     ]
+    // A subset check would pass on a category that has no descriptor at all,
+    // which is how `artifact` and `vector` stayed unlisted. Compare both ways.
+    expect(Object.keys(CATEGORY_INFO).sort()).toEqual([...expected].sort())
     for (const k of expected) {
       expect(CATEGORY_INFO[k]).toBeDefined()
       expect(CATEGORY_INFO[k].i18nKey).toEqual(k)

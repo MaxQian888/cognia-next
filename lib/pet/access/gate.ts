@@ -63,6 +63,26 @@ export type PetRefusal =
   | { code: "unknown-item"; itemId: string }
   | { code: "item-not-owned"; itemId: string }
 
+/**
+ * Reduce a caller's free-form meta to the id-shaped whitelist.
+ *
+ * This used to live in `pet-api.ts`, applied immediately before its own
+ * `emitPetEvent`. Moving the emit into this gate left the sanitizer behind at
+ * one caller, which made the gate's `meta` parameter an unfiltered path onto
+ * the bus for the three callers that arrived after it. Whatever emits should
+ * be what sanitizes.
+ */
+function sanitizeEventMeta(meta: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!meta) return {}
+  const out: Record<string, unknown> = {}
+  if (typeof meta.achievementId === "string") out.achievementId = meta.achievementId
+  if (typeof meta.itemId === "string") out.itemId = meta.itemId
+  if (typeof meta.goalId === "string") out.goalId = meta.goalId
+  if (typeof meta.level === "number") out.level = meta.level
+  if (typeof meta.stage === "string") out.stage = meta.stage
+  return out
+}
+
 export type PetAccessResult =
   { ok: true; grantedXp: number; grantedCoins: number } | { ok: false; refusal: PetRefusal }
 
@@ -79,6 +99,11 @@ export const PET_INTERACTION_KINDS = [
 export type PetInteractionKind = (typeof PET_INTERACTION_KINDS)[number]
 
 const INTERACTION_KIND_SET: ReadonlySet<string> = new Set(PET_INTERACTION_KINDS)
+
+/** Narrows a caller's string once, so the award tables can be indexed safely. */
+function isPetInteractionKind(kind: string): kind is PetInteractionKind {
+  return INTERACTION_KIND_SET.has(kind)
+}
 
 /** Kinds a non-user subject may reward through {@link requestPetReward}. */
 export const PET_REWARDABLE_KINDS: readonly PetEventKind[] = [
@@ -181,7 +206,7 @@ export async function requestPetInteraction(
 ): Promise<PetAccessResult> {
   const unavailable = checkAvailability(deps)
   if (unavailable) return { ok: false, refusal: unavailable }
-  if (!INTERACTION_KIND_SET.has(kind)) {
+  if (!isPetInteractionKind(kind)) {
     return { ok: false, refusal: { code: "kind-not-allowed", kind } }
   }
 
@@ -202,7 +227,7 @@ export async function requestPetInteraction(
   if (subject.kind === "user") {
     emit({
       source: "user",
-      kind: kind as PetEventKind,
+      kind,
       ...(Object.keys(meta).length > 0 ? { meta } : {}),
     })
     return { ok: true, grantedXp: XP_AWARD[kind] ?? 0, grantedCoins: COIN_AWARD[kind] ?? 0 }
@@ -214,7 +239,7 @@ export async function requestPetInteraction(
   })
   emit({
     source: subject.kind === "agent" ? "system" : "plugin",
-    kind: kind as PetEventKind,
+    kind,
     xp: grantedXp,
     meta: { ...meta, coins: grantedCoins },
   })
@@ -243,12 +268,16 @@ export async function requestPetReward(
   if (limited) return { ok: false, refusal: limited }
 
   const askXp = Math.min(MAX_XP_PER_REWARD, Math.max(0, Math.floor(opts.xp ?? 0)))
-  const { grantedXp, grantedCoins } = consumePetBudget(subjectKey, {
-    xp: askXp,
-    coins: opts.coins,
-  })
+  // A `user` subject is exempt from the daily ledger here for the same reason
+  // it is exempt in `requestPetInteraction`, and because
+  // `remainingPetAllowance` already reports an unbounded allowance for one.
+  // Spending a ledger this side claims is infinite would make the two disagree.
+  const { grantedXp, grantedCoins } =
+    subject.kind === "user"
+      ? { grantedXp: askXp, grantedCoins: Math.max(0, Math.floor(opts.coins ?? 0)) }
+      : consumePetBudget(subjectKey, { xp: askXp, coins: opts.coins })
   const emit = deps.emit ?? emitPetEvent
-  const meta: Record<string, unknown> = { ...opts.meta, coins: grantedCoins }
+  const meta: Record<string, unknown> = { ...sanitizeEventMeta(opts.meta), coins: grantedCoins }
   if (subject.kind === "plugin" && subject.id) meta.pluginId = subject.id
   emit({
     source: subject.kind === "agent" ? "system" : "plugin",

@@ -2130,12 +2130,14 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // consent overlay every write inside them asks has no screen to appear on.
   const templateToolsEnabled =
     artifactsChannelAvailable && appSettings?.selfInvokeTools?.templates === true
-  // Desktop pet (ADR-0058). Opt-in and off by default. The pet does not run on
-  // the mobile shell or in a secondary window, and its tools reach a renderer
-  // store, so the host has to be one that actually has a pet. The runner
-  // re-checks availability at call time as well, because a setting can change
-  // between the manifest being built and the tool being called.
-  const petToolsSurfaced = appSettings?.selfInvokeTools?.pet === true
+  // Desktop pet (ADR-0058). Opt-in and off by default. The host check belongs
+  // in the flag itself rather than only on the manifest append: the pet is
+  // excluded from the Capacitor shell outright (ADR-0059), and a ruleset
+  // merged there without its tools is the inert payload this file warns about
+  // twice. The runner re-checks availability at call time as well, because a
+  // setting can change between the manifest being built and a tool being run.
+  const { isNativeMobile: petHostCheck } = await import("@/lib/platform/detect")
+  const petToolsSurfaced = appSettings?.selfInvokeTools?.pet === true && !petHostCheck()
   const { buildTemplateToolRuleset } = await import("@/lib/claude/permissions/template-tool-rules")
   const { buildPetToolRuleset } = await import("@/lib/claude/permissions/pet-tool-rules")
   const mergedRuleset = mergeRulesets(
@@ -3040,17 +3042,12 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   if (petToolsSurfaced) {
     try {
       const { buildPetManifestEntries } = await import("@/lib/claude/pet-builtin-tools")
-      const { isNativeMobile } = await import("@/lib/platform/detect")
-      // The pet is excluded from the Capacitor shell outright (ADR-0059), so
-      // advertising its tools there would offer a subsystem that cannot run.
-      if (!isNativeMobile()) {
-        const entries = buildPetManifestEntries()
-        const existing = new Set((opts.pluginTools ?? []).map((entry) => entry.name))
-        opts.pluginTools = [
-          ...(opts.pluginTools ?? []),
-          ...entries.filter((entry) => !existing.has(entry.name)),
-        ]
-      }
+      const entries = buildPetManifestEntries()
+      const existing = new Set((opts.pluginTools ?? []).map((entry) => entry.name))
+      opts.pluginTools = [
+        ...(opts.pluginTools ?? []),
+        ...entries.filter((entry) => !existing.has(entry.name)),
+      ]
     } catch (err) {
       loggers.app.warn("failed to append pet built-in tools", { error: String(err) })
     }

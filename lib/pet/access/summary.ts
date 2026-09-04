@@ -4,8 +4,13 @@
 // the agent through its `pet_status` tool. The red line is what it leaves out.
 // `accountFingerprint` seeds the deterministic appearance and is derived from
 // the user's provider account id, raw `bones` describe the generated body, and
-// `soul` carries more than the chosen name. None of the three crosses out of
-// the host, so a projection is the only thing callers are ever handed.
+// `soul` carries more than the chosen name. None of the three is handed to
+// third-party or automated callers, so a projection is all they ever get.
+//
+// "Not handed to a caller" is narrower than "never leaves the machine". The
+// fingerprint does travel in the user's own backup, because a restore has to
+// be able to tell the same pet on a second device from a genuinely different
+// one. That is the user moving their own data, not a caller being given it.
 
 import type { PetCondition, PetMood, PetNeeds, PetProfile, PetStage } from "@/types/pet"
 import { computePetView } from "@/lib/pet/runtime/pet-view"

@@ -17,8 +17,12 @@ import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { usePetStore } from "@/stores/pet/pet-store"
 
-/** Authored variants per reason. Must match `pet.bubbles.refused.<reason>`. */
-const REFUSAL_VARIANTS: Record<string, number> = {
+/**
+ * Authored variants per reason. Must match `pet.bubbles.refused.<reason>` in
+ * BOTH locales. `lint:i18n` cannot check a template-literal key, so the
+ * co-located test compares this against the authored arrays instead.
+ */
+export const REFUSAL_VARIANTS: Record<string, number> = {
   cooldown: 3,
   notHatched: 2,
 }

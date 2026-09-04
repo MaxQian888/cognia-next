@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { useActionCooldown } from "./use-action-cooldown"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { upsertPetProfile } from "@/lib/db/pet"
@@ -49,5 +49,29 @@ describe("useActionCooldown", () => {
     await seedGate({ fed: Number.NaN } as unknown as Record<string, number>)
     const { result } = renderHook(() => useActionCooldown())
     await waitFor(() => expect(result.current.remaining("fed")).toBe(0))
+  })
+})
+
+describe("the countdown ticker", () => {
+  it("re-renders while a cooldown is running, so the number actually counts down", async () => {
+    // The whole point of the 250ms interval. Nothing else re-renders this
+    // hook, so without it the button stays greyed out at a stale number until
+    // some unrelated render happens to come along.
+    jest.useFakeTimers()
+    try {
+      const startedAt = Date.now()
+      await seedGate({ treated: startedAt })
+      const { result } = renderHook(() => useActionCooldown())
+      await waitFor(() => expect(result.current.remaining("treated")).toBeGreaterThan(0))
+
+      const first = result.current.remaining("treated")
+      await act(async () => {
+        jest.advanceTimersByTime(1000)
+      })
+      const second = result.current.remaining("treated")
+      expect(second).toBeLessThan(first)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })

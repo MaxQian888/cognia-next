@@ -266,3 +266,33 @@ describe("category iteration robustness", () => {
     spy.mockRestore()
   })
 })
+
+describe("categories the Custom tab must not offer", () => {
+  it("withholds every category whose tables it would delete wholesale", () => {
+    // `cleanupTableNames` short-circuits for any non-`other` category, so an
+    // offered category ignores `cleanupPolicy: "protected"` entirely. Offering
+    // the pet would put "delete the pet you raised" behind a checkbox.
+    for (const category of ["pet", "artifact", "character", "vector"] as const) {
+      expect(selectableCategories()).not.toContain(category)
+    }
+  })
+
+  it("still offers the ones that are safe to clear", () => {
+    expect(selectableCategories()).toContain("session")
+    expect(selectableCategories()).toContain("other")
+  })
+})
+
+describe("row size estimation", () => {
+  it("believes a row that declares its own byte count", () => {
+    // JSON.stringify turns a Blob into `{}`, so the binaries a pet stores
+    // measured about two bytes. The rows holding them record `totalBytes`.
+    expect(__TESTING__.rowSize({ id: "a", totalBytes: 25 * 1024 * 1024 })).toBe(25 * 1024 * 1024)
+  })
+
+  it("ignores a nonsensical declared size and falls back", () => {
+    expect(__TESTING__.rowSize({ id: "a", totalBytes: -1 })).toBeGreaterThan(0)
+    expect(__TESTING__.rowSize({ id: "a", totalBytes: Number.NaN })).toBeGreaterThan(0)
+    expect(__TESTING__.rowSize({ id: "a", totalBytes: "big" })).toBeGreaterThan(0)
+  })
+})
