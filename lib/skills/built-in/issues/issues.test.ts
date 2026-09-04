@@ -53,13 +53,8 @@ describe("issue family registration", () => {
     expect(create.hitlSurface).toBeDefined()
     expect(list.mutation).toBe("read")
     expect(list.mcpToolName).toBe("issue_list_projects")
-    expect(
-      registry
-        .list()
-        .filter((s) => s.family === "issue")
-        .map((s) => s.id)
-        .sort()
-    ).toEqual(["issue.create", "issue.list_projects"])
+    // The family census lives in `index.test.ts`, which imports the barrel.
+    // This file imports two skills directly, so it can only speak for those.
   })
 })
 

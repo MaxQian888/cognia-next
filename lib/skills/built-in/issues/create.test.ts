@@ -26,8 +26,18 @@ jest.mock("@/lib/db/issues", () => ({
 }))
 
 const mockListIssueProjects = jest.fn(async (..._a: unknown[]): Promise<unknown[]> => [])
+// An explicitly named container is now looked up and scope-checked before the
+// write, so the two single-row readers have to answer as well.
+const mockGetIssueProject = jest.fn(async (id: unknown): Promise<unknown> => ({
+  id,
+  key: "MER",
+  projectId: "ws_1",
+}))
+const mockGetIssueProjectByKey = jest.fn(async (..._a: unknown[]): Promise<unknown> => undefined)
 jest.mock("@/lib/db/issue-projects", () => ({
   listIssueProjects: (...a: unknown[]) => mockListIssueProjects(...a),
+  getIssueProject: (...a: unknown[]) => mockGetIssueProject(...a),
+  getIssueProjectByKey: (...a: unknown[]) => mockGetIssueProjectByKey(...a),
 }))
 
 const mockEnsureDefaultProject = jest.fn(async () => ({ id: "ws_default" }))
@@ -66,6 +76,12 @@ const run = (args: Args, ctx: BuiltInSkillContext) =>
 beforeEach(() => {
   activeProjectId = "ws_1"
   mockListIssueProjects.mockResolvedValue([])
+  mockGetIssueProjectByKey.mockResolvedValue(undefined)
+  mockGetIssueProject.mockImplementation(async (id: unknown) => ({
+    id,
+    key: "MER",
+    projectId: "ws_1",
+  }))
   mockProposeIssueFromIm.mockResolvedValue({ status: "proposed", draftId: "draft_1" })
 })
 
@@ -133,7 +149,7 @@ describe("issue.create — the writing shapes", () => {
         projectId: "ws_1",
         issueProjectId: "ip_new",
         title: "Crash",
-        createdBy: { kind: "human" },
+        createdBy: { kind: "agent" },
       })
     )
     expect(out).toEqual({ status: "created", issueId: "iss_1", identifier: "MER-3" })
@@ -144,12 +160,42 @@ describe("issue.create — the writing shapes", () => {
     expect(mockCreateIssue).not.toHaveBeenCalled()
   })
 
-  it("skips the project lookup entirely when the caller named one", async () => {
+  it("takes a named container without scanning the workspace for a default", async () => {
     await run({ title: "Crash", issueProjectId: "ip_named" }, desktopCtx)
     expect(mockListIssueProjects).not.toHaveBeenCalled()
     expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({ issueProjectId: "ip_named" })
     )
+  })
+
+  it("refuses a named container that belongs to another workspace", async () => {
+    // The id comes from a model, which may be repeating one it saw while a
+    // different workspace was active. Writing it would strand the issue where
+    // neither workspace's board could show it.
+    mockGetIssueProject.mockResolvedValue({ id: "ip_far", key: "FAR", projectId: "ws_other" })
+
+    await expect(run({ title: "Crash", issueProjectId: "ip_far" }, desktopCtx)).rejects.toThrow(
+      /belongs to another workspace/
+    )
+    expect(mockCreateIssue).not.toHaveBeenCalled()
+  })
+
+  it("resolves a container named by its key", async () => {
+    mockGetIssueProjectByKey.mockResolvedValue({ id: "ip_1", key: "MER", projectId: "ws_1" })
+
+    await run({ title: "Crash", issueProjectId: "mer" }, desktopCtx)
+    expect(mockGetIssueProjectByKey).toHaveBeenCalledWith("MER")
+    expect(mockCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ issueProjectId: "ip_1" })
+    )
+  })
+
+  it("attributes the issue to the assistant, never to the user", async () => {
+    // A skill call is the model acting. `createdBy` is the only record of who
+    // filed an issue, and it used to claim a human did whatever called in.
+    await run({ title: "Crash", issueProjectId: "ip_1" }, desktopCtx)
+    const payload = mockCreateIssue.mock.calls[0][0] as { createdBy: { kind: string } }
+    expect(payload.createdBy.kind).toBe("agent")
   })
 
   it("writes on the IM path too once a project is explicit, and stamps the IM origin", async () => {
@@ -184,6 +230,9 @@ describe("issue.create — the writing shapes", () => {
 
   it("falls back to the default workspace when no project is active", async () => {
     activeProjectId = null
+    // The scope check compares against whatever workspace was resolved, so the
+    // container has to live in the fallback one for this path to be reachable.
+    mockGetIssueProject.mockResolvedValue({ id: "ip_1", key: "MER", projectId: "ws_default" })
     await run({ title: "Crash", issueProjectId: "ip_1" }, desktopCtx)
     expect(mockEnsureDefaultProject).toHaveBeenCalled()
     expect(mockCreateIssue).toHaveBeenCalledWith(

@@ -20,6 +20,7 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
 import { buildConfirmSurface } from "../_shared/confirm-surface"
+import { resolveIssueActor, resolveWorkspaceId } from "./_core"
 
 const schema = z.object({
   title: z.string().min(1).max(200).describe("Short imperative title for the issue."),
@@ -42,14 +43,6 @@ const schema = z.object({
     ),
 })
 
-async function resolveWorkspaceId(): Promise<string> {
-  const { useProjectStore } = await import("@/stores/project/project-store")
-  const active = useProjectStore.getState().activeProjectId
-  if (active) return active
-  const { ensureDefaultProject } = await import("@/lib/db/project-scope")
-  return (await ensureDefaultProject()).id
-}
-
 const skill: BuiltInSkill<typeof schema> = {
   id: "issue.create",
   family: "issue",
@@ -65,7 +58,7 @@ const skill: BuiltInSkill<typeof schema> = {
   mcpToolName: "issue_create",
   inputSchema: schema,
   execute: async (args, ctx) => {
-    const workspaceId = await resolveWorkspaceId()
+    const workspaceId = await resolveWorkspaceId(ctx)
     if (ctx.imBinding && !args.issueProjectId) {
       const { proposeIssueFromIm } = await import("@/lib/issues/im/propose")
       const result = await proposeIssueFromIm({
@@ -90,7 +83,13 @@ const skill: BuiltInSkill<typeof schema> = {
     const { createIssue } = await import("@/lib/db/issues")
     const { listIssueProjects } = await import("@/lib/db/issue-projects")
     let issueProjectId = args.issueProjectId
-    if (!issueProjectId) {
+    if (issueProjectId) {
+      // The id arrives from a model, which may be repeating one it saw in a
+      // different workspace. `resolveIssueProject` refuses those, and accepts
+      // a key so "file it in MERC" works without a lookup round trip.
+      const { resolveIssueProject } = await import("./_core")
+      issueProjectId = (await resolveIssueProject(issueProjectId, workspaceId)).id
+    } else {
       // Desktop with no project named: the newest container is the honest default.
       const projects = await listIssueProjects({ projectId: workspaceId })
       const newest = [...projects].sort((a, b) => b.updatedAt - a.updatedAt)[0]
@@ -102,7 +101,9 @@ const skill: BuiltInSkill<typeof schema> = {
       issueProjectId,
       title: args.title,
       ...(args.description ? { description: args.description } : {}),
-      createdBy: { kind: "human" },
+      // The assistant is filing this, not the user. `createdBy` is the only
+      // record of that, and it used to say a human did it whatever called in.
+      createdBy: await resolveIssueActor(ctx),
       ...(ctx.imBinding
         ? {
             origin: {
