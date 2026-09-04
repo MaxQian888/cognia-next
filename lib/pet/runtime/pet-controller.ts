@@ -21,6 +21,7 @@ import {
 import { generateBones } from "@/lib/pet/bones/generate"
 import { reducePetVisualState, restingWithCare } from "@/lib/pet/state/reducer"
 import { applyPetEvent, INTERACTION_KINDS } from "@/lib/pet/runtime/apply-event"
+import { canInteract, normalizeInteractionGate } from "@/lib/pet/interaction/gate"
 import { coinMultiplier, computeStreakFromLedger } from "@/lib/pet/economy/streak"
 import { CHAOS_BURST_COUNT } from "@/lib/pet/stats/growth-table"
 import { xpForEvent } from "@/lib/pet/xp/award-table"
@@ -66,6 +67,34 @@ async function process(event: PetEvent): Promise<void> {
     profile = { ...profile, streak: computeStreakFromLedger(ledger, INTERACTION_KINDS) }
   }
 
+  // The authoritative interaction cooldown. Every path into the pet lands
+  // here: the action panel, the tray and hotkey commands, the plugin API, the
+  // agent tools, and the overlay's body-tap arriving over the cross-window
+  // bridge. The last two reach this function without passing through any API,
+  // which is why the decision cannot live at a call site. This is also the
+  // only place that can hold the deadline durably, since the store it used to
+  // live in was per-window and reset on reload.
+  //
+  // A refusal persists nothing, awards nothing, writes no ledger row and fires
+  // no plugin hook. It leaves a signal for the bubble instead of failing mute.
+  const gate = normalizeInteractionGate(profile.interactionGate)
+  const decision = canInteract({
+    nowMs: now,
+    kind: event.kind,
+    source: event.source,
+    state: gate,
+    hatched: profile.soul !== null,
+  })
+  if (!decision.ok) {
+    usePetStore.getState().setInteractionRefusal({
+      kind: event.kind,
+      reason: decision.reason,
+      ...(decision.readyAtMs !== undefined ? { readyAtMs: decision.readyAtMs } : {}),
+      at: now,
+    })
+    return
+  }
+
   // Pure signals for the stat-growth step: a flurry of recent XP-bearing events
   // (chaos) and an error→success recovery (debugging).
   const recent = await listPetActivity(CHAOS_BURST_COUNT)
@@ -88,9 +117,10 @@ async function process(event: PetEvent): Promise<void> {
 
   // When the pet first becomes unwell, stamp the notify time durably so the
   // care-alert hook fires at most once per episode.
+  const withGate = { ...nextProfile, interactionGate: decision.nextState }
   const persistProfile = becameUnwell
-    ? { ...nextProfile, care: { ...nextProfile.care, notifiedAt: now } }
-    : nextProfile
+    ? { ...withGate, care: { ...withGate.care, notifiedAt: now } }
+    : withGate
   await upsertPetProfile(persistProfile)
 
   // Record meaningful events (XP-bearing) in the ledger for counters/图鉴.

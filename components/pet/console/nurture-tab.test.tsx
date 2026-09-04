@@ -57,7 +57,7 @@ function setup() {
   return handlers
 }
 
-beforeEach(() => usePetStore.setState({ actionCooldowns: {} }))
+beforeEach(() => usePetStore.setState({ interactionRefusal: null }))
 
 describe("NurtureTab", () => {
   it("renders the stat card, the three need bars, and a hero preview", () => {
@@ -89,14 +89,13 @@ describe("NurtureTab", () => {
     expect(h.onTalk).not.toHaveBeenCalled()
   })
 
-  it("runs the new actions and starts a cooldown that disables the button", () => {
+  it("runs the new actions", () => {
+    // The cooldown that follows is no longer this component's to start: the
+    // controller persists the deadline and the grid renders the projection.
+    // That contract is pinned in pet-action-grid.test.tsx.
     const h = setup()
-    const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
-    fireEvent.click(sleepBtn)
+    fireEvent.click(document.querySelector('[data-action="slept"]') as HTMLButtonElement)
     expect(h.onSleep).toHaveBeenCalled()
-    // The store now holds a future deadline for "slept" → the button disables.
-    expect(usePetStore.getState().actionCooldowns.slept).toBeGreaterThan(Date.now())
-    expect(document.querySelector('[data-action="slept"]')).toBeDisabled()
 
     fireEvent.click(document.querySelector('[data-action="cleaned"]') as HTMLButtonElement)
     expect(h.onClean).toHaveBeenCalled()

@@ -1,36 +1,46 @@
-// Transient per-interaction cooldown for the console action buttons. Keeps the
-// "ready at" deadlines in the pet store (so they survive a re-render / tab
-// switch) and ticks a local clock only while something is actually cooling down,
-// exposing the remaining time + a trigger. UI-only — it gates spamming, it does
-// not affect the persisted progression (the controller still processes every
-// event that does get emitted).
+// The action buttons' view of the interaction cooldown.
+//
+// This used to BE the cooldown: it kept "ready at" deadlines in the per-window
+// pet store, which meant the gate reset on every reload and the main window,
+// the overlay and the popup each enforced their own. Anything that did not go
+// through a button (a hotkey, the tray, the overlay's body-tap, a plugin) was
+// not gated at all.
+//
+// The deadline now lives on the persisted profile row and the controller
+// enforces it, so this hook is a projection: it reads the same state the
+// controller writes, and every surface agrees because they are all reading one
+// row. `useLiveQuery` re-renders each of them when the controller writes.
 
 "use client"
 
-import { useEffect, useState } from "react"
-import { usePetStore } from "@/stores/pet/pet-store"
+import { useLiveQuery } from "dexie-react-hooks"
+import { useEffect, useMemo, useState } from "react"
+import { getDb } from "@/lib/db/schema"
+import { normalizeInteractionGate, remainingCooldownMs } from "@/lib/pet/interaction/gate"
 
 export interface ActionCooldown {
   /** Remaining cooldown for `kind` in ms (0 = ready). */
   remaining: (kind: string) => number
-  /** Start a cooldown of `durationMs` for `kind`. */
-  trigger: (kind: string, durationMs: number) => void
 }
 
 export function useActionCooldown(): ActionCooldown {
-  const cooldowns = usePetStore((s) => s.actionCooldowns)
-  const setActionCooldown = usePetStore((s) => s.setActionCooldown)
+  const profile = useLiveQuery(() => getDb().petProfile.get("global"), [])
+  const gate = useMemo(
+    () => normalizeInteractionGate(profile?.interactionGate),
+    [profile?.interactionGate]
+  )
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    const active = Object.values(cooldowns).some((until) => until > Date.now())
+    const active = Object.keys(gate.lastAtByKind).some(
+      (kind) => remainingCooldownMs(gate, kind, Date.now()) > 0
+    )
     if (!active) return
     const id = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(id)
-  }, [cooldowns])
+  }, [gate])
 
   return {
-    remaining: (kind) => Math.max(0, (cooldowns[kind] ?? 0) - now),
-    trigger: (kind, durationMs) => setActionCooldown(kind, Date.now() + durationMs),
+    remaining: (kind) => remainingCooldownMs(gate, kind, now),
   }
 }

@@ -1,3 +1,8 @@
+let remainingMs: Record<string, number> = {}
+jest.mock("@/hooks/pet/use-action-cooldown", () => ({
+  useActionCooldown: () => ({ remaining: (kind: string) => remainingMs[kind] ?? 0 }),
+}))
+
 import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { PetActionGrid } from "./pet-action-grid"
@@ -21,7 +26,7 @@ function setup(talkOpen = false) {
   return handlers
 }
 
-beforeEach(() => usePetStore.setState({ actionCooldowns: {} }))
+beforeEach(() => usePetStore.setState({ interactionRefusal: null }))
 
 describe("PetActionGrid", () => {
   it("renders all six care actions plus the talk toggle, with visible labels", () => {
@@ -50,27 +55,27 @@ describe("PetActionGrid", () => {
     expect(h.onTreat).toHaveBeenCalledTimes(1)
   })
 
-  it("starts a cooldown that disables the button, counts down, then re-enables", () => {
-    jest.useFakeTimers()
-    try {
-      const h = setup()
-      const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
-      fireEvent.click(sleepBtn)
-      expect(h.onSleep).toHaveBeenCalledTimes(1)
-      // Cooling: disabled, a whole-seconds countdown replaces the icon, clicks ignored.
-      expect(sleepBtn).toBeDisabled()
-      expect(screen.getByTestId("pet-cooldown-slept").textContent).toMatch(/^\d+$/)
-      fireEvent.click(sleepBtn)
-      expect(h.onSleep).toHaveBeenCalledTimes(1)
-      // Elapse the 5s sleep cooldown (ticker runs every 250ms).
-      act(() => {
-        jest.advanceTimersByTime(5500)
-      })
-      expect(sleepBtn).not.toBeDisabled()
-      expect(screen.queryByTestId("pet-cooldown-slept")).not.toBeInTheDocument()
-    } finally {
-      jest.useRealTimers()
-    }
+  it("renders a cooling action as disabled with a whole-seconds countdown", () => {
+    // The grid no longer starts cooldowns: the controller owns the deadline and
+    // this renders the projection. What is pinned here is the rendering
+    // contract; the projection itself is pinned in the hook's own suite.
+    remainingMs = { slept: 4200 }
+    const h = setup()
+    const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
+    expect(sleepBtn).toBeDisabled()
+    expect(screen.getByTestId("pet-cooldown-slept").textContent).toBe("5")
+    fireEvent.click(sleepBtn)
+    expect(h.onSleep).not.toHaveBeenCalled()
+  })
+
+  it("renders a ready action as clickable", () => {
+    remainingMs = {}
+    const h = setup()
+    const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
+    expect(sleepBtn).not.toBeDisabled()
+    expect(screen.queryByTestId("pet-cooldown-slept")).not.toBeInTheDocument()
+    fireEvent.click(sleepBtn)
+    expect(h.onSleep).toHaveBeenCalledTimes(1)
   })
 
   it("forwards the talk toggle and highlights it while open", () => {

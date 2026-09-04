@@ -24,6 +24,9 @@ import { getPetProfile, listPetAchievements, upsertPetProfile } from "@/lib/db/p
 import { createDefaultProfile } from "@/lib/pet/defaults"
 import { __resetPetEventBusForTesting, getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { usePetStore } from "@/stores/pet/pet-store"
+import { listPetActivity } from "@/lib/db/pet"
+import { INTERACTION_COOLDOWN_MS } from "@/lib/pet/interaction/gate"
+import { XP_AWARD } from "@/lib/pet/xp/award-table"
 import type { PetEvent } from "@/types/pet"
 
 afterEach(() => {
@@ -399,5 +402,82 @@ describe("handlePetEvent", () => {
     ])
     await whenPetEventsSettled()
     expect((await getPetProfile())?.xp).toBe(15) // 3 × 5, none lost to a race
+  })
+})
+
+describe("the interaction cooldown", () => {
+  async function hatched() {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+  }
+
+  it.each([
+    ["a held hotkey or the tray", "user"],
+    ["a looping plugin", "plugin"],
+    ["the agent", "system"],
+  ] as const)("awards %s exactly once for a burst of the same nurture", async (_label, source) => {
+    await hatched()
+    const before = (await getPetProfile())!.xp
+    for (let i = 0; i < 20; i += 1) {
+      await handlePetEvent({ source, kind: "fed", at: 1000 + i })
+    }
+    await whenPetEventsSettled()
+    const after = (await getPetProfile())!.xp
+    expect(after - before).toBe(XP_AWARD.fed)
+    // And the ledger agrees: one row, not twenty.
+    expect((await listPetActivity(100)).filter((r) => r.kind === "fed")).toHaveLength(1)
+  })
+
+  it("accepts the next one after the cooldown elapses", async () => {
+    await hatched()
+    await handlePetEvent({ source: "user", kind: "fed", at: 1000 })
+    await handlePetEvent({ source: "user", kind: "fed", at: 1000 + INTERACTION_COOLDOWN_MS.fed })
+    await whenPetEventsSettled()
+    expect((await listPetActivity(100)).filter((r) => r.kind === "fed")).toHaveLength(2)
+  })
+
+  it("never throttles the ambient sources that report real work", async () => {
+    await hatched()
+    for (let i = 0; i < 5; i += 1) {
+      await handlePetEvent({ source: "chat", kind: "fed", at: 1000 + i })
+    }
+    await whenPetEventsSettled()
+    expect((await listPetActivity(100)).filter((r) => r.kind === "fed")).toHaveLength(5)
+  })
+
+  it("refuses to nurture an unhatched egg, and says so instead of failing mute", async () => {
+    await upsertPetProfile(createDefaultProfile("acct-1", 0))
+    await handlePetEvent({ source: "user", kind: "fed", at: 1000 })
+    await whenPetEventsSettled()
+    expect((await getPetProfile())?.xp).toBe(0)
+    expect(usePetStore.getState().interactionRefusal).toMatchObject({
+      kind: "fed",
+      reason: "not-hatched",
+    })
+  })
+
+  it("leaves a refusal signal carrying when the kind is ready again", async () => {
+    await hatched()
+    await handlePetEvent({ source: "user", kind: "fed", at: 1000 })
+    await handlePetEvent({ source: "user", kind: "fed", at: 1100 })
+    await whenPetEventsSettled()
+    expect(usePetStore.getState().interactionRefusal).toMatchObject({
+      kind: "fed",
+      reason: "cooldown",
+      readyAtMs: 1000 + INTERACTION_COOLDOWN_MS.fed,
+    })
+  })
+
+  it("fires no plugin hook for a refused interaction", async () => {
+    await hatched()
+    await handlePetEvent({ source: "user", kind: "fed", at: 1000 })
+    await whenPetEventsSettled()
+    dispatchPetInteract.mockClear()
+    await handlePetEvent({ source: "user", kind: "fed", at: 1100 })
+    await whenPetEventsSettled()
+    expect(dispatchPetInteract).not.toHaveBeenCalled()
   })
 })

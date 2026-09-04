@@ -8,6 +8,7 @@ import type { PetCareState } from "./care"
 import type { PetStreak } from "./economy"
 import type { PetNeeds } from "./needs"
 import type { ProactiveState } from "./proactive"
+import type { PetInteractionGateState } from "./interaction-gate"
 import type { PetSoul } from "./soul"
 import type { PetStatProgress } from "./stats"
 
@@ -45,6 +46,14 @@ export interface PetProfile {
    * speaks). Advanced via `lib/pet/llm/proactive/scheduler-state.ts`.
    */
   proactiveState?: ProactiveState
+  /**
+   * Per-kind nurture cooldown (non-indexed; absent until the first accepted
+   * interaction). Persisted rather than held in the zustand store because that
+   * store is per-window and per-session, so the main window, the overlay and
+   * the popup each kept their own copy and reset it on reload. Advanced via
+   * `lib/pet/interaction/gate.ts`.
+   */
+  interactionGate?: PetInteractionGateState
   /**
    * Additive stat growth earned by working alongside the pet (non-indexed;
    * absent until the first growth). Effective stats = base bones + this.

@@ -24,6 +24,7 @@ export type { PetVisualState, PetOneShot, PetMood } from "./visual-state"
 export type { PetEventSource, PetEventKind, PetEvent } from "./events"
 export type { PetConversationRow } from "./conversation"
 export type { ProactiveState } from "./proactive"
+export type { PetInteractionGateState } from "./interaction-gate"
 export type { PetCharacterBinding } from "./binding"
 export type {
   PetAchievementId,

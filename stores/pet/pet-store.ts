@@ -37,6 +37,22 @@ export interface PetCareAlert {
   petName: string | null
 }
 
+/**
+ * A refused interaction, on its way to becoming a bubble.
+ *
+ * The controller decides refusals because it is the only place that sees every
+ * path into the pet, but it cannot render one: bubbles need the React i18n
+ * context. So it leaves a signal here, exactly the way `careAlert` works.
+ */
+export interface PetInteractionRefusalSignal {
+  kind: string
+  reason: "cooldown" | "not-hatched"
+  /** Epoch ms the kind becomes available again, when the reason is a cooldown. */
+  readyAtMs?: number
+  /** Set fresh on every refusal so a repeat refusal re-triggers the bubble. */
+  at: number
+}
+
 interface PetStoreState {
   /** Current resting/loop visual state. */
   visualState: PetVisualState
@@ -53,9 +69,10 @@ interface PetStoreState {
   /** Pending "became unwell" signal, or null. Set by the controller, drained
    *  by the care-alert hook which fires the gentle notification. */
   careAlert: PetCareAlert | null
-  /** Per-interaction cooldown deadlines (event kind → epoch-ms "ready at").
-   *  Transient UI gate so action buttons can't be spammed; never persisted. */
-  actionCooldowns: Record<string, number>
+  /** Pending "that interaction was refused" signal, or null. Set by the
+   *  controller (the only place that can decide it), drained by the hook that
+   *  turns it into a localized bubble. Never persisted. */
+  interactionRefusal: PetInteractionRefusalSignal | null
   /** Effective main-window appearance mirrored to overlay/popup windows. */
   appearanceSelection: PetSkinSelection | null
   /** Transient local-only gaze sample for cross-window presentation parity. */
@@ -70,8 +87,7 @@ interface PetStoreState {
   setPosition: (position: PetUiPosition | null) => void
   setLastGrewStats: (keys: PetStatKey[]) => void
   setCareAlert: (alert: PetCareAlert | null) => void
-  /** Start a cooldown for an interaction kind, ready again at `until` (epoch ms). */
-  setActionCooldown: (kind: string, until: number) => void
+  setInteractionRefusal: (refusal: PetInteractionRefusalSignal | null) => void
   setAppearanceSelection: (selection: PetSkinSelection | null) => void
   setLookTarget: (target: PetLookTarget | null) => void
 }
@@ -86,7 +102,7 @@ export const usePetStore = create<PetStoreState>()(
       position: null,
       lastGrewStats: [],
       careAlert: null,
-      actionCooldowns: {},
+      interactionRefusal: null,
       appearanceSelection: null,
       lookTarget: null,
 
@@ -104,8 +120,7 @@ export const usePetStore = create<PetStoreState>()(
       setPosition: (position) => set({ position }),
       setLastGrewStats: (lastGrewStats) => set({ lastGrewStats }),
       setCareAlert: (careAlert) => set({ careAlert }),
-      setActionCooldown: (kind, until) =>
-        set((s) => ({ actionCooldowns: { ...s.actionCooldowns, [kind]: until } })),
+      setInteractionRefusal: (interactionRefusal) => set({ interactionRefusal }),
       setAppearanceSelection: (appearanceSelection) => set({ appearanceSelection }),
       setLookTarget: (lookTarget) => set({ lookTarget }),
     }),

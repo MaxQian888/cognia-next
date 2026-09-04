@@ -39,7 +39,6 @@ interface ActionDef {
   labelKey: string
   Icon: ComponentType<{ className?: string }>
   run: () => void
-  cooldownMs: number
 }
 
 const ANIMATED_ACTION_ICONS: Partial<Record<string, AnimatedIconComponent>> = {
@@ -59,39 +58,37 @@ export function PetActionGrid({
   className,
 }: PetActionGridProps) {
   const t = useTranslations("pet")
-  // Cooldowns live in the per-window zustand store (UI-only spam gate — the
-  // controller processes every event). In the popup window that store is a
-  // fresh instance, so cooldowns reset when the popup reopens; acceptable by
-  // design, and they must NOT join the persisted {minimized, position} slice.
-  const { remaining, trigger } = useActionCooldown()
+  // The cooldown is read, not owned. Its durations and its enforcement live in
+  // `lib/pet/interaction/gate.ts` and run in the controller, so this grid, the
+  // overlay, the popup, the tray and the agent all obey one deadline. When a
+  // UI file owned the numbers, the button greyed out correctly while every
+  // other path farmed the same action freely.
+  const { remaining } = useActionCooldown()
 
-  // `kind` matches the emitted PetEvent kind so the cooldown is keyed
-  // identically across every surface — same key, same gate.
+  // `kind` matches the emitted PetEvent kind, which is also the key the gate
+  // stores its deadline under, so a surface reads exactly what it wrote.
   const actions: ActionDef[] = [
-    { kind: "fed", labelKey: "actions.feed", Icon: CookieIcon, run: onFeed, cooldownMs: 1500 },
-    { kind: "played", labelKey: "actions.play", Icon: Gamepad2Icon, run: onPlay, cooldownMs: 1500 },
+    { kind: "fed", labelKey: "actions.feed", Icon: CookieIcon, run: onFeed },
+    { kind: "played", labelKey: "actions.play", Icon: Gamepad2Icon, run: onPlay },
     {
       kind: "petted",
       labelKey: "actions.pet",
       Icon: HeartIcon,
       run: onPet,
-      cooldownMs: 1500,
     },
     {
       kind: "slept",
       labelKey: "actions.sleep",
       Icon: MoonIcon,
       run: onSleep,
-      cooldownMs: 5000,
     },
     {
       kind: "cleaned",
       labelKey: "actions.clean",
       Icon: DropletsIcon,
       run: onClean,
-      cooldownMs: 4000,
     },
-    { kind: "treated", labelKey: "actions.treat", Icon: GiftIcon, run: onTreat, cooldownMs: 10000 },
+    { kind: "treated", labelKey: "actions.treat", Icon: GiftIcon, run: onTreat },
   ]
 
   return (
@@ -109,10 +106,7 @@ export function PetActionGrid({
             data-action={a.kind}
             aria-label={t(a.labelKey)}
             className="h-auto flex-col gap-1 py-2"
-            onClick={() => {
-              a.run()
-              trigger(a.kind, a.cooldownMs)
-            }}
+            onClick={() => a.run()}
           >
             {cooling ? (
               <span

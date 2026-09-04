@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 // Stub the renderer so the stat-card preview's resolved skin is observable
 // without mounting the live2d skin (stores + canvas) in this unit test.
@@ -58,7 +58,7 @@ function setup() {
 describe("PetInteractionPanel", () => {
   beforeEach(() => {
     window.localStorage.clear()
-    usePetStore.setState({ actionCooldowns: {} })
+    usePetStore.setState({ interactionRefusal: null })
     inventoryValue = []
   })
 
@@ -212,25 +212,16 @@ describe("PetInteractionPanel", () => {
     expect(h.onTreat).toHaveBeenCalledTimes(1)
   })
 
-  it("starts a cooldown after an action and re-enables when it elapses", () => {
-    jest.useFakeTimers()
-    try {
-      const h = setup()
-      const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
-      fireEvent.click(sleepBtn)
-      expect(h.onSleep).toHaveBeenCalledTimes(1)
-      // Cooling: disabled, shows a whole-seconds countdown, clicks ignored.
-      expect(sleepBtn).toBeDisabled()
-      expect(screen.getByTestId("pet-cooldown-slept").textContent).toMatch(/^\d+$/)
-      fireEvent.click(sleepBtn)
-      expect(h.onSleep).toHaveBeenCalledTimes(1)
-      // Elapse the 5s sleep cooldown (ticker runs every 250ms).
-      act(() => {
-        jest.advanceTimersByTime(5500)
-      })
-      expect(sleepBtn).not.toBeDisabled()
-    } finally {
-      jest.useRealTimers()
-    }
+  it("forwards every action without gating it locally", () => {
+    // The panel used to start the cooldown itself, which meant the deadline
+    // only existed in this window and only for clicks. It now belongs to the
+    // controller, so the panel forwards and the grid renders the projection.
+    // Enforcement is pinned in lib/pet/runtime/pet-controller.test.ts and the
+    // rendering contract in pet-action-grid.test.tsx.
+    const h = setup()
+    const sleepBtn = document.querySelector('[data-action="slept"]') as HTMLButtonElement
+    fireEvent.click(sleepBtn)
+    fireEvent.click(sleepBtn)
+    expect(h.onSleep).toHaveBeenCalledTimes(2)
   })
 })

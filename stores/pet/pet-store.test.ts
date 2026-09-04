@@ -9,7 +9,7 @@ function reset() {
     position: null,
     lastGrewStats: [],
     careAlert: null,
-    actionCooldowns: {},
+    interactionRefusal: null,
   })
 }
 
@@ -63,9 +63,23 @@ describe("usePetStore", () => {
     expect(usePetStore.getState().careAlert).toBeNull()
   })
 
-  it("records per-action cooldown deadlines", () => {
-    usePetStore.getState().setActionCooldown("fed", 1000)
-    usePetStore.getState().setActionCooldown("slept", 2000)
-    expect(usePetStore.getState().actionCooldowns).toEqual({ fed: 1000, slept: 2000 })
+  it("carries a refused interaction to the bubble hook", () => {
+    // The cooldown deadline itself is no longer here: it was per-window and
+    // reset on reload, so it now lives on the persisted profile row and the
+    // controller enforces it. What passes through the store is the refusal.
+    usePetStore.getState().setInteractionRefusal({
+      kind: "fed",
+      reason: "cooldown",
+      readyAtMs: 2500,
+      at: 1000,
+    })
+    expect(usePetStore.getState().interactionRefusal).toEqual({
+      kind: "fed",
+      reason: "cooldown",
+      readyAtMs: 2500,
+      at: 1000,
+    })
+    usePetStore.getState().setInteractionRefusal(null)
+    expect(usePetStore.getState().interactionRefusal).toBeNull()
   })
 })
