@@ -24,8 +24,19 @@ export async function putProject(project: Project): Promise<void> {
   await getDb().projects.put(project)
 }
 
-/** Remove a project row by id. No-op when the id is unknown. */
+/**
+ * Remove a project row by id. No-op when the id is unknown.
+ *
+ * Cascades the issue tracker first (ADR-0132): containers, issues, their
+ * activity trails and their runs are all scoped by this workspace id and have
+ * no other owner, so dropping the workspace alone left them orphaned — invisible
+ * to both tracker consoles, still holding their `&key` reservations, and still
+ * syncing to paired devices. The tracker owns its own tombstones, so this stays
+ * a call rather than a second copy of that cascade.
+ */
 export async function deleteProjectRow(id: string): Promise<void> {
+  const { deleteIssueDataForWorkspace } = await import("./issue-projects")
+  await deleteIssueDataForWorkspace(id)
   await getDb().projects.delete(id)
   // Companion-synced. A pull carries only rows that still exist, so without a
   // tombstone a deleted workspace stays in the phone's switcher forever, and

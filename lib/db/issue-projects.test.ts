@@ -14,6 +14,7 @@ import {
   getIssueProject,
   getIssueProjectByKey,
   listIssueProjects,
+  deleteIssueDataForWorkspace,
   listTakenProjectKeys,
   removeIssueProjectResource,
   updateIssueProject,
@@ -226,5 +227,73 @@ describe("deleteIssueProject", () => {
     })
     await deleteIssueProject(drop.id)
     expect(await getDb().issues.get(kept.id)).toBeDefined()
+  })
+})
+
+describe("deleteIssueDataForWorkspace", () => {
+  async function seedWorkspace(workspaceId: string, key: string) {
+    const container = await createIssueProject({ projectId: workspaceId, name: key, key })
+    const issue = await createIssue({
+      projectId: workspaceId,
+      issueProjectId: container.id,
+      title: `${key} work`,
+      createdBy: HUMAN,
+    })
+    return { container, issue }
+  }
+
+  it("takes every container, issue and trail row in the workspace", async () => {
+    const doomed = await seedWorkspace("w1", "AAA")
+    const kept = await seedWorkspace("w2", "BBB")
+
+    const removed = await deleteIssueDataForWorkspace("w1")
+
+    expect(removed).toEqual([doomed.container.id])
+    expect(await listIssueProjects({ projectId: "w1" })).toEqual([])
+    expect(await getDb().issues.where("projectId").equals("w1").count()).toBe(0)
+    expect(await listIssueEvents({ issueId: doomed.issue.id })).toEqual([])
+
+    // Scoped by workspace, so the neighbouring one is untouched.
+    expect(await listIssueProjects({ projectId: "w2" })).toHaveLength(1)
+    expect(await getDb().issues.get(kept.issue.id)).toBeDefined()
+  })
+
+  it("releases the container key back to the pool", async () => {
+    await seedWorkspace("w1", "AAA")
+    await deleteIssueDataForWorkspace("w1")
+
+    expect(await listTakenProjectKeys()).not.toContain("AAA")
+    // Proves the release is real: the key can be claimed again.
+    await expect(
+      createIssueProject({ projectId: "w3", name: "Again", key: "AAA" })
+    ).resolves.toBeDefined()
+  })
+
+  it("collects an issue whose container was already orphaned", async () => {
+    const { container, issue } = await seedWorkspace("w1", "AAA")
+    // Drop the container row alone, the pre-fix shape of this bug.
+    await getDb().issueProjects.delete(container.id)
+
+    await deleteIssueDataForWorkspace("w1")
+
+    expect(await getDb().issues.get(issue.id)).toBeUndefined()
+  })
+
+  it("is a no-op for a workspace that owns nothing", async () => {
+    await expect(deleteIssueDataForWorkspace("empty")).resolves.toEqual([])
+  })
+
+  it("records a tombstone for every table it cascades", async () => {
+    const { container, issue } = await seedWorkspace("w1", "AAA")
+    await deleteIssueDataForWorkspace("w1")
+
+    const tombstoned = await getDb().syncTombstones.toArray()
+    const byTable = new Map(tombstoned.map((row) => [row.table, row]))
+    expect(byTable.has("issueProjects")).toBe(true)
+    expect(byTable.has("issues")).toBe(true)
+    expect(byTable.has("issueEvents")).toBe(true)
+    expect(tombstoned.map((row) => row.id)).toEqual(
+      expect.arrayContaining([container.id, issue.id])
+    )
   })
 })

@@ -78,9 +78,14 @@ describe("listIssueRuns", () => {
     const a = await start({ now: 1 })
     const b = await start({ now: 2, status: "queued" })
     await settleIssueRun(a.id, { status: "succeeded" })
+    // A second workspace needs its own container: an issue whose workspace
+    // disagrees with its container's is refused at write time.
+    const otherContainer = (
+      await createIssueProject({ projectId: "w2", name: "Venus", key: "VEN" })
+    ).id
     const other = await createIssue({
       projectId: "w2",
-      issueProjectId: projectId,
+      issueProjectId: otherContainer,
       title: "y",
       createdBy: HUMAN,
     })

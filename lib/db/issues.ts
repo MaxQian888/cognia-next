@@ -98,6 +98,17 @@ export async function createIssue(input: CreateIssueInput): Promise<Issue> {
     async () => {
       const project = await db.issueProjects.get(input.issueProjectId)
       if (!project) throw new Error(`Unknown issue project: ${input.issueProjectId}`)
+      // The workspace and the container arrive as two independent inputs, so
+      // nothing but this check stops them disagreeing. A row whose `projectId`
+      // is not the container's workspace is invisible on both boards: the
+      // console lists by workspace and the rail filters by container, and no
+      // single workspace satisfies both. Agent tools take the container id
+      // straight from a model, which is exactly how a stale id gets here.
+      if (project.projectId !== input.projectId) {
+        throw new Error(
+          `Issue project ${input.issueProjectId} belongs to workspace ${project.projectId}, not ${input.projectId}`
+        )
+      }
 
       const status = input.status ?? "backlog"
       const number = await allocateIssueNumber(input.issueProjectId)
@@ -414,6 +425,15 @@ export async function moveIssueToProject(
     if (!existing || existing.issueProjectId === issueProjectId) return
     const target = await db.issueProjects.get(issueProjectId)
     if (!target) throw new Error(`Unknown issue project: ${issueProjectId}`)
+    // Same invariant as `createIssue`, and the only place a move could break
+    // it. Re-homing the issue into the target's workspace instead would drag
+    // its identifier, its trail and its runs across a boundary the rest of the
+    // app treats as absolute, so the move is refused rather than repaired.
+    if (target.projectId !== existing.projectId) {
+      throw new Error(
+        `Issue project ${issueProjectId} belongs to workspace ${target.projectId}, not ${existing.projectId}`
+      )
+    }
 
     const now = Date.now()
     await db.issues.put({ ...existing, issueProjectId, updatedAt: now })

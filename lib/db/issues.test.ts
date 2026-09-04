@@ -56,6 +56,19 @@ async function kindsOf(issueId: string) {
 }
 
 describe("createIssue", () => {
+  it("refuses a container owned by another workspace", async () => {
+    // The workspace and the container arrive as two independent inputs, and an
+    // agent tool takes the container id from a model. A row that satisfied
+    // neither board is the failure this guard exists to prevent.
+    const foreign = (await createIssueProject({ projectId: "w2", name: "Other", key: "OTH" })).id
+
+    await expect(make({ issueProjectId: foreign })).rejects.toThrow(
+      /belongs to workspace w2, not w1/
+    )
+    expect(await listIssues({ projectId: "w1" })).toEqual([])
+    expect(await listIssues({ projectId: "w2" })).toEqual([])
+  })
+
   it("records an IM origin when given one", async () => {
     const issue = await make({
       origin: { kind: "im", conversationKey: "lark:oc_1", messageId: "m1" },
@@ -341,6 +354,19 @@ describe("moveIssueToProject", () => {
   it("is a no-op when the issue is already there", async () => {
     const issue = await make()
     await moveIssueToProject(issue.id, projectId, HUMAN)
+    expect(await kindsOf(issue.id)).toEqual(["created"])
+  })
+
+  it("refuses a container owned by another workspace", async () => {
+    const issue = await make()
+    const foreign = (await createIssueProject({ projectId: "w2", name: "Other", key: "OTH" })).id
+
+    await expect(moveIssueToProject(issue.id, foreign, HUMAN)).rejects.toThrow(
+      /belongs to workspace w2, not w1/
+    )
+
+    // Refused, not half-applied: the row and its trail are untouched.
+    expect(await getIssue(issue.id)).toMatchObject({ issueProjectId: projectId, projectId: "w1" })
     expect(await kindsOf(issue.id)).toEqual(["created"])
   })
 })

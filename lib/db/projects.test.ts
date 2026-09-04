@@ -72,6 +72,28 @@ describe("projects table writers", () => {
   it("deleteProjectRow is a no-op for an unknown id", async () => {
     await expect(deleteProjectRow("missing")).resolves.toBeUndefined()
   })
+
+  it("deleteProjectRow cascades the issue tracker rows it owns", async () => {
+    // Containers and issues are scoped by this workspace id and have no other
+    // owner, so dropping the row alone stranded them where neither tracker
+    // console could reach them (ADR-0132).
+    const { createIssueProject, listIssueProjects } = await import("./issue-projects")
+    const { createIssue, listIssues } = await import("./issues")
+
+    await putProject(makeProject("alpha"))
+    const container = await createIssueProject({ projectId: "alpha", name: "Mercury", key: "MERC" })
+    await createIssue({
+      projectId: "alpha",
+      issueProjectId: container.id,
+      title: "Something",
+      createdBy: { kind: "human" },
+    })
+
+    await deleteProjectRow("alpha")
+
+    expect(await listIssueProjects({ projectId: "alpha" })).toEqual([])
+    expect(await listIssues({ projectId: "alpha" })).toEqual([])
+  })
 })
 
 describe("active-workspace pointer (settings singleton)", () => {

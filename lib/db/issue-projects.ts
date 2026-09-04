@@ -250,3 +250,52 @@ export async function deleteIssueProject(id: string): Promise<void> {
     }
   )
 }
+
+/**
+ * Cascade every tracker row belonging to one WORKSPACE.
+ *
+ * `deleteIssueProject` already cascades a single container. Deleting the
+ * workspace above it did not cascade at all — `deleteProjectRow` dropped the
+ * `projects` row and stopped — so every container, issue, event and run in
+ * that workspace survived as an orphan: unreachable (both consoles scope by
+ * the workspace that no longer exists), un-deletable, still counted by the
+ * `&key` uniqueness index, and still replicated to paired devices.
+ *
+ * Returns the container ids it removed so callers can log the blast radius.
+ */
+export async function deleteIssueDataForWorkspace(projectId: string): Promise<string[]> {
+  const db = getDb()
+  return db.transaction(
+    "rw",
+    [
+      db.issueProjects,
+      db.issues,
+      db.issueEvents,
+      db.issueRuns,
+      db.issueCounters,
+      db.syncTombstones,
+    ],
+    async () => {
+      const containers = await db.issueProjects.where("projectId").equals(projectId).toArray()
+      const containerIds = containers.map((row) => row.id)
+      // By workspace, not by container: an issue whose `issueProjectId` was
+      // already orphaned still carries this `projectId` and must go too.
+      const issues = await db.issues.where("projectId").equals(projectId).toArray()
+      const issueIds = issues.map((issue) => issue.id)
+      if (containerIds.length === 0 && issueIds.length === 0) return []
+
+      const eventIds = await deleteIssueEventsForIssues(issueIds)
+      const runIds = await deleteIssueRunsForIssues(issueIds)
+      await db.issues.bulkDelete(issueIds)
+      for (const containerId of containerIds) await deleteIssueCounter(containerId)
+      await db.issueProjects.bulkDelete(containerIds)
+
+      const at = Date.now()
+      await recordTombstones("issueProjects", containerIds, at)
+      await recordTombstones("issues", issueIds, at)
+      await recordTombstones("issueEvents", eventIds, at)
+      await recordTombstones("issueRuns", runIds, at)
+      return containerIds
+    }
+  )
+}
