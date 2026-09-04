@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl"
 import {
   CheckCircle2Icon,
   KeyRoundIcon,
-  Loader2Icon,
   MoreHorizontalIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Label } from "@/components/ui/label"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { Spinner } from "@/components/ui/spinner"
 import {
   accountCapabilities,
   providerDisplayOrder,
@@ -169,7 +169,7 @@ export function AccountCenter() {
           <CardContent className="p-2">
             {Object.values(states).some((state) => state.loading) && accounts.length === 0 ? (
               <p className="p-3 text-xs text-muted-foreground">
-                <Loader2Icon className="mr-2 inline size-3 animate-spin" />
+                <Spinner className="mr-2 inline size-3" />
                 {t("loading")}
               </p>
             ) : accounts.length === 0 ? (
@@ -420,7 +420,7 @@ function AccountDetailPanel({
 
         {detailLoading ? (
           <p className="text-xs text-muted-foreground">
-            <Loader2Icon className="mr-2 inline size-3 animate-spin" />
+            <Spinner className="mr-2 inline size-3" />
             {t("loadingDetail")}
           </p>
         ) : detail?.lastCredentialRotationAtMs ? (
@@ -463,7 +463,7 @@ function AccountDetailPanel({
               {t("actions.setDefault")}
             </Button>
           )}
-          {actionPending && <Loader2Icon className="size-4 animate-spin text-muted-foreground" />}
+          {actionPending && <Spinner className="size-4 text-muted-foreground" />}
         </div>
       </CardContent>
     </Card>

@@ -15,11 +15,12 @@
  */
 
 import { useTranslations } from "next-intl"
-import { CheckCircle2, Loader2, MessageSquare, Save } from "lucide-react"
+import { CheckCircle2, MessageSquare, Save } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { useRecorderStore } from "@/stores/skills/recorder-store"
 import { useRecorderDraft, useRecorderPhase } from "@/hooks/skills/use-skill-recorder"
 
@@ -51,11 +52,7 @@ export function StageSave({ onSave, onStartTrial, onConfirmTrial, onOpenEditor }
       {!savedSkillId ? (
         <>
           <Button onClick={onSave} disabled={saving || !draft}>
-            {saving ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <Save className="size-4" aria-hidden />
-            )}
+            {saving ? <Spinner className="size-4" /> : <Save className="size-4" aria-hidden />}
             {saving ? t("save.saving") : t("save.run")}
           </Button>
           {error?.code === "saveFailed" ? (

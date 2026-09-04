@@ -18,7 +18,7 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2, RefreshCw, ServerCog, Trash2, Upload } from "lucide-react"
+import { RefreshCw, ServerCog, Trash2, Upload } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,6 +32,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Spinner } from "@/components/ui/spinner"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { useHostExternalAgentConfigs } from "@/hooks/agent/use-host-external-agent-configs"
 import { pairRuntimeConfigs } from "@/lib/ai/agent/runtime-catalog/pairing"
@@ -145,7 +146,7 @@ export function HostExternalAgentConfigs() {
           </Empty>
         ) : loading ? (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <Loader2 className="size-4 animate-spin" />
+            <Spinner className="size-4" />
             {t("loading")}
           </div>
         ) : (

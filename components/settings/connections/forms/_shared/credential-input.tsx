@@ -42,7 +42,6 @@ import {
   EyeIcon,
   EyeOffIcon,
   KeyRoundIcon,
-  LoaderIcon,
   LockIcon,
   RotateCwIcon,
 } from "lucide-react"
@@ -52,6 +51,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { PENDING_NO_CODE, credentialConsentCode } from "@/lib/connectors/credential-lease"
 import { useSecretReveal } from "@/hooks/use-secret-reveal"
@@ -202,7 +202,7 @@ function CredentialStatusLine({
   if (status === "loading") {
     return (
       <p id={id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <LoaderIcon className="size-3 animate-spin" aria-hidden />
+        <Spinner className="size-3" />
         {t("statusLoading")}
       </p>
     )
@@ -229,7 +229,7 @@ function CredentialStatusLine({
     const code = credentialConsentCode()
     return (
       <p id={id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <LoaderIcon className="size-3 shrink-0 animate-spin" aria-hidden />
+        <Spinner className="size-3 shrink-0" />
         <span className="min-w-0">
           {code && code !== PENDING_NO_CODE
             ? t("awaitingConsentWithCode", { code })

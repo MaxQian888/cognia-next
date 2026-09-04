@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CheckIcon, CopyIcon, Loader2Icon, LockIcon, Share2Icon, UsersIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, LockIcon, Share2Icon, UsersIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type {
@@ -48,6 +48,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import { Spinner } from "@/components/ui/spinner"
 import { authorizeSessionAction } from "@/lib/collab/session-permissions"
 import { convertLocalSessionToShared } from "@/lib/collab/shared-chat-conversion"
 import { isSharedChatClientEnabled } from "@/lib/collab/shared-chat-feature"
@@ -402,7 +403,7 @@ export function SharedSessionPanel({ session }: Props) {
         <ScrollArea className="min-h-0 flex-1 px-4 pb-6">
           {loading ? (
             <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-              <Loader2Icon className="size-4 animate-spin" /> {t("loading")}
+              <Spinner className="size-4" /> {t("loading")}
             </div>
           ) : !context ? (
             <p className="py-6 text-sm text-muted-foreground">{t("notConfigured")}</p>

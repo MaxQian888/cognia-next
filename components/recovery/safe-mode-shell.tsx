@@ -2,14 +2,7 @@
 
 import Link from "next/link"
 import { useTranslations } from "next-intl"
-import {
-  AlertTriangle,
-  CheckCircle2,
-  CircleDashed,
-  Loader2,
-  MinusCircle,
-  XCircle,
-} from "lucide-react"
+import { AlertTriangle, CheckCircle2, CircleDashed, MinusCircle, XCircle } from "lucide-react"
 
 import {
   RECOVERY_ORDER,
@@ -20,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { settingsHref } from "@/lib/settings/deep-link"
 import type { RecoveryRetryAction } from "@/lib/tauri/recovery"
@@ -94,10 +88,7 @@ export function SafeModeShell({ state, probing, onRetry }: SafeModeShellProps) {
           <CardTitle className="flex items-center gap-2 text-base">
             {t("checkpoints.title")}
             {probing ? (
-              <Loader2
-                className="size-4 animate-spin text-muted-foreground"
-                aria-label={t("checkpoints.running")}
-              />
+              <Spinner className="size-4 text-muted-foreground" label={t("checkpoints.running")} />
             ) : null}
           </CardTitle>
           <CardDescription>{t("checkpoints.description")}</CardDescription>

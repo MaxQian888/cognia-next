@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ClipboardPasteIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react"
+import { ClipboardPasteIcon, TriangleAlertIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { bulkImportMcpServers, type McpImportStrategy } from "@/lib/db/mcp-servers"
@@ -216,7 +217,7 @@ export function McpTransferDialog({ onImported }: { onImported?: () => void }) {
             {t("cancel")}
           </Button>
           <Button size="sm" disabled={chosen.length === 0 || busy} onClick={() => void onConfirm()}>
-            {busy && <Loader2Icon className="size-3.5 animate-spin" />}
+            {busy && <Spinner className="size-3.5" />}
             {t("importN", { count: chosen.length })}
           </Button>
         </DialogFooter>

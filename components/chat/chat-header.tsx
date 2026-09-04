@@ -10,7 +10,6 @@ import {
   Columns2Icon,
   ExternalLinkIcon,
   InboxIcon,
-  Loader2Icon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   Settings2Icon,
@@ -18,6 +17,7 @@ import {
 import { toast } from "sonner"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { useCharacter } from "@/lib/data-hooks/context"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -191,7 +191,7 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
           onClick={() => void handleOpenInCodexApp()}
         >
           {codexDispatching ? (
-            <Loader2Icon className="size-4 animate-spin" />
+            <Spinner className="size-4" />
           ) : (
             <ExternalLinkIcon className="size-4" />
           )}

@@ -44,7 +44,6 @@ import {
   FilePlusIcon,
   FolderPlusIcon,
   LightbulbIcon,
-  Loader2Icon,
   PlugIcon,
   PlusIcon,
   ScanTextIcon,
@@ -68,6 +67,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Spinner } from "@/components/ui/spinner"
 import { loggers } from "@cognia/logging"
 import {
   pickFolder,
@@ -288,7 +288,7 @@ export function ComposerAttachMenu({
                     <PanelItem
                       icon={
                         smartSnapshotPending ? (
-                          <Loader2Icon className="size-4 animate-spin" />
+                          <Spinner className="size-4" />
                         ) : (
                           <ScanTextIcon className="size-4" />
                         )

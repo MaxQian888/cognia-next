@@ -13,14 +13,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  Loader2Icon,
-  ReceiptTextIcon,
-  RefreshCwIcon,
-  SendIcon,
-  ShieldOffIcon,
-  Trash2Icon,
-} from "lucide-react"
+import { ReceiptTextIcon, RefreshCwIcon, SendIcon, ShieldOffIcon, Trash2Icon } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -39,6 +32,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Toggle } from "@/components/ui/toggle"
+import { Spinner } from "@/components/ui/spinner"
 import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-incidents"
 import type { useEdgeResize } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
@@ -247,7 +241,7 @@ export function IncidentWorkspace({
               </Alert>
             ) : loading && incidents.length === 0 ? (
               <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-                <Loader2Icon className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t("incidents.loading")}
               </div>
             ) : incidents.length === 0 ? (
@@ -507,11 +501,7 @@ export function IncidentDetail({
                 })
               }
             >
-              {submission?.busy ? (
-                <Loader2Icon className="size-4 animate-spin" />
-              ) : (
-                <SendIcon className="size-4" />
-              )}
+              {submission?.busy ? <Spinner className="size-4" /> : <SendIcon className="size-4" />}
               {submission?.busy ? t("submission.submitting") : t("submission.submit")}
             </Button>
           </div>

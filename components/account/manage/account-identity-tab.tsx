@@ -12,11 +12,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CloudIcon, LoaderIcon, LogInIcon, LogOutIcon } from "lucide-react"
+import { CloudIcon, LogInIcon, LogOutIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { CollabClient, type CollabAccountMembership } from "@/lib/collab/client"
 import { adoptOrganization } from "@/lib/identity/cloud-sign-in-flow"
 import { readCloudSessionState, type CloudSessionState } from "@/lib/identity/cloud-session"
@@ -155,7 +156,7 @@ export function AccountIdentityTab({ account, deps = {} }: AccountIdentityTabPro
   if (!state || !discovery) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-        <LoaderIcon className="size-4 animate-spin" aria-hidden />
+        <Spinner className="size-4" />
         {t("loading")}
       </div>
     )

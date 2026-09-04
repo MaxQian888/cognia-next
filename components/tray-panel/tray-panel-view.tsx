@@ -19,10 +19,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronRightIcon, Loader2Icon, SendIcon, SettingsIcon, XIcon } from "lucide-react"
+import { ChevronRightIcon, SendIcon, SettingsIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/spinner"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { schedulePetWindowReveal } from "@/lib/pet/reveal"
 import { DELEGATE_PROMPT_FIELD, resolveLabel } from "@/lib/tray-panel/defaults"
@@ -438,7 +439,7 @@ export function TrayPanelView() {
               onClick={() => void run(primary)}
             >
               {busyId === primary.id ? (
-                <Loader2Icon className="size-3.5 animate-spin" />
+                <Spinner className="size-3.5" />
               ) : (
                 <SendIcon className="size-3.5" />
               )}

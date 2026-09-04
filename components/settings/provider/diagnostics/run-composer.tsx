@@ -1,6 +1,6 @@
 "use client"
 
-import { Loader2, Play, SlidersHorizontal } from "lucide-react"
+import { Play, SlidersHorizontal } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Spinner } from "@/components/ui/spinner"
 import { ProviderSection } from "../provider-section"
 import type {
   ProviderDiagnosticCapability,
@@ -232,11 +233,7 @@ export function RunComposer({
         </div>
 
         <Button className="w-full gap-2" onClick={onReviewRun} disabled={runDisabled || running}>
-          {running ? (
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-          ) : (
-            <Play className="h-4 w-4" />
-          )}
+          {running ? <Spinner className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           {t("composer.reviewRun")}
         </Button>
       </div>

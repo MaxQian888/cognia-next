@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   CircleSlashIcon,
-  Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -18,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
@@ -168,7 +168,7 @@ export function McpToolRulesCard({ server }: Props) {
             title={canDiscover ? t("refreshTooltip") : t("desktopOnly")}
           >
             {discovering ? (
-              <Loader2Icon className="size-3.5 animate-spin sm:mr-1.5" />
+              <Spinner className="size-3.5 sm:mr-1.5" />
             ) : (
               <RefreshCwIcon className="size-3.5 sm:mr-1.5" />
             )}

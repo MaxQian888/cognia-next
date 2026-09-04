@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react"
 import type { ProjectKnowledgeIngestController } from "@/lib/project-knowledge/wire-ingest"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { FileTextIcon, Loader2Icon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
+import { FileTextIcon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { Spinner } from "@/components/ui/spinner"
 import { ClampedNumberInput } from "@/components/settings/common/clamped-number-input"
 import { StatusBadge } from "@/components/status-badge"
 import { processDocumentAsync } from "@cognia/document/document-processor"
@@ -235,11 +236,7 @@ export function WorkspaceKnowledgeSection({ project }: Props) {
           disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
         >
-          {uploading ? (
-            <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <UploadIcon className="size-4" />
-          )}
+          {uploading ? <Spinner className="size-4" /> : <UploadIcon className="size-4" />}
           {uploading ? t("importing") : t("addFile")}
         </Button>
       </div>

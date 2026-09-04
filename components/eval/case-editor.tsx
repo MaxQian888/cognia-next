@@ -9,12 +9,13 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { ChevronDownIcon, Loader2Icon, PaperclipIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, PaperclipIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Spinner } from "@/components/ui/spinner"
 import type { EvalCase, EvalInputPart, EvalReference } from "@/types/eval/eval"
 import type { EvalAssetClearance } from "@/lib/ai/eval/assets"
 
@@ -293,7 +294,7 @@ export function CaseEditor({ initial, onSave, onCancel, onAttach }: CaseEditorPr
           </label>
           {uploading ? (
             <p className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
-              <Loader2Icon className="size-3 animate-spin" />
+              <Spinner className="size-3" />
               {t("case.attachmentUploading")}
             </p>
           ) : null}

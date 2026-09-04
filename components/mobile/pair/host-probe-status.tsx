@@ -32,9 +32,10 @@
 
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckIcon, CopyIcon, Loader2Icon } from "lucide-react"
+import { CheckIcon, CopyIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { writeClipboardText } from "@/lib/tauri/clipboard"
 import { cn } from "@/lib/utils"
 
@@ -97,10 +98,7 @@ export function HostProbeStatus({
     >
       <p className="flex items-center gap-2 leading-relaxed">
         {state === "searching" ? (
-          <Loader2Icon
-            className="size-3 shrink-0 animate-spin text-muted-foreground"
-            aria-hidden="true"
-          />
+          <Spinner className="size-3 shrink-0 text-muted-foreground" />
         ) : (
           <span
             aria-hidden="true"

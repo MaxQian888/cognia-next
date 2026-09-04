@@ -24,7 +24,6 @@ import {
   CircleDotIcon,
   CircleSlashIcon,
   DownloadIcon,
-  Loader2Icon,
   RefreshCwIcon,
   ShieldAlertIcon,
 } from "lucide-react"
@@ -45,6 +44,7 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import { Spinner } from "@/components/ui/spinner"
 import type { useTriageConsole } from "@/hooks/diagnostic-service/use-triage-console"
 import type { GroupStatus } from "@/lib/diagnostic-service/types"
 import { cn } from "@/lib/utils"
@@ -195,7 +195,7 @@ export function ServiceConsoleWorkspace({
           <div className="w-full min-w-0 space-y-2 p-3" data-testid="console-group-list">
             {triage.loading && triage.groups.length === 0 ? (
               <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-                <Loader2Icon className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t("groups.loading")}
               </div>
             ) : triage.groups.length === 0 ? (

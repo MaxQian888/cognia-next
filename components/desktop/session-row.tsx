@@ -28,6 +28,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import {
   CONVERSATION_TIMESTAMP_FORMATS,
@@ -55,7 +56,6 @@ import {
   GripVerticalIcon,
   HashIcon,
   ListChecksIcon,
-  Loader2Icon,
   LockKeyholeIcon,
   MessageSquareIcon,
   MessageSquareTextIcon,
@@ -713,7 +713,7 @@ function SessionRowImpl({
                 <>
                   <DropdownMenuItem onSelect={handleOpenInCodexApp} disabled={codexDispatching}>
                     {codexDispatching ? (
-                      <Loader2Icon className="mr-2 size-4 animate-spin" />
+                      <Spinner className="mr-2 size-4" />
                     ) : (
                       <ExternalLinkIcon className="mr-2 size-4" />
                     )}

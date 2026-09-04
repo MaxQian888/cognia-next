@@ -16,7 +16,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2, ShieldCheck, Sparkles } from "lucide-react"
+import { ShieldCheck, Sparkles } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +25,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Spinner } from "@/components/ui/spinner"
 import type { GenerationEnvelope } from "@/lib/skills/recording/generation-envelope"
 import { intersectAllowedTools } from "@/lib/skills/recording/tool-catalog"
 import { useRecorderStore } from "@/stores/skills/recorder-store"
@@ -117,7 +118,7 @@ export function StageGenerate({
               </div>
             </>
           ) : (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
+            <Spinner className="size-4" />
           )}
         </CollapsibleContent>
       </Collapsible>
@@ -136,7 +137,7 @@ export function StageGenerate({
         ) : (
           <Button size="sm" onClick={onGenerate} disabled={generating || !hasModel || blocked}>
             {generating ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
+              <Spinner className="size-4" />
             ) : (
               <Sparkles className="size-4" aria-hidden />
             )}

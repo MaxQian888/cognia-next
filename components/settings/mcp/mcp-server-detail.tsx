@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import {
   CheckCircle2Icon,
   CopyIcon,
-  Loader2Icon,
   PencilIcon,
   PlayIcon,
   ScrollTextIcon,
@@ -23,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
 import { loggers } from "@cognia/logging"
@@ -226,7 +226,7 @@ export function McpServerDetail({
             title={testReach.available ? tRow("testTooltip") : tReach(`block.${testReach.block}`)}
           >
             {testing ? (
-              <Loader2Icon className="size-3.5 animate-spin sm:mr-1.5" />
+              <Spinner className="size-3.5 sm:mr-1.5" />
             ) : (
               <PlayIcon className="size-3.5 sm:mr-1.5" />
             )}
@@ -301,7 +301,7 @@ export function McpServerDetail({
                 }}
               >
                 {reviewing ? (
-                  <Loader2Icon className="size-3.5 animate-spin sm:mr-1.5" />
+                  <Spinner className="size-3.5 sm:mr-1.5" />
                 ) : (
                   <ShieldCheckIcon className="size-3.5 sm:mr-1.5" />
                 )}

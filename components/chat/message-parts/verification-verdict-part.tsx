@@ -22,7 +22,6 @@ import {
   CircleHelpIcon,
   CircleXIcon,
   ExternalLinkIcon,
-  Loader2Icon,
   ShieldCheckIcon,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -30,6 +29,7 @@ import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { useChatStore } from "@/stores/chat/chat-store"
 import type {
   VerificationVerdict,
@@ -89,7 +89,7 @@ export const VerificationVerdictPart = memo(function VerificationVerdictPart({ p
             className="flex shrink-0 items-center gap-1 text-[10px]"
             data-testid="verification-verdict-running"
           >
-            <Loader2Icon aria-hidden className="size-3 animate-spin" />
+            <Spinner className="size-3" />
             {t("running")}
           </Badge>
         ) : null}

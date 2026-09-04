@@ -7,7 +7,6 @@ import {
   DatabaseIcon,
   EyeIcon,
   GitBranchIcon,
-  Loader2Icon,
   MessageSquareIcon,
   PencilIcon,
   RefreshCwIcon,
@@ -39,6 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Spinner } from "@/components/ui/spinner"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import {
   deleteSdkSession,
@@ -396,11 +396,7 @@ export function SdkSessionManager() {
             disabled={!enabled || loading}
             aria-label={t("refresh")}
           >
-            {loading ? (
-              <Loader2Icon className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCwIcon className="size-3.5" />
-            )}
+            {loading ? <Spinner className="size-3.5" /> : <RefreshCwIcon className="size-3.5" />}
           </Button>
         </div>
         {!enabled ? (
@@ -600,7 +596,7 @@ export function SdkSessionManager() {
           <div className="flex min-h-72 flex-1 overflow-hidden rounded-md border">
             {detailsLoading ? (
               <div className="flex flex-1 items-center justify-center" role="status">
-                <Loader2Icon className="size-5 animate-spin" aria-label={t("loadingDetails")} />
+                <Spinner className="size-5" label={t("loadingDetails")} />
               </div>
             ) : detailMessages.length > 0 && detailsTarget ? (
               <TranscriptMessageList

@@ -1,10 +1,11 @@
 "use client"
 
-import { Loader2, RotateCcw, Server } from "lucide-react"
+import { RotateCcw, Server } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { formatMs } from "@/lib/provider-diagnostics/format"
 import { ProviderSection } from "../provider-section"
 import type { compareProviderEndpointsFree } from "@/lib/provider-diagnostics/endpoints"
@@ -93,9 +94,7 @@ export function EndpointsSection({
           onClick={onCompareFree}
           disabled={readOnly || comparing || candidates.length === 0}
         >
-          {comparing && (
-            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-          )}
+          {comparing && <Spinner className="mr-1 h-3.5 w-3.5" />}
           {t("endpoints.compareFree")}
         </Button>
         <Button

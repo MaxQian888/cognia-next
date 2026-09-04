@@ -25,13 +25,14 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, GitCompareArrowsIcon, Loader2Icon, RotateCcwIcon } from "lucide-react"
+import { DownloadIcon, GitCompareArrowsIcon, RotateCcwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import type { ChatSession } from "@cognia/agent-config-types"
 import { FidelityReport } from "@/components/session-import/fidelity-report"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { acknowledgeImportDivergence } from "@/lib/db/sessions"
 import { resumeImportedSessionNative } from "@/lib/session-import/native-resume"
 import { compositionForSession, useAgentRuntimeStore } from "@/stores/agent/agent-runtime-store"
@@ -197,11 +198,7 @@ export function ImportedOriginChip({
             data-testid="imported-native-resume"
           >
             <Badge variant="outline" className="h-5 shrink-0 gap-1 px-1.5 text-[10px] font-normal">
-              {resuming ? (
-                <Loader2Icon className="size-3 animate-spin" />
-              ) : (
-                <RotateCcwIcon className="size-3" />
-              )}
+              {resuming ? <Spinner className="size-3" /> : <RotateCcwIcon className="size-3" />}
               {t("resume")}
             </Badge>
           </button>

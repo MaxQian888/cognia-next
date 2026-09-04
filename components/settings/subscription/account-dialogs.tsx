@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -16,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { Spinner } from "@/components/ui/spinner"
 import {
   inspectProviderAccountReferences,
   type ProviderAccountReferences,
@@ -67,7 +67,7 @@ export function RenameDialog({
             }}
             disabled={busy}
           >
-            {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+            {busy && <Spinner className="mr-2 size-4" />}
             {t("confirm")}
           </Button>
         </DialogFooter>
@@ -150,7 +150,7 @@ export function RemoveDialog({
         </p>
         {loadingReferences && (
           <p className="text-xs text-muted-foreground">
-            <Loader2Icon className="mr-2 inline size-3 animate-spin" />
+            <Spinner className="mr-2 inline size-3" />
             {t("checkingReferences")}
           </p>
         )}
@@ -230,7 +230,7 @@ export function RemoveDialog({
               (requiresReplacement && !replacementAccountId)
             }
           >
-            {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
+            {busy && <Spinner className="mr-2 size-4" />}
             {t(isDiscovered ? "unlinkConfirm" : "removeConfirm")}
           </Button>
         </DialogFooter>

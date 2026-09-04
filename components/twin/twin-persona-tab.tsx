@@ -17,11 +17,12 @@ import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { useRouter } from "next/navigation"
-import { FlaskConicalIcon, Loader2Icon } from "lucide-react"
+import { FlaskConicalIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { getTwinProfile } from "@/lib/db/twin-profile"
 import { createTwinBenchmark } from "@/lib/ai/eval/twin-benchmark"
 import type { TwinProfile } from "@/types/twin"
@@ -95,7 +96,7 @@ export function TwinPersonaTab({ twinId }: { twinId: string }) {
           data-testid="generate-twin-benchmark"
         >
           {generatingBenchmark ? (
-            <Loader2Icon className="size-4 animate-spin" />
+            <Spinner className="size-4" />
           ) : (
             <FlaskConicalIcon className="size-4" />
           )}

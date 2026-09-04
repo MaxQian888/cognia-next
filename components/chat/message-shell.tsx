@@ -2,18 +2,12 @@
 
 import { useMemo, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import {
-  BotIcon,
-  CheckCircle2Icon,
-  ChevronDownIcon,
-  CircleAlertIcon,
-  Loader2Icon,
-  UserIcon,
-} from "lucide-react"
+import { BotIcon, CheckCircle2Icon, ChevronDownIcon, CircleAlertIcon, UserIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Spinner } from "@/components/ui/spinner"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
 import type { MessageDisplayMetadataOptions } from "@/types/appearance"
@@ -175,7 +169,7 @@ export function MessageShell({
             {isAssistant && (
               <span className="inline-flex items-center gap-1" role="status" aria-live="polite">
                 {isStreaming ? (
-                  <Loader2Icon className="size-3 animate-spin" aria-hidden />
+                  <Spinner className="size-3" />
                 ) : isError ? (
                   <CircleAlertIcon className="size-3 text-destructive" aria-hidden />
                 ) : (

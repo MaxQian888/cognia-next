@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, CheckCircle2Icon, Loader2Icon, RefreshCwIcon } from "lucide-react"
+import { ArrowLeftIcon, CheckCircle2Icon, RefreshCwIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/spinner"
 import {
   applyMigration,
   buildMigrationPreview,
@@ -386,7 +387,7 @@ export function AgentMigrationDialog({ trigger }: AgentMigrationDialogProps) {
                 disabled={selectedArtifacts.length === 0 || busy}
                 onClick={() => void onPreview()}
               >
-                {busy && <Loader2Icon className="mr-1 size-3.5 animate-spin" />}
+                {busy && <Spinner className="mr-1 size-3.5" />}
                 {t("preview.action")}
               </Button>
             </>
@@ -420,7 +421,7 @@ export function AgentMigrationDialog({ trigger }: AgentMigrationDialogProps) {
 function Loading({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-      <Loader2Icon className="size-4 animate-spin" />
+      <Spinner className="size-4" />
       {label}
     </div>
   )

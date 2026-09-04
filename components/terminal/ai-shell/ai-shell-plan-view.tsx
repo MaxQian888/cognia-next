@@ -11,13 +11,13 @@ import {
   AlertTriangleIcon,
   CheckCircle2Icon,
   CircleIcon,
-  LoaderIcon,
   PencilIcon,
   SkipForwardIcon,
   XCircleIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import type { ExecutionPlan, ErrorAdvisory, StepStatus } from "@/lib/terminal/ai-shell"
 
 export interface AiShellPlanViewProps {
@@ -40,7 +40,7 @@ function StepStatusIcon({ status }: { status: StepStatus }) {
     case "pending":
       return <CircleIcon className="h-3 w-3 text-muted-foreground" />
     case "running":
-      return <LoaderIcon className="h-3 w-3 animate-spin text-primary" />
+      return <Spinner className="h-3 w-3 text-primary" />
     case "succeeded":
       return <CheckCircle2Icon className="h-3 w-3 text-emerald-500" />
     case "failed":
@@ -221,7 +221,7 @@ export function AiShellPlanView({
       )}
       {advisoryLoading && (
         <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
-          <LoaderIcon className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3" />
           {t("plan.generating")}
         </div>
       )}

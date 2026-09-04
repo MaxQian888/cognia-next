@@ -22,12 +22,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Check, Loader2 } from "lucide-react"
+import { Check } from "lucide-react"
 
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { ChatTemplateParamValue } from "@/lib/chat/template/binding"
 import type { ChatTemplateParam } from "@/lib/chat/template/template"
@@ -241,7 +242,7 @@ function ResourcePicker({ resourceKind, search, selectedId, onPick }: ResourcePi
       <div className="max-h-52 overflow-y-auto" role="listbox">
         {state.loading && state.items.length === 0 ? (
           <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
+            <Spinner className="size-3.5" />
             {t("loading")}
           </div>
         ) : empty ? (

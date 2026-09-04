@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowUpIcon, Loader2Icon } from "lucide-react"
+import { ArrowUpIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { FileTree, FileTreeFolder } from "@/components/ai-elements/file-tree"
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/spinner"
 import { defaultExportDir } from "@/lib/claude/ipc"
 import { listWorkspaceDir, listWorkspaceRoots } from "@/lib/files/workspace-fs"
 import type { WorkspaceEntry, WorkspaceRoot } from "@/lib/files/types"
@@ -133,7 +134,7 @@ function FolderNodes({ rel, activeRoot, childrenByRel, expanded, pendingRels }: 
   if (pendingRels.has(rel)) {
     return (
       <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground">
-        <Loader2Icon className="size-3 animate-spin" />
+        <Spinner className="size-3" />
         {t("loading")}
       </div>
     )
@@ -422,7 +423,7 @@ export function WorkspaceFolderPicker({ open, onOpenChange, initialPath, onSelec
           <ScrollArea className="h-64 rounded-md border">
             {rootLoading ? (
               <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2Icon className="size-4 animate-spin" />
+                <Spinner className="size-4" />
                 {t("loading")}
               </div>
             ) : loadFailure ? (

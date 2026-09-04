@@ -38,7 +38,6 @@ import {
   FileTextIcon,
   FolderOpenIcon,
   InfoIcon,
-  Loader2Icon,
   PackageIcon,
   PauseIcon,
   PlayIcon,
@@ -80,6 +79,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { useCrashLogs } from "@/hooks/logging/use-crash-logs"
 import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
 import type {
@@ -751,7 +751,7 @@ export function CrashDiagnosticsWorkspace() {
 
         {isLoading && items.length === 0 ? (
           <div className="flex flex-1 items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-            <Loader2Icon className="size-4 animate-spin" />
+            <Spinner className="size-4" />
             {t("crash.loading")}
           </div>
         ) : items.length === 0 ? (

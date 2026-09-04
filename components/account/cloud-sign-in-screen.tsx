@@ -8,11 +8,12 @@
 
 import { useId, useState, type FormEvent, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { CloudIcon, LoaderIcon, LogInIcon, LogOutIcon, WifiOffIcon } from "lucide-react"
+import { CloudIcon, LogInIcon, LogOutIcon, WifiOffIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { isInvitationTokenShaped } from "@/lib/identity/pending-invitation"
 
 import type { CollabAccountMembership } from "@/lib/collab/client"
@@ -157,7 +158,7 @@ function Heading({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 function Pending({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-      <LoaderIcon className="size-4 animate-spin" aria-hidden />
+      <Spinner className="size-4" />
       {label}
     </div>
   )

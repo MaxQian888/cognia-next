@@ -19,20 +19,14 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  AlertTriangle,
-  Loader2,
-  MonitorSmartphone,
-  AppWindow,
-  Layers,
-  RefreshCw,
-} from "lucide-react"
+import { AlertTriangle, MonitorSmartphone, AppWindow, Layers, RefreshCw } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { recordListCaptureTargets } from "@/lib/skills/recording/recorder-client"
@@ -203,7 +197,7 @@ export function StageSetup({
 
           {loadingTargets && targets === null ? (
             <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden />
+              <Spinner className="size-4" />
               {t("setup.targetLoading")}
             </p>
           ) : null}
@@ -285,7 +279,7 @@ export function StageSetup({
 
       {checking ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" aria-hidden />
+          <Spinner className="size-4" />
           {t("preflight.checking")}
         </p>
       ) : null}

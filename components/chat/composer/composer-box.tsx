@@ -19,18 +19,12 @@
 
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from "react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
-import {
-  ArrowUpIcon,
-  BookmarkPlusIcon,
-  EyeIcon,
-  EyeOffIcon,
-  Loader2Icon,
-  SquareIcon,
-} from "lucide-react"
+import { ArrowUpIcon, BookmarkPlusIcon, EyeIcon, EyeOffIcon, SquareIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import { cn } from "@/lib/utils"
@@ -715,7 +709,7 @@ export function ComposerBox({
                     {sendButton.mode === "stop" ? (
                       <SquareIcon className="size-4" />
                     ) : sendButton.mode === "busy" ? (
-                      <Loader2Icon className="size-4 animate-spin" />
+                      <Spinner className="size-4" />
                     ) : (
                       <ArrowUpIcon className="size-4" />
                     )}

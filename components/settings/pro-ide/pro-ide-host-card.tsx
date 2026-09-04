@@ -18,12 +18,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Loader2Icon, PlayIcon, SquareIcon } from "lucide-react"
+import { PlayIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
 import { CodeServerWebFrame } from "@/components/editor/project/code-server-web-frame"
 import { SurfaceUnavailableNotice } from "@/components/platform/surface-unavailable-notice"
 import { useSurfaceReach } from "@/hooks/platform/use-surface-reach"
@@ -151,7 +152,7 @@ export function ProIdeHostCard() {
                 data-testid="pro-ide-host-toggle"
               >
                 {busy !== null ? (
-                  <Loader2Icon data-icon="inline-start" className="animate-spin" />
+                  <Spinner data-icon="inline-start" />
                 ) : running ? (
                   <SquareIcon data-icon="inline-start" />
                 ) : (
