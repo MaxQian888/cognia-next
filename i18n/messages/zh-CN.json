@@ -25364,6 +25364,12 @@
     "appPath": "应用路径",
     "appScheduler": "应用调度器",
     "appTasks": "应用任务",
+    "authoredBy": {
+      "agent": "Agent",
+      "agentHint": "这是 agent 代你设置的。你可以在这里暂停或删除它。",
+      "plugin": "插件",
+      "pluginHint": "这是插件设置的。你可以在这里暂停或删除它。"
+    },
     "authority": {
       "graceLabel": "宽限期",
       "graceMinutes": "{minutes} 分钟",
@@ -25477,6 +25483,11 @@
     },
     "cancel": "取消",
     "cancelRun": "取消",
+    "cancelRunAlreadyFinished": "该次运行已经结束",
+    "cancelRunRemoteUnsupported": "暂时无法从这里取消配对主机上的运行",
+    "cancelRunRequested": "已把取消请求发给正在执行该任务的窗口",
+    "cancelRunSuccess": "已取消该次运行",
+    "cancelRunUnreachable": "无法触达这次运行，取消失败",
     "cancelSelect": "取消",
     "catchupWindow": {
       "help": "超过该时长的错过运行将被跳过而不是补跑。0 表示不限制。",
@@ -25503,6 +25514,7 @@
     "createSystemTask": "创建系统任务",
     "createTask": "创建任务",
     "createTaskDescription": "设置一个新的定时任务",
+    "createTaskFailed": "无法创建这个任务。",
     "createTaskKind": "选择任务类型",
     "createdAt": "创建时间",
     "creating": "创建中…",
@@ -25918,8 +25930,22 @@
       },
       "appendSystemPromptHeading": "追加系统提示",
       "appendSystemPromptHelp": "拼接在已解析的系统提示之后——适合在不修改角色的前提下加入本次专用提醒。",
+      "backgroundCommand": {
+        "browse": "浏览",
+        "command": "命令",
+        "commandHelp": "它会在无人值守时运行，所以不能需要输入。输出会随这次运行一起保存。",
+        "commandPlaceholder": "pnpm test --silent",
+        "cwd": "工作目录",
+        "cwdPlaceholder": "/Users/you/project",
+        "label": "标签",
+        "labelPlaceholder": "每晚测试",
+        "maxRuntime": "最长运行时间（分钟）",
+        "maxRuntimeHelp": "超过这个时长仍在运行的进程会被结束。留空表示一直运行到自然结束或应用关闭。",
+        "maxRuntimePlaceholder": "不限制"
+      },
       "builtinToolsHeading": "Sidecar 内置工具（按任务覆盖）",
       "character": "角色",
+      "characterMissing": "角色 {id}（已不存在）",
       "characterNone": "无角色",
       "characterPlaceholder": "选择一个角色",
       "effort": "推理强度",
@@ -25927,7 +25953,9 @@
       "errors": {
         "agentIdRequired": "外部代理必填",
         "characterIdRequired": "agent 任务必须选择角色",
+        "commandRequired": "必须填写命令。",
         "conversationKeyRequired": "IM 推送任务需要会话键",
+        "cwdRequired": "必须填写工作目录。",
         "imPushTextRequired": "需要消息文本（或 segments）",
         "inputsInvalidJson": "输入必须是合法的 JSON",
         "objectiveRequired": "goal 任务必须填写目标",
@@ -25936,9 +25964,7 @@
         "segmentsInvalid": "segments 必须是非空的消息片段 JSON 数组",
         "skillIdRequired": "skill 任务必须选择技能",
         "teamIdRequired": "agent-team 任务必须选择团队",
-        "workflowIdRequired": "工作流任务需要选择工作流",
-        "commandRequired": "必须填写命令。",
-        "cwdRequired": "必须填写工作目录。"
+        "workflowIdRequired": "工作流任务需要选择工作流"
       },
       "externalAgent": {
         "agentId": "外部代理",
@@ -26032,17 +26058,6 @@
         "workflowIdManual": "工作流 ID",
         "workflowIdManualPlaceholder": "……或粘贴工作流 ID",
         "workflowPlaceholder": "选择一个工作流"
-      },
-      "characterMissing": "角色 {id}（已不存在）",
-      "backgroundCommand": {
-        "command": "命令",
-        "commandPlaceholder": "pnpm test --silent",
-        "commandHelp": "它会在无人值守时运行，所以不能需要输入。输出会随这次运行一起保存。",
-        "cwd": "工作目录",
-        "cwdPlaceholder": "/Users/you/project",
-        "browse": "浏览",
-        "label": "标签",
-        "labelPlaceholder": "每晚测试"
       }
     },
     "payloadDescription": "传递给执行器的数据",
@@ -26085,6 +26100,17 @@
     "platformWindows": "Windows",
     "plugin": "插件",
     "pluginJobNotFound": "未找到该插件任务。",
+    "processes": {
+      "exitCode": "退出码 {code}",
+      "noPid": "未记录 PID",
+      "none": "该任务当前没有正在运行的进程。",
+      "pid": "PID {pid}",
+      "stop": "停止",
+      "stopFailed": "停止失败",
+      "stopped": "已停止",
+      "title": "进程",
+      "watching": "监视中：{condition}"
+    },
     "processing": "处理中...",
     "promote": {
       "badge": "系统级定时",
@@ -26138,6 +26164,14 @@
       "high": "高风险",
       "low": "低风险",
       "medium": "中等风险"
+    },
+    "runArtifacts": {
+      "goal": "打开目标",
+      "plan": "打开计划",
+      "session": "打开对话",
+      "squad": "打开小队",
+      "title": "打开这次运行的产物",
+      "workflow-run": "打开工作流运行"
     },
     "runAt": "运行时间",
     "runLevelAdmin": "管理员",
@@ -26468,22 +26502,7 @@
       },
       "unbound": "所有工作区"
     },
-    "yes": "是",
-    "runArtifacts": {
-      "title": "打开这次运行的产物",
-      "session": "打开对话",
-      "goal": "打开目标",
-      "plan": "打开计划",
-      "squad": "打开小队",
-      "workflow-run": "打开工作流运行"
-    },
-    "authoredBy": {
-      "agent": "Agent",
-      "agentHint": "这是 agent 代你设置的。你可以在这里暂停或删除它。",
-      "plugin": "插件",
-      "pluginHint": "这是插件设置的。你可以在这里暂停或删除它。"
-    },
-    "createTaskFailed": "无法创建这个任务。"
+    "yes": "是"
   },
   "searchCache": {
     "allProviders": "全部 Provider",
