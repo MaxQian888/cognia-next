@@ -1008,3 +1008,99 @@ describe("the production OS-tier route", () => {
     ).rejects.toThrow(/boom/)
   })
 })
+
+describe("OS-tier audit", () => {
+  // On the desktop the Rust command records the row. A host running the tier
+  // itself never reaches that code, so before this a CLI session executed
+  // confined commands and left no trace while the desktop recorded every one.
+  const okResult = {
+    exit_code: 0,
+    stdout: "",
+    stderr: "",
+    duration: 2,
+    timed_out: false,
+  }
+
+  afterEach(() => {
+    __resetOsSandboxBridgeForTesting()
+  })
+
+  function runtimeWithAudit() {
+    const deps = createDeps()
+    const rows: Array<Record<string, unknown>> = []
+    deps.recordAudit = jest.fn(async (row) => {
+      rows.push(row as unknown as Record<string, unknown>)
+    })
+    return { runtime: new SandboxSessionRuntime(deps), deps, rows }
+  }
+
+  it("records nothing when the desktop's Rust command owns the row", async () => {
+    const { runtime, rows } = runtimeWithAudit()
+    await runtime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    expect(rows).toEqual([])
+  })
+
+  it("records an allow row when a host executor ran the call", async () => {
+    const { runtime, deps, rows } = runtimeWithAudit()
+    deps.executeOsSandbox.mockResolvedValueOnce(okResult)
+    setOsSandboxExec({
+      execute: async () => okResult,
+      probe: async () => ({ confined: true, backend: "t", detail: "" }),
+    })
+    await runtime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      surface: "sandbox",
+      pluginId: "cognia-sandboxed-tools",
+      command: "sandbox_bash",
+      processName: "os:cognia-sandbox-exec",
+      decision: "allow",
+    })
+    expect(String(rows[0]!.reason)).toContain("tier=os")
+    expect(String(rows[0]!.reason)).toContain("termination=completed")
+  })
+
+  it("records a deny row carrying the refusal, and still throws", async () => {
+    const { runtime, deps, rows } = runtimeWithAudit()
+    deps.executeOsSandbox.mockRejectedValueOnce(new Error("invalid policy: no writable dir"))
+    setOsSandboxExec({
+      execute: async () => okResult,
+      probe: async () => ({ confined: true, backend: "t", detail: "" }),
+    })
+    await expect(runtime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)).rejects.toThrow(
+      "invalid policy"
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ decision: "deny", error: "invalid policy: no writable dir" })
+  })
+
+  it("marks a non-zero exit as allowed-but-failed rather than denied", async () => {
+    // The sandbox permitted the call. The command failed. Collapsing those two
+    // into one verdict would make the audit useless for either question.
+    const { runtime, deps, rows } = runtimeWithAudit()
+    deps.executeOsSandbox.mockResolvedValueOnce({ ...okResult, exit_code: 3 })
+    setOsSandboxExec({
+      execute: async () => okResult,
+      probe: async () => ({ confined: true, backend: "t", detail: "" }),
+    })
+    await runtime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)
+    expect(rows[0]).toMatchObject({ decision: "allow" })
+    expect(String(rows[0]!.reason)).toContain("termination=exit_nonzero")
+  })
+
+  it("does not let an audit-persist failure take the tool call down", async () => {
+    const { runtime, deps, rows } = runtimeWithAudit()
+    deps.recordAudit = jest.fn(async () => {
+      throw new Error("dexie is closed")
+    })
+    deps.executeOsSandbox.mockResolvedValueOnce(okResult)
+    setOsSandboxExec({
+      execute: async () => okResult,
+      probe: async () => ({ confined: true, backend: "t", detail: "" }),
+    })
+    await expect(runtime.executeSandbox(HOST_FALLBACK_RUNTIME_REF, payload)).resolves.toMatchObject(
+      { exit_code: 0 }
+    )
+    expect(rows).toEqual([])
+  })
+})

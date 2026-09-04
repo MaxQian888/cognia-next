@@ -369,8 +369,36 @@ export class SandboxSessionRuntime {
       throw error
     }
     switch (record.binding.shellTier) {
-      case "os":
-        return this.deps.executeOsSandbox(payload)
+      case "os": {
+        // On the desktop the Rust `sandbox_exec` command records the audit
+        // entry and emits `automation:event`, which the renderer mirrors into
+        // Dexie. A host running the tier through its own executor never reaches
+        // that code, so it has to record here or the call leaves no trace on
+        // that host while the desktop records every one. The predicate is read
+        // ONCE and reused for the decision, so a withdrawal racing the call
+        // cannot make the row disagree with the route that ran.
+        const hostExecuted = getOsSandboxExec() !== null
+        if (!hostExecuted) return this.deps.executeOsSandbox(payload)
+        const started = Date.now()
+        try {
+          const result = await this.deps.executeOsSandbox(payload)
+          this.recordTierAudit(payload, {
+            tier: "os",
+            provider: "cognia-sandbox-exec",
+            result,
+            durationMs: Math.max(result.duration * 1000, Date.now() - started),
+          })
+          return result
+        } catch (error) {
+          this.recordTierAudit(payload, {
+            tier: "os",
+            provider: "cognia-sandbox-exec",
+            error,
+            durationMs: Date.now() - started,
+          })
+          throw error
+        }
+      }
       case "microvm": {
         const adapter = record.microvmAdapter
         if (!adapter) {
@@ -548,6 +576,30 @@ export class SandboxSessionRuntime {
       termination?: string
     }
   ): void {
+    this.recordTierAudit(payload, { tier: "microvm", provider: "e2b", ...outcome })
+  }
+
+  /**
+   * Persist one sandbox call to the shared audit surface.
+   *
+   * On the desktop the OS tier is audited in Rust: `sandbox_exec` records an
+   * `AuditEntry` and emits `automation:event`, which the renderer mirrors into
+   * Dexie. A host that runs the tier through its own executor never reaches
+   * that code, so before this the CLI executed confined commands and left no
+   * trace anywhere, while the desktop recorded every one. An audit surface that
+   * covers one host and not another is not an audit surface.
+   */
+  private recordTierAudit(
+    payload: MicrovmExecPayload,
+    outcome: {
+      tier: string
+      provider: string
+      result?: MicrovmResult
+      error?: unknown
+      durationMs: number
+      termination?: string
+    }
+  ): void {
     const result = outcome.result
     const termination =
       outcome.termination ??
@@ -559,8 +611,8 @@ export class SandboxSessionRuntime {
             ? "completed"
             : "exit_nonzero")
     const reason = [
-      "tier=microvm",
-      "provider=e2b",
+      `tier=${outcome.tier}`,
+      `provider=${outcome.provider}`,
       `termination=${termination}`,
       `requested_timeout_seconds=${payload.command.timeout}`,
       `timeout=${result?.timed_out ?? false}`,
@@ -574,7 +626,7 @@ export class SandboxSessionRuntime {
       surface: "sandbox",
       pluginId: "cognia-sandboxed-tools",
       command: payload.tool,
-      processName: "microvm:e2b",
+      processName: `${outcome.tier}:${outcome.provider}`,
       windowTitle: payload.command.cwd,
       decision: outcome.error ? "deny" : "allow",
       reason,
@@ -587,7 +639,7 @@ export class SandboxSessionRuntime {
             : String(outcome.error),
     }
     void this.deps.recordAudit?.(row).catch((error) => {
-      console.warn("sandbox microVM audit persist failed", error)
+      console.warn("sandbox audit persist failed", { tier: outcome.tier, error })
     })
   }
 
