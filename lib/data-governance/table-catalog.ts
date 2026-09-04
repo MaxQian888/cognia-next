@@ -81,6 +81,9 @@ export const CORE_TABLE_NAMES = [
   "backgroundTasks",
   "backupHistory",
   "behaviorEvents",
+  "botDefinitions",
+  "botEventDeliveries",
+  "botInstallations",
   "browserAnnotations",
   "browserDomainGrants",
   "browserProfiles",
@@ -768,6 +771,10 @@ const QUEUE_TABLES = new Set<CoreTableName>(
   )
 )
 QUEUE_TABLES.add("matrixPendingEncryptedEvents")
+// A per-installation Bot delivery IS the retry unit: leased, backed off,
+// dead-lettered and replayable. Named for what it carries rather than for the
+// queue it is, so the suffix heuristic misses it.
+QUEUE_TABLES.add("botEventDeliveries")
 // Named for the work it carries rather than the queue it is, so the suffix
 // heuristic above misses it. The row tracks dispatch responsibility only.
 QUEUE_TABLES.add("workSubmissions")
@@ -1222,6 +1229,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     reason:
       "Two-role cross-host handoff journal (ADR-0103). Expired tickets are retired in place by the sweep, not removed; rows leave only with the owning account database.",
   },
+  botEventDeliveries: {
+    mode: "ttl",
+    days: 14,
+    enforcement: "domain",
+    reason:
+      "The delivery runner drops settled rows once replay is no longer useful. Two weeks so a Monday-morning look at a Friday-night dead letter still finds its envelope.",
+  },
   hostDispatchQueue: {
     mode: "ttl",
     days: 7,
@@ -1327,6 +1341,14 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // spelling. Encrypting it would also mean the resume path could not read its
   // own journal without the cipher it is in the middle of installing.
   accountContentMigrations: "metadata-only",
+  // A Bot definition carries an agent-turn prompt and a config schema the
+  // author wrote, and an installation carries the configuration a user filled
+  // in. Neither is metadata.
+  botDefinitions: "encrypted-content",
+  botInstallations: "encrypted-content",
+  // The envelope is a verbatim projection of somebody's pull-request body, IM
+  // message or webhook payload. It is the least metadata-shaped row here.
+  botEventDeliveries: "encrypted-content",
   // What the user actually said to their pet, and what it said back. The name
   // matches none of the content-ish spellings the heuristic looks for, and it
   // sat in AUTO_INCREMENT_METADATA_TABLES besides, so it stored a private

@@ -395,7 +395,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 220
+export const CURRENT_SCHEMA_VERSION = 221
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -908,6 +908,17 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   scheduledTasks:
     "id, name, type, status, nextRunAt, createdAt, projectId, createdBySource, [status+nextRunAt], [status+type], [status+eventType], [projectId+status], [createdBySource+status]",
   scheduledTaskRuns: "id, taskId, status, startedAt, [taskId+startedAt]",
+  // v221 — the Bot control plane. `botDefinitions` holds Creator-authored
+  // definitions only; a plugin's are registry overlays that come and go with
+  // the plugin. There is deliberately no `botEvents` table: every source
+  // already persists and deduplicates its own inbound work, so what the Bot
+  // plane owns is the per-installation DELIVERY, which is the unit retry,
+  // dead-lettering and replay actually operate on.
+  botDefinitions: "&id, name, executor, workspaceId, updatedAt",
+  botInstallations:
+    "&id, definitionId, definitionSource, status, workspaceId, projectId, [definitionId+status], [workspaceId+status], [projectId+status], updatedAt",
+  botEventDeliveries:
+    "&id, &dedupKey, eventId, installationId, triggerId, status, [status+nextAttemptAt], [installationId+status], concurrencyKey, correlation, runId, leaseExpiresAt, receivedAt, settledAt",
 }
 
 let databaseConnectionSequence = 0
@@ -1420,6 +1431,11 @@ export class CogniaDB extends Dexie {
     import("./matrix-pending-events").MatrixPendingEncryptedEventRow,
     string
   >
+  // v221 — Bot control plane. See `lib/db/bot-types.ts` for why there are
+  // three tables and not four.
+  botDefinitions!: Table<import("./bot-types").BotDefinitionRow, string>
+  botInstallations!: Table<import("./bot-types").BotInstallationRow, string>
+  botEventDeliveries!: Table<import("./bot-types").BotEventDeliveryRow, string>
 
   constructor(name = LEGACY_COGNIA_DB_NAME, connectionOwner = "unspecified") {
     super(name)

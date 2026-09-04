@@ -46,7 +46,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(346)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(349)
     db.close()
   })
 
@@ -144,6 +144,11 @@ describe("DataTableCatalog", () => {
     expect(policyForTable("hostDispatchQueue")?.retentionPolicy).toMatchObject({
       mode: "ttl",
       days: 7,
+      enforcement: "domain",
+    })
+    expect(policyForTable("botEventDeliveries")?.retentionPolicy).toMatchObject({
+      mode: "ttl",
+      days: 14,
       enforcement: "domain",
     })
     expect(policyForTable("terminalHistory")?.retentionPolicy).toMatchObject({
@@ -285,6 +290,26 @@ describe("thread-handoff journal", () => {
       /retired in place/
     )
     expect(COMPANION_SYNC_TABLES.has("threadHandoffTickets")).toBe(false)
+  })
+
+  it("classifies the Bot control plane", () => {
+    // A delivery IS the retry unit: leased, backed off, dead-lettered and
+    // replayable. Classifying it as authoritative would exempt it from the
+    // queue expectations every other retry surface is held to.
+    expect(policyForTable("botEventDeliveries")?.role).toBe("queue")
+    expect(policyForTable("botDefinitions")?.role).toBe("authoritative")
+    expect(policyForTable("botInstallations")?.role).toBe("authoritative")
+
+    // A definition carries a prompt, an installation carries the configuration
+    // a user filled in, and a delivery carries somebody's pull-request body.
+    // None of the three is metadata.
+    for (const table of ["botDefinitions", "botInstallations", "botEventDeliveries"] as const) {
+      expect(policyForTable(table)?.contentProtection).toBe("encrypted-content")
+    }
+
+    // Definitions and installations survive until somebody deletes them.
+    expect(policyForTable("botDefinitions")?.retentionPolicy.mode).toBe("permanent")
+    expect(policyForTable("botInstallations")?.retentionPolicy.mode).toBe("permanent")
   })
 })
 
