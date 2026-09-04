@@ -127,7 +127,7 @@ export function toTaskTrigger(input: z.infer<typeof triggerSchema>): TaskTrigger
 export const payloadSchema = z
   .record(z.string(), z.unknown())
   .describe(
-    "Type-specific configuration. chat/agent/skill: { prompt, characterId?, skillId?, sessionTitle?, model?, maxTurns? }. goal: { objective, characterId? }. plan: { planId }. agent-team: { teamId }. workflow: { workflowId }. external-agent: { prompt, agentId }. im-push: { adapterId, conversationKey, text }. background-command: { command, cwd }. backup: { backupType?, destination? }."
+    "Type-specific configuration. chat/agent/skill: { prompt, characterId?, skillId?, sessionTitle?, model?, maxTurns? }. goal: { objective, characterId? }. plan: { planId }. agent-team: { teamId }. workflow: { workflowId }. external-agent: { prompt, agentId }. im-push: { adapterId, conversationKey, text }. background-command: { command, cwd, maxRuntimeMs? } (maxRuntimeMs kills the spawned process once it has run that long; omit for no limit). backup: { backupType?, destination? }."
   )
 
 /** A task as the agent sees it. Trimmed: no serialized blobs, no internals. */

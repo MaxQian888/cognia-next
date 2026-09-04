@@ -710,7 +710,10 @@
       "cwdPlaceholder": "/Users/you/project",
       "browse": "浏览",
       "label": "标签",
-      "labelPlaceholder": "每晚测试"
+      "labelPlaceholder": "每晚测试",
+      "maxRuntime": "最长运行时间（分钟）",
+      "maxRuntimePlaceholder": "不限制",
+      "maxRuntimeHelp": "超过这个时长仍在运行的进程会被结束。留空表示一直运行到自然结束或应用关闭。"
     }
   },
   "payloadDescription": "传递给执行器的数据",

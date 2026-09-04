@@ -87,6 +87,29 @@ export function BackgroundCommandPayloadEditor({
       </div>
 
       <div className="space-y-2">
+        <Label className="text-sm font-medium">{t("payload.backgroundCommand.maxRuntime")}</Label>
+        {/* Blank means no limit, which is the shipped behaviour: the point of
+            a background command is work that outlives its run, so a default
+            timeout would break the type it belongs to. */}
+        <Input
+          type="number"
+          min={1}
+          value={draft.maxRuntimeMinutes ?? ""}
+          onChange={(e) => {
+            const parsed = Number.parseInt(e.target.value, 10)
+            update("maxRuntimeMinutes", Number.isFinite(parsed) && parsed > 0 ? parsed : undefined)
+          }}
+          placeholder={t("payload.backgroundCommand.maxRuntimePlaceholder")}
+          disabled={disabled}
+          className="h-10"
+          data-testid={`${testId}-max-runtime`}
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("payload.backgroundCommand.maxRuntimeHelp")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
         <Label className="text-sm font-medium">{t("payload.backgroundCommand.label")}</Label>
         <Input
           value={draft.label ?? ""}

@@ -26,6 +26,7 @@ import {
   isDeprecatedTaskType,
 } from "./host-support"
 import { decideConcurrencyAdmission, resolveConcurrencyLimit } from "./concurrency-limit"
+import { describeOverrun, selectOverrunJobs, taskRuntimeLimitMs } from "./process-reaper"
 import { loadSchedulerPolicy } from "./write-authority"
 import { getNextCronTime } from "./cron-parser"
 import { enumerateBackfillSlots } from "./backfill"
@@ -834,8 +835,67 @@ class TaskSchedulerImpl {
       this.checkMissedTasks().catch((err) => {
         log.error("Error checking missed tasks:", err)
       })
+      // Same minute cadence as the missed-task check. A runaway process is
+      // measured in minutes and hours, so a tighter sweep would only cost a
+      // supervisor round trip to be told nothing changed.
+      this.reapOverrunProcesses().catch((err) => {
+        log.error("Error reaping overrun processes:", err)
+      })
     }, 60000)
     unrefTimer(this.checkInterval)
+  }
+
+  /**
+   * Kill spawned processes that have outlived their task's `maxRuntimeMs`.
+   *
+   * Nothing else could. `executeWithTimeout` bounds the EXECUTION, which for a
+   * `background-command` settled the moment the process was spawned, and the
+   * jobs supervisor caps how MANY jobs may run but never how long. Before this
+   * the only thing that ended a runaway was quitting the app.
+   *
+   * The whole sweep is skipped unless some task actually sets a limit, so a
+   * schedule that never opted in pays one indexed read and no supervisor call.
+   */
+  private async reapOverrunProcesses(): Promise<void> {
+    const commandTasks = await schedulerDb.getTasksByType("background-command")
+    const limited = commandTasks.filter((task) => taskRuntimeLimitMs(task) !== undefined)
+    if (limited.length === 0) return
+
+    // One supervisor read for the whole sweep, filtered here against every
+    // limited task, rather than one read per task.
+    const { killTaskJob } = await import("./task-processes")
+    const { listBackgroundJobs } = await import("@/lib/jobs/background-jobs")
+    const jobs = await listBackgroundJobs().catch(() => null)
+    // A host with no supervisor has nothing to reap and must not be retried
+    // per task. Distinguished from an empty list only to skip the work.
+    if (jobs === null) return
+
+    const overrun = selectOverrunJobs({
+      jobs,
+      tasksById: new Map(limited.map((task) => [task.id, task])),
+      nowMs: Date.now(),
+    })
+
+    for (const job of overrun) {
+      try {
+        await killTaskJob(job.jobId)
+      } catch (err) {
+        log.error(`Could not kill overrun job ${job.jobId}:`, err)
+        continue
+      }
+      const task = limited.find((candidate) => candidate.id === job.taskId)
+      if (!task) continue
+      log.warn(`Killed ${job.jobId} for task ${job.taskName}: ${describeOverrun(job)}`)
+      // Recorded against the task, because the execution that spawned this
+      // process settled long ago and the run history is where a user looks to
+      // find out what happened overnight. The supervisor's own row ages out.
+      await this.createSettledExecution(task, {
+        status: "cancelled",
+        triggerSource: "schedule",
+        terminalReason: "runtime-exceeded",
+        message: describeOverrun(job),
+      })
+    }
   }
 
   /**
@@ -2720,9 +2780,30 @@ class TaskSchedulerImpl {
     return "execution-error"
   }
 
-  private async createSkippedExecution(
+  private createSkippedExecution(
     task: ScheduledTask,
     params: {
+      triggerSource: TaskExecutionTriggerSource
+      scheduledFor?: Date
+      terminalReason: string
+      message: string
+      retryAttempt?: number
+    }
+  ): Promise<TaskExecution> {
+    return this.createSettledExecution(task, { ...params, status: "skipped" })
+  }
+
+  /**
+   * Write a row for something that ended without an execution of its own.
+   *
+   * Task statistics are deliberately untouched: none of these ran the
+   * executor, so counting them as runs would move the success rate for
+   * something the task never did.
+   */
+  private async createSettledExecution(
+    task: ScheduledTask,
+    params: {
+      status: TaskExecution["status"]
       triggerSource: TaskExecutionTriggerSource
       scheduledFor?: Date
       terminalReason: string
@@ -2736,7 +2817,7 @@ class TaskSchedulerImpl {
       taskId: task.id,
       taskName: task.name,
       taskType: task.type,
-      status: "skipped",
+      status: params.status,
       retryAttempt: params.retryAttempt ?? 0,
       triggerSource: params.triggerSource,
       scheduledFor: params.scheduledFor,

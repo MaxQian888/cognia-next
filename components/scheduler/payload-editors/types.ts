@@ -108,6 +108,12 @@ export interface BackgroundCommandDraft {
   command: string
   cwd: string
   label?: string
+  /**
+   * Minutes, because that is the unit a person picks a build timeout in.
+   * Converted to `maxRuntimeMs` on submit. Undefined means no limit, which is
+   * the shipped behaviour and stays the default.
+   */
+  maxRuntimeMinutes?: number
 }
 
 /** Draft for `plan` tasks — executes an existing AgentPlan. */
@@ -374,6 +380,9 @@ export function payloadToBackgroundCommandDraft(raw: unknown): BackgroundCommand
   if (typeof p.command === "string") draft.command = p.command
   if (typeof p.cwd === "string") draft.cwd = p.cwd
   if (typeof p.label === "string") draft.label = p.label
+  if (typeof p.maxRuntimeMs === "number" && p.maxRuntimeMs > 0) {
+    draft.maxRuntimeMinutes = p.maxRuntimeMs / 60_000
+  }
   return draft
 }
 
@@ -438,6 +447,12 @@ export function backgroundCommandDraftToPayload(
   const out: BackgroundCommandTaskPayload = { command, cwd }
   const label = trimOrUndef(draft.label)
   if (label) out.label = label
+  // Omitted rather than written as 0 when unset. `process-reaper.ts` treats a
+  // non-positive limit as no limit, but a persisted 0 would read to anyone
+  // opening the JSON as "kill immediately".
+  if (typeof draft.maxRuntimeMinutes === "number" && draft.maxRuntimeMinutes > 0) {
+    out.maxRuntimeMs = Math.round(draft.maxRuntimeMinutes * 60_000)
+  }
   return out
 }
 

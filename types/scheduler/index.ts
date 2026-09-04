@@ -109,6 +109,10 @@ export type TaskExecutionTerminalReason =
   // the `schedule.cancel_run` skill. Distinct from `overlap-cancelled`, which
   // the scheduler does to itself when a newer start displaces a running one.
   | "user-cancelled"
+  // A process this task spawned outlived its `maxRuntimeMs` and was killed by
+  // the reaper. Recorded against the task rather than against the execution
+  // that started it, which settled long before.
+  | "runtime-exceeded"
   | "retry-chain-active"
   | "missed-run-skipped"
   | "once-expired"
@@ -309,6 +313,17 @@ export interface BackgroundCommandTaskPayload extends Record<string, unknown> {
   command: string
   cwd: string
   label?: string
+  /**
+   * Kill the spawned process once it has run this long.
+   *
+   * Opt-in, with no default. The point of `background-command` is work that
+   * outlives its execution, so a scheduler that killed a long job at some
+   * invented hour would be worse than the runaway it prevents. Enforced by
+   * `lib/scheduler/process-reaper.ts` on the scheduler's periodic sweep, not
+   * by the execution timeout, which bounds a run that has already finished by
+   * the time the command is still going.
+   */
+  maxRuntimeMs?: number
 }
 
 export interface MonitorTaskPayload extends Record<string, unknown> {

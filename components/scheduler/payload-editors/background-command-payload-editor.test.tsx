@@ -29,6 +29,36 @@ import {
   EMPTY_BACKGROUND_COMMAND_DRAFT,
 } from "./types"
 
+it("edits the runtime limit through the draft", async () => {
+  const onDraftChange = jest.fn()
+  render(
+    <BackgroundCommandPayloadEditor
+      draft={{ ...EMPTY_BACKGROUND_COMMAND_DRAFT }}
+      onDraftChange={onDraftChange}
+      testId="bg"
+    />
+  )
+  // One digit: the draft prop is not fed back in here, so a second keystroke
+  // would be typed against a still-empty input.
+  await userEvent.type(screen.getByTestId("bg-max-runtime"), "5")
+  expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ maxRuntimeMinutes: 5 }))
+})
+
+it("clears the limit back to none when the field is emptied", async () => {
+  const onDraftChange = jest.fn()
+  render(
+    <BackgroundCommandPayloadEditor
+      draft={{ ...EMPTY_BACKGROUND_COMMAND_DRAFT, maxRuntimeMinutes: 5 }}
+      onDraftChange={onDraftChange}
+      testId="bg"
+    />
+  )
+  await userEvent.clear(screen.getByTestId("bg-max-runtime"))
+  expect(onDraftChange).toHaveBeenLastCalledWith(
+    expect.objectContaining({ maxRuntimeMinutes: undefined })
+  )
+})
+
 it("edits the command through the draft", async () => {
   const onDraftChange = jest.fn()
   render(
@@ -69,6 +99,32 @@ describe("converters", () => {
       command: "ls",
       cwd: "/r",
     })
+  })
+
+  it("round-trips a runtime limit through minutes", () => {
+    const payload = { command: "pnpm build", cwd: "/repo", maxRuntimeMs: 1_800_000 }
+    const draft = payloadToBackgroundCommandDraft(payload)
+    expect(draft.maxRuntimeMinutes).toBe(30)
+    expect(backgroundCommandDraftToPayload(draft)).toEqual(payload)
+  })
+
+  // Blank means no limit, which is the shipped behaviour. A persisted 0 would
+  // read to anyone opening the JSON as "kill immediately".
+  it("omits the limit entirely when the field is left blank", () => {
+    expect(backgroundCommandDraftToPayload({ command: "ls", cwd: "/r" })).toEqual({
+      command: "ls",
+      cwd: "/r",
+    })
+  })
+
+  it("ignores a non-positive limit on the way in and out", () => {
+    expect(
+      payloadToBackgroundCommandDraft({ command: "ls", cwd: "/r", maxRuntimeMs: 0 })
+        .maxRuntimeMinutes
+    ).toBeUndefined()
+    expect(
+      backgroundCommandDraftToPayload({ command: "ls", cwd: "/r", maxRuntimeMinutes: 0 })
+    ).not.toHaveProperty("maxRuntimeMs")
   })
 
   it("survives a payload that is not an object", () => {

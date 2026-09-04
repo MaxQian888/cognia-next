@@ -710,7 +710,10 @@
       "cwdPlaceholder": "/Users/you/project",
       "browse": "Browse",
       "label": "Label",
-      "labelPlaceholder": "Nightly test run"
+      "labelPlaceholder": "Nightly test run",
+      "maxRuntime": "Maximum runtime (minutes)",
+      "maxRuntimePlaceholder": "No limit",
+      "maxRuntimeHelp": "Kill the process if it is still running after this long. Leave blank to let it run until it finishes or the app closes."
     }
   },
   "payloadDescription": "Data passed to the task executor",
