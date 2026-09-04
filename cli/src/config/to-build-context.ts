@@ -263,7 +263,16 @@ export function buildCliSession(
     // the model always knows its working directory and prefers `edit` over
     // `write` (see {@link buildDefaultSystemPrompt}).
     systemPrompt: composeSystemPrompt(
-      config.systemPrompt ?? buildDefaultSystemPrompt({ cwd: config.cwd, now, permissionMode }),
+      config.systemPrompt ??
+        buildDefaultSystemPrompt({
+          cwd: config.cwd,
+          now,
+          permissionMode,
+          // Named so the shell section can say WHOSE sandbox is refusing a
+          // command: with an external backend the shell is that agent's, and a
+          // refusal is not something Cognia can widen or the model can retry.
+          ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
+        }),
       config.outputStyle
     ),
     workingDir: config.cwd,
@@ -284,7 +293,12 @@ export function toBuildContext(params: ToBuildContextParams): BuildOptionsContex
     defaultModel: model,
     defaultSystemPrompt: composeSystemPrompt(
       config.systemPrompt ??
-        buildDefaultSystemPrompt({ cwd: config.cwd, now, permissionMode: config.permissionMode }),
+        buildDefaultSystemPrompt({
+          cwd: config.cwd,
+          now,
+          permissionMode: config.permissionMode,
+          ...(config.agentBackend ? { externalBackend: config.agentBackend } : {}),
+        }),
       config.outputStyle
     ),
     permissionMode: config.permissionMode,

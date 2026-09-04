@@ -75,6 +75,16 @@ export interface ToolHostBrokerParams {
   attempt: number
   /** Cognia's approval overlay. Absent ⇒ every approval-needing call is denied. */
   gate?: PermissionResponder
+  /**
+   * Resolve once no approval is awaiting the user.
+   *
+   * A tool that needs no approval used to be authorized on the spot, so while
+   * one call sat on the approval overlay the agent's other calls kept running:
+   * the user was being asked whether to allow a command, and the work they
+   * might be about to stop was already happening behind the dialog. Absent ⇒
+   * no barrier, which is the right default for a caller with no UI.
+   */
+  awaitApprovals?: () => Promise<void>
   /** Execute one `cognia-plugin-tools` call through the existing CLI executors. */
   execHostTool: (name: string, args: unknown) => Promise<ExecResult>
   /** Surface a projected tool call in the TUI, like a built-in one. */
@@ -195,6 +205,12 @@ export async function startToolHostBroker(params: ToolHostBrokerParams): Promise
     server: ToolHostServerName,
     p: AuthorizeParams
   ): Promise<AuthorizeResult> {
+    if (closed) return { allow: false, reason: "the Cognia session has ended" }
+    if (cancelledReason) return { allow: false, reason: cancelledReason }
+    // Nothing starts while the user is answering a question. Awaited BEFORE
+    // this call's own approval is raised, so a call never waits on itself, and
+    // re-checked afterwards because the answer may have ended the session.
+    await params.awaitApprovals?.()
     if (closed) return { allow: false, reason: "the Cognia session has ended" }
     if (cancelledReason) return { allow: false, reason: cancelledReason }
     const visible = server === COGNIA_TOOLS_SERVER ? visibleBuiltins : visibleHost

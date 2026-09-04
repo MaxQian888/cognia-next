@@ -59,6 +59,11 @@ Usage:
   cognia-agent logto <login|status|logout>          cloud OIDC (Logto) session
                      [--issuer u] [--client-id id] [--resource api] [--scope a,b] [--org id]
   cognia-agent config <get|set|path>
+                     config set agentBackends.<backend>.piExtensionPolicy
+                       isolated|global|trusted-project
+                       Pi only: how much of your own Pi stack a Cognia session
+                       loads. Default isolated (--no-extensions), which also
+                       hides every model an extension of yours contributes.
   cognia eval <preflight|run|status|report|export> ...
   cognia-agent lark <list|approve|reject|disable|enable|unlink|tenant|sweep>
                      [--adapter id] [--user id] [--server-url u] [--json]

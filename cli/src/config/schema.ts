@@ -682,12 +682,27 @@ export const searchConfigSchema = z
 export type CliSearchConfig = z.infer<typeof searchConfigSchema>
 
 /**
- * What we remember for one external agent backend. Only the model so far: the
- * id we explicitly asked that agent to run with. Absent means "the agent picks"
- * — for Codex that is `~/.codex/config.toml`, which is the correct default.
+ * What we remember for one external agent backend.
+ *
+ * `model` is the id we explicitly asked that agent to run with. Absent means
+ * "the agent picks" — for Codex that is `~/.codex/config.toml`, which is the
+ * correct default.
+ *
+ * `piExtensionPolicy` is Pi's only (ADR-0119): how much of the user's own Pi
+ * stack a Cognia session loads. It defaults to `isolated`, which is
+ * `--no-extensions`, and that is deliberate — a Pi extension is arbitrary code
+ * and Cognia's permission matrix is enforced by the bundled extension, not by
+ * theirs. It has to be settable, though, because a provider contributed by a
+ * user extension is not in an isolated session's model catalog at all: on a
+ * machine whose models come from one, Pi offers 70 models outside Cognia and 3
+ * inside it, and every turn silently ran on the wrong provider before the
+ * refusal was made visible. Only Pi reads this key.
  */
 export const externalBackendConfigSchema = z
-  .object({ model: z.string().min(1).optional() })
+  .object({
+    model: z.string().min(1).optional(),
+    piExtensionPolicy: z.enum(["isolated", "global", "trusted-project"]).optional(),
+  })
   .strict()
 
 export type ExternalBackendConfig = z.infer<typeof externalBackendConfigSchema>

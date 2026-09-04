@@ -476,7 +476,13 @@ export class NodeExternalAgentBackend {
             record.child.kill(name)
           }
         } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ESRCH") done()
+          // ESRCH: the group is gone. EPERM: it is a zombie leader we may no
+          // longer signal, which on macOS is what a group whose child has just
+          // exited reports. Both mean there is nothing left of ours to kill,
+          // and this runs inside the escalation TIMER, where a throw is not
+          // caught by anything and takes the host process down with it.
+          const code = (error as NodeJS.ErrnoException).code
+          if (code === "ESRCH" || code === "EPERM") done()
           else throw error
         }
       }

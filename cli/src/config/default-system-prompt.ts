@@ -13,6 +13,8 @@
 
 import { PLAN_MODE_PROMPT } from "@/lib/claude/plan-mode-prompt"
 
+import { buildShellEnvironmentSection } from "./shell-environment-prompt"
+
 export interface DefaultSystemPromptInput {
   /** The session working directory (absolute). */
   cwd: string
@@ -20,6 +22,13 @@ export interface DefaultSystemPromptInput {
   now: number
   /** Overridable for tests; defaults to {@link process.platform}. */
   platform?: string
+  /** The user's login shell. Defaults to `$SHELL`. */
+  shell?: string
+  /**
+   * The external backend running the tools, when one is in use. Named in the
+   * shell section so the model knows whose sandbox is refusing a command.
+   */
+  externalBackend?: string
   /**
    * The effective session permission mode. When `"plan"`, a Plan-mode section is
    * appended that turns the base prompt into an explore→analyze→plan workflow
@@ -46,6 +55,11 @@ export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): strin
   const platform = input.platform ?? process.platform
   const date = new Date(input.now).toISOString().slice(0, 10)
   const planSection = input.permissionMode === "plan" ? ["", PLAN_MODE_PROMPT_SECTION] : []
+  const shellSection = buildShellEnvironmentSection({
+    platform,
+    ...((input.shell ?? process.env.SHELL) ? { shell: input.shell ?? process.env.SHELL } : {}),
+    ...(input.externalBackend ? { externalBackend: input.externalBackend } : {}),
+  })
   return [
     "You are Cognia's command-line coding agent. You help with software-engineering tasks in the user's project, using the available tools to read, search, edit, and run code.",
     "",
@@ -62,6 +76,8 @@ export function buildDefaultSystemPrompt(input: DefaultSystemPromptInput): strin
     "Tool usage:",
     "- Prefer the dedicated tools over shelling out: use `grep` for content search, `glob` for finding files by name, and `read`/`ls` for inspecting files — not `bash` with `grep`/`find`/`cat`/`ls`. Reach for `bash` for actually running commands (builds, tests, git, package managers).",
     "- When several tool calls are independent, issue them together in one step instead of waiting for each in turn.",
+    "",
+    shellSection,
     "",
     "Following the project's conventions:",
     "- Match the surrounding code: its style, naming, formatting, and idioms. Before using a library or framework, confirm it's already a dependency (check imports, package manifest, lockfile) — never assume one is available.",

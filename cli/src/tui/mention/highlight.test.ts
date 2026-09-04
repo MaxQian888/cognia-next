@@ -76,10 +76,20 @@ describe("highlightMentionsWithCursor", () => {
 
   it("uses a block glyph past the last character, which Ink will not trim", () => {
     const end = highlightMentionsWithCursor(line, line.length, line.length + 1)
-    expect(end[end.length - 1]).toEqual({ text: END_OF_LINE_CARET, cursor: true })
+    expect(end[end.length - 1]).toEqual({ text: END_OF_LINE_CARET, cursor: true, atEnd: true })
     expect(highlightMentionsWithCursor("", 0, 1)).toEqual([
-      { text: END_OF_LINE_CARET, cursor: true },
+      { text: END_OF_LINE_CARET, cursor: true, atEnd: true },
     ])
+  })
+
+  // The renderer draws an on-character caret by inverting the cell. Doing that
+  // to the end-of-line block glyph paints it in the background colour across the
+  // whole cell, so the caret disappears. Only the synthesized end-of-line caret
+  // carries `atEnd`, which is what tells the renderer to colour it instead.
+  it("flags only the end-of-line caret as a glyph of its own", () => {
+    const overChar = highlightMentionsWithCursor(line, 0, 1)
+    expect(overChar[0]).toMatchObject({ cursor: true })
+    expect(overChar[0].atEnd).toBeUndefined()
   })
 
   it("covers a whole grapheme cluster, so a surrogate pair is not half-inverted", () => {

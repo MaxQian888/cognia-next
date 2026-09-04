@@ -481,8 +481,16 @@ describe("tool-host rendering", () => {
       startToolHost: host.start as never,
       buildToolHostServers: () => [] as never,
     })
+    // Fire from INSIDE the turn. The session drops host events once the turn is
+    // over, on purpose: there is no live region left to render them into. A
+    // fixture that fired after `send` resolved was asserting against a closed
+    // turn and proved nothing about the projection.
+    const execute = manager.execute
+    manager.execute = (async (agentId, sent, options) => {
+      host.fire()
+      return execute(agentId, sent, options)
+    }) as typeof manager.execute
     await session.send("hi", { gate, onAction: (a) => actions.push(a) })
-    host.fire()
     expect(actions.filter((a) => a.type === "TOOL_CALL")).toEqual([
       { type: "TOOL_CALL", callKey: "k1", toolName: "read", input: { path: "a.ts" } },
     ])

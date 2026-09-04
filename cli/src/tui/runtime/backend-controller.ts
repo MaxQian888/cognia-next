@@ -32,6 +32,7 @@ import {
   findSandboxLauncher,
   sandboxSupportsPlatform,
 } from "../../runtime/external/sandbox-launcher"
+import { piMetadataForPreset } from "../../config/active-model"
 import type { ResolvedConfig } from "../../config/schema"
 import {
   canHostCogniaTools,
@@ -215,6 +216,9 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
     // Reasoning effort and extra skill roots have only this channel, and it is
     // read when the agent is registered — hence connect-time, not per turn.
     const codexOptions = buildCodexOptions(config, presetId)
+    // Pi's extension policy is read when the process is spawned, so like the
+    // Codex metadata above it is a connect-time fact, not a per-turn one.
+    const piMetadata = piMetadataForPreset(config, presetId)
     const agentConfig = buildAgent(presetId, {
       id: agentId,
       enabled: true,
@@ -225,6 +229,7 @@ export async function connectBackend(deps: BackendConnectDeps): Promise<BackendC
       // on the one path that actually does the connecting.
       timeout: resolveConnectTimeoutMs(config),
       ...(codexOptions ? { codexOptions } : {}),
+      ...(piMetadata ? { metadata: piMetadata } : {}),
     })
     if (!agentConfig) {
       return fail({

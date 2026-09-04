@@ -16,6 +16,7 @@ import {
   setNumberConfig,
   setMascotConfig,
   setPluginToolsConfig,
+  setBackendExtensionPolicy,
   setProviderBaseURL,
   setProviderExperimentalAgentSdk,
   setProviderModel,
@@ -227,6 +228,49 @@ describe("setAgentBackendModel", () => {
     // Unlike the provider writer, this one leaves the built-in path's pin alone.
     expect(written.model).toBe("claude-opus-4-8")
     expect(written.agentBackends).toEqual({ "claude-code": { model: "some-acp-model" } })
+  })
+})
+
+describe("setBackendExtensionPolicy", () => {
+  it("writes the policy under the backend's slot, keeping its model", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        agentBackend: "pi-rpc",
+        agentBackends: { "pi-rpc": { model: "commandcode/z-ai/glm-5.3-flash" } },
+      }),
+    })
+    const target = setBackendExtensionPolicy(HOME, "pi-rpc", "global", m.fsx)
+    expect(JSON.parse(m.files.get(target)!)).toEqual({
+      agentBackend: "pi-rpc",
+      agentBackends: {
+        "pi-rpc": { model: "commandcode/z-ai/glm-5.3-flash", piExtensionPolicy: "global" },
+      },
+    })
+  })
+
+  it("leaves the other backends alone", () => {
+    const m = memFs({
+      [userConfigPath(HOME)]: JSON.stringify({
+        agentBackends: { "pi-rpc": {}, codex: { model: "o3" } },
+      }),
+    })
+    setBackendExtensionPolicy(HOME, "pi-rpc", "trusted-project", m.fsx)
+    expect(JSON.parse(m.files.get(userConfigPath(HOME))!).agentBackends).toEqual({
+      "pi-rpc": { piExtensionPolicy: "trusted-project" },
+      codex: { model: "o3" },
+    })
+  })
+
+  it("refuses a policy Pi has no flags for, rather than silently isolating", () => {
+    // The adapter falls back to `isolated` for anything it does not recognise,
+    // so an unvalidated write here would look accepted and change nothing.
+    expect(() => setBackendExtensionPolicy(HOME, "pi-rpc", "wide-open", memFs().fsx)).toThrow()
+  })
+
+  it("rejects an empty backend id", () => {
+    expect(() => setBackendExtensionPolicy(HOME, "  ", "global", memFs().fsx)).toThrow(
+      /backend id is required/
+    )
   })
 })
 

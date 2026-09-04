@@ -230,6 +230,20 @@ export function externalAgentEventToCanonicalFallback(
           : "External session metadata updated",
         level: "info",
       }
+    case "tool_call_update":
+      // A status tick on a call that is already on screen. The reducer branch
+      // turns one of these into a diff when it carries one and into nothing
+      // when it does not, and "nothing" used to fall through to the default
+      // below, which narrated `External event: tool_call_update` into the
+      // TRANSCRIPT. Three ticks on one call put three lines of protocol jargon
+      // between the reply and the tool cards they belonged to.
+      return {
+        kind: "tool-progress",
+        toolCallId: event.toolCallId,
+        toolName: event.title ?? event.kind ?? "tool",
+        elapsedMs: 0,
+        heartbeat: true,
+      }
     case "progress":
       return {
         kind: "activity",
@@ -250,11 +264,12 @@ export function externalAgentEventToCanonicalFallback(
         retryable: event.recoverable ?? false,
       }
     default:
-      return {
-        kind: "informational",
-        content: `External event: ${event.type}`,
-        level: "info",
-      }
+      // An event this build has no projection for. It stays in the AUDIT
+      // stream, where /logs can show it verbatim, rather than being narrated
+      // into the conversation: "External event: tool_call_update" is protocol
+      // jargon addressed to nobody, and it pushed the reply it interrupted out
+      // of the reader's way.
+      return { kind: "diagnostic", runtime: "external-agent", payload: event }
   }
 }
 

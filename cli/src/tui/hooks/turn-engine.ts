@@ -33,6 +33,7 @@ export interface TurnSession {
     prompt: string,
     opts: {
       gate: PermissionResponder
+      awaitApprovals?: () => Promise<void>
       onAction?: (action: TuiAction) => void
       onEnvelope?: (envelope: AgentEventEnvelope) => void
       onEvent?: (event: CaptureStreamEvent) => void
@@ -58,12 +59,35 @@ export interface GateController {
   /** Whether a request is awaiting a decision. */
   isPending(): boolean
   /**
+   * Resolve once no request is awaiting a decision.
+   *
+   * The barrier the tool host waits on. A tool that needs no approval used to
+   * be authorized the moment it was asked for, so while an approval sat on
+   * screen the agent's other calls kept running: the user was being asked
+   * whether to allow one command, and the work they might be about to stop was
+   * already happening behind the dialog. Nothing runs while a question is open.
+   */
+  whenSettled(): Promise<void>
+  /**
    * Discard every pending resolver without resolving it. Used after a session
    * error (timeout / sidecar crash) to prevent a stale resolver from being
    * popped by the next turn's permission UI — a stale "allow" on an old
    * request would corrupt the gate queue and hang the new turn.
    */
   reset(): void
+  /**
+   * Answer every queued request with a denial and empty the queue. Returns how
+   * many were answered.
+   *
+   * What an interrupt has to do. `reset()` drops the resolvers on the floor,
+   * which is right after the turn is already dead, but pressing Esc while an
+   * approval is on screen happens BEFORE anything has ended: the agent is
+   * sitting on a question, and dropping it leaves that question unanswered.
+   * A denial is the honest answer to "stop" — the user did not approve
+   * anything — and it is what actually unblocks the agent so the cancel can
+   * land.
+   */
+  denyAll(message: string): number
 }
 
 /**
@@ -103,20 +127,45 @@ export function createGateController(
   const queue: Array<{
     req: PermissionRequestEvent
     resolve: (d: CapturePermissionDecision) => void
+    /** Pre-approved by the live "Allow always" set: answered without an overlay. */
+    silent?: boolean
   }> = []
+  /** Woken every time the queue drains, for {@link GateController.whenSettled}. */
+  const settledWaiters: Array<() => void> = []
+
+  const notifySettled = () => {
+    if (queue.length > 0) return
+    const waiters = settledWaiters.splice(0, settledWaiters.length)
+    for (const wake of waiters) wake()
+  }
+
+  /**
+   * Answer every silently-approved request at the head, in order, and open the
+   * overlay for the first one that needs a person.
+   *
+   * Silent approvals join the QUEUE rather than resolving on the spot, so a
+   * tool the user pre-approved still waits behind a question they have not
+   * answered yet. Order is the whole point: a decision the user is making is
+   * about the state of the workspace at that moment.
+   */
+  const advance = () => {
+    while (queue.length > 0 && queue[0].silent) {
+      const head = queue.shift()
+      head?.resolve({ decision: "allow" })
+    }
+    if (queue.length > 0) onRequest(queue[0].req)
+    else notifySettled()
+  }
 
   const responder: PermissionResponder = (req) =>
     new Promise<CapturePermissionDecision>((resolve) => {
       const proceed = () => {
-        // Silent auto-approve (the live "Allow always" set) skips the overlay.
-        if (autoApprove?.(req)) {
-          resolve({ decision: "allow" })
-          return
-        }
-        queue.push({ req, resolve })
-        // Only open the overlay when this request is the head — queued asks wait
-        // their turn and are surfaced by `resolve` as the head settles.
-        if (queue.length === 1) onRequest(req)
+        // A silent auto-approve (the live "Allow always" set) still takes its
+        // place in the queue. Resolving it on the spot let a pre-approved tool
+        // run while the user was still deciding about the one in front of it.
+        const silent = autoApprove?.(req) === true
+        queue.push({ req, resolve, ...(silent ? { silent: true } : {}) })
+        if (queue.length === 1) advance()
       }
       if (!preCheck) {
         proceed()
@@ -146,7 +195,7 @@ export function createGateController(
       if (head) head.resolve(decision)
       // Surface the next queued ask (if any) so a batch of parallel tool calls
       // is approved/denied one overlay at a time instead of stranding the rest.
-      if (queue.length > 0) onRequest(queue[0].req)
+      advance()
     },
     peek() {
       return queue[0]?.req
@@ -154,8 +203,19 @@ export function createGateController(
     isPending() {
       return queue.length > 0
     },
+    whenSettled() {
+      if (queue.length === 0) return Promise.resolve()
+      return new Promise<void>((wake) => settledWaiters.push(wake))
+    },
     reset() {
       queue.length = 0
+      notifySettled()
+    },
+    denyAll(message) {
+      const pending = queue.splice(0, queue.length)
+      for (const entry of pending) entry.resolve({ decision: "deny", message })
+      notifySettled()
+      return pending.length
     },
   }
 }
@@ -172,6 +232,8 @@ export interface RunTurnOptions {
   prompt: string
   dispatch: (action: TuiAction) => void
   gate: PermissionResponder
+  /** Held by the tool host so nothing else runs while an approval is on screen. */
+  awaitApprovals?: () => Promise<void>
   signal?: AbortSignal
   timeoutMs?: number
   /** Optional settings.json lifecycle hooks (PostToolUse / Stop / …). */
@@ -217,6 +279,7 @@ export async function runTurn(
   try {
     const result = await opts.session.send(opts.prompt, {
       gate: opts.gate,
+      ...(opts.awaitApprovals ? { awaitApprovals: opts.awaitApprovals } : {}),
       onEnvelope: (envelope) => {
         const order = envelopeOrder.observe(envelope)
         if (order.kind === "duplicate") return

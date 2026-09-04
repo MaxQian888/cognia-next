@@ -5,7 +5,7 @@
  */
 import React from "react"
 import { Box, Text } from "ink"
-import Spinner from "ink-spinner"
+import { Spinner } from "./Spinner"
 
 import { Markdown } from "./Markdown"
 import { DiffView } from "./DiffView"
@@ -122,7 +122,7 @@ function StatusGlyph({ status, color }: { status: ToolCell["status"]; color: str
   if (status === "running") {
     return (
       <Text color={color}>
-        <Spinner type="dots" />{" "}
+        <Spinner />{" "}
       </Text>
     )
   }

@@ -73,6 +73,15 @@ export interface AgentSessionApi {
   send(prompt: string): Promise<RunAndCaptureResult | null>
   abort(): void
   resolvePermission(decision: CapturePermissionDecision): void
+  /**
+   * Deny every approval the agent is still waiting on, and say how many.
+   *
+   * Interrupting is not the same as walking away. The agent is blocked on a
+   * question, and stopping the turn without answering it leaves the tool call
+   * suspended: with Pi it kept the process parked and the turn ran on. Denial
+   * is the answer that matches the gesture — nothing was approved.
+   */
+  denyPendingPermissions(message: string): number
   /** Add a tool to the live "Allow always" set so its subsequent requests are
    * auto-approved this session — no overlay, no waiting. Called when the user
    * picks "Allow always" so the same tool stops re-prompting mid-turn (the
@@ -403,11 +412,21 @@ export function useAgentSession({
         },
         // PreToolUse hooks: a deny blocks the tool before the overlay shows.
         (req) => hookRunner.preToolUse(req.toolName, req.input),
-        // Silent auto-approve for tools the user already chose "Allow always".
-        // The gate invokes this only when the model requests a tool mid-turn —
-        // never during render — so reading the ref here is safe.
+        // Silent auto-approve, from two sources. The tools the user chose
+        // "Allow always" for, and the mode whose entire definition is "no
+        // prompts": under `bypassPermissions` an approval overlay is not a
+        // safeguard, it is the thing the user just turned off. An agent that
+        // seals its policy in at spawn (Pi) keeps asking until its session is
+        // recreated, and answering those asks HERE is what makes the switch
+        // take effect on the turn that is already running.
+        //
+        // Runs after the PreToolUse pre-check, so a hook deny still wins over
+        // bypass. Both refs are read only when the model requests a tool
+        // mid-turn, never during render.
         // eslint-disable-next-line react-hooks/refs
-        (req) => approvedToolsRef.current.has(req.toolName)
+        (req) =>
+          configRef.current.permissionMode === "bypassPermissions" ||
+          approvedToolsRef.current.has(req.toolName)
       ),
     [dispatch, hookRunner]
   )
@@ -567,6 +586,10 @@ export function useAgentSession({
         prompt,
         dispatch,
         gate: gate.responder,
+        // The tool host holds this before authorizing anything, so a call that
+        // needs no approval does not run while the user is answering a question
+        // about a different one.
+        awaitApprovals: () => gate.whenSettled(),
         signal: controller.signal,
         // Interactive turns impose NO wall-clock cap. A live agentic turn can
         // legitimately run for many minutes (long thinking, many tool legs) and
@@ -668,6 +691,18 @@ export function useAgentSession({
     [dispatch, gate, hookRunner]
   )
 
+  const denyPendingPermissions = useCallback(
+    (message: string) => {
+      // Attribute each denial to its tool before the queue is emptied, so the
+      // PermissionDenied hooks fire with the same detail a manual "Deny" gives.
+      const head = gate.peek()
+      const denied = gate.denyAll(message)
+      if (head) hookRunner.onPermissionDenied(head.toolName, message)
+      return denied
+    },
+    [gate, hookRunner]
+  )
+
   const rememberApproval = useCallback((toolName: string) => {
     approvedToolsRef.current.add(toolName)
   }, [])
@@ -762,10 +797,24 @@ export function useAgentSession({
       // Before a session is live there is nothing to mutate — SET_MODE folds
       // into the first `startSession`'s options.
       const session = sessionRef.current
-      if (session?.isLive?.()) {
-        const handle = executionHandleRef.current
-        if (handle) await handle.setPermissionMode(mode)
-        else if (session.setPermissionMode) await session.setPermissionMode(mode)
+      if (!session?.isLive?.()) return
+      const handle = executionHandleRef.current
+      if (handle) {
+        await handle.setPermissionMode(mode)
+        return
+      }
+      if (!session.setPermissionMode) return
+      // Not every agent can be switched while it runs. Pi seals its native-tool
+      // policy into the process at spawn, so the honest answer there is "the
+      // agent restarts on your next message" — the session arranges that
+      // itself. Saying nothing is what made a switch to `bypassPermissions`
+      // look broken: the banner changed, and the next tool asked anyway.
+      const appliedLive = await session.setPermissionMode(mode)
+      if (appliedLive === false) {
+        dispatch({
+          type: "NOTICE",
+          message: `${mode} takes effect on your next message — this agent cannot change its permission mode while it is running, so its context restarts.`,
+        })
       }
     },
     [dispatch]
@@ -969,6 +1018,7 @@ export function useAgentSession({
     send,
     abort,
     resolvePermission,
+    denyPendingPermissions,
     rememberApproval,
     clear,
     resume,

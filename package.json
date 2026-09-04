@@ -204,6 +204,7 @@
     "benchmark:connectors": "cross-env CONNECTOR_BENCHMARK=1 jest lib/connectors/outbound-runner.benchmark.test.ts --runInBand",
     "e2e:serve:test": "node --test scripts/e2e/serve-out.test.mjs",
     "cli:test": "jest cli/",
+    "cli:test:conversation": "jest cli/src/tui/pty/",
     "conformance:prepare": "cargo build --manifest-path src-tauri/Cargo.toml --bin cognia-server --features workspace-runtime-exec",
     "// 12 ─── Gates — lint / audit / check (see scripts/gates/check-all.mjs) ───": "",
     "check:all": "node scripts/gates/check-all.mjs",

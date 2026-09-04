@@ -1937,7 +1937,9 @@ describe("App", () => {
 
   it("captures a `# fact` line to memory instead of sending it to the model", async () => {
     const { create, prompts } = fakeSession()
-    render(<App config={config} sessionId="s1" createSession={create} home="/home/u/.cognia" />)
+    const { container } = render(
+      <App config={config} sessionId="s1" createSession={create} home="/home/u/.cognia" />
+    )
     type("# always use pnpm")
     await act(async () => {
       submit()
@@ -1946,6 +1948,13 @@ describe("App", () => {
     // The fact never reached the model (it routed to /remember).
     expect(prompts).not.toContain("always use pnpm")
     expect(prompts.some((p) => p.includes("always use pnpm"))).toBe(false)
+    // Wait for the capture to SETTLE, whichever way it goes. The write opens
+    // the CLI database and runs the real capture funnel, so a test that only
+    // checked what was not sent returned while that work was still in flight
+    // and Jest tore the environment down underneath it.
+    await waitFor(() => {
+      expect(container.textContent ?? "").toMatch(/Remembered:|memory|went wrong/i)
+    })
   })
 
   it("opens a file in the editor on /open <path>", async () => {

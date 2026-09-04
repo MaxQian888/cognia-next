@@ -171,6 +171,15 @@ export interface AgentModelOption {
 
 export interface SendTurnOptions {
   gate: PermissionResponder
+  /**
+   * Resolve once no approval is awaiting the user.
+   *
+   * Held by the tool host before it authorizes anything, so a call that needs
+   * no approval does not run while the user is answering a question about a
+   * different one. Optional: a caller with no approval UI has no barrier to
+   * wait on.
+   */
+  awaitApprovals?: () => Promise<void>
   /** Preferred canonical stream. When present, the session does not invoke
    * `onEvent`, preventing the same event from being applied twice. */
   onEnvelope?: (envelope: AgentEventEnvelope) => void
@@ -209,8 +218,13 @@ export interface AgentSession {
   /** Mutate the live session's permission mode in place (no respawn), so the
    * in-process conversation is preserved across a Shift+Tab / plan-approval
    * mode switch. A no-op before the sidecar has spawned — the mode then folds
-   * into the first `startSession`. Optional for lightweight test doubles. */
-  setPermissionMode?(mode: PermissionModeValue): Promise<void>
+   * into the first `startSession`. Optional for lightweight test doubles.
+   *
+   * Resolves whether the new mode is in force NOW. `false` means the running
+   * agent could not be switched and its session has to be recreated for the
+   * change to be real (an external agent that bakes its policy in at spawn), so
+   * the caller can say so instead of showing a mode that is not being enforced. */
+  setPermissionMode?(mode: PermissionModeValue): Promise<boolean>
   /** True once the sidecar has spawned (≥1 `send` happened) — i.e. there is a
    * live session the sidecar knows by `sessionId`, so a manual `/compact` can
    * target it. Optional so lightweight test doubles need not implement it. */
@@ -505,13 +519,16 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
       // Before the sidecar has spawned there is no live session to mutate — the
       // mode is already in `params.config` and folds into the first
       // `startSession` via the resolver. Do nothing (and never respawn).
-      if (closed || boot === null) return
+      if (closed || boot === null) return true
       await setSessionMode(sessionId, mode)
       // Keep the cached options coherent so a later local read reflects the
       // live mode.
       sendOptionsOverrideMode = mode
       const cached = assembler.peek()
       if (cached) cached.sendOptions.permissionMode = mode
+      // The sidecar takes it live, every time: this path is the reason the
+      // contract can promise "in force now" at all.
+      return true
     },
     isLive() {
       return boot !== null && !closed

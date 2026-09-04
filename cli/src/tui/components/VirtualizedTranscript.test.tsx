@@ -13,20 +13,51 @@ describe("VirtualizedTranscript", () => {
       kind: "notice" as const,
       message: `message-${index}`,
     }))
+    // One notice is one row now that adjacent rows pack together, so the
+    // scroll offset is the cell index. It used to be two, and this offset was
+    // written as 1000 to reach the same cell.
     const { container } = render(
-      <VirtualizedTranscript
-        cells={cells}
-        width={80}
-        top={1000}
-        viewportRows={20}
-        verbose={false}
-      />
+      <VirtualizedTranscript cells={cells} width={80} top={500} viewportRows={20} verbose={false} />
     )
     const text = container.textContent ?? ""
     expect(text).toContain("message-500")
     expect(text).not.toContain("message-0")
     expect(text).not.toContain("message-999")
-    expect(container.querySelectorAll('[data-testid="terminal-block"]').length).toBeLessThan(100)
+    // The window is the viewport plus two overscans of it, so at one row per
+    // notice that is the block count too. The point is that it is a window and
+    // not the thousand cells behind it.
+    expect(container.querySelectorAll('[data-testid="terminal-block"]').length).toBeLessThanOrEqual(
+      5 * 20
+    )
+  })
+
+  // Density. A working turn is mostly one-line rows, and a blank after every
+  // one of them halved how much of the conversation a terminal could hold.
+  it("packs adjacent one-line cells and keeps a paragraph separated", () => {
+    const cells: Cell[] = [
+      { id: "u", kind: "user", text: "do the thing" },
+      { id: "t1", kind: "tool", callKey: "k1", toolName: "read", input: {}, status: "done" },
+      { id: "n1", kind: "notice", message: "first notice" },
+      { id: "n2", kind: "notice", message: "second notice" },
+      { id: "a", kind: "assistant", raw: "the answer" },
+    ]
+    const { container } = render(
+      <VirtualizedTranscript cells={cells} width={80} top={0} viewportRows={40} verbose />
+    )
+    // One element per block, each holding one element per rendered row.
+    const rowsPerBlock = [...container.querySelectorAll('[data-testid="terminal-block"]')].map(
+      (block) => block.children.length
+    )
+    // user, tool, notice, notice, assistant.
+    expect(rowsPerBlock).toHaveLength(5)
+    // A question is separated from the work under it.
+    expect(rowsPerBlock[0]).toBe(2)
+    // The tool card and the first notice pack against what follows them. The
+    // second notice keeps its blank, because a reply comes next.
+    expect(rowsPerBlock.slice(1, 4)).toEqual([1, 1, 2])
+    // The reply gets its air back, and the transcript ends with a blank so it
+    // never butts up against the composer.
+    expect(rowsPerBlock[4]).toBe(2)
   })
 
   it("renders all rows before the viewport has been measured", () => {

@@ -15,7 +15,7 @@
  */
 import React, { useEffect, useRef, useState } from "react"
 import { Box, Text, type DOMElement } from "ink"
-import Spinner from "ink-spinner"
+import { Spinner } from "./Spinner"
 
 import { useTheme } from "../theme/context"
 import { formatElapsed } from "../format/usage"
@@ -280,7 +280,7 @@ function BottomStatusImpl({
 
       {busy ? (
         <Text color={theme.warning}>
-          <Spinner type="dots" /> <WorkingIndicator turnStatus={turnStatus} />
+          <Spinner /> <WorkingIndicator turnStatus={turnStatus} />
           {elapsed ? ` · ${elapsed}` : ""} · esc to interrupt
         </Text>
       ) : null}

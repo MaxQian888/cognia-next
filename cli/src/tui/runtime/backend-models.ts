@@ -7,7 +7,15 @@
  * (unvalidated on the Codex side). This module is the honest source: the models
  * the connected agent reports for itself.
  *
- * Fetched LAZILY, on first open. `model/list` needs no session, so the picker
+ * Two agents answer without a session and they answer differently. Codex's
+ * native app-server has `model/list`. Pi shells its own `pi --list-models`,
+ * reached through the manager's `fetchAgentModelCatalog`, and asking only the
+ * Codex adapter is why `/model` on a connected Pi reported no models at all
+ * while `pi --list-models` printed dozens. Every other protocol scopes its
+ * models to a live session and is answered there, by the session's own
+ * `listModels`, not here.
+ *
+ * Fetched LAZILY, on first open. Neither route needs a session, so the picker
  * works before the first turn; the adapter caches the result, so reopening the
  * picker costs nothing. Doing it at connect instead would put a round-trip on
  * every startup for a menu most sessions never open.
@@ -37,6 +45,22 @@ export function defaultBackendModelHost(): BackendModelHost {
   return {
     async listExternalModels(agentId: string): Promise<ExternalModelOption[]> {
       const manager = getExternalAgentManager({ healthCheckInterval: 0 })
+      try {
+        // The shared catalog first: it is the route that answers for a
+        // pull-based adapter (Pi), and it reports `unsupported` rather than
+        // throwing for every agent with nothing to say before a session opens.
+        const catalog = await manager.fetchAgentModelCatalog(agentId)
+        if (catalog.status === "ok" && catalog.data.models.choices.length > 0) {
+          return catalog.data.models.choices.map((choice) => ({
+            id: choice.modelId,
+            ...(choice.name && choice.name !== choice.modelId ? { name: choice.name } : {}),
+          }))
+        }
+      } catch {
+        // Fall through to the Codex route rather than failing the picker. The
+        // two are independent sources, and one being wedged says nothing about
+        // the other.
+      }
       const adapter = manager.getCodexAppServerAdapter(agentId)
       if (!adapter) return []
       try {

@@ -65,3 +65,39 @@ export function resolveBackendModel(config: ResolvedConfig, presetId?: string): 
   if (!backends) return undefined
   return (presetId ? backends[presetId]?.model : undefined) ?? backends[backend!]?.model
 }
+
+/**
+ * How much of the user's own Pi stack this backend's sessions may load
+ * (`agentBackends[<preset>].piExtensionPolicy`, ADR-0119).
+ *
+ * Lives beside {@link resolveBackendModel} because it is the same per-backend
+ * record read the same way, and because BOTH paths that build a Pi agent need
+ * it: the TUI's connect-at-startup and the session factory the one-shot `run`
+ * uses. Wiring only one of them is how the setting appeared to do nothing on
+ * whichever path was missed.
+ *
+ * `undefined` means nothing was configured, and the adapter keeps its own
+ * default (`isolated`). That distinction matters: restating the default as an
+ * explicit choice would be indistinguishable from the user making it.
+ */
+export function resolveBackendExtensionPolicy(
+  config: ResolvedConfig,
+  presetId?: string
+): string | undefined {
+  if (!presetId) return undefined
+  return config.agentBackends?.[presetId]?.piExtensionPolicy
+}
+
+/**
+ * The Pi-only agent metadata a spawn has to carry, or nothing.
+ *
+ * Shaped as the metadata patch both call sites merge, so neither has to know
+ * the adapter's key name.
+ */
+export function piMetadataForPreset(
+  config: ResolvedConfig,
+  presetId?: string
+): { piExtensionPolicy: string } | undefined {
+  const policy = resolveBackendExtensionPolicy(config, presetId)
+  return policy ? { piExtensionPolicy: policy } : undefined
+}

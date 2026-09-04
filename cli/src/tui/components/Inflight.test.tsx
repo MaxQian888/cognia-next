@@ -2,6 +2,7 @@ import React from "react"
 import { render } from "@testing-library/react"
 
 import { Inflight } from "./Inflight"
+import { hasSpinnerFrame } from "./Spinner"
 import { ThemeProvider } from "../theme/context"
 import { BUILTIN_THEMES } from "../theme/builtins"
 
@@ -64,8 +65,50 @@ describe("Inflight", () => {
       />
     )
     // A running tool now shows a spinner glyph instead of the static ⏳.
-    expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(true)
     expect(container.textContent).toContain("Bash")
+  })
+
+  // The live region is where a read-heavy turn floods the screen: the
+  // transcript has always folded a settled context burst, but only after the
+  // turn committed, so twelve cards sat on screen for the whole time the reader
+  // was trying to follow along.
+  it("folds a settled run of context reads into one summary row", () => {
+    const tool = (id: string, path: string) => ({
+      id,
+      kind: "tool" as const,
+      callKey: id,
+      toolName: "read",
+      input: { path },
+      status: "done" as const,
+      collapsed: true,
+      result: "ok",
+    })
+    const { container } = wrap(
+      <Inflight
+        inflight={{ ...empty, tools: [tool("t1", "a.ts"), tool("t2", "b.ts"), tool("t3", "c.ts")] }}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("⚙")
+    expect(text).not.toContain("a.ts")
+  })
+
+  it("keeps every read visible in verbose mode", () => {
+    const tool = (id: string, path: string) => ({
+      id,
+      kind: "tool" as const,
+      callKey: id,
+      toolName: "read",
+      input: { path },
+      status: "done" as const,
+      collapsed: true,
+      result: "ok",
+    })
+    const { container } = wrap(
+      <Inflight inflight={{ ...empty, tools: [tool("t1", "a.ts"), tool("t2", "b.ts")] }} verbose />
+    )
+    expect(container.textContent ?? "").toContain("a.ts")
   })
 
   it("re-renders tool cells when they complete", () => {
@@ -87,7 +130,7 @@ describe("Inflight", () => {
         }}
       />
     )
-    expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(true)
     // Tool result arrives — status switches to done.
     rerender(
       <ThemeProvider palette={BUILTIN_THEMES.ansi}>
@@ -112,6 +155,6 @@ describe("Inflight", () => {
     )
     expect(container.textContent).toContain("✓")
     // The spinner is gone once the tool completes.
-    expect(container.querySelector('[data-ink="spinner"]')).toBeNull()
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(false)
   })
 })

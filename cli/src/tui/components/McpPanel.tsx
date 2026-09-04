@@ -13,7 +13,7 @@
 import React, { useRef, useState } from "react"
 import { Box, Text, type DOMElement } from "ink"
 import { useModalInput } from "../input/input-router"
-import Spinner from "ink-spinner"
+import { Spinner } from "./Spinner"
 
 import { useTheme } from "../theme/context"
 import { isMouseSequence } from "../input/mouse"
@@ -175,7 +175,7 @@ export function McpPanel({
         {probing ? (
           <Text color={theme.info}>
             {"  "}
-            <Spinner type="dots" /> probing…
+            <Spinner /> probing…
           </Text>
         ) : null}
       </Text>

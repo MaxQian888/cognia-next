@@ -6,6 +6,17 @@
  * two surfaces cannot drift on what a tool call says.
  */
 import { tokenizeCached } from "../markdown/render-cache"
+import {
+  cellRefText,
+  collectTableFootnotes,
+  fitCell,
+  TABLE_FRAME,
+  TABLE_RULE_BOTTOM,
+  TABLE_RULE_MID,
+  TABLE_RULE_TOP,
+  tableLayout,
+  tableRule,
+} from "../markdown/table-layout"
 import type { DiffLine, MdLine, MdSpan } from "../markdown/types"
 import { diffFilePath, formatEditDiff } from "../markdown/diff"
 import { highlightLine, langFromPath, paletteCodeTheme } from "../markdown/highlight"
@@ -88,13 +99,74 @@ function inlineSpans(spans: MdSpan[]): TerminalSpan[] {
   })
 }
 
+/**
+ * A GFM table as a framed, column-aligned grid.
+ *
+ * This surface used to join cells with a bare `" │ "` and rule the header with
+ * `"─".repeat(header.length)`, so nothing lined up: columns were as wide as
+ * whatever happened to be in the first row, and the rule was measured in code
+ * units, which is half the drawn width for CJK. It shares its geometry with the
+ * Ink renderer now, so both draw the same table.
+ *
+ * Links are footnoted below the grid rather than expanded inline, because the
+ * `(url)` suffix `inlineSpans` appends elsewhere would push a cell past the
+ * column it was measured into.
+ */
+function tableSpans(
+  line: Extract<MdLine, { kind: "table" }>,
+  maxWidth: number | undefined
+): TerminalSpan[] {
+  const footnotes = collectTableFootnotes(line, false)
+  const { widths, capped } = tableLayout(line, (spans) => cellRefText(spans, footnotes), maxWidth)
+  const cols = line.header.length
+  const rule = (ends: Parameters<typeof tableRule>[1]) => seg(tableRule(widths, ends), "muted")
+  const row = (cells: MdSpan[][], header: boolean): TerminalSpan[] => {
+    const out: TerminalSpan[] = [seg(TABLE_FRAME.vertical, "muted")]
+    for (let c = 0; c < cols; c++) {
+      const spans = cells[c] ?? []
+      const fit = fitCell(cellRefText(spans, footnotes), widths[c], line.align[c] ?? null, capped)
+      out.push(seg(` ${fit.left}`, "muted"))
+      if (fit.truncated) {
+        out.push(seg(fit.text, header ? "accent" : "plain", header ? { bold: true } : undefined))
+      } else {
+        out.push(...tableCellSpans(spans, footnotes, header))
+      }
+      out.push(seg(`${fit.right} `, "muted"), seg(TABLE_FRAME.vertical, "muted"))
+    }
+    return out
+  }
+  return [
+    rule(TABLE_RULE_TOP),
+    BREAK,
+    ...row(line.header, true),
+    BREAK,
+    rule(TABLE_RULE_MID),
+    ...line.rows.flatMap((cells) => [BREAK, ...row(cells, false)]),
+    BREAK,
+    rule(TABLE_RULE_BOTTOM),
+    ...footnotes.flatMap((url, i) => [BREAK, seg(`[${i + 1}] ${url}`, "muted")]),
+  ]
+}
+
+/** One cell's styled spans, with a footnoted link written as `label[n]` so the
+ * printed text is exactly what the column was measured against. */
+function tableCellSpans(spans: MdSpan[], footnotes: string[], header: boolean): TerminalSpan[] {
+  return spans.flatMap((span) => {
+    const ref = span.link ? footnotes.indexOf(span.link) : -1
+    const { style, extra } = spanStyle(span)
+    const own = seg(span.text, header ? "accent" : style, header ? { ...extra, bold: true } : extra)
+    return ref >= 0 ? [own, seg(`[${ref + 1}]`, "muted")] : [own]
+  })
+}
+
 const HEADING_STYLE: Record<number, TerminalStyle> = { 1: "accent", 2: "warning", 3: "success" }
 
 /** One markdown line as styled spans, without a trailing row break. */
 function markdownLineSpans(
   line: MdLine,
   highlight: boolean,
-  palette: ThemePalette | undefined
+  palette: ThemePalette | undefined,
+  maxWidth: number | undefined
 ): TerminalSpan[] {
   switch (line.kind) {
     case "heading": {
@@ -135,17 +207,8 @@ function markdownLineSpans(
       return [seg("────────────────────────", "muted")]
     case "blank":
       return []
-    case "table": {
-      const row = (cells: MdSpan[][]) =>
-        cells.map((cell) => cell.map((span) => span.text).join("")).join(" │ ")
-      const header = row(line.header)
-      return [
-        seg(header, "accent", { bold: true }),
-        BREAK,
-        seg("─".repeat(Math.max(3, header.length)), "muted"),
-        ...line.rows.flatMap((cells) => [BREAK, seg(row(cells), "plain")]),
-      ]
-    }
+    case "table":
+      return tableSpans(line, maxWidth)
   }
 }
 
@@ -153,10 +216,11 @@ function markdownLineSpans(
 function markdownSpans(
   raw: string,
   highlight = false,
-  palette: ThemePalette | undefined = undefined
+  palette: ThemePalette | undefined = undefined,
+  maxWidth: number | undefined = undefined
 ): TerminalSpan[] {
   const lines = tokenizeCached(sanitizeTerminalText(raw)).map((line) =>
-    markdownLineSpans(line, highlight, palette)
+    markdownLineSpans(line, highlight, palette, maxWidth)
   )
   return lines.flatMap((spans, index) => (index === 0 ? spans : [BREAK, ...spans]))
 }
@@ -194,6 +258,16 @@ export interface CellRenderOptions {
   prefs?: ResolvedRenderConfig
   /** Palette for theme-aware syntax colours, matching the Ink card path. */
   palette?: ThemePalette
+  /**
+   * Whether this block ends with a blank row.
+   *
+   * Defaults to `true`, which is what every cell used to do unconditionally.
+   * The composer of a transcript knows what follows this cell and can pack two
+   * one-line rows together instead (see `render/transcript-spacing`), which is
+   * most of the difference between a screen that holds two exchanges and one
+   * that holds four.
+   */
+  trailingBlank?: boolean
 }
 
 /**
@@ -477,13 +551,14 @@ function cellSpans(
   cell: Cell,
   verbose: boolean,
   prefs: ResolvedRenderConfig,
-  palette: ThemePalette | undefined
+  palette: ThemePalette | undefined,
+  maxWidth: number
 ): { spans: TerminalSpan[]; target?: string } {
   switch (cell.kind) {
     case "user":
       return { spans: [seg("› ", "accent", { bold: true }), seg(cell.text, "plain")] }
     case "assistant":
-      return { spans: markdownSpans(cell.raw, prefs.syntaxHighlightInline, palette) }
+      return { spans: markdownSpans(cell.raw, prefs.syntaxHighlightInline, palette, maxWidth) }
     case "thinking":
       return {
         spans:
@@ -491,7 +566,7 @@ function cellSpans(
             ? [
                 seg("▾ ∴ thinking", "muted"),
                 BREAK,
-                ...markdownSpans(cell.text, prefs.syntaxHighlightInline, palette),
+                ...markdownSpans(cell.text, prefs.syntaxHighlightInline, palette, maxWidth),
               ]
             : [seg("▸ ∴ thinking", "muted")],
       }
@@ -500,7 +575,7 @@ function cellSpans(
         spans: [
           seg(`${cell.done ? "◆" : "◇"} commentary`, "accent"),
           BREAK,
-          ...markdownSpans(cell.text, prefs.syntaxHighlightInline, palette),
+          ...markdownSpans(cell.text, prefs.syntaxHighlightInline, palette, maxWidth),
         ],
       }
     case "tool":
@@ -584,7 +659,10 @@ function cellSpans(
             "muted"
           ),
           BREAK,
-          ...markdownSpans(cell.raw).map((span) => ({ ...span, style: "muted" as TerminalStyle })),
+          ...markdownSpans(cell.raw, false, undefined, maxWidth).map((span) => ({
+            ...span,
+            style: "muted" as TerminalStyle,
+          })),
         ],
         target: "view:plan",
       }
@@ -597,11 +675,12 @@ export function cellToTerminalBlock(cell: Cell, options: CellRenderOptions): Ter
     cell,
     options.verbose,
     options.prefs ?? RENDER_DEFAULTS,
-    options.palette
+    options.palette,
+    options.width
   )
   return buildTerminalBlock({
     id: cell.id,
-    spans: [...rendered.spans, BREAK],
+    spans: options.trailingBlank === false ? rendered.spans : [...rendered.spans, BREAK],
     width: options.width,
     ...(rendered.target ? { target: rendered.target } : {}),
   })

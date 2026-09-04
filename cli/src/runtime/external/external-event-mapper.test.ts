@@ -12,6 +12,7 @@ import { createInitialState } from "../../tui/state/initial"
 import { tuiReducer } from "../../tui/state/reducer"
 import type { TuiAction } from "../../tui/state/types"
 
+import { classifyCanonicalEvent } from "../../tui/state/event-mapper"
 import {
   externalAgentEventToActions,
   externalAgentEventToCanonicalFallback,
@@ -571,6 +572,27 @@ describe("externalAgentEventToActions", () => {
         event({ type: "progress", progress: 0.5, message: "Working" })
       )
     ).toEqual({ kind: "activity", phase: "requesting", detail: "Working" })
+  })
+
+  // A protocol tick is not news. These used to reach the transcript as
+  // `informational` rows reading "External event: tool_call_update", which the
+  // transcript renders like any other message: three of them landed between a
+  // reply and the tool cards it was talking about.
+  it("keeps a contentless tool update off the transcript", () => {
+    const projected = externalAgentEventToCanonicalFallback(
+      event({ type: "tool_call_update", toolCallId: "call-1", title: "Reading README.md" })
+    )
+    expect(projected).toMatchObject({ kind: "tool-progress", toolCallId: "call-1" })
+    expect(classifyCanonicalEvent(projected.kind)).toBe("status")
+  })
+
+  it("routes an event this build cannot project into the audit stream", () => {
+    const projected = externalAgentEventToCanonicalFallback({
+      type: "some_future_protocol_event",
+      sessionId: "s1",
+    } as unknown as Parameters<typeof externalAgentEventToCanonicalFallback>[0])
+    expect(projected).toMatchObject({ kind: "diagnostic", runtime: "external-agent" })
+    expect(classifyCanonicalEvent(projected.kind)).toBe("audit")
   })
 
   it("preserves rich ACP blocks, compaction, and NES without durable binary bodies", () => {

@@ -14,10 +14,22 @@ import {
   tokenizeCached,
   tokenizeTransient,
 } from "../markdown/render-cache"
-import { stringWidth, truncateToWidth } from "../markdown/width"
+import { truncateToWidth } from "../markdown/width"
 import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
 import { useTheme } from "../theme/context"
-import type { MdLine, MdSpan, TableAlign } from "../markdown/types"
+import type { MdLine, MdSpan } from "../markdown/types"
+import {
+  cellRefText,
+  collectTableFootnotes,
+  fitCell,
+  TABLE_FRAME,
+  TABLE_RULE_BOTTOM,
+  TABLE_RULE_MID,
+  TABLE_RULE_TOP,
+  tableLayout,
+  tableRule,
+  type TableRuleEnds,
+} from "../markdown/table-layout"
 import { sanitizeTerminalText } from "../render/terminal-block"
 
 /** Whether the host terminal renders OSC-8 hyperlinks. Detected once per render
@@ -94,58 +106,11 @@ function spansText(spans: MdSpan[]): React.ReactNode {
   return spans.map((s, i) => <Span key={i} span={s} />)
 }
 
-/** Left/right padding strings to set a cell of `used` width into `width` per its
- * column alignment. `used`/`width` are display columns. */
-function padding(used: number, width: number, align: TableAlign): { left: string; right: string } {
-  const gap = Math.max(0, width - used)
-  if (align === "right") return { left: " ".repeat(gap), right: "" }
-  if (align === "center") {
-    const left = Math.floor(gap / 2)
-    return { left: " ".repeat(left), right: " ".repeat(gap - left) }
-  }
-  return { left: "", right: " ".repeat(gap) }
-}
-
-/**
- * Collect, in stable document order, the distinct link URLs of a table that need
- * a footnote reference. A link is footnoted only when it can't be made clickable
- * inline (no OSC-8) and its URL differs from its visible text — otherwise the raw
- * URL would either bloat the cell (breaking column alignment, since the inline
- * `(url)` suffix isn't counted) or be redundant. Returns `[]` when nothing needs
- * a footnote, so an ordinary table is unchanged.
- */
-export function collectTableFootnotes(
-  line: Extract<MdLine, { kind: "table" }>,
-  hyperlinks: boolean
-): string[] {
-  if (hyperlinks) return []
-  const urls: string[] = []
-  const scan = (spans: MdSpan[]) => {
-    for (const s of spans) {
-      if (s.link && s.link !== s.text && !urls.includes(s.link)) urls.push(s.link)
-    }
-  }
-  for (const cell of line.header) scan(cell)
-  for (const row of line.rows) for (const cell of row) scan(cell)
-  return urls
-}
-
-/** A table cell as a plain string with footnoted links rendered as `label[n]`
- * — the single source of truth for both column-width measurement and truncation,
- * so styled rendering and width math never disagree (the old bug: the inline
- * `(url)` suffix inflated a link cell's render but not its measured width). */
-export function cellRefText(spans: MdSpan[], footnotes: string[]): string {
-  return spans
-    .map((s) => {
-      const ref = s.link ? footnotes.indexOf(s.link) : -1
-      return ref >= 0 ? `${s.text}[${ref + 1}]` : s.text
-    })
-    .join("")
-}
-
 // `truncateToWidth` now lives in ../markdown/width (next to `stringWidth`) so the
-// tool-detail formatter can share it; re-exported here for existing importers.
-export { truncateToWidth }
+// tool-detail formatter can share it. `cellRefText` / `collectTableFootnotes`
+// moved to ../markdown/table-layout so the fullscreen renderer can lay a table
+// out the same way. Both re-exported here for existing importers.
+export { truncateToWidth, cellRefText, collectTableFootnotes }
 
 /** Render a table cell's spans, turning footnoted links into `label[n]` so the
  * URL lives below the table instead of widening (and misaligning) the column. */
@@ -183,62 +148,53 @@ function Table({
   const hyperlinks = React.useContext(HyperlinkContext)
   const footnotes = collectTableFootnotes(line, hyperlinks)
   const cols = line.header.length
-  const widths: number[] = []
-  for (let c = 0; c < cols; c++) {
-    let w = stringWidth(cellRefText(line.header[c] ?? [], footnotes))
-    for (const row of line.rows) w = Math.max(w, stringWidth(cellRefText(row[c] ?? [], footnotes)))
-    widths[c] = w
-  }
-  // Keep the table within the terminal: if the natural width (columns + " │ "
-  // separators) overflows, cap each column to an even share and truncate any
-  // over-long cell to its cap, so the table never wraps into a ragged mess.
-  let capped = false
-  if (maxWidth && maxWidth > 0 && cols > 0) {
-    const sepWidth = (cols - 1) * 3
-    const natural = widths.reduce((a, b) => a + b, 0) + sepWidth
-    if (natural > maxWidth) {
-      const cap = Math.max(3, Math.floor(Math.max(cols * 3, maxWidth - sepWidth) / cols))
-      for (let c = 0; c < cols; c++) widths[c] = Math.min(widths[c], cap)
-      capped = true
-    }
-  }
-  const renderRow = (cells: MdSpan[][], bold: boolean) => (
+  const { widths, capped } = tableLayout(line, (spans) => cellRefText(spans, footnotes), maxWidth)
+  const edge = (
+    <Text color={theme.borderSubtle} dimColor>
+      {TABLE_FRAME.vertical}
+    </Text>
+  )
+  const renderRow = (cells: MdSpan[][], header: boolean) => (
     <Text>
+      {edge}
       {Array.from({ length: cols }, (_, c) => {
         const spans = cells[c] ?? []
-        const refText = cellRefText(spans, footnotes)
         // A capped, over-wide cell falls back to a truncated plain string (it
         // loses inline styling, but only when the table wouldn't otherwise fit).
-        const truncated = capped && stringWidth(refText) > widths[c]
-        const used = truncated
-          ? stringWidth(truncateToWidth(refText, widths[c]))
-          : stringWidth(refText)
-        const { left, right } = padding(used, widths[c], line.align[c] ?? null)
+        const fit = fitCell(cellRefText(spans, footnotes), widths[c], line.align[c] ?? null, capped)
         return (
           <Text key={c}>
-            {c > 0 ? <Text color={theme.muted}>{" │ "}</Text> : null}
-            {left}
-            <Text bold={bold}>
-              {truncated ? (
-                truncateToWidth(refText, widths[c])
-              ) : (
-                <TableCellSpans spans={spans} footnotes={footnotes} />
-              )}
+            {" "}
+            {fit.left}
+            {/* The header is the accent colour as well as bold: in a wide table
+                the bold weight alone is easy to lose against the body rows. */}
+            <Text bold={header} color={header ? theme.accent : undefined}>
+              {fit.truncated ? fit.text : <TableCellSpans spans={spans} footnotes={footnotes} />}
             </Text>
-            {right}
+            {fit.right} {edge}
           </Text>
         )
       })}
     </Text>
   )
-  const sep = widths.map((w) => "─".repeat(w)).join("─┼─")
+  const rule = (ends: TableRuleEnds) => (
+    <Text color={theme.borderSubtle} dimColor>
+      {tableRule(widths, ends)}
+    </Text>
+  )
   return (
     <Box flexDirection="column">
+      {/* Fully framed, the way the fenced code block already is. The old layout
+          drew a bare `a │ b` grid with one header rule, which read as loose
+          columns of prose rather than as a table, and left the first and last
+          column with no edge to align against. */}
+      {rule(TABLE_RULE_TOP)}
       {renderRow(line.header, true)}
-      <Text color={theme.muted}>{sep}</Text>
+      {rule(TABLE_RULE_MID)}
       {line.rows.map((row, i) => (
         <React.Fragment key={i}>{renderRow(row, false)}</React.Fragment>
       ))}
+      {rule(TABLE_RULE_BOTTOM)}
       {footnotes.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
           {footnotes.map((url, i) => (

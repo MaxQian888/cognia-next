@@ -37,6 +37,19 @@ export function highlightMentions(line: string): LineSegment[] {
 /** A {@link LineSegment} plus a flag for the single run the caret occupies. */
 export interface CursorLineSegment extends LineSegment {
   cursor?: boolean
+  /**
+   * The caret sits past the last character, so it is a glyph of its own rather
+   * than a highlighted character.
+   *
+   * The renderer has to know the difference. A caret ON a character is drawn by
+   * inverting that cell, which reads as a block. The same inversion applied to
+   * {@link END_OF_LINE_CARET} paints a full block in the terminal's BACKGROUND
+   * colour on a foreground-coloured cell, and a full block covers the whole
+   * cell, so the result is a cell the colour of the background: the caret was
+   * being drawn and was invisible. This flag lets the end-of-line caret be
+   * drawn as an ordinary coloured block instead.
+   */
+  atEnd?: boolean
 }
 
 /**
@@ -44,7 +57,8 @@ export interface CursorLineSegment extends LineSegment {
  *
  * Ink trims styling from a trailing blank cell, so an inverse space at the end
  * of a line renders as nothing at all. A block glyph survives that pass while
- * showing the same single-cell caret.
+ * showing the same single-cell caret. It is drawn as a coloured glyph, never
+ * inverted, for the reason spelled out on {@link CursorLineSegment.atEnd}.
  */
 export const END_OF_LINE_CARET = "█"
 
@@ -81,6 +95,6 @@ export function highlightMentionsWithCursor(
     offset = end
   }
   // Past the last character: an empty line, or the cursor parked at the end.
-  if (cursorCol >= offset) out.push({ text: END_OF_LINE_CARET, cursor: true })
+  if (cursorCol >= offset) out.push({ text: END_OF_LINE_CARET, cursor: true, atEnd: true })
   return out
 }

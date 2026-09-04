@@ -114,17 +114,32 @@ const LineView = React.memo(function LineView({
   )
   return (
     <Text>
-      {segments.map((seg, i) => (
-        <Text
-          key={i}
-          color={
-            seg.kind === "skill" ? theme.accent : seg.kind === "agent" ? theme.info : undefined
-          }
-          inverse={"cursor" in seg && seg.cursor === true}
-        >
-          {seg.text}
-        </Text>
-      ))}
+      {segments.map((seg, i) => {
+        // Two different carets. Over a character, invert the cell. Past the last
+        // character, paint the block glyph itself: inverting a FULL BLOCK draws
+        // it in the background colour across the whole cell, which is the same
+        // as drawing nothing, and that is why the composer looked like it had
+        // no cursor whenever the line was empty or the caret sat at the end.
+        const atEndCaret = seg.cursor === true && seg.atEnd === true
+        const onCharCaret = seg.cursor === true && !atEndCaret
+        return (
+          <Text
+            key={i}
+            color={
+              atEndCaret
+                ? theme.caret
+                : seg.kind === "skill"
+                  ? theme.accent
+                  : seg.kind === "agent"
+                    ? theme.info
+                    : undefined
+            }
+            inverse={onCharCaret}
+          >
+            {seg.text}
+          </Text>
+        )
+      })}
     </Text>
   )
 })

@@ -5,6 +5,7 @@ import { __fireInput, __resetInk } from "ink"
 import {
   choiceToDecision,
   DEFAULT_PERMISSION_CHOICES,
+  permissionDetail,
   PermissionOverlay,
   prettyToolName,
   riskLevelFor,
@@ -57,6 +58,25 @@ describe("riskLevelFor", () => {
   })
 })
 
+describe("permissionDetail", () => {
+  const bare = { toolName: "bash", input: {} } as unknown as PermissionRequestEvent
+
+  it("prefers the concrete summary of the arguments", () => {
+    expect(permissionDetail(bare, "rm -rf /tmp/x")).toBe("rm -rf /tmp/x")
+  })
+
+  it("falls back to the description, then the path", () => {
+    expect(permissionDetail({ ...bare, description: "runs a command" }, "")).toBe("runs a command")
+    expect(permissionDetail({ ...bare, blockedPath: "/work/x.ts" }, "")).toBe("/work/x.ts")
+  })
+
+  it("says so when the agent sent nothing at all", () => {
+    // The state this whole line exists for: "Allow bash?" alone reads as a lost
+    // command, not as an agent that never sent one.
+    expect(permissionDetail(bare, "")).toMatch(/no details/i)
+  })
+})
+
 describe("PermissionOverlay", () => {
   beforeEach(() => __resetInk())
 
@@ -79,6 +99,33 @@ describe("PermissionOverlay", () => {
     expect(text).toContain("Allow bash?")
     expect(text).not.toContain("mcp__cognia-tools__")
     expect(text).toContain("[high risk]")
+  })
+
+  it("says what Esc really does, which is not 'cancel'", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={req}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    const text = container.textContent ?? ""
+    expect(text).toContain("Esc deny and stop the turn")
+  })
+
+  it("admits when the request carries no detail at all", () => {
+    const { container } = render(
+      <PermissionOverlay
+        req={{ toolName: "bash", input: {} } as unknown as PermissionRequestEvent}
+        choices={DEFAULT_PERMISSION_CHOICES}
+        index={0}
+        onMove={() => {}}
+        onResolve={() => {}}
+      />
+    )
+    expect(container.textContent ?? "").toMatch(/no details/i)
   })
 
   it("shows the tool, summary and description", () => {

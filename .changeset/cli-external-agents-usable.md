@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Fix external agents in the CLI: they could not start, listed no models, and answered nothing. The stdio gate asked whether the runtime owns a process table and the CLI answered no (it has no browser window, so it read as a web page), which refused every `--backend <agent>` with "the desktop app, or a paired Host" for a process that spawns the agent itself. `/model` then asked only Codex's app-server, so a pull-based agent like Pi reported no models at all. A turn the agent refused settled as a success with an empty reply, so a one-shot run printed nothing and exited 0 with no error to show. And a model the agent would not switch to was logged and swallowed: the turn ran on whichever model the agent was already on while every surface named the chosen one. Pi additionally listed models a Cognia session cannot select, because the listing read the user's whole Pi stack while the session runs with those extensions disabled. The listing now matches the session, a refusal says which model and why, and `cognia-agent config set agentBackends.<backend>.piExtensionPolicy global` loads your own Pi extensions when you want them.

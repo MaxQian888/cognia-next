@@ -48,7 +48,11 @@ function buildDeps(over: Partial<GlobalKeysDeps> = {}): GlobalKeysDeps {
     doExit: jest.fn(),
     cancelBackendConnect: jest.fn(),
     cancelBackendInstall: jest.fn(),
-    agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
+    agent: {
+      abort: jest.fn(),
+      switchMode: jest.fn(),
+      denyPendingPermissions: jest.fn(() => 0),
+    } as unknown as AgentSessionApi,
     abortRuntime: jest.fn(),
     askUser: { resolve: jest.fn() } as unknown as AskUserOverlayApi,
     hasForegroundRun: jest.fn(() => false),
@@ -231,6 +235,33 @@ describe("useGlobalKeys", () => {
     act(() => __fireInput("", { escape: true }))
     expect(deps.agent.abort).toHaveBeenCalled()
     expect(deps.dispatch).toHaveBeenCalledWith({ type: "OVERLAY_CLOSE" })
+  })
+
+  it("answers the pending approval before stopping the turn", () => {
+    // Interrupting while the agent waits on an approval used to close the box
+    // and leave the question unanswered: the agent stayed blocked, the abort
+    // never reached it, and the tool it had asked about ran anyway.
+    const initial = createInitialState(config, "s1", true, [])
+    const deps = buildDeps({
+      busy: true,
+      overlayOpen: true,
+      state: {
+        ...initial,
+        turnStatus: "streaming",
+        overlay: {
+          kind: "permission",
+          req: { requestId: "req-1", toolName: "bash", input: {} },
+          choices: [{ label: "Allow once", value: "allow" }],
+          index: 0,
+        },
+      } as unknown as TuiState,
+    })
+    render(<Harness deps={deps} />)
+    act(() => __fireInput("", { escape: true }))
+    expect(deps.agent.denyPendingPermissions).toHaveBeenCalledWith(
+      expect.stringContaining("Denied")
+    )
+    expect(deps.agent.abort).toHaveBeenCalled()
   })
 
   it("lets an agent-run modal consume Esc without interrupting either run", () => {
@@ -459,7 +490,11 @@ describe("useGlobalKeys — text selection", () => {
       fullscreen: true,
       busy: true,
       selection: { current: selection },
-      agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
+      agent: {
+        abort: jest.fn(),
+        switchMode: jest.fn(),
+        denyPendingPermissions: jest.fn(() => 0),
+      } as unknown as AgentSessionApi,
     })
     render(<Harness deps={deps} />)
     act(() => __fireInput("", { escape: true }))
@@ -473,7 +508,11 @@ describe("useGlobalKeys — text selection", () => {
       fullscreen: true,
       busy: true,
       selection: { current: selection },
-      agent: { abort: jest.fn(), switchMode: jest.fn() } as unknown as AgentSessionApi,
+      agent: {
+        abort: jest.fn(),
+        switchMode: jest.fn(),
+        denyPendingPermissions: jest.fn(() => 0),
+      } as unknown as AgentSessionApi,
     })
     render(<Harness deps={deps} />)
     act(() => __fireInput("", { escape: true }))

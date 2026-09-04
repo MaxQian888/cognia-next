@@ -1149,7 +1149,11 @@ describe("createAgentSession", () => {
     expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBeFalsy()
   })
 
-  it("does NOT surface load_skill when no skills are enabled (name mode)", async () => {
+  // "No skills" means no USER skills and nothing the built-in contextual
+  // catalog can deliver. The two are separate sources, and this used to assert
+  // only the first while running against the machine's real skill database, so
+  // it failed the moment a built-in became deliverable on a stock provider.
+  it("does NOT surface load_skill when nothing at all is loadable (name mode)", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const session = createAgentSession({
       config: cfg(),
@@ -1159,14 +1163,40 @@ describe("createAgentSession", () => {
         transport: {} as never,
         shutdown: jest.fn().mockResolvedValue(undefined),
       } as unknown as SidecarBootstrap),
-      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      // A provider with no built-in web tools and no plugin tools: no built-in
+      // skill's capability requirement is met, so the catalog is empty.
+      resolveOptions: async () => ({ model: "m", provider: "openai" }) as never,
       capture,
       resolveSkillIds: () => [],
+      ensureDb: async () => undefined,
       resolveAgents: async () => [],
     })
     await session.send("hi", { gate: createPermissionGate({ yes: true }) })
     const sendOptions = capture.mock.calls[0][2] as SendOptions
     expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBeFalsy()
+  })
+
+  it("surfaces load_skill for a contextual built-in even with no user skills", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const session = createAgentSession({
+      config: cfg(),
+      home: HOME,
+      transcriptFs: memFs().fsx,
+      bootstrap: jest.fn().mockResolvedValue({
+        transport: {} as never,
+        shutdown: jest.fn().mockResolvedValue(undefined),
+      } as unknown as SidecarBootstrap),
+      // Anthropic carries web search and fetch natively, so the research-web
+      // built-in is deliverable and the model needs a way to pull its body.
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      resolveSkillIds: () => [],
+      ensureDb: async () => undefined,
+      resolveAgents: async () => [],
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    const sendOptions = capture.mock.calls[0][2] as SendOptions
+    expect(sendOptions.pluginTools?.some((t) => t.name === "load_skill")).toBe(true)
   })
 })
 

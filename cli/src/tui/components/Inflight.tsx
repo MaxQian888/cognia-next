@@ -17,6 +17,8 @@ import { useRenderPrefs } from "../render/context"
 import { usePacedReveal } from "../render/use-paced-reveal"
 import type { Inflight as InflightState } from "../state/types"
 import { CellView } from "./CellView"
+import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
+import { ThinkingPulse } from "./Spinner"
 
 export function Inflight({
   inflight,
@@ -52,8 +54,10 @@ export function Inflight({
       {hasThinking && (
         <Box flexDirection="column">
           <Text>
+            <ThinkingPulse />
             <Text color={theme.thinking} italic>
-              ✻ Thinking…
+              {" "}
+              Thinking…
             </Text>
             {!verbose && (
               <Text color={theme.muted} dimColor>
@@ -71,9 +75,21 @@ export function Inflight({
       )}
       {hasTools && (
         <Box flexDirection="column" marginBottom={1}>
-          {inflight.tools.map((tool) => (
-            <CellView key={tool.id} cell={tool} columns={columns} />
-          ))}
+          {/* Settled context reads fold into one summary row here too. The
+              transcript has always folded them once the turn committed, so a
+              turn that opened twelve files showed twelve cards while it ran and
+              one line the moment it finished. The live region is where the
+              flood actually hurts: it is on screen while the reader is trying
+              to follow what the agent is doing. */}
+          {groupContextRuns(inflight.tools, verbose).map((run) =>
+            run.kind === "group" ? (
+              <Text key={`context:${run.tools[0].id}`} color={theme.muted} dimColor>
+                ⚙ {summarizeContextGroup(run.tools)}
+              </Text>
+            ) : (
+              <CellView key={run.cell.id} cell={run.cell} columns={columns} />
+            )
+          )}
         </Box>
       )}
       {hasText && <Markdown raw={revealedText} streaming columns={columns} />}

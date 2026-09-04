@@ -2,6 +2,7 @@ import React from "react"
 import { render } from "@testing-library/react"
 
 import { CellView } from "./CellView"
+import { hasSpinnerFrame } from "./Spinner"
 import type { Cell } from "../state/types"
 
 function renderCell(cell: Cell) {
@@ -107,8 +108,8 @@ describe("CellView", () => {
         }}
       />
     )
-    // The ink-spinner mock renders a span marked data-ink="spinner".
-    expect(container.querySelector('[data-ink="spinner"]')).not.toBeNull()
+    // The spinner draws one of its own frames while the call runs.
+    expect(hasSpinnerFrame(container.textContent ?? "")).toBe(true)
   })
 
   it("renders an image result as a placeholder (no base64 wall) on a plain terminal", () => {

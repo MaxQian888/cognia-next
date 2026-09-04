@@ -138,10 +138,18 @@ export function useGlobalKeys(deps: GlobalKeysDeps): void {
     }
     lastCtrlCAtRef.current = null
     if (deps.state.lastCtrlCAt) deps.dispatch({ type: "CLEAR_CTRL_C" })
+    // Answer before aborting. An approval on screen means the agent is BLOCKED
+    // on that question, and closing the overlay without answering left it
+    // waiting: the abort could not reach an agent that was not listening, and
+    // the tool it had asked about eventually ran anyway. Denying is the answer
+    // that matches the gesture, and it is what frees the agent to be cancelled.
+    const denied = deps.agent.denyPendingPermissions("Denied: the turn was stopped.")
     deps.agent.abort()
     deps.abortRuntime()
-    if (deps.state.overlay.kind === "permission") deps.dispatch({ type: "OVERLAY_CLOSE" })
-    else if (deps.state.overlay.kind === "askUser") {
+    if (deps.state.overlay.kind === "permission" || denied > 0) {
+      deps.dispatch({ type: "OVERLAY_CLOSE" })
+    }
+    if (deps.state.overlay.kind === "askUser") {
       deps.askUser.resolve({ selected: [], text: "", cancelled: true })
     }
     deps.disarmBacktrack()

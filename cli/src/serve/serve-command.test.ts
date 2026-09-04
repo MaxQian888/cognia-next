@@ -169,6 +169,25 @@ function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { NODE_ENV: "test", ...extra } as NodeJS.ProcessEnv
 }
 
+/**
+ * A throwaway account content key.
+ *
+ * `ensureHeadlessAccount` reads this from the REAL `process.env` (and deletes
+ * it as it goes), because that is a deployment's interface for handing a
+ * headless brain its key. This suite used to leave it unset, so the boot test
+ * only passed on a machine that happened to export a valid one. Setting it here
+ * makes the test say what a deployment must supply instead of inheriting it.
+ */
+const TEST_ACCOUNT_CONTENT_KEY = "a".repeat(64)
+
+beforeEach(() => {
+  process.env.COGNIA_ACCOUNT_CONTENT_KEY = TEST_ACCOUNT_CONTENT_KEY
+})
+
+afterEach(() => {
+  delete process.env.COGNIA_ACCOUNT_CONTENT_KEY
+})
+
 describe("serveCommand", () => {
   it("fails fast without a server url or a service token", async () => {
     const out = sink()

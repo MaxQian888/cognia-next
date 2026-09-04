@@ -26,6 +26,7 @@ import { createInitialState } from "../tui/state/initial"
 import { tuiReducer } from "../tui/state/reducer"
 import type { AgentSession } from "../agent/session-runner"
 import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
+import { markCliHostProcess } from "../runtime/cli-host-marker"
 import { parseArgv } from "./args"
 import { chatCommand } from "./chat"
 
@@ -33,6 +34,20 @@ const mockInvoke = invoke as jest.Mock
 const mockListen = listen as jest.Mock
 
 describe("external chat integration", () => {
+  // `chatCommand` runs under `cli/src/cli/entry.ts` in production, which marks
+  // the process as the standalone CLI host before anything in `@/lib` loads.
+  // Without that mark a Node process looks like a browser to `detectPlatform`,
+  // so the external-agent process plane refuses to start a stdio agent and the
+  // turn never reaches the backend at all. Going through the real bootstrap
+  // seam keeps this a test of the product's own host detection.
+  beforeAll(() => {
+    markCliHostProcess()
+  })
+
+  afterAll(() => {
+    delete (globalThis as Record<string, unknown>).__COGNIA_CLI__
+  })
+
   it("runs chat --backend codex through ACP permission approval into TUI cells", async () => {
     let stdout: ((event: { payload: { agentId: string; data: string } }) => void) | undefined
     let promptRequestId: number | undefined
@@ -141,11 +156,14 @@ describe("external chat integration", () => {
           })
         )
         const turn = runTurn({ session, prompt: "edit", dispatch, gate: gate.responder })
-        // The turn now resolves the whole Cognia context and starts the tool
-        // host before it reaches the agent, so wait for the overlay rather than
-        // counting a fixed handful of ticks.
-        for (let attempt = 0; attempt < 400 && state.overlay?.kind !== "permission"; attempt += 1) {
-          await new Promise((resolve) => setImmediate(resolve))
+        // The turn resolves the whole Cognia context and starts the tool host
+        // before it reaches the agent, and that work is real IO, not a fixed
+        // number of microtasks. Counting ticks made this assert a race: too few
+        // and the overlay had not opened, and no number is right on every
+        // machine. Wait for the state, and let the clock only bound the failure.
+        const deadline = Date.now() + 20_000
+        while (state.overlay?.kind !== "permission" && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 5))
         }
         expect(mockInvoke.mock.calls.map(([command]) => command)).toEqual(
           expect.arrayContaining(["spawn_external_agent", "send_to_external_agent"])

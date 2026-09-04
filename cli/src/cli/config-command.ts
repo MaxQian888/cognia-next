@@ -11,6 +11,7 @@ import {
   loadConfig as defaultLoadConfig,
 } from "../config/load"
 import {
+  setBackendExtensionPolicy as defaultSetBackendExtensionPolicy,
   setConfigValue as defaultSet,
   setProviderBaseURL as defaultSetProviderBaseURL,
 } from "../config/mutate"
@@ -23,12 +24,21 @@ export interface ConfigDeps {
   loadConfig?: (flags?: Partial<CliConfigFile>) => ReturnType<typeof defaultLoadConfig>
   setConfigValue?: typeof defaultSet
   setProviderBaseURL?: typeof defaultSetProviderBaseURL
+  setBackendExtensionPolicy?: typeof defaultSetBackendExtensionPolicy
   out?: OutputSink
   env?: Record<string, string | undefined>
 }
 
-/** Matches the one supported nested `set` path: `providers.<id>.baseURL`. */
+/** Matches the nested `set` path `providers.<id>.baseURL`. */
 const PROVIDER_BASE_URL_KEY = /^providers\.([^.]+)\.baseURL$/
+
+/**
+ * Matches `agentBackends.<preset>.piExtensionPolicy` — how much of the user's
+ * own Pi stack a Cognia Pi session loads (ADR-0119). The one external-backend
+ * setting that is not a model, and the one a user has to be able to change:
+ * an isolated session cannot see a provider that a Pi extension contributes.
+ */
+const BACKEND_EXTENSION_POLICY_KEY = /^agentBackends\.([^.]+)\.piExtensionPolicy$/
 
 export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Promise<number> {
   const out = deps.out ?? realOutput
@@ -37,6 +47,8 @@ export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Pr
   const loadConfig = deps.loadConfig ?? defaultLoadConfig
   const setConfigValue = deps.setConfigValue ?? defaultSet
   const setProviderBaseURL = deps.setProviderBaseURL ?? defaultSetProviderBaseURL
+  const setBackendExtensionPolicy =
+    deps.setBackendExtensionPolicy ?? defaultSetBackendExtensionPolicy
 
   switch (args.subcommand) {
     case "path": {
@@ -87,9 +99,15 @@ export async function configCommand(args: ParsedArgs, deps: ConfigDeps = {}): Pr
         return 2
       }
       const providerBaseURLMatch = key.match(PROVIDER_BASE_URL_KEY)
+      const backendPolicyMatch = key.match(BACKEND_EXTENSION_POLICY_KEY)
       try {
         if (providerBaseURLMatch) {
           const path = setProviderBaseURL(home, providerBaseURLMatch[1], value)
+          out.write(`Set ${key} in ${path}\n`)
+          return 0
+        }
+        if (backendPolicyMatch) {
+          const path = setBackendExtensionPolicy(home, backendPolicyMatch[1], value)
           out.write(`Set ${key} in ${path}\n`)
           return 0
         }

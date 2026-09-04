@@ -245,6 +245,44 @@ describe("NodeExternalAgentBackend", () => {
     await backend.invoke("kill_external_agent", { agentId })
   })
 
+  // A process group we spawned can refuse our signal with EPERM rather than
+  // ESRCH once its leader is a zombie, which is what macOS reports for a child
+  // that has just exited. That was rethrown from inside the escalation TIMER,
+  // where nothing catches it, so a busy machine turned "the agent already
+  // exited" into a crash of the host process.
+  it("treats a process group that refuses the signal as already gone", async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-agent-eperm-"))
+    const stub = fileURLToPath(new URL("./stub-acp-agent.mjs", import.meta.url))
+    const backend = new NodeExternalAgentBackend({
+      workspacesRoot: workspace,
+      allowSmokeAgent: true,
+      resolveLaunch: async (config) => ({ command: config.command, args: config.args ?? [] }),
+    })
+    const config = { id: "eperm", command: "node", args: [stub], cwd: workspace }
+    const running = nextEvent<{ state: string }>(
+      backend,
+      "external-agent://state-change",
+      (payload) => payload.state === "Running"
+    )
+    await backend.invoke("spawn_external_agent", { config })
+    await running
+
+    const kill = jest.spyOn(process, "kill").mockImplementationOnce(() => {
+      const error = new Error("kill EPERM") as NodeJS.ErrnoException
+      error.code = "EPERM"
+      throw error
+    })
+    try {
+      await expect(
+        backend.invoke("kill_external_agent", { agentId: "eperm" })
+      ).resolves.toBeUndefined()
+    } finally {
+      kill.mockRestore()
+      await backend.invoke("kill_external_agent", { agentId: "eperm" }).catch(() => undefined)
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   it("checks real and absent commands", async () => {
     const backend = new NodeExternalAgentBackend({ workspacesRoot: process.cwd() })
     await expect(

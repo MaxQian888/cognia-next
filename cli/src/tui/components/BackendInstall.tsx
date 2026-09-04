@@ -14,7 +14,7 @@
  */
 import React from "react"
 import { Box, Text } from "ink"
-import Spinner from "ink-spinner"
+import { Spinner } from "./Spinner"
 
 import { useTheme } from "../theme/context"
 import type { BackendInstallState } from "../state/types"
@@ -50,7 +50,7 @@ export function BackendInstall({
     <Box flexDirection="column" width={width}>
       <Box>
         <Text color={theme.accent}>
-          <Spinner type="dots" />
+          <Spinner />
         </Text>
         <Text color={theme.muted}>{` Installing ${install.name} …`}</Text>
       </Box>

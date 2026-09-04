@@ -205,6 +205,40 @@ export function setProviderBaseURL(
 }
 
 /**
+ * Record how much of the user's own Pi stack a Cognia Pi session may load
+ * (`agentBackends[<preset>].piExtensionPolicy`, ADR-0119).
+ *
+ * Nested, so it cannot ride {@link setConfigValue}, and deliberately explicit:
+ * `global` and `trusted-project` load code the user installed themselves, which
+ * is a decision only they can make. The reason it has to be reachable at all is
+ * that a provider contributed by a Pi extension does not exist inside an
+ * isolated session, so the models it offers can be listed by Pi and refused by
+ * the very next `set_model`.
+ *
+ * Validates the merged file before writing. Returns the absolute path written.
+ */
+export function setBackendExtensionPolicy(
+  home: string,
+  presetId: string,
+  policy: string,
+  fsx: ConfigMutateFs = realConfigMutateFs
+): string {
+  if (!presetId.trim()) throw new Error("backend id is required")
+  const current = readUserConfig(home, fsx)
+  const agentBackends = {
+    ...current.agentBackends,
+    [presetId]: { ...current.agentBackends?.[presetId], piExtensionPolicy: policy },
+  }
+  // Parsed, not cast: an unknown policy has to fail here, with the enum's own
+  // message, rather than reach a spawn that would silently fall back.
+  const merged = cliConfigFileSchema.parse({ ...current, agentBackends })
+  const target = userConfigPath(home)
+  fsx.mkdirp(path.dirname(target))
+  fsx.write(target, JSON.stringify(merged, null, 2) + "\n")
+  return target
+}
+
+/**
  * Merge a status-bar patch into `config.json`'s `statusBar` object (the footer
  * isn't a scalar so it can't go through {@link setConfigValue}). Validates the
  * merged file before writing. Returns the absolute path written.

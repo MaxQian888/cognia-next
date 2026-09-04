@@ -218,6 +218,32 @@ describe("startToolHostBroker — authorization", () => {
     expect(prompts).toBe(0)
   })
 
+  // The failure this prevents: while an approval sat on screen, every call that
+  // needed no approval was authorized straight through, so the work the user
+  // was deciding whether to allow had already happened by the time they
+  // answered.
+  it("authorizes nothing while an approval is awaiting the user", async () => {
+    let release = () => {}
+    const settled = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const broker = await start({
+      gate: async () => ({ decision: "allow" }),
+      awaitApprovals: () => settled,
+    })
+    const { c } = await connected(broker)
+    let allowed = false
+    const pending = c.call("authorize", { name: "git_status", args: {} }).then((verdict) => {
+      allowed = true
+      return verdict
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    // `git_status` needs no approval, and it is still not authorized.
+    expect(allowed).toBe(false)
+    release()
+    expect(await pending).toEqual({ allow: true })
+  })
+
   it("prompts once — and only once — for a mutating call", async () => {
     let prompts = 0
     const broker = await start({

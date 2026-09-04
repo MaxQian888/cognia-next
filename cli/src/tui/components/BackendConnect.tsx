@@ -13,7 +13,7 @@
  */
 import React from "react"
 import { Box, Text } from "ink"
-import Spinner from "ink-spinner"
+import { Spinner } from "./Spinner"
 
 import { useTheme } from "../theme/context"
 import { connectProgressLine, type BackendConnectStage } from "../runtime/backend-controller"
@@ -32,7 +32,7 @@ export function BackendConnect({
     <Box flexDirection="column" width={width}>
       <Box>
         <Text color={theme.accent}>
-          <Spinner type="dots" />
+          <Spinner />
         </Text>
         <Text color={theme.muted}>{` ${connectProgressLine(backend, stage)}`}</Text>
       </Box>

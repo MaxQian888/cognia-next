@@ -667,6 +667,82 @@ describe("runTurn", () => {
   })
 })
 
+describe("createGateController barrier", () => {
+  const request = (toolName: string) => ({ toolName, input: {} }) as never
+
+  it("holds a pre-approved tool behind a question the user has not answered", async () => {
+    // The failure this prevents: an approval on screen while the agent's other
+    // calls kept running behind it, so the work the user was deciding whether
+    // to allow had already happened by the time they answered.
+    const shown: string[] = []
+    const gate = createGateController(
+      (req) => shown.push(req.toolName),
+      undefined,
+      (req) => req.toolName === "read"
+    )
+    let readAnswered = false
+    const asked = gate.responder(request("bash"))
+    void gate.responder(request("read")).then(() => {
+      readAnswered = true
+    })
+    await Promise.resolve()
+    expect(shown).toEqual(["bash"])
+    expect(readAnswered).toBe(false)
+
+    gate.resolve({ decision: "allow" })
+    await expect(asked).resolves.toEqual({ decision: "allow" })
+    await Promise.resolve()
+    expect(readAnswered).toBe(true)
+    // The pre-approved call still never opened an overlay.
+    expect(shown).toEqual(["bash"])
+  })
+
+  it("answers a pre-approved tool immediately when nothing is pending", async () => {
+    const shown: string[] = []
+    const gate = createGateController(
+      (req) => shown.push(req.toolName),
+      undefined,
+      () => true
+    )
+    await expect(gate.responder(request("read"))).resolves.toEqual({ decision: "allow" })
+    expect(shown).toEqual([])
+  })
+
+  it("settles immediately when no question is open", async () => {
+    const gate = createGateController(() => {})
+    await expect(gate.whenSettled()).resolves.toBeUndefined()
+  })
+
+  it("settles once the last question is answered", async () => {
+    const gate = createGateController(() => {})
+    void gate.responder(request("bash"))
+    await Promise.resolve()
+    let settled = false
+    void gate.whenSettled().then(() => {
+      settled = true
+    })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    gate.resolve({ decision: "deny", message: "no" })
+    await Promise.resolve()
+    expect(settled).toBe(true)
+  })
+
+  it("settles when an interrupt denies everything, so nothing waits on a dead turn", async () => {
+    const gate = createGateController(() => {})
+    void gate.responder(request("bash"))
+    void gate.responder(request("write"))
+    await Promise.resolve()
+    let settled = false
+    void gate.whenSettled().then(() => {
+      settled = true
+    })
+    expect(gate.denyAll("stopped")).toBe(2)
+    await Promise.resolve()
+    expect(settled).toBe(true)
+  })
+})
+
 describe("createGateController PreToolUse pre-check", () => {
   it("denies a tool when the pre-check denies, without showing the overlay", async () => {
     const requests: string[] = []

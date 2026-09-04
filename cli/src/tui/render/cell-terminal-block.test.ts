@@ -18,8 +18,44 @@ describe("cellToTerminalBlock", () => {
     expect(block.plainText).toContain("# Heading")
     expect(block.plainText).toContain("☑ done")
     expect(block.plainText).toContain("│ quote")
-    expect(block.plainText).toContain("A │ B")
+    expect(block.plainText).toContain("│ A  │ B  │")
     expect(block.rowCount).toBe(block.lines.length)
+  })
+
+  // This renderer paints the DEFAULT (fullscreen, virtualized) layout, so an
+  // unaligned table here is the table the user actually sees. It used to join
+  // cells with a bare " │ " and rule the header with a code-unit count, which
+  // meant no column lined up and a CJK header got a half-width rule.
+  it("frames a table and aligns its columns in display width", () => {
+    const cell: Cell = {
+      id: "t1",
+      kind: "assistant",
+      raw: ["| Model | Note |", "| --- | --- |", "| 模型 | ok |", "| claude | fine |"].join("\n"),
+    }
+    const rows = cellToTerminalBlock(cell, { width: 80, verbose: false }).plainText.split("\n")
+    const framed = rows.filter((row) => row.startsWith("╭") || row.startsWith("│"))
+    expect(framed[0]).toBe("╭────────┬──────╮")
+    expect(framed[1]).toBe("│ Model  │ Note │")
+    // "模型" is 4 display columns, so it is padded by 4 to the 6-wide column and
+    // the next edge still lands under the header's.
+    expect(framed).toContain("│ 模型   │ ok   │")
+    for (const row of framed) expect(row.length > 0).toBe(true)
+  })
+
+  it("truncates a table's columns to the terminal instead of wrapping them", () => {
+    const cell: Cell = {
+      id: "t2",
+      kind: "assistant",
+      raw: [
+        "| Command | Description |",
+        "| --- | --- |",
+        "| /backend | switch the agent backend for this session |",
+      ].join("\n"),
+    }
+    const block = cellToTerminalBlock(cell, { width: 28, verbose: false })
+    const framed = block.plainText.split("\n").filter((row) => row.startsWith("│"))
+    for (const row of framed) expect(row.length).toBeLessThanOrEqual(28)
+    expect(block.plainText).toContain("…")
   })
 
   it("never drops a supported content part", () => {

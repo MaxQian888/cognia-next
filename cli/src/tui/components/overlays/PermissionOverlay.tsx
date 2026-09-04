@@ -50,6 +50,22 @@ export function riskLevelFor(toolName: string): BuiltinToolRiskLevel | undefined
   return RISK_BY_BARE_NAME.get(prettyToolName(toolName))
 }
 
+/**
+ * The line under the title: what this call actually does.
+ *
+ * Ordered by how concrete it is. The agent's own summary of the arguments wins,
+ * then its description of the tool, then the path it named. The last branch is
+ * the one that matters most: an approval with nothing to show has to SAY it has
+ * nothing to show, because a bare "Allow bash?" reads as a UI that lost the
+ * command rather than as an agent that never sent one.
+ */
+export function permissionDetail(req: PermissionRequestEvent, summary: string): string {
+  if (summary) return summary
+  if (req.description) return req.description
+  if (req.blockedPath) return req.blockedPath
+  return "The agent sent no details with this request."
+}
+
 export function PermissionOverlay({
   req,
   choices,
@@ -68,6 +84,7 @@ export function PermissionOverlay({
   const theme = useTheme()
   const input = (req.input as Record<string, unknown>) ?? {}
   const summary = summarizeToolCall(req.toolName, input)
+  const detail = permissionDetail(req, summary)
   const name = prettyToolName(req.displayName ?? req.toolName)
   const risk = riskLevelFor(req.toolName)
   // For an edit/write request, preview the proposed change inline (capped) so the
@@ -80,7 +97,8 @@ export function PermissionOverlay({
     1,
     Math.min(choices.length, contentRows(maxRows, (showFrame ? 2 : 0) + 4))
   )
-  const metadataRows = (summary ? 1 : 0) + (req.description ? 1 : 0)
+  // The detail line is always rendered now, so it always costs a row.
+  const metadataRows = 1 + (req.description && req.description !== detail ? 1 : 0)
   const fixedRows = (showFrame ? 2 : 0) + 4 + metadataRows + choiceRows + (diff.length > 0 ? 1 : 0)
   const diffRows = Math.min(12, contentRows(maxRows, fixedRows))
   return (
@@ -103,8 +121,16 @@ export function PermissionOverlay({
           to render first, which put the command, the description and (worst)
           the proposed diff underneath the buttons: Enter landed on "allow"
           without the change ever having been on screen above it. */}
-      {summary ? <Text color={theme.muted}>{summary}</Text> : null}
-      {req.description ? <Text color={theme.muted}>{req.description}</Text> : null}
+      <Text color={theme.muted} wrap="truncate-end">
+        {detail}
+      </Text>
+      {/* The tool's own description, only when it is not already the detail
+          line — an agent that sends both says two different things. */}
+      {req.description && req.description !== detail ? (
+        <Text color={theme.muted} wrap="truncate-end">
+          {req.description}
+        </Text>
+      ) : null}
       {diff.length > 0 && diffRows > 0 ? (
         <Box marginBottom={1} flexDirection="column">
           <DiffView diff={diff} lang={diffLang} maxLines={diffRows} />
@@ -117,6 +143,10 @@ export function PermissionOverlay({
         onMove={onMove}
         onSelect={(i) => onResolve(choiceToDecision(choices[i], req.toolName))}
         onCancel={() => onResolve(choiceToDecision({ label: "Deny", value: "deny" }, req.toolName))}
+        // The shared hint says "Esc cancel", which is not what Esc does here:
+        // it denies this call AND stops the turn. Saying so is the difference
+        // between a key that looks like "go back" and one that ends the run.
+        footerHint="↑/↓ choose · Enter confirm · Esc deny and stop the turn"
       />
     </Box>
   )

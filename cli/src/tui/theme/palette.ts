@@ -78,6 +78,8 @@ export interface ThemePalette extends Required<Omit<BaseColors, "text">> {
   mascotStopping: string
   // selection highlight
   selected: string
+  /** The composer's own block caret, drawn where the terminal cursor is hidden. */
+  caret: string
   // fenced code-block syntax highlighting (mapped to a cli-highlight theme).
   codeKeyword: string
   codeString: string
@@ -143,6 +145,7 @@ export function expandPalette(base: BaseColors, overrides?: Partial<ThemePalette
     mascotStopping: danger,
     // selection
     selected: accent,
+    caret: accent,
     // code-block syntax tokens
     codeKeyword: secondary,
     codeString: success,

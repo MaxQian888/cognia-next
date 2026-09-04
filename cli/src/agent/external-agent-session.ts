@@ -46,7 +46,7 @@ import type { AcpMcpServerConfig } from "@/types/agent/external-agent"
 import type { SessionCreateOptions } from "@/lib/ai/agent/external/protocol-adapter"
 
 import { resolveHome } from "../config/load"
-import { resolveBackendModel } from "../config/active-model"
+import { piMetadataForPreset, resolveBackendModel } from "../config/active-model"
 import { loadMcpServers } from "../mcp/load-mcp-config"
 import { applyDisabled, readDisabled, readDisabledTools } from "../mcp/mcp-state"
 import { toAcpMcpServers } from "../tui/runtime/backend-bridge"
@@ -343,7 +343,12 @@ export function acpPermissionRequestToCli(
     input: request.rawInput ?? {},
     ...(request.title ? { title: request.title } : {}),
     displayName: request.toolInfo.name,
-    ...(request.toolInfo.description ? { description: request.toolInfo.description } : {}),
+    // The agent's own words about the call, from either field it may use. Pi
+    // puts them in `reason` (the extension's "bash: echo hi"), and dropping
+    // that left an approval whose entire content was the tool's name.
+    ...(request.toolInfo.description || request.reason
+      ? { description: request.toolInfo.description ?? request.reason }
+      : {}),
     ...(request.locations?.[0]?.path ? { blockedPath: request.locations[0].path } : {}),
     ...(request.reason ? { decisionReason: request.reason } : {}),
   }
@@ -605,6 +610,10 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
   let sessionContextVersion: string | null = isResumableLink(recordedLink, backend)
     ? (recordedLink.contextVersion ?? null)
     : null
+  // Set when the permission mode changed and the adapter could not apply it to
+  // the running protocol session. Cleared by `reconcile`, which recreates that
+  // session so the new mode is the one the agent actually runs under.
+  let permissionModeStale = false
 
   const ensureAgent = async (): Promise<void> => {
     if (initialized) return
@@ -642,7 +651,18 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           "session_error"
         )
       }
-      config.metadata = { ...config.metadata, piExtensionPath: extensionPath }
+      config.metadata = {
+        ...config.metadata,
+        piExtensionPath: extensionPath,
+        // How much of the user's own Pi stack loads. The adapter defaults to
+        // `isolated`, which is right, and is also why a provider contributed by
+        // one of their extensions is not in this session's catalog at all: Pi
+        // lists the model, `set_model` answers "Model not found". Configured per
+        // backend, and read on BOTH paths that build a Pi agent (the TUI's
+        // connect does the same) so the setting cannot work on one and not the
+        // other.
+        ...piMetadataForPreset(params.config, presetId),
+      }
     }
 
     if (config.process) {
@@ -699,6 +719,9 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
           activeTurnOptions
             ? activeTurnOptions.gate(request)
             : { decision: "deny", message: "No active turn" },
+        // Read per call, not captured: the barrier belongs to whichever turn is
+        // live, and the broker outlives any one of them.
+        awaitApprovals: async () => activeTurnOptions?.awaitApprovals?.(),
         execHostTool,
         onToolCall: (event) =>
           activeTurnOptions?.onAction?.({
@@ -762,7 +785,15 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
     // is null for a link recorded before versions existed, and null never equals
     // a hash — so an unknown-context resume is refused exactly like a changed
     // one rather than silently continuing.
-    if (externalSessionId && sessionContextVersion !== session.contextVersion) {
+    //
+    // A permission mode the adapter could not switch live counts as staleness
+    // too. It is not part of the context hash because most adapters DO switch it
+    // in place, and restarting those would throw away a conversation for a
+    // change they had already applied.
+    if (
+      externalSessionId &&
+      (sessionContextVersion !== session.contextVersion || permissionModeStale)
+    ) {
       // Everything `session/new` baked in has changed. Appending a second system
       // prompt to the live session would leave the agent with two conflicting
       // instruction sets and make resume non-deterministic, so start a new
@@ -773,6 +804,7 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       mcpServers = undefined
       restarted = true
     }
+    permissionModeStale = false
     sessionContextVersion = session.contextVersion
     return { session, restarted }
   }
@@ -1099,10 +1131,34 @@ export function createExternalAgentSession(params: ExternalAgentSessionParams): 
       mcpServers = undefined
       skillsAnnounced = false
     },
+    /**
+     * Move the live session onto a new permission mode, or arrange for it to
+     * be recreated under one.
+     *
+     * Returns whether the change is in force NOW. It used to return nothing and
+     * throw for every agent whose adapter has no `setSessionMode` — Pi is one:
+     * its native-tool policy is serialized into the process environment at
+     * spawn and its tool floor into the argv, neither of which a running
+     * process can be talked out of. So switching to `bypassPermissions`
+     * mid-session changed the banner, the footer and the config, and then the
+     * agent asked for approval on the very next tool exactly as before.
+     *
+     * Recreating the protocol session is what makes the new mode real there, so
+     * the session is marked stale and `reconcile` restarts it on the next turn.
+     * Adapters that CAN switch live still do, and are not restarted.
+     */
     async setPermissionMode(mode) {
       permissionMode = normalizePermissionMode(mode)
-      if (initialized && externalSessionId) {
+      if (!initialized || !externalSessionId) {
+        // Nothing is running yet: the mode folds into `session/new`.
+        return true
+      }
+      try {
         await manager.setSessionMode(agentId, externalSessionId, permissionMode)
+        return true
+      } catch {
+        permissionModeStale = true
+        return false
       }
     },
     async listModels() {

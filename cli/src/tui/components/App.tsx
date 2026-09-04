@@ -187,6 +187,7 @@ import { useTextSelection } from "../hooks/use-text-selection"
 import type { FrameBuffer } from "../selection/frame-buffer"
 import { TranscriptRegion } from "./app/TranscriptRegion"
 import { AppOverlays } from "./app/AppOverlays"
+import { inlineOverlayRows, overlayTakesScreen } from "../state/overlay-layout"
 import { BottomRegion } from "./app/BottomRegion"
 import {
   createTuiAgentComplete,
@@ -828,6 +829,12 @@ export function App({
           })
         )
       },
+      denyPendingPermissions(message) {
+        // Attached or not, the local gate is the thing holding the resolver for
+        // a locally-driven turn; when a host owns the turn its own approval
+        // plane is answered through `resolvePermission` below.
+        return standaloneAgent.denyPendingPermissions(message)
+      },
       resolvePermission(decision) {
         const connection = attachedHostConnectionRef.current
         if (!connection) {
@@ -1106,9 +1113,15 @@ export function App({
   // The region is measured after Yoga allocates the fixed bottom chrome. Until
   // that first pass, use a conservative fallback; overflow clipping still makes
   // the actual region authoritative.
-  const overlayViewportRows = overlayMetrics.hasMeasured
+  const measuredOverlayRows = overlayMetrics.hasMeasured
     ? overlayMetrics.height
     : Math.max(1, rows - (layoutBudget.tier === "tiny" ? 1 : 3))
+  // A docked prompt shares the column with the transcript instead of replacing
+  // it, and the measured region belongs to the full-screen branch — so it gets
+  // its own bounded budget rather than the whole viewport it no longer owns.
+  const overlayViewportRows = overlayTakesScreen(state.overlay)
+    ? measuredOverlayRows
+    : inlineOverlayRows(measuredOverlayRows)
   // Fullscreen mouse model (default = native click-drag selection). Drives the
   // alt-screen mouse escapes below and whether the wheel scrolls the transcript.
   const mouseMode = state.config.mouse ?? DEFAULT_MOUSE_MODE
@@ -2713,6 +2726,7 @@ export function App({
           rows={rows}
           fullscreen={fullscreen}
           overlayOpen={overlayOpen}
+          overlayTakesScreen={overlayTakesScreen(state.overlay)}
           overlayRegionRef={overlayRegionRef}
           transcript={
             <TranscriptRegion

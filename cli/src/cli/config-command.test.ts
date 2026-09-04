@@ -111,6 +111,37 @@ describe("configCommand", () => {
     expect(s.stdout()).toMatch(/Set providers\.deepseek\.baseURL in \/h\/config\.json/)
   })
 
+  it("set agentBackends.<preset>.piExtensionPolicy routes to the backend writer", async () => {
+    const s = sink()
+    const setConfigValue = jest.fn()
+    const setBackendExtensionPolicy = jest.fn().mockReturnValue("/h/config.json")
+    const code = await configCommand(
+      parseArgv(["config", "set", "agentBackends.pi-rpc.piExtensionPolicy", "global"]),
+      { out: s.out, home: "/h", setConfigValue, setBackendExtensionPolicy }
+    )
+    expect(code).toBe(0)
+    expect(setBackendExtensionPolicy).toHaveBeenCalledWith("/h", "pi-rpc", "global")
+    // The flat writer would have rejected the dotted key outright, which is how
+    // this setting was unreachable from the CLI in the first place.
+    expect(setConfigValue).not.toHaveBeenCalled()
+  })
+
+  it("set agentBackends.<preset>.piExtensionPolicy surfaces writer validation errors", async () => {
+    const s = sink()
+    const code = await configCommand(
+      parseArgv(["config", "set", "agentBackends.pi-rpc.piExtensionPolicy", "wide-open"]),
+      {
+        out: s.out,
+        home: "/h",
+        setBackendExtensionPolicy: () => {
+          throw new Error("invalid enum value")
+        },
+      }
+    )
+    expect(code).toBe(2)
+    expect(s.stderr()).toMatch(/invalid enum value/)
+  })
+
   it("set providers.<id>.baseURL surfaces writer validation errors", async () => {
     const s = sink()
     const code = await configCommand(

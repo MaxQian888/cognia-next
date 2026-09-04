@@ -181,6 +181,21 @@ describe("runHeadlessTurn — event bridging", () => {
   it("drops envelope-only kinds that have no capture representation", async () => {
     mockedRun.mockImplementation(async (params) => {
       params.onEnvelope?.(envelopeWith({ kind: "lifecycle", phase: "started" }))
+      params.onEnvelope?.(envelopeWith({ kind: "text-delta", delta: "kept" }))
+      return { result: result(), envelopes: [] }
+    })
+
+    const seen: unknown[] = []
+    await runHeadlessTurn({ config, prompt: "p", gate, onEvent: (e) => seen.push(e) })
+    expect(seen).toEqual([{ type: "text-delta", delta: "kept" }])
+  })
+
+  // `retry` used to be envelope-only, and this suite listed it among the kinds
+  // that get dropped. It has a capture representation now, and a dropped retry
+  // is a turn that streams nothing for the length of the provider's backoff
+  // ladder without saying why, so the projection has to carry it.
+  it("projects a retry, which is the only signal during a provider backoff", async () => {
+    mockedRun.mockImplementation(async (params) => {
       params.onEnvelope?.(
         envelopeWith({
           kind: "retry",
@@ -190,13 +205,14 @@ describe("runHeadlessTurn — event bridging", () => {
           code: "provider_error",
         })
       )
-      params.onEnvelope?.(envelopeWith({ kind: "text-delta", delta: "kept" }))
       return { result: result(), envelopes: [] }
     })
 
     const seen: unknown[] = []
     await runHeadlessTurn({ config, prompt: "p", gate, onEvent: (e) => seen.push(e) })
-    expect(seen).toEqual([{ type: "text-delta", delta: "kept" }])
+    expect(seen).toEqual([
+      { type: "retry", phase: "scheduled", attempt: 1, maxRetries: 2, code: "provider_error" },
+    ])
   })
 
   it("subscribes nothing when the caller passed no onEvent", async () => {

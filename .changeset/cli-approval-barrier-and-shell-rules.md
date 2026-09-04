@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Stop the CLI running tools while an approval is still on screen, and tell the model what shell it is actually in. A call the policy allowed outright was authorized the moment it was asked for, so a turn with several tool calls kept working behind the approval dialog: the user was being asked whether to allow one command while the work they might be about to stop was already happening. Nothing is authorized now until every open question has been answered, on both the projected-tool path and Pi's native one, and a pre-approved tool takes its place in the queue instead of jumping it. The system prompt also carries the host's shell facts: which interpreter, which platform, whose sandbox is in force when an external backend owns the shell, and the rules that hold everywhere. One command per call rather than a chain whose exit status comes from the wrong half, no redirecting to `/dev/null` or any other device a sandbox may refuse, and BSD rather than GNU utilities on macOS. The agent had been rediscovering each of these by failing, and retrying the same construct because nothing had told it the construct was the problem.

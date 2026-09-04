@@ -1,4 +1,4 @@
-import { resolveActiveModel, resolveBackendModel } from "./active-model"
+import { piMetadataForPreset, resolveActiveModel, resolveBackendModel } from "./active-model"
 import { DEFAULT_RESOLVED_CONFIG, type ResolvedConfig } from "./schema"
 
 jest.mock("@/lib/ai/model-options", () => ({
@@ -126,5 +126,44 @@ describe("resolveBackendModel", () => {
     expect(resolveBackendModel(config, "claude-code")).toBe("some-acp-model")
     // The built-in provider's own model is untouched by the backend memory.
     expect(resolveActiveModel(config)).toBe("claude-opus-4-8")
+  })
+})
+
+describe("piMetadataForPreset", () => {
+  it("carries a configured Pi extension policy to the agent config", () => {
+    // Without this the adapter's own default (`isolated`, i.e. --no-extensions)
+    // was the only reachable answer from the CLI, and every model a user's Pi
+    // extension contributes was outside the session's catalog: Pi listed it,
+    // `set_model` refused it.
+    expect(
+      piMetadataForPreset(
+        makeConfig({ agentBackends: { "pi-rpc": { piExtensionPolicy: "global" } } }),
+        "pi-rpc"
+      )
+    ).toEqual({ piExtensionPolicy: "global" })
+  })
+
+  it("says nothing when the backend has no policy configured", () => {
+    // Restating the default as an explicit override would make the adapter
+    // unable to tell "the user chose isolated" from "nobody chose".
+    expect(
+      piMetadataForPreset(makeConfig({ agentBackends: { "pi-rpc": {} } }), "pi-rpc")
+    ).toBeUndefined()
+    expect(piMetadataForPreset(makeConfig(), "pi-rpc")).toBeUndefined()
+    expect(piMetadataForPreset(makeConfig(), undefined)).toBeUndefined()
+  })
+
+  it("reads the preset being connected, not another backend's", () => {
+    expect(
+      piMetadataForPreset(
+        makeConfig({
+          agentBackends: {
+            "pi-rpc": { piExtensionPolicy: "global" },
+            codex: { piExtensionPolicy: "trusted-project" },
+          },
+        }),
+        "codex"
+      )
+    ).toEqual({ piExtensionPolicy: "trusted-project" })
   })
 })

@@ -1,3 +1,4 @@
+import { modelSupportsEffort as sharedModelSupportsEffort } from "@/lib/ai/reasoning-capability"
 import { deriveEffortSliderState, modelSupportsEffort, thinkingLevelToEffort } from "./thinking"
 import { EFFORT_SLIDER_LEVELS, type ThinkingLevel } from "./schema"
 
@@ -46,52 +47,20 @@ describe("deriveEffortSliderState", () => {
   })
 })
 
-describe("modelSupportsEffort — Anthropic", () => {
-  it.each([
-    "claude-opus-4-5",
-    "claude-opus-4-6",
-    "claude-opus-4-6-fast",
-    "claude-opus-4-7",
-    "claude-opus-4-8",
-    "claude-sonnet-4-6",
-    "claude-fable-5",
-    "claude-mythos-5",
-  ])("supports effort-capable model %s", (model) => {
-    expect(modelSupportsEffort("anthropic", model)).toBe(true)
+// The per-model matrix lives with the capability itself
+// (`lib/ai/reasoning-capability.test.ts`). Restating it here made this suite a
+// second, weaker copy of the model table that drifted the moment the real one
+// changed: it still vouched for `claude-mythos-5` after that id was removed for
+// naming a model no catalog carries. What this module actually owns is the
+// re-export, so that is what it pins.
+describe("modelSupportsEffort re-export", () => {
+  it("is the shared capability itself, not a CLI-local copy", () => {
+    expect(modelSupportsEffort).toBe(sharedModelSupportsEffort)
   })
 
-  it.each(["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-1", "claude-opus-4-0"])(
-    "rejects effort on %s",
-    (model) => {
-      expect(modelSupportsEffort("anthropic", model)).toBe(false)
-    }
-  )
-})
-
-describe("modelSupportsEffort — non-Anthropic reasoning models", () => {
-  it.each([
-    ["openai", "o1"],
-    ["openai", "o3-mini"],
-    ["openai", "gpt-5"],
-    ["deepseek", "deepseek-reasoner"],
-    ["deepseek", "deepseek-r1"],
-    ["google", "gemini-2.5-flash-thinking"],
-    ["xai", "grok-4-reasoning"],
-  ])("supports %s/%s", (provider, model) => {
-    expect(modelSupportsEffort(provider, model)).toBe(true)
-  })
-
-  it.each([
-    ["openai", "gpt-4o"],
-    ["deepseek", "deepseek-chat"],
-    ["google", "gemini-2.0-flash"],
-  ])("does not force effort on non-reasoning %s/%s", (provider, model) => {
-    expect(modelSupportsEffort(provider, model)).toBe(false)
-  })
-})
-
-describe("modelSupportsEffort — no model", () => {
-  it("returns false when the model is undefined", () => {
+  it("reaches the shared gate for a representative allow and deny", () => {
+    expect(modelSupportsEffort("anthropic", "claude-opus-5")).toBe(true)
+    expect(modelSupportsEffort("anthropic", "claude-haiku-4-5")).toBe(false)
     expect(modelSupportsEffort("anthropic", undefined)).toBe(false)
   })
 })

@@ -30,7 +30,11 @@ const project = (): EvalProject => ({
   })),
   decisionPolicy: {
     formal: false,
-    dimensions: [],
+    // A project with no weighted dimension cannot decide anything, and shared
+    // preflight refuses it. This fixture used to carry an empty list, so every
+    // case here reported a decision-policy failure and the credential and disk
+    // assertions were reading an already-blocked result.
+    dimensions: [{ metric: "quality", direction: "maximize", weight: 1 }],
     constraints: [],
     confidenceLevel: 0.95,
     minimumEffectiveCases: 30,

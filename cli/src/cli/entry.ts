@@ -66,6 +66,13 @@ async function boot(): Promise<number> {
     return ok ? 0 : 1
   }
 
+  // Before the preamble, and before anything from `@/lib`: this process owns a
+  // process table and nothing in the shared graph can tell by looking. Without
+  // the marker the external-agent process plane refuses every stdio agent with
+  // "the desktop app, or a paired Host". See ../runtime/cli-host-marker.
+  const { markCliHostProcess } = await import("../runtime/cli-host-marker")
+  markCliHostProcess()
+
   // MUST be first on the CLI path: installs a synchronous IndexedDB on the
   // global before any `@/lib` module (and the eager Dexie databases they
   // construct at import) is evaluated. See ../db/install-indexeddb.

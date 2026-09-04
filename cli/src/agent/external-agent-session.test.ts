@@ -124,6 +124,27 @@ describe("external-agent permission adaptation", () => {
     })
   })
 
+  it("falls back to the agent's reason when the tool carries no description", () => {
+    // Pi's approval arrives with the extension's line in `reason` and nothing
+    // in `toolInfo.description`, and `reason` reached no surface: the prompt
+    // read "Allow bash?" with the command it was about to run nowhere on it.
+    const withoutDescription: AcpPermissionRequest = {
+      ...request,
+      toolInfo: { id: "bash", name: "bash" },
+      reason: "bash: echo hi",
+    }
+    expect(acpPermissionRequestToCli(withoutDescription, "fallback-session")).toMatchObject({
+      description: "bash: echo hi",
+      decisionReason: "bash: echo hi",
+    })
+  })
+
+  it("prefers the tool's own description over the reason when both exist", () => {
+    expect(
+      acpPermissionRequestToCli({ ...request, reason: "why" }, "fallback-session")
+    ).toMatchObject({ description: "Run a shell command", decisionReason: "why" })
+  })
+
   it.each([
     ["allow", "once", false, "once"],
     ["allow_always", "always", true, "always"],

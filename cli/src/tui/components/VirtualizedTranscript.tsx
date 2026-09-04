@@ -8,6 +8,7 @@ import { cellToTerminalBlock, TerminalBlockCache } from "../render/cell-terminal
 import { buildTerminalBlock } from "../render/terminal-block"
 import type { TerminalBlock, TerminalStyle } from "../render/terminal-block"
 import { groupContextRuns, summarizeContextGroup } from "../format/context-group"
+import { needsBlankAfter } from "../render/transcript-spacing"
 import { useTheme } from "../theme/context"
 import { useRenderPrefs } from "../render/context"
 import { recordBlockCacheStats, recordRenderDuration } from "../runtime/render-diagnostics"
@@ -91,36 +92,55 @@ function VirtualizedTranscriptBody({
     // summary row, the same collapse the scrollback renderer applies. It used to
     // live only in the legacy `Transcript` live path, so the renderer that
     // actually paints the fullscreen viewport showed every read in full.
-    () =>
-      groupContextRuns(cells, verbose).map((run) =>
-        run.kind === "group"
-          ? blockCache.get(
-              {
+    () => {
+      const runs = groupContextRuns(cells, verbose)
+      // A folded context burst is one summary row, so it packs like any other
+      // row. `leadCell` is what the spacing rule sees for a run.
+      const leadCell = (run: (typeof runs)[number]) =>
+        run.kind === "group" ? run.tools[0] : run.cell
+      return runs.map((run, index) => {
+        const blank = needsBlankAfter(leadCell(run), runs[index + 1] && leadCell(runs[index + 1]))
+        if (run.kind === "group") {
+          return blockCache.get(
+            {
+              id: `context:${run.tools[0].id}`,
+              width: safeWidth,
+              theme: JSON.stringify(theme),
+              preferences: `compact:${blank}`,
+              revision: run.tools.map((tool) => tool.id).join(","),
+            },
+            () =>
+              buildTerminalBlock({
                 id: `context:${run.tools[0].id}`,
+                spans: [
+                  {
+                    text: `⚙ ${summarizeContextGroup(run.tools)}${blank ? "\n" : ""}`,
+                    style: "muted",
+                  },
+                ],
                 width: safeWidth,
-                theme: JSON.stringify(theme),
-                preferences: "compact",
-                revision: run.tools.map((tool) => tool.id).join(","),
-              },
-              () =>
-                buildTerminalBlock({
-                  id: `context:${run.tools[0].id}`,
-                  spans: [{ text: `⚙ ${summarizeContextGroup(run.tools)}\n`, style: "muted" }],
-                  width: safeWidth,
-                })
-            )
-          : blockCache.get(
-              {
-                id: run.cell.id,
-                width: safeWidth,
-                theme: JSON.stringify(theme),
-                preferences: `${verbose ? "verbose" : "compact"}:${JSON.stringify(prefs)}`,
-                revision: revisionOf(run.cell),
-              },
-              () =>
-                cellToTerminalBlock(run.cell, { width: safeWidth, verbose, prefs, palette: theme })
-            )
-      ),
+              })
+          )
+        }
+        return blockCache.get(
+          {
+            id: run.cell.id,
+            width: safeWidth,
+            theme: JSON.stringify(theme),
+            preferences: `${verbose ? "verbose" : "compact"}:${blank}:${JSON.stringify(prefs)}`,
+            revision: revisionOf(run.cell),
+          },
+          () =>
+            cellToTerminalBlock(run.cell, {
+              width: safeWidth,
+              verbose,
+              prefs,
+              palette: theme,
+              trailingBlank: blank,
+            })
+        )
+      })
+    },
     [cells, safeWidth, theme, verbose, prefs]
   )
   const index = React.useMemo(

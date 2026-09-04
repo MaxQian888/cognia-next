@@ -45,15 +45,20 @@ describe("plugin runtime (real bootstrap)", () => {
   it("loads in-tree plugins, builds a tools manifest, and resolves a tool handler", async () => {
     const result = await ensurePluginRuntime()
     expect(result.ok).toBe(true)
-    // web-tools (3) + workspace-tools (4) + others — comfortably > 5.
+    // web-tools (2) + workspace-tools (4) + others, comfortably > 5.
     expect(result.toolCount).toBeGreaterThan(5)
 
     const { buildPluginToolsManifest } = await import("@/lib/plugin/bridge/sidecar-tools-bridge")
     const names = buildPluginToolsManifest({}).map((m) => m.name)
-    // cognia-web-tools works headless (uses fetch, not Tauri) — its tools must
-    // be present so the CLI agent can actually fetch/search the web.
-    expect(names).toContain("web_fetch")
+    // cognia-web-tools works headless (it uses fetch, not Tauri), so its own
+    // tools must be present for the CLI agent to reach the web.
+    expect(names).toContain("web_download")
     expect(names).toContain("web_research")
+    // `web_fetch` is the HOST's promoted tool, which the plugin calls through
+    // `ctx.agent.invokeTool` rather than re-registering. Asserting it in the
+    // PLUGIN manifest made this suite fail the moment the plugin stopped
+    // shadowing it, while proving nothing about whether the agent can fetch.
+    expect(names).not.toContain("web_fetch")
 
     // The execution path: the tool resolves in the live registry (so
     // handlePluginToolExec → invokePluginTool can run it) without a consent stall.
@@ -61,6 +66,22 @@ describe("plugin runtime (real bootstrap)", () => {
       await import("@/lib/plugin/core/invoke-plugin-tool")
     const resolved = await resolvePluginToolByName("workspace_list_files")
     expect(resolved?.pluginId).toBe("cognia-workspace-tools")
+
+    // A session-scoped invocation resolves its sandbox placement from the
+    // runtime registry, and refuses outright when the session has none. The
+    // CLI binds the host/local placement at session start
+    // (`cli/src/agent/rpc/runtime-service.ts`), so bind it the same way here
+    // rather than invoking through a session the product would reject.
+    const { sandboxSessionRuntime } = await import("@/lib/sandbox/session-runtime")
+    const { DEFAULT_SANDBOX_SESSION_BINDING } = await import("@/lib/sandbox/binding")
+    await sandboxSessionRuntime.bindSession({
+      sessionId: "it",
+      binding: DEFAULT_SANDBOX_SESSION_BINDING,
+      policy: null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: true,
+    })
     const exec = await Promise.race([
       invokePluginTool(
         resolved!.pluginId,

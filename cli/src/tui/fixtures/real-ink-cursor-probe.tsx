@@ -52,5 +52,11 @@ process.stdout.write(
   JSON.stringify({
     hasVisualCaret: frame.includes("█"),
     showsNativeCursor: frame.includes("\u001b[?25h"),
+    // A caret drawn with SGR 7 is a caret nobody can see: reverse video paints
+    // the FULL BLOCK in the background colour over the whole cell. The probe
+    // reports the escapes around the glyph so the test can pin the difference
+    // between "the caret is emitted" and "the caret is visible".
+    invertedCaret: frame.includes("\u001b[7m█"),
+    caretContext: frame.slice(Math.max(0, frame.indexOf("█") - 24), frame.indexOf("█")),
   })
 )
