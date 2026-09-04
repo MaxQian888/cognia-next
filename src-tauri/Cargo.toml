@@ -225,7 +225,7 @@ async-trait = "0.1"
 parking_lot = "0.12"
 # ADR-0059 R13 — bollard (docker) and kube moved to
 # `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
-rusqlite = { version = "0.37", features = ["backup", "bundled"] }
+rusqlite = { version = "0.40", features = ["backup", "bundled"] }
 # ADR-0067 Tier B — the Matrix E2EE stack (`matrix-sdk-crypto` /
 # `matrix-sdk-sqlite` / `ruma`) moved to `crates/cognia-connectors`; these
 # declarations outlived the move and kept the stack in app_lib's dep graph.
