@@ -1,91 +1,61 @@
-// Plugin-facing desktop-pet API (ctx.pet). Gated twice:
+// Plugin-facing desktop-pet API (ctx.pet). This module owns what is a PLUGIN
+// concern and delegates what is a PET concern.
 //
-//   1. Capability gate — without the `"pet"` capability every method is a
+// Plugin concerns kept here:
+//   1. Capability gate. Without the `"pet"` capability every method is a
 //      warn-once no-op (tray-api pattern), so ctx.pet never throws for
-//      plugins that simply didn't opt in.
-//   2. Permission guard — reads need `pet:read`, interactions/rewards need
+//      plugins that simply did not opt in.
+//   2. Permission guard. Reads need `pet:read`, interactions and rewards need
 //      `pet:interact` (fail-closed `createGuardedAPI` proxy).
+//   3. Event sanitization on the way out to subscribers.
+//   4. The throwing contract plugin authors already code against.
 //
-// Anti-abuse (the API is open to third-party plugins):
-//   - token-bucket rate limits per plugin ("pet:interact" / "pet:emit") — the
-//     bucket answers "how fast", the budget below answers "how much"
-//   - ONE daily XP/coin budget per plugin (lib/plugin/api/pet-budget.ts) that
-//     BOTH reward paths spend from: `emitEvent` clamps the amount the plugin
-//     asked for, `interact` clamps the kind's host award-table amount. Either
-//     way the granted amounts ride the event as explicit overrides (even 0),
-//     so neither path can fall through to the host award tables.
-//     At zero remaining budget an interaction is a no-op REWARD, not a no-op
-//     interaction: `applyPetEvent` derives need settlement and the flourish
-//     from `kind` alone, so feeding still restores energy/mood — it just
-//     grants nothing, and never throws.
-//   - an emittable-kind whitelist: nurture/neutral kinds only, lifecycle
-//     kinds (hatched/levelUp/evolved/achievementUnlocked/unwell) throw
+// Pet policy now lives in `lib/pet/access/gate.ts`, which the command
+// registry and the agent tools call too. Before that gate existed this file
+// was the only caller doing any checking at all, which made it the de-facto
+// owner of rules that were never enforced on the three other paths into the
+// same event bus.
 //
 // PII red-line: the summary never exposes accountFingerprint/bones/soul
-// internals, and forwarded events carry a REDUCED meta (id-shaped keys only —
-// `talked` events' meta.userText never crosses into plugin code).
+// internals, and forwarded events carry a REDUCED meta (id-shaped keys only,
+// so a `talked` event's meta.userText never crosses into plugin code).
 
 import { loggers } from "@cognia/logging"
 import type { PluginCapability } from "@/types/plugin/plugin"
-import type {
-  PetCondition,
-  PetEventKind,
-  PetEventSource,
-  PetMood,
-  PetNeeds,
-  PetStage,
-} from "@/types/pet"
+import type { PetEventKind, PetEventSource } from "@/types/pet"
 import { getPetProfile } from "@/lib/db/pet"
-import { computePetView } from "@/lib/pet/runtime/pet-view"
-import { XP_AWARD } from "@/lib/pet/xp/award-table"
-import { COIN_AWARD } from "@/lib/pet/economy/coin-table"
-import { emitPetEvent, getPetEventBus } from "@/lib/pet/events/pet-event-bus"
-import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
+import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
-import { consumePetBudget, getRemainingPetBudget } from "./pet-budget"
+import { projectPetSummary, type PetSummary } from "@/lib/pet/access/summary"
+import {
+  MAX_XP_PER_REWARD,
+  PET_REWARDABLE_KINDS,
+  remainingPetAllowance,
+  requestPetInteraction,
+  requestPetReward,
+  type PetAccessResult,
+  type PetInteractionKind,
+} from "@/lib/pet/access/gate"
 
-/** PII-safe projection of the pet's public state. */
-export interface PluginPetSummary {
-  hatched: boolean
-  name: string | null
-  level: number
-  stage: PetStage
-  xp: number
-  mood: PetMood
-  needs: Pick<PetNeeds, "energy" | "mood" | "bond">
-  condition: PetCondition
-  coins: number
-}
+/**
+ * PII-safe projection of the pet's public state.
+ *
+ * The shape moved to `lib/pet/access/summary.ts` when the agent gained the
+ * same read. The alias stays because the SDK re-exports this name from this
+ * path (`packages/plugin-sdk/src/api/pet.ts`), so renaming it here would break
+ * every plugin that imports the type.
+ */
+export type PluginPetSummary = PetSummary
 
 /** Direct nurture interactions a plugin may perform. */
-export type PluginPetInteractionKind =
-  "fed" | "played" | "petted" | "talked" | "slept" | "cleaned" | "treated"
+export type PluginPetInteractionKind = PetInteractionKind
 
-const INTERACTION_KINDS: ReadonlySet<string> = new Set<PluginPetInteractionKind>([
-  "fed",
-  "played",
-  "petted",
-  "talked",
-  "slept",
-  "cleaned",
-  "treated",
-])
-
-/** Kinds a plugin may emit through `emitEvent` — nurture/neutral only. */
-export const PLUGIN_EMITTABLE_PET_EVENT_KINDS: readonly PetEventKind[] = [
-  "fed",
-  "played",
-  "petted",
-  "talked",
-  "slept",
-  "cleaned",
-  "treated",
-  "workflowRun",
-]
+/** Kinds a plugin may emit through `emitEvent`, nurture and neutral only. */
+export const PLUGIN_EMITTABLE_PET_EVENT_KINDS: readonly PetEventKind[] = PET_REWARDABLE_KINDS
 
 /** Hard per-call XP ceiling, below the daily budget. */
-export const MAX_XP_PER_EMIT = 10
+export const MAX_XP_PER_EMIT = MAX_XP_PER_REWARD
 
 /** Sanitized event forwarded to plugin subscribers. */
 export interface PluginPetEvent {
@@ -109,6 +79,20 @@ export class PetEventKindNotAllowedError extends Error {
       `Pet event kind "${kind}" is not plugin-emittable. Allowed: ${PLUGIN_EMITTABLE_PET_EVENT_KINDS.join(", ")}`
     )
     this.name = "PetEventKindNotAllowedError"
+  }
+}
+
+/**
+ * Thrown when a plugin names an item it does not own (or one that is not a
+ * consumable). `applyPetEvent` applies the named item's stronger `needsEffect`
+ * in place of the base restore, so before the access gate an unowned id was a
+ * free upgrade: the shop path checked ownership and decremented stock, this
+ * path did neither.
+ */
+export class PetItemNotOwnedError extends Error {
+  constructor(itemId: string) {
+    super(`Pet item "${itemId}" is not owned, or is not a consumable.`)
+    this.name = "PetItemNotOwnedError"
   }
 }
 
@@ -146,31 +130,6 @@ interface CreatePetAPIArgs {
   capabilities: readonly PluginCapability[]
 }
 
-function projectSummary(
-  profile: NonNullable<Awaited<ReturnType<typeof getPetProfile>>>,
-  now: number
-): PluginPetSummary {
-  const view = computePetView(profile, null, now)
-  return {
-    hatched: profile.soul !== null,
-    name: profile.soul?.name ?? null,
-    level: profile.level,
-    stage: profile.stage,
-    xp: profile.xp,
-    mood: view.mood,
-    needs: {
-      energy: view.needs.energy,
-      mood: view.needs.mood,
-      bond: view.needs.bond,
-    },
-    condition: view.condition,
-    coins:
-      typeof profile.coins === "number" && Number.isFinite(profile.coins)
-        ? Math.max(0, Math.floor(profile.coins))
-        : 0,
-  }
-}
-
 /** Reduce an event's free-form meta to the id-shaped whitelist. */
 function sanitizeMeta(meta: Record<string, unknown> | undefined): PluginPetEvent["meta"] {
   if (!meta) return undefined
@@ -183,17 +142,41 @@ function sanitizeMeta(meta: Record<string, unknown> | undefined): PluginPetEvent
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/**
+ * Turn a gate result into the contract plugin authors already code against.
+ *
+ * A refusal that is the plugin's fault throws, the way it always has. A pet
+ * that is simply switched off is NOT the plugin's fault, so that grants
+ * nothing and returns quietly, matching how the capability gate behaves for a
+ * plugin that never opted in.
+ */
+function unwrap(result: PetAccessResult): { grantedXp: number; grantedCoins: number } {
+  if (result.ok) return { grantedXp: result.grantedXp, grantedCoins: result.grantedCoins }
+  const { refusal } = result
+  switch (refusal.code) {
+    case "kind-not-allowed":
+      throw new PetEventKindNotAllowedError(refusal.kind)
+    case "unknown-item":
+    case "item-not-owned":
+      throw new PetItemNotOwnedError(refusal.itemId)
+    case "rate-limited":
+      throw refusal.cause instanceof Error ? refusal.cause : new Error("Pet rate limit exceeded")
+    case "unavailable":
+      return { grantedXp: 0, grantedCoins: 0 }
+  }
+}
+
 export function createPetAPI({ pluginId, capabilities }: CreatePetAPIArgs): PluginPetAPI {
   if (!capabilities.includes("pet")) return noopPetAPI(pluginId)
 
   const api: PluginPetAPI = {
     getView: async () => {
       const profile = await getPetProfile()
-      return profile ? projectSummary(profile, Date.now()) : null
+      return profile ? projectPetSummary(profile, Date.now()) : null
     },
     getSummary: async () => {
       const profile = await getPetProfile()
-      return profile ? projectSummary(profile, Date.now()) : null
+      return profile ? projectPetSummary(profile, Date.now()) : null
     },
     onEvent: (cb) =>
       getPetEventBus().subscribe((event) => {
@@ -213,52 +196,23 @@ export function createPetAPI({ pluginId, capabilities }: CreatePetAPIArgs): Plug
           )
         }
       }),
-    getRemainingBudget: () => getRemainingPetBudget(pluginId),
-    interact: async (kind, opts) => {
-      if (!INTERACTION_KINDS.has(kind)) throw new PetEventKindNotAllowedError(kind)
-      getPluginRateLimiter().check(pluginId, "pet:interact")
-      // A nurture is worth whatever the host award tables say the kind is
-      // worth — spent from the daily ledger rather than granted for free.
-      const { grantedXp, grantedCoins } = consumePetBudget(pluginId, {
-        xp: XP_AWARD[kind] ?? 0,
-        coins: COIN_AWARD[kind] ?? 0,
-      })
-      // Same invariant as emitEvent: the granted amounts ALWAYS ride the event
-      // (even 0) so a drained budget can't fall through to the award tables.
-      // The event is still emitted at 0 — applyPetEvent settles needs and picks
-      // the flourish from `kind` alone, so a nurture stays a nurture.
-      emitPetEvent({
-        source: "plugin",
-        kind,
-        xp: grantedXp,
-        meta: {
-          pluginId,
-          ...(opts?.itemId ? { itemId: opts.itemId } : {}),
-          coins: grantedCoins,
-        },
-      })
-      return { grantedXp, grantedCoins }
-    },
-    emitEvent: async (kind, opts) => {
-      if (!PLUGIN_EMITTABLE_PET_EVENT_KINDS.includes(kind)) {
-        throw new PetEventKindNotAllowedError(kind)
-      }
-      getPluginRateLimiter().check(pluginId, "pet:emit")
-      const askXp = Math.min(MAX_XP_PER_EMIT, Math.max(0, Math.floor(opts?.xp ?? 0)))
-      const { grantedXp, grantedCoins } = consumePetBudget(pluginId, {
-        xp: askXp,
-        coins: opts?.coins,
-      })
-      // Explicit xp/coins overrides ALWAYS ride the event (even 0) so a
-      // plugin emission can never fall through to the host award tables.
-      emitPetEvent({
-        source: "plugin",
-        kind,
-        xp: grantedXp,
-        meta: { ...sanitizeMeta(opts?.meta), pluginId, coins: grantedCoins },
-      })
-      return { grantedXp, grantedCoins }
-    },
+    getRemainingBudget: () => remainingPetAllowance({ kind: "plugin", id: pluginId }),
+    interact: async (kind, opts) =>
+      unwrap(
+        await requestPetInteraction(
+          { kind: "plugin", id: pluginId },
+          kind,
+          opts?.itemId ? { itemId: opts.itemId } : {}
+        )
+      ),
+    emitEvent: async (kind, opts) =>
+      unwrap(
+        await requestPetReward({ kind: "plugin", id: pluginId }, kind, {
+          xp: opts?.xp,
+          coins: opts?.coins,
+          meta: sanitizeMeta(opts?.meta),
+        })
+      ),
   }
 
   return createGuardedAPI(pluginId, api, {

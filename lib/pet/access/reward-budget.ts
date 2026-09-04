@@ -1,11 +1,18 @@
-// Per-plugin daily reward budget for ctx.pet — the anti-abuse layer that keeps
-// third-party plugins from farming the pet's progression. A localStorage
-// day-keyed ledger (in-memory fallback off the DOM) tracks what each plugin
-// has granted today; grants are CLAMPED to the remainder, never rejected.
+// Daily reward budget for everything that can drive the pet's progression from
+// outside the user's own hands. A localStorage day-keyed ledger (in-memory
+// fallback off the DOM) tracks what each SUBJECT has granted today, and grants
+// are clamped to the remainder rather than rejected, so a drained budget still
+// leaves a nurture that settles needs and plays its flourish.
+//
+// The subject key is opaque. It was per-plugin when this lived under
+// `lib/plugin/api/`, and it now also carries the agent, which spends one
+// ledger under a single identity rather than a fresh allowance per session.
+// The storage prefix keeps its original spelling so an existing day's ledger
+// survives the move.
 //
 // Known limitation (documented, accepted): multi-window localStorage writes
 // can race and slightly over-grant. This is an anti-abuse bound, not
-// accounting — the pet economy tolerates a few stray coins.
+// accounting, and the pet economy tolerates a few stray coins.
 
 export const PET_DAILY_XP_BUDGET = 50
 export const PET_DAILY_COIN_BUDGET = 100
@@ -13,7 +20,7 @@ export const PET_DAILY_COIN_BUDGET = 100
 const STORAGE_PREFIX = "cognia:plugin-pet-budget:"
 
 interface BudgetLedger {
-  [pluginId: string]: { xp: number; coins: number }
+  [subjectKey: string]: { xp: number; coins: number }
 }
 
 export interface PetBudgetDeps {
@@ -63,14 +70,14 @@ function clampSpend(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : 0
 }
 
-/** Remaining daily XP/coin budget for a plugin. */
+/** Remaining daily XP/coin budget for one subject. */
 export function getRemainingPetBudget(
-  pluginId: string,
+  subjectKey: string,
   deps?: PetBudgetDeps
 ): { xp: number; coins: number } {
   const storage = resolveStorage(deps)
   const ledger = readLedger(storage, dayKey(deps?.now?.() ?? Date.now()))
-  const spent = ledger[pluginId]
+  const spent = ledger[subjectKey]
   return {
     xp: Math.max(0, PET_DAILY_XP_BUDGET - clampSpend(spent?.xp)),
     coins: Math.max(0, PET_DAILY_COIN_BUDGET - clampSpend(spent?.coins)),
@@ -78,19 +85,22 @@ export function getRemainingPetBudget(
 }
 
 /**
- * Clamp a requested grant to the plugin's remaining budget for the current
+ * Clamp a requested grant to the subject's remaining budget for the current
  * local day, persist the consumption, and return what was actually granted.
- * Stale-day keys are simply never read again (lazy reset — no scheduler).
+ * Stale-day keys are simply never read again, a lazy reset with no scheduler.
  */
 export function consumePetBudget(
-  pluginId: string,
+  subjectKey: string,
   req: { xp?: number; coins?: number },
   deps?: PetBudgetDeps
 ): { grantedXp: number; grantedCoins: number } {
   const storage = resolveStorage(deps)
   const key = dayKey(deps?.now?.() ?? Date.now())
   const ledger = readLedger(storage, key)
-  const spent = { xp: clampSpend(ledger[pluginId]?.xp), coins: clampSpend(ledger[pluginId]?.coins) }
+  const spent = {
+    xp: clampSpend(ledger[subjectKey]?.xp),
+    coins: clampSpend(ledger[subjectKey]?.coins),
+  }
 
   const clampAsk = (v?: number) =>
     typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0
@@ -100,11 +110,11 @@ export function consumePetBudget(
   const grantedCoins = Math.min(askCoins, Math.max(0, PET_DAILY_COIN_BUDGET - spent.coins))
 
   if (grantedXp > 0 || grantedCoins > 0) {
-    ledger[pluginId] = { xp: spent.xp + grantedXp, coins: spent.coins + grantedCoins }
+    ledger[subjectKey] = { xp: spent.xp + grantedXp, coins: spent.coins + grantedCoins }
     try {
       storage.setItem(key, JSON.stringify(ledger))
     } catch {
-      // Quota/serialization failure → the grant still happened this session;
+      // Quota or serialization failure. The grant still happened this session,
       // the ledger just under-records. Acceptable for an anti-abuse bound.
     }
   }

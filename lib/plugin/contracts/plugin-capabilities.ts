@@ -1674,10 +1674,13 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     id: "pet",
     support: "supported",
     manifestFields: [],
-    runtimeBinding: "context.pet (createPetAPI — rate-limited, daily reward budget)",
+    runtimeBinding: "context.pet (createPetAPI, a thin adapter over the shared pet access gate)",
     hostBindings: [
       "lib/plugin/api/pet-api.ts",
-      "lib/plugin/api/pet-budget.ts",
+      "lib/pet/access/gate.ts",
+      "lib/pet/access/reward-budget.ts",
+      "lib/pet/access/availability.ts",
+      "lib/pet/access/summary.ts",
       "lib/plugin/core/context.ts",
       "lib/pet/events/pet-event-bus.ts",
     ],
@@ -1685,7 +1688,11 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     pythonSdk: ["plugin-sdk/python/src/cognia/context.py"],
     builtinContributionPaths: ["plugins/pet-daily-quests/src/index.ts"],
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
-    requiredTests: ["lib/plugin/api/pet-api.test.ts", "lib/plugin/api/pet-budget.test.ts"],
+    requiredTests: [
+      "lib/plugin/api/pet-api.test.ts",
+      "lib/pet/access/gate.test.ts",
+      "lib/pet/access/reward-budget.test.ts",
+    ],
   },
   {
     id: "pet-achievement",

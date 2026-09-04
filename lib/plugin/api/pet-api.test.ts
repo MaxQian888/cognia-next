@@ -15,6 +15,7 @@ import {
   createPetAPI,
   MAX_XP_PER_EMIT,
   PetEventKindNotAllowedError,
+  PetItemNotOwnedError,
   PLUGIN_EMITTABLE_PET_EVENT_KINDS,
 } from "./pet-api"
 import {
@@ -22,7 +23,7 @@ import {
   consumePetBudget,
   PET_DAILY_COIN_BUDGET,
   PET_DAILY_XP_BUDGET,
-} from "./pet-budget"
+} from "@/lib/pet/access/reward-budget"
 import { applyPetEvent } from "@/lib/pet/runtime/apply-event"
 import { COIN_AWARD } from "@/lib/pet/economy/coin-table"
 import { XP_AWARD } from "@/lib/pet/xp/award-table"
@@ -33,8 +34,12 @@ import type { PetEvent, PetProfile } from "@/types/pet"
 
 // --- mock the Dexie data layer ------------------------------------------
 let profileValue: PetProfile | undefined
+let ownedItems: Set<string>
 jest.mock("@/lib/db/pet", () => ({
   getPetProfile: async () => profileValue,
+  // The access gate spends a named item before the event is emitted, so the
+  // inventory seam has to exist here now.
+  decrementPetInventory: async (id: string) => ownedItems.delete(id),
 }))
 
 // --- mock the event bus ---------------------------------------------------
@@ -85,6 +90,7 @@ beforeEach(() => {
   localStorage.clear()
   getPluginRateLimiter().reset(PLUGIN)
   profileValue = makeProfile()
+  ownedItems = new Set(["berry"])
 })
 
 describe("capability gate", () => {
@@ -234,6 +240,37 @@ describe("interact", () => {
   it("rejects non-interaction kinds", async () => {
     const api = grantedApi()
     await expect(api.interact("levelUp" as never)).rejects.toThrow(PetEventKindNotAllowedError)
+  })
+
+  it("refuses an item the plugin does not own instead of granting a free upgrade", async () => {
+    const api = grantedApi()
+    // The regression pin: `applyPetEvent` applies the named item's stronger
+    // needsEffect in place of the base restore, so before the access gate any
+    // known id was a free premium feed. The shop path always checked ownership
+    // and decremented stock; this path checked neither.
+    ownedItems.clear()
+    await expect(api.interact("fed", { itemId: "berry" })).rejects.toBeInstanceOf(
+      PetItemNotOwnedError
+    )
+    expect(emitPetEvent).not.toHaveBeenCalled()
+  })
+
+  it("refuses an item id that is not in the catalogue", async () => {
+    const api = grantedApi()
+    await expect(api.interact("fed", { itemId: "philosophers-stone" })).rejects.toBeInstanceOf(
+      PetItemNotOwnedError
+    )
+    expect(emitPetEvent).not.toHaveBeenCalled()
+  })
+
+  it("spends the owned item exactly once, so it cannot be reused", async () => {
+    const api = grantedApi()
+    await api.interact("fed", { itemId: "berry" })
+    expect(emitPetEvent).toHaveBeenCalledTimes(1)
+    await expect(api.interact("fed", { itemId: "berry" })).rejects.toBeInstanceOf(
+      PetItemNotOwnedError
+    )
+    expect(emitPetEvent).toHaveBeenCalledTimes(1)
   })
 
   it("rate-limits repeated interactions", async () => {

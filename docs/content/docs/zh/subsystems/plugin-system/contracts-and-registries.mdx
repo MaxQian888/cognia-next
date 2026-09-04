@@ -131,7 +131,7 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 
 宠物子系统（ADR-0058）向插件暴露四个协同表面：
 
-- **`ctx.pet`**（capability `pet`；权限 `pet:read` / `pet:interact`，`lib/plugin/api/pet-api.ts`）—— 读取去 PII 的宠物摘要、订阅净化后的事件、发起养育互动、发放 XP/金币奖励。奖励受令牌桶限流（`pet:interact` / `pet:emit`）并被每插件每日预算钳制（50 XP / 100 金币，`lib/plugin/api/pet-budget.ts`）；生命周期事件不可由插件发出。
+- **`ctx.pet`**（capability `pet`；权限 `pet:read` / `pet:interact`，`lib/plugin/api/pet-api.ts`）—— 读取去 PII 的宠物摘要、订阅净化后的事件、发起养育互动、发放 XP/金币奖励。奖励受令牌桶限流（`pet:interact` / `pet:emit`）并被每插件每日预算钳制（50 XP / 100 金币，`lib/pet/access/reward-budget.ts`）；生命周期事件不可由插件发出。可用性、事件白名单、突发桶、道具所有权与预算统一由共享的宠物访问门（`lib/pet/access/gate.ts`）判定，命令注册表与 Agent 工具走的是同一个门，因此 `ctx.pet` 只是它的薄适配层，而不再是唯一执行这些规则的路径。
 - **Hooks** —— `onPetInteract`、`onPetLevelUp`、`onPetEvolved`、`onPetAchievementUnlocked`、`onPetUnwell`，由 `lib/pet/runtime/pet-controller.ts` fire-and-forget 分发。载荷不携带任何事件 meta（PII 红线）；雷达/被动事件从不分发。
 - **UI slot** —— `pet.console.tab`（/pet 控制台由宿主持有的「插件」tab，仅在有贡献时出现）与 `pet.panel.actions`（互动面板动作行，上限 4）。context 包：`level` / `stage` / `mood` / `condition`。
 - **工作流节点** —— 内置 `trigger.pet.event`（levelUp / evolved / achievementUnlocked / unwell，runner 在 `lib/workflow/runtime/pet-event-trigger.ts`）与 `action.pet.interact`。

@@ -6,7 +6,7 @@ import {
   PET_DAILY_COIN_BUDGET,
   PET_DAILY_XP_BUDGET,
   type PetBudgetDeps,
-} from "./pet-budget"
+} from "./reward-budget"
 
 /** Fresh isolated storage per test (never touches real localStorage). */
 function makeDeps(nowMs: number): PetBudgetDeps & { store: Map<string, string> } {
