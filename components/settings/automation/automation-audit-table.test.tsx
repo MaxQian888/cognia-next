@@ -71,4 +71,24 @@ describe("AutomationAuditTable", () => {
     await screen.findByText(/no audit records/i)
     expect(screen.getByRole("button", { name: /export/i })).toBeDisabled()
   })
+
+  /**
+   * Six columns do not fit a phone. The table stays for wide viewports and the
+   * same rows render as cards below `sm`, so a reader never has to scroll
+   * sideways to find out what was denied.
+   */
+  it("renders the same rows as cards for a narrow viewport", async () => {
+    listAuditRows.mockResolvedValue([row()])
+    render(<AutomationAuditTable />)
+    await screen.findByTitle("screenshot")
+
+    const cards = screen.getByTestId("audit-cards")
+    expect(cards.className).toContain("sm:hidden")
+    expect(cards.querySelectorAll("li").length).toBeGreaterThan(0)
+
+    const tableWrap = screen.getByTestId("audit-table-wrap")
+    expect(tableWrap.className).toContain("hidden")
+    expect(tableWrap.className).toContain("sm:block")
+    expect(tableWrap.querySelector("table")).not.toBeNull()
+  })
 })

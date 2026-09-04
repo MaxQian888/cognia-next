@@ -167,61 +167,98 @@ export function AutomationAuditTable() {
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
-          <div className="max-h-[480px] w-full overflow-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{tColumns("time")}</TableHead>
-                  <TableHead>{tColumns("surface")}</TableHead>
-                  <TableHead>{tColumns("command")}</TableHead>
-                  <TableHead>{tColumns("decision")}</TableHead>
-                  <TableHead>{tColumns("target")}</TableHead>
-                  <TableHead className="text-right">{tColumns("duration")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">
-                      {new Date(row.ts).toLocaleString()}
-                    </TableCell>
-                    <TableCell>{row.surface}</TableCell>
-                    <TableCell
-                      className="max-w-[140px] truncate font-mono text-xs"
-                      title={row.command}
-                    >
-                      {row.command}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          row.decision === "allow"
-                            ? "secondary"
-                            : row.decision === "deny"
-                              ? "destructive"
-                              : "outline"
-                        }
-                      >
-                        {row.decision}
-                      </Badge>
-                    </TableCell>
-                    <TableCell
-                      className="max-w-[160px] truncate text-xs"
-                      title={row.processName ?? row.windowTitle ?? undefined}
-                    >
-                      {row.processName ?? row.windowTitle ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs">
+          <>
+            {/* Below sm a six-column table is unreadable even inside an
+              overflow container: every cell collapses and the reader scrolls
+              sideways to answer "what was denied?". The same rows render as
+              cards there instead, and this section is also mounted outside the
+              settings shell where nothing constrains the table's width. */}
+            <ul
+              className="max-h-[480px] space-y-2 overflow-y-auto sm:hidden"
+              data-testid="audit-cards"
+            >
+              {rows.map((row) => (
+                <li key={row.id} className="space-y-1 rounded-md border p-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <DecisionBadge decision={row.decision} />
+                    {/* No `title`: a phone has no hover, and a second element
+                      carrying the same tooltip text made every getByTitle in
+                      the suite ambiguous. */}
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{row.command}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                       {row.durationMs}ms
-                    </TableCell>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                    <span className="font-mono">{new Date(row.ts).toLocaleString()}</span>
+                    <span>{row.surface}</span>
+                    {(row.processName ?? row.windowTitle) && (
+                      <span className="min-w-0 truncate">{row.processName ?? row.windowTitle}</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div
+              className="hidden max-h-[480px] w-full overflow-auto sm:block"
+              data-testid="audit-table-wrap"
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{tColumns("time")}</TableHead>
+                    <TableHead>{tColumns("surface")}</TableHead>
+                    <TableHead>{tColumns("command")}</TableHead>
+                    <TableHead>{tColumns("decision")}</TableHead>
+                    <TableHead>{tColumns("target")}</TableHead>
+                    <TableHead className="text-right">{tColumns("duration")}</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell className="font-mono text-xs">
+                        {new Date(row.ts).toLocaleString()}
+                      </TableCell>
+                      <TableCell>{row.surface}</TableCell>
+                      <TableCell
+                        className="max-w-[140px] truncate font-mono text-xs"
+                        title={row.command}
+                      >
+                        {row.command}
+                      </TableCell>
+                      <TableCell>
+                        <DecisionBadge decision={row.decision} />
+                      </TableCell>
+                      <TableCell
+                        className="max-w-[160px] truncate text-xs"
+                        title={row.processName ?? row.windowTitle ?? undefined}
+                      >
+                        {row.processName ?? row.windowTitle ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs">
+                        {row.durationMs}ms
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function DecisionBadge({ decision }: { decision: AutomationAuditLogRow["decision"] }) {
+  return (
+    <Badge
+      variant={decision === "allow" ? "secondary" : decision === "deny" ? "destructive" : "outline"}
+      className="shrink-0"
+    >
+      {decision}
+    </Badge>
   )
 }
 

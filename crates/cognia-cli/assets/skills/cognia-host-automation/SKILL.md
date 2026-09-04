@@ -24,8 +24,14 @@ cognia host commands --category automation --resource <resource> --query <workfl
 
 1. Inspect workflow or schedule state before create, update, pause, resume, run-now, or delete.
 2. Treat workflow definitions and scheduled-task payloads as distinct schemas.
-3. Query pending consent before responding; pass only the user's actual decision.
-4. For background jobs and monitors, list/read before kill or cancel.
-5. Use dry-run for destructive or externally visible actions and retain idempotency state.
+3. Query pending consent before responding, and pass only the user's actual decision.
+4. To supervise desktop automation rather than drive it, read `automation_settings_get`,
+   `automation_kill_switch_engaged` and `automation_audit_snapshot`, and halt with
+   `automation_kill_switch`. Halting rejects in-flight calls AND clears remembered
+   approvals, so the next call prompts again. It needs confirmation like any other
+   destructive action. Nothing that synthesises input or captures the screen is
+   reachable here by design.
+5. For background jobs and monitors, list/read before kill or cancel.
+6. Use dry-run for destructive or externally visible actions and retain idempotency state.
 
 Do not infer cron syntax, workflow input fields, or approval payloads; always read the command schema.
