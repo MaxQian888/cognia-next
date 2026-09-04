@@ -68,6 +68,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "connectors_lark_upload_image",
     "automation_consent_respond",
     "automation_consent_pending",
+    "automation_kill_switch_engaged",
+    "automation_settings_get",
+    "automation_audit_snapshot",
+    "automation_kill_switch",
     "companion_can_control",
     "companion_endpoints",
     "langfuse_credentials_set",
@@ -1181,6 +1185,67 @@ pub(super) async fn dispatch(
                 app.state();
             let pending = automation_state.consent.pending_requests();
             to_json(pending)
+        }
+
+        // Remote supervision of a running host. Reads, plus the one write that
+        // stops everything. Driving the host (click, type, screenshot, window
+        // ops) keeps the client target and never crosses the wire: a phone
+        // watches and halts, it does not steer.
+        //
+        // `automation_kill_switch` sits in CONTROL_COMMANDS beside
+        // `automation_consent_respond`. A device trusted to approve an
+        // automation call is trusted to stop one, and an observe-only device
+        // gets the same 403 for both.
+        "automation_kill_switch_engaged" => {
+            if host.headless().is_some() {
+                return Err(RpcError::headless_unsupported(name));
+            }
+            let app = host.tauri_app(name)?;
+            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
+                app.state();
+            crate::automation::commands::automation_kill_switch_engaged(automation_state)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(|engaged| to_json(engaged))
+        }
+
+        "automation_settings_get" => {
+            if host.headless().is_some() {
+                return Err(RpcError::headless_unsupported(name));
+            }
+            let app = host.tauri_app(name)?;
+            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
+                app.state();
+            crate::automation::commands::automation_settings_get(automation_state)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(|settings| to_json(settings))
+        }
+
+        "automation_audit_snapshot" => {
+            if host.headless().is_some() {
+                return Err(RpcError::headless_unsupported(name));
+            }
+            let app = host.tauri_app(name)?;
+            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
+                app.state();
+            crate::automation::commands::automation_audit_snapshot(automation_state)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(|entries| to_json(entries))
+        }
+
+        "automation_kill_switch" => {
+            if host.headless().is_some() {
+                return Err(RpcError::headless_unsupported(name));
+            }
+            let app = host.tauri_app(name)?;
+            let automation_state: tauri::State<'_, crate::automation::commands::AutomationState> =
+                app.state();
+            crate::automation::commands::automation_kill_switch(app.clone(), automation_state)
+                .await
+                .map(|_| Value::Null)
+                .map_err(RpcError::internal)
         }
 
         // Remote Session Control — read-only capability probe. A paired device

@@ -6244,11 +6244,23 @@
     "app_settings_update": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "automation_audit_snapshot": {
+      "$ref": "#/$defs/LegacyList"
+    },
     "automation_consent_pending": {
       "$ref": "#/$defs/LegacyResult"
     },
     "automation_consent_respond": {
       "$ref": "#/$defs/NullResult"
+    },
+    "automation_kill_switch": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "automation_kill_switch_engaged": {
+      "$ref": "#/$defs/BooleanResult"
+    },
+    "automation_settings_get": {
+      "$ref": "#/$defs/LegacyRecord"
     },
     "background_job_kill": {
       "$ref": "#/$defs/BackgroundJobRecord"

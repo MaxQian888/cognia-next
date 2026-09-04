@@ -78,6 +78,11 @@
       "category": "agents"
     },
     {
+      "id": "automation",
+      "title": "Automation",
+      "category": "automation"
+    },
+    {
       "id": "automation-consent",
       "title": "Automation Consent",
       "category": "automation"
@@ -1621,6 +1626,43 @@
       "outputTyped": true
     },
     {
+      "name": "automation_audit_snapshot",
+      "category": "automation",
+      "resource": "automation",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "automation_audit_snapshot (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "automation"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "automation_consent_pending",
       "category": "automation",
       "resource": "automation-consent",
@@ -1707,6 +1749,81 @@
       "outputSchemaSource": "contract",
       "outputSchema": {
         "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "automation_kill_switch",
+      "category": "automation",
+      "resource": "automation",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "automation_kill_switch (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "automation_kill_switch_engaged",
+      "category": "automation",
+      "resource": "automation",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "automation_kill_switch_engaged (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "boolean"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "automation_settings_get",
+      "category": "automation",
+      "resource": "automation",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "automation_settings_get (workspace.read)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "runtime-inferred",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "automation"
       },
       "outputTyped": true
     },
@@ -46967,5 +47084,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "4f3e332bebf8f33dee22b8412c7287608dfe65cf60ee2d62c548902b0f5cc739"
+  "catalogHash": "062255c6ac687c985c3f0b043adca456c56a443a28264cdb5aff6a3421c63622"
 }

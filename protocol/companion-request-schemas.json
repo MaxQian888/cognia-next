@@ -754,6 +754,11 @@
       },
       "additionalProperties": false
     },
+    "automation_audit_snapshot": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "automation_consent_pending": {
       "type": "object",
       "description": "Empty body. Returns all unexpired broker requests with remaining timeout budgets."
@@ -794,6 +799,21 @@
           "minimum": 0
         }
       },
+      "additionalProperties": false
+    },
+    "automation_kill_switch": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "automation_kill_switch_engaged": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "automation_settings_get": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     },
     "backup_export": {

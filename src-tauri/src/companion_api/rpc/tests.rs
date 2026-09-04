@@ -622,12 +622,79 @@ fn headless_host_for_account(account_id: &str) -> super::super::dispatch_host::D
     super::super::dispatch_host::DispatchHost::Headless(services)
 }
 
+/// Remote supervision of a desktop host's automation engine.
+///
+/// The line this pins: a paired device may WATCH the engine and HALT it, and
+/// may not DRIVE it. Every command that synthesises input or captures the
+/// screen stays off the remote plane, so widening that set is a deliberate
+/// edit here rather than a quiet addition to `KNOWN_COMMANDS`.
+#[test]
+fn automation_supervision_is_reachable_but_driving_the_desktop_is_not() {
+    for read in [
+        "automation_settings_get",
+        "automation_kill_switch_engaged",
+        "automation_audit_snapshot",
+    ] {
+        assert!(KNOWN_COMMANDS.contains(&read), "{read} should be reachable");
+        assert!(
+            READ_ONLY_COMMANDS.contains(&read),
+            "{read} should be read-only"
+        );
+        assert!(
+            !CONTROL_COMMANDS.contains(&read),
+            "{read} reads state and should not need the control capability"
+        );
+    }
+
+    // Halting is a write, gated exactly like answering a consent prompt.
+    assert!(KNOWN_COMMANDS.contains(&"automation_kill_switch"));
+    assert!(CONTROL_COMMANDS.contains(&"automation_kill_switch"));
+    assert!(!READ_ONLY_COMMANDS.contains(&"automation_kill_switch"));
+
+    // Driving the desktop never crosses the wire, whatever the capability.
+    for driver in [
+        "desktop_click",
+        "desktop_type",
+        "desktop_keys",
+        "desktop_paste",
+        "desktop_drag",
+        "desktop_scroll",
+        "desktop_mouse_move",
+        "desktop_mouse_button",
+        "desktop_hold_key",
+        "desktop_window_op",
+        "desktop_launch_app",
+        "desktop_perform_action",
+        "desktop_invoke_pattern",
+        "desktop_screenshot",
+        "desktop_get_app_state",
+        "automation_execute",
+        // Editing the rules is a desktop-local act too: the Access rules
+        // editor runs where the engine runs.
+        "automation_settings_set",
+        "automation_policy_set",
+        "automation_set_enabled",
+    ] {
+        assert!(
+            !KNOWN_COMMANDS.contains(&driver),
+            "{driver} drives or reconfigures the desktop and must stay off the remote plane"
+        );
+    }
+}
+
 #[tokio::test]
 async fn headless_dispatch_rejects_desktop_automation_consent_commands() {
     let state = test_state();
     let host = headless_host();
 
-    for command in ["automation_consent_pending", "automation_consent_respond"] {
+    for command in [
+        "automation_consent_pending",
+        "automation_consent_respond",
+        "automation_settings_get",
+        "automation_kill_switch_engaged",
+        "automation_audit_snapshot",
+        "automation_kill_switch",
+    ] {
         let error = dispatch(
             command,
             json!({}),

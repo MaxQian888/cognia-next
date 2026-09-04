@@ -268,12 +268,8 @@ impl RpcError {
     /// session".
     pub(super) fn transcript(detail: String) -> (StatusCode, Json<Self>) {
         match detail.as_str() {
-            "INVALID_PARAMS"
-            | "SESSION_NOT_FOUND"
-            | "TRANSCRIPT_STALE"
-            | "TURN_NOT_FOUND"
-            | "TURN_NOT_COMPLETED"
-            | "MEDIA_NOT_FOUND" => (
+            "INVALID_PARAMS" | "SESSION_NOT_FOUND" | "TRANSCRIPT_STALE" | "TURN_NOT_FOUND"
+            | "TURN_NOT_COMPLETED" | "MEDIA_NOT_FOUND" => (
                 StatusCode::BAD_REQUEST,
                 Json(Self::new(detail.clone(), detail)),
             ),
@@ -727,6 +723,15 @@ const KNOWN_COMMANDS: &[&str] = &[
     // Calls the automation ConsentBroker directly (not via writes-bridge).
     "automation_consent_respond",
     "automation_consent_pending",
+    // Remote supervision of a running host: read its automation state and its
+    // audit ring, and stop everything. Every command that DRIVES the host
+    // (click, type, screenshot, window ops) keeps the client target and is
+    // absent from this list on purpose. A phone watches and halts, it does not
+    // steer.
+    "automation_kill_switch_engaged",
+    "automation_settings_get",
+    "automation_audit_snapshot",
+    "automation_kill_switch",
     // Read-only capability probe — lets a paired device learn whether it holds
     // the remote-control capability without attempting (and 403-ing on) a
     // gated RPC. NOT a CONTROL_COMMAND: every paired device may query its own
@@ -1304,6 +1309,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "ocr_list_available_backends",
     "ocr_model_status",
     "automation_consent_pending",
+    "automation_kill_switch_engaged",
+    "automation_settings_get",
+    "automation_audit_snapshot",
     "langfuse_credentials_status",
     // Sync-down (M4.7) is structurally idempotent: same `(table, since)`
     // returns the same delta. Skip the cache to avoid stalling phone clients
@@ -1614,6 +1622,11 @@ const CONTROL_COMMANDS: &[&str] = &[
     "agent_task_move",
     "automation_consent_respond",
     "automation_consent_pending",
+    // Halting a running host is a write. A device trusted to approve an
+    // automation call is trusted to stop one, so this is gated exactly like
+    // the consent reply beside it and an observe-only device gets the same
+    // 403 for both.
+    "automation_kill_switch",
     // Destructive character mutation — gated for consistency with the other
     // delete surfaces below (Wave 4.1 policy: every remote delete is gated).
     "character_delete",
