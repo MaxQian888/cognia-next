@@ -15,7 +15,7 @@
  * survives being interrupted at any point.
  *
  * Only the ACTIVE persist bucket is read. Account buckets
- * (`cognia-artifacts:<accountId>`) belong to a different Dexie database, and
+ * (`cognia-artifacts:<localAccountId>`) belong to a different Dexie database, and
  * merging one into whichever database happens to be selected would leak another
  * account's artifacts into this one.
  */
