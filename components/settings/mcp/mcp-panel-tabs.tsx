@@ -1,18 +1,13 @@
 "use client"
 
-import type { ComponentType } from "react"
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { ActivityIcon, PlugZapIcon, ServerIcon, ShoppingBagIcon } from "lucide-react"
 
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { cn } from "@/lib/utils"
+import { PanelTabStrip, type PanelTab } from "@/components/common/panel-tab-strip"
 import { useMcpPanelStore, type McpPanelTab } from "@/stores/mcp/mcp-panel-store"
 
-const TAB_DEFS: {
-  id: McpPanelTab
-  labelKey: string
-  icon: ComponentType<{ className?: string }>
-}[] = [
+const TAB_DEFS: { id: McpPanelTab; labelKey: string; icon: PanelTab<McpPanelTab>["icon"] }[] = [
   { id: "my-servers", labelKey: "myServers", icon: ServerIcon },
   { id: "presets", labelKey: "presets", icon: ShoppingBagIcon },
   { id: "agents", labelKey: "agents", icon: PlugZapIcon },
@@ -20,36 +15,25 @@ const TAB_DEFS: {
 ]
 
 /**
- * Panel tab bar.
- *
- * No `overflow-x-auto`: an unbounded width makes the `w-fit` list render at
- * max-content and overflow a narrow pane, which is what produced the
- * scroll-into-view jitter when a half-hidden tab was clicked. Triggers shrink
- * and truncate instead — compact when there is room, narrow when there isn't,
- * never scrolling.
+ * Panel tab bar. The narrowing contract lives in `PanelTabStrip`, which this
+ * file used to carry its own copy of.
  */
 export function McpPanelTabs({ className }: { className?: string }) {
   const t = useTranslations("mcp.tabs")
   const activeTab = useMcpPanelStore((s) => s.activeTab)
   const setActiveTab = useMcpPanelStore((s) => s.setActiveTab)
 
+  const tabs = useMemo<PanelTab<McpPanelTab>[]>(
+    () => TAB_DEFS.map((tab) => ({ id: tab.id, label: t(tab.labelKey), icon: tab.icon })),
+    [t]
+  )
+
   return (
-    <Tabs
+    <PanelTabStrip
+      tabs={tabs}
       value={activeTab}
-      onValueChange={(value) => setActiveTab(value as McpPanelTab)}
-      className={cn(className)}
-    >
-      <TabsList className="max-w-full">
-        {TAB_DEFS.map((tab) => {
-          const Icon = tab.icon
-          return (
-            <TabsTrigger key={tab.id} value={tab.id} className="min-w-0 flex-initial text-xs">
-              <Icon className="size-3.5 shrink-0" />
-              <span className="truncate">{t(tab.labelKey)}</span>
-            </TabsTrigger>
-          )
-        })}
-      </TabsList>
-    </Tabs>
+      onValueChange={setActiveTab}
+      className={className}
+    />
   )
 }
