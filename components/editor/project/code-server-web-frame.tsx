@@ -42,6 +42,15 @@ export interface CodeServerWebFrameProps {
   className?: string
   /** Test seam for the load deadline. */
   loadBudgetMs?: number
+  /**
+   * Fires when the frame starts, and stops, showing the workbench.
+   *
+   * Whether code-server consents to being framed is the one thing
+   * `resolveWebWorkbenchTarget` cannot know in advance, so a caller that acts
+   * on the workbench being on screen — registering it as the project-editor
+   * opener, say — cannot derive it from the target alone.
+   */
+  onEmbeddedChange?: (embedded: boolean) => void
 }
 
 export function CodeServerWebFrame({
@@ -49,6 +58,7 @@ export function CodeServerWebFrame({
   hostBaseUrl,
   className,
   loadBudgetMs = FRAME_LOAD_BUDGET_MS,
+  onEmbeddedChange,
 }: CodeServerWebFrameProps) {
   const t = useTranslations("projectEditor.proIde.webFrame")
   const target: WebWorkbenchTarget = resolveWebWorkbenchTarget({ status, hostBaseUrl })
@@ -78,6 +88,17 @@ export function CodeServerWebFrame({
   const onLoad = useCallback(() => {
     loadedRef.current = true
   }, [])
+
+  const embedded = embedUrl !== null && !refused
+  const onEmbeddedChangeRef = useRef(onEmbeddedChange)
+  useEffect(() => {
+    onEmbeddedChangeRef.current = onEmbeddedChange
+  }, [onEmbeddedChange])
+  useEffect(() => {
+    onEmbeddedChangeRef.current?.(embedded)
+    // Unmounting takes the workbench off screen just as surely as a refusal.
+    return () => onEmbeddedChangeRef.current?.(false)
+  }, [embedded])
 
   if (!embedUrl) {
     const reason = target.kind === "unavailable" ? target.reason : "not-running"

@@ -1,11 +1,11 @@
 "use client"
 
-// The optional "Pro IDE" surface for the project editors: a native code-server
+// The DESKTOP "Pro IDE" surface for the project editors: a native code-server
 // (browser VS Code) webview pinned over this pane, downloaded on first use.
 // Desktop-only; augments — never replaces — the Monaco editor. The webview
 // itself is a single shared resource owned by `lib/codeserver/pane-manager`.
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useRef } from "react"
 import { useTranslations } from "next-intl"
 import { Loader2Icon, MonitorXIcon, RotateCwIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -17,12 +17,15 @@ import { useCodeServerWorkspaceSync } from "@/hooks/codeserver/use-code-server-w
 import { useCodeServerEditorEvents } from "@/hooks/codeserver/use-code-server-editor-events"
 import { useCodeServerLocaleSync } from "@/hooks/codeserver/use-code-server-locale-sync"
 import { useCodeServerPane } from "@/hooks/codeserver/use-code-server-pane"
+import { useCodeServerProjectOpener } from "@/hooks/codeserver/use-code-server-project-opener"
 import { useCodeServerSettingsSync } from "@/hooks/codeserver/use-code-server-settings-sync"
 import { useRemoteHostActive } from "@/hooks/use-host-profile"
 import { type CodeServerProfile, codeServerClient } from "@/lib/codeserver/client"
-import { createCodeServerOpenQueue } from "@/lib/codeserver/open-file-queue"
 import { PRO_IDE_REGION_ATTR } from "@/lib/codeserver/pane-manager"
-import { registerProjectEditorOpener } from "@/lib/files/project-editor-bridge"
+// Re-exported where it has always lived: `joinProjectPath` moved next to the
+// opener registration so the browser pane could share it, and every existing
+// caller imports it from here.
+export { joinProjectPath } from "@/hooks/codeserver/use-code-server-project-opener"
 
 interface Props {
   /** Project root code-server should open (the selected worktree root). */
@@ -47,13 +50,6 @@ interface Props {
   onCancelled?: () => void
   /** Make the host's file surface visible before a bridge capability uses the IDE. */
   beforeOpen?: () => void
-}
-
-/** Join a project root with a project-relative path into an absolute path. */
-export function joinProjectPath(root: string, relative: string): string {
-  const base = root.replace(/[/\\]+$/, "")
-  const clean = relative.replace(/^[/\\]+/, "")
-  return clean ? `${base}/${clean}` : base
 }
 
 export function CodeServerPane({
@@ -151,88 +147,7 @@ export function CodeServerPane({
   // flash of bare background in between.
   const showPlaceholder = phase !== "ready" || !mounted
 
-  // Register as the project-editor opener only once code-server can actually
-  // service an open. Registering earlier guarantees a raw "code-server is not
-  // running" toast for any jump that lands mid-download; the bridge holds a
-  // deferred request instead and replays it when we register.
-  useEffect(() => {
-    if (phase !== "ready") return
-    const onError = (cause: unknown) =>
-      toast.error(t("proIde.openFileFailed", { error: String(cause) }))
-    // Prefer the companion extension: it opens in the live window with no CLI
-    // cold start. Fall back to the CLI reuse-window path when the extension isn't
-    // connected (still installing, or an older code-server).
-    const openQueue = createCodeServerOpenQueue(
-      async (path, line, column) => {
-        try {
-          await codeServerClient.driveOpen(root, joinProjectPath(root, path), line, column)
-        } catch {
-          await codeServerClient.openFile(root, path, line, column)
-        }
-      },
-      { onError }
-    )
-    // Agent writes reflect as an undo-able edit; degrade to a reveal (then the CLI)
-    // when the extension can't apply it.
-    const editQueue = createCodeServerOpenQueue(
-      async (path, line, column) => {
-        try {
-          await codeServerClient.driveApplyEdit(root, joinProjectPath(root, path), line, column)
-        } catch (cause) {
-          // A dirty editor buffer contains user-authored work that is not on
-          // disk. Revealing/falling back would hide the failed reconciliation,
-          // so surface the conflict and require the user to resolve it.
-          if (String(cause).includes("DIRTY_DOCUMENT_CONFLICT")) throw cause
-          try {
-            await codeServerClient.driveOpen(root, joinProjectPath(root, path), line, column)
-          } catch {
-            await codeServerClient.openFile(root, path, line, column)
-          }
-        }
-      },
-      { onError }
-    )
-    const unregister = registerProjectEditorOpener({
-      root,
-      open: (path, line, column) => {
-        beforeOpen?.()
-        openQueue.request(path, line, column)
-      },
-      applyEdit: (path, line, column) => {
-        beforeOpen?.()
-        editQueue.request(path, line, column)
-      },
-      // Registered only from `ready`, like the openers above: before that the
-      // companion extension isn't connected and a read would reject rather than
-      // fall through to whichever editor *is* live.
-      readActive: () => codeServerClient.readActive(root),
-      // Dirty VS Code buffers are invisible to the agent's disk-based file tools;
-      // flushing them is what stops a turn reading stale content and overwriting
-      // the user's unsaved work.
-      saveDirty: async () => (await codeServerClient.saveAll(root)).failed,
-      showDiff: (path, content, title) => {
-        beforeOpen?.()
-        return codeServerClient.showDiff(root, joinProjectPath(root, path), content, title)
-      },
-      reveal: (path) => {
-        beforeOpen?.()
-        return codeServerClient.reveal(root, joinProjectPath(root, path))
-      },
-      runInTerminal: (command, options) => {
-        beforeOpen?.()
-        return codeServerClient.runInTerminal(root, command, {
-          cwd: options?.cwd ?? root,
-          ...options,
-        })
-      },
-      notify: (message, kind) => codeServerClient.notify(root, message, kind),
-    })
-    return () => {
-      unregister()
-      openQueue.dispose()
-      editQueue.dispose()
-    }
-  }, [beforeOpen, phase, root, t])
+  useCodeServerProjectOpener({ root, enabled: phase === "ready", beforeOpen })
 
   return (
     <div className="relative h-full w-full overflow-hidden" data-testid="code-server-pane">

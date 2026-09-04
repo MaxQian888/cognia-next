@@ -113,3 +113,64 @@ describe("<CodeServerWebFrame />", () => {
     )
   })
 })
+
+describe("reporting whether the workbench is on screen", () => {
+  // A caller that acts on the workbench being visible — the pane registering it
+  // as the project-editor opener — cannot derive this from the target alone:
+  // whether code-server consents to being framed is only knowable at runtime.
+  it("reports embedded once the frame is shown", () => {
+    const onEmbeddedChange = jest.fn()
+    render(
+      <CodeServerWebFrame
+        status={status()}
+        hostBaseUrl="http://127.0.0.1:27891"
+        onEmbeddedChange={onEmbeddedChange}
+      />
+    )
+    expect(onEmbeddedChange).toHaveBeenLastCalledWith(true)
+  })
+
+  it("reports not-embedded when there is nothing to frame", () => {
+    const onEmbeddedChange = jest.fn()
+    render(
+      <CodeServerWebFrame
+        status={status()}
+        hostBaseUrl="https://192.168.1.20:27890"
+        onEmbeddedChange={onEmbeddedChange}
+      />
+    )
+    expect(onEmbeddedChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it("withdraws it when the frame misses its load deadline", () => {
+    const onEmbeddedChange = jest.fn()
+    render(
+      <CodeServerWebFrame
+        status={status()}
+        hostBaseUrl={null}
+        loadBudgetMs={100}
+        onEmbeddedChange={onEmbeddedChange}
+      />
+    )
+    expect(onEmbeddedChange).toHaveBeenLastCalledWith(true)
+
+    act(() => void jest.advanceTimersByTime(101))
+
+    expect(screen.getByTestId("code-server-web-frame-refused")).toBeInTheDocument()
+    expect(onEmbeddedChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it("withdraws it on unmount, which takes the workbench off screen too", () => {
+    const onEmbeddedChange = jest.fn()
+    const { unmount } = render(
+      <CodeServerWebFrame
+        status={status()}
+        hostBaseUrl={null}
+        onEmbeddedChange={onEmbeddedChange}
+      />
+    )
+    onEmbeddedChange.mockClear()
+    unmount()
+    expect(onEmbeddedChange).toHaveBeenLastCalledWith(false)
+  })
+})
