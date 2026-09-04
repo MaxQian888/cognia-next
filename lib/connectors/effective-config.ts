@@ -11,6 +11,7 @@ import type {
   AutonomyLevel,
   EngagementMode,
 } from "@cognia/agent-config-types/agent-composition"
+import type { EffectiveValue } from "@/lib/config/effective-value"
 import type {
   ActiveRunDispatchMode,
   ConnectorMode,
@@ -47,12 +48,12 @@ export type ImConfigSource =
   | "system-default"
   | "target-managed"
 
-export interface EffectiveConfigValue<T> {
-  requested: T | undefined
-  effective: T
-  source: ImConfigSource
-  blockedReason?: string
-}
+/**
+ * The IM specialisation of the shared layered-config shape. The generic lives
+ * in `@/lib/config/effective-value` so the Bot control plane resolves its own
+ * layers through the same type instead of a parallel one.
+ */
+export type EffectiveConfigValue<T> = EffectiveValue<T, ImConfigSource>
 
 export type ImExecutionTarget =
   { kind: "direct" } | { kind: "team"; id: string } | { kind: "workflow"; id: string }

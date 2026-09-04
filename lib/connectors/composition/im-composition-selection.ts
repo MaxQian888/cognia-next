@@ -24,10 +24,11 @@
  *     routing fields that already hold it, so the two can never disagree.
  */
 
+import { projectEffectiveComposition } from "@/lib/agent/composition/project-effective-composition"
 import type {
-  AgentCompositionSelectionV1,
-  AgentOrchestrationPolicy,
-} from "@cognia/agent-config-types/agent-composition"
+  ProjectedCompositionProvenance,
+  ProjectedComposition,
+} from "@/lib/agent/composition/project-effective-composition"
 
 import { appPresetCatalog } from "@/lib/agent/composition/app-preset-catalog"
 import { selectionFromLegacyModeId } from "@/lib/agent/composition/legacy-mode-mapping"
@@ -36,15 +37,9 @@ import type { ImConfigSource, resolveImEffectiveConfig } from "@/lib/connectors/
 type ImEffectiveConfig = ReturnType<typeof resolveImEffectiveConfig>
 
 /** Which layer supplied each axis, for the chip and the override dialog. */
-export type ImCompositionProvenance = Record<
-  "preset" | "authority" | "orchestration" | "engagement" | "autonomy",
-  ImConfigSource
->
+export type ImCompositionProvenance = ProjectedCompositionProvenance<ImConfigSource>
 
-export interface ImCompositionProjection {
-  selection: AgentCompositionSelectionV1
-  provenance: ImCompositionProvenance
-}
+export type ImCompositionProjection = ProjectedComposition<ImConfigSource>
 
 /**
  * Provenance and warnings are kept apart on purpose. `AgentCompositionWarning`
@@ -73,36 +68,22 @@ export function projectImComposition(input: {
   const { effective } = input
   const target = effective.target.effective
 
-  const orchestration: AgentOrchestrationPolicy =
-    target.kind === "team" ? "team" : target.kind === "workflow" ? "workflow" : "direct"
-
   const knownPresetIds =
     input.knownPresetIds ?? new Set(appPresetCatalog().map((preset) => preset.id))
-  const base = selectionFromLegacyModeId(input.sessionModeId, knownPresetIds).selection
 
-  const selection: AgentCompositionSelectionV1 = {
-    ...base,
-    orchestration,
-    engagement: effective.engagement.effective,
-    autonomy: effective.autonomy.effective,
-    ...(target.kind === "direct" ? {} : { orchestrationRef: target.id }),
-    // `authority` is omitted rather than defaulted when the conversation has
-    // no opinion, so a preset recommendation still applies. An explicit
-    // `approvalMode` is an opinion and does come through.
-    ...(effective.authority.effective ? { authority: effective.authority.effective } : {}),
-    ...(input.runtimeBindingRef ? { runtimeBindingRef: input.runtimeBindingRef } : {}),
-  }
-
-  return {
-    selection,
-    provenance: {
-      // The preset comes from the session's mode, not from the conversation
-      // row — say so rather than claiming a channel-level choice nobody made.
-      preset: input.sessionModeId ? "session" : "system-default",
-      authority: effective.authority.source,
-      orchestration: effective.target.source,
-      engagement: effective.engagement.source,
-      autonomy: effective.autonomy.source,
+  return projectEffectiveComposition<ImConfigSource>({
+    base: selectionFromLegacyModeId(input.sessionModeId, knownPresetIds).selection,
+    // The preset comes from the session's mode, not from the conversation
+    // row. Say so rather than claiming a channel-level choice nobody made.
+    presetSource: input.sessionModeId ? "session" : "system-default",
+    orchestration: {
+      policy: target.kind === "team" ? "team" : target.kind === "workflow" ? "workflow" : "direct",
+      ...(target.kind === "direct" ? {} : { ref: target.id }),
+      source: effective.target.source,
     },
-  }
+    engagement: effective.engagement,
+    autonomy: effective.autonomy,
+    authority: effective.authority,
+    ...(input.runtimeBindingRef ? { runtimeBindingRef: input.runtimeBindingRef } : {}),
+  })
 }
