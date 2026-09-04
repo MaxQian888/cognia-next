@@ -881,6 +881,19 @@ describe("self-invocation tool toggles", () => {
     })
   })
 
+  it("persists the pet tool flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setPetToolsEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, pet: true },
+    })
+  })
+
   it("persists the session-messaging tool flag, preserving other toggles", async () => {
     useSettingsStore.setState({
       settings: baseSettings({ selfInvokeTools: { skill: true } }),

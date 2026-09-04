@@ -5447,6 +5447,28 @@ describe("agent self-invocation tools (Skill / SlashCommand / spawn_task / sessi
     expect(opts.permissionRuleset?.template_list).toBeUndefined()
   })
 
+  it("appends the pet tools only when opted in, with their consent tier", async () => {
+    const off = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(toolNames(off)).not.toContain("pet_status")
+    // The tier must not be surfaced apart from the tools it governs: a rule for
+    // a tool the turn never offers is inert payload, and it would break the
+    // "no rules configured, no ruleset at all" invariant that keeps
+    // SendOptions byte-identical for the provider prompt cache.
+    expect(off.permissionRuleset?.pet_status).toBeUndefined()
+
+    const on = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { pet: true } } as AppSettings,
+    })
+    for (const name of ["pet_status", "pet_care", "pet_say", "pet_reward"]) {
+      expect(toolNames(on)).toContain(name)
+      expect(on.permissionRuleset?.[name]).toBe("allow")
+    }
+    // The one that raises an always-on-top window over the user's screen.
+    expect(toolNames(on)).toContain("pet_show")
+    expect(on.permissionRuleset?.pet_show).toBe("ask")
+  })
+
   it("appends spawn_task only when opted in and not on native mobile", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", characterId: "c1" }),

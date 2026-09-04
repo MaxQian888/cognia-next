@@ -13,6 +13,7 @@ import {
 } from "@/lib/claude/artifact-builtin-tools"
 import type { BuiltInToolName } from "./tool"
 import { buildProjectHistoryManifestEntries } from "@/lib/claude/project-history-tool"
+import { PET_BUILTIN_PLUGIN_ID, buildPetManifestEntries } from "@/lib/claude/pet-builtin-tools"
 
 // The artifact/canvas arm, restated as a value so it can be compared. If the
 // union changes, this list must change with it — a `satisfies` keeps the two
@@ -55,5 +56,28 @@ describe("declared project-history tool names", () => {
   it("match the tool actually shipped in the manifest", () => {
     const shipped = buildProjectHistoryManifestEntries().map((entry) => entry.name)
     expect([...shipped].sort()).toEqual([...DECLARED_PROJECT_HISTORY_TOOLS].sort())
+  })
+})
+
+// The pet arm, restated the same way. `pet_status` and friends went in with an
+// implementation, and this keeps it that way.
+const DECLARED_PET_TOOLS = [
+  "pet_status",
+  "pet_care",
+  "pet_say",
+  "pet_reward",
+  "pet_show",
+] as const satisfies readonly BuiltInToolName[]
+
+describe("declared pet tool names", () => {
+  it("match the tools actually shipped in the manifest", () => {
+    const shipped = buildPetManifestEntries().map((entry) => entry.name)
+    expect([...shipped].sort()).toEqual([...DECLARED_PET_TOOLS].sort())
+  })
+
+  it("all agree on the plugin id the relay routes them under", () => {
+    for (const entry of buildPetManifestEntries()) {
+      expect(entry.pluginId).toBe(PET_BUILTIN_PLUGIN_ID)
+    }
   })
 })

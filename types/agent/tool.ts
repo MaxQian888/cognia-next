@@ -149,6 +149,15 @@ export type BuiltInToolName =
   | "artifact_update"
   | "artifact_read"
   | "artifact_delete"
+  // Desktop pet (ADR-0058), implemented in `lib/claude/pet-builtin-tools.ts`
+  // and routed host-side through `lib/claude/plugin-tool-ipc.ts`. Offered only
+  // when the user turned them on in Settings, Tools, and never on the mobile
+  // shell where the pet subsystem does not run at all.
+  | "pet_status"
+  | "pet_care"
+  | "pet_say"
+  | "pet_reward"
+  | "pet_show"
   // Project-context deep path — implemented in
   // `lib/claude/project-history-tool.ts`, routed host-side through
   // `lib/claude/plugin-tool-ipc.ts`. Offered only when the user turned project

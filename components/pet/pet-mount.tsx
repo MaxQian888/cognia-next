@@ -29,6 +29,7 @@ import {
 import { isTauri } from "@/lib/platform/detect"
 import { usePlatform } from "@/hooks/use-platform"
 import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
+import { onPetConsoleRequest } from "@/lib/pet/console-request"
 import { PetWidget } from "./pet-widget"
 
 export function PetMount() {
@@ -85,6 +86,16 @@ export function PetMount() {
   // only this window has the app router). Pointless on the web (single
   // browsing context), so gate on Tauri.
   const router = useRouter()
+
+  // In-window requests to open the console. The popup's request already came
+  // through the bridge below; this is the same destination for callers inside
+  // the main window (the agent's pet_show, a command) that cannot hold the
+  // router themselves. Not gated on Tauri: the console exists on the web too.
+  useEffect(() => {
+    if (!widgetEnabled) return
+    return onPetConsoleRequest(({ tab }) => router.push(tab ? `/pet?tab=${tab}` : "/pet"))
+  }, [widgetEnabled, router])
+
   useEffect(() => {
     if (!widgetEnabled || !isTauri()) return
     const dispose = startMainPetBridge({

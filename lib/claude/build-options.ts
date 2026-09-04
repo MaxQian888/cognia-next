@@ -2130,12 +2130,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // consent overlay every write inside them asks has no screen to appear on.
   const templateToolsEnabled =
     artifactsChannelAvailable && appSettings?.selfInvokeTools?.templates === true
+  // Desktop pet (ADR-0058). Opt-in and off by default. The pet does not run on
+  // the mobile shell or in a secondary window, and its tools reach a renderer
+  // store, so the host has to be one that actually has a pet. The runner
+  // re-checks availability at call time as well, because a setting can change
+  // between the manifest being built and the tool being called.
+  const petToolsSurfaced = appSettings?.selfInvokeTools?.pet === true
   const { buildTemplateToolRuleset } = await import("@/lib/claude/permissions/template-tool-rules")
+  const { buildPetToolRuleset } = await import("@/lib/claude/permissions/pet-tool-rules")
   const mergedRuleset = mergeRulesets(
     editorWriteToolsSurfaced ? buildEditorToolRuleset() : undefined,
     sitesToolsSurfaced ? buildSiteToolRuleset() : undefined,
     artifactAuthoringEnabled ? buildArtifactToolRuleset() : undefined,
     templateToolsEnabled ? buildTemplateToolRuleset() : undefined,
+    petToolsSurfaced ? buildPetToolRuleset() : undefined,
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
   )
@@ -3023,6 +3031,28 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       ]
     } catch (err) {
       loggers.app.warn("failed to append artifact built-in tools", { error: String(err) })
+    }
+  }
+  // Desktop pet. Gated on the same `petToolsSurfaced` flag as its consent tier
+  // above: a tier surfaced apart from the tools it governs is inert payload,
+  // and it would break the "no rules configured, no ruleset at all" invariant
+  // that keeps SendOptions byte-identical for the provider prompt cache.
+  if (petToolsSurfaced) {
+    try {
+      const { buildPetManifestEntries } = await import("@/lib/claude/pet-builtin-tools")
+      const { isNativeMobile } = await import("@/lib/platform/detect")
+      // The pet is excluded from the Capacitor shell outright (ADR-0059), so
+      // advertising its tools there would offer a subsystem that cannot run.
+      if (!isNativeMobile()) {
+        const entries = buildPetManifestEntries()
+        const existing = new Set((opts.pluginTools ?? []).map((entry) => entry.name))
+        opts.pluginTools = [
+          ...(opts.pluginTools ?? []),
+          ...entries.filter((entry) => !existing.has(entry.name)),
+        ]
+      }
+    } catch (err) {
+      loggers.app.warn("failed to append pet built-in tools", { error: String(err) })
     }
   }
   // Template / chat-template / squad tools (ADR-0164). Gated on the same

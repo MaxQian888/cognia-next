@@ -67,6 +67,11 @@ import {
   runArtifactBuiltinTool,
 } from "./artifact-builtin-tools"
 import {
+  isPetBuiltinTool,
+  resolvePetToolDeps,
+  runPetBuiltinTool,
+} from "@/lib/claude/pet-builtin-tools"
+import {
   isTemplateBuiltinTool,
   resolveTemplateToolDeps as resolveProductionTemplateToolDeps,
   runTemplateBuiltinTool,
@@ -716,6 +721,19 @@ export async function handlePluginToolExec(
         request.name,
         request.args,
         resolveArtifactToolDeps(),
+        { sessionId: request.sessionId }
+      )
+      return { ...baseResponse, result: assertSafePluginToolResult(result) }
+    }
+    // ── Desktop pet ────────────────────────────────────────────────────────
+    // Host-routed: the pet's state is Dexie plus a renderer zustand store, and
+    // its access gate is the same one `ctx.pet` goes through. Opt-in via
+    // selfInvokeTools.pet, and surfaced only where the pet actually runs.
+    if (isPetBuiltinTool(request.name)) {
+      const result = await runPetBuiltinTool(
+        request.name,
+        request.args,
+        await resolvePetToolDeps(),
         { sessionId: request.sessionId }
       )
       return { ...baseResponse, result: assertSafePluginToolResult(result) }

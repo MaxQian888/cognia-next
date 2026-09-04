@@ -17,6 +17,7 @@ import {
   type PluginToolExecRequest,
   type PluginToolResolver,
 } from "./plugin-tool-ipc"
+import { __setPetToolDepsForTesting } from "./pet-builtin-tools"
 import type { VectorToolRunDeps } from "./vector-builtin-tools"
 import type { ProjectHistoryToolDeps } from "./project-history-tool"
 // Static imports so these share the SAME module instance the top-level
@@ -920,6 +921,44 @@ describe("handlePluginToolExec — vector built-ins", () => {
     const response = await handlePluginToolExec(makeRequest({ name: "vector_reindex", args: {} }))
     expect(execute).toHaveBeenCalled()
     expect(response.result).toBe("from plugin")
+  })
+})
+
+describe("handlePluginToolExec — desktop pet built-ins", () => {
+  afterEach(() => {
+    __setPetToolDepsForTesting(null)
+    __setPluginToolResolverForTesting(null)
+  })
+
+  it("routes a pet tool ahead of the plugin registry", async () => {
+    const execute = jest.fn()
+    __setPluginToolResolverForTesting({ getTool: () => ({ pluginId: "x", execute }) })
+    __setPetToolDepsForTesting(() => ({
+      getProfile: async () => ({ soul: { name: "Boba" }, level: 3 }) as never,
+      summarize: () => ({ hatched: true, name: "Boba", level: 3 }),
+      interact: async () => ({ ok: true, grantedXp: 1, grantedCoins: 1 }),
+      reward: async () => ({ ok: true, grantedXp: 1, grantedCoins: 1 }),
+      say: (text: string) => ({ ok: true, text, clearsAt: 0 }) as never,
+      openOverlay: async () => true,
+      openConsole: () => true,
+      listActivity: async () => [],
+      listAchievements: async () => [],
+      listInventory: async () => [],
+      bubblesMuted: () => false,
+      now: () => 0,
+    }))
+    const res = await handlePluginToolExec({
+      id: "r1",
+      name: "pet_status",
+      args: {},
+      sessionId: "s1",
+    } as never)
+    // A plugin that happened to register the same name must not win.
+    expect(execute).not.toHaveBeenCalled()
+    expect((res as { result?: { ok?: boolean; name?: string } }).result).toMatchObject({
+      ok: true,
+      name: "Boba",
+    })
   })
 })
 

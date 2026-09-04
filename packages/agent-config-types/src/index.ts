@@ -3330,6 +3330,15 @@ export interface AppSettings {
      * withheld for IM-bound sessions. Default false.
      */
     templates?: boolean
+    /**
+     * Expose the desktop pet to the agent (`pet_status`, `pet_care`,
+     * `pet_say`, `pet_reward`, `pet_show`). Reads and nurture are allowed
+     * outright; the pet's own access gate applies the per-kind cooldown and a
+     * daily XP/coin budget, and `pet_show` asks first because it raises an
+     * always-on-top window. Desktop and web only, since the pet subsystem is
+     * excluded from the Capacitor shell. Default false.
+     */
+    pet?: boolean
   }
   /**
    * Desktop → cognia CLI storage sync (ADR: CLI ↔ APP storage unification).

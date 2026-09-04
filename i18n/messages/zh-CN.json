@@ -41647,6 +41647,8 @@
     "lspIntelligenceDesc": "基于语言服务器的代码导航——跳转定义、查找引用、悬停类型、文档符号与实时诊断。仅桌面端；语言服务器首次使用时懒启动。",
     "permissionsDesc": "需要审批的工具会逐次弹出审批对话框。将工具加入下方的「始终允许」列表可跳过审批；关闭整个分类则会将其工具完全从 Agent 中移除。",
     "permissionsTitle": "权限流程",
+    "petToolsDesc": "让 Agent 读取桌面宠物状态、照顾它、让它说话，并在里程碑时给它奖励。把宠物拉到屏幕上始终会先询问。",
+    "petToolsTitle": "桌面宠物",
     "processManagement": "进程管理",
     "processManagementDesc": "列出、搜索、启动和终止本地进程。默认关闭 —— 启动/终止为高风险操作。",
     "requiresApprovalIconLabel": "需要逐次审批",

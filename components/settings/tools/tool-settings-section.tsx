@@ -96,6 +96,7 @@ export function ToolSettingsSection() {
   const setSpawnTaskToolEnabled = useSettingsStore((s) => s.setSpawnTaskToolEnabled)
   const setSessionMessagingToolEnabled = useSettingsStore((s) => s.setSessionMessagingToolEnabled)
   const setTemplateToolsEnabled = useSettingsStore((s) => s.setTemplateToolsEnabled)
+  const setPetToolsEnabled = useSettingsStore((s) => s.setPetToolsEnabled)
 
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
   const webToolsEnabled = settings?.webTools?.enabled ?? true
@@ -113,6 +114,7 @@ export function ToolSettingsSection() {
   const spawnTaskToolEnabled = settings?.selfInvokeTools?.spawnTask ?? false
   const sessionMessagingToolEnabled = settings?.selfInvokeTools?.sessionMessaging ?? false
   const templateToolsEnabled = settings?.selfInvokeTools?.templates ?? false
+  const petToolsEnabled = settings?.selfInvokeTools?.pet ?? false
   const desktop = isTauri()
 
   return (
@@ -264,6 +266,17 @@ export function ToolSettingsSection() {
               checked={templateToolsEnabled}
               onCheckedChange={(next) => setTemplateToolsEnabled(next)}
               aria-label={t("toggleAriaLabel", { name: t("templateToolsTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("petToolsTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">{t("petToolsDesc")}</p>
+            </div>
+            <Switch
+              checked={petToolsEnabled}
+              onCheckedChange={(next) => setPetToolsEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("petToolsTitle") })}
             />
           </div>
           <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">

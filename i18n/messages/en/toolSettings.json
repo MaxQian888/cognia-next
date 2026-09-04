@@ -29,6 +29,8 @@
   "lspIntelligenceDesc": "Language-server-backed code navigation — go-to-definition, find references, hover types, document symbols, and live diagnostics. Desktop only; language servers spawn lazily on first use.",
   "permissionsDesc": "Tools that require approval pop up a per-call dialog. Add a tool to the always-allow list (below) to skip the prompt. Disable a category to remove its tools from the agent entirely.",
   "permissionsTitle": "Permission flow",
+  "petToolsDesc": "Let the agent read your desktop pet, nurture it, make it speak, and reward it for milestones. Bringing the pet on screen always asks first.",
+  "petToolsTitle": "Desktop pet",
   "processManagement": "Processes",
   "processManagementDesc": "List, search, start and terminate local processes. Off by default — start/terminate are high-risk.",
   "requiresApprovalIconLabel": "Requires per-call approval",
