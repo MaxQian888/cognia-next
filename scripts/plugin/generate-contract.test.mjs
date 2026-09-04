@@ -24,7 +24,7 @@ describe("plugin contract generator", () => {
 
   test("projects every canonical plugin point into the authoring catalog", () => {
     assert.equal(catalog.pluginPointSchemaVersion, 1)
-    assert.equal(catalog.pluginPoints.length, 275)
+    assert.equal(catalog.pluginPoints.length, 276)
     assert.equal(
       new Set(catalog.pluginPoints.map((point) => point.id)).size,
       catalog.pluginPoints.length
@@ -88,8 +88,8 @@ describe("plugin contract generator", () => {
   test("projects every callable API into generated author documentation", () => {
     const docs = renderApiReference(catalog)
     const methods = catalog.apiNamespaces.flatMap((namespace) => namespace.methods)
-    assert.equal(catalog.apiNamespaces.length, 76)
-    assert.equal(methods.length, 747)
+    assert.equal(catalog.apiNamespaces.length, 77)
+    assert.equal(methods.length, 764)
     assert.match(docs, /`ctx\.session`/)
     assert.match(docs, /`session\.listSessions`/)
     assert.match(docs, /`templates\.instantiate`/)
@@ -104,7 +104,7 @@ describe("plugin contract generator", () => {
         .map((method) => [method.id, method.resourceEffect])
     )
 
-    assert.equal(methods.size, 747)
+    assert.equal(methods.size, 764)
     assert.deepEqual(methods.get("webview.create"), {
       kind: "returned-handle",
       disposeMethod: "dispose",
