@@ -108,6 +108,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   agent: RunControlHandler
   job: RunControlHandler
   securityScan: RunControlHandler
+  bot: RunControlHandler
   workflow: RunControlHandler
   team: RunControlHandler
   goal: RunControlHandler
@@ -609,6 +610,26 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     }
   }
 
+  /**
+   * A Bot run.
+   *
+   * `stop` aborts the live handler, which settles the delivery as dismissed.
+   * `retry` is a genuine re-dispatch, unlike an agent turn's: the delivery is
+   * still there with its envelope, so putting it back in the queue re-enters
+   * the same run with its completed steps already memoized. That is why a Bot
+   * registers a retry handler and a team, goal or plan does not.
+   */
+  const bot: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "bot")
+    const { cancelLiveBotRun } = await import("@/lib/bot/runtime/run")
+    if (!cancelLiveBotRun(command.runId)) {
+      // Honest: the run may be alive on another Host, and saying "stopped"
+      // here would be a claim this process cannot make.
+      throw new Error("Bot run is not active in this process")
+    }
+  }
+
   const securityScan: RunControlHandler = async (command) => {
     if (command.action === "open_details") return
     if (command.action !== "stop") {
@@ -622,6 +643,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   const unregisterAgent = registerRunControlHandler("agent-turn", agent)
   const unregisterJob = registerRunControlHandler("job", job)
   const unregisterSecurityScan = registerRunControlHandler("security-scan", securityScan)
+  const unregisterBot = registerRunControlHandler("bot", bot)
   const unregisterWorkflows = (["workflow", "scheduled"] as const).map((kind) =>
     registerRunControlHandler(kind, workflow)
   )
@@ -635,6 +657,12 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   // retry would have to re-derive a permission ceiling and an objective that
   // are not on the settled row. `canRetryRunKind` reads this registry, so those
   // cards simply never show the button.
+  //
+  // `bot` does not either, for the opposite reason: a Bot retry re-enters the
+  // SAME run so its checkpoints and its pending approval survive, and this
+  // registry can only express a REPLACEMENT (the gate adopts the returned id
+  // as a child of the original). Replaying the delivery is the real control,
+  // and it belongs on the surface that shows the queue.
   const unregisterWorkflowRetry = (["workflow", "scheduled"] as const).map((kind) =>
     registerRunRetryHandler(kind, workflowRetry)
   )
@@ -643,6 +671,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     agent,
     job,
     securityScan,
+    bot,
     workflow,
     team,
     goal,
@@ -654,6 +683,7 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       unregisterAgent()
       unregisterJob()
       unregisterSecurityScan()
+      unregisterBot()
       unregisterTeam()
       unregisterDelegation()
       for (const unregister of unregisterWorkflows) unregister()

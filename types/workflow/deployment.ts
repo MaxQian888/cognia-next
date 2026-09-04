@@ -62,6 +62,10 @@ export type WorkflowEntrypoint =
   // A `workflow` scheduled task (app scheduler) — see
   // `lib/scheduler/executors/workflow-executor.ts`.
   | "schedule"
+  // An installed Bot whose executor is a published workflow. Its own
+  // entrypoint so run history can tell a Bot-driven run from a human one, and
+  // so admission can scope a Bot differently from a person at a keyboard.
+  | "bot"
 
 export interface WorkflowInvocation {
   id: string

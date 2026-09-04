@@ -1184,3 +1184,62 @@ describe("security scan control", () => {
     installed.dispose()
   })
 })
+
+describe("bot run control", () => {
+  it("stops a live Bot run", async () => {
+    const { __resetLiveBotRunsForTesting } = await import("@/lib/bot/runtime/run")
+    __resetLiveBotRunsForTesting()
+    const installed = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "run_bot_bdl_1",
+      kind: "bot",
+      sourceId: "boti_1",
+      title: "Digest",
+      status: "running",
+      currentRevision: 0,
+      initiator: { remoteUserId: "operator-1" },
+      startedAt: 1_000,
+      updatedAt: 1_000,
+    })
+
+    // Nothing is running here, and saying "stopped" would be a claim this
+    // process cannot make: the run may be alive on another Host.
+    const refused = await executeRunControlCommand({
+      runId: "run_bot_bdl_1",
+      action: "stop",
+      idempotencyKey: "stop-bot-1",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+    expect(refused.accepted).toBe(false)
+
+    installed.dispose()
+    __resetLiveBotRunsForTesting()
+  })
+
+  it("refuses an action a Bot run has no lane for", async () => {
+    const installed = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "run_bot_bdl_2",
+      kind: "bot",
+      sourceId: "boti_1",
+      title: "Digest",
+      status: "running",
+      currentRevision: 0,
+      initiator: { remoteUserId: "operator-1" },
+      startedAt: 1_000,
+      updatedAt: 1_000,
+    })
+
+    // There is no live input lane somebody is typing into.
+    const result = await executeRunControlCommand({
+      runId: "run_bot_bdl_2",
+      action: "steer",
+      idempotencyKey: "steer-bot-1",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+    expect(result.accepted).toBe(false)
+    installed.dispose()
+  })
+})

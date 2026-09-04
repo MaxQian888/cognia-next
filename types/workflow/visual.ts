@@ -850,7 +850,7 @@ export interface WorkflowTriggeredFrom {
    * (`lib/scheduler/executors/workflow-executor.ts`); run history can then
    * tell a timed run from a human-initiated one.
    */
-  source: "im" | "ui" | "api" | "chat" | "desktop" | "schedule"
+  source: "im" | "ui" | "api" | "chat" | "desktop" | "schedule" | "bot"
   adapterId?: string
   conversationKey?: string
   sourceMessageId?: string
