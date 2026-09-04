@@ -20,6 +20,7 @@ import type {
 } from "@/types/scheduler"
 import { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
 import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
+import type { CancelExecutionOutcome } from "@/lib/scheduler/task-scheduler"
 import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import { subscribeSchedulerHostTarget } from "@/lib/scheduler/scheduler-host-target"
 import {
@@ -130,6 +131,17 @@ interface SchedulerActions {
 
   // Maintenance
   cleanupOldExecutions: (maxAgeDays?: number) => Promise<number>
+
+  /**
+   * Stop a running execution of any task type.
+   *
+   * Supersedes `cancelPluginExecution` as the surface the panel calls. A
+   * plugin run still ends through the plugin executor's own controller, which
+   * is what {@link cancelPluginExecution} reaches, but every other type has
+   * only ever been reachable through the scheduler's abort controller and so
+   * had no cancel at all.
+   */
+  cancelExecution: (executionId: string) => Promise<CancelExecutionOutcome>
 
   // Plugin Execution Management
   cancelPluginExecution: (executionId: string) => boolean
@@ -717,6 +729,33 @@ export const useSchedulerStore = create<SchedulerStore>()(
         } catch (error) {
           log.error("SchedulerStore: Cleanup old executions failed", error as Error)
           return 0
+        }
+      },
+
+      // ========== Execution Control ==========
+
+      cancelExecution: async (executionId) => {
+        // A plugin run is held by the plugin executor rather than by the
+        // scheduler's controller map, so it is tried first. Asking the
+        // scheduler about it would answer "not-owned-here" for a run this
+        // process can in fact stop.
+        if (isPluginTaskExecutionActive(executionId)) {
+          const stopped = cancelPluginTaskExecution(executionId)
+          if (stopped) return { cancelled: true }
+        }
+        try {
+          const outcome = await getSchedulerDataSource().cancelExecution(executionId)
+          if (outcome.cancelled) {
+            // The run settles itself through its own `finally`. Reloading the
+            // selected task's page is what puts the settled row in front of the
+            // user without waiting for the next poll.
+            const { selectedTaskId } = get()
+            if (selectedTaskId) await get().loadTaskExecutions(selectedTaskId)
+          }
+          return outcome
+        } catch (error) {
+          log.error("SchedulerStore: Cancel execution failed", error as Error)
+          return { cancelled: false, reason: "not-found" }
         }
       },
 

@@ -69,7 +69,15 @@ export interface TaskWriteAuthorityDeps {
   countTasksBySource?: (source: TaskWriteSource) => Promise<number>
 }
 
-async function loadPolicyFromSettings(): Promise<SchedulerPermissionPolicy> {
+/**
+ * The user's policy, merged over the defaults.
+ *
+ * Exported because the execution cap in `concurrency-limit.ts` is enforced by
+ * the scheduler rather than by this gate, and both must read the policy the
+ * same way. A second loader would be a second answer to "what did the user
+ * actually set", and the merge below is the part that is easy to get wrong.
+ */
+export async function loadSchedulerPolicy(): Promise<SchedulerPermissionPolicy> {
   const { getSettings } = await import("@/lib/db/settings")
   const stored = await getSettings()
     .then((settings) => settings.schedulerPermissionPolicy)
@@ -123,7 +131,7 @@ export async function authorizeTaskWrite(
   // of their own scheduler by tightening a setting.
   if (request.source === "user") return { allowed: true }
 
-  const policy = await (deps.loadPolicy ?? loadPolicyFromSettings)()
+  const policy = await (deps.loadPolicy ?? loadSchedulerPolicy)()
 
   if (request.taskType === "script" && !policy.scriptTasksEnabled) {
     return {

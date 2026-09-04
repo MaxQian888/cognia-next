@@ -65,8 +65,14 @@ export interface SchedulerMobileDetailViewProps {
   /** Execution-history pagination + plugin-run cancel (app-kind path only). */
   hasMoreExecutions?: boolean
   onLoadMoreExecutions?: () => Promise<void> | void
-  onCancelPluginExecution?: (executionId: string) => boolean
-  isPluginExecutionActive?: (executionId: string) => boolean
+  /**
+   * Stop a running execution of any task type.
+   *
+   * Replaces the `onCancelPluginExecution` / `isPluginExecutionActive` pair,
+   * which only ever reached plugin runs. Everything else the scheduler starts,
+   * including an agent turn and a spawned OS process, had no control here.
+   */
+  onCancelExecution?: (executionId: string) => void
 }
 
 const statusColors: Record<string, string> = {
@@ -95,8 +101,7 @@ export function SchedulerMobileDetailView({
   onSelectRun,
   hasMoreExecutions,
   onLoadMoreExecutions,
-  onCancelPluginExecution,
-  isPluginExecutionActive,
+  onCancelExecution,
 }: SchedulerMobileDetailViewProps) {
   const t = useTranslations("scheduler")
 
@@ -187,14 +192,7 @@ export function SchedulerMobileDetailView({
               }
               hasMoreOnServer={hasMoreExecutions}
               onLoadMore={onLoadMoreExecutions}
-              onCancelExecution={
-                onCancelPluginExecution
-                  ? (executionId) => {
-                      onCancelPluginExecution(executionId)
-                    }
-                  : undefined
-              }
-              canCancelExecution={isPluginExecutionActive}
+              onCancelExecution={onCancelExecution}
             />
             {/* This view composes its own body rather than delegating to
                 `TaskDetailView`, so mounting the workspace control there alone

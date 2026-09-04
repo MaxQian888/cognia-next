@@ -19,8 +19,8 @@ jest.mock("./task-execution-chart", () => ({
   toChartPointsFromExecutions: () => [],
 }))
 // Captured so the wiring test can assert the detail view actually forwards
-// the cancel + pagination handlers it receives — it used to accept and discard
-// `onCancelPluginExecution` / `isPluginExecutionActive`.
+// the cancel + pagination handlers it receives. It used to accept and discard
+// them, and the cancel it did forward reached plugin runs only.
 const historyProps: Record<string, unknown>[] = []
 jest.mock("./task-execution-history", () => ({
   __esModule: true,
@@ -300,9 +300,8 @@ describe("TaskDetailView · execution-list wiring", () => {
     historyProps.length = 0
   })
 
-  it("forwards plugin-run cancel and store pagination to the execution list", () => {
-    const onCancelPluginExecution = jest.fn(() => true)
-    const isPluginExecutionActive = jest.fn(() => true)
+  it("forwards run cancel and store pagination to the execution list", () => {
+    const onCancelExecution = jest.fn()
     const onLoadMoreExecutions = jest.fn()
 
     render(
@@ -310,8 +309,7 @@ describe("TaskDetailView · execution-list wiring", () => {
         task={buildTask()}
         executions={[]}
         {...callbacks()}
-        onCancelPluginExecution={onCancelPluginExecution}
-        isPluginExecutionActive={isPluginExecutionActive}
+        onCancelExecution={onCancelExecution}
         hasMoreExecutions
         onLoadMoreExecutions={onLoadMoreExecutions}
       />
@@ -320,9 +318,9 @@ describe("TaskDetailView · execution-list wiring", () => {
     const props = historyProps.at(-1)!
     expect(props.hasMoreOnServer).toBe(true)
     expect(props.onLoadMore).toBe(onLoadMoreExecutions)
-    expect(props.canCancelExecution).toBe(isPluginExecutionActive)
-    ;(props.onCancelExecution as (id: string) => void)("exec-1")
-    expect(onCancelPluginExecution).toHaveBeenCalledWith("exec-1")
+    // Passed straight through rather than rewrapped, so the list cannot be
+    // handed a cancel that quietly drops the id.
+    expect(props.onCancelExecution).toBe(onCancelExecution)
   })
 
   it("offers no cancel handler when the page supplies none", () => {

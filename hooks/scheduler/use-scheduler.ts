@@ -167,6 +167,7 @@ export function useScheduler() {
     loadRecentExecutions: store.loadRecentExecutions,
     loadUpcomingTasks: store.loadUpcomingTasks,
     cleanupOldExecutions: store.cleanupOldExecutions,
+    cancelExecution: store.cancelExecution,
     cancelPluginExecution: store.cancelPluginExecution,
     getActivePluginCount: store.getActivePluginCount,
     isPluginExecutionActive: store.isPluginExecutionActive,

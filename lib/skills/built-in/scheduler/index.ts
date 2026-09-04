@@ -9,6 +9,7 @@
  * | schedule.update      | write       | always   | scheduler_update_task       |
  * | schedule.set_status  | write       | always   | scheduler_set_task_status   |
  * | schedule.run_now     | write       | always   | scheduler_run_task_now      |
+ * | schedule.cancel_run  | write       | always   | scheduler_cancel_task_run   |
  * | schedule.delete      | destructive | opt-in   | scheduler_delete_task       |
  *
  * Why this family exists: the only agent-facing scheduler surface was three
@@ -39,4 +40,5 @@ import "./create"
 import "./update"
 import "./set-status"
 import "./run-now"
+import "./cancel-run"
 import "./delete"

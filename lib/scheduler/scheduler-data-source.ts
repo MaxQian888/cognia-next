@@ -11,7 +11,7 @@ import { transport } from "@/lib/tauri"
 import { getEffectiveSchedulerHostTarget } from "./scheduler-host-target"
 import { schedulerDb } from "./scheduler-db"
 import { resolveTaskWorkspace } from "./task-workspace-binding"
-import { getTaskScheduler } from "./task-scheduler"
+import { getTaskScheduler, type CancelExecutionOutcome } from "./task-scheduler"
 
 export interface SchedulerDataSource {
   readonly host: "local" | "remote"
@@ -50,6 +50,15 @@ export interface SchedulerDataSource {
     mode?: "merge" | "replace"
   ): Promise<{ imported: number; skipped: number; errors: string[] }>
   cleanupOldExecutions(maxAgeDays: number): Promise<number>
+  /**
+   * Stop a run that is currently executing.
+   *
+   * Answers an outcome rather than a boolean because "no" has several
+   * meanings the caller has to be able to tell apart, including the one this
+   * interface introduces: a remote schedule cannot be reached for cancellation
+   * at all yet, and saying so is different from saying the run had finished.
+   */
+  cancelExecution(executionId: string): Promise<CancelExecutionOutcome>
 }
 
 class LocalSchedulerDataSource implements SchedulerDataSource {
@@ -133,6 +142,10 @@ class LocalSchedulerDataSource implements SchedulerDataSource {
 
   cleanupOldExecutions(maxAgeDays: number) {
     return schedulerDb.cleanupOldExecutions(maxAgeDays)
+  }
+
+  cancelExecution(executionId: string) {
+    return getTaskScheduler().cancelExecution(executionId)
   }
 }
 
@@ -308,6 +321,20 @@ class RemoteSchedulerDataSource implements SchedulerDataSource {
 
   cleanupOldExecutions(maxAgeDays: number): Promise<number> {
     return transport.call("scheduled_task_cleanup", { maxAgeDays })
+  }
+
+  /**
+   * A paired host's runs cannot be cancelled from here yet.
+   *
+   * Every other verb on this interface has a `scheduled_task_*` command behind
+   * it. Cancellation does not, because the abort controller lives in the
+   * process running the execution and there is no command that reaches it. This
+   * refuses in the shape the caller already handles instead of resolving to
+   * something that reads like success, which is the failure mode that leaves a
+   * user watching a run they believe they stopped.
+   */
+  async cancelExecution(_executionId: string): Promise<CancelExecutionOutcome> {
+    return { cancelled: false, reason: "unsupported-on-remote" }
   }
 }
 

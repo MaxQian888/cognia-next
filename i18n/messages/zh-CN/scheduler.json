@@ -140,6 +140,11 @@
   },
   "cancel": "取消",
   "cancelRun": "取消",
+  "cancelRunSuccess": "已取消该次运行",
+  "cancelRunRequested": "已把取消请求发给正在执行该任务的窗口",
+  "cancelRunAlreadyFinished": "该次运行已经结束",
+  "cancelRunRemoteUnsupported": "暂时无法从这里取消配对主机上的运行",
+  "cancelRunUnreachable": "无法触达这次运行，取消失败",
   "cancelSelect": "取消",
   "catchupWindow": {
     "help": "超过该时长的错过运行将被跳过而不是补跑。0 表示不限制。",

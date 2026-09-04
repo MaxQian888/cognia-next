@@ -18,7 +18,7 @@ metadata:
   host-policies: [permission-ceiling, user-language]
 ---
 
-You can put work on the user's schedule and read back what is already there. The tools are `scheduler_list_tasks`, `scheduler_inspect_task`, `scheduler_create_task`, `scheduler_update_task`, `scheduler_set_task_status`, `scheduler_run_task_now` and `scheduler_delete_task`.
+You can put work on the user's schedule and read back what is already there. The tools are `scheduler_list_tasks`, `scheduler_inspect_task`, `scheduler_create_task`, `scheduler_update_task`, `scheduler_set_task_status`, `scheduler_run_task_now`, `scheduler_cancel_task_run` and `scheduler_delete_task`.
 
 ## Schedule, or just do it
 
@@ -63,13 +63,27 @@ Tell the user where it lives. They can review, amend and cancel from the Schedul
 
 `scheduler_run_task_now` is the honest way to check a task works: it runs the task without disturbing its schedule, and the run shows up in the history marked as manual. Use it once after creating anything non-trivial, and tell the user what happened.
 
+## Stopping things
+
+Two different verbs, and picking the wrong one is the common mistake.
+
+`scheduler_set_task_status` with `paused` stops FUTURE runs. It does nothing to a run already in progress, so "stop the backup" answered with a pause leaves the backup running.
+
+`scheduler_cancel_task_run` stops a run happening RIGHT NOW, and leaves the schedule alone so the task runs again next time. Get the `runId` from `scheduler_inspect_task`, where a live run has status `running`.
+
+When the user wants both, do both, and say so. Neither one implies the other.
+
+Read the answer before reporting success. `status: "requested"` means the stop was handed to the window running the task and has not happened yet, and `status: "already-finished"` means there was nothing to stop. Only `status: "cancelled"` means the run is over.
+
 ## When something is not firing
 
 `scheduler_inspect_task` returns the recent runs with a `terminalReason` on each. That field is the answer, not the failure count:
 
 - `unsupported-on-host`: this machine cannot run that task type.
 - `executor-not-found`: nothing is registered to run it.
-- `overlap-skipped`: the previous run was still going.
+- `overlap-skipped`: the previous run of this task was still going.
+- `concurrency-blocked`: the machine was already running as many tasks at once as the user allows. Not a fault in the task.
+- `user-cancelled`: somebody stopped that run, from the panel or with `scheduler_cancel_task_run`.
 - `missed-run-skipped` / `catchup-window-expired`: the machine was asleep past the catch-up window.
 - `auto-paused`: it failed enough consecutive times that the scheduler stopped it.
 

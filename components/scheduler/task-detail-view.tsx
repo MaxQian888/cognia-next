@@ -70,8 +70,14 @@ export interface TaskDetailViewProps {
    * `lib/scheduler/executors/plugin-executor.ts` and the store already
    * exposes both halves — the execution list simply never offered the action.
    */
-  onCancelPluginExecution?: (executionId: string) => boolean
-  isPluginExecutionActive?: (executionId: string) => boolean
+  /**
+   * Stop a running execution of any task type.
+   *
+   * Replaces the `onCancelPluginExecution` / `isPluginExecutionActive` pair,
+   * which only ever reached plugin runs. Everything else the scheduler starts,
+   * including an agent turn and a spawned OS process, had no control here.
+   */
+  onCancelExecution?: (executionId: string) => void
   /** True while the store holds more execution rows than it has loaded. */
   hasMoreExecutions?: boolean
   /** Fetch the next page of execution rows (store `loadMoreExecutions`). */
@@ -127,8 +133,7 @@ export function TaskDetailView({
   onRunNow,
   onDelete,
   onEdit,
-  onCancelPluginExecution,
-  isPluginExecutionActive,
+  onCancelExecution,
   hasMoreExecutions,
   onLoadMoreExecutions,
   onSelectExecution,
@@ -348,14 +353,7 @@ export function TaskDetailView({
               onSelectExecution={onSelectExecution}
               hasMoreOnServer={hasMoreExecutions}
               onLoadMore={onLoadMoreExecutions}
-              onCancelExecution={
-                onCancelPluginExecution
-                  ? (executionId) => {
-                      onCancelPluginExecution(executionId)
-                    }
-                  : undefined
-              }
-              canCancelExecution={isPluginExecutionActive}
+              onCancelExecution={onCancelExecution}
             />
           </div>
 

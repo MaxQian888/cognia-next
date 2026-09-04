@@ -43,6 +43,7 @@ jest.mock("@/lib/scheduler/task-scheduler", () => {
     promoteTask: jest.fn(),
     recordPromotion: jest.fn(),
     unpromoteTask: jest.fn(),
+    cancelExecution: jest.fn(),
   }
   return {
     __mockScheduler: mockScheduler,
@@ -68,6 +69,7 @@ const taskSchedulerMock = jest.requireMock("@/lib/scheduler/task-scheduler") as 
     promoteTask: jest.Mock
     recordPromotion: jest.Mock
     unpromoteTask: jest.Mock
+    cancelExecution: jest.Mock
   }
   getTaskScheduler: jest.Mock
 }
@@ -132,6 +134,7 @@ jest.mock("@/lib/scheduler/scheduler-data-source", () => ({
       exportTasks: scheduler.exportTasks,
       importTasks: scheduler.importTasks,
       cleanupOldExecutions: db.cleanupOldExecutions,
+      cancelExecution: (executionId: string) => scheduler.cancelExecution(executionId),
     }
   },
 }))
@@ -1524,6 +1527,62 @@ describe("useSchedulerStore", () => {
         count = await result.current.cleanupOldExecutions()
       })
       expect(count).toBe(0)
+    })
+  })
+
+  describe("cancelExecution", () => {
+    it("stops a plugin run through the plugin executor, which holds its controller", async () => {
+      const { result } = renderHook(() => useSchedulerStore())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.cancelExecution("exec-plugin")
+      })
+      expect(outcome).toEqual({ cancelled: true })
+      expect(pluginExecutorMock.cancelPluginTaskExecution).toHaveBeenCalledWith("exec-plugin")
+      // Asking the scheduler about a run the plugin executor owns would answer
+      // "not-owned-here" for one this process can in fact stop.
+      expect(mockScheduler.cancelExecution).not.toHaveBeenCalled()
+    })
+
+    it("falls through to the scheduler for every other task type", async () => {
+      pluginExecutorMock.isPluginTaskExecutionActive.mockReturnValueOnce(false)
+      mockScheduler.cancelExecution.mockResolvedValueOnce({ cancelled: true })
+
+      const { result } = renderHook(() => useSchedulerStore())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.cancelExecution("exec-agent")
+      })
+      expect(outcome).toEqual({ cancelled: true })
+      expect(mockScheduler.cancelExecution).toHaveBeenCalledWith("exec-agent")
+    })
+
+    it("returns the refusal rather than throwing it at the caller", async () => {
+      pluginExecutorMock.isPluginTaskExecutionActive.mockReturnValueOnce(false)
+      mockScheduler.cancelExecution.mockResolvedValueOnce({
+        cancelled: false,
+        reason: "already-settled",
+        status: "completed",
+      })
+
+      const { result } = renderHook(() => useSchedulerStore())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.cancelExecution("exec-done")
+      })
+      expect(outcome).toMatchObject({ cancelled: false, reason: "already-settled" })
+    })
+
+    it("survives a data source that throws, instead of leaving the panel hanging", async () => {
+      pluginExecutorMock.isPluginTaskExecutionActive.mockReturnValueOnce(false)
+      mockScheduler.cancelExecution.mockRejectedValueOnce(new Error("transport gone"))
+
+      const { result } = renderHook(() => useSchedulerStore())
+      let outcome: unknown
+      await act(async () => {
+        outcome = await result.current.cancelExecution("exec-boom")
+      })
+      expect(outcome).toMatchObject({ cancelled: false })
     })
   })
 

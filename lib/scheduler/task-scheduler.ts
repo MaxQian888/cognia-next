@@ -15,6 +15,7 @@ import {
   type UpdateScheduledTaskInput,
   type ScheduledTaskStatus,
   type TaskExecutionTriggerSource,
+  type TaskExecutionTerminalReason,
   type TaskExecutorResult,
   DEFAULT_EXECUTION_CONFIG,
   DEFAULT_NOTIFICATION_CONFIG,
@@ -24,6 +25,8 @@ import {
   DEPRECATED_TASK_TYPES,
   isDeprecatedTaskType,
 } from "./host-support"
+import { decideConcurrencyAdmission, resolveConcurrencyLimit } from "./concurrency-limit"
+import { loadSchedulerPolicy } from "./write-authority"
 import { getNextCronTime } from "./cron-parser"
 import { enumerateBackfillSlots } from "./backfill"
 import { schedulerDb } from "./scheduler-db"
@@ -235,6 +238,13 @@ export function resolveDefaultTimingDriver(): SchedulerTimingDriver {
  */
 const EXECUTION_CHANNEL_NAME = "cognia-scheduler-executions"
 
+/**
+ * How long a read of the concurrency cap stays good for. Short enough that
+ * lowering the ceiling on a thrashing machine takes effect while the user is
+ * still watching, long enough that a burst of fires is one settings read.
+ */
+const CONCURRENCY_CAP_TTL_MS = 30_000
+
 export type ExecutionStatusEvent = {
   type: "execution-update"
   taskId: string
@@ -244,6 +254,42 @@ export type ExecutionStatusEvent = {
   duration?: number
   error?: string
 }
+
+/**
+ * A request to stop a run, addressed to whichever context is actually running
+ * it. Only the tab holding the timing lock has the `AbortController`, so a
+ * cancel clicked in a second window has to travel to it.
+ */
+export type ExecutionCancelRequest = {
+  type: "execution-cancel-request"
+  executionId: string
+}
+
+type SchedulerChannelMessage = ExecutionStatusEvent | ExecutionCancelRequest
+
+/**
+ * The answer to "stop this run", which is never just a boolean.
+ *
+ * Four outcomes that a boolean would flatten into one, and the difference is
+ * what the user needs to be told. `already-settled` means they are looking at
+ * stale rows. `not-owned-here` means the run is real but this context cannot
+ * reach it, which on the web is the ordinary case of a second tab. `requested`
+ * means it was handed to the owning context and the status broadcast will say
+ * what happened.
+ */
+export type CancelExecutionOutcome =
+  | { cancelled: true }
+  | { cancelled: false; reason: "not-found" }
+  | { cancelled: false; reason: "already-settled"; status: TaskExecution["status"] }
+  | { cancelled: false; reason: "requested" }
+  | { cancelled: false; reason: "not-owned-here" }
+  /**
+   * The schedule on screen belongs to a paired host and there is no
+   * `scheduled_task_cancel_run` RPC to carry the request to it. Named rather
+   * than folded into `not-owned-here` because the fix is different: this one is
+   * a missing command, not a run that moved.
+   */
+  | { cancelled: false; reason: "unsupported-on-remote" }
 
 interface ExecuteTaskContext {
   triggerSource?: TaskExecutionTriggerSource
@@ -330,6 +376,64 @@ class TaskSchedulerImpl {
     if (!perTask) return
     perTask.delete(execution.id)
     if (perTask.size === 0) this.runningByTask.delete(execution.taskId)
+  }
+
+  /** Executions running across every task, which is what the global cap counts. */
+  private totalRunning(): number {
+    let total = 0
+    for (const perTask of this.runningByTask.values()) total += perTask.size
+    return total
+  }
+
+  /**
+   * The host's execution ceiling, kept fresh in the background.
+   *
+   * Read synchronously on the dispatch path, which is the whole design. The
+   * first version of this awaited `loadSchedulerPolicy()` inline, and the
+   * settings read does not always answer: in a host with no account database
+   * resolved it never settles at all, which turned an unavailable setting into
+   * a scheduler that stopped dispatching. A ceiling on how much may run is not
+   * worth blocking the thing it governs.
+   *
+   * So the cap is a field, seeded with the shipped default, refreshed on
+   * initialize and whenever a dispatch finds it stale. This is a deliberate
+   * departure from `write-authority.ts`, which reads the policy at check time
+   * and must: that gate decides whether an agent may write to the user's
+   * schedule, where a stale permissive answer is a real failure. This one
+   * decides how many things run at once, where being one refresh interval
+   * behind costs a little scheduling accuracy and nothing else.
+   */
+  private concurrencyCap = resolveConcurrencyLimit(undefined)
+  private concurrencyCapReadAtMs = 0
+  private concurrencyCapRefresh: Promise<void> | null = null
+
+  private refreshConcurrencyCap(): void {
+    // One refresh in flight at a time. A burst of fires must not queue a burst
+    // of settings reads behind each other.
+    if (this.concurrencyCapRefresh) return
+    this.concurrencyCapRefresh = loadSchedulerPolicy()
+      .then((policy) => {
+        this.concurrencyCap = resolveConcurrencyLimit(policy.maxConcurrentExecutions)
+        this.concurrencyCapReadAtMs = Date.now()
+      })
+      .catch((err) => {
+        // Keep the last known cap rather than failing open or shut. Stamp the
+        // clock anyway so a settings store that is permanently unavailable is
+        // retried on the interval instead of on every single fire.
+        this.concurrencyCapReadAtMs = Date.now()
+        log.warn("Could not read the scheduler concurrency policy, keeping the last cap:", err)
+      })
+      .finally(() => {
+        this.concurrencyCapRefresh = null
+      })
+  }
+
+  /** The cap to enforce right now, refreshing it in the background when stale. */
+  private currentConcurrencyCap(): number {
+    if (Date.now() - this.concurrencyCapReadAtMs >= CONCURRENCY_CAP_TTL_MS) {
+      this.refreshConcurrencyCap()
+    }
+    return this.concurrencyCap
   }
 
   /**
@@ -471,6 +575,11 @@ class TaskSchedulerImpl {
       // Start auto-cleanup for old executions (runs every 24 hours)
       this.startAutoCleanup()
 
+      // Warm the execution cap before anything can be dispatched, so the first
+      // fires of a session are governed by the user's number rather than by the
+      // seeded default. Deliberately not awaited: boot must not wait on it.
+      this.refreshConcurrencyCap()
+
       // Initialize BroadcastChannel for real-time execution status updates
       try {
         this.executionChannel = new BroadcastChannel(EXECUTION_CHANNEL_NAME)
@@ -479,6 +588,19 @@ class TaskSchedulerImpl {
         // forever once a plugin registered a scheduled task. Same reasoning as
         // `unrefTimer` above; browsers have no `unref`.
         ;(this.executionChannel as { unref?: () => void }).unref?.()
+        // The channel was write-only until cancellation needed to travel the
+        // other way. Only the context holding the timing lock runs executions,
+        // so a cancel clicked anywhere else has to be delivered to it. Every
+        // context ignores an id it does not own, which makes the broadcast
+        // self-addressing without a routing table.
+        this.executionChannel.onmessage = (event: MessageEvent<SchedulerChannelMessage>) => {
+          const message = event.data
+          if (message?.type !== "execution-cancel-request") return
+          const controller = this.executionControllers.get(message.executionId)
+          if (!controller) return
+          log.info(`Execution ${message.executionId} cancelled on request from another context`)
+          controller.abort("user-cancelled")
+        }
       } catch {
         log.warn("BroadcastChannel not available for execution status updates")
       }
@@ -1485,6 +1607,58 @@ class TaskSchedulerImpl {
   }
 
   /**
+   * Stop a running execution.
+   *
+   * Until this existed the only ways to end a run early were to delete its task
+   * or to stop the scheduler, and the panel's one cancel button reached plugin
+   * runs alone through the plugin executor's private controller. Everything
+   * else the scheduler can start, including an agent turn and a spawned OS
+   * process, ran to completion or timeout with no way to intervene.
+   *
+   * The abort is routed through the same `executionControllers` map that
+   * `cancel-previous` and the execution timeout already use, so a cancelled run
+   * settles through the ordinary `catch`. It becomes `status: "cancelled"` with
+   * `terminalReason: "user-cancelled"`, its executor sees the abort signal, and
+   * its `finally` frees the concurrency slot and drains a buffered start. There
+   * is no second teardown path to keep in step.
+   *
+   * A run this context does not own is not settled from here. Writing
+   * "cancelled" over a row whose execution is alive in another tab would be a
+   * lie the scheduler tells about its own state, and the row would then be
+   * settled a second time when the real run ends. The request is broadcast
+   * instead, and the owner answers.
+   */
+  async cancelExecution(executionId: string): Promise<CancelExecutionOutcome> {
+    const controller = this.executionControllers.get(executionId)
+    if (controller) {
+      controller.abort("user-cancelled")
+      log.info(`Execution ${executionId} cancelled on request`)
+      return { cancelled: true }
+    }
+
+    const execution = await schedulerDb.getExecution(executionId)
+    if (!execution) return { cancelled: false, reason: "not-found" }
+    if (execution.status !== "running" && execution.status !== "pending") {
+      return { cancelled: false, reason: "already-settled", status: execution.status }
+    }
+
+    // The row says running and this context has no controller for it, so the
+    // run belongs to another tab. Ask its owner rather than guessing.
+    if (this.executionChannel) {
+      try {
+        this.executionChannel.postMessage({
+          type: "execution-cancel-request",
+          executionId,
+        } satisfies ExecutionCancelRequest)
+        return { cancelled: false, reason: "requested" }
+      } catch {
+        // Channel closed. Fall through to the honest refusal.
+      }
+    }
+    return { cancelled: false, reason: "not-owned-here" }
+  }
+
+  /**
    * Get task executions
    */
   async getTaskExecutions(taskId: string, limit: number = 50): Promise<TaskExecution[]> {
@@ -1638,45 +1812,15 @@ class TaskSchedulerImpl {
       switch (overlapPolicy) {
         case "queue-one":
         case "queue-all": {
-          const queue = this.queues.get(task.id) ?? []
-          const queuedStart: QueuedStart = {
+          return this.bufferStart(task, executionId, {
+            overlapPolicy,
             triggerSource,
+            retryAttempt,
             scheduledFor: context.scheduledFor,
             deferNextRunUpdate: context.deferNextRunUpdate,
             scheduledSlotClaimed: context.scheduledSlotClaimed,
-          }
-          if (overlapPolicy === "queue-one") {
-            // Newest wins: any displaced pending start is dropped as skipped.
-            for (const displaced of queue) {
-              await this.createSkippedExecution(task, {
-                triggerSource: displaced.triggerSource,
-                scheduledFor: displaced.scheduledFor,
-                terminalReason: "overlap-skipped",
-                message: "Skipped: displaced by a newer buffered start (queue-one)",
-              })
-            }
-            this.queues.set(task.id, [queuedStart])
-            log.debug(`Task ${task.name} start buffered (queue-one)`)
-            return this.createQueuedPlaceholderExecution(task, executionId, queuedStart)
-          }
-          const maxQueueSize = Math.max(
-            1,
-            task.config.maxQueueSize ?? DEFAULT_EXECUTION_CONFIG.maxQueueSize ?? 10
-          )
-          if (queue.length >= maxQueueSize) {
-            log.warn(`Task ${task.name} start dropped: queue full (${maxQueueSize})`)
-            return this.createSkippedExecution(task, {
-              triggerSource,
-              scheduledFor: context.scheduledFor,
-              terminalReason: "overlap-skipped",
-              message: `Skipped: start buffer full (queue-all, max ${maxQueueSize})`,
-              retryAttempt,
-            })
-          }
-          queue.push(queuedStart)
-          this.queues.set(task.id, queue)
-          log.debug(`Task ${task.name} start buffered (queue-all, ${queue.length} pending)`)
-          return this.createQueuedPlaceholderExecution(task, executionId, queuedStart)
+            blockedBy: "overlap",
+          })
         }
         case "cancel-previous": {
           if (retryBlocked) {
@@ -1714,6 +1858,46 @@ class TaskSchedulerImpl {
           })
         }
       }
+    }
+
+    // Host execution cap. Runs AFTER the per-task overlap policy on purpose:
+    // `cancel-previous` frees its own slot by aborting the run it collided
+    // with, so asking the cap first would block a start that is about to take a
+    // slot it already owns. The overlap policy is about this task, the cap is
+    // about the host, and the narrower question is answered first.
+    // An idle host cannot be over its own ceiling, because `resolveConcurrencyLimit`
+    // never answers less than 1. Checking that first keeps the settings read off
+    // the overwhelmingly common path, where this fire is the only thing running.
+    const runningCount = this.totalRunning()
+    const concurrencyCap = this.currentConcurrencyCap()
+    const admission = decideConcurrencyAdmission({
+      runningCount,
+      limit: concurrencyCap,
+      overlapPolicy,
+    })
+    if (!admission.admit) {
+      if (admission.disposition === "buffer") {
+        // The task asked to queue, so the fire waits for a slot rather than
+        // being lost. `drainQueuedStart` is capacity-aware, and a completing
+        // run on any task drains whatever is waiting.
+        return this.bufferStart(task, executionId, {
+          overlapPolicy: overlapPolicy === "queue-one" ? "queue-one" : "queue-all",
+          triggerSource,
+          retryAttempt,
+          scheduledFor: context.scheduledFor,
+          deferNextRunUpdate: context.deferNextRunUpdate,
+          scheduledSlotClaimed: context.scheduledSlotClaimed,
+          blockedBy: "concurrency",
+        })
+      }
+      log.warn(`Task ${task.name} start blocked: host concurrency cap (${concurrencyCap}) reached`)
+      return this.createSkippedExecution(task, {
+        triggerSource,
+        scheduledFor: context.scheduledFor,
+        terminalReason: "concurrency-blocked",
+        message: admission.message,
+        retryAttempt,
+      })
     }
 
     // Create execution record
@@ -2075,33 +2259,156 @@ class TaskSchedulerImpl {
   }
 
   /**
+   * Put a start into the task's buffer instead of running it now.
+   *
+   * Shared by the two things that can hold a start back: the task's own overlap
+   * policy (this task is already running) and the host's execution cap (someone
+   * else is). They differ only in why, so they share the queue, the overflow
+   * rule and the placeholder, and diverge on the terminal reason written for a
+   * start the buffer could not take. Keeping them on one implementation is the
+   * point. Two buffers would be two answers to "what is waiting to run".
+   */
+  private async bufferStart(
+    task: ScheduledTask,
+    executionId: string,
+    options: {
+      overlapPolicy: "queue-one" | "queue-all"
+      triggerSource: TaskExecutionTriggerSource
+      retryAttempt: number
+      scheduledFor?: Date
+      deferNextRunUpdate?: boolean
+      scheduledSlotClaimed?: boolean
+      blockedBy: "overlap" | "concurrency"
+    }
+  ): Promise<TaskExecution> {
+    const { overlapPolicy, triggerSource, retryAttempt, blockedBy } = options
+    // A start the buffer cannot take is reported under the reason it was held
+    // for, so run history separates "this task was busy" from "the host was".
+    const overflowReason: TaskExecutionTerminalReason =
+      blockedBy === "concurrency" ? "concurrency-blocked" : "overlap-skipped"
+    const queue = this.queues.get(task.id) ?? []
+    const queuedStart: QueuedStart = {
+      triggerSource,
+      scheduledFor: options.scheduledFor,
+      deferNextRunUpdate: options.deferNextRunUpdate,
+      scheduledSlotClaimed: options.scheduledSlotClaimed,
+    }
+
+    if (overlapPolicy === "queue-one") {
+      // Newest wins: any displaced pending start is dropped as skipped.
+      for (const displaced of queue) {
+        await this.createSkippedExecution(task, {
+          triggerSource: displaced.triggerSource,
+          scheduledFor: displaced.scheduledFor,
+          terminalReason: "overlap-skipped",
+          message: "Skipped: displaced by a newer buffered start (queue-one)",
+        })
+      }
+      this.queues.set(task.id, [queuedStart])
+      log.debug(`Task ${task.name} start buffered (queue-one, blocked by ${blockedBy})`)
+      return this.createQueuedPlaceholderExecution(task, executionId, queuedStart)
+    }
+
+    const maxQueueSize = Math.max(
+      1,
+      task.config.maxQueueSize ?? DEFAULT_EXECUTION_CONFIG.maxQueueSize ?? 10
+    )
+    if (queue.length >= maxQueueSize) {
+      log.warn(`Task ${task.name} start dropped: queue full (${maxQueueSize})`)
+      return this.createSkippedExecution(task, {
+        triggerSource,
+        scheduledFor: options.scheduledFor,
+        terminalReason: overflowReason,
+        message: `Skipped: start buffer full (queue-all, max ${maxQueueSize})`,
+        retryAttempt,
+      })
+    }
+
+    queue.push(queuedStart)
+    this.queues.set(task.id, queue)
+    log.debug(
+      `Task ${task.name} start buffered (queue-all, ${queue.length} pending, blocked by ${blockedBy})`
+    )
+    return this.createQueuedPlaceholderExecution(task, executionId, queuedStart)
+  }
+
+  /**
    * Pop and run the FIFO head of a task's buffered-start queue. Each drained
    * run drains the next on its own completion (via its `finally`).
    */
   private drainQueuedStart(taskId: string): void {
-    if (this.retryChains.has(taskId)) return
-    const queue = this.queues.get(taskId)
-    if (!queue || queue.length === 0) {
-      this.queues.delete(taskId)
-      return
-    }
-    const next = queue.shift()!
-    if (queue.length === 0) this.queues.delete(taskId)
+    void this.drainOneBufferedStart(taskId).catch((err) => {
+      log.error(`Error draining a buffered start after task ${taskId} finished:`, err)
+    })
+  }
 
-    void schedulerDb
-      .getTask(taskId)
-      .then((latest) => {
-        if (!latest) return
-        return this.executeTask(latest, 0, {
-          triggerSource: next.triggerSource,
-          scheduledFor: next.scheduledFor,
-          deferNextRunUpdate: next.deferNextRunUpdate,
-          scheduledSlotClaimed: next.scheduledSlotClaimed,
-        })
+  /**
+   * Release exactly one buffered start, now that a slot has just been freed.
+   *
+   * One per completion is the whole concurrency argument. A completion frees
+   * exactly one execution slot, so releasing exactly one buffered start can
+   * never exceed the cap, and it needs no reservation counter to be correct.
+   * A loop that released "as many as capacity allows" would race itself:
+   * `executeTask` is async and does not call `trackRunning` until it has read
+   * the policy, so a second iteration would still see the old running count and
+   * over-admit. Each released run drains the next when it finishes, so a queue
+   * still empties at exactly the rate the host can absorb.
+   *
+   * The task that just finished is offered first, because its buffered starts
+   * were waiting on it specifically and FIFO within a task is what `queue-all`
+   * promises. Other tasks follow, because under the host cap a start can now be
+   * buffered while its own task is idle, waiting on somebody else's execution.
+   * Before this existed, such a start had nothing that would ever release it.
+   *
+   * A task that is currently running is skipped rather than started. Its buffer
+   * exists precisely because its overlap policy says not to run it twice, and
+   * `allow` never buffers, so a running task is never a legal drain target.
+   *
+   * Known and accepted: raising the cap at runtime does not immediately release
+   * the extra starts it just permitted. They wait for the next completion. The
+   * alternative is a poller for a case that resolves itself.
+   */
+  private async drainOneBufferedStart(finishedTaskId?: string): Promise<void> {
+    if (this.queues.size === 0) return
+
+    if (this.totalRunning() >= this.currentConcurrencyCap()) return
+
+    const candidates =
+      finishedTaskId !== undefined
+        ? [finishedTaskId, ...Array.from(this.queues.keys()).filter((id) => id !== finishedTaskId)]
+        : Array.from(this.queues.keys())
+
+    for (const taskId of candidates) {
+      if (this.retryChains.has(taskId)) continue
+      if (this.isTaskRunning(taskId)) continue
+
+      const queue = this.queues.get(taskId)
+      if (!queue || queue.length === 0) {
+        this.queues.delete(taskId)
+        continue
+      }
+
+      const next = queue.shift()!
+      if (queue.length === 0) this.queues.delete(taskId)
+
+      const latest = await schedulerDb.getTask(taskId).catch((err) => {
+        log.error(`Error loading task ${taskId} for its buffered start:`, err)
+        return undefined
       })
-      .catch((err) => {
+      // A task deleted while its start sat in the buffer drops that start and
+      // moves on to the next candidate, rather than consuming the freed slot.
+      if (!latest) continue
+
+      void this.executeTask(latest, 0, {
+        triggerSource: next.triggerSource,
+        scheduledFor: next.scheduledFor,
+        deferNextRunUpdate: next.deferNextRunUpdate,
+        scheduledSlotClaimed: next.scheduledSlotClaimed,
+      }).catch((err) => {
         log.error(`Error executing buffered start for task ${taskId}:`, err)
       })
+      return
+    }
   }
 
   /**
@@ -2154,7 +2461,9 @@ class TaskSchedulerImpl {
           ? SchedulerError.executionCancelled("task", "scheduler-stopped")
           : reason === "task-deleted"
             ? SchedulerError.executionCancelled("task", "task-deleted")
-            : SchedulerError.executionTimeout("task", timeoutMs)
+            : reason === "user-cancelled"
+              ? SchedulerError.executionCancelled("task", "user-cancelled")
+              : SchedulerError.executionTimeout("task", timeoutMs)
     }
 
     try {
@@ -2402,6 +2711,7 @@ class TaskSchedulerImpl {
     if (error instanceof SchedulerError && error.code === "EXECUTION_CANCELLED") {
       if (error.details?.reason === "scheduler-stopped") return "scheduler-stopped"
       if (error.details?.reason === "task-deleted") return "task-deleted"
+      if (error.details?.reason === "user-cancelled") return "user-cancelled"
       return "overlap-cancelled"
     }
     if (error instanceof SchedulerError && error.code === "EXECUTOR_NOT_FOUND") {

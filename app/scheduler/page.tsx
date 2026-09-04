@@ -107,9 +107,8 @@ export default function SchedulerPage() {
     refresh,
     cleanupOldExecutions,
     cloneTask,
-    cancelPluginExecution,
+    cancelExecution,
     getActivePluginCount: _getActivePluginCount,
-    isPluginExecutionActive,
     hasMoreExecutions,
     loadMoreExecutions,
   } = useScheduler()
@@ -497,6 +496,40 @@ export default function SchedulerPage() {
     [runTaskNow]
   )
 
+  /**
+   * Stop a running execution, and say what actually happened.
+   *
+   * Every outcome gets its own message. A cancel that could not be delivered
+   * used to be indistinguishable from one that worked, because the control was
+   * simply hidden for anything but a plugin run, and the user was left watching
+   * a row they believed they had stopped.
+   */
+  const handleCancelRun = useCallback(
+    async (executionId: string) => {
+      const outcome = await cancelExecution(executionId)
+      if (outcome.cancelled) {
+        toast.success(t("cancelRunSuccess"))
+        return
+      }
+      switch (outcome.reason) {
+        case "requested":
+          // Delivered to the context that owns the run. Its own status
+          // broadcast is what will settle the row.
+          toast.info(t("cancelRunRequested"))
+          break
+        case "already-settled":
+          toast.info(t("cancelRunAlreadyFinished"))
+          break
+        case "unsupported-on-remote":
+          toast.error(t("cancelRunRemoteUnsupported"))
+          break
+        default:
+          toast.error(t("cancelRunUnreachable"))
+      }
+    },
+    [cancelExecution, t]
+  )
+
   const handleCloneTask = useCallback(
     async (taskId: string) => {
       const clone = await cloneTask(taskId)
@@ -838,8 +871,7 @@ export default function SchedulerPage() {
             onSelectRun={setSelectedRun}
             hasMoreExecutions={hasMoreExecutions}
             onLoadMoreExecutions={loadMoreExecutions}
-            onCancelPluginExecution={cancelPluginExecution}
-            isPluginExecutionActive={isPluginExecutionActive}
+            onCancelExecution={handleCancelRun}
           />
         }
         header={
@@ -894,8 +926,7 @@ export default function SchedulerPage() {
                     onRunNow={handleRunNow}
                     onDelete={requestDeleteTask}
                     onEdit={() => setShowEditSheet(true)}
-                    onCancelPluginExecution={cancelPluginExecution}
-                    isPluginExecutionActive={isPluginExecutionActive}
+                    onCancelExecution={handleCancelRun}
                     hasMoreExecutions={hasMoreExecutions}
                     onLoadMoreExecutions={loadMoreExecutions}
                     onSelectExecution={(exec) => setSelectedRun(toUnifiedFromTaskExecution(exec))}

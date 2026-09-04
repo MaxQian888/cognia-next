@@ -256,23 +256,34 @@ describe("TaskExecutionHistory · reaching the rest of the history", () => {
     expect(screen.queryByTestId("execution-load-more")).not.toBeInTheDocument()
   })
 
-  it("offers Cancel only on running rows the app can still abort", () => {
+  // Every running row gets the control now. It used to be gated on a predicate
+  // that only accepted plugin runs, so an agent turn or a spawned command
+  // showed nothing, and the missing button read as "this cannot be stopped".
+  it("offers Cancel on every running row, and on no settled one", () => {
     const onCancelExecution = jest.fn()
     render(
       <TaskExecutionHistory
         executions={[
-          makeExecution("running-ours", { status: "running", duration: undefined }),
-          makeExecution("running-theirs", { status: "running", duration: undefined }),
+          makeExecution("running-a", { status: "running", duration: undefined }),
+          makeExecution("running-b", { status: "running", duration: undefined }),
           makeExecution("done"),
         ]}
         onCancelExecution={onCancelExecution}
-        canCancelExecution={(id) => id === "running-ours"}
       />
     )
     const cancels = screen.getAllByTestId("execution-cancel")
-    expect(cancels).toHaveLength(1)
+    expect(cancels).toHaveLength(2)
     fireEvent.click(cancels[0])
-    expect(onCancelExecution).toHaveBeenCalledWith("running-ours")
+    expect(onCancelExecution).toHaveBeenCalledWith("running-a")
+  })
+
+  it("offers no Cancel at all when the caller cannot handle one", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[makeExecution("r", { status: "running", duration: undefined })]}
+      />
+    )
+    expect(screen.queryByTestId("execution-cancel")).not.toBeInTheDocument()
   })
 
   it("does not open the run sheet when Cancel is used", () => {
@@ -282,7 +293,6 @@ describe("TaskExecutionHistory · reaching the rest of the history", () => {
         executions={[makeExecution("r", { status: "running", duration: undefined })]}
         onSelectExecution={onSelectExecution}
         onCancelExecution={jest.fn()}
-        canCancelExecution={() => true}
       />
     )
     fireEvent.click(screen.getByTestId("execution-cancel"))

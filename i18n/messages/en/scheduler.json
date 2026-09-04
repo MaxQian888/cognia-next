@@ -140,6 +140,11 @@
   },
   "cancel": "Cancel",
   "cancelRun": "Cancel",
+  "cancelRunSuccess": "Run cancelled",
+  "cancelRunRequested": "Cancellation sent to the window running this task",
+  "cancelRunAlreadyFinished": "That run had already finished",
+  "cancelRunRemoteUnsupported": "Runs on a paired host cannot be cancelled from here yet",
+  "cancelRunUnreachable": "This run could not be reached to cancel it",
   "cancelSelect": "Cancel",
   "catchupWindow": {
     "help": "Missed runs older than this are skipped instead of re-run. 0 = no limit.",

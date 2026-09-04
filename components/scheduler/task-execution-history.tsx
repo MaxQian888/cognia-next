@@ -139,12 +139,16 @@ interface TaskExecutionHistoryProps {
   /** Fetch the next page. Awaited so the button can show its pending state. */
   onLoadMore?: () => Promise<void> | void
   /**
-   * Cancel a still-running execution. Only offered for rows
-   * {@link canCancelExecution} accepts — today that is plugin task runs, whose
-   * controllers `lib/scheduler/executors/plugin-executor.ts` holds.
+   * Stop a still-running execution.
+   *
+   * Offered on every running row. It used to be gated by a companion
+   * `canCancelExecution` predicate that only accepted plugin runs, so a
+   * scheduled agent turn or a spawned command showed no control at all and the
+   * absence read as "this cannot be stopped" rather than "we did not wire it".
+   * The scheduler now holds an abort controller for every run, and a request it
+   * cannot honour answers with a reason the caller reports.
    */
   onCancelExecution?: (executionId: string) => void
-  canCancelExecution?: (executionId: string) => boolean
 }
 
 export function TaskExecutionHistory({
@@ -154,7 +158,6 @@ export function TaskExecutionHistory({
   hasMoreOnServer = false,
   onLoadMore,
   onCancelExecution,
-  canCancelExecution,
 }: TaskExecutionHistoryProps) {
   const t = useTranslations("scheduler")
   const format = useFormatter()
@@ -277,24 +280,22 @@ export function TaskExecutionHistory({
               )}
             </div>
 
-            {/* Cancel — only for runs whose controller this app still holds. */}
-            {execution.status === "running" &&
-              onCancelExecution &&
-              canCancelExecution?.(execution.id) && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="shrink-0 h-6 px-2 text-[11px]"
-                  data-testid="execution-cancel"
-                  onClick={(event) => {
-                    // The row itself opens the run sheet.
-                    event.stopPropagation()
-                    onCancelExecution(execution.id)
-                  }}
-                >
-                  {t("cancelRun")}
-                </Button>
-              )}
+            {/* Cancel, on every running row. */}
+            {execution.status === "running" && onCancelExecution && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="shrink-0 h-6 px-2 text-[11px]"
+                data-testid="execution-cancel"
+                onClick={(event) => {
+                  // The row itself opens the run sheet.
+                  event.stopPropagation()
+                  onCancelExecution(execution.id)
+                }}
+              >
+                {t("cancelRun")}
+              </Button>
+            )}
 
             {/* Duration */}
             <span

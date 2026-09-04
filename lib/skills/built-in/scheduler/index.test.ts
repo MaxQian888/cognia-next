@@ -17,6 +17,7 @@ const scheduler = {
   pauseTask: jest.fn(),
   resumeTask: jest.fn(),
   runTaskNow: jest.fn(),
+  cancelExecution: jest.fn(),
 }
 jest.mock("@/lib/scheduler/task-scheduler", () => ({ getTaskScheduler: () => scheduler }))
 
@@ -70,13 +71,14 @@ beforeEach(() => {
 })
 
 describe("the schedule family", () => {
-  it("registers all seven skills under one family", () => {
+  it("registers all eight skills under one family", () => {
     expect(
       registry
         .listByFamily("schedule")
         .map((s) => s.id)
         .sort()
     ).toEqual([
+      "schedule.cancel_run",
       "schedule.create",
       "schedule.delete",
       "schedule.inspect",
@@ -91,6 +93,15 @@ describe("the schedule family", () => {
     // It stores no row of its own, but it CAUSES the task's effects: an
     // im-push task sends a message, a background-command task runs a command.
     expect(skill("schedule.run_now").mutation).toBe("write")
+  })
+
+  it("classifies cancel_run as a write, for the mirror of run_now's reason", () => {
+    // It stores no row either, and it abandons an agent turn or signals a
+    // spawned process on the user's machine.
+    expect(skill("schedule.cancel_run").mutation).toBe("write")
+    // Stopping is the recoverable direction, so unlike delete it is not gated
+    // behind a channel opt-in.
+    expect(skill("schedule.cancel_run").imAccess).toBe("always")
   })
 
   it("keeps delete destructive and behind a channel opt-in", () => {

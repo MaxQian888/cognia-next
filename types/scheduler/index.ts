@@ -100,7 +100,15 @@ export type TaskExecutionTerminalReason =
   | "executor-failure"
   | "execution-error"
   | "execution-timeout"
+  // The host was already running `maxConcurrentExecutions` executions when this
+  // start came due. Distinct from `overlap-skipped`, which means *this* task was
+  // busy: one is answered by the task's own overlap policy, the other by the
+  // user's host-wide ceiling.
   | "concurrency-blocked"
+  // Somebody asked for this run to stop, from the scheduler panel or through
+  // the `schedule.cancel_run` skill. Distinct from `overlap-cancelled`, which
+  // the scheduler does to itself when a newer start displaces a running one.
+  | "user-cancelled"
   | "retry-chain-active"
   | "missed-run-skipped"
   | "once-expired"

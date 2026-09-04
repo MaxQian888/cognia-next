@@ -60,11 +60,25 @@ jest.mock("./scheduler-db", () => ({
     getTasksByType: jest.fn().mockResolvedValue([]),
     cleanupOldExecutions: jest.fn().mockResolvedValue(0),
     interruptStaleExecutions: jest.fn().mockResolvedValue(0),
+    getExecution: jest.fn().mockResolvedValue(undefined),
   },
 }))
 
 // The creating conversation's workspace. Mocked so `createTask` never reaches
 // the main database from this suite — the point under test is that it ASKS.
+// The execution cap reads the user's policy. Mocked so the suite pins the
+// ceiling instead of depending on a settings store that never resolves in a
+// node environment with no account database.
+jest.mock("./write-authority", () => ({
+  loadSchedulerPolicy: jest.fn(async () => ({
+    agentAutoCreate: false,
+    confirmationRequired: [],
+    scriptTasksEnabled: true,
+    maxTasksPerSource: 50,
+    maxConcurrentExecutions: 5,
+  })),
+}))
+
 jest.mock("./task-workspace-binding", () => ({
   resolveTaskWorkspace: jest.fn(async (input: { createdBy?: { sessionId?: string } }) =>
     input.createdBy?.sessionId === "ses_wf" ? "ws_from_session" : undefined
@@ -99,6 +113,7 @@ import { schedulerDb } from "./scheduler-db"
 import { getNextCronTime, validateCronExpression } from "./cron-parser"
 import { CATCHUP_GRACE_WINDOW_MS, CATCHUP_MAX_REPLAYED_RUNS } from "./catchup-policy"
 import { loggers } from "@cognia/logging"
+import { loadSchedulerPolicy } from "./write-authority"
 
 const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
 
@@ -2738,6 +2753,185 @@ describe("TaskScheduler", () => {
         // initialize and arm the scheduler.
         await jest.advanceTimersByTimeAsync(10_000)
         expect(executor).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    describe("host concurrency cap", () => {
+      /**
+       * The cap is refreshed in the background rather than awaited on the
+       * dispatch path, so a test that wants it enforced has to let that
+       * refresh land first. One dispatch primes it, this flushes it.
+       */
+      async function primeCap(limit: number) {
+        jest.mocked(loadSchedulerPolicy).mockResolvedValue({
+          agentAutoCreate: false,
+          confirmationRequired: [],
+          scriptTasksEnabled: true,
+          maxTasksPerSource: 50,
+          maxConcurrentExecutions: limit,
+        })
+        // A dispatch is what asks for the cap, so run one throwaway task to
+        // trigger the refresh and then let it land. Reaching in for a private
+        // field would be quicker and would stop testing the real path.
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        mockSchedulerDb.getTask.mockResolvedValue(makePolicyTask({ id: "cap-primer" }))
+        await scheduler.runTaskNow("cap-primer")
+        await jest.advanceTimersByTimeAsync(1)
+      }
+
+      it("blocks a start once the host is at its ceiling, under skip", async () => {
+        await primeCap(1)
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        // Two DIFFERENT tasks: the per-task overlap policy is not what is
+        // being tested, the host-wide ceiling is.
+        const busy = makePolicyTask({ id: "cap-busy" })
+        const blocked = makePolicyTask({ id: "cap-blocked" })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "cap-busy" ? busy : blocked
+        )
+
+        const first = scheduler.runTaskNow(busy.id)
+        await Promise.resolve()
+        const second = await scheduler.runTaskNow(blocked.id)
+
+        expect(second?.status).toBe("skipped")
+        expect(second?.terminalReason).toBe("concurrency-blocked")
+        expect(executor).toHaveBeenCalledTimes(1)
+
+        release()
+        await first
+      })
+
+      it("does not exempt an `allow` task from the ceiling", async () => {
+        await primeCap(1)
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const busy = makePolicyTask({ id: "cap-allow-busy" })
+        const blocked = makePolicyTask({
+          id: "cap-allow-blocked",
+          config: { ...makePolicyTask().config, overlapPolicy: "allow" },
+        })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "cap-allow-busy" ? busy : blocked
+        )
+
+        const first = scheduler.runTaskNow(busy.id)
+        await Promise.resolve()
+        const second = await scheduler.runTaskNow(blocked.id)
+
+        expect(second?.terminalReason).toBe("concurrency-blocked")
+
+        release()
+        await first
+      })
+
+      it("buffers a capped start under queue-all and drains it when a slot frees", async () => {
+        await primeCap(1)
+        const { executor, release } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const busy = makePolicyTask({ id: "cap-queue-busy" })
+        const queued = makePolicyTask({
+          id: "cap-queue-blocked",
+          config: { ...makePolicyTask().config, overlapPolicy: "queue-all" },
+        })
+        mockSchedulerDb.getTask.mockImplementation(async (id: string) =>
+          id === "cap-queue-busy" ? busy : queued
+        )
+
+        const first = scheduler.runTaskNow(busy.id)
+        await Promise.resolve()
+        const second = await scheduler.runTaskNow(queued.id)
+
+        // Buffered, not dropped: the fire survives the ceiling.
+        expect(second?.status).toBe("pending")
+        expect(executor).toHaveBeenCalledTimes(1)
+
+        release()
+        await first
+        await jest.advanceTimersByTimeAsync(10)
+
+        // A completion on ANOTHER task released it. Before the cap existed a
+        // buffered start could only ever be drained by its own task finishing,
+        // so this start would have waited forever.
+        expect(executor).toHaveBeenCalledTimes(2)
+      })
+
+      it("admits freely while the host is idle", async () => {
+        await primeCap(1)
+        const executor = jest.fn().mockResolvedValue({ success: true })
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "cap-idle" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        expect((await scheduler.runTaskNow(task.id))?.status).toBe("completed")
+        expect((await scheduler.runTaskNow(task.id))?.status).toBe("completed")
+      })
+    })
+
+    describe("cancelling a run", () => {
+      it("aborts a running execution and settles it as user-cancelled", async () => {
+        const { executor } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "cancel-me" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const running = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+
+        const started = mockSchedulerDb.createExecution.mock.calls
+          .map(([execution]: [{ id: string; status: string }]) => execution)
+          .find((execution) => execution.status === "running")
+        expect(started).toBeDefined()
+
+        const outcome = await scheduler.cancelExecution(started!.id)
+        expect(outcome).toEqual({ cancelled: true })
+
+        const settled = await running
+        expect(settled?.status).toBe("cancelled")
+        // Distinct from `overlap-cancelled`, which is the scheduler displacing
+        // a run of its own accord rather than somebody asking it to stop.
+        expect(settled?.terminalReason).toBe("user-cancelled")
+      })
+
+      it("frees the slot it was holding, so the next start is admitted", async () => {
+        const { executor } = makeBlockingExecutor()
+        registerTaskExecutor("test", executor)
+        const task = makePolicyTask({ id: "cancel-frees-slot" })
+        mockSchedulerDb.getTask.mockResolvedValue(task)
+
+        const running = scheduler.runTaskNow(task.id)
+        await Promise.resolve()
+        const started = mockSchedulerDb.createExecution.mock.calls
+          .map(([execution]: [{ id: string; status: string }]) => execution)
+          .find((execution) => execution.status === "running")
+
+        expect(await scheduler.cancelExecution(started!.id)).toEqual({ cancelled: true })
+        expect((await running)?.status).toBe("cancelled")
+
+        // Proven by running something, rather than by reading a private
+        // counter. A fresh executor because the blocking one above is a
+        // one-shot: its point was to hold the slot, not to be reused.
+        registerTaskExecutor("test", jest.fn().mockResolvedValue({ success: true }))
+        const next = await scheduler.runTaskNow(task.id)
+        expect(next?.status).toBe("completed")
+      })
+
+      it("says not-found for an execution id that does not exist", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue(undefined)
+        await expect(scheduler.cancelExecution("nope")).resolves.toEqual({
+          cancelled: false,
+          reason: "not-found",
+        })
+      })
+
+      it("says already-settled rather than pretending to cancel a finished run", async () => {
+        mockSchedulerDb.getExecution.mockResolvedValue({ id: "done", status: "completed" })
+        await expect(scheduler.cancelExecution("done")).resolves.toEqual({
+          cancelled: false,
+          reason: "already-settled",
+          status: "completed",
+        })
       })
     })
 
