@@ -69,6 +69,7 @@ for (const [entry, values] of Object.entries({
 }
 
 for (const entry of [
+  "bot",
   "contracts",
   "templates",
   "connector",

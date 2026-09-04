@@ -38,6 +38,7 @@ export const CAPABILITY_META: readonly PluginCapabilityMeta[] = [
   { id: "tools", i18nKey: "tools", icon: WrenchIcon },
   { id: "components", i18nKey: "components", icon: PuzzleIcon },
   { id: "modes", i18nKey: "modes", icon: BotIcon },
+  { id: "bot", i18nKey: "bot", icon: BotIcon },
   { id: "themes", i18nKey: "themes", icon: PaletteIcon },
   { id: "commands", i18nKey: "commands", icon: CommandIcon },
   { id: "hooks", i18nKey: "hooks", icon: ZapIcon },

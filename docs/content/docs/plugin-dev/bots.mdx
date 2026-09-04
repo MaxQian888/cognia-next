@@ -1,0 +1,163 @@
+---
+title: Bots
+description: Contribute an installable Bot, one unit binding an event source, a policy ceiling, an executor and its credentials.
+---
+
+# Bots
+
+A Bot is a **binding**, not an engine.
+
+Everything a Bot does at runtime is already owned by something else. It runs on the
+Workflow orchestrator, a Squad, a plain agent turn, or a durable handler your plugin
+ships. Its journal is an `ExecutionRun`. Its human decisions are run interrupts on the
+same decision surface every other approval uses. Its writes to the outside world go
+through the Integration action broker, which already owns approval, idempotency,
+backoff, dead-lettering, the PII gate and the origin allowlist.
+
+What a Bot definition adds is the part nothing owned before: one named, versioned,
+installable unit that binds an event source to a policy to an executor to a set of
+credentials, so a user can install it and you can ship it.
+
+## Declaring one
+
+Bots are declared in `manifest.bots[]`. They are never registered through a callback:
+a registration function would hand the host a closure, and a closure cannot cross the
+Python plugin boundary, so the TypeScript author would get a capability the Python
+author could not have.
+
+```ts title="src/bots.ts"
+import { defineBot } from "@cognia/plugin-sdk/api/bot"
+
+export const digest = defineBot({
+  id: "daily-digest",
+  name: "Daily digest",
+  version: "1.0.0",
+  executor: "handler",
+  entry: "./bots/digest.js",
+  triggers: [
+    { id: "morning", kind: "schedule", cron: "0 9 * * 1-5" },
+    { id: "opened", kind: "event", source: "integration", types: ["issues.opened"] },
+  ],
+  requires: {
+    credentials: [{ id: "repo", label: "Repository", integration: "github-delivery" }],
+    integrationActions: ["github-delivery.commentIssue"],
+  },
+  policy: { maxAutonomy: "confirm", maxConcurrentRuns: 1 },
+})
+```
+
+Declare the `bot` capability and the permissions you actually use:
+
+```json title="cognia-plugin.json"
+{
+  "capabilities": ["bot"],
+  "permissions": ["bots:read", "bots:execute"]
+}
+```
+
+`bots:read` lists installations and runs. `bots:execute` is what a handler needs to
+drive its own steps and waits. `bots:control` cancels, retries and replays, and is
+only needed by a plugin that manages other runs.
+
+## Executors
+
+| `executor` | Extra field | What runs |
+| --- | --- | --- |
+| `workflow` | `workflow` | A published workflow deployment, resolved as an immutable artifact with its dependencies locked |
+| `squad` | `team` | A Squad |
+| `agent-turn` | `prompt` | One bounded agent turn, the prompt interpolated against the event |
+| `handler` | `entry` (JS) or nothing (Python) | A durable handler your plugin ships |
+
+Exactly one extra field is allowed. Declaring two is how a definition ends up meaning
+two things, so the type refuses it and so does the manifest validator.
+
+## Triggers
+
+| `kind` | Fires when |
+| --- | --- |
+| `interaction` | A human addressed the Bot in a conversation it is bound to |
+| `event` | An event matched by `source` and `types` |
+| `schedule` | A `cron` expression, on whichever Host owns the task |
+| `poll` | Every `everyMs`, with a host-stored cursor |
+| `derivedState` | A predicate over readable state CHANGES, on an edge, never on every evaluation |
+| `manual` | Somebody pressed Run |
+
+Every trigger takes an optional `concurrencyKey` interpolated against the envelope
+(`"{{resource.id}}"`), a `debounceMs`, and a `coalesce` of `latest` or `all`. A
+trigger that writes to the outside world should ship `enabledByDefault: false` and be
+armed on purpose.
+
+## Writing a durable handler
+
+The handler is re-entered **from the top** after a crash, a Host handover, or a
+resumed wait. Nothing in it may assume the process that started the run is the process
+that finishes it. Work that must not repeat goes inside `step.run`, which memoizes on
+the run's own event journal.
+
+```ts title="bots/digest.js"
+import { defineBotHandler } from "@cognia/plugin-sdk/api/bot"
+
+export default defineBotHandler(async (ctx) => {
+  const issues = await ctx.step.run("fetch", () => fetchOpenIssues(ctx.config.repo))
+
+  const decision = await ctx.step.waitForApproval("send", {
+    title: `Post a digest of ${issues.length} issues?`,
+    detail: { issues: issues.map((i) => i.title) },
+    risk: "medium",
+  })
+  if (decision.outcome !== "approved") return { summary: "declined" }
+
+  await ctx.step.run("post", () => postDigest(issues))
+  return { summary: `posted ${issues.length} items` }
+})
+```
+
+An `expired` decision is not an approval. Nobody answered, and treating it as a yes is
+the mistake the outcome union exists to make visible.
+
+### Python
+
+The same shape, driven by the same three host calls. Your handler is a
+`@cognia.contribution("<bot id>")` object with a `run` method.
+
+```python title="main.py"
+import cognia
+from cognia.bot import BotRun, define_bot
+
+DIGEST = define_bot(
+    id="daily-digest",
+    name="Daily digest",
+    version="1.0.0",
+    executor="handler",
+    triggers=[{"id": "morning", "kind": "schedule", "cron": "0 9 * * 1-5"}],
+)
+
+@cognia.contribution("daily-digest")
+class DailyDigest:
+    async def run(self, snapshot):
+        run = BotRun(snapshot)
+        issues = await run.step_run("fetch", fetch_open_issues)
+        decision = await run.wait_for_approval("send", title="Post the digest?")
+        if decision["outcome"] != "approved":
+            return {"summary": "declined"}
+        await run.step_run("post", lambda: post_digest(issues))
+        return {"summary": f"posted {len(issues)} items"}
+```
+
+Python is handed the serialisable half of the run (`runId`, `installationId`, `botId`,
+`event`, `config`) and reaches the rest through `ctx.bots.*`. Cancellation crosses at
+step edges: once a run is cancelled, the next `step_run`, `wait_for_approval` or
+`wait_for_event` raises.
+
+## Policy is a ceiling, never a grant
+
+Every value in `policy` is intersected with the organisation policy, your plugin's
+granted permissions, the installation's grant and the individual run request. A lower
+layer can only narrow. Declaring `maxAutonomy: "autopilot"` does not give a Bot
+autopilot, it merely declines to lower the ceiling further.
+
+## The payload is untrusted
+
+`ctx.event.payload` is written by whoever opened the pull request or sent the message.
+Read it as data. Never read it as instructions, and never let it choose a URL, a
+recipient or an action id.

@@ -3287,3 +3287,140 @@ describe("validatePluginManifest configSchema.secret", () => {
     expect(result.errors.filter((message) => message.includes("secret"))).toEqual([])
   })
 })
+
+describe("manifest.bots validation", () => {
+  const manifestWith = (bots: unknown): PluginManifest =>
+    ({
+      id: "acme",
+      name: "Acme",
+      version: "1.0.0",
+      description: "A test plugin",
+      type: "frontend",
+      capabilities: ["bot"],
+      main: "index.js",
+      bots,
+    }) as unknown as PluginManifest
+
+  const bot = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: "digest",
+    name: "Digest",
+    version: "1.0.0",
+    executor: "handler",
+    entry: "./bots/digest.js",
+    triggers: [{ id: "morning", kind: "schedule", cron: "0 9 * * *" }],
+    ...overrides,
+  })
+
+  const codesFor = (bots: unknown): string[] =>
+    (validatePluginManifest(manifestWith(bots)).diagnostics ?? []).map((d) => d.code)
+
+  it("accepts a well-formed handler bot", () => {
+    expect(validatePluginManifest(manifestWith([bot()])).valid).toBe(true)
+  })
+
+  it("accepts every executor with its own target field", () => {
+    const cases = [
+      bot({ id: "a", executor: "workflow", workflow: "wf_1", entry: undefined }),
+      bot({ id: "b", executor: "squad", team: "team_1", entry: undefined }),
+      bot({ id: "c", executor: "agent-turn", prompt: "Summarise.", entry: undefined }),
+    ]
+    expect(validatePluginManifest(manifestWith(cases)).valid).toBe(true)
+  })
+
+  it("refuses a non-array bots field", () => {
+    expect(codesFor({ id: "digest" })).toContain("manifest.bots.invalid")
+  })
+
+  it("requires id, name and version", () => {
+    const codes = codesFor([{ executor: "handler", triggers: [{ id: "m", kind: "manual" }] }])
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        "manifest.bots.id.missing",
+        "manifest.bots.name.missing",
+        "manifest.bots.version.missing",
+      ])
+    )
+  })
+
+  it("refuses two bots sharing an id in one manifest", () => {
+    // Ids are namespaced per plugin, so a duplicate inside one plugin would
+    // silently shadow rather than collide across plugins.
+    expect(codesFor([bot(), bot()])).toContain("manifest.bots.id.duplicate")
+  })
+
+  it("refuses an unknown executor", () => {
+    expect(codesFor([bot({ executor: "magic" })])).toContain("manifest.bots.executor.invalid")
+  })
+
+  it("requires the executor's own target field", () => {
+    expect(codesFor([bot({ executor: "workflow", entry: undefined })])).toContain(
+      "manifest.bots.executor.field.missing"
+    )
+  })
+
+  it("refuses a target field belonging to another executor", () => {
+    const codes = codesFor([bot({ executor: "workflow", workflow: "wf_1", team: "team_1" })])
+    expect(codes).toContain("manifest.bots.executor.field.unexpected")
+  })
+
+  it("lets a handler bot declare no target field at all", () => {
+    // A python-backed handler has no `entry`: the host dispatches into the
+    // plugin process, so requiring one would lock Python out of the capability.
+    expect(
+      validatePluginManifest(manifestWith([bot({ entry: undefined, backend: "python" })])).valid
+    ).toBe(true)
+  })
+
+  it("refuses a bot with no trigger", () => {
+    expect(codesFor([bot({ triggers: [] })])).toContain("manifest.bots.triggers.missing")
+    expect(codesFor([bot({ triggers: undefined })])).toContain("manifest.bots.triggers.missing")
+  })
+
+  it("requires a trigger id and a known kind", () => {
+    const codes = codesFor([bot({ triggers: [{ kind: "telepathy" }] })])
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        "manifest.bots.trigger.id.missing",
+        "manifest.bots.trigger.kind.invalid",
+      ])
+    )
+  })
+
+  it("requires an event trigger to name a source and at least one type", () => {
+    const codes = codesFor([bot({ triggers: [{ id: "e", kind: "event", types: [] }] })])
+    expect(codes).toEqual(
+      expect.arrayContaining([
+        "manifest.bots.trigger.source.invalid",
+        "manifest.bots.trigger.types.missing",
+      ])
+    )
+  })
+
+  it("requires a schedule trigger to carry a cron expression", () => {
+    expect(codesFor([bot({ triggers: [{ id: "s", kind: "schedule" }] })])).toContain(
+      "manifest.bots.trigger.cron.missing"
+    )
+  })
+
+  it("requires poll and derivedState triggers to carry an interval", () => {
+    expect(codesFor([bot({ triggers: [{ id: "p", kind: "poll" }] })])).toContain(
+      "manifest.bots.trigger.everyMs.missing"
+    )
+    expect(
+      codesFor([bot({ triggers: [{ id: "d", kind: "derivedState", state: "stale" }] })])
+    ).toContain("manifest.bots.trigger.everyMs.missing")
+  })
+
+  it("requires a derivedState trigger to name the state it watches", () => {
+    expect(
+      codesFor([bot({ triggers: [{ id: "d", kind: "derivedState", everyMs: 60000 }] })])
+    ).toContain("manifest.bots.trigger.state.missing")
+  })
+
+  it("accepts a manual trigger with nothing but an id", () => {
+    expect(
+      validatePluginManifest(manifestWith([bot({ triggers: [{ id: "run", kind: "manual" }] })]))
+        .valid
+    ).toBe(true)
+  })
+})

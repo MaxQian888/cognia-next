@@ -227,6 +227,7 @@ export type PluginCapability =
   | "pet" // Reads + nurtures the desktop pet — gates ctx.pet (rate-limited, budget-clamped)
   | "pet-achievement" // Contributes data-only pet achievements (condition DSL, manifest.petAchievements)
   | "pet-item" // Contributes data-only pet shop items (manifest.petItems)
+  | "bot" // Contributes installable Bots: event source + policy + executor as one unit (manifest.bots)
 
 /**
  * Plugin status in the lifecycle
@@ -1135,6 +1136,16 @@ export interface PluginManifest {
    * `extension:ui` plus the read permission for every declared resource kind.
    */
   contextPanels?: PluginContextPanelDef[]
+
+  /**
+   * Installable Bots. Each entry binds an event source, a policy ceiling and
+   * an executor (a published workflow, a Squad, one agent turn, or a durable
+   * handler this plugin ships) into one named, versioned unit a user installs
+   * and arms. Registered by `lib/plugin/bridge/bots-bridge.ts` on enable and
+   * dropped on disable. Permission gate: `bots:read` to be listed,
+   * `bots:execute` for the handler to reach `ctx.bots`.
+   */
+  bots?: import("./plugin-bot").PluginBotDef[]
 
   /**
    * Sandboxed webview panels (B3) — arbitrary HTML rendered in an isolated

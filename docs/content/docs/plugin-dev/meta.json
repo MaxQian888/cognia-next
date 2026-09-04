@@ -10,6 +10,7 @@
     "surfaces",
     "integrations",
     "workflow-nodes",
+    "bots",
     "connector-adapters",
     "lifecycle-hooks",
     "devtools",

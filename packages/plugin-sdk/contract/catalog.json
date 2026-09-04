@@ -621,6 +621,13 @@
       "manifestFields": ["petItems"],
       "introducedIn": "0.1.0",
       "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "bot",
+      "support": "supported",
+      "manifestFields": ["bots"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
     }
   ],
   "pathFields": [
@@ -926,6 +933,12 @@
       "runtime": "asset",
       "requiredFor": ["vscode-extension"],
       "executable": false
+    },
+    {
+      "path": "bots[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
     }
   ],
   "manifestContributions": [
@@ -1251,6 +1264,16 @@
       "capabilities": ["configuration"],
       "execution": "javascript",
       "entryPath": "configComponent.entry"
+    },
+    {
+      "field": "bots",
+      "capabilities": ["bot"],
+      "execution": "conditional",
+      "pythonExecution": "supported",
+      "javascriptWhen": {
+        "path": "entry"
+      },
+      "entryPath": "bots[].entry"
     }
   ],
   "runtimeEntries": {

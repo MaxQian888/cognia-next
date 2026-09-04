@@ -1726,6 +1726,25 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     docs: "docs/content/docs/en/subsystems/plugin-system/contracts-and-registries.mdx#capabilities",
     requiredTests: ["lib/plugin/registries/pet-item-registry.test.ts"],
   },
+  {
+    // A Bot binds an event source, a policy ceiling, an executor and its
+    // credentials into one installable unit. Three executors are pure data; only
+    // `executor: "handler"` resolves a module, which is why the contribution is
+    // `conditional` execution with `pythonExecution: "supported"`.
+    id: "bot",
+    support: "supported",
+    manifestFields: ["bots"],
+    runtimeBinding: "registerBotsForPlugin + bot-registry overlay + module-bridge dispatch",
+    hostBindings: ["lib/plugin/registries/bot-registry.ts", "lib/plugin/bridge/bots-bridge.ts"],
+    typescriptSdk: ["packages/plugin-sdk/src/define/define-bot.ts"],
+    pythonSdk: ["plugin-sdk/python/src/cognia/bot.py"],
+    docs: "docs/content/docs/plugin-dev/bots.mdx",
+    requiredTests: [
+      "lib/plugin/registries/bot-registry.test.ts",
+      "lib/plugin/bridge/bots-bridge.test.ts",
+      "lib/plugin/contracts/module-bridge-map.test.ts",
+    ],
+  },
 ] as const
 
 export const CANONICAL_PLUGIN_CAPABILITIES = AUTHOR_CAPABILITY_IDS as readonly PluginCapability[]

@@ -193,6 +193,41 @@ export { defineAiProvider } from "./define/define-ai-provider"
 export { defineCliTool } from "./define/define-cli-tool"
 export { defineCommand } from "./define/define-command"
 export { defineLspServer } from "./define/define-lsp-server"
+export { defineBot, defineBotHandler } from "./define/define-bot"
+export type {
+  PluginBotDef,
+  PluginBotExecutor,
+  PluginBotTriggerDef,
+  PluginBotTriggerKind,
+  PluginBotEventSource,
+  PluginBotCredentialSlot,
+  PluginBotRequirementsV1,
+  PluginBotCompositionRequestV1,
+  PluginBotPolicyV1,
+  PluginWorkflowBotDef,
+  PluginSquadBotDef,
+  PluginAgentTurnBotDef,
+  PluginHandlerBotDef,
+} from "@/types/plugin/plugin-bot"
+export { PLUGIN_BOT_EXECUTORS, PLUGIN_BOT_TRIGGER_KINDS } from "@/types/plugin/plugin-bot"
+export type {
+  BotEventEnvelopeV1,
+  BotEventActor,
+  BotEventResource,
+  BotEventProvenanceV1,
+} from "@/types/bot/event"
+export type {
+  BotHandlerV1,
+  BotHandlerResultV1,
+  BotRunContextV1,
+  BotRunSnapshotV1,
+  BotStepApiV1,
+  BotApprovalRequestV1,
+  BotApprovalDecisionV1,
+  BotWaitForEventInput,
+  BotProgressUpdateV1,
+  BotLogLevel,
+} from "@/types/bot/run"
 export { defineMode } from "./define/define-mode"
 export { defineOcrProvider } from "./define/define-ocr-provider"
 export { definePetAchievement } from "./define/define-pet-achievement"

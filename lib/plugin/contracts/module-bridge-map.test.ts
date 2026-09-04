@@ -110,6 +110,7 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
         "scheduler",
         "view",
         "webview",
+        "bot",
       ])
     )
     // Lock the count — silent growth means the manager dispatch loop picked
@@ -119,7 +120,10 @@ describe("MODULE_BRIDGE_CAPABILITIES", () => {
     // real and covered by `integrations-bridge.test.ts`.
     // `commands` (25th) is declarative bookkeeping for python-backed
     // `manifest.commands[]`, covered by `commands-bridge.test.ts`.
-    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(25)
+    // `bot` (26th) was verified: only `executor: "handler"` imports anything,
+    // and `bots-bridge.test.ts` covers the JS export, the python snapshot
+    // boundary, the per-bot error isolation and the re-enable drop.
+    expect(MODULE_BRIDGE_CAPABILITY_KEYS).toHaveLength(26)
   })
 
   describe.each(MODULE_BRIDGE_CAPABILITY_KEYS)("%s", (key) => {

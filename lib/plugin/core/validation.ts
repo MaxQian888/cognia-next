@@ -39,6 +39,14 @@ import {
   CANONICAL_CONTEXT_ACTIVITIES,
   CONTEXT_RESOURCE_READ_PERMISSIONS,
 } from "@/types/context-workbench"
+import {
+  PLUGIN_BOT_EVENT_SOURCES,
+  PLUGIN_BOT_EXECUTOR_FIELDS,
+  PLUGIN_BOT_EXECUTOR_REQUIRED_FIELD,
+  PLUGIN_BOT_EXECUTORS,
+  PLUGIN_BOT_TRIGGER_KINDS,
+  type PluginBotExecutor,
+} from "@/types/plugin/plugin-bot"
 import { DECLARATIVE_CONTEXT_PANEL_KINDS } from "@/types/plugin/plugin-context-panel"
 import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "@/types/plugin/plugin-modal"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
@@ -2052,6 +2060,10 @@ export function validatePluginManifest(
     validateCliTools(m as unknown as PluginManifest, pushError)
   }
 
+  if (m.bots !== undefined) {
+    validateBots(m as unknown as PluginManifest, pushError)
+  }
+
   if (m.modes && Array.isArray(m.modes)) {
     for (let i = 0; i < m.modes.length; i++) {
       const mode = m.modes[i] as Record<string, unknown>
@@ -3347,6 +3359,180 @@ type PushDiagnostic = (field: string, code: string, message: string, hint?: stri
  * every rule here is one the executor's safety model relies on (argv
  * params declared, binary refs resolvable, no path traversal).
  */
+/**
+ * Per-entry validation for `manifest.bots[]`.
+ *
+ * The three rules worth catching before anything is registered:
+ *
+ *   1. The executor discriminant and its one required field must agree. The
+ *      TypeScript union already refuses two, but a hand-written plugin.json
+ *      does not go through the union, and a definition carrying both
+ *      `workflow` and `team` means two different things at once.
+ *   2. A Bot with no trigger can never start, which is a silently dormant
+ *      contribution rather than an error the author would notice.
+ *   3. Each trigger kind carries a field without which it cannot fire. A
+ *      schedule with no cron and a poll with no interval are the same defect
+ *      wearing different names.
+ *
+ * Keep in lockstep with `define_bot` in `plugin-sdk/python/src/cognia/bot.py`,
+ * which enforces the identical rules for a Python author before packaging.
+ */
+function validateBots(m: PluginManifest, pushError: PushDiagnostic): void {
+  const bots = m.bots as unknown
+  if (!Array.isArray(bots)) {
+    pushError("bots", "manifest.bots.invalid", '"bots" must be an array')
+    return
+  }
+
+  const seenIds = new Set<string>()
+
+  bots.forEach((entry, i) => {
+    const field = `bots[${i}]`
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      pushError(field, "manifest.bots.entry.invalid", `${field} must be an object`)
+      return
+    }
+    const bot = entry as Record<string, unknown>
+
+    for (const key of ["id", "name", "version"] as const) {
+      if (typeof bot[key] !== "string" || (bot[key] as string).trim() === "") {
+        pushError(
+          `${field}.${key}`,
+          `manifest.bots.${key}.missing`,
+          `Bot at index ${i} is missing a non-empty "${key}"`
+        )
+      }
+    }
+
+    if (typeof bot.id === "string" && bot.id.trim() !== "") {
+      if (seenIds.has(bot.id)) {
+        pushError(
+          `${field}.id`,
+          "manifest.bots.id.duplicate",
+          `Duplicate bot id "${bot.id}" in this manifest`,
+          "Bot ids are namespaced by plugin, so they must be unique within one plugin."
+        )
+      }
+      seenIds.add(bot.id)
+    }
+
+    const executor = bot.executor
+    if (typeof executor !== "string" || !PLUGIN_BOT_EXECUTORS.includes(executor as never)) {
+      pushError(
+        `${field}.executor`,
+        "manifest.bots.executor.invalid",
+        `Bot at index ${i} has an unknown executor ${JSON.stringify(executor)}`,
+        `Expected one of ${PLUGIN_BOT_EXECUTORS.join(", ")}.`
+      )
+    } else {
+      const requiredField = PLUGIN_BOT_EXECUTOR_REQUIRED_FIELD[executor as PluginBotExecutor]
+      if (requiredField && typeof bot[requiredField] !== "string") {
+        pushError(
+          `${field}.${requiredField}`,
+          "manifest.bots.executor.field.missing",
+          `Bot executor "${executor}" requires a "${requiredField}" value`
+        )
+      }
+      for (const other of PLUGIN_BOT_EXECUTOR_FIELDS) {
+        if (other !== requiredField && bot[other] !== undefined) {
+          pushError(
+            `${field}.${other}`,
+            "manifest.bots.executor.field.unexpected",
+            `Bot executor "${executor}" must not declare "${other}"`,
+            "One executor, one target. Declaring two makes the definition mean two things."
+          )
+        }
+      }
+    }
+
+    const triggers = bot.triggers
+    if (!Array.isArray(triggers) || triggers.length === 0) {
+      pushError(
+        `${field}.triggers`,
+        "manifest.bots.triggers.missing",
+        `Bot at index ${i} needs at least one trigger, or it can never start`
+      )
+      return
+    }
+
+    triggers.forEach((rawTrigger, t) => {
+      const triggerField = `${field}.triggers[${t}]`
+      if (!rawTrigger || typeof rawTrigger !== "object" || Array.isArray(rawTrigger)) {
+        pushError(
+          triggerField,
+          "manifest.bots.trigger.invalid",
+          `${triggerField} must be an object`
+        )
+        return
+      }
+      const trigger = rawTrigger as Record<string, unknown>
+
+      if (typeof trigger.id !== "string" || trigger.id.trim() === "") {
+        pushError(
+          `${triggerField}.id`,
+          "manifest.bots.trigger.id.missing",
+          `${triggerField} is missing a non-empty "id"`
+        )
+      }
+
+      const kind = trigger.kind
+      if (typeof kind !== "string" || !PLUGIN_BOT_TRIGGER_KINDS.includes(kind as never)) {
+        pushError(
+          `${triggerField}.kind`,
+          "manifest.bots.trigger.kind.invalid",
+          `${triggerField} has an unknown kind ${JSON.stringify(kind)}`,
+          `Expected one of ${PLUGIN_BOT_TRIGGER_KINDS.join(", ")}.`
+        )
+        return
+      }
+
+      if (kind === "event") {
+        if (
+          typeof trigger.source !== "string" ||
+          !PLUGIN_BOT_EVENT_SOURCES.includes(trigger.source as never)
+        ) {
+          pushError(
+            `${triggerField}.source`,
+            "manifest.bots.trigger.source.invalid",
+            `${triggerField} needs a "source" from ${PLUGIN_BOT_EVENT_SOURCES.join(", ")}`
+          )
+        }
+        if (!Array.isArray(trigger.types) || trigger.types.length === 0) {
+          pushError(
+            `${triggerField}.types`,
+            "manifest.bots.trigger.types.missing",
+            `${triggerField} needs a non-empty "types" list`
+          )
+        }
+      }
+
+      if (kind === "schedule" && typeof trigger.cron !== "string") {
+        pushError(
+          `${triggerField}.cron`,
+          "manifest.bots.trigger.cron.missing",
+          `${triggerField} needs a "cron" expression`
+        )
+      }
+
+      if ((kind === "poll" || kind === "derivedState") && typeof trigger.everyMs !== "number") {
+        pushError(
+          `${triggerField}.everyMs`,
+          "manifest.bots.trigger.everyMs.missing",
+          `${triggerField} needs a numeric "everyMs"`
+        )
+      }
+
+      if (kind === "derivedState" && typeof trigger.state !== "string") {
+        pushError(
+          `${triggerField}.state`,
+          "manifest.bots.trigger.state.missing",
+          `${triggerField} needs a "state" name`
+        )
+      }
+    })
+  })
+}
+
 function validateCliTools(m: PluginManifest, pushError: PushDiagnostic): void {
   const cliTools = m.cliTools as unknown
   if (!Array.isArray(cliTools)) {

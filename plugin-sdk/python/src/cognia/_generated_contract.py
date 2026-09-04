@@ -218,6 +218,7 @@ VALID_CAPABILITIES = (
     "pet",
     "pet-achievement",
     "pet-item",
+    "bot",
 )
 
 CAPABILITY_FIELDS = {
@@ -406,6 +407,9 @@ CAPABILITY_FIELDS = {
     "pet-item": [
         "petItems",
     ],
+    "bot": [
+        "bots",
+    ],
 }
 
 CAPABILITY_SUPPORT = {
@@ -478,6 +482,7 @@ CAPABILITY_SUPPORT = {
     "pet": "supported",
     "pet-achievement": "supported",
     "pet-item": "supported",
+    "bot": "supported",
 }
 
 CAPABILITY_INTRODUCED_VERSIONS = {
@@ -550,6 +555,7 @@ CAPABILITY_INTRODUCED_VERSIONS = {
     "pet": "0.1.0",
     "pet-achievement": "0.1.0",
     "pet-item": "0.1.0",
+    "bot": "0.1.0",
 }
 
 CAPABILITY_MINIMUM_HOST_VERSIONS = {
@@ -622,6 +628,7 @@ CAPABILITY_MINIMUM_HOST_VERSIONS = {
     "pet": "0.1.0",
     "pet-achievement": "0.1.0",
     "pet-item": "0.1.0",
+    "bot": "0.1.0",
 }
 
 MANIFEST_CONTRIBUTIONS = [
@@ -1062,6 +1069,18 @@ MANIFEST_CONTRIBUTIONS = [
         "execution": "javascript",
         "entryPath": "configComponent.entry",
     },
+    {
+        "field": "bots",
+        "capabilities": [
+            "bot",
+        ],
+        "execution": "conditional",
+        "pythonExecution": "supported",
+        "javascriptWhen": {
+            "path": "entry",
+        },
+        "entryPath": "bots[].entry",
+    },
 ]
 
 RUNTIME_ENTRY_CONTRACTS = {
@@ -1449,6 +1468,12 @@ PLUGIN_PATH_FIELD_CONTRACTS = [
             "vscode-extension",
         ],
         "executable": False,
+    },
+    {
+        "path": "bots[].entry",
+        "runtime": "javascript",
+        "requiredFor": [],
+        "executable": True,
     },
 ]
 
@@ -15976,4 +16001,5 @@ PLUGIN_PATH_FIELDS = (
     "vscodeExtension.contributes.snippets[].path",
     "vscodeExtension.contributes.chatInstructions[].path",
     "vscodeExtension.contributes.chatPromptFiles[].path",
+    "bots[].entry",
 )

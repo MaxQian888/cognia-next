@@ -76,6 +76,8 @@ PYTHON_MIRRORS: dict[str, str] = {
     # external-agent (merged into cognia)
     "external-agent-preset": "define_external_agent_preset",
     "external-agent-adapter": "define_external_agent_adapter",
+    # bot capability
+    "bot": "define_bot",
     # agent / skills / command family
     "skill": "define_skill",
     "subagent": "define_subagent",

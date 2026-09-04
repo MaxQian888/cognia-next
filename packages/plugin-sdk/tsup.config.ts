@@ -23,6 +23,7 @@ const runtimeEntries = {
   team: "src/api/team.ts",
   automation: "src/api/automation.ts",
   "balance-adapter": "src/api/balance-adapter.ts",
+  bot: "src/api/bot.ts",
   browser: "src/api/browser.ts",
   "character-pack": "src/api/character-pack.ts",
   "cli-tool": "src/api/cli-tool.ts",

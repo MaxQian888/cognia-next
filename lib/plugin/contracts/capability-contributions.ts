@@ -60,6 +60,7 @@ interface ContributionManifestShape {
   scheduledTasks?: Array<{ name?: string }>
   characterPacks?: Array<{ id?: string; name?: string }>
   subagents?: Array<{ id?: string; name?: string }>
+  bots?: Array<{ id?: string; name?: string }>
   // A template package is keyed by its own manifest, not by a flat `id`: the
   // contribution IS a package envelope (`PluginTemplatePackageContribution`),
   // and the definitions inside it are addressed through that manifest.
@@ -180,6 +181,8 @@ export function getContributionsForCapability(
       return compact(asArray(m.characterPacks).map((s) => entry(s.id, s.name)))
     case "subagent":
       return compact(asArray(m.subagents).map((s) => entry(s.id, s.name)))
+    case "bot":
+      return compact(asArray(m.bots).map((s) => entry(s.id, s.name)))
     case "template-package":
       // One entry per PACKAGE, which is what the manifest field holds and what
       // the library's "N templates" chip is counting. The definitions a package

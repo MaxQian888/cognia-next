@@ -201,6 +201,12 @@
       "require": "./dist/site.cjs",
       "default": "./dist/site.js"
     },
+    "./api/bot": {
+      "types": "./dist/bot.d.ts",
+      "import": "./dist/bot.js",
+      "require": "./dist/bot.cjs",
+      "default": "./dist/bot.js"
+    },
     "./api/skill": {
       "types": "./dist/skill.d.ts",
       "import": "./dist/skill.js",

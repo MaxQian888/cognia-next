@@ -28,6 +28,7 @@ describe("plugin-sdk package exports", () => {
     "./api/team",
     "./api/agent-turn",
     "./api/automation",
+    "./api/bot",
     "./api/browser",
     "./api/i18n",
     "./api/balance-adapter",

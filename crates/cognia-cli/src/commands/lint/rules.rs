@@ -12,6 +12,42 @@ use crate::engine::contract::{
     VALID_PLUGIN_TYPES,
 };
 
+/// Bot executor discriminants, mirroring `PLUGIN_BOT_EXECUTORS` in
+/// `types/plugin/plugin-bot.ts`. Kept here rather than generated because the
+/// contract catalog carries capability and permission vocabularies, not the
+/// per-contribution shape a linter needs to read.
+const BOT_EXECUTORS: [&str; 4] = ["workflow", "squad", "agent-turn", "handler"];
+
+/// Every executor-target field, so the linter can refuse the ones that do not
+/// belong to the declared executor.
+const BOT_EXECUTOR_FIELDS: [&str; 3] = ["workflow", "team", "prompt"];
+
+/// Trigger discriminants, mirroring `PLUGIN_BOT_TRIGGER_KINDS`.
+const BOT_TRIGGER_KINDS: [&str; 6] = [
+    "interaction",
+    "event",
+    "schedule",
+    "poll",
+    "derivedState",
+    "manual",
+];
+
+/// Event sources a `kind: "event"` trigger may name, mirroring
+/// `PLUGIN_BOT_EVENT_SOURCES`.
+const BOT_EVENT_SOURCES: [&str; 5] = ["integration", "workflow", "connector", "desktop", "bot"];
+
+/// The one extra field an executor requires. `handler` needs none: a
+/// python-backed handler declares no `entry`, because the host dispatches into
+/// the plugin process instead.
+fn bot_executor_required_field(executor: &str) -> Option<&'static str> {
+    match executor {
+        "workflow" => Some("workflow"),
+        "squad" => Some("team"),
+        "agent-turn" => Some("prompt"),
+        _ => None,
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation core
 // ─────────────────────────────────────────────────────────────────────────────
@@ -603,6 +639,254 @@ pub fn validate_manifest(manifest: &Value) -> Vec<Diagnostic> {
                         field: format!("modes[{i}].{required}"),
                         code: format!("manifest.modes.{required}.missing"),
                         message: format!("Mode at index {i} missing \"{required}\" field"),
+                        hint: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // ── bots[]: identity + one executor target + at least one live trigger ──
+    //
+    // Kept rule-for-rule in lockstep with `validateBots` in
+    // `lib/plugin/core/validation.ts`. Two of these are only catchable here for
+    // a hand-written plugin.json: the TypeScript union already refuses a
+    // definition that names two executor targets, and a definition with no
+    // trigger is a contribution that registers and then never fires.
+    if let Some(arr) = obj.get("bots").and_then(Value::as_array) {
+        let mut seen_ids: Vec<&str> = Vec::new();
+        for (i, bot) in arr.iter().enumerate() {
+            let bo = match bot.as_object() {
+                Some(o) => o,
+                None => {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("bots[{i}]"),
+                        code: "manifest.bots.entry.invalid".into(),
+                        message: format!("bots[{i}] must be an object"),
+                        hint: None,
+                    });
+                    continue;
+                }
+            };
+
+            for required in ["id", "name", "version"] {
+                let present = bo
+                    .get(required)
+                    .and_then(Value::as_str)
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false);
+                if !present {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("bots[{i}].{required}"),
+                        code: format!("manifest.bots.{required}.missing"),
+                        message: format!("Bot at index {i} is missing a non-empty \"{required}\""),
+                        hint: None,
+                    });
+                }
+            }
+
+            if let Some(id) = bo.get("id").and_then(Value::as_str) {
+                if !id.trim().is_empty() {
+                    if seen_ids.contains(&id) {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("bots[{i}].id"),
+                            code: "manifest.bots.id.duplicate".into(),
+                            message: format!("Duplicate bot id \"{id}\" in this manifest"),
+                            hint: Some(
+                                "Bot ids are namespaced by plugin, so they must be unique within one plugin."
+                                    .into(),
+                            ),
+                        });
+                    }
+                    seen_ids.push(id);
+                }
+            }
+
+            match bo.get("executor").and_then(Value::as_str) {
+                Some(executor) if BOT_EXECUTORS.contains(&executor) => {
+                    let required_field = bot_executor_required_field(executor);
+                    if let Some(required_field) = required_field {
+                        if !bo
+                            .get(required_field)
+                            .map(|v| v.is_string())
+                            .unwrap_or(false)
+                        {
+                            out.push(Diagnostic {
+                                severity: Severity::Error,
+                                field: format!("bots[{i}].{required_field}"),
+                                code: "manifest.bots.executor.field.missing".into(),
+                                message: format!(
+                                    "Bot executor \"{executor}\" requires a \"{required_field}\" value"
+                                ),
+                                hint: None,
+                            });
+                        }
+                    }
+                    for other in BOT_EXECUTOR_FIELDS {
+                        if Some(other) != required_field && bo.contains_key(other) {
+                            out.push(Diagnostic {
+                                severity: Severity::Error,
+                                field: format!("bots[{i}].{other}"),
+                                code: "manifest.bots.executor.field.unexpected".into(),
+                                message: format!(
+                                    "Bot executor \"{executor}\" must not declare \"{other}\""
+                                ),
+                                hint: Some(
+                                    "One executor, one target. Declaring two makes the definition mean two things."
+                                        .into(),
+                                ),
+                            });
+                        }
+                    }
+                }
+                other => out.push(Diagnostic {
+                    severity: Severity::Error,
+                    field: format!("bots[{i}].executor"),
+                    code: "manifest.bots.executor.invalid".into(),
+                    message: format!(
+                        "Bot at index {i} has an unknown executor {:?}",
+                        other.unwrap_or_default()
+                    ),
+                    hint: Some(format!("Expected one of {}.", BOT_EXECUTORS.join(", "))),
+                }),
+            }
+
+            let triggers = bo.get("triggers").and_then(Value::as_array);
+            let triggers = match triggers {
+                Some(t) if !t.is_empty() => t,
+                _ => {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("bots[{i}].triggers"),
+                        code: "manifest.bots.triggers.missing".into(),
+                        message: format!(
+                            "Bot at index {i} needs at least one trigger, or it can never start"
+                        ),
+                        hint: None,
+                    });
+                    continue;
+                }
+            };
+
+            for (t, trigger) in triggers.iter().enumerate() {
+                let field = format!("bots[{i}].triggers[{t}]");
+                let tr = match trigger.as_object() {
+                    Some(o) => o,
+                    None => {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: field.clone(),
+                            code: "manifest.bots.trigger.invalid".into(),
+                            message: format!("{field} must be an object"),
+                            hint: None,
+                        });
+                        continue;
+                    }
+                };
+
+                let has_id = tr
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false);
+                if !has_id {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("{field}.id"),
+                        code: "manifest.bots.trigger.id.missing".into(),
+                        message: format!("{field} is missing a non-empty \"id\""),
+                        hint: None,
+                    });
+                }
+
+                let kind = tr.get("kind").and_then(Value::as_str);
+                let kind = match kind {
+                    Some(k) if BOT_TRIGGER_KINDS.contains(&k) => k,
+                    other => {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{field}.kind"),
+                            code: "manifest.bots.trigger.kind.invalid".into(),
+                            message: format!(
+                                "{field} has an unknown kind {:?}",
+                                other.unwrap_or_default()
+                            ),
+                            hint: Some(format!(
+                                "Expected one of {}.",
+                                BOT_TRIGGER_KINDS.join(", ")
+                            )),
+                        });
+                        continue;
+                    }
+                };
+
+                if kind == "event" {
+                    let source_ok = tr
+                        .get("source")
+                        .and_then(Value::as_str)
+                        .map(|v| BOT_EVENT_SOURCES.contains(&v))
+                        .unwrap_or(false);
+                    if !source_ok {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{field}.source"),
+                            code: "manifest.bots.trigger.source.invalid".into(),
+                            message: format!(
+                                "{field} needs a \"source\" from {}",
+                                BOT_EVENT_SOURCES.join(", ")
+                            ),
+                            hint: None,
+                        });
+                    }
+                    let types_ok = tr
+                        .get("types")
+                        .and_then(Value::as_array)
+                        .map(|v| !v.is_empty())
+                        .unwrap_or(false);
+                    if !types_ok {
+                        out.push(Diagnostic {
+                            severity: Severity::Error,
+                            field: format!("{field}.types"),
+                            code: "manifest.bots.trigger.types.missing".into(),
+                            message: format!("{field} needs a non-empty \"types\" list"),
+                            hint: None,
+                        });
+                    }
+                }
+
+                if kind == "schedule" && !tr.get("cron").map(|v| v.is_string()).unwrap_or(false) {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("{field}.cron"),
+                        code: "manifest.bots.trigger.cron.missing".into(),
+                        message: format!("{field} needs a \"cron\" expression"),
+                        hint: None,
+                    });
+                }
+
+                if (kind == "poll" || kind == "derivedState")
+                    && !tr.get("everyMs").map(|v| v.is_number()).unwrap_or(false)
+                {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("{field}.everyMs"),
+                        code: "manifest.bots.trigger.everyMs.missing".into(),
+                        message: format!("{field} needs a numeric \"everyMs\""),
+                        hint: None,
+                    });
+                }
+
+                if kind == "derivedState"
+                    && !tr.get("state").map(|v| v.is_string()).unwrap_or(false)
+                {
+                    out.push(Diagnostic {
+                        severity: Severity::Error,
+                        field: format!("{field}.state"),
+                        code: "manifest.bots.trigger.state.missing".into(),
+                        message: format!("{field} needs a \"state\" name"),
                         hint: None,
                     });
                 }
@@ -1540,5 +1824,195 @@ mod tests {
             codes.contains(&"manifest.contributions.javascript.unsupported_for_python".to_string()),
             "expected a javascript-unsupported diagnostic, got: {codes:?}"
         );
+    }
+    fn manifest_with_bots(bots: serde_json::Value) -> Value {
+        serde_json::json!({
+            "id": "acme",
+            "name": "Acme",
+            "version": "1.0.0",
+            "description": "A plugin contributing bots.",
+            "type": "frontend",
+            "main": "index.js",
+            "capabilities": ["bot"],
+            "bots": bots,
+        })
+    }
+
+    fn bot_codes(bots: serde_json::Value) -> Vec<String> {
+        validate_manifest(&manifest_with_bots(bots))
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect()
+    }
+
+    fn valid_bot() -> serde_json::Value {
+        serde_json::json!({
+            "id": "digest",
+            "name": "Digest",
+            "version": "1.0.0",
+            "executor": "handler",
+            "entry": "dist/digest.js",
+            "triggers": [{ "id": "morning", "kind": "schedule", "cron": "0 9 * * *" }],
+        })
+    }
+
+    #[test]
+    fn a_well_formed_bot_produces_no_bot_diagnostics() {
+        let codes = bot_codes(serde_json::json!([valid_bot()]));
+        assert!(
+            !codes.iter().any(|c| c.starts_with("manifest.bots.")),
+            "expected no bot diagnostics, got: {codes:?}"
+        );
+    }
+
+    #[test]
+    fn every_executor_accepts_its_own_target_field() {
+        let codes = bot_codes(serde_json::json!([
+            { "id": "a", "name": "A", "version": "1.0.0", "executor": "workflow",
+              "workflow": "wf_1", "triggers": [{ "id": "m", "kind": "manual" }] },
+            { "id": "b", "name": "B", "version": "1.0.0", "executor": "squad",
+              "team": "team_1", "triggers": [{ "id": "m", "kind": "manual" }] },
+            { "id": "c", "name": "C", "version": "1.0.0", "executor": "agent-turn",
+              "prompt": "Summarise.", "triggers": [{ "id": "m", "kind": "manual" }] },
+        ]));
+        assert!(
+            !codes.iter().any(|c| c.starts_with("manifest.bots.")),
+            "expected no bot diagnostics, got: {codes:?}"
+        );
+    }
+
+    #[test]
+    fn a_bot_missing_identity_is_reported_per_field() {
+        let codes = bot_codes(serde_json::json!([{
+            "executor": "handler",
+            "triggers": [{ "id": "m", "kind": "manual" }],
+        }]));
+        for expected in [
+            "manifest.bots.id.missing",
+            "manifest.bots.name.missing",
+            "manifest.bots.version.missing",
+        ] {
+            assert!(
+                codes.contains(&expected.to_string()),
+                "missing {expected}: {codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn two_bots_sharing_an_id_are_refused() {
+        let codes = bot_codes(serde_json::json!([valid_bot(), valid_bot()]));
+        assert!(
+            codes.contains(&"manifest.bots.id.duplicate".to_string()),
+            "{codes:?}"
+        );
+    }
+
+    #[test]
+    fn an_executor_must_declare_its_own_target_and_no_other() {
+        let missing = bot_codes(serde_json::json!([{
+            "id": "a", "name": "A", "version": "1.0.0", "executor": "workflow",
+            "triggers": [{ "id": "m", "kind": "manual" }],
+        }]));
+        assert!(
+            missing.contains(&"manifest.bots.executor.field.missing".to_string()),
+            "{missing:?}"
+        );
+
+        let both = bot_codes(serde_json::json!([{
+            "id": "a", "name": "A", "version": "1.0.0", "executor": "workflow",
+            "workflow": "wf_1", "team": "team_1",
+            "triggers": [{ "id": "m", "kind": "manual" }],
+        }]));
+        assert!(
+            both.contains(&"manifest.bots.executor.field.unexpected".to_string()),
+            "{both:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_executor_is_refused() {
+        let codes = bot_codes(serde_json::json!([{
+            "id": "a", "name": "A", "version": "1.0.0", "executor": "magic",
+            "triggers": [{ "id": "m", "kind": "manual" }],
+        }]));
+        assert!(
+            codes.contains(&"manifest.bots.executor.invalid".to_string()),
+            "{codes:?}"
+        );
+    }
+
+    #[test]
+    fn a_bot_with_no_trigger_can_never_start_and_is_refused() {
+        let empty = bot_codes(serde_json::json!([{
+            "id": "a", "name": "A", "version": "1.0.0", "executor": "handler",
+            "entry": "dist/a.js", "triggers": [],
+        }]));
+        assert!(
+            empty.contains(&"manifest.bots.triggers.missing".to_string()),
+            "{empty:?}"
+        );
+
+        let absent = bot_codes(serde_json::json!([{
+            "id": "a", "name": "A", "version": "1.0.0", "executor": "handler",
+            "entry": "dist/a.js",
+        }]));
+        assert!(
+            absent.contains(&"manifest.bots.triggers.missing".to_string()),
+            "{absent:?}"
+        );
+    }
+
+    #[test]
+    fn each_trigger_kind_requires_the_field_it_cannot_fire_without() {
+        let cases: [(serde_json::Value, &str); 5] = [
+            (
+                serde_json::json!({ "id": "e", "kind": "event", "types": ["a"] }),
+                "manifest.bots.trigger.source.invalid",
+            ),
+            (
+                serde_json::json!({ "id": "e", "kind": "event", "source": "integration", "types": [] }),
+                "manifest.bots.trigger.types.missing",
+            ),
+            (
+                serde_json::json!({ "id": "s", "kind": "schedule" }),
+                "manifest.bots.trigger.cron.missing",
+            ),
+            (
+                serde_json::json!({ "id": "p", "kind": "poll" }),
+                "manifest.bots.trigger.everyMs.missing",
+            ),
+            (
+                serde_json::json!({ "id": "d", "kind": "derivedState", "everyMs": 60000 }),
+                "manifest.bots.trigger.state.missing",
+            ),
+        ];
+        for (trigger, expected) in cases {
+            let codes = bot_codes(serde_json::json!([{
+                "id": "a", "name": "A", "version": "1.0.0", "executor": "handler",
+                "entry": "dist/a.js", "triggers": [trigger],
+            }]));
+            assert!(
+                codes.contains(&expected.to_string()),
+                "expected {expected}, got {codes:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_trigger_needs_an_id_and_a_known_kind() {
+        let codes = bot_codes(serde_json::json!([{
+            "id": "a", "name": "A", "version": "1.0.0", "executor": "handler",
+            "entry": "dist/a.js", "triggers": [{ "kind": "telepathy" }],
+        }]));
+        for expected in [
+            "manifest.bots.trigger.id.missing",
+            "manifest.bots.trigger.kind.invalid",
+        ] {
+            assert!(
+                codes.contains(&expected.to_string()),
+                "missing {expected}: {codes:?}"
+            );
+        }
     }
 }

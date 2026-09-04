@@ -109,6 +109,13 @@ from .pet import (
     define_pet_achievement,
     define_pet_item,
 )
+from .bot import (
+    BOT_EVENT_SOURCES,
+    BOT_EXECUTORS,
+    BOT_TRIGGER_KINDS,
+    Bot,
+    define_bot,
+)
 from .modes import Mode, define_mode
 from .plugin import Plugin
 from .runtime import (
@@ -158,6 +165,12 @@ __version__ = "0.3.0"
 
 __all__ = [
     "ctx",
+    # bot capability
+    "BOT_EVENT_SOURCES",
+    "BOT_EXECUTORS",
+    "BOT_TRIGGER_KINDS",
+    "Bot",
+    "define_bot",
     "Ctx",
     "HostNamespace",
     "PYTHON_HOST_NAMESPACES",

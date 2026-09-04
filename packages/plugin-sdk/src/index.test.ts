@@ -27,6 +27,8 @@ describe("plugin-sdk root barrel", () => {
       "defineCliTool",
       "defineCommand",
       "defineLspServer",
+      "defineBot",
+      "defineBotHandler",
       "defineMode",
       "defineOcrProvider",
       "definePetAchievement",

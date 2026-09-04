@@ -16,10 +16,10 @@ type _ImIsASpecialisation = Assert<
 >
 
 // A `source` outside the domain's union must not type-check.
-// @ts-expect-error "invented-layer" is not an ImConfigSource
 const _rejectsUnknownSource: EffectiveValue<number, ImConfigSource> = {
   requested: undefined,
   effective: 1,
+  // @ts-expect-error "invented-layer" is not an ImConfigSource
   source: "invented-layer",
 }
 

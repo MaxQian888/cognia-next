@@ -59,6 +59,7 @@ import {
   registerWebviewsForPlugin,
   unregisterWebviewsForPlugin,
 } from "@/lib/plugin/bridge/plugin-webview-bridge"
+import { registerBotsForPlugin, unregisterBotsForPlugin } from "@/lib/plugin/bridge/bots-bridge"
 import {
   registerPluginAdapters,
   unregisterPluginAdapters,
@@ -550,6 +551,19 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     },
     unregister: (pluginId) => {
       unregisterWebviewsForPlugin(pluginId)
+    },
+  },
+  bot: {
+    // Installable Bots. Three executors are pure data, so the bridge only
+    // imports for `executor: "handler"`; a python plugin gets a synthesized
+    // handler through the shared python-backed seam instead.
+    key: "bot",
+    manifestField: "bots",
+    register: async (ctx) => {
+      await registerBotsForPlugin(ctx.manifest, ctx.installRoot, { importer: ctx.importer })
+    },
+    unregister: (pluginId) => {
+      unregisterBotsForPlugin(pluginId)
     },
   },
 } as const satisfies Record<string, ModuleBridgeCapabilityDescriptor>
