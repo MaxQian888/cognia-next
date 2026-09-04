@@ -1,4 +1,5 @@
-import { render, waitFor } from "@testing-library/react"
+import { act, render, waitFor } from "@testing-library/react"
+import { toast } from "sonner"
 
 import type { OutboundDispatcher } from "@/lib/queue/outbound-queue"
 import {
@@ -49,13 +50,48 @@ jest.mock("@/lib/platform/web-companion", () => ({
   hasWebCompanionTarget: () => false,
 }))
 
+jest.mock("sonner", () => ({
+  toast: { loading: jest.fn(), dismiss: jest.fn() },
+}))
+
+let mockApprovalState: "not-required" | "held" | "blocked" = "not-required"
+const mockClearApproval = jest.fn()
+let mockConsentCode: string | null = null
+let mockHasReporter = false
+const approvalListeners = new Set<() => void>()
+jest.mock("@/lib/queue/outbound-approval", () => ({
+  PENDING_NO_CODE: "pending",
+  ensureOutboundApproval: async () => mockApprovalState,
+  clearOutboundApproval: () => mockClearApproval(),
+  withOutboundApproval: (_command: string, payload: unknown) => payload,
+  outboundConsentCode: () => mockConsentCode,
+  hasOutboundApprovalReporter: () => mockHasReporter,
+  subscribeOutboundApproval: (listener: () => void) => {
+    approvalListeners.add(listener)
+    return () => approvalListeners.delete(listener)
+  },
+}))
+
 jest.mock("@/lib/platform/host-feature-manifest", () => ({
   parseHostFeatureManifest: (value: unknown) => value,
 }))
 
 const transportCall = jest.fn()
+// The provider subscribes to `host-consent://requested` so a lease approved on
+// another screen resumes the frozen queue. `subscribe` must hand back a real
+// unsubscribe: the effect's cleanup calls it.
+const consentUnsubscribe = jest.fn()
+let consentHandler: ((request: { state: string }) => void) | undefined
+const transportSubscribe = jest.fn((_channel: string, handler: (request: never) => void) => {
+  consentHandler = handler as (request: { state: string }) => void
+  return consentUnsubscribe
+})
 jest.mock("@/lib/tauri", () => ({
-  transport: { call: (...args: unknown[]) => transportCall(...args), subscribe: jest.fn() },
+  transport: {
+    call: (...args: unknown[]) => transportCall(...args),
+    subscribe: (...args: unknown[]) =>
+      transportSubscribe(...(args as [string, (request: never) => void])),
+  },
 }))
 
 const stopHostStateSync = jest.fn()
@@ -135,6 +171,11 @@ beforeEach(() => {
   jest.clearAllMocks()
   clearActiveRuntimeTargetContext()
   pendingObserver = undefined
+  consentHandler = undefined
+  mockApprovalState = "not-required"
+  mockConsentCode = null
+  mockHasReporter = false
+  approvalListeners.clear()
   runtimeTarget = null
   transitionParticipant = null
   transportCall.mockResolvedValue({
@@ -288,6 +329,115 @@ it("runs in an ordinary browser only when a Companion target exists", () => {
   )
 })
 
+// The queue drains on mount, on reconnect, on any runtime-snapshot change and
+// on any pending row. None of those is a user action, so a leftover row asked
+// the Host for host-admin authority with nobody at the keyboard, and a Host
+// waiting on a human answered REMOTE_CONSENT_REQUIRED. That reached the queue
+// as an ordinary delivery failure, which retried the user's message into the
+// deadletter lane while the approval was still on someone's screen.
+describe("the interactive-approval gate", () => {
+  const canDispatchOf = () =>
+    (createRunner.mock.calls.at(-1)?.[0] as { canDispatch: (row: unknown) => Promise<boolean> })
+      .canDispatch
+
+  function mountMobile() {
+    runtimeTarget = { id: "host-mobile-a" }
+    return render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="mobile"
+        webCompanionOverride={false}
+        mobilePairedOverride
+      />
+    )
+  }
+
+  it("freezes a row the Host is still asking a human about", async () => {
+    mountMobile()
+    mockApprovalState = "blocked"
+
+    await expect(canDispatchOf()({ command: "host_state_submit", protocol: "rpc" })).resolves.toBe(
+      false
+    )
+  })
+
+  it("lets a row through once the lease is held", async () => {
+    mountMobile()
+    mockApprovalState = "held"
+
+    await expect(canDispatchOf()({ command: "host_state_submit", protocol: "rpc" })).resolves.toBe(
+      true
+    )
+  })
+
+  it("resumes the queue when an approval is answered on another screen", () => {
+    mountMobile()
+    const kicks = runner.kick.mock.calls.length
+
+    consentHandler?.({ state: "approved" })
+
+    expect(mockClearApproval).toHaveBeenCalled()
+    expect(runner.kick.mock.calls.length).toBeGreaterThan(kicks)
+  })
+
+  it("ignores a denial, which is not something to retry into", () => {
+    mountMobile()
+    const kicks = runner.kick.mock.calls.length
+    const clears = mockClearApproval.mock.calls.length
+
+    consentHandler?.({ state: "denied" })
+
+    expect(mockClearApproval.mock.calls.length).toBe(clears)
+    expect(runner.kick.mock.calls.length).toBe(kicks)
+  })
+
+  it("drops the previous target's approval state when the scope moves", () => {
+    // The lease is host-bound. Carrying Host A's answer — a live token, or a
+    // "waiting on a human" banner — into Host B's session is a credential and
+    // a status belonging to a host nobody is dispatching to any more.
+    const hostA = { accountId: "acct_a", targetId: "host-a", routingGeneration: 1 }
+    const hostB = { accountId: "acct_a", targetId: "host-b", routingGeneration: 2 }
+    const { rerender } = render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="web"
+        webCompanionOverride
+        scopeOverride={hostA}
+      />
+    )
+    const clears = mockClearApproval.mock.calls.length
+
+    rerender(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="web"
+        webCompanionOverride
+        scopeOverride={hostB}
+      />
+    )
+
+    // Once on the way out of Host A, once on the way into Host B.
+    expect(mockClearApproval.mock.calls.length).toBe(clears + 2)
+    expect(getActiveRuntimeTargetContext()).toEqual(hostB)
+  })
+
+  it("drops the approval state when the target is deactivated altogether", () => {
+    const { unmount } = render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="web"
+        webCompanionOverride
+        scopeOverride={{ accountId: "acct_a", targetId: "host-a", routingGeneration: 1 }}
+      />
+    )
+    const clears = mockClearApproval.mock.calls.length
+
+    unmount()
+
+    expect(mockClearApproval.mock.calls.length).toBe(clears + 1)
+  })
+})
+
 it("stops and unsubscribes on target deactivation", () => {
   const { rerender } = render(
     <CompanionOutboundRunnerProvider
@@ -335,4 +485,67 @@ it("runs and installs HostState synchronization on the Tauri host", async () => 
   unmount()
   expect(stopHostStateSync).toHaveBeenCalledTimes(1)
   expect(unregisterResync).toHaveBeenCalledTimes(1)
+})
+
+describe("reporting a Host that is waiting on a human", () => {
+  // The gate freezes a row for any `companion` target, including a paired
+  // desktop browser. Only the mobile shells mount `OfflineBanner`, so without
+  // this the composer cleared, no turn started, and nothing anywhere said why.
+  it("raises a toast on a shell with no inline surface", async () => {
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="web"
+        webCompanionOverride
+        scopeOverride={scope}
+      />
+    )
+
+    mockConsentCode = "742519"
+    act(() => approvalListeners.forEach((listener) => listener()))
+
+    await waitFor(() => expect(toast.loading).toHaveBeenCalled())
+    expect(toast.loading).toHaveBeenCalledWith(
+      expect.stringContaining("742519"),
+      expect.objectContaining({ id: "outbound-approval-pending", duration: Infinity })
+    )
+  })
+
+  it("stays quiet while a banner is already reporting the same wait", () => {
+    mockHasReporter = true
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="mobile"
+        webCompanionOverride={false}
+        mobilePairedOverride
+        scopeOverride={scope}
+      />
+    )
+
+    mockConsentCode = "742519"
+    act(() => approvalListeners.forEach((listener) => listener()))
+
+    expect(toast.loading).not.toHaveBeenCalled()
+  })
+
+  it("clears the toast once the approval is answered", async () => {
+    render(
+      <CompanionOutboundRunnerProvider
+        dispatcher={dispatcher}
+        platformOverride="web"
+        webCompanionOverride
+        scopeOverride={scope}
+      />
+    )
+
+    mockConsentCode = "742519"
+    act(() => approvalListeners.forEach((listener) => listener()))
+    await waitFor(() => expect(toast.loading).toHaveBeenCalled())
+
+    mockConsentCode = null
+    act(() => approvalListeners.forEach((listener) => listener()))
+
+    expect(toast.dismiss).toHaveBeenCalledWith("outbound-approval-pending")
+  })
 })

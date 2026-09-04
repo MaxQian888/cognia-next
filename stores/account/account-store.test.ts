@@ -376,6 +376,160 @@ describe("account store load", () => {
   })
 })
 
+// The predicate's own rules live in `lib/accounts/dev-auto-unlock.test.ts`.
+// What matters here is that `load()` actually reaches the app without a
+// prompt, and that it never does so for an account the developer made.
+describe("development local account", () => {
+  const ORIGINAL_NODE_ENV = process.env.NODE_ENV
+
+  function setNodeEnv(value: string | undefined): void {
+    Object.defineProperty(process.env, "NODE_ENV", { value, configurable: true })
+  }
+
+  beforeEach(() => {
+    mockIsTauri = false
+    mockIsCapacitor = false
+    setNodeEnv("development")
+  })
+
+  afterEach(() => {
+    setNodeEnv(ORIGINAL_NODE_ENV)
+  })
+
+  it("provisions and unlocks the disposable account when the registry is empty", async () => {
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockCreateRegistryAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "acct_dev_local_workspace", activate: true })
+    )
+    expect(mockProvisionBrowserVault).toHaveBeenCalledWith(
+      "acct_dev_local_workspace",
+      "cognia-dev-local-account"
+    )
+    expect(store.getState().unlockedAccountId).toBe("acct_dev_local_workspace")
+    expect(store.getState().activeAccountId).toBe("acct_dev_local_workspace")
+    expect(store.getState().locked).toBe(false)
+    expect(store.getState().loaded).toBe(true)
+  })
+
+  it("adopts the account a racing tab created instead of standing a second one up", async () => {
+    // Both tabs read an empty registry, so both would provision. The loser's
+    // `provisionBrowserVault` REPLACES the winner's vault record and its
+    // rollback then deletes it, leaving the winner signed in against a vault
+    // that no longer exists. Re-reading inside the provisioning lock is what
+    // turns the loser into an ordinary unlock.
+    const dev = account("acct_dev_local_workspace", "Developer")
+    mockListAccounts.mockResolvedValueOnce([]).mockResolvedValue([dev])
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+    expect(mockProvisionBrowserVault).not.toHaveBeenCalled()
+    expect(mockUnlockBrowserVault).toHaveBeenCalledWith(
+      "acct_dev_local_workspace",
+      "cognia-dev-local-account"
+    )
+    expect(store.getState().unlockedAccountId).toBe("acct_dev_local_workspace")
+    expect(store.getState().locked).toBe(false)
+  })
+
+  it("swallows the recovery key so first-run setup has nothing left to show", async () => {
+    // The key wraps a throwaway database whose password is a constant in the
+    // bundle. Surfacing it would put the acknowledge screen back in front of
+    // every new browser, which is the cost this account exists to remove.
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(store.getState().pendingRecoveryKey).toBeNull()
+  })
+
+  it("re-opens the disposable account in a new tab, with nothing remembered", async () => {
+    // `resumeDevSessionUnlock` reads sessionStorage, which dies with the tab.
+    // The constant password is what makes a second window free.
+    const dev = account("acct_dev_local_workspace", "Developer")
+    mockListAccounts.mockResolvedValue([dev])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_dev_local_workspace" })
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+    expect(mockUnlockBrowserVault).toHaveBeenCalledWith(
+      "acct_dev_local_workspace",
+      "cognia-dev-local-account"
+    )
+    expect(store.getState().unlockedAccountId).toBe("acct_dev_local_workspace")
+    expect(store.getState().locked).toBe(false)
+  })
+
+  it("leaves an account the developer created behind its real password", async () => {
+    const mine = account("acct_mine", "Mine")
+    mockListAccounts.mockResolvedValue([mine])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_mine" })
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+    expect(mockUnlockBrowserVault).not.toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(store.getState().locked).toBe(true)
+  })
+
+  it("does nothing under Tauri, where the password binds the OS keyring", async () => {
+    mockIsTauri = true
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBeNull()
+  })
+
+  it("does nothing in a shipped build", async () => {
+    setNodeEnv("production")
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(mockCreateRegistryAccount).not.toHaveBeenCalled()
+    expect(store.getState().unlockedAccountId).toBeNull()
+  })
+
+  it("falls back to first-run setup when provisioning fails, with no error banner", async () => {
+    // Convenience must never be able to make a boot worse than the gate it
+    // replaced: a failed provision has to settle as an ordinary empty registry.
+    mockCreateRegistryAccount.mockRejectedValueOnce(new Error("registry offline"))
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(store.getState().loaded).toBe(true)
+    expect(store.getState().accounts).toEqual([])
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(store.getState().error).toBeNull()
+  })
+
+  it("falls back to the lock screen when the constant password stops opening the vault", async () => {
+    const dev = account("acct_dev_local_workspace", "Developer")
+    mockListAccounts.mockResolvedValue([dev])
+    mockGetState.mockResolvedValue({ activeAccountId: "acct_dev_local_workspace" })
+    mockUnlockBrowserVault.mockRejectedValueOnce(new Error("bad password"))
+    const store = makeStore()
+
+    await store.getState().load()
+
+    expect(store.getState().loaded).toBe(true)
+    expect(store.getState().unlockedAccountId).toBeNull()
+    expect(store.getState().locked).toBe(true)
+    expect(store.getState().error).toBeNull()
+  })
+})
+
 describe("browser Vault lifecycle", () => {
   beforeEach(() => {
     mockIsTauri = false

@@ -52,6 +52,29 @@ describe("LocalAccountRegistry", () => {
     db.close()
   })
 
+  it("refuses a duplicate id with a typed error, in the transaction that would add it", async () => {
+    // Two contexts racing first-run with a FIXED id (the dev-local and E2E
+    // accounts) both reach here. The loser must be able to tell "already
+    // exists" apart from a transport failure, because it holds a freshly
+    // provisioned vault whose rollback would delete the winner's.
+    const { db, registry } = await freshRegistry("duplicate-id")
+    await registry.createAccount({
+      id: "acct_fixed",
+      displayName: "First",
+      passwordVerifier: verifier,
+    })
+
+    await expect(
+      registry.createAccount({
+        id: "acct_fixed",
+        displayName: "Second",
+        passwordVerifier: verifier,
+      })
+    ).rejects.toMatchObject({ name: "AccountRegistryError", code: "account-exists" })
+    expect(await db.accounts.get("acct_fixed")).toMatchObject({ displayName: "First" })
+    db.close()
+  })
+
   it("creates the first account, activates it, and derives its physical Dexie name", async () => {
     const { db, registry } = await freshRegistry("first-account")
 

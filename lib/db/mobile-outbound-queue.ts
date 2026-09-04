@@ -270,7 +270,17 @@ function hostStateQueueInput(action: HostStateAction): EnqueueInput {
     accountId: action.accountId,
     targetId: action.runtimeTargetId,
     command: "host_state_submit",
-    payload: { actions: [action] },
+    // The scope the Host revalidates the batch against
+    // (`host-state-service.ts:assertRequestScope`), and a required part of the
+    // wire body. Sending only `actions` meant every submission from a paired
+    // client was refused as a contract violation, which is how a chat turn's
+    // user message disappeared with no error: the queue records a delivery
+    // failure rather than surfacing one.
+    payload: {
+      accountId: action.accountId,
+      runtimeTargetId: action.runtimeTargetId,
+      actions: [action],
+    },
     protocol: "host-state",
     channel: action.channel,
     hostGeneration: action.hostGeneration,

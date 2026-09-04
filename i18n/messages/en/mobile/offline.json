@@ -5,6 +5,8 @@
   "notifBody": "{count} messages waiting. Will retry when online.",
   "notifChannel": "cognia",
   "notifTitle": "cognia outbound queue",
+  "queueAwaitingApproval": "Waiting for approval on the host — code {code}",
+  "queueAwaitingApprovalNoCode": "Waiting for approval on the host.",
   "queueNeedsAttention": "{count, plural, one {# action needs your attention} other {# actions need your attention}}",
   "queuePending": "{count} queued",
   "staleWarning": "{count} messages waiting > 30 min."

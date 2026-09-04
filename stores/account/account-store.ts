@@ -7,7 +7,9 @@ import {
   encryptedAccountDatabaseName,
   generateAccountId,
 } from "@/lib/accounts/account-db"
+import { AccountRegistryError } from "@/lib/accounts/account-types"
 import type { LocalAccountRecord } from "@/lib/accounts/account-types"
+import { withAccountProvisioningLock } from "@/lib/accounts/provisioning-lock"
 import {
   AccountContentCipher,
   activateAccountContentCipher,
@@ -23,7 +25,13 @@ import {
   unbindLocalAccount,
   verifyPassword,
 } from "@/lib/accounts/password-client"
-import { isDevAutoUnlockEnabled } from "@/lib/accounts/dev-auto-unlock"
+import {
+  DEV_LOCAL_ACCOUNT_DISPLAY_NAME,
+  DEV_LOCAL_ACCOUNT_ID,
+  DEV_LOCAL_ACCOUNT_PASSWORD,
+  isDevAutoUnlockEnabled,
+  isDevLocalAccountEnabled,
+} from "@/lib/accounts/dev-auto-unlock"
 import {
   forgetDevSessionUnlock,
   readDevSessionUnlock,
@@ -419,6 +427,63 @@ export function createAccountStore(
       }
     }
 
+    /**
+     * May this runtime stand up the disposable development account?
+     *
+     * Deliberately the same line `resolveE2EAutoUnlockTarget` draws. Under
+     * Tauri the account password binds the OS keyring, so a constant one has
+     * no business there, and Capacitor keeps its own runtime chooser.
+     */
+    const devLocalAccountAllowed = (): boolean =>
+      !isTauri() && !isCapacitor() && isDevLocalAccountEnabled()
+
+    /**
+     * Create the deterministic development account and leave it unlocked.
+     *
+     * Returns null on any failure, which simply leaves first-run setup on
+     * screen. Dev convenience must never be able to make a boot worse.
+     */
+    const provisionDevLocalAccount = async (): Promise<string | null> => {
+      try {
+        const account = await get().createAccount({
+          id: DEV_LOCAL_ACCOUNT_ID,
+          displayName: DEV_LOCAL_ACCOUNT_DISPLAY_NAME,
+          password: DEV_LOCAL_ACCOUNT_PASSWORD,
+          activate: true,
+        })
+        // The recovery-key screen is the last of the six first-run
+        // interactions, and this key wraps a throwaway database whose password
+        // is a constant in the bundle. Surfacing it would defeat the point.
+        set({ pendingRecoveryKey: null, error: null })
+        return account.id
+      } catch {
+        // `createAccount` already recorded the failure through `setFailure`.
+        // Clear it so the gate offers first-run setup rather than an error the
+        // developer has no way to act on.
+        set({ error: null })
+        return null
+      }
+    }
+
+    /**
+     * Re-open the development account from its constant password.
+     *
+     * Unlike `resumeDevSessionUnlock` this needs nothing remembered, which is
+     * the whole point: `sessionStorage` dies with the tab, so a second window
+     * or a fresh agent context would otherwise be back at the lock screen.
+     */
+    const openDevLocalAccount = async (): Promise<string | null> => {
+      try {
+        if (!(await browserVaultExists(DEV_LOCAL_ACCOUNT_ID))) return null
+        await unlockBrowserVault(DEV_LOCAL_ACCOUNT_ID, DEV_LOCAL_ACCOUNT_PASSWORD)
+        await activateUnlockedAccount(DEV_LOCAL_ACCOUNT_ID)
+        return DEV_LOCAL_ACCOUNT_ID
+      } catch {
+        publishUnlockStage(DEV_LOCAL_ACCOUNT_ID, "failed")
+        return null
+      }
+    }
+
     return {
       ...DEFAULT_STATE,
 
@@ -432,7 +497,7 @@ export function createAccountStore(
         if (get().loaded && !get().error) return
         set({ loading: true, error: null })
         try {
-          const [accounts, registryState] = await Promise.all([
+          let [accounts, registryState] = await Promise.all([
             dependencies.registry.listAccounts(),
             dependencies.registry.getState(),
           ])
@@ -440,7 +505,6 @@ export function createAccountStore(
             accounts,
             registryState.activeAccountId
           )
-          const activeAccountId = e2eAutoUnlockAccountId ?? registryState.activeAccountId
           if (e2eAutoUnlockAccountId) {
             if (await browserVaultExists(e2eAutoUnlockAccountId)) {
               await unlockBrowserVault(e2eAutoUnlockAccountId, E2E_ACCOUNT_PASSWORD)
@@ -449,11 +513,46 @@ export function createAccountStore(
             }
             await activateUnlockedAccount(e2eAutoUnlockAccountId)
           }
+          // `pnpm dev` in a browser. An empty registry gets the disposable
+          // account stood up, and an existing one gets re-opened from its
+          // constant password, so neither a fresh profile nor a second tab
+          // has to walk through first-run setup. Both paths degrade to null,
+          // which leaves the real gate exactly where it was.
+          let devLocalAccountId: string | null = null
+          if (!e2eAutoUnlockAccountId && devLocalAccountAllowed()) {
+            if (accounts.length === 0) {
+              // Two tabs booting a fresh profile both read an empty registry.
+              // Whoever loses the race must ADOPT the account the winner just
+              // created rather than stand a second one up over its vault, so
+              // the decision is re-made inside the lock, not out here.
+              devLocalAccountId = await withAccountProvisioningLock(
+                DEV_LOCAL_ACCOUNT_ID,
+                async () => {
+                  const current = await dependencies.registry.listAccounts()
+                  return current.some((record) => record.id === DEV_LOCAL_ACCOUNT_ID)
+                    ? openDevLocalAccount()
+                    : provisionDevLocalAccount()
+                }
+              )
+              if (devLocalAccountId) {
+                ;[accounts, registryState] = await Promise.all([
+                  dependencies.registry.listAccounts(),
+                  dependencies.registry.getState(),
+                ])
+              }
+            } else if (resolveDevLocalUnlockTarget(accounts, registryState.activeAccountId)) {
+              devLocalAccountId = await openDevLocalAccount()
+            }
+          }
+          const activeAccountId =
+            e2eAutoUnlockAccountId ?? devLocalAccountId ?? registryState.activeAccountId
           // Dev convenience, one tab, one typed password. Never provisions a
           // vault: a remembered secret may only re-open a vault that already
           // exists, so first-run account creation stays a deliberate choice.
           const unlockedAccountId =
-            e2eAutoUnlockAccountId ?? (await resumeDevSessionUnlock(accounts, activeAccountId))
+            e2eAutoUnlockAccountId ??
+            devLocalAccountId ??
+            (await resumeDevSessionUnlock(accounts, activeAccountId))
           set((state) => ({
             accounts,
             activeAccountId,
@@ -481,21 +580,46 @@ export function createAccountStore(
           const accountId = input.id ?? generateAccountId()
           const passwordVerifier = await createPasswordVerifier(input.password)
           const useBrowserVault = shouldUseBrowserVault()
-          const recoveryKey = shouldActivate
-            ? await provisionBrowserVault(accountId, input.password)
-            : await provisionBrowserVault(accountId, input.password, false)
-          let account: LocalAccountRecord
-          try {
-            account = await dependencies.registry.createAccount({
-              id: accountId,
-              displayName: input.displayName,
-              passwordVerifier,
-              activate: shouldActivate,
-            })
-          } catch (error) {
-            await deleteBrowserVault(accountId).catch(() => {})
-            throw error
-          }
+          // The check, the vault write and the registry row are ONE critical
+          // section, held across every context that shares this origin. A
+          // caller-named id can collide, and `provisionBrowserVault` REPLACES
+          // the vault record outright: two contexts that both pass the check
+          // both mint a fresh DEK, and the loser's rollback below then deletes
+          // the vault the winner is signed in against. Re-checking without the
+          // lock only narrows that window. Holding it closes it. See
+          // `lib/accounts/provisioning-lock.ts`.
+          const { account, recoveryKey } = await withAccountProvisioningLock(
+            accountId,
+            async () => {
+              // Re-read INSIDE the lock: the read that got us here is exactly
+              // the one the loser of the race took before the winner wrote.
+              if (input.id) {
+                const onRecord = await dependencies.registry.listAccounts()
+                if (onRecord.some((record) => record.id === accountId)) {
+                  throw new AccountRegistryError(
+                    "account-exists",
+                    `Account ${accountId} already exists.`
+                  )
+                }
+              }
+              const provisioned = shouldActivate
+                ? await provisionBrowserVault(accountId, input.password)
+                : await provisionBrowserVault(accountId, input.password, false)
+              let created: LocalAccountRecord
+              try {
+                created = await dependencies.registry.createAccount({
+                  id: accountId,
+                  displayName: input.displayName,
+                  passwordVerifier,
+                  activate: shouldActivate,
+                })
+              } catch (error) {
+                await deleteBrowserVault(accountId).catch(() => {})
+                throw error
+              }
+              return { account: created, recoveryKey: provisioned }
+            }
+          )
 
           if (!useBrowserVault && shouldActivate) {
             const verified = await verifyPassword(input.password, passwordVerifier, account.id)
@@ -1171,6 +1295,24 @@ function resolveE2EAutoUnlockTarget(
     return activeAccountId
   }
   return accounts[0]?.id ?? null
+}
+
+/**
+ * The development account, when boot may open it without a prompt.
+ *
+ * An active account that exists and is not this one is a deliberate choice by
+ * the developer, so it keeps the real password prompt. A dangling or absent
+ * active id falls back to the development account.
+ */
+function resolveDevLocalUnlockTarget(
+  accounts: LocalAccountRecord[],
+  activeAccountId: string | null
+): string | null {
+  if (!accounts.some((account) => account.id === DEV_LOCAL_ACCOUNT_ID)) return null
+  if (activeAccountId && activeAccountId !== DEV_LOCAL_ACCOUNT_ID) {
+    return accounts.some((account) => account.id === activeAccountId) ? null : DEV_LOCAL_ACCOUNT_ID
+  }
+  return DEV_LOCAL_ACCOUNT_ID
 }
 
 function computeLocked(

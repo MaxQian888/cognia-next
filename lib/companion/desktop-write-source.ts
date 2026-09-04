@@ -773,6 +773,12 @@ function stripHostStateInternal(payload: Record<string, unknown>): Record<string
     callerAccountId: _accountId,
     callerDeviceId: _deviceId,
     callerDeviceGrants: _grants,
+    // The approval token, not part of the protocol body. `host_state_submit`
+    // is `approval: "interactive"`, so a paired client has to send one and the
+    // RPC layer forwards it untouched; left in, it fails the closed-shape
+    // check as an unknown key.
+    adminLease: _adminLease,
+    admin_lease: _adminLeaseSnake,
     ...request
   } = payload
   return request

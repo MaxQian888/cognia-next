@@ -2,7 +2,14 @@
 // point of this module, and jsdom's `window` is non-configurable, so the
 // no-window branch can only be exercised where we own the global.
 
-import { FORCE_ACCOUNT_GATE_ENV, isDevAutoUnlockEnabled } from "./dev-auto-unlock"
+import {
+  DEV_LOCAL_ACCOUNT_ID,
+  DEV_LOCAL_ACCOUNT_PASSWORD,
+  FORCE_ACCOUNT_GATE_ENV,
+  isDevAutoUnlockEnabled,
+  isDevLocalAccount,
+  isDevLocalAccountEnabled,
+} from "./dev-auto-unlock"
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV
 const ORIGINAL_FORCE_GATE = process.env.NEXT_PUBLIC_ACCOUNT_GATE
@@ -98,5 +105,53 @@ describe("dev-auto-unlock", () => {
 
   it("names the force-gate env so callers and docs cannot drift", () => {
     expect(FORCE_ACCOUNT_GATE_ENV).toBe("NEXT_PUBLIC_ACCOUNT_GATE")
+  })
+})
+
+describe("dev local account", () => {
+  it("is enabled while the dev server is serving the page", () => {
+    setNodeEnv("development")
+    expect(isDevLocalAccountEnabled()).toBe(true)
+  })
+
+  it("is disabled in production builds, which is what pnpm build sets", () => {
+    setNodeEnv("production")
+    expect(isDevLocalAccountEnabled()).toBe(false)
+  })
+
+  it("is disabled under NODE_ENV=test so Jest never auto-creates an account", () => {
+    setNodeEnv("test")
+    expect(isDevLocalAccountEnabled()).toBe(false)
+  })
+
+  it("is disabled when NEXT_PUBLIC_ACCOUNT_GATE=1 forces the real first run", () => {
+    setNodeEnv("development")
+    setForceGate("1")
+    expect(isDevLocalAccountEnabled()).toBe(false)
+  })
+
+  it("is disabled without a window (server render / node host)", () => {
+    setNodeEnv("development")
+    detachWindow()
+    expect(isDevLocalAccountEnabled()).toBe(false)
+  })
+
+  it("recognises only the fixed development account id", () => {
+    setNodeEnv("development")
+    expect(isDevLocalAccount(DEV_LOCAL_ACCOUNT_ID)).toBe(true)
+    expect(isDevLocalAccount("acct_someone_else")).toBe(false)
+    expect(isDevLocalAccount(null)).toBe(false)
+    expect(isDevLocalAccount(undefined)).toBe(false)
+  })
+
+  it("recognises nothing once the build can ship", () => {
+    setNodeEnv("production")
+    expect(isDevLocalAccount(DEV_LOCAL_ACCOUNT_ID)).toBe(false)
+  })
+
+  it("keeps a password that clears the account password policy", () => {
+    // `createPasswordVerifier` enforces PASSWORD_MIN_LENGTH, so a shorter
+    // constant here would make provisioning throw instead of settling.
+    expect(DEV_LOCAL_ACCOUNT_PASSWORD.length).toBeGreaterThanOrEqual(8)
   })
 })

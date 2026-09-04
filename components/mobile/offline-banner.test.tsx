@@ -57,6 +57,14 @@ jest.mock("@/lib/queue/outbound-queue", () => ({
     summary.deadlettered + summary.rejected + summary.conflicted,
 }))
 
+let consentCode: string | null = null
+jest.mock("@/lib/queue/outbound-approval", () => ({
+  PENDING_NO_CODE: "pending",
+  outboundConsentCode: () => consentCode,
+  subscribeOutboundApproval: () => () => {},
+  registerOutboundApprovalReporter: () => () => {},
+}))
+
 // Stand in for the Dexie live query: run the querier once on mount and on dep
 // change, surfacing the resolved value like the real hook would after a write.
 jest.mock("@/hooks/data", () => {
@@ -86,6 +94,8 @@ jest.mock("next-intl", () => ({
       bannerOffline: "Offline mode",
       queuePending: `${(vars?.count as number) ?? 0} queued`,
       queueNeedsAttention: `${(vars?.count as number) ?? 0} need attention`,
+      queueAwaitingApproval: `Waiting for approval on the host — code ${String(vars?.code ?? "")}`,
+      queueAwaitingApprovalNoCode: "Waiting for approval on the host.",
     }
     return map[key] ?? key
   },
@@ -97,6 +107,7 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValue({ loading: false, status: { connected: true, connectionType: "wifi" } })
   getQueueSummaryMock.mockReset().mockResolvedValue(EMPTY_SUMMARY)
+  consentCode = null
   useRuntimeSnapshotMock
     .mockReset()
     .mockReturnValue({ target: { kind: "companion" }, connectionState: "online" })
@@ -230,6 +241,27 @@ describe("<OfflineBanner />", () => {
     const banner = await screen.findByTestId("offline-banner")
     expect(banner).toHaveAttribute("data-offline", "true")
     expect(banner).toHaveAttribute("data-host-offline", "false")
+  })
+
+  it("says the Host is waiting on a human, rather than counting forever", async () => {
+    // A row frozen on an interactive approval is not offline, not retrying and
+    // not stuck. Reported as a plain pending count it read as a message that
+    // had simply stopped, which is the silence the approval gate exists to end.
+    consentCode = "A1B2C3D4"
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 1 })
+
+    render(<OfflineBanner />)
+
+    expect(await screen.findByText(/code A1B2C3D4/)).toBeInTheDocument()
+  })
+
+  it("still says an approval is pending against a Host that named no code", async () => {
+    consentCode = "pending"
+    getQueueSummaryMock.mockResolvedValue({ ...EMPTY_SUMMARY, pending: 1 })
+
+    render(<OfflineBanner />)
+
+    expect(await screen.findByText("Waiting for approval on the host.")).toBeInTheDocument()
   })
 
   it("hides when network is up and queue is empty", async () => {

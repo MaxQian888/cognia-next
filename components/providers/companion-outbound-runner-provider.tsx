@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useSyncExternalStore } from "react"
+import { useTranslations } from "next-intl"
+import { toast } from "sonner"
 import Dexie from "dexie"
 
 import { usePlatform } from "@/hooks/use-platform"
@@ -10,6 +12,16 @@ import { getDb } from "@/lib/db/schema"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isPlaceholderRuntimeTargetId } from "@/lib/runtime/runtime-target"
 import { createOutboundRunner, type OutboundDispatcher } from "@/lib/queue/outbound-queue"
+import {
+  clearOutboundApproval,
+  ensureOutboundApproval,
+  hasOutboundApprovalReporter,
+  outboundConsentCode,
+  PENDING_NO_CODE,
+  subscribeOutboundApproval,
+  withOutboundApproval,
+} from "@/lib/queue/outbound-approval"
+import { subscribeToHostConsent } from "@/lib/host-consent/client"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
 import {
@@ -39,7 +51,14 @@ const liveDispatcher: OutboundDispatcher = {
       const { dispatchCollabOutbound } = await import("@/lib/collab/outbound-dispatcher")
       return dispatchCollabOutbound(command as never, payload)
     }
-    const result = await transport.call(command, payload, options)
+    // Interactive commands need a device-bound lease. It is TAKEN by the
+    // runner's pre-flight gate below, not here: minting inside the dispatch put
+    // a host-admin request behind every background drain, and turned a host
+    // waiting on a human into an ordinary delivery failure that retried the
+    // row into the deadletter lane. All this does is attach what the gate
+    // already holds.
+    const approved = withOutboundApproval(command, payload)
+    const result = await transport.call(command, approved, options)
     if (command === "workflow_trigger_manual") {
       setTimeout(() => {
         void runSyncDown({ only: ["workflowRuns"] }).catch(() => {})
@@ -91,6 +110,9 @@ export function CompanionOutboundRunnerProvider({
   scopeOverride,
 }: CompanionOutboundRunnerProviderProps): null {
   const detectedPlatform = usePlatform()
+  // Same strings the mobile banner shows. One wait, one wording, wherever the
+  // user happens to be standing.
+  const tApproval = useTranslations("mobile.offline")
   const unlockedAccountId = useAccountStore((state) => state.unlockedAccountId)
   const runtimeTarget = useRuntimeSnapshot().target
   const mobileRuntimeMode = useSettingsStore((state) => state.settings?.mobileRuntimeMode)
@@ -144,14 +166,29 @@ export function CompanionOutboundRunnerProvider({
   useEffect(() => {
     if (!enabled || !scope) return
 
+    // Drop the previous target's approval state before the new routing context
+    // is installed. The gate keys its cache by this same scope, so this is not
+    // what makes a foreign lease unusable — it is what stops a "waiting for
+    // approval" banner minted against the old Host from outliving it on screen.
+    clearOutboundApproval()
     setActiveRuntimeTargetContext(scope.accountId, scope.targetId, scope.routingGeneration)
     const runner = createOutboundRunner({
       dispatcher,
       enforceMobile: false,
       scope,
-      canDispatch: (row) =>
-        row.protocol !== "host-state" ||
-        getRuntimeSnapshot().host?.operations.includes("host_state_submit") === true,
+      canDispatch: async (row) => {
+        if (
+          row.protocol === "host-state" &&
+          getRuntimeSnapshot().host?.operations.includes("host_state_submit") !== true
+        ) {
+          return false
+        }
+        // "blocked" is the host asking for a human, or having just refused.
+        // Freezing the row keeps it pending at its place in the channel with
+        // its attempt count untouched, which is what makes the answer
+        // recoverable rather than a message that quietly ran out of retries.
+        return (await ensureOutboundApproval(row.command)) !== "blocked"
+      },
     })
     const kick = () => {
       void runner.kick().catch((error) => {
@@ -160,6 +197,15 @@ export function CompanionOutboundRunnerProvider({
     }
     const unsubscribePendingJobs = subscribeToPendingJobs(scope, kick)
     const unsubscribeRuntime = subscribeRuntimeSnapshot(kick)
+    // The approval is answered on someone else's screen. Without this the
+    // frozen rows would sit until the refusal cooldown lapsed and something
+    // else happened to kick the runner, so a message the user watched being
+    // approved still would not move.
+    const unsubscribeConsent = subscribeToHostConsent((request) => {
+      if (request.state !== "approved") return
+      clearOutboundApproval()
+      kick()
+    })
     const unregisterTransitionParticipant = registerRuntimeTargetTransitionParticipant({
       id: "companion-outbound-runner",
       phase: "finalize-captures",
@@ -171,10 +217,52 @@ export function CompanionOutboundRunnerProvider({
     return () => {
       unsubscribePendingJobs()
       unsubscribeRuntime()
+      unsubscribeConsent()
       unregisterTransitionParticipant()
+      // Sign-out, unpair, and every target switch land here. Nothing cached
+      // survives the target it was taken against.
+      clearOutboundApproval()
       void runner.stop()
     }
   }, [dispatcher, enabled, scope])
+
+  // The wait, on whichever shell is running the queue.
+  //
+  // `ensureOutboundApproval` freezes a row for ANY `companion` target, and a
+  // paired desktop browser is one. Only the mobile shells mount
+  // `OfflineBanner`, so everywhere else the composer cleared, no turn started
+  // and nothing said why, which is the same silence the gate was built to end,
+  // one shell over. This provider is mounted exactly where the freeze can
+  // happen, which makes it the right place to report it. The banner claims the
+  // wait while it is on screen so the two never say it twice.
+  useEffect(() => {
+    if (!enabled) return
+    const TOAST_ID = "outbound-approval-pending"
+    let shown = false
+    const report = () => {
+      const code = outboundConsentCode()
+      if (code === null || hasOutboundApprovalReporter()) {
+        if (shown) {
+          shown = false
+          toast.dismiss(TOAST_ID)
+        }
+        return
+      }
+      shown = true
+      toast.loading(
+        code === PENDING_NO_CODE
+          ? tApproval("queueAwaitingApprovalNoCode")
+          : tApproval("queueAwaitingApproval", { code }),
+        { id: TOAST_ID, duration: Infinity }
+      )
+    }
+    const unsubscribe = subscribeOutboundApproval(report)
+    report()
+    return () => {
+      unsubscribe()
+      toast.dismiss(TOAST_ID)
+    }
+  }, [enabled, tApproval])
 
   useEffect(() => {
     if (!collabScope) return

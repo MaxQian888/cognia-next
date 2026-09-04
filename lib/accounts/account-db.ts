@@ -157,6 +157,13 @@ export class LocalAccountRegistry {
 
     await this.db.transaction("rw", this.db.accounts, this.db.state, async () => {
       const state = await this.ensureState()
+      // Refuse a duplicate id in the same transaction that would add it, so a
+      // second context racing first-run with a FIXED id (the dev-local and E2E
+      // accounts) gets a typed answer instead of a bare Dexie ConstraintError.
+      // The caller has a vault to protect and needs to know which failure it is.
+      if (await this.db.accounts.get(account.id)) {
+        throw new AccountRegistryError("account-exists", `Account ${account.id} already exists.`)
+      }
       await this.db.accounts.add(account)
       const shouldActivate = input.activate === true || state.activeAccountId === null
       if (shouldActivate) {

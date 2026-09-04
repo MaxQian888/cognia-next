@@ -28,6 +28,7 @@
  * empty snapshot reports `offline` by construction.
  */
 
+import { useEffect, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { CloudOffIcon, LoaderIcon, TriangleAlertIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
@@ -37,6 +38,12 @@ import { useNetworkStatus } from "@/hooks/use-network-status"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
 import { useCompactLayout } from "@/hooks/ui/use-compact-layout"
 import { getQueueSummary, inFlight, needsAttention } from "@/lib/queue/outbound-queue"
+import {
+  outboundConsentCode,
+  PENDING_NO_CODE,
+  registerOutboundApprovalReporter,
+  subscribeOutboundApproval,
+} from "@/lib/queue/outbound-approval"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
@@ -53,6 +60,20 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   // a live query makes the banner react to enqueue/drain writes instead of
   // re-counting on a fixed 15s interval. The banner only mounts inside the
   // mobile shell, so this query never runs on web/desktop.
+  // A queue frozen on an interactive approval is not offline, not retrying and
+  // not stuck: the Host is asking a human, and until someone answers, the rows
+  // simply do not move. Reported here because the alternative is a count that
+  // sits at "1 queued" forever with nothing on screen saying why, which is the
+  // silence this whole gate exists to end.
+  const consentCode = useSyncExternalStore(
+    subscribeOutboundApproval,
+    outboundConsentCode,
+    () => null
+  )
+  // Claim the wait for as long as this banner is mounted, so the runner's
+  // fallback toast stays out of the way here and fires on every shell that
+  // does NOT mount this banner, which is all of them but the mobile ones.
+  useEffect(() => registerOutboundApprovalReporter(), [])
   const queue = useClientLiveQuery<{ inFlight: number; stuck: number }>(
     async () => {
       const summary = await getQueueSummary()
@@ -74,7 +95,8 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   // will move them on its own, and they used to be reported by no surface at
   // all — a refused action looked exactly like one that had gone through.
   const stuckCount = queue?.stuck ?? 0
-  const visible = offline || reconnecting || pendingCount > 0 || stuckCount > 0
+  const visible =
+    offline || reconnecting || pendingCount > 0 || stuckCount > 0 || consentCode !== null
 
   return (
     <AnimatePresence initial={false}>
@@ -88,9 +110,13 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
           messageOffline={hostOffline ? t("bannerHostOffline") : t("bannerOffline")}
           messageReconnecting={t("bannerReconnecting")}
           messageQueue={
-            stuckCount > 0
-              ? t("queueNeedsAttention", { count: stuckCount })
-              : t("queuePending", { count: pendingCount })
+            consentCode
+              ? consentCode === PENDING_NO_CODE
+                ? t("queueAwaitingApprovalNoCode")
+                : t("queueAwaitingApproval", { code: consentCode })
+              : stuckCount > 0
+                ? t("queueNeedsAttention", { count: stuckCount })
+                : t("queuePending", { count: pendingCount })
           }
           className={className}
         />

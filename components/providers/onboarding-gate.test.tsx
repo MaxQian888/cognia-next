@@ -18,12 +18,33 @@ jest.mock("@/components/ui/loading-states", () => ({
   ),
 }))
 
+let unlockedAccountId: string | null = null
+let activeAccountId: string | null = null
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: (selector: (state: unknown) => unknown) =>
+    selector({ unlockedAccountId, activeAccountId }),
+}))
+
+import { DEV_LOCAL_ACCOUNT_ID } from "@/lib/accounts/dev-auto-unlock"
+
 import { OnboardingGate } from "./onboarding-gate"
+
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV
+
+function setNodeEnv(value: string | undefined): void {
+  Object.defineProperty(process.env, "NODE_ENV", { value, configurable: true })
+}
 
 beforeEach(() => {
   replace.mockClear()
   gate.mockReset()
   pathname = "/"
+  unlockedAccountId = null
+  activeAccountId = null
+})
+
+afterEach(() => {
+  setNodeEnv(ORIGINAL_NODE_ENV)
 })
 
 describe("OnboardingGate", () => {
@@ -99,5 +120,45 @@ describe("OnboardingGate", () => {
       </OnboardingGate>
     )
     expect(screen.getByText("flow")).toBeInTheDocument()
+  })
+
+  it("passes the app through for the dev server's disposable account", () => {
+    // That account is provisioned fresh on every new browser profile, so it is
+    // permanently a first run. Routing it into the flow would put the wizard
+    // back in front of every browser the dev server sees.
+    setNodeEnv("development")
+    unlockedAccountId = DEV_LOCAL_ACCOUNT_ID
+    gate.mockReturnValue({ status: "enter", shell: "web" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).not.toHaveBeenCalled()
+    expect(screen.getByText("app")).toBeInTheDocument()
+  })
+
+  it("still routes an account the developer created into the flow", () => {
+    setNodeEnv("development")
+    unlockedAccountId = "acct_mine"
+    gate.mockReturnValue({ status: "enter", shell: "web" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).toHaveBeenCalledWith("/onboarding")
+  })
+
+  it("does not honour the bypass in a shipped build", () => {
+    setNodeEnv("production")
+    unlockedAccountId = DEV_LOCAL_ACCOUNT_ID
+    gate.mockReturnValue({ status: "enter", shell: "web" })
+    render(
+      <OnboardingGate>
+        <p>app</p>
+      </OnboardingGate>
+    )
+    expect(replace).toHaveBeenCalledWith("/onboarding")
   })
 })

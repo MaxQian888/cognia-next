@@ -8,6 +8,7 @@ export type AccountRegistryErrorCode =
   | "invalid-account-id"
   | "invalid-display-name"
   | "account-not-found"
+  | "account-exists"
   | "last-account"
   | "replacement-required"
 
