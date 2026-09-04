@@ -256,7 +256,10 @@ const REGISTRY = [
   // exactly what gates:registry exists to catch: without it, a regression in
   // the stager is invisible until an installed build ships without RepoWiki.
   { script: "plugin:bundled:stage:test", group: "gate-tests" },
-  { script: "scripts:test:ci", group: "gate-tests" },
+  // Rust because the glob picks up scripts/dev/agent-proxy.test.mjs, which
+  // drives the native sandbox launcher. The script builds that bin first; five
+  // of its assertions are a usage error rather than a test without it.
+  { script: "scripts:test:ci", group: "gate-tests", runtime: "rust", resource: "cargo" },
   { script: "artifact-runtime:test", group: "gate-tests" },
   { script: "support:docs:test", group: "gate-tests" },
   { script: "tauri:debug:agent:test", group: "gate-tests" },

@@ -191,7 +191,7 @@
     "test:e2e:workflows:runs": "playwright test tests/e2e/workflows/runs/",
     "test:evals": "jest lib/ai/eval/ci",
     "scripts:test:build": "node --test scripts/build/*.test.mjs scripts/build/lib/*.test.mjs",
-    "scripts:test:ci": "node --test scripts/test/*.test.mjs scripts/e2e/*.test.mjs scripts/dev/*.test.mjs scripts/ci/require-macos-release-signing.test.mjs scripts/ci/workflow-contract.test.mjs scripts/ci/report/*.test.mjs",
+    "scripts:test:ci": "cargo build -q -p cognia-automation --bin cognia-agent-proxy-launcher && node --test scripts/test/*.test.mjs scripts/e2e/*.test.mjs scripts/dev/*.test.mjs scripts/ci/require-macos-release-signing.test.mjs scripts/ci/workflow-contract.test.mjs scripts/ci/report/*.test.mjs",
     "scripts:test:gates": "node --test scripts/gates/*.test.mjs scripts/gates/lib/*.test.mjs",
     "scripts:test:i18n": "node --test scripts/i18n/*.test.mjs",
     "scripts:test:mobile": "node --test mobile/scripts/*.test.mjs",

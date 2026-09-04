@@ -171,9 +171,10 @@ export const EXEMPTIONS = {
   "plugin-convert:check:test": "covered by scripts:test:plugin",
   "plugin:scaffold:test": "covered by scripts:test:plugin",
   "clean:db:test": "covered by scripts:test:ci",
-  // scripts:test:ci globs scripts/dev/*.test.mjs. The `agent:proxy:test`
-  // script itself also does a cargo build, which the aggregate does not — but
-  // the assertions it guards are the ones in the .test.mjs, and those run.
+  // scripts:test:ci globs scripts/dev/*.test.mjs, and now does the same cargo
+  // build this script does. It has to: without the launcher bin, five of the
+  // suite's assertions end as a usage error instead of a test, so the aggregate
+  // was reporting coverage it did not have.
   "agent:proxy:test": "covered by scripts:test:ci",
   "e2e:serve:test": "covered by scripts:test:ci",
   "test:coverage:changed:test": "covered by scripts:test:ci",
