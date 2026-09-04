@@ -24,6 +24,7 @@ interface StoreState {
   canvasDocuments: Record<string, unknown>
   getArtifact: (id: string) => unknown
   getArtifactsForWorkspace: () => unknown[]
+  getCanvasDocumentsForWorkspace: (options?: { sessionId?: string | null }) => unknown[]
 }
 // Annotated: `getArtifact` reads `storeState` from inside its own initializer,
 // which leaves TypeScript with no way to infer the shape (TS7022).
@@ -32,6 +33,12 @@ const storeState: StoreState = {
   canvasDocuments: {},
   getArtifact: (id: string) => storeState.artifacts[id],
   getArtifactsForWorkspace: jest.fn(() => Object.values(storeState.artifacts)),
+  // Mirrors the real selector: workspace scope first, then the session narrow.
+  getCanvasDocumentsForWorkspace: jest.fn(({ sessionId = null } = {}) =>
+    (Object.values(storeState.canvasDocuments) as Array<{ sessionId?: string }>).filter(
+      (doc) => !sessionId || !doc.sessionId || doc.sessionId === sessionId
+    )
+  ),
 }
 jest.mock("@/stores/artifact/artifact-store", () => ({
   useArtifactStore: { getState: () => storeState },

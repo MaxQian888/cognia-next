@@ -26,7 +26,6 @@ import { useEffect } from "react"
 import { useKeybindingStore, parseKeyEvent } from "@/stores/canvas/keybinding-store"
 import { useCanvasLayoutStore, type CanvasRightTab } from "@/stores/canvas/canvas-layout-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import type { CanvasDocument } from "@/types/artifact/artifact"
 import { CANVAS_ACTIONS } from "@/lib/canvas/constants"
 
 export interface UseCanvasKeyboardShortcutsOptions {
@@ -57,7 +56,8 @@ function toggleRightTab(tab: CanvasRightTab): void {
 /** Move the active canvas document by `dir` (+1 next / -1 previous), wrapping around. */
 function cycleDocument(dir: 1 | -1): void {
   const store = useArtifactStore.getState()
-  const docs = Object.values(store.canvasDocuments) as CanvasDocument[]
+  // Scoped: cycling must not walk into another workspace's documents.
+  const docs = store.getCanvasDocumentsForWorkspace()
   if (docs.length < 2) return
   const currentIndex = docs.findIndex((d) => d.id === store.activeCanvasId)
   const base = currentIndex === -1 ? 0 : currentIndex

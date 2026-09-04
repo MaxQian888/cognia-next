@@ -11,11 +11,20 @@
  * with each summary memoised against its source document's object identity. A
  * keystroke changes one document, so exactly one summary changes identity and
  * `useShallow` bails the render for everything else.
+ *
+ * It is also the workspace-isolation seam for every Canvas *list*. The active
+ * project is read reactively (not through `getState()`), so switching workspace
+ * re-runs the selector and the rail, the tab strip and the empty state all stop
+ * showing the previous workspace's documents in the same commit.
  */
 
 import { useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import {
+  filterCanvasDocumentsByWorkspace,
+  useArtifactStore,
+} from "@/stores/artifact/artifact-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { ArtifactLanguage, CanvasDocument } from "@/types"
 
 export interface CanvasDocumentSummary {
@@ -43,13 +52,18 @@ export function useCanvasDocumentSummaries(): CanvasDocumentSummary[] {
   const cacheRef = useRef(
     new Map<string, { source: CanvasDocument; summary: CanvasDocumentSummary }>()
   )
+  const projectId = useProjectStore((s) => s.activeProjectId)
 
   return useArtifactStore(
     useShallow((state) => {
       const cache = cacheRef.current
       const out: CanvasDocumentSummary[] = []
       const seen = new Set<string>()
-      for (const doc of Object.values(state.canvasDocuments) as CanvasDocument[]) {
+      const scoped = filterCanvasDocumentsByWorkspace(
+        Object.values(state.canvasDocuments) as CanvasDocument[],
+        projectId
+      )
+      for (const doc of scoped) {
         seen.add(doc.id)
         const hit = cache.get(doc.id)
         if (hit && hit.source === doc) {

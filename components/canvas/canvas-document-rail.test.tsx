@@ -12,6 +12,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { CanvasDocumentRail } from "./canvas-document-rail"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { useProjectStore } from "@/stores/project/project-store"
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -23,6 +24,7 @@ function resetStores() {
     const docs = Object.keys(useArtifactStore.getState().canvasDocuments)
     docs.forEach((id) => useArtifactStore.getState().deleteCanvasDocument(id))
     useArtifactStore.getState().setActiveCanvas(null)
+    useProjectStore.setState({ activeProjectId: null })
   })
 }
 
@@ -248,5 +250,61 @@ describe("CanvasDocumentRail", () => {
         errorSpy.mockRestore()
       }
     })
+  })
+})
+
+describe("CanvasDocumentRail — workspace isolation", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    resetStores()
+  })
+
+  afterEach(() => {
+    act(() => {
+      useProjectStore.setState({ activeProjectId: null })
+    })
+  })
+
+  function seedIn(projectId: string, title: string) {
+    act(() => {
+      useProjectStore.setState({ activeProjectId: projectId })
+      useArtifactStore.getState().createCanvasDocument({
+        title,
+        content: title,
+        language: "markdown",
+        type: "text",
+      })
+    })
+  }
+
+  it("lists only the active workspace's documents", () => {
+    seedIn("ws-a", "AlphaDoc")
+    seedIn("ws-b", "BetaDoc")
+    act(() => {
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+    })
+
+    renderWithProviders(<CanvasDocumentRail />)
+
+    expect(screen.getByText("AlphaDoc")).toBeInTheDocument()
+    expect(screen.queryByText("BetaDoc")).not.toBeInTheDocument()
+  })
+
+  it("switching workspace never reveals the other workspace's documents", () => {
+    seedIn("ws-a", "AlphaDoc")
+    seedIn("ws-b", "BetaDoc")
+    act(() => {
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+    })
+
+    renderWithProviders(<CanvasDocumentRail />)
+    expect(screen.getByText("AlphaDoc")).toBeInTheDocument()
+
+    act(() => {
+      useProjectStore.setState({ activeProjectId: "ws-b" })
+    })
+
+    expect(screen.getByText("BetaDoc")).toBeInTheDocument()
+    expect(screen.queryByText("AlphaDoc")).not.toBeInTheDocument()
   })
 })

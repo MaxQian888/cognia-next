@@ -54,8 +54,12 @@ import {
   SidebarSeparator,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import {
+  filterCanvasDocumentsByWorkspace,
+  useArtifactStore,
+} from "@/stores/artifact/artifact-store"
 import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
 import { getFileExtension } from "@/lib/canvas/utils"
@@ -107,9 +111,17 @@ function groupByTime(
 export function CanvasDocumentRail() {
   const t = useTranslations("canvas")
   const canvasDocuments = useArtifactStore((s) => s.canvasDocuments)
+  // Workspace isolation: the rail lists only the ACTIVE workspace's documents.
+  // Read reactively so switching workspace re-filters in the same commit rather
+  // than leaving the previous workspace's rows on screen.
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const documents = useMemo(
-    () => Object.values(canvasDocuments) as CanvasDocument[],
-    [canvasDocuments]
+    () =>
+      filterCanvasDocumentsByWorkspace(
+        Object.values(canvasDocuments) as CanvasDocument[],
+        activeProjectId
+      ),
+    [canvasDocuments, activeProjectId]
   )
   const activeId = useArtifactStore((s) => s.activeCanvasId)
   const setActive = useArtifactStore((s) => s.setActiveCanvas)

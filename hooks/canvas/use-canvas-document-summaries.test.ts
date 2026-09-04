@@ -3,6 +3,7 @@ import { renderHook } from "@testing-library/react"
 import { act } from "react"
 import { useCanvasDocumentSummaries } from "./use-canvas-document-summaries"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useProjectStore } from "@/stores/project/project-store"
 
 beforeEach(() => {
   useArtifactStore.setState({ canvasDocuments: {}, activeCanvasId: null })
@@ -110,5 +111,64 @@ describe("useCanvasDocumentSummaries", () => {
       useArtifactStore.getState().deleteCanvasDocument(a)
     })
     expect(result.current.map((d) => d.title)).toEqual(["B"])
+  })
+})
+
+describe("useCanvasDocumentSummaries — workspace isolation", () => {
+  afterEach(() => {
+    useProjectStore.setState({ activeProjectId: null })
+  })
+
+  function seedIn(projectId: string, title: string) {
+    act(() => {
+      useProjectStore.setState({ activeProjectId: projectId })
+    })
+    return seed(title)
+  }
+
+  it("lists only the active workspace's documents", () => {
+    seedIn("ws-a", "Alpha")
+    seedIn("ws-b", "Beta")
+
+    act(() => {
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+    })
+    const { result } = renderHook(() => useCanvasDocumentSummaries())
+    expect(result.current.map((d) => d.title)).toEqual(["Alpha"])
+  })
+
+  it("re-filters when the active workspace changes", () => {
+    seedIn("ws-a", "Alpha")
+    seedIn("ws-b", "Beta")
+
+    act(() => {
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+    })
+    const { result } = renderHook(() => useCanvasDocumentSummaries())
+    expect(result.current.map((d) => d.title)).toEqual(["Alpha"])
+
+    act(() => {
+      useProjectStore.setState({ activeProjectId: "ws-b" })
+    })
+    expect(result.current.map((d) => d.title)).toEqual(["Beta"])
+  })
+
+  it("grandfathers legacy documents that carry no projectId", () => {
+    // Parity with `applyArtifactWorkspaceFilters`: an unattributed row is
+    // visible everywhere rather than invisible everywhere. The v86 backfill
+    // stamps it on the next boot.
+    const id = seed("Legacy")
+    act(() => {
+      useArtifactStore.setState((state) => ({
+        canvasDocuments: {
+          ...state.canvasDocuments,
+          [id]: { ...state.canvasDocuments[id]!, projectId: undefined },
+        },
+      }))
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+    })
+
+    const { result } = renderHook(() => useCanvasDocumentSummaries())
+    expect(result.current.map((d) => d.title)).toEqual(["Legacy"])
   })
 })

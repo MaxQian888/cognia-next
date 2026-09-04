@@ -900,6 +900,100 @@ describe("canvas documents", () => {
   })
 })
 
+describe("getCanvasDocumentsForWorkspace (Canvas workspace isolation)", () => {
+  function seedIn(projectId: string | null, title: string) {
+    mockActiveProjectId = projectId
+    return useArtifactStore.getState().createCanvasDocument({
+      title,
+      content: title,
+      language: "markdown",
+      type: "text",
+    })
+  }
+
+  it("lists only the active workspace's documents", () => {
+    seedIn("proj-A", "Alpha")
+    seedIn("proj-B", "Beta")
+
+    mockActiveProjectId = "proj-A"
+    expect(
+      useArtifactStore
+        .getState()
+        .getCanvasDocumentsForWorkspace()
+        .map((doc) => doc.title)
+    ).toEqual(["Alpha"])
+
+    mockActiveProjectId = "proj-B"
+    expect(
+      useArtifactStore
+        .getState()
+        .getCanvasDocumentsForWorkspace()
+        .map((doc) => doc.title)
+    ).toEqual(["Beta"])
+  })
+
+  it("grandfathers documents with no projectId, like artifacts do", () => {
+    const id = seedIn(null, "Legacy")
+    expect(useArtifactStore.getState().canvasDocuments[id].projectId).toBeUndefined()
+
+    mockActiveProjectId = "proj-A"
+    expect(
+      useArtifactStore
+        .getState()
+        .getCanvasDocumentsForWorkspace()
+        .map((doc) => doc.title)
+    ).toEqual(["Legacy"])
+  })
+
+  it("returns every workspace's documents when no workspace is active", () => {
+    seedIn("proj-A", "Alpha")
+    seedIn("proj-B", "Beta")
+    mockActiveProjectId = null
+    expect(useArtifactStore.getState().getCanvasDocumentsForWorkspace()).toHaveLength(2)
+  })
+
+  it("narrows by sessionId on top of the workspace scope", () => {
+    mockActiveProjectId = "proj-A"
+    useArtifactStore.getState().createCanvasDocument({
+      sessionId: "s1",
+      title: "InSession",
+      content: "a",
+      language: "markdown",
+      type: "text",
+    })
+    useArtifactStore.getState().createCanvasDocument({
+      sessionId: "s2",
+      title: "OtherSession",
+      content: "b",
+      language: "markdown",
+      type: "text",
+    })
+
+    expect(
+      useArtifactStore
+        .getState()
+        .getCanvasDocumentsForWorkspace({ sessionId: "s1" })
+        .map((doc) => doc.title)
+    ).toEqual(["InSession"])
+  })
+
+  it("sorts newest-first and honours limit", () => {
+    mockActiveProjectId = "proj-A"
+    const older = seedIn("proj-A", "Older")
+    const newer = seedIn("proj-A", "Newer")
+    useArtifactStore.setState((state) => ({
+      canvasDocuments: {
+        ...state.canvasDocuments,
+        [older]: { ...state.canvasDocuments[older], updatedAt: new Date(1_000) },
+        [newer]: { ...state.canvasDocuments[newer], updatedAt: new Date(2_000) },
+      },
+    }))
+
+    const rows = useArtifactStore.getState().getCanvasDocumentsForWorkspace({ limit: 1 })
+    expect(rows.map((doc) => doc.title)).toEqual(["Newer"])
+  })
+})
+
 describe("clearSessionData", () => {
   it("removes only the matching session's artifacts", () => {
     const a = useArtifactStore

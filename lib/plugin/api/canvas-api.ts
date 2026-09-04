@@ -261,8 +261,10 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
     },
 
     getDocument: (id: string): PluginCanvasDocument | null => {
-      const store = useArtifactStore.getState()
-      const doc = store.canvasDocuments[id]
+      // Workspace-scoped: a plugin running in one workspace must not be able to
+      // read a document that belongs to another. `null` covers both "missing"
+      // and "not yours" so the two cannot be told apart.
+      const doc = useArtifactStore.getState().getCanvasDocumentForWorkspace(id)
       if (!doc) return null
 
       return toPluginDocument(doc)

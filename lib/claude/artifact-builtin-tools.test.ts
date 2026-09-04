@@ -11,6 +11,7 @@ import {
 } from "./artifact-builtin-tools"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
+import { useProjectStore } from "@/stores/project/project-store"
 
 const mockReveal = jest.fn()
 jest.mock("@/lib/artifacts/reveal", () => ({
@@ -317,6 +318,63 @@ describe("canvas tools", () => {
       ctx
     )) as { ok: boolean; code: string }
     expect(result).toMatchObject({ ok: false, code: "not_found" })
+  })
+
+  describe("workspace isolation", () => {
+    afterEach(() => {
+      useProjectStore.setState({ activeProjectId: null })
+    })
+
+    async function seedDocIn(projectId: string, title: string) {
+      useProjectStore.setState({ activeProjectId: projectId })
+      const created = (await runArtifactBuiltinTool(
+        "canvas_create",
+        { title, content: title, language: "markdown", type: "text" },
+        deps(),
+        ctx
+      )) as { documentId: string }
+      return created.documentId
+    }
+
+    it("canvas_read lists only the active workspace's documents", async () => {
+      await seedDocIn("ws-a", "Alpha")
+      await seedDocIn("ws-b", "Beta")
+
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+      const result = (await runArtifactBuiltinTool("canvas_read", {}, deps(), ctx)) as {
+        documents: Array<{ title: string }>
+      }
+      expect(result.documents.map((doc) => doc.title)).toEqual(["Alpha"])
+    })
+
+    it("canvas_read answers not_found for another workspace's document", async () => {
+      const other = await seedDocIn("ws-b", "Beta")
+
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+      const result = (await runArtifactBuiltinTool(
+        "canvas_read",
+        { documentId: other },
+        deps(),
+        ctx
+      )) as { ok: boolean; code: string }
+      // Same shape as a made-up id: "not yours" must not be distinguishable
+      // from "not there", or the difference enumerates the other workspace.
+      expect(result).toMatchObject({ ok: false, code: "not_found" })
+    })
+
+    it("canvas_update refuses another workspace's document", async () => {
+      const other = await seedDocIn("ws-b", "Beta")
+
+      useProjectStore.setState({ activeProjectId: "ws-a" })
+      const result = (await runArtifactBuiltinTool(
+        "canvas_update",
+        { documentId: other, content: "hijacked" },
+        deps(),
+        ctx
+      )) as { ok: boolean; code: string }
+      expect(result).toMatchObject({ ok: false, code: "not_found" })
+      expect(useArtifactStore.getState().canvasDocuments[other]?.content).toBe("Beta")
+    })
   })
 })
 

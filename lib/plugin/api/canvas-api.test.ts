@@ -184,6 +184,9 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
     getState: jest.fn(() => ({
       canvasDocuments: mockCanvasDocuments,
       activeCanvasId: mockActiveCanvasId,
+      // The plugin API reads documents through the workspace-scoped selector;
+      // this fixture has one workspace, so it resolves straight from the map.
+      getCanvasDocumentForWorkspace: jest.fn((id: string) => mockCanvasDocuments[id] ?? null),
       createCanvasDocument: jest.fn((options) => {
         const id = `canvas-${Date.now()}`
         mockCanvasDocuments[id] = {

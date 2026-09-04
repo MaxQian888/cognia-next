@@ -449,7 +449,7 @@ export async function runArtifactBuiltinTool(
         if (!documentId || content === null) {
           return invalidArguments("documentId and content are required")
         }
-        const doc = store.canvasDocuments[documentId]
+        const doc = store.getCanvasDocumentForWorkspace(documentId)
         if (!doc) return notFound("canvas document", documentId)
 
         if (reviewBeforeApply()) {
@@ -478,7 +478,10 @@ export async function runArtifactBuiltinTool(
       case CANVAS_READ_TOOL_NAME: {
         const documentId = str(args, "documentId")
         if (documentId) {
-          const doc = store.canvasDocuments[documentId]
+          // Workspace-scoped: a turn running in one workspace cannot read a
+          // document owned by another, and gets the same "not found" it would
+          // get for a made-up id rather than a distinguishable refusal.
+          const doc = store.getCanvasDocumentForWorkspace(documentId)
           if (!doc) return notFound("canvas document", documentId)
           const body = truncate(doc.content)
           return {
@@ -490,9 +493,10 @@ export async function runArtifactBuiltinTool(
             ...(doc.editorContext?.selection ? { selection: doc.editorContext.selection } : {}),
           }
         }
-        const docs = Object.values(store.canvasDocuments)
-          .filter((doc) => !sessionId || !doc.sessionId || doc.sessionId === sessionId)
-          .slice(0, READ_LIST_MAX_ITEMS)
+        const docs = store.getCanvasDocumentsForWorkspace({
+          sessionId: sessionId || null,
+          limit: READ_LIST_MAX_ITEMS,
+        })
         return { ok: true as const, documents: docs.map(canvasSummary) }
       }
 

@@ -294,17 +294,17 @@ registerNodeExecutor({
   retryable: true,
   execute: async (ctx) => {
     const kind = "action.canvas.get"
-    const documents = useArtifactStore.getState().canvasDocuments
+    const store = useArtifactStore.getState()
     const documentId = optionalString(ctx, "documentId")
     if (documentId) {
-      const doc = documents[documentId]
+      const doc = store.canvasDocuments[documentId]
       if (!doc) throw new Error(`${kind}: no canvas document with id ${documentId}`)
       return { output: { ...canvasOutput(doc), content: doc.content } }
     }
     const sessionId = stepSessionId(ctx)
-    const rows = Object.values(documents).filter(
-      (doc) => !sessionId || !doc.sessionId || doc.sessionId === sessionId
-    )
+    // Workspace-scoped listing — a flow running in one workspace must not
+    // enumerate another's documents.
+    const rows = store.getCanvasDocumentsForWorkspace({ sessionId })
     return { output: { documents: rows.map(canvasOutput) } }
   },
 })

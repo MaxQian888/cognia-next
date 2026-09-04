@@ -45,7 +45,9 @@ export function revealArtifactInWorkspace(id: string): Artifact | null {
  */
 export function revealCanvasDocument(id: string): CanvasDocument | null {
   const store = useArtifactStore.getState()
-  const document = store.canvasDocuments[id]
+  // Workspace-scoped: revealing a document the active workspace does not own
+  // would switch the guild to a canvas whose rail cannot list it.
+  const document = store.getCanvasDocumentForWorkspace(id)
 
   if (!document) {
     return null

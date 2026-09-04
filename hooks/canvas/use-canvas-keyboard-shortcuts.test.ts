@@ -42,6 +42,9 @@ const artifactState = {
   },
   activeCanvasId: "a",
   setActiveCanvas: jest.fn(),
+  // Document cycling reads the workspace-scoped list, not the raw map, so a
+  // hotkey can never step into another workspace's document.
+  getCanvasDocumentsForWorkspace: () => Object.values(artifactState.canvasDocuments),
 }
 jest.mock("@/stores/artifact/artifact-store", () => ({
   useArtifactStore: { getState: () => artifactState },

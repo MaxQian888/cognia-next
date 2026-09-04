@@ -408,6 +408,24 @@ const INITIAL_ARTIFACT_WORKSPACE: ArtifactWorkspaceState = {
   returnContext: null,
 }
 
+/**
+ * Workspace isolation for Canvas documents — the same rule
+ * {@link applyArtifactWorkspaceFilters} applies to artifacts, lifted into its
+ * own helper because a Canvas document has no `artifactWorkspace` blob to carry
+ * a search term or a type filter: workspace ownership is the only axis.
+ *
+ * Legacy documents (no `projectId`) are grandfathered — visible everywhere —
+ * for parity with artifacts, and because `lib/db/project-scope-backfill.ts`
+ * stamps them on the next boot anyway.
+ */
+export function filterCanvasDocumentsByWorkspace(
+  documents: CanvasDocument[],
+  projectId: string | null
+): CanvasDocument[] {
+  if (!projectId) return documents
+  return documents.filter((doc) => !doc.projectId || doc.projectId === projectId)
+}
+
 function applyArtifactWorkspaceFilters(
   artifacts: Artifact[],
   workspace: ArtifactWorkspaceState,
@@ -857,6 +875,27 @@ interface ArtifactActions {
   ) => void
   deleteCanvasVersion: (documentId: string, versionId: string) => void
   getCanvasVersions: (documentId: string) => CanvasDocumentVersion[]
+  /**
+   * Every Canvas document owned by the ACTIVE workspace, newest first.
+   *
+   * The rail, the summaries hook, the plugin API and the `canvas_read` tool all
+   * used to read the raw `canvasDocuments` map, so switching workspace left the
+   * previous workspace's documents on screen — and let a model in workspace A
+   * read a document belonging to workspace B. This is the single scoped read
+   * they now share; `canvasDocuments` stays the unscoped source of truth for
+   * by-id lookups the caller has already authorised.
+   */
+  getCanvasDocumentsForWorkspace: (options?: {
+    sessionId?: string | null
+    limit?: number
+  }) => CanvasDocument[]
+  /**
+   * One Canvas document by id, but only when the ACTIVE workspace owns it.
+   * `null` is the same answer a caller gets for an id that does not exist —
+   * deliberately, so a plugin or a model tool cannot distinguish "not yours"
+   * from "not there" and use the difference to enumerate another workspace.
+   */
+  getCanvasDocumentForWorkspace: (id: string) => CanvasDocument | null
   compareVersions: (
     documentId: string,
     versionId1: string,
@@ -2093,6 +2132,23 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
             },
           }
         })
+      },
+
+      getCanvasDocumentForWorkspace: (id) => {
+        const doc = get().canvasDocuments[id]
+        if (!doc) return null
+        return filterCanvasDocumentsByWorkspace([doc], activeProjectId())[0] ?? null
+      },
+
+      getCanvasDocumentsForWorkspace: ({ sessionId = null, limit } = {}) => {
+        const state = get()
+        const scoped = filterCanvasDocumentsByWorkspace(
+          Object.values(state.canvasDocuments) as CanvasDocument[],
+          activeProjectId()
+        )
+          .filter((doc) => !sessionId || !doc.sessionId || doc.sessionId === sessionId)
+          .sort((a, b) => ensureDate(b.updatedAt).getTime() - ensureDate(a.updatedAt).getTime())
+        return typeof limit === "number" ? scoped.slice(0, limit) : scoped
       },
 
       getCanvasVersions: (documentId) => {
