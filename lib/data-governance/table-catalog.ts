@@ -242,7 +242,7 @@ export const CORE_TABLE_NAMES = [
   "petAchievements",
   "petActivityLog",
   "petCharacterBindings",
-  "petConversation",
+  "petConversationV2",
   "petInventory",
   "petModelFiles",
   "petModels",
@@ -772,13 +772,14 @@ const SECRET_EXTERNALIZED_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 const AUTO_INCREMENT_METADATA_TABLES = new Set<CoreTableName>([
   "chatInputHistory",
   "petActivityLog",
-  "petConversation",
   "providerLimits",
   "subscriptionBalance",
   "subscriptionUsage",
 ])
 
 const USER_CONTENT_TABLES = new Set<CoreTableName>([
+  // The user's own half of every talk turn with the pet.
+  "petConversationV2",
   // A scheduled task's payload is whatever the user (or an agent on their
   // behalf) wants run unattended: chat prompts, goal objectives, scripts. Its
   // notification block carries webhook URLs and IM conversation targets. The
@@ -1029,7 +1030,7 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     reason:
       "`prunePetActivity` trims the ledger to PET_ACTIVITY_CAP on every append, so the newest 2000 interactions are all that ever survive.",
   },
-  petConversation: {
+  petConversationV2: {
     mode: "cap",
     maxRows: 200,
     enforcement: "domain",
@@ -1302,6 +1303,14 @@ const CONTENT_PROTECTION_OVERRIDES: Partial<Record<CoreTableName, DataContentPro
   // spelling. Encrypting it would also mean the resume path could not read its
   // own journal without the cipher it is in the middle of installing.
   accountContentMigrations: "metadata-only",
+  // What the user actually said to their pet, and what it said back. The name
+  // matches none of the content-ish spellings the heuristic looks for, and it
+  // sat in AUTO_INCREMENT_METADATA_TABLES besides, so it stored a private
+  // conversation in the clear. Encrypting it is why the table was re-keyed
+  // from `++id` to a minted `&id` in v220: the middleware requires a primary
+  // key before the row is written, and an auto-increment key does not exist
+  // until Dexie has written it.
+  petConversationV2: "encrypted-content",
   // An observation carries `Score.reasoning` — a judge's prose about what the
   // user asked and what the agent answered. The name matches none of the
   // content-ish spellings the heuristic looks for, so it would default to

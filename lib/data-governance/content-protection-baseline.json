@@ -195,7 +195,7 @@
   "petAchievements": "metadata-only",
   "petActivityLog": "metadata-only",
   "petCharacterBindings": "metadata-only",
-  "petConversation": "metadata-only",
+  "petConversationV2": "encrypted-content",
   "petInventory": "metadata-only",
   "petModelFiles": "metadata-only",
   "petModels": "metadata-only",

@@ -334,7 +334,7 @@ describe("desktop pet", () => {
       maxRows: 2000,
       enforcement: "domain",
     })
-    expect(policyForTable("petConversation")?.retentionPolicy).toMatchObject({
+    expect(policyForTable("petConversationV2")?.retentionPolicy).toMatchObject({
       mode: "cap",
       maxRows: 200,
       enforcement: "domain",
@@ -355,7 +355,7 @@ describe("desktop pet", () => {
     for (const table of [
       "petProfile",
       "petActivityLog",
-      "petConversation",
+      "petConversationV2",
       "petAchievements",
       "petInventory",
       "petCharacterBindings",

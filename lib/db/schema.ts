@@ -395,7 +395,7 @@ export const LEGACY_COGNIA_DB_NAME = "cognia-claude"
 /** Bump when CURRENT_SCHEMA changes. IndexedDB only runs an upgrade when this
  * number INCREASES, so editing CURRENT_SCHEMA without bumping leaves every
  * existing database on its old store set with no error of any kind. */
-export const CURRENT_SCHEMA_VERSION = 219
+export const CURRENT_SCHEMA_VERSION = 220
 
 /**
  * The complete current Dexie schema, declared as ONE version.
@@ -546,7 +546,12 @@ export const CURRENT_SCHEMA: Record<string, string | null> = {
   // v218 - derived, local-only scan state for the external usage index.
   usageSourceStates: "&sourceId, status, lastScanAt",
   toolRoutes: "&id, refId, kind, enabled, pluginId",
-  petConversation: "++id, at",
+  // Dropped in v220. Dexie refuses to open a database whose primary key
+  // changed ("Not yet support for changing primary key"), so moving this table
+  // to an encrypted, minted `&id` had to be a drop and replace rather than a
+  // re-key. The key stays here as `null` per the schema contract.
+  petConversation: null,
+  petConversationV2: "&id, at",
   loops:
     "&id, sessionId, [sessionId+status], status, mode, scheduledTaskId, createdAt, projectId, [projectId+createdAt]",
   loopEvents: "&id, loopId, [loopId+ts], kind, ts, projectId",
@@ -1638,7 +1643,7 @@ export class CogniaDB extends Dexie {
   // v76 — Semantic tool routes. See `lib/db/tool-routes.ts`.
   toolRoutes!: Table<import("@/types/routing/tool-route").ToolRouteRecord, string>
   // v77 — Pet conversation history. See `lib/db/pet-conversation.ts`.
-  petConversation!: Table<PetConversationRow, number>
+  petConversationV2!: Table<PetConversationRow, string>
   // v95 — Wiki Lint results (singleton per scope). See `lib/db/wiki-lint-results.ts`.
   wikiLintResults!: Table<import("@/types/wiki").WikiLintResult, import("@/types/wiki").WikiScope>
   // v96 — Attention Radar reports. See `lib/db/radar-reports.ts`.

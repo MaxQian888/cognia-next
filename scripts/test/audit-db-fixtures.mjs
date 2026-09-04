@@ -10,7 +10,7 @@ const AUTO_INCREMENT_TABLES = [
   "subscriptionUsage",
   "petActivityLog",
   "subscriptionBalance",
-  "petConversation",
+  "petConversationV2",
   "chatInputHistory",
   "providerLimits",
 ]

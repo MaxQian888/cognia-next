@@ -13,7 +13,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-  await getDb().petConversation.clear()
+  await getDb().petConversationV2.clear()
 })
 
 describe("pet-conversation", () => {
@@ -36,15 +36,39 @@ describe("pet-conversation", () => {
       await appendPetTurn({ at: i, userText: `u${i}`, reply: `r${i}` })
     }
     const db = getDb()
-    expect(await db.petConversation.count()).toBe(PET_CONVERSATION_CAP)
+    expect(await db.petConversationV2.count()).toBe(PET_CONVERSATION_CAP)
     // The survivors are the newest CAP rows.
-    const oldest = await db.petConversation.orderBy("at").first()
+    const oldest = await db.petConversationV2.orderBy("at").first()
     expect(oldest?.at).toBe(5)
   })
 
   it("clearPetConversation empties the table", async () => {
     await appendPetTurn({ at: 1, userText: "a", reply: "b" })
     await clearPetConversation()
-    expect(await getDb().petConversation.count()).toBe(0)
+    expect(await getDb().petConversationV2.count()).toBe(0)
+  })
+})
+
+describe("the minted primary key", () => {
+  it("returns a string id and stores it on the row", async () => {
+    // Not an auto-increment number any more. The encryption middleware
+    // requires a primary key to exist BEFORE the row is written, and an
+    // auto-increment key does not exist until Dexie has written it, so every
+    // append against the encrypted table would have thrown.
+    const id = await appendPetTurn({ at: 1, userText: "hi", reply: "hello" })
+    expect(typeof id).toBe("string")
+    expect(id).toMatch(/^pc_/)
+    const [row] = await listRecentPetTurns(1)
+    expect(row.id).toBe(id)
+  })
+
+  it("mints a distinct id per turn so one cannot overwrite another", async () => {
+    const ids = await Promise.all([
+      appendPetTurn({ at: 1, userText: "a", reply: "1" }),
+      appendPetTurn({ at: 2, userText: "b", reply: "2" }),
+      appendPetTurn({ at: 3, userText: "c", reply: "3" }),
+    ])
+    expect(new Set(ids).size).toBe(3)
+    expect(await listRecentPetTurns(10)).toHaveLength(3)
   })
 })

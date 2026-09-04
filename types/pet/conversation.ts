@@ -4,8 +4,15 @@
 // rows in `lib/db/pet-conversation.ts`; the prompt window reads the newest ~12.
 
 export interface PetConversationRow {
-  /** Auto-increment primary key (absent before insert). */
-  id?: number
+  /**
+   * Minted primary key.
+   *
+   * This was an auto-increment number until the table moved to
+   * encrypted-content. The encryption middleware requires a primary key to
+   * exist BEFORE the row is written, and an auto-increment key does not exist
+   * until Dexie has written it, so every append would have thrown.
+   */
+  id: string
   /** Epoch ms of the turn. */
   at: number
   /** What the user said to the pet. */
