@@ -1,12 +1,16 @@
 // Birthday source: celebrates the pet's hatch anniversary. Checks hourly (and
 // once at wiring, so a launch on the birthday celebrates immediately) whether
 // today's local month-day matches the Soul's `hatchDate` at least one year
-// later, and emits a single XP-bearing `birthday` event per local day — the
-// activity ledger is the dedup record (birthday carries XP, so it is always
-// journaled), which also feeds the "first birthday" achievement counter.
+// later, and emits a single XP-bearing `birthday` event per local day.
+//
+// The dedup record is a durable day marker on the profile. It used to be a
+// scan of the newest 500 activity rows, but the ledger is capped and a busy
+// hour can push today's birthday row out of that window, after which the next
+// hourly tick celebrates again. The scan is kept as a backstop for profiles
+// written before the marker existed.
 
 import type { PetActivityRow, PetProfile } from "@/types/pet"
-import { getPetProfile, listPetActivity } from "@/lib/db/pet"
+import { getPetProfile, listPetActivity, patchPetProfile } from "@/lib/db/pet"
 import { localDayKey } from "@/lib/pet/economy/streak"
 import type { PetEmit } from "../pet-event-bus"
 
@@ -50,6 +54,8 @@ export interface BirthdayDeps {
   getProfile?: () => Promise<PetProfile | undefined>
   /** Injectable ledger read (tests) — defaults to the Dexie ledger. */
   listActivity?: (limit: number) => Promise<PetActivityRow[]>
+  /** Injectable profile patch (tests) — defaults to the Dexie singleton. */
+  markCelebrated?: (day: string) => Promise<unknown>
 }
 
 /** Build a birthday source wire with injectable deps (for tests). */
@@ -60,6 +66,8 @@ export function createBirthdaySource(deps: BirthdayDeps = {}): (emit: PetEmit) =
   const nowFn = deps.now ?? Date.now
   const getProfile = deps.getProfile ?? getPetProfile
   const listActivity = deps.listActivity ?? listPetActivity
+  const markCelebrated =
+    deps.markCelebrated ?? ((day: string) => patchPetProfile({ lastBirthdayAwardDay: day }))
 
   return (emit) => {
     let disposed = false
@@ -70,14 +78,21 @@ export function createBirthdaySource(deps: BirthdayDeps = {}): (emit: PetEmit) =
         if (!hatchDate || disposed) return
         const now = nowFn()
         if (!isBirthdayToday(hatchDate, now)) return
-        // One celebration per local day: the XP-bearing emit below lands in
-        // the activity ledger, so a prior birthday row today means we already
-        // celebrated (across restarts too).
+        // One celebration per local day, recorded durably on the profile.
+        //
+        // This used to rest entirely on scanning the newest 500 activity rows
+        // for a `birthday` entry from today. The ledger is capped at 2000, so
+        // a busy hour can push that row out of the scanned window and the next
+        // hourly tick celebrates again. A stored day cannot be pushed out.
         const today = localDayKey(now)
+        if (profile?.lastBirthdayAwardDay === today) return
+        // The ledger scan stays as a backstop for profiles written before the
+        // marker existed, and for the gap between emitting and recording.
         const rows = await listActivity(DEDUP_SCAN_ROWS)
         if (disposed) return
         if (rows.some((r) => r.kind === "birthday" && localDayKey(r.ts) === today)) return
         emit({ source: "system", kind: "birthday", at: now })
+        await markCelebrated(today)
       } catch {
         // Best-effort ambience — a failed check must never surface.
       }

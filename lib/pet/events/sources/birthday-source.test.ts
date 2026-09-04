@@ -3,6 +3,7 @@ import {
   isBirthdayToday,
   BIRTHDAY_CHECK_INTERVAL_MS,
 } from "./birthday-source"
+import { localDayKey } from "@/lib/pet/economy/streak"
 import type { PetActivityRow, PetProfile } from "@/types/pet"
 import type { PetEvent } from "@/types/pet"
 
@@ -124,5 +125,51 @@ describe("createBirthdaySource", () => {
 
   it("uses an hourly default cadence", () => {
     expect(BIRTHDAY_CHECK_INTERVAL_MS).toBe(3_600_000)
+  })
+})
+
+describe("dedup that a busy day cannot defeat", () => {
+  it("skips the celebration when the profile already records today", async () => {
+    const emit = jest.fn()
+    const listActivity = jest.fn().mockResolvedValue([])
+    const wire = createBirthdaySource({
+      now: () => BIRTHDAY_NOON,
+      getProfile: async () =>
+        ({
+          soul: { hatchDate: HATCH },
+          lastBirthdayAwardDay: localDayKey(BIRTHDAY_NOON),
+        }) as never,
+      listActivity,
+      setInterval: () => 0 as never,
+      clearInterval: () => {},
+    })
+    const dispose = wire(emit)
+    await settle()
+    expect(emit).not.toHaveBeenCalled()
+    // The marker answers before the ledger is even read.
+    expect(listActivity).not.toHaveBeenCalled()
+    dispose()
+  })
+
+  it("celebrates once and records the day, even when the ledger has rotated", async () => {
+    // The regression: a busy hour pushes today's birthday row past the 500-row
+    // scan window, and the next hourly tick used to celebrate all over again.
+    const emit = jest.fn()
+    const marked: string[] = []
+    const wire = createBirthdaySource({
+      now: () => BIRTHDAY_NOON,
+      getProfile: async () => ({ soul: { hatchDate: HATCH } }) as never,
+      listActivity: async () => [],
+      markCelebrated: async (day) => {
+        marked.push(day)
+      },
+      setInterval: () => 0 as never,
+      clearInterval: () => {},
+    })
+    const dispose = wire(emit)
+    await settle()
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(marked).toEqual([localDayKey(BIRTHDAY_NOON)])
+    dispose()
   })
 })

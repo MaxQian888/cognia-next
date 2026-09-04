@@ -26,11 +26,16 @@ export type ImportOutcome =
  */
 export async function filesToEntries(
   files: FileList | File[]
-): Promise<{ ok: true; entries: ModelFileEntry[] } | { ok: false; code: "zipFailed" }> {
+): Promise<
+  { ok: true; entries: ModelFileEntry[] } | { ok: false; code: "zipFailed" | "tooLarge" }
+> {
   const arr = Array.from(files as ArrayLike<File>)
   if (arr.length === 1 && arr[0].name.toLowerCase().endsWith(".zip")) {
     const result = await extractModelZip(arr[0])
-    if (!result.ok) return { ok: false, code: "zipFailed" }
+    // Pass the real reason through. Collapsing everything to "couldn't be read"
+    // told a user whose archive was simply too big to go looking for a corrupt
+    // file instead.
+    if (!result.ok) return { ok: false, code: result.code }
     return { ok: true, entries: result.entries }
   }
   const entries: ModelFileEntry[] = arr.map((f) => ({

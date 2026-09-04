@@ -3,7 +3,7 @@
 import JSZip from "jszip"
 
 import { readBlobText } from "./read-blob-text"
-import { extractModelZip } from "./zip"
+import { MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES, MAX_ZIP_TOTAL_BYTES, extractModelZip } from "./zip"
 
 function fakeZip(files: Record<string, { dir: boolean; content?: string }>) {
   return {
@@ -134,3 +134,61 @@ describe("extractModelZip — real jszip", () => {
   })
 })
 /** @jest-environment jsdom */
+
+describe("bounds applied during extraction", () => {
+  function fakeZip(files: Record<string, { size: number }>) {
+    return {
+      files: Object.fromEntries(
+        Object.entries(files).map(([path, spec]) => [
+          path,
+          {
+            dir: false,
+            async: async () => new Blob([new Uint8Array(spec.size)]),
+          },
+        ])
+      ),
+    }
+  }
+
+  it("refuses an absurd member count before decompressing any of it", async () => {
+    const many: Record<string, { size: number }> = {}
+    for (let i = 0; i < MAX_ZIP_ENTRIES + 1; i += 1) many[`m/f${i}.png`] = { size: 1 }
+    const result = await extractModelZip(new Blob(), {
+      loadAsync: async () => fakeZip(many) as never,
+    })
+    expect(result).toEqual({ ok: false, code: "tooLarge" })
+  })
+
+  it("stops on the first entry that is itself over the cap", async () => {
+    const result = await extractModelZip(new Blob(), {
+      loadAsync: async () =>
+        fakeZip({
+          "m/a.png": { size: 8 },
+          "m/bomb.png": { size: MAX_ZIP_ENTRY_BYTES + 1 },
+        }) as never,
+    })
+    expect(result).toEqual({ ok: false, code: "tooLarge" })
+  })
+
+  it("stops once the running total crosses the cap, not after expanding it all", async () => {
+    // A compression bomb is small on disk and enormous once expanded, so the
+    // check that mattered was the one after validation, far too late.
+    const half = Math.ceil(MAX_ZIP_TOTAL_BYTES / 2)
+    const result = await extractModelZip(new Blob(), {
+      loadAsync: async () =>
+        fakeZip({
+          "m/a.png": { size: half },
+          "m/b.png": { size: half },
+          "m/c.png": { size: half },
+        }) as never,
+    })
+    expect(result).toEqual({ ok: false, code: "tooLarge" })
+  })
+
+  it("still extracts an ordinary archive", async () => {
+    const result = await extractModelZip(new Blob(), {
+      loadAsync: async () => fakeZip({ "m/a.png": { size: 16 }, "m/b.json": { size: 8 } }) as never,
+    })
+    expect(result.ok).toBe(true)
+  })
+})

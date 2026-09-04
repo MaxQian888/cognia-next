@@ -55,6 +55,15 @@ export interface PetProfile {
    */
   interactionGate?: PetInteractionGateState
   /**
+   * Local day (YYYY-MM-DD) the last birthday reward was granted, or absent.
+   *
+   * Dedup used to rest on scanning the newest 500 activity rows for a
+   * `birthday` entry from today. The ledger is capped at 2000 and a busy hour
+   * can push that row out of the scanned window, after which the next hourly
+   * tick celebrates again. A durable marker is not a finite window.
+   */
+  lastBirthdayAwardDay?: string
+  /**
    * Additive stat growth earned by working alongside the pet (non-indexed;
    * absent until the first growth). Effective stats = base bones + this.
    * Advanced via `lib/pet/stats/*`.
