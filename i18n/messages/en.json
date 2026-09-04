@@ -14139,8 +14139,8 @@
       "openProject": "Open {name} in the projects console",
       "projects": "Projects",
       "show": "Show the sidebar",
-      "views": "Views",
-      "trackerNav": "Tracker sections"
+      "trackerNav": "Tracker sections",
+      "views": "Views"
     },
     "run": {
       "activeHint": "A run is in progress — the issue stays in In progress until the engine finishes or you cancel.",
@@ -33139,6 +33139,7 @@
       "teams": "Multi-character coordination — round-robin, supervisor, manual.",
       "terminal": "Integrated terminal dock — default shell, font, scrollback, and per-project overrides.",
       "tools": "Built-in shell, filesystem, git, process and environment tools — global on/off, risk levels, and always-allow management.",
+      "updates": "Apps, extensions, plugins and content that can be updated.",
       "usageCost": "Spending limits and the local trace debug session",
       "webhooks": "Outbound webhooks, endpoint subscriptions, HMAC signing, delivery retries, and logs.",
       "workflows": "Visual n8n-style orchestration over characters, teams, skills, twins, and connectors. Trigger via cron, webhook, platform message, or manual run.",
@@ -36758,6 +36759,7 @@
       "teams": "Teams",
       "terminal": "Terminal",
       "tools": "Tools",
+      "updates": "Updates",
       "usageCost": "Usage & cost",
       "webhooks": "Webhooks",
       "workflows": "Workflows",
@@ -42698,6 +42700,144 @@
       "missing-refs": "{root} needs its own base and target references.",
       "missing-run": "{root} has no agent run to review — only the repository the last turn wrote in does."
     }
+  },
+  "updates": {
+    "aboutLink": "Open Update Center",
+    "action": {
+      "install-in-app": "Install",
+      "open-pack-diff": "Review changes",
+      "open-store": "Open store",
+      "reload-extension": "Reload extension",
+      "restart-desktop": "Restart now",
+      "review-permissions": "Review and install",
+      "run-package-manager": "Show command"
+    },
+    "allCurrent": "Everything is up to date.",
+    "ambiguousSource": "Cognia could not tell which package manager installed the CLI. Pick the one you used.",
+    "breaking": "Installing this cannot be undone by going back.",
+    "checkAll": "Check for updates",
+    "checking": "Checking…",
+    "clearHold": "Show this again",
+    "commandCopied": "Command copied",
+    "commandTitle": "Run this to update",
+    "connectHint": "Connect the extension to see the version installed in your browser.",
+    "copyCommand": "Copy command",
+    "criticalNotice": "This is a critical update. You can postpone it, but it cannot be dismissed permanently.",
+    "criticality": {
+      "critical": "Critical",
+      "recommended": "Recommended",
+      "routine": "Routine"
+    },
+    "defer": "Remind me later",
+    "deferredUntil": "Hidden until {when}",
+    "description": "Every updatable part of Cognia in one place: the apps, the extensions, and your plugins and content.",
+    "downloadingLabel": "Downloading update",
+    "error": {
+      "cancelled": "The update was cancelled.",
+      "disk": "There is not enough disk space to install this update.",
+      "expired": "The update information has expired.",
+      "incompatible": "This version needs a newer Cognia than the one installed.",
+      "network": "Could not reach the update service.",
+      "package-manager": "Your package manager could not complete the update.",
+      "permission": "Cognia was not allowed to install this update.",
+      "revoked": "This release was withdrawn.",
+      "rollback": "The update service offered an older release than one already seen.",
+      "signature": "This update failed its signature check and was not installed.",
+      "store": "The store could not start the update.",
+      "timeout": "The update service did not answer in time.",
+      "unknown": "The update failed.",
+      "unsupported": "This device cannot install this update."
+    },
+    "groupHint": {
+      "apps-and-runtimes": "The Cognia app on this device, plus the command-line agent.",
+      "extensions": "Installed and updated by your browser, not by Cognia.",
+      "plugins-and-content": "Plugins, skills, and character packs installed into this app."
+    },
+    "groups": {
+      "apps-and-runtimes": "Apps and runtimes",
+      "extensions": "Browser extensions",
+      "plugins-and-content": "Plugins and content"
+    },
+    "installedBy": {
+      "app-store": "Installed by the App Store",
+      "browser-store": "Installed by your browser",
+      "character-pack-runtime": "Installed by Cognia",
+      "google-play": "Installed by Google Play",
+      "package-manager": "Installed by your package manager",
+      "plugin-runtime": "Installed by Cognia",
+      "skill-runtime": "Installed by Cognia",
+      "tauri": "Installed by Cognia"
+    },
+    "interrupted": "The last install did not finish. The previous version is still running.",
+    "kind": {
+      "browser-chrome": "Chrome companion",
+      "browser-edge": "Edge companion",
+      "character-pack": "Character pack",
+      "cli": "Command-line agent",
+      "desktop": "Cognia desktop",
+      "mobile-android": "Cognia for Android",
+      "mobile-ios": "Cognia for iOS",
+      "plugin": "Plugin",
+      "skill": "Skill"
+    },
+    "lastChecked": "Last checked {when}",
+    "neverChecked": "Not checked yet",
+    "newVersion": "Version {version}",
+    "notInstalledLocally": "Not connected. The store lists version {version}.",
+    "nothingHere": "Nothing here can be updated on this device.",
+    "permissionsExpanded": "This version asks for more access than the one you have.",
+    "progressPercent": "{percent}% downloaded",
+    "recovery": {
+      "contactSupport": "Report a problem",
+      "freeSpace": "Free up space",
+      "openPluginSettings": "Open plugin settings",
+      "openReleasePage": "Open the release page",
+      "openStore": "Open the store",
+      "retry": "Try again",
+      "retryInstall": "Install again",
+      "retryLater": "Try again later",
+      "reviewPermissions": "Review permissions",
+      "updateHost": "Update Cognia first"
+    },
+    "settings": {
+      "backgroundDownloadDescription": "Only the signed Cognia desktop package. Everything else always asks first.",
+      "backgroundDownloadLabel": "Download desktop updates in the background",
+      "channel": {
+        "beta": "Beta",
+        "stable": "Stable"
+      },
+      "channelDescription": "Beta builds arrive earlier and change more often.",
+      "channelLabel": "Release channel",
+      "notifyCriticalDescription": "A critical update is announced on launch even when automatic checks are off. It never blocks the app.",
+      "notifyCriticalLabel": "Always tell me about critical updates",
+      "saveFailed": "Could not save the update settings: {error}"
+    },
+    "skip": "Skip this version",
+    "skipped": "Skipped version {version}",
+    "state": {
+      "available": "Update available",
+      "awaiting-consent": "Needs your approval",
+      "awaiting-reload": "Waiting on a reload",
+      "awaiting-restart": "Restart to finish",
+      "awaiting-store": "Waiting on the store",
+      "cancelled": "Cancelled",
+      "checking": "Checking",
+      "current": "Up to date",
+      "deferred": "Reminder postponed",
+      "downloading": "Downloading",
+      "failed": "Update failed",
+      "installing": "Installing",
+      "verified": "Updated"
+    },
+    "title": "Updates",
+    "toast": {
+      "available": "An update is available",
+      "criticalAvailable": "A critical update is available",
+      "multiple": "{count, plural, one {# update is available} other {# updates are available}}",
+      "open": "Open Update Center"
+    },
+    "unsigned": "This build is not in the signed catalog. Install it only if you trust the source.",
+    "versionChange": "{from} to {to}"
   },
   "usageBudget": {
     "loading": "Reading spend…",

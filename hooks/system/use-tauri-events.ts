@@ -257,8 +257,9 @@ export function useTauriEvents(): void {
                 toast.success(
                   tRef.current("updates.updateAvailableToast", { version: outcome.version })
                 )
-                // Hand off to Settings → About, where the download + relaunch lives.
-                useUIStore.getState().requestOpenSettings("about")
+                // Hand off to the Update Center, which owns every asset kind.
+                // About only installs the desktop package.
+                useUIStore.getState().requestOpenSettings("updates")
                 break
               case "upToDate":
                 toast.success(tRef.current("updates.alreadyLatest"))

@@ -270,14 +270,14 @@ describe("useTauriEvents", () => {
     expect(requestOpenSettings).toHaveBeenCalledWith()
   })
 
-  it("tray Check for updates opens Settings → About when an update is available", async () => {
+  it("tray Check for updates opens the Update Center when an update is available", async () => {
     checkUpdatesMock.mockResolvedValue({ kind: "available", version: "3.1.4" })
     renderHook(() => useTauriEvents())
     await flushPromises()
     listenHandlers["tray://check-updates"]?.({ payload: null })
     await flushPromises()
     expect(toastSuccess).toHaveBeenCalledWith("Update available: 3.1.4")
-    expect(requestOpenSettings).toHaveBeenCalledWith("about")
+    expect(requestOpenSettings).toHaveBeenCalledWith("updates")
   })
 
   it("tray Check for updates toasts and stays put when already current", async () => {

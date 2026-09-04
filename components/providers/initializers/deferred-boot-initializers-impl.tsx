@@ -8,6 +8,7 @@ import { ExecutionControlInitializer } from "./execution-control-initializer"
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { RemoteNotificationInitializer } from "./remote-notification-initializer"
+import { UpdateCenterInitializer } from "./update-center-initializer"
 import { GatewayProvider } from "@/components/providers/gateway-provider"
 import { markBootCapabilityReady } from "@/lib/boot/capabilities"
 import { recoverStaleDirectChatExecutionRuns } from "@/lib/execution/direct-chat-run"
@@ -61,6 +62,13 @@ export function DeferredBootInitializersImpl() {
         nothing.
       */}
       <CodeAdoptionTrackerInitializer />
+      {/*
+        Not desktop-gated: plugins, skills, character packs and the browser
+        companion are updatable on hosts with no Tauri shell at all. Mounting
+        it beside the desktop-only initializers instead would have left every
+        other host with no update discovery whatsoever.
+      */}
+      <UpdateCenterInitializer />
     </>
   )
 }

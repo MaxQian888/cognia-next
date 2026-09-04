@@ -99,6 +99,10 @@ const AboutSection = dynamic(() => import("./about/about-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const UpdatesSection = dynamic(
+  () => import("./sections/updates-section").then((m) => m.UpdatesSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const AccountOverviewSection = dynamic(
   () => import("./account/account-overview-section").then((m) => m.AccountOverviewSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -676,6 +680,8 @@ function SectionContent({
       return <UsageCostSection />
     case "desktop":
       return <DesktopSection />
+    case "updates":
+      return <UpdatesSection />
     case "about":
       return <AboutSection />
     default:

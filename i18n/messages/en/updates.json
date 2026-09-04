@@ -1,0 +1,138 @@
+{
+  "title": "Updates",
+  "description": "Every updatable part of Cognia in one place: the apps, the extensions, and your plugins and content.",
+  "checkAll": "Check for updates",
+  "checking": "Checking…",
+  "lastChecked": "Last checked {when}",
+  "neverChecked": "Not checked yet",
+  "allCurrent": "Everything is up to date.",
+  "nothingHere": "Nothing here can be updated on this device.",
+  "groups": {
+    "apps-and-runtimes": "Apps and runtimes",
+    "extensions": "Browser extensions",
+    "plugins-and-content": "Plugins and content"
+  },
+  "groupHint": {
+    "apps-and-runtimes": "The Cognia app on this device, plus the command-line agent.",
+    "extensions": "Installed and updated by your browser, not by Cognia.",
+    "plugins-and-content": "Plugins, skills, and character packs installed into this app."
+  },
+  "kind": {
+    "desktop": "Cognia desktop",
+    "mobile-ios": "Cognia for iOS",
+    "mobile-android": "Cognia for Android",
+    "browser-chrome": "Chrome companion",
+    "browser-edge": "Edge companion",
+    "cli": "Command-line agent",
+    "plugin": "Plugin",
+    "skill": "Skill",
+    "character-pack": "Character pack"
+  },
+  "installedBy": {
+    "tauri": "Installed by Cognia",
+    "app-store": "Installed by the App Store",
+    "google-play": "Installed by Google Play",
+    "browser-store": "Installed by your browser",
+    "package-manager": "Installed by your package manager",
+    "plugin-runtime": "Installed by Cognia",
+    "skill-runtime": "Installed by Cognia",
+    "character-pack-runtime": "Installed by Cognia"
+  },
+  "state": {
+    "current": "Up to date",
+    "checking": "Checking",
+    "available": "Update available",
+    "deferred": "Reminder postponed",
+    "downloading": "Downloading",
+    "awaiting-consent": "Needs your approval",
+    "awaiting-store": "Waiting on the store",
+    "awaiting-reload": "Waiting on a reload",
+    "awaiting-restart": "Restart to finish",
+    "installing": "Installing",
+    "verified": "Updated",
+    "failed": "Update failed",
+    "cancelled": "Cancelled"
+  },
+  "action": {
+    "install-in-app": "Install",
+    "open-store": "Open store",
+    "reload-extension": "Reload extension",
+    "run-package-manager": "Show command",
+    "restart-desktop": "Restart now",
+    "review-permissions": "Review and install",
+    "open-pack-diff": "Review changes"
+  },
+  "versionChange": "{from} to {to}",
+  "newVersion": "Version {version}",
+  "notInstalledLocally": "Not connected. The store lists version {version}.",
+  "connectHint": "Connect the extension to see the version installed in your browser.",
+  "criticality": {
+    "critical": "Critical",
+    "recommended": "Recommended",
+    "routine": "Routine"
+  },
+  "criticalNotice": "This is a critical update. You can postpone it, but it cannot be dismissed permanently.",
+  "permissionsExpanded": "This version asks for more access than the one you have.",
+  "breaking": "Installing this cannot be undone by going back.",
+  "unsigned": "This build is not in the signed catalog. Install it only if you trust the source.",
+  "skip": "Skip this version",
+  "defer": "Remind me later",
+  "clearHold": "Show this again",
+  "skipped": "Skipped version {version}",
+  "deferredUntil": "Hidden until {when}",
+  "commandTitle": "Run this to update",
+  "copyCommand": "Copy command",
+  "commandCopied": "Command copied",
+  "ambiguousSource": "Cognia could not tell which package manager installed the CLI. Pick the one you used.",
+  "progressPercent": "{percent}% downloaded",
+  "downloadingLabel": "Downloading update",
+  "error": {
+    "network": "Could not reach the update service.",
+    "timeout": "The update service did not answer in time.",
+    "signature": "This update failed its signature check and was not installed.",
+    "expired": "The update information has expired.",
+    "rollback": "The update service offered an older release than one already seen.",
+    "revoked": "This release was withdrawn.",
+    "incompatible": "This version needs a newer Cognia than the one installed.",
+    "permission": "Cognia was not allowed to install this update.",
+    "disk": "There is not enough disk space to install this update.",
+    "cancelled": "The update was cancelled.",
+    "store": "The store could not start the update.",
+    "package-manager": "Your package manager could not complete the update.",
+    "unsupported": "This device cannot install this update.",
+    "unknown": "The update failed."
+  },
+  "recovery": {
+    "retry": "Try again",
+    "retryLater": "Try again later",
+    "retryInstall": "Install again",
+    "contactSupport": "Report a problem",
+    "reviewPermissions": "Review permissions",
+    "freeSpace": "Free up space",
+    "updateHost": "Update Cognia first",
+    "openStore": "Open the store",
+    "openReleasePage": "Open the release page",
+    "openPluginSettings": "Open plugin settings"
+  },
+  "interrupted": "The last install did not finish. The previous version is still running.",
+  "toast": {
+    "available": "An update is available",
+    "criticalAvailable": "A critical update is available",
+    "multiple": "{count, plural, one {# update is available} other {# updates are available}}",
+    "open": "Open Update Center"
+  },
+  "settings": {
+    "channelLabel": "Release channel",
+    "channelDescription": "Beta builds arrive earlier and change more often.",
+    "channel": {
+      "stable": "Stable",
+      "beta": "Beta"
+    },
+    "backgroundDownloadLabel": "Download desktop updates in the background",
+    "backgroundDownloadDescription": "Only the signed Cognia desktop package. Everything else always asks first.",
+    "notifyCriticalLabel": "Always tell me about critical updates",
+    "notifyCriticalDescription": "A critical update is announced on launch even when automatic checks are off. It never blocks the app.",
+    "saveFailed": "Could not save the update settings: {error}"
+  },
+  "aboutLink": "Open Update Center"
+}

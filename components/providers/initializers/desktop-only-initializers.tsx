@@ -101,10 +101,6 @@ const PetWindowInitializer = dynamic(
   () => import("./pet-window-initializer").then((m) => m.PetWindowInitializer),
   { ssr: false }
 )
-const UpdateCheckInitializer = dynamic(
-  () => import("./update-check-initializer").then((m) => m.UpdateCheckInitializer),
-  { ssr: false }
-)
 const FleetHistorySinkInitializer = dynamic(
   () => import("./fleet-history-sink-initializer").then((m) => m.FleetHistorySinkInitializer),
   { ssr: false }
@@ -201,7 +197,6 @@ export function DesktopOnlyInitializers() {
       <FleetHistorySinkInitializer />
       <WorkerRuntimeInitializer />
       <ExitLeaseReleaseInitializer />
-      <UpdateCheckInitializer />
       <PluginDeepLinkRouter />
       <ConsentOverlay />
       <CliBridgeEventsBridge />

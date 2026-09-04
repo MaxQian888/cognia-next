@@ -62,8 +62,9 @@ describe("DesktopOnlyInitializers", () => {
     // Mirrors the count of gated children in the component — a guard against
     // silently dropping one when the list changes. (WindowShowInitializer,
     // WebviewHeartbeatInitializer and ExitConfirmationDialog moved up to
-    // WindowLivenessInitializers.)
-    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(22)
+    // WindowLivenessInitializers. UpdateCheckInitializer moved out entirely:
+    // the Update Center sweep covers every host, not just the desktop.)
+    expect(container.querySelectorAll('[data-testid="desktop-child"]')).toHaveLength(21)
     expect(mockMarkDesktopReady).toHaveBeenCalledWith("desktop-tools")
   })
 

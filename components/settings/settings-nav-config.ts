@@ -55,6 +55,7 @@ import {
   KeyboardIcon,
   RadarIcon,
   CableIcon,
+  DownloadCloudIcon,
 } from "lucide-react"
 
 import type { CapabilityId, HostProfile } from "@/lib/platform/capabilities"
@@ -127,6 +128,7 @@ export type SettingsSectionId =
   | "sandbox"
   | "security"
   | "about"
+  | "updates"
 
 export interface NavItem {
   id: SettingsSectionId
@@ -732,6 +734,15 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: ShieldCheckIcon,
     // Biometric guard policy toggles; the guard itself degrades per device,
     // and the mobile sign-out toggle only means anything off the desktop.
+  },
+  {
+    id: "updates",
+    labelKey: "updates",
+    descriptionKey: "updates",
+    group: "system",
+    // Every host has something updatable, even a browser tab (plugins,
+    // skills, packs), so this section is never profile-gated.
+    icon: DownloadCloudIcon,
   },
   {
     id: "about",
@@ -1606,6 +1617,21 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
   ],
   desktop: ["tauri", "tray", "autostart", "window"],
   about: ["version", "build", "credits"],
+  updates: [
+    "update",
+    "updates",
+    "upgrade",
+    "version",
+    "release",
+    "channel",
+    "beta",
+    "download",
+    "install",
+    "app store",
+    "play store",
+    "extension",
+    "cli",
+  ],
   "source-control": [
     "git",
     "source control",

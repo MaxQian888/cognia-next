@@ -49,6 +49,9 @@ export const NON_PREFERENCE_KEYS = [
  * `undefined`), which is the correct "back to default" behavior.
  */
 export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSettings)[]>> = {
+  // `updates` is the Update Center's channel and per-asset snapshots. The
+  // desktop updater's own scheduling stays under `about`, where its card is.
+  updates: ["updateCenter"],
   tools: ["alwaysAllowTools", "builtinTools", "webTools", "selfInvokeTools", "toolFilter"],
   // Keyed on the id the NAV uses. The standalone `providers` / `profile`
   // sections were merged into `ai-connections` / `account`, and this map kept

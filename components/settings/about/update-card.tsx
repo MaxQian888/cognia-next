@@ -3,7 +3,13 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { DownloadIcon, RefreshCwIcon, RocketIcon, RotateCcwIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  LayoutListIcon,
+  RefreshCwIcon,
+  RocketIcon,
+  RotateCcwIcon,
+} from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -34,6 +40,7 @@ import {
   type AvailableUpdate,
   type UpdateProgress,
 } from "@/lib/tauri/updater"
+import { openUpdateCenter } from "@/lib/updates/open-update-center"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import { AboutCard } from "./about-card"
@@ -68,6 +75,7 @@ function PreferenceRow({
 
 export function UpdateCard() {
   const t = useTranslations("settings.about")
+  const tUpdates = useTranslations("updates")
   const rawUpdateSettings = useSettingsStore((s) => s.settings?.updates)
   const lastUpdateCheckAt = useSettingsStore((s) => s.settings?.lastUpdateCheckAt)
   const save = useSettingsStore((s) => s.save)
@@ -230,6 +238,22 @@ export function UpdateCard() {
       {lastChecked && (
         <InfoRow label={t("updates.lastChecked")} value={lastChecked} testid="row-last-checked" />
       )}
+
+      {/*
+        This card installs the desktop package and nothing else. Extensions,
+        the CLI, plugins, skills and packs live in the Update Center, so the
+        link is here rather than a second, partial copy of that list.
+      */}
+      <Button
+        variant="outline"
+        size="sm"
+        className="mt-2"
+        onClick={() => openUpdateCenter()}
+        data-testid="open-update-center"
+      >
+        <LayoutListIcon className="mr-2 size-4" />
+        {tUpdates("aboutLink")}
+      </Button>
 
       <div className="mt-2 flex flex-wrap gap-2">
         <Button

@@ -1,0 +1,138 @@
+{
+  "title": "更新",
+  "description": "Cognia 中所有可更新的部分都在这里：应用、扩展，以及你的插件与内容。",
+  "checkAll": "检查更新",
+  "checking": "检查中…",
+  "lastChecked": "上次检查：{when}",
+  "neverChecked": "尚未检查",
+  "allCurrent": "全部已是最新。",
+  "nothingHere": "此设备上没有可更新的项目。",
+  "groups": {
+    "apps-and-runtimes": "应用与运行时",
+    "extensions": "浏览器扩展",
+    "plugins-and-content": "插件与内容"
+  },
+  "groupHint": {
+    "apps-and-runtimes": "本设备上的 Cognia 应用，以及命令行 Agent。",
+    "extensions": "由浏览器安装和更新，Cognia 不负责安装。",
+    "plugins-and-content": "安装在本应用中的插件、技能与角色包。"
+  },
+  "kind": {
+    "desktop": "Cognia 桌面版",
+    "mobile-ios": "Cognia for iOS",
+    "mobile-android": "Cognia for Android",
+    "browser-chrome": "Chrome 伴侣扩展",
+    "browser-edge": "Edge 伴侣扩展",
+    "cli": "命令行 Agent",
+    "plugin": "插件",
+    "skill": "技能",
+    "character-pack": "角色包"
+  },
+  "installedBy": {
+    "tauri": "由 Cognia 安装",
+    "app-store": "由 App Store 安装",
+    "google-play": "由 Google Play 安装",
+    "browser-store": "由浏览器安装",
+    "package-manager": "由包管理器安装",
+    "plugin-runtime": "由 Cognia 安装",
+    "skill-runtime": "由 Cognia 安装",
+    "character-pack-runtime": "由 Cognia 安装"
+  },
+  "state": {
+    "current": "已是最新",
+    "checking": "检查中",
+    "available": "有可用更新",
+    "deferred": "已推迟提醒",
+    "downloading": "下载中",
+    "awaiting-consent": "等待你确认",
+    "awaiting-store": "等待商店处理",
+    "awaiting-reload": "等待重新加载",
+    "awaiting-restart": "重启后生效",
+    "installing": "安装中",
+    "verified": "已更新",
+    "failed": "更新失败",
+    "cancelled": "已取消"
+  },
+  "action": {
+    "install-in-app": "安装",
+    "open-store": "打开商店",
+    "reload-extension": "重新加载扩展",
+    "run-package-manager": "查看命令",
+    "restart-desktop": "立即重启",
+    "review-permissions": "查看并安装",
+    "open-pack-diff": "查看变更"
+  },
+  "versionChange": "{from} → {to}",
+  "newVersion": "版本 {version}",
+  "notInstalledLocally": "尚未连接。商店中的版本为 {version}。",
+  "connectHint": "连接扩展后可查看浏览器中已安装的版本。",
+  "criticality": {
+    "critical": "关键",
+    "recommended": "建议",
+    "routine": "常规"
+  },
+  "criticalNotice": "这是关键更新。你可以推迟，但无法永久忽略。",
+  "permissionsExpanded": "此版本申请的权限比你当前授予的更多。",
+  "breaking": "安装后无法通过回退旧版本撤销。",
+  "unsigned": "该构建不在已签名目录中。只有在你信任来源时才安装。",
+  "skip": "跳过此版本",
+  "defer": "稍后提醒",
+  "clearHold": "重新显示",
+  "skipped": "已跳过版本 {version}",
+  "deferredUntil": "在 {when} 之前隐藏",
+  "commandTitle": "运行以下命令进行更新",
+  "copyCommand": "复制命令",
+  "commandCopied": "已复制命令",
+  "ambiguousSource": "Cognia 无法确定 CLI 是由哪个包管理器安装的。请选择你使用的那一个。",
+  "progressPercent": "已下载 {percent}%",
+  "downloadingLabel": "正在下载更新",
+  "error": {
+    "network": "无法连接更新服务。",
+    "timeout": "更新服务响应超时。",
+    "signature": "该更新未通过签名校验，已拒绝安装。",
+    "expired": "更新信息已过期。",
+    "rollback": "更新服务返回的版本比已见过的更旧。",
+    "revoked": "该版本已被撤回。",
+    "incompatible": "该版本需要更新版本的 Cognia。",
+    "permission": "Cognia 没有权限安装此更新。",
+    "disk": "磁盘空间不足，无法安装此更新。",
+    "cancelled": "更新已取消。",
+    "store": "商店无法启动此更新。",
+    "package-manager": "包管理器未能完成更新。",
+    "unsupported": "此设备无法安装该更新。",
+    "unknown": "更新失败。"
+  },
+  "recovery": {
+    "retry": "重试",
+    "retryLater": "稍后重试",
+    "retryInstall": "重新安装",
+    "contactSupport": "反馈问题",
+    "reviewPermissions": "查看权限",
+    "freeSpace": "清理磁盘空间",
+    "updateHost": "请先更新 Cognia",
+    "openStore": "打开商店",
+    "openReleasePage": "打开发布页",
+    "openPluginSettings": "打开插件设置"
+  },
+  "interrupted": "上次安装未完成，当前仍运行旧版本。",
+  "toast": {
+    "available": "有可用更新",
+    "criticalAvailable": "有关键更新",
+    "multiple": "{count, plural, other {有 # 个可用更新}}",
+    "open": "打开更新中心"
+  },
+  "settings": {
+    "channelLabel": "发布渠道",
+    "channelDescription": "Beta 版本更早发布，也变动更频繁。",
+    "channel": {
+      "stable": "稳定版",
+      "beta": "Beta"
+    },
+    "backgroundDownloadLabel": "后台下载桌面端更新",
+    "backgroundDownloadDescription": "仅限已签名的 Cognia 桌面安装包，其他项目始终会先询问。",
+    "notifyCriticalLabel": "始终提醒我关键更新",
+    "notifyCriticalDescription": "即使关闭自动检查，关键更新也会在启动时提示，并且不会阻断应用使用。",
+    "saveFailed": "保存更新设置失败：{error}"
+  },
+  "aboutLink": "打开更新中心"
+}
