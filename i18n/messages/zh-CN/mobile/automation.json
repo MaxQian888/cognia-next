@@ -7,5 +7,32 @@
     "sheetDescription": "已连接的桌面请求执行一个操作。请确认后选择允许或拒绝。",
     "thumbnailAlt": "请求发生时的桌面画面",
     "thumbnailRedacted": "画面已隐藏：桌面端当前聚焦在密码或凭据输入框上。"
+  },
+  "host": {
+    "countsAllow": "放行",
+    "countsConsent": "询问",
+    "countsDeny": "拒绝",
+    "countsTotal": "决策",
+    "description": "已连接桌面端此刻在做什么，以及如何叫停。",
+    "engineOff": "引擎已关闭",
+    "engineOn": "引擎运行中",
+    "halt": "停止全部自动化",
+    "haltConfirm": "停止主机上的所有自动化调用？进行中的调用会被拒绝，已记住的授权也会清空。",
+    "haltDone": "已在主机上停止自动化。",
+    "haltFailed": "无法停止自动化",
+    "haltForbidden": "此设备可以查看主机，但没有控制权限。请在主机上授予远程控制后，才能从这里停止自动化。",
+    "halted": "已急停",
+    "loading": "正在读取主机…",
+    "readFailed": "无法读取主机的自动化状态",
+    "recentEmpty": "主机还没有对任何自动化调用做出决策。",
+    "recentTitle": "最近的决策",
+    "refresh": "刷新",
+    "tier": "默认层级：{tier}",
+    "tierOff": "关闭",
+    "tierPerCall": "每次询问",
+    "tierWhitelist": "白名单",
+    "title": "主机自动化",
+    "unreachableDescription": "把此设备与一台运行 Cognia 的桌面端配对，即可在这里查看并停止它的自动化。",
+    "unreachableTitle": "没有可查看的主机"
   }
 }

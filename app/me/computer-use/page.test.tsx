@@ -31,8 +31,10 @@ jest.mock("@/lib/db/mobile-outbound-queue", () => ({
   enqueue: (arg: unknown) => enqueueMock(arg),
 }))
 
-jest.mock("@/components/settings/automation/automation-section", () => ({
-  AutomationSection: () => <div data-testid="stub-automation-section" />,
+// The supervision panel has its own suite. Stubbing it keeps this one on the
+// master toggle, which is the only thing this page owns.
+jest.mock("@/components/mobile/automation/host-automation-panel", () => ({
+  HostAutomationPanel: () => <div data-testid="stub-host-automation-panel" />,
 }))
 
 import Page from "./page"
@@ -44,11 +46,11 @@ beforeEach(() => {
 })
 
 describe("MobileComputerUsePage", () => {
-  it("renders the master toggle and the embedded automation section", () => {
+  it("renders the master toggle and the host supervision panel", () => {
     render(<Page />)
     expect(screen.getByTestId("mobile-computer-use-page")).toBeInTheDocument()
     expect(screen.getByTestId("computer-use-master-switch")).toBeInTheDocument()
-    expect(screen.getByTestId("stub-automation-section")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-host-automation-panel")).toBeInTheDocument()
   })
 
   it("flipping the master switch writes mobileComputerUseEnabled + enqueues an RPC", async () => {

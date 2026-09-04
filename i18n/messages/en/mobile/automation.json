@@ -7,5 +7,32 @@
     "sheetDescription": "The connected desktop wants to run an action. Review it, then allow or reject.",
     "thumbnailAlt": "Desktop screen at the moment of the request",
     "thumbnailRedacted": "Screen hidden: the desktop is focused on a password or credential prompt."
+  },
+  "host": {
+    "countsAllow": "Allowed",
+    "countsConsent": "Asked",
+    "countsDeny": "Denied",
+    "countsTotal": "Decisions",
+    "description": "What the connected desktop is doing right now, and how to stop it.",
+    "engineOff": "Engine off",
+    "engineOn": "Engine running",
+    "halt": "Stop all automation",
+    "haltConfirm": "Stop every automation call on the host? In-flight calls are rejected and remembered approvals are cleared.",
+    "haltDone": "Automation halted on the host.",
+    "haltFailed": "Could not halt automation",
+    "haltForbidden": "This device can watch the host but cannot control it. Grant it remote control from the host to stop automation from here.",
+    "halted": "Halted",
+    "loading": "Reading the host…",
+    "readFailed": "Could not read the host automation state",
+    "recentEmpty": "The host has not decided on any automation call yet.",
+    "recentTitle": "Recent decisions",
+    "refresh": "Refresh",
+    "tier": "Default tier: {tier}",
+    "tierOff": "off",
+    "tierPerCall": "ask every call",
+    "tierWhitelist": "whitelist",
+    "title": "Host automation",
+    "unreachableDescription": "Pair this device with a desktop running Cognia to see and stop its automation from here.",
+    "unreachableTitle": "No host to watch"
   }
 }
