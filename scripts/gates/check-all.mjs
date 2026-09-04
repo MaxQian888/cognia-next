@@ -250,6 +250,12 @@ const REGISTRY = [
   { script: "scripts:test:sync", group: "gate-tests" },
   { script: "scripts:test:i18n", group: "gate-tests" },
   { script: "scripts:test:plugin", group: "gate-tests" },
+  // The staging step that puts Python and WASM plugins under
+  // src-tauri/resources/plugins/ for bundle.resources. Its test was the only
+  // verification-shaped script in package.json wired to nothing, which is
+  // exactly what gates:registry exists to catch: without it, a regression in
+  // the stager is invisible until an installed build ships without RepoWiki.
+  { script: "plugin:bundled:stage:test", group: "gate-tests" },
   { script: "scripts:test:ci", group: "gate-tests" },
   { script: "artifact-runtime:test", group: "gate-tests" },
   { script: "support:docs:test", group: "gate-tests" },

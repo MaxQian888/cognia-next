@@ -5,6 +5,7 @@
     "wasm-plugins",
     "manifest",
     "api-overview",
+    "api-reference.generated",
     "permissions",
     "surfaces",
     "integrations",
