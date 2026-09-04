@@ -37,7 +37,7 @@ import { PinPad } from "./pin-pad"
 import { PatternGrid } from "./pattern-grid"
 
 export interface QuickUnlockPanelProps {
-  accountId: string
+  localAccountId: string
   enrollments: QuickUnlockEnrollment[]
   /** Resolves to whether the account opened. Never throws on a wrong secret. */
   onQuickUnlock: (
@@ -56,7 +56,7 @@ const METHOD_ICON: Record<QuickUnlockMethod, typeof KeyRoundIcon> = {
 }
 
 export function QuickUnlockPanel({
-  accountId,
+  localAccountId,
   enrollments,
   onQuickUnlock,
   onUsePassword,
@@ -113,7 +113,7 @@ export function QuickUnlockPanel({
         setError(t("failure.not-enrolled"))
         return
       }
-      const derived = await derivePasskeySecret({ accountId, credentialId })
+      const derived = await derivePasskeySecret({ localAccountId, credentialId })
       if (!derived.ok) {
         // A cancelled prompt is not a failed credential, and saying otherwise
         // would tell a user their passkey is broken when they just changed

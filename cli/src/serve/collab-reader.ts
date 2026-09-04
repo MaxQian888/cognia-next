@@ -102,7 +102,7 @@ export interface HeadlessCollabReader {
  * autonomous collaboration actor.
  */
 export async function startHeadlessCollabReader(input: {
-  accountId: string
+  localAccountId: string
   cliHome: string
   config: CollabCliConfig
   deps?: HeadlessCollabReaderDeps
@@ -126,23 +126,23 @@ export async function startHeadlessCollabReader(input: {
 
   const registry = deps.registry ?? new UserBindingRegistry()
   await registry.bind({
-    localAccountId: input.accountId,
+    localAccountId: input.localAccountId,
     userId: identity.userId,
     orgId: identity.orgId,
     logtoSubject: subject,
     logtoIssuer: initial.issuer,
   })
-  saveCollabConnection(input.accountId, { baseUrl: input.config.url })
+  saveCollabConnection(input.localAccountId, { baseUrl: input.config.url })
 
-  const refresh = (accountId: string) =>
+  const refresh = (localAccountId: string) =>
     refreshCollabPlaneQuietly({
-      localAccountId: accountId,
+      localAccountId: localAccountId,
       registry,
       fetchImpl,
       accessToken: async () => accessToken(),
       ...(deps.now ? { now: deps.now } : {}),
     })
-  await requestCollabRefresh(input.accountId, refresh, deps.now)
+  await requestCollabRefresh(input.localAccountId, refresh, deps.now)
 
   const scheduleTimeout = deps.setTimeout ?? globalThis.setTimeout
   const cancelTimeout = deps.clearTimeout ?? globalThis.clearTimeout
@@ -152,9 +152,9 @@ export async function startHeadlessCollabReader(input: {
     if (stopped) return
     timer = scheduleTimeout(
       () => {
-        void requestCollabRefresh(input.accountId, refresh, deps.now).finally(schedule)
+        void requestCollabRefresh(input.localAccountId, refresh, deps.now).finally(schedule)
       },
-      collabRefreshDelay(getCollabRefreshState(input.accountId).failures)
+      collabRefreshDelay(getCollabRefreshState(input.localAccountId).failures)
     )
     ;(timer as NodeJS.Timeout).unref?.()
   }

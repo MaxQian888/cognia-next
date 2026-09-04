@@ -168,7 +168,7 @@ export function QuickUnlockSettings({
     setError(null)
     try {
       const result = await enrollPasskey({
-        accountId: account.id,
+        localAccountId: account.id,
         displayName: account.displayName,
       })
       if (!result.ok) {

@@ -135,7 +135,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   const collabConfig = resolveServeCollabConfig(env, cliHome)
   const collabReader = collabConfig
     ? await startHeadlessCollabReader({
-        accountId: localAccountId,
+        localAccountId,
         cliHome,
         config: collabConfig,
       }).catch((cause) => {

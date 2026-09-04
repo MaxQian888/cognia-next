@@ -36,7 +36,7 @@ function renderPanel(
   const onUsePassword = jest.fn()
   render(
     <QuickUnlockPanel
-      accountId="acct-001"
+      localAccountId="acct-001"
       enrollments={enrollments}
       onQuickUnlock={onQuickUnlock}
       onUsePassword={onUsePassword}
@@ -59,7 +59,7 @@ describe("QuickUnlockPanel", () => {
   it("renders nothing when no method is enrolled", () => {
     const { container } = render(
       <QuickUnlockPanel
-        accountId="acct-001"
+        localAccountId="acct-001"
         enrollments={[]}
         onQuickUnlock={jest.fn()}
         onUsePassword={jest.fn()}
@@ -151,7 +151,7 @@ describe("QuickUnlockPanel", () => {
 
     render(
       <QuickUnlockPanel
-        accountId="acct-001"
+        localAccountId="acct-001"
         enrollments={[enrollment({ method: "pin", failedAttempts: MAX_QUICK_UNLOCK_ATTEMPTS - 2 })]}
         onQuickUnlock={jest.fn()}
         onUsePassword={jest.fn()}
@@ -176,7 +176,7 @@ describe("QuickUnlockPanel", () => {
     await flush()
 
     expect(derivePasskeySecret).toHaveBeenCalledWith({
-      accountId: "acct-001",
+      localAccountId: "acct-001",
       credentialId: "cred-1",
     })
     expect(onQuickUnlock).toHaveBeenCalledWith("passkey", "passkey:32")

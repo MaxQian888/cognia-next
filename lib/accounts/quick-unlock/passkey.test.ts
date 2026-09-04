@@ -95,7 +95,7 @@ describe("hasPlatformAuthenticator", () => {
 })
 
 describe("enrollPasskey", () => {
-  const args = { accountId: "acct-001", displayName: "Ada" }
+  const args = { localAccountId: "acct-001", displayName: "Ada" }
 
   it("returns the credential and its PRF secret", async () => {
     create.mockResolvedValue(
@@ -159,8 +159,8 @@ describe("enrollPasskey", () => {
     create.mockResolvedValue(
       credential({ prf: { enabled: true, results: { first: PRF_BYTES.buffer.slice(0) } } })
     )
-    await enrollPasskey({ accountId: "acct-one", displayName: "A" })
-    await enrollPasskey({ accountId: "acct-two", displayName: "B" })
+    await enrollPasskey({ localAccountId: "acct-one", displayName: "A" })
+    await enrollPasskey({ localAccountId: "acct-two", displayName: "B" })
 
     const first = new Uint8Array(create.mock.calls[0][0].publicKey.extensions.prf.eval.first)
     const second = new Uint8Array(create.mock.calls[1][0].publicKey.extensions.prf.eval.first)
@@ -169,7 +169,10 @@ describe("enrollPasskey", () => {
 })
 
 describe("derivePasskeySecret", () => {
-  const args = { accountId: "acct-001", credentialId: encodeBase64Url(new Uint8Array([1, 2, 3])) }
+  const args = {
+    localAccountId: "acct-001",
+    credentialId: encodeBase64Url(new Uint8Array([1, 2, 3])),
+  }
 
   it("returns stable bytes from the assertion", async () => {
     get.mockResolvedValue(credential({ prf: { results: { first: PRF_BYTES.buffer.slice(0) } } }))

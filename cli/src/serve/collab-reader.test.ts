@@ -39,7 +39,7 @@ function fetchImpl(url: string): Promise<Response> {
 
 it("stays inactive without the existing 0600 Logto session", async () => {
   const reader = await startHeadlessCollabReader({
-    accountId: "acct-1",
+    localAccountId: "acct-1",
     cliHome: "/home",
     config: { url: "https://collab.test", orgId: ORG },
     deps: { sessionFs: sessionFs(null) },
@@ -51,7 +51,7 @@ it("binds the server identity and installs read-only polling", async () => {
   const bind = jest.fn().mockResolvedValue({})
   const timeout = jest.fn().mockReturnValue({ unref: jest.fn() })
   const reader = await startHeadlessCollabReader({
-    accountId: "acct-1",
+    localAccountId: "acct-1",
     cliHome: "/home",
     config: { url: "https://collab.test", orgId: ORG },
     deps: {
@@ -97,7 +97,7 @@ describe("a refresh that is refused vs one that merely failed", () => {
       throw new LogtoRefreshError("invalid_grant", "refused", { oauthError: "invalid_grant" })
     })
     const reader = await startHeadlessCollabReader({
-      accountId: "acct-1",
+      localAccountId: "acct-1",
       cliHome: "/home",
       config: { url: "https://collab.test", orgId: ORG },
       deps: { sessionFs: fs, refreshToken, now: () => 10_000 },
@@ -112,7 +112,7 @@ describe("a refresh that is refused vs one that merely failed", () => {
       throw new Error("something else")
     })
     const reader = await startHeadlessCollabReader({
-      accountId: "acct-1",
+      localAccountId: "acct-1",
       cliHome: "/home",
       config: { url: "https://collab.test", orgId: ORG },
       deps: { sessionFs: fs, refreshToken, now: () => 10_000 },
@@ -127,7 +127,7 @@ describe("a refresh that is refused vs one that merely failed", () => {
       throw new LogtoRefreshError("network", "down")
     })
     const reader = await startHeadlessCollabReader({
-      accountId: "acct-1",
+      localAccountId: "acct-1",
       cliHome: "/home",
       config: { url: "https://collab.test", orgId: ORG },
       deps: { sessionFs: fs, refreshToken, now: () => 10_000 },

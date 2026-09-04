@@ -14,7 +14,7 @@ function Harness(props: { enrollments: QuickUnlockEnrollment[]; alwaysWrong?: bo
   return (
     <div className="mx-auto max-w-sm p-6">
       <QuickUnlockPanel
-        accountId="acct-demo"
+        localAccountId="acct-demo"
         enrollments={props.enrollments}
         onUsePassword={() => {}}
         onQuickUnlock={async () =>

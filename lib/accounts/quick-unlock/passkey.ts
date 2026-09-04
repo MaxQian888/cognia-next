@@ -42,8 +42,8 @@ function relyingPartyId(): string {
  * input is what makes the derived bytes stable across unlocks. Salted per
  * account so two accounts on one authenticator derive different secrets.
  */
-function prfInput(accountId: string): Uint8Array {
-  return new TextEncoder().encode(`cognia.quick-unlock.passkey.v1:${accountId}`)
+function prfInput(localAccountId: string): Uint8Array {
+  return new TextEncoder().encode(`cognia.quick-unlock.passkey.v1:${localAccountId}`)
 }
 
 export interface PasskeyEnrollment {
@@ -109,7 +109,7 @@ interface PrfExtensionResults {
  * nothing in the app will ever reference it.
  */
 export async function enrollPasskey(args: {
-  accountId: string
+  localAccountId: string
   displayName: string
   now?: number
 }): Promise<PasskeyResult<{ enrollment: PasskeyEnrollment; secret: Uint8Array }>> {
@@ -117,7 +117,7 @@ export async function enrollPasskey(args: {
   const now = args.now ?? Date.now()
 
   const challenge = randomBytes(32)
-  const userId = new TextEncoder().encode(args.accountId)
+  const userId = new TextEncoder().encode(args.localAccountId)
 
   let credential: PublicKeyCredential | null
   try {
@@ -141,7 +141,7 @@ export async function enrollPasskey(args: {
         },
         timeout: 60_000,
         extensions: {
-          prf: { eval: { first: toBuffer(prfInput(args.accountId)) } },
+          prf: { eval: { first: toBuffer(prfInput(args.localAccountId)) } },
         } as AuthenticationExtensionsClientInputs,
       },
     })) as PublicKeyCredential | null
@@ -170,7 +170,7 @@ export async function enrollPasskey(args: {
   // No results at creation time. Ask for an assertion immediately so
   // enrollment still completes in one user-visible step.
   const asserted = await derivePasskeySecret({
-    accountId: args.accountId,
+    localAccountId: args.localAccountId,
     credentialId: enrollment.credentialId,
   })
   if (!asserted.ok) return asserted
@@ -184,7 +184,7 @@ export async function enrollPasskey(args: {
  * are used directly with no pepper.
  */
 export async function derivePasskeySecret(args: {
-  accountId: string
+  localAccountId: string
   credentialId: string
 }): Promise<PasskeyResult<Uint8Array>> {
   if (!isPasskeySupported()) return { ok: false, reason: "unsupported" }
@@ -202,7 +202,7 @@ export async function derivePasskeySecret(args: {
         userVerification: "required",
         timeout: 60_000,
         extensions: {
-          prf: { eval: { first: toBuffer(prfInput(args.accountId)) } },
+          prf: { eval: { first: toBuffer(prfInput(args.localAccountId)) } },
         } as AuthenticationExtensionsClientInputs,
       },
     })) as PublicKeyCredential | null

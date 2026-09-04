@@ -97,12 +97,16 @@ const ERROR_KEY: Record<AccountUnlockErrorCode, string> = {
 export interface AccountLockScreenProps {
   accounts: LocalAccountRecord[]
   activeAccountId: string | null
-  onUnlock: (accountId: string, password: string) => Promise<void>
+  onUnlock: (localAccountId: string, password: string) => Promise<void>
   /**
    * Redeem a Browser Vault recovery key and set a new password. Absent on the
    * desktop host, which mints no recovery key — see `supportsRecoveryKey`.
    */
-  onRecoveryUnlock: (accountId: string, recoveryKey: string, newPassword: string) => Promise<void>
+  onRecoveryUnlock: (
+    localAccountId: string,
+    recoveryKey: string,
+    newPassword: string
+  ) => Promise<void>
   /**
    * True on Browser Vault runtimes. Gates the recovery entry point and the
    * stage ladder, which has one more step there. Not dormancy: the desktop
@@ -125,7 +129,7 @@ export interface AccountLockScreenProps {
    * either way.
    */
   onQuickUnlock?: (
-    accountId: string,
+    localAccountId: string,
     method: QuickUnlockMethod,
     canonicalSecret: string
   ) => Promise<{ ok: boolean; reason?: QuickUnlockFailure }>
@@ -204,19 +208,19 @@ export function AccountLockScreen({
     () => accounts.find((candidate) => candidate.id === selectedId) ?? accounts[0] ?? null,
     [accounts, selectedId]
   )
-  const accountId = account?.id ?? null
+  const localAccountId = account?.id ?? null
 
   const [throttle, setThrottle] = useState<UnlockThrottleStatus>(() =>
-    accountId ? readUnlockThrottle(accountId) : EMPTY_THROTTLE
+    localAccountId ? readUnlockThrottle(localAccountId) : EMPTY_THROTTLE
   )
 
   // Reset on account change, during render rather than in an effect: an effect
   // would paint one frame of the previous account's cooldown and error before
   // correcting itself. React's own "adjust state when a prop changes" pattern.
-  const [throttleAccountId, setThrottleAccountId] = useState(accountId)
-  if (accountId !== throttleAccountId) {
-    setThrottleAccountId(accountId)
-    setThrottle(accountId ? readUnlockThrottle(accountId) : EMPTY_THROTTLE)
+  const [throttleAccountId, setThrottleAccountId] = useState(localAccountId)
+  if (localAccountId !== throttleAccountId) {
+    setThrottleAccountId(localAccountId)
+    setThrottle(localAccountId ? readUnlockThrottle(localAccountId) : EMPTY_THROTTLE)
     setErrorCode(null)
     setLocalError(null)
   }
@@ -241,8 +245,8 @@ export function AccountLockScreen({
 
   const elapsedMs = submitting && startedAt > 0 ? Math.max(0, now - startedAt) : 0
   const cooldownStatus = useMemo(
-    () => (accountId ? projectCooldown(throttle, now) : EMPTY_THROTTLE),
-    [accountId, throttle, now]
+    () => (localAccountId ? projectCooldown(throttle, now) : EMPTY_THROTTLE),
+    [localAccountId, throttle, now]
   )
 
   const stages = useMemo(() => unlockStagesFor(supportsRecoveryKey), [supportsRecoveryKey])
@@ -290,13 +294,13 @@ export function AccountLockScreen({
 
   const handlePasswordSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!accountId || submitting || blocked) return
-    void run(() => onUnlock(accountId, password), accountId)
+    if (!localAccountId || submitting || blocked) return
+    void run(() => onUnlock(localAccountId, password), localAccountId)
   }
 
   const handleRecoverySubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!accountId || submitting) return
+    if (!localAccountId || submitting) return
     if (newPassword.length < PASSWORD_MIN_LENGTH) {
       setLocalError(t("passwordTooShort", { min: PASSWORD_MIN_LENGTH }))
       return
@@ -305,7 +309,7 @@ export function AccountLockScreen({
       setLocalError(t("passwordMismatch"))
       return
     }
-    void run(() => onRecoveryUnlock(accountId, recoveryKey, newPassword), accountId)
+    void run(() => onRecoveryUnlock(localAccountId, recoveryKey, newPassword), localAccountId)
   }
 
   const abandon = () => {
@@ -375,7 +379,7 @@ export function AccountLockScreen({
           <Label htmlFor={accountPickerId}>{t("switchAccountLabel")}</Label>
           <NativeSelect
             id={accountPickerId}
-            value={accountId ?? ""}
+            value={localAccountId ?? ""}
             disabled={submitting}
             data-testid="account-lock-screen-picker"
             onChange={(event) => setSelectedId(event.target.value)}
@@ -389,13 +393,15 @@ export function AccountLockScreen({
         </FieldBlock>
       )}
 
-      {mode === "quick" && onQuickUnlock && accountId ? (
+      {mode === "quick" && onQuickUnlock && localAccountId ? (
         <QuickUnlockPanel
-          accountId={accountId}
-          enrollments={accounts.find((candidate) => candidate.id === accountId)?.quickUnlock ?? []}
+          localAccountId={localAccountId}
+          enrollments={
+            accounts.find((candidate) => candidate.id === localAccountId)?.quickUnlock ?? []
+          }
           disabled={submitting}
           onQuickUnlock={(method, canonicalSecret) =>
-            onQuickUnlock(accountId, method, canonicalSecret)
+            onQuickUnlock(localAccountId, method, canonicalSecret)
           }
           onUsePassword={() => setMode("password")}
         />
