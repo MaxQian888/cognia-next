@@ -1,6 +1,6 @@
 import { join } from "node:path"
 
-import { appRoutePages, REPO_ROOT, reachesSource, routeSegment } from "./route-module-graph"
+import { appRoutePages, REPO_ROOT, reachesSource, routeSegment } from "./test-route-module-graph"
 
 /**
  * Routes that deliberately render no wallpaper, with the reason. Everything
@@ -16,6 +16,7 @@ const EXEMPT: Record<string, string> = {
   inbox: "redirect-only route — renders nothing",
   "deep-link": "invisible handoff route, redirects immediately",
   fleet: "transparent island window — wallpaper is force-disabled there",
+  invite: "standalone public landing, reachable before sign-in and outside the shell",
   island: "transparent island window — wallpaper is force-disabled there",
   onboarding: "owns a full-bleed narrative backdrop (ADR-0141)",
   pet: "transparent pet window — wallpaper is force-disabled there",
@@ -27,6 +28,7 @@ const EXEMPT: Record<string, string> = {
   "share-target": "invisible OS share handoff route",
   status: "standalone public status page",
   "tray-panel": "transparent tray window — wallpaper is force-disabled there",
+  "usage-dock": "transparent Capacity Dock window — wallpaper is force-disabled there",
   workflows: 'marks data-bg-target="canvas" itself (its own scope)',
 }
 

@@ -6,7 +6,7 @@ import {
   reachesSource,
   resolveSpecifier,
   routeSegment,
-} from "./route-module-graph"
+} from "./test-route-module-graph"
 
 describe("route module graph", () => {
   it("resolves an aliased specifier to a real file", () => {

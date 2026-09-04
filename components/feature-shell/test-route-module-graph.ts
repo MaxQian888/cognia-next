@@ -12,7 +12,12 @@
  * cannot quietly fall outside them.
  */
 
+// A build-time-only walker: nothing in the app imports it, its only callers
+// are the three suites named above, and they run under Jest in node. The
+// `test-` prefix tells check-unreachable-components the same thing.
+// static-export-exempt: test-only walker, never reached from a bundle
 import { existsSync, globSync, readFileSync } from "node:fs"
+// static-export-exempt: test-only walker, never reached from a bundle
 import { dirname, join, resolve } from "node:path"
 
 export const REPO_ROOT = resolve(__dirname, "..", "..")

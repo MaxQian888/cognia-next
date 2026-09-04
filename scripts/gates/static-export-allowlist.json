@@ -83,30 +83,5 @@
     "file": "lib/qr/pair-payload.ts",
     "module": "buffer",
     "reason": "Resolves to the npm `buffer` browser polyfill in the bundle (base64url codec); verified in shipped builds."
-  },
-  {
-    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
-    "module": "node:child_process",
-    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
-  },
-  {
-    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
-    "module": "node:util",
-    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
-  },
-  {
-    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
-    "module": "node:fs",
-    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
-  },
-  {
-    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
-    "module": "node:path",
-    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
-  },
-  {
-    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
-    "module": "node:os",
-    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
   }
 ]

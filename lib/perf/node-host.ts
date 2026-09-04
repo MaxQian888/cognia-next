@@ -384,6 +384,10 @@ export class NodePerformanceHost implements PerformanceHostAdapter {
 }
 
 export async function createNativeNodePerformanceProvider(): Promise<NodePerformanceProvider> {
+  // The Node-host provider itself. Its only importer is
+  // lib/headless/runtimes/performance-runtime.ts, and the import is lazy, so
+  // no renderer bundle ever evaluates it.
+  // static-export-exempt: Node-host only, lazy import
   const { monitorEventLoopDelay, performance: nodePerformance } = await import("node:perf_hooks")
   const histogram = monitorEventLoopDelay({ resolution: 20 })
   histogram.enable()

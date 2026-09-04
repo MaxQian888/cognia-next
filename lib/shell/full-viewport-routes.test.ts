@@ -7,7 +7,7 @@ import {
   REPO_ROOT,
   reachesSource,
   routeSegment,
-} from "@/components/feature-shell/route-module-graph"
+} from "@/components/feature-shell/test-route-module-graph"
 
 import { FULL_VIEWPORT_ROUTE_PATTERNS, needsFullViewport } from "./full-viewport-routes"
 

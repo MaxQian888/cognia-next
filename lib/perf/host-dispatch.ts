@@ -71,6 +71,10 @@ export async function dispatchPerformanceHostCommand(
       case "perf_trace_close":
         throw new Error("unsupported: trace transfer is unavailable on Node/headless hosts")
       case "perf_system_details": {
+        // The Node-host half of the perf pair. Every desktop-only case above
+        // throws "unsupported on Node/headless hosts"; this is the branch that
+        // answers, and the import is lazy, so no renderer bundle evaluates it.
+        // static-export-exempt: Node-host only, lazy import
         const os = await import("node:os")
         return {
           os: os.platform(),
