@@ -1,9 +1,17 @@
 // Read-only recall bridge into the autonomous memory subsystem. The pet may
 // KNOW what the user has shared (top-K semantic/episodic facts) but never
-// writes back — pet conversations are not extraction-worthy by design. Any
-// failure degrades to "" (no recall layer), never an error.
+// writes back, because pet conversations are not extraction-worthy by design.
+// Any failure degrades to "" (no recall layer), never an error.
+//
+// Every recalled line passes the PII gate before it can reach a prompt. The
+// callers already gate the user's own text and the persona, but this layer was
+// unchecked, and it is the one that deliberately asks for `personal-only`
+// claims: facts the user shared about themselves. A line that trips the gate is
+// dropped on its own rather than degrading the whole recall, so the pet keeps
+// whatever context was safe to keep.
 
 import { retrieveMemories, type MemoryRetrieverDeps } from "@/lib/memory/retrieve/retriever"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface RecallAboutUserInput {
   queryText: string
@@ -39,7 +47,11 @@ export async function recallAboutUser(
       },
       deps
     )
-    return recalled.map((r) => `- ${r.memory.text}`).join("\n")
+    return recalled
+      .map((r) => r.memory.text)
+      .filter((text) => hasNoLeakingPii(text))
+      .map((text) => `- ${text}`)
+      .join("\n")
   } catch {
     return ""
   }

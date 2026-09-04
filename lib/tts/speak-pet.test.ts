@@ -56,3 +56,21 @@ describe("speakPetText", () => {
     expect(opts.speechSettings.ttsProvider).toBe("system")
   })
 })
+
+describe("the PII gate before synthesis", () => {
+  it("refuses to send a reply carrying PII to a voice provider", async () => {
+    // Synthesis is a SECOND outbound hop. The reply already went to a model,
+    // and the voice vendor is a different party that has not seen it. The pet
+    // can also echo back a fact recalled from long-term memory, so gating only
+    // the prompt would let the model launder it into the audio path.
+    await speakPetText("Your SSN 123-45-6789, I remembered!")
+    expect(mockSpeak).not.toHaveBeenCalled()
+    // Refused before the keyring is even touched.
+    expect(ensureProviderKeys).not.toHaveBeenCalled()
+  })
+
+  it("still speaks ordinary pet chatter", async () => {
+    await speakPetText("I missed you today!")
+    expect(mockSpeak).toHaveBeenCalledTimes(1)
+  })
+})

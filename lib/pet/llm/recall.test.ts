@@ -74,3 +74,31 @@ describe("recallAboutUser", () => {
     expect(await recallAboutUser(broken, { queryText: "hello" })).toBe("")
   })
 })
+
+describe("the PII gate on recalled facts", () => {
+  it("drops a recalled line carrying PII before it can reach a prompt", async () => {
+    // This layer asks for `personal-only` claims on purpose: facts the user
+    // shared about themselves. The callers gate the user's own text and the
+    // persona, but nothing gated what came back out of memory.
+    const out = await recallAboutUser(
+      deps([memory("m1", "likes strong coffee"), memory("m2", "SSN 123-45-6789")]),
+      { queryText: "coffee", relevanceFloor: 0 }
+    )
+    expect(out).toContain("likes strong coffee")
+    expect(out).not.toContain("123-45-6789")
+  })
+
+  it("keeps the safe lines rather than degrading the whole recall", async () => {
+    const out = await recallAboutUser(
+      deps([
+        memory("m1", "prefers dark mode"),
+        memory("m2", "SSN 123-45-6789"),
+        memory("m3", "works on a Rust backend"),
+      ]),
+      { queryText: "dark mode Rust backend", topK: 5, relevanceFloor: 0 }
+    )
+    expect(out).toContain("prefers dark mode")
+    expect(out).toContain("works on a Rust backend")
+    expect(out).not.toContain("123-45-6789")
+  })
+})

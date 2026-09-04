@@ -15,18 +15,27 @@ import {
   type CharacterVoiceSource,
 } from "@/lib/plugin/character-pack/character-voice"
 import { useSettingsStore } from "@/stores/settings"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /**
  * Speak a pet bubble aloud. Returns early without speaking when there is no
- * text; resolves once playback finishes (or rejects if synthesis fails — the
- * orchestrator toasts in that case). The caller should fire-and-forget so a
+ * text, and resolves once playback finishes (or rejects if synthesis fails,
+ * where the orchestrator toasts). The caller should fire-and-forget so a
  * synthesis failure never breaks the bubble.
+ *
+ * The text passes the PII gate first. Synthesis is a SECOND outbound hop: the
+ * reply already went to a model, and a cloud voice provider is a different
+ * vendor that has not seen it. The pet's reply can also echo back a fact
+ * recalled from long-term memory, so gating only the prompt would let the
+ * model launder it into the audio path. Refusing here shows the bubble
+ * silently, which is the right degradation for a cosmetic voice.
  */
 export async function speakPetText(
   text: string,
   character?: CharacterVoiceSource | null
 ): Promise<void> {
   if (!text.trim()) return
+  if (!hasNoLeakingPii(text)) return
 
   await useSettingsStore.getState().ensureProviderKeys()
   const store = useSettingsStore.getState()
