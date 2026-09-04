@@ -38,7 +38,10 @@ registerHeadlessRuntime({
       // Read the failure count at scheduling time rather than at install time.
       // The backoff is the whole reason to re-read it: a server that is down
       // must not be retried every minute for the life of the process.
-      timer = setTimeout(run, collabRefreshDelay(getCollabRefreshState(ctx.accountId).failures))
+      timer = setTimeout(
+        run,
+        collabRefreshDelay(getCollabRefreshState(ctx.localAccountId).failures)
+      )
       // A refresh must never hold the process open. `serveCommand` blocks on
       // SIGINT, and a timer that was not unref'd would keep the event loop
       // alive through teardown.
@@ -47,7 +50,7 @@ registerHeadlessRuntime({
 
     const run = () => {
       if (stopped) return
-      void requestCollabRefresh(ctx.accountId)
+      void requestCollabRefresh(ctx.localAccountId)
         .catch(() => {
           // `requestCollabRefresh` already records the failure and swallows it.
           // This catch exists only so an unexpected throw cannot kill the loop.

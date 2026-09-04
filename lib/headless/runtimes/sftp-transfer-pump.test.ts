@@ -17,7 +17,7 @@ const mockStart = startSftpTransferPump as jest.MockedFunction<typeof startSftpT
 function context(): HeadlessRuntimeContext {
   return {
     host: "brain",
-    accountId: "local_acct_headless",
+    localAccountId: "local_acct_headless",
     bridge: {
       listen: async () => () => undefined,
       invoke: async () => null,

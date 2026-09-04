@@ -76,7 +76,7 @@ registerHeadlessRuntime({
 
     const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
     const unregisterThreadHandoff = registerThreadHandoffDelivery()
-    const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.accountId })
+    const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.localAccountId })
     initTriggerSubscriptions()
     initPluginTriggerLifecycle()
     try {

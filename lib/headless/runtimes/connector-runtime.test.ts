@@ -60,7 +60,7 @@ const makeCtx = (): HeadlessRuntimeContext & { logs: Array<[string, string]> } =
   const logs: Array<[string, string]> = []
   return {
     host: "brain",
-    accountId: "local_acct_a",
+    localAccountId: "local_acct_a",
     bridge: makeBridge(),
     notifyDbWrite: () => undefined,
     resolveMessage: (key) => key,

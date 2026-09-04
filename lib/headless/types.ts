@@ -72,7 +72,7 @@ export interface HeadlessRuntimeContext {
   /** The hosting process kind. */
   host: HeadlessHost
   /** The unlocked local account this brain serves. */
-  accountId: string
+  localAccountId: string
   /** Data-plane bridge (request/respond) for the three installers. */
   bridge: RuntimeBridge
   /**

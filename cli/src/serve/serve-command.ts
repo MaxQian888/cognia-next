@@ -219,7 +219,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
   const resolveMessage = await loadMessageResolver("en")
   const runtimes = await bootstrapHeadlessRuntimes({
     host: "brain",
-    accountId: localAccountId,
+    localAccountId,
     bridge,
     notifyDbWrite: durability.notifyDbWrite,
     backupFilesystem: createNodeBackupFilesystem(),

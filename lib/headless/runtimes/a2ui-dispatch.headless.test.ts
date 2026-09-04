@@ -33,7 +33,7 @@ describe("a2ui-dispatch headless smoke", () => {
     }
     const ctx: HeadlessRuntimeContext = {
       host: "brain",
-      accountId: "local_acct_a",
+      localAccountId: "local_acct_a",
       bridge,
       notifyDbWrite: () => undefined,
       resolveMessage: (key) => key,

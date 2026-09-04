@@ -9,7 +9,7 @@ describe("headless runtime contracts", () => {
     }
     const context: HeadlessRuntimeContext = {
       host: "brain",
-      accountId: "account-1",
+      localAccountId: "account-1",
       bridge,
       notifyDbWrite: jest.fn(),
       resolveMessage: (key) => key,

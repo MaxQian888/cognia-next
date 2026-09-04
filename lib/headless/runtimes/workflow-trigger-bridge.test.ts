@@ -9,7 +9,7 @@ jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
 function makeContext(): HeadlessRuntimeContext & { log: jest.Mock } {
   return {
     host: "brain",
-    accountId: "account",
+    localAccountId: "account",
     bridge: {
       listen: async () => () => undefined,
       invoke: jest.fn(),

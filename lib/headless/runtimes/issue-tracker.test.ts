@@ -9,7 +9,7 @@ jest.mock("@/lib/issues/boot", () => ({
 function makeContext(): HeadlessRuntimeContext & { log: jest.Mock } {
   return {
     host: "brain",
-    accountId: "account",
+    localAccountId: "account",
     bridge: {
       listen: async () => () => undefined,
       invoke: jest.fn(),

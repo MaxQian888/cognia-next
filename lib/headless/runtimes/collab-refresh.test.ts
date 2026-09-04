@@ -14,7 +14,7 @@ jest.mock("@/lib/collab/refresh-scheduler", () => ({
 function makeContext(): HeadlessRuntimeContext & { log: jest.Mock } {
   return {
     host: "brain",
-    accountId: "acct-1",
+    localAccountId: "acct-1",
     bridge: {
       listen: async () => () => undefined,
       invoke: jest.fn(),

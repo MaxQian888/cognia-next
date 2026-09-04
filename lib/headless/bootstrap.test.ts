@@ -5,7 +5,7 @@ import type { HeadlessRuntimeContext } from "./types"
 function ctx(): HeadlessRuntimeContext {
   return {
     host: "brain",
-    accountId: "local_acct_a",
+    localAccountId: "local_acct_a",
     bridge: {
       listen: async () => () => undefined,
       invoke: async () => null,

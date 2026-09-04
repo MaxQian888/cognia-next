@@ -55,7 +55,7 @@ registerHeadlessRuntime({
         ctx.log("warn", "plugin runtime ignored a malformed change event")
         return
       }
-      if (change.accountId && change.accountId !== ctx.accountId) return
+      if (change.accountId && change.accountId !== ctx.localAccountId) return
       pending = pending
         .then(() => runtime.reconcile(change))
         .catch((error) => {

@@ -17,7 +17,7 @@ it("registers the Node performance host in the headless runtime roster", async (
   await import("./performance-runtime")
   const context: HeadlessRuntimeContext = {
     host: "brain",
-    accountId: "account",
+    localAccountId: "account",
     bridge: {
       listen: async () => () => undefined,
       invoke: jest.fn(),

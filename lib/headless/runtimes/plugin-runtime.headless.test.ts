@@ -41,7 +41,7 @@ function context(pluginRuntime?: HeadlessRuntimeContext["pluginRuntime"]) {
   const logs: Array<[string, string]> = []
   const ctx: HeadlessRuntimeContext = {
     host: "brain",
-    accountId: "account-a",
+    localAccountId: "account-a",
     bridge: {
       listen: async () => () => undefined,
       invoke: async () => null,

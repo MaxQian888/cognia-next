@@ -24,7 +24,7 @@ describe("host-event-publisher runtime", () => {
     const invoke = jest.fn(async () => null)
     const ctx: HeadlessRuntimeContext = {
       host: "brain",
-      accountId: "local_acct_a",
+      localAccountId: "local_acct_a",
       bridge: {
         listen: async () => () => undefined,
         invoke,
