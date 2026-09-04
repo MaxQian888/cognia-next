@@ -14139,7 +14139,8 @@
       "openProject": "Open {name} in the projects console",
       "projects": "Projects",
       "show": "Show the sidebar",
-      "views": "Views"
+      "views": "Views",
+      "trackerNav": "Tracker sections"
     },
     "run": {
       "activeHint": "A run is in progress — the issue stays in In progress until the engine finishes or you cancel.",

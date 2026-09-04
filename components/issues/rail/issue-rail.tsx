@@ -27,6 +27,7 @@ import type { IssueProject } from "@/types/issues"
 import { defaultLabelColor, type LabelRow } from "@/types/labels"
 import { IssueRailRow } from "./issue-rail-row"
 import { IssueRailSection } from "./issue-rail-section"
+import { TrackerNav } from "./tracker-nav"
 
 export interface IssueRailProps {
   viewId: string
@@ -75,8 +76,11 @@ export function IssueRail({
     <nav
       aria-label={t("rail.label")}
       data-testid="issue-rail"
-      className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto py-2"
+      className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2"
     >
+      {/* Above the filter sections, because it navigates and they narrow. */}
+      <TrackerNav active="issues" />
+
       <IssueRailSection
         id="views"
         title={t("rail.views")}

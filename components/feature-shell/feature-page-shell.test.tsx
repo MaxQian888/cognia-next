@@ -8,9 +8,12 @@ jest.mock("next-intl", () => ({
     vars?.name ? `${key}:${vars.name}` : key,
 }))
 
-let isMobileValue = false
+// The shell overlays its side panes below `lg`, not below `md`, so what these
+// tests toggle is the breakpoint tier. `"tablet"` is the case the rename was
+// for: a narrow desktop window that used to get three starved columns.
+let breakpointValue: "mobile" | "tablet" | "desktop" = "desktop"
 jest.mock("@/hooks/ui", () => ({
-  useIsMobile: () => isMobileValue,
+  useBreakpoint: () => breakpointValue,
 }))
 
 // react-resizable-panels reads window.matchMedia and ResizeObserver — stub
@@ -40,7 +43,7 @@ beforeAll(() => {
 import { FeaturePageShell } from "./feature-page-shell"
 
 beforeEach(() => {
-  isMobileValue = false
+  breakpointValue = "desktop"
 })
 
 test("renders the direct header, left, center, and right panes on desktop", () => {
@@ -77,7 +80,7 @@ test("renders only the center pane when no leftPane / rightPane is provided", ()
 })
 
 test("on mobile, renders sheet triggers for left and right panes", () => {
-  isMobileValue = true
+  breakpointValue = "mobile"
   render(
     <FeaturePageShell
       storageId="example"
@@ -95,7 +98,7 @@ test("on mobile, renders sheet triggers for left and right panes", () => {
 })
 
 test("on mobile with no panes, no sheet triggers render", () => {
-  isMobileValue = true
+  breakpointValue = "mobile"
   render(
     <FeaturePageShell storageId="solo">
       <div data-testid="solo-center" />
@@ -115,7 +118,7 @@ test("on mobile with no panes, no sheet triggers render", () => {
  */
 describe("wallpaper scope marker", () => {
   test("desktop shell marks itself as a background target", () => {
-    isMobileValue = false
+    breakpointValue = "desktop"
     render(
       <FeaturePageShell storageId="scoped">
         <div data-testid="scoped-center" />
@@ -125,7 +128,7 @@ describe("wallpaper scope marker", () => {
   })
 
   test("mobile shell marks itself too", () => {
-    isMobileValue = true
+    breakpointValue = "mobile"
     render(
       <FeaturePageShell storageId="scoped-mobile">
         <div data-testid="scoped-mobile-center" />
@@ -138,7 +141,7 @@ describe("wallpaper scope marker", () => {
   })
 
   test("does not nest a second target inside itself", () => {
-    isMobileValue = false
+    breakpointValue = "desktop"
     const { container } = render(
       <FeaturePageShell storageId="nesting">
         <div data-testid="nesting-center" />
@@ -160,7 +163,7 @@ describe("wallpaper scope marker", () => {
  */
 describe("controlled mobile panes", () => {
   beforeEach(() => {
-    isMobileValue = true
+    breakpointValue = "mobile"
   })
 
   test("an uncontrolled right pane still opens from its own trigger", () => {
@@ -233,5 +236,55 @@ describe("controlled mobile panes", () => {
       </FeaturePageShell>
     )
     expect(screen.getByTestId("controlled-sections")).toBeInTheDocument()
+  })
+})
+
+/**
+ * The tablet tier is why this shell stopped asking `useIsMobile`.
+ *
+ * Between `md` and `lg` the three percentages still resolved, so a ~900px
+ * window rendered three columns in ~750px: the right pane landed near 165px
+ * and clipped its own property values mid-word, and a six-column board lost
+ * two columns off the edge. Nothing about that window is a phone, so the fix
+ * is the tier, not the mobile flag.
+ */
+describe("narrow desktop windows", () => {
+  function renderWithPanes(storageId: string) {
+    return render(
+      <FeaturePageShell
+        storageId={storageId}
+        leftPane={{ label: "Rail", content: <div data-testid={`${storageId}-left`} /> }}
+        rightPane={{ label: "Details", content: <div data-testid={`${storageId}-right`} /> }}
+      >
+        <div data-testid={`${storageId}-center`} />
+      </FeaturePageShell>
+    )
+  }
+
+  test("a tablet-width window overlays its side panes instead of columning them", () => {
+    breakpointValue = "tablet"
+    renderWithPanes("tablet-shell")
+
+    // The pane-control strip is the overlay branch's signature.
+    expect(screen.getByTestId("feature-shell-tablet-shell-pane-controls")).toBeInTheDocument()
+    expect(screen.getByTestId("tablet-shell-center")).toBeInTheDocument()
+    // Side content lives behind a trigger, so it is not painted inline.
+    expect(screen.queryByTestId("tablet-shell-right")).not.toBeInTheDocument()
+  })
+
+  test("a full-width window still columns all three", () => {
+    breakpointValue = "desktop"
+    renderWithPanes("wide-shell")
+
+    expect(screen.queryByTestId("feature-shell-wide-shell-pane-controls")).not.toBeInTheDocument()
+    expect(screen.getByTestId("wide-shell-right")).toBeInTheDocument()
+  })
+
+  test("the overlaid pane is still reachable from its trigger", () => {
+    breakpointValue = "tablet"
+    renderWithPanes("tablet-open")
+
+    fireEvent.click(screen.getByLabelText("openRight:Details"))
+    expect(screen.getByTestId("tablet-open-right")).toBeInTheDocument()
   })
 })

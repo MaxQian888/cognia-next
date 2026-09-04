@@ -426,7 +426,8 @@
     "manageLabels": "Manage labels",
     "openProject": "Open {name} in the projects console",
     "show": "Show the sidebar",
-    "hide": "Hide the sidebar"
+    "hide": "Hide the sidebar",
+    "trackerNav": "Tracker sections"
   },
   "list": {
     "select": "Select {identifier}",

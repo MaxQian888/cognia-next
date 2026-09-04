@@ -14139,7 +14139,8 @@
       "openProject": "在项目控制台中打开 {name}",
       "projects": "项目",
       "show": "显示侧栏",
-      "views": "视图"
+      "views": "视图",
+      "trackerNav": "追踪器分区"
     },
     "run": {
       "activeHint": "运行进行中 —— 在引擎结束或你取消之前，议题会一直停在「进行中」。",

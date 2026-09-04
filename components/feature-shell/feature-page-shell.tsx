@@ -24,12 +24,14 @@
  * has collapse shortcuts and version-bumped resets that this lighter shell
  * does not need.
  *
- * On viewports < md the panes collapse: only the center renders, with
+ * Below `lg` the side panes collapse: only the center renders, with
  * "open left" / "open right" Sheet triggers in the toolbar so feature pages
- * stay usable on mobile / Capacitor. Those Sheets are uncontrolled by
- * default; a route whose center pane selects what the right pane shows should
- * pass `open` / `onOpenChange` on the pane config so a tap opens the detail
- * instead of silently updating a store nothing is watching.
+ * stay usable on a phone, on Capacitor, and in a narrow desktop window. Those
+ * Sheets are uncontrolled by default. A route whose center pane selects what
+ * the right pane shows should pass `open` / `onOpenChange` on the pane config
+ * so a tap opens the detail instead of silently updating a store nothing is
+ * watching, and that now matters on a 900px desktop window and not only on a
+ * phone.
  *
  * The shell owns `data-bg-target`, not its callers. Hand-marking it left seven
  * routes ( /logs, /devices, /agent-runs, /templates, /goals, /integrations,
@@ -45,7 +47,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import { useIsMobile } from "@/hooks/ui"
+import { useBreakpoint } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
 
 export interface FeaturePaneConfig {
@@ -106,11 +108,17 @@ export function FeaturePageShell({
   children,
   centerClassName,
 }: FeaturePageShellProps) {
-  const isMobile = useIsMobile()
+  // Three panes need roughly 1024px before the side ones stop starving each
+  // other. Between `md` and `lg` the percentages still resolved, so the shell
+  // rendered three columns in about 750px: the right pane landed near 165px
+  // and clipped its own property values mid-word, and the board lost two of
+  // its six columns off the edge. The tablet tier keeps the desktop centre and
+  // moves the side panes into the overlay the phone tier already used.
+  const overlayPanes = useBreakpoint() !== "desktop"
 
-  if (isMobile) {
+  if (overlayPanes) {
     return (
-      <FeaturePageShellMobile
+      <FeaturePageShellOverlay
         storageId={storageId}
         header={header}
         leftPane={leftPane}
@@ -118,7 +126,7 @@ export function FeaturePageShell({
         centerClassName={centerClassName}
       >
         {children}
-      </FeaturePageShellMobile>
+      </FeaturePageShellOverlay>
     )
   }
 
@@ -200,7 +208,7 @@ export function FeaturePageShell({
   )
 }
 
-function FeaturePageShellMobile({
+function FeaturePageShellOverlay({
   storageId,
   header,
   leftPane,

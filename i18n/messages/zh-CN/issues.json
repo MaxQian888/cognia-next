@@ -426,7 +426,8 @@
     "manageLabels": "管理标签",
     "openProject": "在项目控制台中打开 {name}",
     "show": "显示侧栏",
-    "hide": "隐藏侧栏"
+    "hide": "隐藏侧栏",
+    "trackerNav": "追踪器分区"
   },
   "list": {
     "select": "选中 {identifier}",

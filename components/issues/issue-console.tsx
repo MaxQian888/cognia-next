@@ -579,6 +579,16 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         selected
           ? {
               label: t("detail.properties"),
+              // Below `lg` this pane is a Sheet, and an uncontrolled Sheet only
+              // opens from its own trigger, so selecting a card in a narrow
+              // window used to tick the row and show nothing. The pane exists
+              // only while something is selected, so "selected" IS "open", and
+              // dismissing the overlay is how that window says "done with this
+              // one".
+              open: true,
+              onOpenChange: (open: boolean) => {
+                if (!open) setSelectedId(undefined)
+              },
               content: (
                 <IssueDetailPanel
                   item={selected}

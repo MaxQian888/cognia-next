@@ -33,6 +33,7 @@ import { toast } from "sonner"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import { TrackerNav } from "@/components/issues/rail/tracker-nav"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listIssues } from "@/lib/db/issues"
@@ -214,10 +215,27 @@ export function ProjectConsole({ initialSelectedId }: ProjectConsoleProps) {
           ]}
         />
       }
+      leftPane={{
+        // The same rail position `/issues` uses, so moving between the board
+        // and its containers changes what is on screen without moving the
+        // navigation out from under the pointer.
+        label: t("rail.trackerNav"),
+        defaultSize: "13rem",
+        content: <TrackerNav active="projects" />,
+      }}
       rightPane={
         selected
           ? {
               label: t("detail.properties"),
+              // Below `lg` the inspector is a Sheet, and an uncontrolled Sheet
+              // only opens from its own trigger, so a row click used to
+              // highlight the row and show nothing. The pane exists only while
+              // something is selected, so "selected" IS "open", and dismissing
+              // the overlay is how that window says "done with this row".
+              open: true,
+              onOpenChange: (open: boolean) => {
+                if (!open) setSelectedId(undefined)
+              },
               defaultSize: 30,
               minSize: 22,
               maxSize: 46,

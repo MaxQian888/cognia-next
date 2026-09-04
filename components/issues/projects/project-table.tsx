@@ -29,8 +29,22 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
   const t = useTranslations("issues")
 
   return (
-    <div className="min-w-0 flex-1 overflow-auto" data-testid="project-table">
-      <table className="w-full min-w-[52rem] border-collapse text-sm">
+    /*
+      A container query, not a viewport one: this table sits in the centre pane
+      and its width depends on whether the inspector is open, which no `md:` or
+      `lg:` can see. The old floor was `min-w-[52rem]`, wider than the centre
+      pane ever gets below about 1200px, so the issue count sat permanently off
+      the right edge behind a horizontal scrollbar nobody looks for.
+
+      Columns drop in reverse order of how often they are read. Name, key,
+      status and the issue count always survive, because those are what the
+      page is for.
+    */
+    <div
+      className="@container/project-table min-w-0 flex-1 overflow-auto"
+      data-testid="project-table"
+    >
+      <table className="w-full min-w-[22rem] border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur">
           <tr className="whitespace-nowrap border-b text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {/*
@@ -48,10 +62,16 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
             <th scope="col" className="px-3 py-2 font-semibold">
               {t("detail.status")}
             </th>
-            <th scope="col" className="px-3 py-2 font-semibold">
+            <th
+              scope="col"
+              className="hidden px-3 py-2 font-semibold @3xl/project-table:table-cell"
+            >
               {t("projects.lead")}
             </th>
-            <th scope="col" className="px-3 py-2 font-semibold">
+            <th
+              scope="col"
+              className="hidden px-3 py-2 font-semibold @4xl/project-table:table-cell"
+            >
               {t("projects.targetDate")}
             </th>
             {/*
@@ -59,7 +79,10 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
               the slack, and without a floor the progress bar shrinks to a stub
               that reads as broken rather than as "barely started".
             */}
-            <th scope="col" className="min-w-40 px-3 py-2 font-semibold">
+            <th
+              scope="col"
+              className="hidden min-w-40 px-3 py-2 font-semibold @xl/project-table:table-cell"
+            >
               {t("projects.progress")}
             </th>
             <th scope="col" className="px-3 py-2 text-right font-semibold">
@@ -111,15 +134,15 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
                     {t(`projects.status.${project.status}`)}
                   </Badge>
                 </td>
-                <td className="max-w-32 truncate px-3 py-2 text-muted-foreground">
+                <td className="hidden max-w-32 truncate px-3 py-2 text-muted-foreground @3xl/project-table:table-cell">
                   {project.lead
                     ? (project.lead.label ?? t(`actor.${project.lead.kind}`))
                     : t("actor.noLead")}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">
+                <td className="hidden whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground @4xl/project-table:table-cell">
                   {project.targetDate ? new Date(project.targetDate).toLocaleDateString() : "—"}
                 </td>
-                <td className="min-w-40 px-3 py-2">
+                <td className="hidden min-w-40 px-3 py-2 @xl/project-table:table-cell">
                   <div className="flex items-center gap-2">
                     <Progress
                       value={(progress?.ratio ?? 0) * 100}
