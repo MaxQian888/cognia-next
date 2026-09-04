@@ -58,6 +58,153 @@
       },
       "additionalProperties": false
     },
+    "AutomationSurface": {
+      "type": "string",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs Surface (rename_all = camelCase). `sandbox` rows reach the same ring without going through command_body!.",
+      "enum": ["workflow", "computerUse", "mcp", "plugin", "sandbox"]
+    },
+    "AutomationTier": {
+      "type": "string",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).",
+      "enum": ["off", "whitelist", "perCall"]
+    },
+    "AutomationAuditEntry": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/audit.rs AuditEntry (rename_all = camelCase). Every Option is serialised, so the nullable fields are present rather than absent. `decision` is rename_all = lowercase.",
+      "required": [
+        "id",
+        "ts",
+        "surface",
+        "pluginId",
+        "command",
+        "processName",
+        "windowTitle",
+        "decision",
+        "reason",
+        "durationMs",
+        "error"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "ts": { "type": "integer" },
+        "surface": { "$ref": "#/$defs/AutomationSurface" },
+        "pluginId": { "type": ["string", "null"] },
+        "command": { "type": "string" },
+        "processName": { "type": ["string", "null"] },
+        "windowTitle": { "type": ["string", "null"] },
+        "decision": { "type": "string", "enum": ["allow", "deny", "consent"] },
+        "reason": { "type": ["string", "null"] },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "error": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "AutomationAuditEntryList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/AutomationAuditEntry" }
+    },
+    "AutomationWhitelist": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.",
+      "required": ["processNames", "windowTitlePatterns"],
+      "properties": {
+        "processNames": { "type": "array", "items": { "type": "string" } },
+        "windowTitlePatterns": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "AutomationSurfacePolicy": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs SurfacePolicy. A null whitelist means the global one applies.",
+      "required": ["tier", "whitelist"],
+      "properties": {
+        "tier": { "$ref": "#/$defs/AutomationTier" },
+        "whitelist": {
+          "oneOf": [{ "$ref": "#/$defs/AutomationWhitelist" }, { "type": "null" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutomationPluginSurfacePolicy": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs PluginSurfacePolicy. perPluginOverrides is keyed by plugin id.",
+      "required": ["tier", "whitelist", "perPluginOverrides"],
+      "properties": {
+        "tier": { "$ref": "#/$defs/AutomationTier" },
+        "whitelist": {
+          "oneOf": [{ "$ref": "#/$defs/AutomationWhitelist" }, { "type": "null" }]
+        },
+        "perPluginOverrides": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/AutomationSurfacePolicy" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutomationPerSurfacePolicies": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs PerSurfacePolicies.",
+      "required": ["workflow", "computerUse", "mcp", "plugin"],
+      "properties": {
+        "workflow": { "$ref": "#/$defs/AutomationSurfacePolicy" },
+        "computerUse": { "$ref": "#/$defs/AutomationSurfacePolicy" },
+        "mcp": { "$ref": "#/$defs/AutomationSurfacePolicy" },
+        "plugin": { "$ref": "#/$defs/AutomationPluginSurfacePolicy" }
+      },
+      "additionalProperties": false
+    },
+    "AutomationAuditSettings": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs AuditSettings.",
+      "required": ["retentionDays", "exportEnabled"],
+      "properties": {
+        "retentionDays": { "type": "integer", "minimum": 0 },
+        "exportEnabled": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "AutomationScreenshotScalingSettings": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs ScreenshotScalingSettings.",
+      "required": ["enabled", "maxWidth", "maxHeight"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "maxWidth": { "type": "integer", "minimum": 0 },
+        "maxHeight": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "AutomationSettings": {
+      "type": "object",
+      "x-cognia-wire-source": "crates/cognia-automation/src/automation/permission.rs AutomationSettings (rename_all = camelCase, default). consentTimeoutMs is the stored value, which the host clamps on read.",
+      "required": [
+        "enabled",
+        "defaultTier",
+        "whitelist",
+        "perSurface",
+        "audit",
+        "redactScreenshots",
+        "screenshotScaling",
+        "screenshotDedup",
+        "alwaysHidePictureInPicture",
+        "pasteThresholdChars",
+        "consentTimeoutMs"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "defaultTier": { "$ref": "#/$defs/AutomationTier" },
+        "whitelist": { "$ref": "#/$defs/AutomationWhitelist" },
+        "perSurface": { "$ref": "#/$defs/AutomationPerSurfacePolicies" },
+        "audit": { "$ref": "#/$defs/AutomationAuditSettings" },
+        "redactScreenshots": { "type": "boolean" },
+        "screenshotScaling": { "$ref": "#/$defs/AutomationScreenshotScalingSettings" },
+        "screenshotDedup": { "type": "boolean" },
+        "alwaysHidePictureInPicture": { "type": "boolean" },
+        "pasteThresholdChars": { "type": "integer", "minimum": 0 },
+        "consentTimeoutMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "BackgroundJobList": {
       "type": "object",
       "x-cognia-wire-source": "src-tauri/src/jobs/mod.rs \"jobs.list\" -> json!({ \"jobs\": rows })",
@@ -6245,7 +6392,7 @@
       "$ref": "#/$defs/LegacyRecord"
     },
     "automation_audit_snapshot": {
-      "$ref": "#/$defs/LegacyList"
+      "$ref": "#/$defs/AutomationAuditEntryList"
     },
     "automation_consent_pending": {
       "$ref": "#/$defs/LegacyResult"
@@ -6260,7 +6407,7 @@
       "$ref": "#/$defs/BooleanResult"
     },
     "automation_settings_get": {
-      "$ref": "#/$defs/LegacyRecord"
+      "$ref": "#/$defs/AutomationSettings"
     },
     "background_job_kill": {
       "$ref": "#/$defs/BackgroundJobRecord"

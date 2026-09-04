@@ -2239,7 +2239,7 @@ paths:
         - headless-rpc
       summary: automation_audit_snapshot (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2258,18 +2258,69 @@ paths:
               schema:
                 type: array
                 items:
-                  type:
-                    - object
-                    - array
-                    - string
-                    - number
-                    - boolean
-                    - "null"
-                  x-cognia-opaque-reason: The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The
-                    command remains contract-covered at the JSON value boundary until its owning domain publishes a
-                    narrower stable wire type.
-                x-cognia-opaque-reason: The command serializes an existing domain collection; item compatibility remains owned by that domain.
-                x-cognia-schema-owner: automation
+                  type: object
+                  x-cognia-wire-source: crates/cognia-automation/src/automation/audit.rs AuditEntry (rename_all = camelCase). Every Option
+                    is serialised, so the nullable fields are present rather than absent. `decision` is rename_all =
+                    lowercase.
+                  required:
+                    - id
+                    - ts
+                    - surface
+                    - pluginId
+                    - command
+                    - processName
+                    - windowTitle
+                    - decision
+                    - reason
+                    - durationMs
+                    - error
+                  properties:
+                    id:
+                      type: string
+                    ts:
+                      type: integer
+                    surface:
+                      type: string
+                      x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Surface (rename_all = camelCase). `sandbox`
+                        rows reach the same ring without going through command_body!.
+                      enum:
+                        - workflow
+                        - computerUse
+                        - mcp
+                        - plugin
+                        - sandbox
+                    pluginId:
+                      type:
+                        - string
+                        - "null"
+                    command:
+                      type: string
+                    processName:
+                      type:
+                        - string
+                        - "null"
+                    windowTitle:
+                      type:
+                        - string
+                        - "null"
+                    decision:
+                      type: string
+                      enum:
+                        - allow
+                        - deny
+                        - consent
+                    reason:
+                      type:
+                        - string
+                        - "null"
+                    durationMs:
+                      type: integer
+                      minimum: 0
+                    error:
+                      type:
+                        - string
+                        - "null"
+                  additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.
           content:
@@ -2575,7 +2626,7 @@ paths:
         - headless-rpc
       summary: automation_kill_switch (workspace.write)
       description: "Loopback service-token command. Target: execution; risk: high."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2673,7 +2724,7 @@ paths:
         - headless-rpc
       summary: automation_kill_switch_engaged (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2771,7 +2822,7 @@ paths:
         - headless-rpc
       summary: automation_settings_get (workspace.read)
       description: "Loopback service-token command. Target: execution; risk: low."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2789,10 +2840,272 @@ paths:
             application/json:
               schema:
                 type: object
-                additionalProperties: true
-                x-cognia-opaque-reason: The command serializes an existing domain record whose stable root is an object; property-level
-                  compatibility remains owned by that domain.
-                x-cognia-schema-owner: automation
+                x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs AutomationSettings (rename_all = camelCase,
+                  default). consentTimeoutMs is the stored value, which the host clamps on read.
+                required:
+                  - enabled
+                  - defaultTier
+                  - whitelist
+                  - perSurface
+                  - audit
+                  - redactScreenshots
+                  - screenshotScaling
+                  - screenshotDedup
+                  - alwaysHidePictureInPicture
+                  - pasteThresholdChars
+                  - consentTimeoutMs
+                properties:
+                  enabled:
+                    type: boolean
+                  defaultTier:
+                    type: string
+                    x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).
+                    enum:
+                      - off
+                      - whitelist
+                      - perCall
+                  whitelist:
+                    type: object
+                    x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.
+                    required:
+                      - processNames
+                      - windowTitlePatterns
+                    properties:
+                      processNames:
+                        type: array
+                        items:
+                          type: string
+                      windowTitlePatterns:
+                        type: array
+                        items:
+                          type: string
+                    additionalProperties: false
+                  perSurface:
+                    type: object
+                    x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs PerSurfacePolicies.
+                    required:
+                      - workflow
+                      - computerUse
+                      - mcp
+                      - plugin
+                    properties:
+                      workflow:
+                        type: object
+                        x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs SurfacePolicy. A null whitelist means the
+                          global one applies.
+                        required:
+                          - tier
+                          - whitelist
+                        properties:
+                          tier:
+                            type: string
+                            x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).
+                            enum:
+                              - off
+                              - whitelist
+                              - perCall
+                          whitelist:
+                            oneOf:
+                              - type: object
+                                x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.
+                                required:
+                                  - processNames
+                                  - windowTitlePatterns
+                                properties:
+                                  processNames:
+                                    type: array
+                                    items:
+                                      type: string
+                                  windowTitlePatterns:
+                                    type: array
+                                    items:
+                                      type: string
+                                additionalProperties: false
+                              - type: "null"
+                        additionalProperties: false
+                      computerUse:
+                        type: object
+                        x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs SurfacePolicy. A null whitelist means the
+                          global one applies.
+                        required:
+                          - tier
+                          - whitelist
+                        properties:
+                          tier:
+                            type: string
+                            x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).
+                            enum:
+                              - off
+                              - whitelist
+                              - perCall
+                          whitelist:
+                            oneOf:
+                              - type: object
+                                x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.
+                                required:
+                                  - processNames
+                                  - windowTitlePatterns
+                                properties:
+                                  processNames:
+                                    type: array
+                                    items:
+                                      type: string
+                                  windowTitlePatterns:
+                                    type: array
+                                    items:
+                                      type: string
+                                additionalProperties: false
+                              - type: "null"
+                        additionalProperties: false
+                      mcp:
+                        type: object
+                        x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs SurfacePolicy. A null whitelist means the
+                          global one applies.
+                        required:
+                          - tier
+                          - whitelist
+                        properties:
+                          tier:
+                            type: string
+                            x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).
+                            enum:
+                              - off
+                              - whitelist
+                              - perCall
+                          whitelist:
+                            oneOf:
+                              - type: object
+                                x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.
+                                required:
+                                  - processNames
+                                  - windowTitlePatterns
+                                properties:
+                                  processNames:
+                                    type: array
+                                    items:
+                                      type: string
+                                  windowTitlePatterns:
+                                    type: array
+                                    items:
+                                      type: string
+                                additionalProperties: false
+                              - type: "null"
+                        additionalProperties: false
+                      plugin:
+                        type: object
+                        x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs PluginSurfacePolicy. perPluginOverrides is
+                          keyed by plugin id.
+                        required:
+                          - tier
+                          - whitelist
+                          - perPluginOverrides
+                        properties:
+                          tier:
+                            type: string
+                            x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).
+                            enum:
+                              - off
+                              - whitelist
+                              - perCall
+                          whitelist:
+                            oneOf:
+                              - type: object
+                                x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.
+                                required:
+                                  - processNames
+                                  - windowTitlePatterns
+                                properties:
+                                  processNames:
+                                    type: array
+                                    items:
+                                      type: string
+                                  windowTitlePatterns:
+                                    type: array
+                                    items:
+                                      type: string
+                                additionalProperties: false
+                              - type: "null"
+                          perPluginOverrides:
+                            type: object
+                            additionalProperties:
+                              type: object
+                              x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs SurfacePolicy. A null whitelist means the
+                                global one applies.
+                              required:
+                                - tier
+                                - whitelist
+                              properties:
+                                tier:
+                                  type: string
+                                  x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Tier (rename_all = camelCase).
+                                  enum:
+                                    - off
+                                    - whitelist
+                                    - perCall
+                                whitelist:
+                                  oneOf:
+                                    - type: object
+                                      x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs Whitelist. Empty admits every target.
+                                      required:
+                                        - processNames
+                                        - windowTitlePatterns
+                                      properties:
+                                        processNames:
+                                          type: array
+                                          items:
+                                            type: string
+                                        windowTitlePatterns:
+                                          type: array
+                                          items:
+                                            type: string
+                                      additionalProperties: false
+                                    - type: "null"
+                              additionalProperties: false
+                        additionalProperties: false
+                    additionalProperties: false
+                  audit:
+                    type: object
+                    x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs AuditSettings.
+                    required:
+                      - retentionDays
+                      - exportEnabled
+                    properties:
+                      retentionDays:
+                        type: integer
+                        minimum: 0
+                      exportEnabled:
+                        type: boolean
+                    additionalProperties: false
+                  redactScreenshots:
+                    type: boolean
+                  screenshotScaling:
+                    type: object
+                    x-cognia-wire-source: crates/cognia-automation/src/automation/permission.rs ScreenshotScalingSettings.
+                    required:
+                      - enabled
+                      - maxWidth
+                      - maxHeight
+                    properties:
+                      enabled:
+                        type: boolean
+                      maxWidth:
+                        type: integer
+                        minimum: 0
+                      maxHeight:
+                        type: integer
+                        minimum: 0
+                    additionalProperties: false
+                  screenshotDedup:
+                    type: boolean
+                  alwaysHidePictureInPicture:
+                    type: boolean
+                  pasteThresholdChars:
+                    type: integer
+                    minimum: 0
+                  consentTimeoutMs:
+                    type: integer
+                    minimum: 0
+                additionalProperties: false
         "202":
           description: Command is still running under the durable operation ledger.
           content:
@@ -85711,8 +86024,8 @@ x-cognia-generated:
     - scripts/build/companion-request-schema-contracts.mjs
   internalCommandCount: 641
   generatedRequestSchemaCount: 641
-  runtimeInferredRequestSchemaCount: 79
-  contractRequestSchemaCount: 562
+  runtimeInferredRequestSchemaCount: 75
+  contractRequestSchemaCount: 566
   genericRequestSchemaCount: 0
   generatedResponseSchemaCount: 641
   loopbackOnly: true

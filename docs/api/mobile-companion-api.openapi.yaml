@@ -4097,7 +4097,7 @@ paths:
         - rpc-dispatch
       summary: automation_audit_snapshot (workspace.read)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -4466,7 +4466,7 @@ paths:
         - rpc-dispatch
       summary: automation_kill_switch (workspace.write)
       description: "Device-reachable side-effect command. Risk: high; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -4579,7 +4579,7 @@ paths:
         - rpc-dispatch
       summary: automation_kill_switch_engaged (workspace.read)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -4692,7 +4692,7 @@ paths:
         - rpc-dispatch
       summary: automation_settings_get (workspace.read)
       description: "Device-reachable read command. Risk: low; approval: none."
-      x-cognia-request-schema-source: runtime-inferred
+      x-cognia-request-schema-source: contract
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/DpopProof"
@@ -70721,7 +70721,7 @@ x-cognia-generated:
     - scripts/build/companion-request-schema-contracts.mjs
   publicCommandCount: 512
   generatedRequestSchemaCount: 512
-  runtimeInferredRequestSchemaCount: 4
-  contractRequestSchemaCount: 508
+  runtimeInferredRequestSchemaCount: 0
+  contractRequestSchemaCount: 512
   genericRequestSchemaCount: 0
   legacyCompatibility: false
