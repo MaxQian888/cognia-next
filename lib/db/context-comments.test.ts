@@ -44,6 +44,28 @@ describe("context-comments", () => {
     expect(await listContextCommentsForResource("workflow", "wf-1")).toHaveLength(4)
   })
 
+  it("exempts a CRDT-anchored comment from revision staleness", async () => {
+    // A relative position does not go stale. It names the characters rather
+    // than their index, so an edit anywhere else in the document moves it
+    // instead of invalidating it. Greying the thread out on a revision bump
+    // would be reporting a problem that is not there.
+    const comment = await addContextComment({
+      resource: { kind: "canvas-document", id: "doc-1" },
+      anchor: {
+        kind: "text-range",
+        start: 1,
+        end: 4,
+        revision: "r1",
+        crdt: { anchor: "AQE=", head: "AgI=" },
+      },
+      authorId: "user-1",
+      authorName: "Maya",
+      content: "still points at the same words",
+    })
+    expect(isContextCommentAnchorStale(comment, "r1")).toBe(false)
+    expect(isContextCommentAnchorStale(comment, "r2")).toBe(false)
+  })
+
   it("preserves thread, edit, reaction, resolve, reopen, and cascade-delete behavior", async () => {
     const root = await addContextComment({
       resource: { kind: "artifact", id: "artifact-1" },

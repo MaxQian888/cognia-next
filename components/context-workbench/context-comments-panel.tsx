@@ -49,6 +49,16 @@ export interface ContextCommentsPanelProps {
    * hosts that know a human title should pass it.
    */
   resourceTitle?: string
+  /**
+   * Bring an anchor up to date before it is shown.
+   *
+   * The panel is resource-agnostic, so it cannot know how to move an anchor
+   * itself. A Canvas document with a live shared document passes one backed by
+   * its CRDT, and the comment's line range follows the text instead of naming
+   * where it used to be. Everything else omits it and the stored anchor is
+   * displayed as written.
+   */
+  resolveAnchor?: (anchor: ContextCommentAnchor) => ContextCommentAnchor
 }
 
 export function ContextCommentsPanel({
@@ -58,14 +68,28 @@ export function ContextCommentsPanel({
   currentUserId = "local-user",
   currentUserName,
   resourceTitle,
+  resolveAnchor,
 }: ContextCommentsPanelProps) {
   const t = useTranslations("contextWorkbench.commentsPanel")
   const authorName = currentUserName ?? t("you")
   const addContextSelection = useChatStore((state) => state.addContextSelection)
-  const comments = useLiveQuery(
+  const storedComments = useLiveQuery(
     () => listContextCommentsForResource(resource.kind, resource.id),
     [resource.kind, resource.id],
     []
+  )
+  // Resolved for display only. The stored anchor is left alone, so a device
+  // that cannot resolve one still reads what was written rather than a range
+  // some other device computed.
+  const comments = useMemo(
+    () =>
+      resolveAnchor
+        ? storedComments.map((comment) => ({
+            ...comment,
+            anchor: resolveAnchor(comment.anchor),
+          }))
+        : storedComments,
+    [storedComments, resolveAnchor]
   )
   const [draft, setDraft] = useState("")
   const [showResolved, setShowResolved] = useState(false)

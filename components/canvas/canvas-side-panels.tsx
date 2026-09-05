@@ -71,6 +71,7 @@ import {
 import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
 import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
 import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
+import { useCanvasCommentAnchors } from "@/hooks/canvas/use-canvas-comment-anchors"
 
 export interface CanvasSidePanelsProps {
   mobile?: boolean
@@ -105,6 +106,7 @@ function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnl
   const layouts = useContextWorkbenchStore((state) => state.layouts)
   const document = activeId ? documents[activeId] : undefined
   const unresolvedCommentCount = useContextCommentBadge("canvas-document", activeId)
+  const canvasAnchors = useCanvasCommentAnchors(activeId)
   const scopeKey = activeId ? `${workbenchInstanceId}::canvas:${activeId}` : null
   const [selectionState, setSelectionState] = useState<
     { documentId: string; start: number; end: number } | undefined
@@ -204,9 +206,14 @@ function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnl
                       start: textSelection.start,
                       end: textSelection.end,
                       revision: document.currentVersionId ?? document.updatedAt.toISOString(),
+                      // Present only when a shared document is open. A comment
+                      // written with one follows the text it was about instead
+                      // of being greyed out by the next edit anywhere above it.
+                      crdt: canvasAnchors.encode(textSelection.start, textSelection.end),
                     }
                   : undefined
               }
+              resolveAnchor={canvasAnchors.resolve}
             />
           ) : null,
       },
@@ -345,6 +352,7 @@ function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnl
       tWorkbench,
       textSelection,
       unresolvedCommentCount,
+      canvasAnchors,
     ]
   )
 

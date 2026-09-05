@@ -87,6 +87,59 @@ describe("ContextCommentsPanel", () => {
     )
   })
 
+  it("displays an anchor the host moved, without rewriting what was stored", () => {
+    // The panel is resource-agnostic. A Canvas document with a live shared
+    // document hands it a resolver backed by the CRDT, so a comment's line
+    // range follows the text instead of naming where it used to be.
+    comments = [
+      {
+        id: "comment-1",
+        resourceKind: "workflow",
+        resourceId: "workflow-1",
+        anchor: { kind: "text-range", start: 6, end: 11, revision: "r2" },
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "look here",
+        createdAt: new Date(),
+        reactions: [],
+      },
+    ]
+    const resolveAnchor = jest.fn(() => ({
+      kind: "text-range" as const,
+      start: 10,
+      end: 15,
+      revision: "r2",
+      lineRange: { startLine: 4, startColumn: 1, endLine: 4, endColumn: 6 },
+    }))
+
+    renderPanel({ resolveAnchor })
+
+    expect(resolveAnchor).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "text-range", start: 6, end: 11 })
+    )
+    // The stored row is untouched: a device that cannot resolve an anchor
+    // still reads what was written.
+    expect(comments[0].anchor).toMatchObject({ start: 6, end: 11 })
+  })
+
+  it("leaves anchors alone when the host has no way to move them", () => {
+    comments = [
+      {
+        id: "comment-1",
+        resourceKind: "workflow",
+        resourceId: "workflow-1",
+        anchor: { kind: "text-range", start: 6, end: 11, revision: "r2" },
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "look here",
+        createdAt: new Date(),
+        reactions: [],
+      },
+    ]
+    renderPanel()
+    expect(screen.getByText("look here")).toBeInTheDocument()
+  })
+
   it("shows stale anchors and exposes reply, edit, reaction, resolve, and delete actions", () => {
     comments = [
       {

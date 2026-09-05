@@ -46,6 +46,18 @@ export interface SessionPermissions {
   canExport: boolean
 }
 
+/**
+ * A text range named by two Yjs relative positions, base64 for transport.
+ *
+ * Lives here rather than beside the encoder so the comment types can name it
+ * without pulling `yjs` into a module that only describes shapes.
+ */
+export interface CanvasCrdtAnchor {
+  anchor: string
+  /** Named `head` to match the editor convention for the moving end. */
+  head: string
+}
+
 export interface CanvasComment {
   id: string
   documentId: string
