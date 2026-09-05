@@ -335,6 +335,81 @@ export interface AcceptedCollabInvitation {
 const GRANT_REFRESH_MARGIN_MS = 30_000
 export const SHARED_CHAT_PROTOCOL_VERSION = "2"
 
+/** The subprotocol a Canvas socket offers. Must match `CANVAS_SUBPROTOCOL`. */
+export const CANVAS_SUBPROTOCOL = "cognia.canvas.v1"
+
+/** One Canvas document, as the collaboration plane reports it. */
+export interface CollabCanvasDocument {
+  id: string
+  orgId: string
+  workspaceId: string
+  title: string
+  language: string
+  createdByUserId: string
+  createdAt: number
+  updatedAt: number
+  revision: number
+  /** The highest update sequence the server holds. */
+  latestSequence: number
+  /** Updates at or below this are folded into the stored snapshot. */
+  snapshotSequence: number
+}
+
+export interface CollabCanvasUpdate {
+  documentId: string
+  sequence: number
+  /** Base64 of one Yjs update. */
+  payload: string
+  authorUserId: string
+  createdAt: number
+  operationId: string
+}
+
+/**
+ * Everything needed to reach the document's current state.
+ *
+ * `hasMore` matters: a full page is indistinguishable from the end of the log
+ * without it, so a client that ignored it would stop one page short of current
+ * and look like it had silently lost the most recent edits.
+ */
+export interface CollabCanvasCatchUp {
+  snapshot: string | null
+  snapshotSequence: number
+  updates: CollabCanvasUpdate[]
+  latestSequence: number
+  hasMore: boolean
+}
+
+export interface CollabCanvasComment {
+  id: string
+  documentId: string
+  /** Base64 Yjs relative position. */
+  anchor: string
+  head: string | null
+  body: string
+  authorUserId: string
+  resolved: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CollabCanvasVersion {
+  id: string
+  documentId: string
+  label: string
+  content: string
+  authorUserId: string
+  createdAt: number
+}
+
+export interface CollabCanvasPresence {
+  participantId: string
+  userId: string
+  name: string
+  color: string
+  lastActive: number
+}
+
 // ── Membership administration (ADR-0149 section 4) ─────────────────────────
 
 export interface CollabInvitation {
@@ -837,6 +912,188 @@ export class CollabClient {
     })
   }
 
+  // ── Canvas documents ────────────────────────────────────────────────────
+  //
+  // Every one of these goes through `json`, so they share the grant cache, the
+  // one-retry-on-401 path and the proxy-aware transport with the rest of the
+  // plane. A second HTTP client for Canvas would have been a second place for
+  // grant refresh to be subtly wrong.
+
+  async listCanvasDocuments(orgId: string, workspaceId: string): Promise<CollabCanvasDocument[]> {
+    return this.json<CollabCanvasDocument[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/canvas-documents`
+    )
+  }
+
+  async createCanvasDocument(
+    orgId: string,
+    workspaceId: string,
+    input: { id: string; title: string; language: string; operationId: string }
+  ): Promise<CollabCanvasDocument> {
+    return this.json<CollabCanvasDocument>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/canvas-documents`,
+      { method: "POST", body: JSON.stringify(input) }
+    )
+  }
+
+  async getCanvasDocument(orgId: string, documentId: string): Promise<CollabCanvasDocument> {
+    return this.json<CollabCanvasDocument>(orgId, canvasPath(orgId, documentId))
+  }
+
+  async renameCanvasDocument(
+    orgId: string,
+    documentId: string,
+    input: {
+      title?: string
+      language?: string
+      baseRevision: number
+      operationId: string
+    }
+  ): Promise<CollabCanvasDocument> {
+    return this.json<CollabCanvasDocument>(orgId, canvasPath(orgId, documentId), {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    })
+  }
+
+  async deleteCanvasDocument(orgId: string, documentId: string): Promise<void> {
+    await this.json<null>(orgId, canvasPath(orgId, documentId), { method: "DELETE" })
+  }
+
+  /**
+   * Pull everything after `since`.
+   *
+   * A caller behind the server's snapshot is sent that snapshot as well, since
+   * the updates it replaced no longer exist to be replayed.
+   */
+  async pullCanvasUpdates(
+    orgId: string,
+    documentId: string,
+    since = 0
+  ): Promise<CollabCanvasCatchUp> {
+    return this.json<CollabCanvasCatchUp>(
+      orgId,
+      `${canvasPath(orgId, documentId)}/updates${searchSuffix({ since: String(Math.max(0, since)) })}`
+    )
+  }
+
+  /**
+   * Post one Yjs update.
+   *
+   * `operationId` is what makes an interrupted offline drain safe to repeat:
+   * the server returns the update already stored under that id rather than
+   * recording the edit twice.
+   */
+  async pushCanvasUpdate(
+    orgId: string,
+    documentId: string,
+    input: { update: string; operationId: string }
+  ): Promise<CollabCanvasUpdate> {
+    return this.json<CollabCanvasUpdate>(orgId, `${canvasPath(orgId, documentId)}/updates`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** Replace the baseline and retire the updates it covers. Maintainers only. */
+  async pushCanvasSnapshot(
+    orgId: string,
+    documentId: string,
+    input: { snapshot: string; coversSequence: number }
+  ): Promise<CollabCanvasDocument> {
+    return this.json<CollabCanvasDocument>(orgId, `${canvasPath(orgId, documentId)}/snapshots`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  async listCanvasComments(orgId: string, documentId: string): Promise<CollabCanvasComment[]> {
+    return this.json<CollabCanvasComment[]>(orgId, `${canvasPath(orgId, documentId)}/comments`)
+  }
+
+  async createCanvasComment(
+    orgId: string,
+    documentId: string,
+    input: { id: string; anchor: string; head?: string; body: string; operationId: string }
+  ): Promise<CollabCanvasComment> {
+    return this.json<CollabCanvasComment>(orgId, `${canvasPath(orgId, documentId)}/comments`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  async updateCanvasComment(
+    orgId: string,
+    documentId: string,
+    commentId: string,
+    input: { body?: string; resolved?: boolean }
+  ): Promise<CollabCanvasComment> {
+    return this.json<CollabCanvasComment>(
+      orgId,
+      `${canvasPath(orgId, documentId)}/comments/${encodeURIComponent(commentId)}`,
+      { method: "PATCH", body: JSON.stringify(input) }
+    )
+  }
+
+  async deleteCanvasComment(orgId: string, documentId: string, commentId: string): Promise<void> {
+    await this.json<null>(
+      orgId,
+      `${canvasPath(orgId, documentId)}/comments/${encodeURIComponent(commentId)}`,
+      { method: "DELETE" }
+    )
+  }
+
+  async listCanvasVersions(orgId: string, documentId: string): Promise<CollabCanvasVersion[]> {
+    return this.json<CollabCanvasVersion[]>(orgId, `${canvasPath(orgId, documentId)}/versions`)
+  }
+
+  async createCanvasVersion(
+    orgId: string,
+    documentId: string,
+    input: { id: string; label: string; content: string; operationId: string }
+  ): Promise<CollabCanvasVersion> {
+    return this.json<CollabCanvasVersion>(orgId, `${canvasPath(orgId, documentId)}/versions`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    })
+  }
+
+  /** Who the server currently has a socket open for on this document. */
+  async readCanvasPresence(orgId: string, documentId: string): Promise<CollabCanvasPresence[]> {
+    return this.json<CollabCanvasPresence[]>(orgId, `${canvasPath(orgId, documentId)}/presence`)
+  }
+
+  /**
+   * Open the realtime channel for one Canvas document.
+   *
+   * A fresh ticket is minted per call, which is what makes this safe to use as
+   * a reconnect factory: the ticket is single-use and lives 30 seconds, so
+   * replaying the first one on every retry would fail every retry.
+   *
+   * Same reasoning as the shared chat stream for the transport and the
+   * subprotocol: a bare `new WebSocket` in the renderer misses the desktop
+   * proxy settings, and a ticket in a query parameter lands in logs.
+   */
+  async openCanvasStream(
+    orgId: string,
+    documentId: string,
+    handlers: PlatformWebSocketHandlers = {}
+  ): Promise<PlatformWebSocket> {
+    const { ticket } = await this.json<{ ticket: string; expiresAt: number }>(
+      orgId,
+      `${canvasPath(orgId, documentId)}/stream-tickets`,
+      { method: "POST", body: "{}" }
+    )
+    const url = new URL(`${canvasPath(orgId, documentId)}/stream`, this.baseUrl)
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+    return this.openWebSocket(url.toString(), {
+      ...handlers,
+      protocols: [CANVAS_SUBPROTOCOL, ticket],
+    })
+  }
+
   async acquireSessionRunLease(
     orgId: string,
     sessionId: string,
@@ -1289,6 +1546,11 @@ export class CollabClient {
  * a narrowing flag, and `?active=false` and no flag at all mean the same thing
  * to the server. Sending the former would just be a longer way to ask.
  */
+/** The document-scoped route prefix, which eight Canvas calls share. */
+function canvasPath(orgId: string, documentId: string): string {
+  return `/v1/orgs/${encodeURIComponent(orgId)}/canvas-documents/${encodeURIComponent(documentId)}`
+}
+
 function searchSuffix(query: Record<string, string | boolean | undefined>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {

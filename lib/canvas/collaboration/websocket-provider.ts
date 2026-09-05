@@ -1,5 +1,32 @@
 /**
- * WebSocket Provider - Real-time sync for collaborative editing
+ * The live half of Canvas collaboration.
+ *
+ * # It no longer knows where the server is
+ *
+ * This used to hold a `url` and an `authorization.token` and call
+ * `new WebSocket(url, ["cognia.canvas.v1", token])` itself. Three things were
+ * wrong with that.
+ *
+ * A bare `WebSocket` in the renderer misses the desktop proxy settings
+ * entirely, so a machine that reaches the plane over a proxy could not open a
+ * Canvas socket at all while every other collaboration call worked.
+ *
+ * The token was reused on every reconnect. The server's tickets are single-use
+ * and live 30 seconds, so the first reconnect would have failed, and so would
+ * every one after it.
+ *
+ * And the URL was configuration a caller supplied, which is what let the old
+ * join page point the transport at an arbitrary host.
+ *
+ * So the provider now takes `openSocket`, a factory that is called afresh for
+ * the first connection and for each retry. `CollabClient.openCanvasStream`
+ * mints a new ticket per call and opens the socket through the platform
+ * transport, which answers all three.
+ *
+ * # Fail closed
+ *
+ * No factory means no socket. A Canvas with no collaboration server configured
+ * stays local rather than half-connecting.
  */
 
 import type {
@@ -9,10 +36,11 @@ import type {
   CollaborationEvent,
   CollaborationEventType,
 } from "@/types/canvas/collaboration"
+import type { PlatformWebSocket, PlatformWebSocketHandlers } from "@/lib/network/platform-websocket"
 import { CanvasCRDTStore, type CRDTOperation } from "./crdt-store"
 import { loggers } from "@cognia/logging"
 
-const log = loggers.app
+const log = loggers.canvas
 
 export interface WebSocketMessage {
   type: "operation" | "cursor" | "selection" | "presence" | "sync" | "error"
@@ -22,34 +50,51 @@ export interface WebSocketMessage {
   timestamp: number
 }
 
+/**
+ * Opens one socket for one document.
+ *
+ * Called again for every reconnect attempt, so whatever short-lived credential
+ * the transport needs is minted per call rather than captured once.
+ */
+export type CanvasSocketFactory = (
+  handlers: PlatformWebSocketHandlers
+) => Promise<PlatformWebSocket>
+
 export interface WebSocketProviderConfig {
-  url: string
-  /** Short-lived server-minted proof bound to the human subject and canvas resource. */
-  authorization?: {
-    token: string
-    subjectId: string
-    resourceId: string
-    expiresAt: number
-  }
+  openSocket?: CanvasSocketFactory
   reconnectAttempts?: number
   reconnectInterval?: number
   heartbeatInterval?: number
 }
 
+/** Thrown when a socket is asked for on an install with no server configured. */
+export class CanvasTransportUnavailableError extends Error {
+  readonly code = "CANVAS_REMOTE_AUTH_REQUIRED" as const
+
+  constructor() {
+    super("Canvas collaboration has no configured transport")
+    this.name = "CanvasTransportUnavailableError"
+  }
+}
+
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "reconnecting" | "error"
 
 export class CanvasWebSocketProvider {
-  private ws: WebSocket | null = null
+  private socket: PlatformWebSocket | null = null
   private crdtStore: CanvasCRDTStore
   private config: WebSocketProviderConfig
   private sessionId: string | null = null
   private participantId: string | null = null
+  private participant: Participant | null = null
   private connectionState: ConnectionState = "disconnected"
   private reconnectAttempts = 0
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private eventListeners: Map<CollaborationEventType, Set<(event: CollaborationEvent) => void>> =
     new Map()
   private messageQueue: WebSocketMessage[] = []
+  /** Set by `disconnect`, so a deliberate close does not schedule a retry. */
+  private closing = false
 
   constructor(crdtStore: CanvasCRDTStore, config: WebSocketProviderConfig) {
     this.crdtStore = crdtStore
@@ -62,75 +107,55 @@ export class CanvasWebSocketProvider {
   }
 
   async connect(sessionId: string, participant: Participant): Promise<void> {
-    const authorization = this.config.authorization
-    if (
-      !authorization?.token ||
-      !authorization.subjectId ||
-      !authorization.resourceId ||
-      authorization.expiresAt <= Date.now()
-    ) {
-      throw new Error("CANVAS_REMOTE_AUTH_REQUIRED")
-    }
+    if (!this.config.openSocket) throw new CanvasTransportUnavailableError()
+    this.closing = false
     this.sessionId = sessionId
     this.participantId = participant.id
+    this.participant = participant
     this.connectionState = "connecting"
 
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.config.url, ["cognia.canvas.v1", authorization.token])
-
-        this.ws.onopen = () => {
-          this.connectionState = "connected"
-          this.reconnectAttempts = 0
-          this.startHeartbeat()
-          this.flushMessageQueue()
-
-          this.send({
-            type: "presence",
-            sessionId,
-            participantId: participant.id,
-            data: {
-              action: "join",
-              participant,
-              subjectId: authorization.subjectId,
-              resourceId: authorization.resourceId,
-            },
-            timestamp: Date.now(),
-          })
-
-          this.emitEvent({ type: "connected", timestamp: new Date() })
-          resolve()
-        }
-
-        this.ws.onclose = () => {
-          this.handleDisconnect()
-        }
-
-        this.ws.onerror = (error) => {
+    try {
+      this.socket = await this.config.openSocket({
+        onMessage: (data) => this.handleMessage(data),
+        onClose: () => this.handleDisconnect(),
+        onError: (message) => {
           this.connectionState = "error"
-          this.emitEvent({
-            type: "error",
-            timestamp: new Date(),
-            data: error,
-          })
-          reject(error)
-        }
+          this.emitEvent({ type: "error", timestamp: new Date(), data: message })
+        },
+      })
+    } catch (error) {
+      this.connectionState = "error"
+      this.emitEvent({ type: "error", timestamp: new Date(), data: error })
+      throw error
+    }
 
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data)
-        }
-      } catch (error) {
-        this.connectionState = "error"
-        reject(error)
-      }
+    this.connectionState = "connected"
+    this.reconnectAttempts = 0
+    this.startHeartbeat()
+
+    // Announced before the queue drains, so a peer sees who is typing rather
+    // than edits from a participant it has never heard of.
+    await this.dispatch({
+      type: "presence",
+      sessionId,
+      participantId: participant.id,
+      data: { action: "join", participant },
+      timestamp: Date.now(),
     })
+    await this.flushMessageQueue()
+    this.emitEvent({ type: "connected", timestamp: new Date() })
   }
 
   disconnect(): void {
+    this.closing = true
     this.stopHeartbeat()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
 
-    if (this.ws && this.sessionId && this.participantId) {
-      this.send({
+    if (this.socket && this.sessionId && this.participantId) {
+      void this.dispatch({
         type: "presence",
         sessionId: this.sessionId,
         participantId: this.participantId,
@@ -139,10 +164,9 @@ export class CanvasWebSocketProvider {
       })
     }
 
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
+    const socket = this.socket
+    this.socket = null
+    void socket?.close()
 
     this.connectionState = "disconnected"
     this.emitEvent({ type: "disconnected", timestamp: new Date() })
@@ -150,20 +174,18 @@ export class CanvasWebSocketProvider {
 
   broadcastOperation(operation: CRDTOperation): void {
     if (!this.sessionId || !this.participantId) return
-
-    this.send({
+    void this.dispatch({
       type: "operation",
       sessionId: this.sessionId,
       participantId: this.participantId,
-      data: this.serializeOperation(operation),
+      data: operation,
       timestamp: Date.now(),
     })
   }
 
   broadcastCursor(cursor: CursorPosition): void {
     if (!this.sessionId || !this.participantId) return
-
-    this.send({
+    void this.dispatch({
       type: "cursor",
       sessionId: this.sessionId,
       participantId: this.participantId,
@@ -174,8 +196,7 @@ export class CanvasWebSocketProvider {
 
   broadcastSelection(selection: LineRange | null): void {
     if (!this.sessionId || !this.participantId) return
-
-    this.send({
+    void this.dispatch({
       type: "selection",
       sessionId: this.sessionId,
       participantId: this.participantId,
@@ -184,14 +205,21 @@ export class CanvasWebSocketProvider {
     })
   }
 
-  requestSync(): void {
+  /**
+   * Ask for everything after `since`.
+   *
+   * The server answers with the baseline when this client is behind it, then
+   * each later update, as separate frames. Applying them one at a time is
+   * equivalent to applying a merged update, which is what lets the server relay
+   * Yjs without decoding it.
+   */
+  requestSync(since = 0): void {
     if (!this.sessionId || !this.participantId) return
-
-    this.send({
+    void this.dispatch({
       type: "sync",
       sessionId: this.sessionId,
       participantId: this.participantId,
-      data: { action: "request" },
+      data: { action: "request", since },
       timestamp: Date.now(),
     })
   }
@@ -211,20 +239,26 @@ export class CanvasWebSocketProvider {
     return this.connectionState
   }
 
-  private send(message: WebSocketMessage): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message))
-    } else {
+  private async dispatch(message: WebSocketMessage): Promise<void> {
+    if (!this.socket || this.connectionState !== "connected") {
       this.messageQueue.push(message)
+      return
+    }
+    try {
+      await this.socket.send(JSON.stringify(message))
+    } catch (error) {
+      // A send that fails means the socket is already gone. Queue the frame so
+      // the reconnect delivers it rather than dropping the edit.
+      this.messageQueue.push(message)
+      log.warn("canvas frame not sent", { error: String(error) })
     }
   }
 
-  private flushMessageQueue(): void {
-    while (this.messageQueue.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
-      const message = this.messageQueue.shift()
-      if (message) {
-        this.ws.send(JSON.stringify(message))
-      }
+  private async flushMessageQueue(): Promise<void> {
+    const pending = this.messageQueue
+    this.messageQueue = []
+    for (const message of pending) {
+      await this.dispatch(message)
     }
   }
 
@@ -318,7 +352,7 @@ export class CanvasWebSocketProvider {
   }
 
   /**
-   * A peer's state snapshot, merged into the session we are already in.
+   * A state frame, merged into the session we are already in.
    *
    * This used to call `deserializeState`, which `JSON.parse`d the frame and
    * installed whatever session and document it described, with no validation.
@@ -338,34 +372,40 @@ export class CanvasWebSocketProvider {
 
   private handleDisconnect(): void {
     this.stopHeartbeat()
+    this.socket = null
     this.connectionState = "disconnected"
+    if (this.closing) return
 
-    if (this.reconnectAttempts < (this.config.reconnectAttempts || 5)) {
-      this.connectionState = "reconnecting"
-      this.reconnectAttempts++
-
-      setTimeout(() => {
-        if (this.sessionId && this.participantId) {
-          this.connect(this.sessionId, {
-            id: this.participantId,
-            name: "Reconnecting...",
-            color: "#888",
-            lastActive: new Date(),
-            isOnline: true,
-          }).catch(() => {
-            this.handleDisconnect()
-          })
-        }
-      }, this.config.reconnectInterval)
-    } else {
+    const limit = this.config.reconnectAttempts ?? 5
+    if (this.reconnectAttempts >= limit) {
       this.emitEvent({ type: "disconnected", timestamp: new Date() })
+      return
     }
+
+    this.connectionState = "reconnecting"
+    this.reconnectAttempts++
+    const sessionId = this.sessionId
+    // Reconnecting AS somebody, not as a placeholder. The old code invented a
+    // participant named "Reconnecting..." in a grey colour, which is what
+    // every other peer then saw in the roster.
+    const participant = this.participant
+    this.reconnectTimer = setTimeout(() => {
+      if (!sessionId || !participant) return
+      this.connect(sessionId, participant)
+        .then(() => {
+          // The server may have moved on while this client was away, and the
+          // updates it missed are not replayed by the socket on its own.
+          this.requestSync()
+        })
+        .catch(() => this.handleDisconnect())
+    }, this.config.reconnectInterval)
   }
 
   private startHeartbeat(): void {
+    this.stopHeartbeat()
     this.heartbeatTimer = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN && this.sessionId && this.participantId) {
-        this.send({
+      if (this.connectionState === "connected" && this.sessionId && this.participantId) {
+        void this.dispatch({
           type: "presence",
           sessionId: this.sessionId,
           participantId: this.participantId,
@@ -390,16 +430,6 @@ export class CanvasWebSocketProvider {
         callback(event)
       }
     }
-  }
-
-  /**
-   * An operation is already JSON-safe: its payload is base64 of a Yjs update.
-   * The old pair existed to hoist a `Map` vector clock across the wire, and
-   * `deserializeOperation` cast the frame with no checks, so a negative or
-   * enormous `position` reached `String.prototype.slice` unvalidated.
-   */
-  private serializeOperation(operation: CRDTOperation): unknown {
-    return operation
   }
 
   /**

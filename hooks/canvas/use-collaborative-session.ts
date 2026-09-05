@@ -16,8 +16,13 @@ import { CanvasCRDTStore, crdtStore } from "@/lib/canvas/collaboration/crdt-stor
 import {
   CanvasWebSocketProvider,
   type ConnectionState,
-  type WebSocketProviderConfig,
 } from "@/lib/canvas/collaboration/websocket-provider"
+import {
+  publishCanvasDocument,
+  resolveCanvasShareTarget,
+  resolveCanvasTransport,
+  type CanvasTransportBinding,
+} from "@/lib/canvas/collaboration/canvas-transport"
 import { loggers } from "@cognia/logging"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { CanvasShareTarget } from "@/lib/canvas/collaboration/share-link"
@@ -60,67 +65,53 @@ export interface UseCollaborativeSessionReturn {
   updateCursor: (cursor: CursorPosition) => void
   updateSelection: (selection: LineRange | null) => void
   getContent: () => string | null
-  /** Identifiers for a share link, or `null` when the document cannot be shared. */
-  shareTarget: () => CanvasShareTarget | null
+  /**
+   * Identifiers for a share link, or `null` when the document cannot be
+   * shared.
+   *
+   * Asynchronous because the organisation comes from the sign-in binding
+   * rather than from a constant. It used to name an org literally called
+   * `"personal"`, which no server could ever have honoured.
+   */
+  shareTarget: () => Promise<CanvasShareTarget | null>
   joinSession: (sessionId: string) => Promise<void>
   openDocumentSession: (documentId: string, content: string) => Promise<string | null>
 }
 
 export interface CollaborativeSessionConfig {
-  websocketUrl?: string
   participantName?: string
   participantColor?: string
   autoReconnect?: boolean
   reconnectAttempts?: number
   /**
-   * Server-minted proof; without it every remote Canvas transport remains
-   * disabled.
+   * Where this document lives on the collaboration plane, and how to open a
+   * socket to it. Injectable so the remote path can be driven in a test
+   * without a server.
    *
-   * DORMANT BY DESIGN, for now: nothing in the app mints one yet, so
-   * `connect`/`joinSession` never open a socket and Canvas collaboration is
-   * local-only. That is the intended fail-closed state — a transport must not
-   * open without a grant — but it means the remote half is unreachable rather
-   * than merely unused. Purely local operations (`shareTarget`,
-   * `openDocumentSession`) deliberately do NOT consult this field.
+   * `null` is the ordinary answer on an install with no plane configured, and
+   * it keeps Canvas local rather than failing. The remote half no longer
+   * depends on a credential nothing mints: `resolveCanvasTransport` mints a
+   * fresh single-use ticket per connection attempt.
    */
-  remoteAuthorization?: WebSocketProviderConfig["authorization"]
+  resolveTransport?: (documentId: string) => Promise<CanvasTransportBinding | null>
   onStateChange?: (state: CanvasCollaborationRuntimeState) => void
   onRemoteContentChange?: (content: string) => void
 }
 
 const DEFAULT_CONFIG: CollaborativeSessionConfig = {
-  websocketUrl: "ws://localhost:8080/canvas",
   participantName: "Anonymous",
   participantColor: "#3b82f6",
   autoReconnect: true,
   reconnectAttempts: 5,
 }
 
-/**
- * The organisation a share link is addressed to.
- *
- * A recipient is checked against org AND workspace membership, so the org has
- * to be in the link. There is no synchronous accessor for the active
- * organisation today, and inventing a store for one would be a second source
- * of truth next to `lib/collab/`, so an install with no organisation addresses
- * its own implicit one. The collaboration server's Canvas routes are what will
- * replace this with the caller's real org, and they will also be the thing
- * that can reject a mismatch.
- */
-export const PERSONAL_SHARE_ORG_ID = "personal"
-
-function resolveShareOrgId(): string {
-  return PERSONAL_SHARE_ORG_ID
-}
-
 export function useCollaborativeSession(
   config: CollaborativeSessionConfig = {}
 ): UseCollaborativeSessionReturn {
-  const websocketUrl = config.websocketUrl ?? DEFAULT_CONFIG.websocketUrl
   const participantName = config.participantName ?? DEFAULT_CONFIG.participantName ?? "Anonymous"
   const participantColor = config.participantColor ?? DEFAULT_CONFIG.participantColor ?? "#3b82f6"
   const reconnectAttempts = config.reconnectAttempts ?? DEFAULT_CONFIG.reconnectAttempts ?? 5
-  const remoteAuthorization = config.remoteAuthorization
+  const resolveTransport = config.resolveTransport ?? resolveCanvasTransport
   const onStateChange = config.onStateChange
   const onRemoteContentChange = config.onRemoteContentChange
 
@@ -249,6 +240,61 @@ export function useCollaborativeSession(
     [onRemoteContentChange]
   )
 
+  /**
+   * Bring one session onto the plane, when there is a plane to bring it onto.
+   *
+   * Both entry points used to carry their own copy of this, differing only in
+   * whether they called `requestSync` afterwards. They now differ in exactly
+   * that, and nothing else.
+   */
+  const attachTransport = useCallback(
+    async (
+      sessionId: string,
+      documentId: string,
+      participant: Participant,
+      options: { sync: boolean }
+    ): Promise<void> => {
+      if (providerRef.current) return
+      let binding: CanvasTransportBinding | null = null
+      try {
+        binding = await resolveTransport(documentId)
+      } catch (error) {
+        // A plane that is configured but unreachable is not a reason to lose
+        // the local document.
+        log.warn("canvas transport unavailable", { error: String(error) })
+        return
+      }
+      if (!binding) return
+
+      const document = useArtifactStore.getState().getCanvasDocumentForWorkspace(documentId)
+      try {
+        // The socket needs a row to attach to, and a document created locally
+        // has none until somebody with write access publishes it.
+        const published = await publishCanvasDocument(binding, {
+          title: document?.title ?? "Untitled",
+          language: document?.language ?? "markdown",
+        })
+        if (!published) return
+
+        const provider = new CanvasWebSocketProvider(storeRef.current, {
+          openSocket: binding.openSocket,
+          reconnectAttempts,
+        })
+        providerRef.current = provider
+        attachProviderEvents(provider, handleCollaborationEvent)
+
+        setConnectionState("connecting")
+        await provider.connect(sessionId, participant)
+        if (options.sync) provider.requestSync()
+      } catch (error) {
+        log.error("Failed to open the Canvas transport", error as Error)
+        providerRef.current = null
+        setConnectionState("error")
+      }
+    },
+    [handleCollaborationEvent, reconnectAttempts, resolveTransport]
+  )
+
   const connect = useCallback(
     async (documentId: string, content: string): Promise<string> => {
       const store = storeRef.current
@@ -263,39 +309,14 @@ export function useCollaborativeSession(
       setLocalParticipant(localParticipant)
       setParticipants([localParticipant])
 
-      if (
-        websocketUrl &&
-        remoteAuthorization?.resourceId === documentId &&
-        remoteAuthorization.expiresAt > Date.now()
-      ) {
-        try {
-          const provider = new CanvasWebSocketProvider(store, {
-            url: websocketUrl,
-            reconnectAttempts,
-            authorization: remoteAuthorization,
-          })
-          providerRef.current = provider
-
-          attachProviderEvents(provider, handleCollaborationEvent)
-
-          setConnectionState("connecting")
-          await provider.connect(newSession.id, localParticipant)
-        } catch (error) {
-          log.error("Failed to connect WebSocket", error as Error)
-          setConnectionState("disconnected")
-        }
-      }
+      // The opener syncs too. Its local content seeds the session, but the
+      // plane may already hold edits from another device, and Yjs merging the
+      // two is exactly right where picking one would lose work.
+      await attachTransport(newSession.id, documentId, localParticipant, { sync: true })
 
       return newSession.id
     },
-    [
-      createLocalParticipant,
-      handleCollaborationEvent,
-      getParticipantId,
-      reconnectAttempts,
-      remoteAuthorization,
-      websocketUrl,
-    ]
+    [attachTransport, createLocalParticipant, getParticipantId]
   )
 
   const disconnect = useCallback(() => {
@@ -369,27 +390,18 @@ export function useCollaborativeSession(
    * recipient can edit, and the payload landed in an unvalidated `JSON.parse`
    * that installed whatever session it described.
    *
-   * Purely local, and it opens no transport, so it is not gated on a remote
-   * grant. The gate that belongs to `remoteAuthorization` stays on
-   * `connect` / `joinSession`, which are the calls that open a socket.
+   * Opens no transport, but it does need the organisation, which comes from
+   * the sign-in binding. `null` when this install has no plane, when nobody is
+   * signed in, or when the document is filed under no workspace: a recipient's
+   * membership is checked against org and workspace, and a link naming neither
+   * could never be honoured.
    */
-  const shareTarget = useCallback((): CanvasShareTarget | null => {
+  const shareTarget = useCallback(async (): Promise<CanvasShareTarget | null> => {
     const sessionId = sessionIdRef.current
     if (!sessionId) return null
     const current = storeRef.current.getSession(sessionId)
     if (!current) return null
-
-    const document = useArtifactStore.getState().getCanvasDocumentForWorkspace(current.documentId)
-    // A document with no workspace cannot be addressed by a link: the
-    // recipient's membership is checked against the workspace, and there would
-    // be nothing to check.
-    if (!document?.projectId) return null
-
-    return {
-      orgId: resolveShareOrgId(),
-      workspaceId: document.projectId,
-      documentId: document.id,
-    }
+    return resolveCanvasShareTarget(current.documentId)
   }, [])
 
   const joinSession = useCallback(
@@ -412,41 +424,12 @@ export function useCollaborativeSession(
           onRemoteContentChange?.(latestContent)
         }
 
-        if (
-          websocketUrl &&
-          providerRef.current === null &&
-          remoteAuthorization?.resourceId === existingSession.documentId &&
-          remoteAuthorization.expiresAt > Date.now()
-        ) {
-          try {
-            const provider = new CanvasWebSocketProvider(store, {
-              url: websocketUrl,
-              reconnectAttempts,
-              authorization: remoteAuthorization,
-            })
-            providerRef.current = provider
-
-            attachProviderEvents(provider, handleCollaborationEvent)
-
-            setConnectionState("connecting")
-            await provider.connect(sessionId, currentParticipant)
-            provider.requestSync()
-          } catch (error) {
-            log.error("Failed to join session", error as Error)
-            setConnectionState("error")
-          }
-        }
+        await attachTransport(sessionId, existingSession.documentId, currentParticipant, {
+          sync: true,
+        })
       }
     },
-    [
-      createLocalParticipant,
-      handleCollaborationEvent,
-      getParticipantId,
-      onRemoteContentChange,
-      reconnectAttempts,
-      remoteAuthorization,
-      websocketUrl,
-    ]
+    [attachTransport, createLocalParticipant, getParticipantId, onRemoteContentChange]
   )
 
   /**
@@ -462,14 +445,10 @@ export function useCollaborativeSession(
   const openDocumentSession = useCallback(
     async (documentId: string, content: string): Promise<string | null> => {
       const store = storeRef.current
-      const authorization =
-        remoteAuthorization && remoteAuthorization.expiresAt > Date.now()
-          ? remoteAuthorization
-          : null
-      // When a grant IS present it still pins the session to the document it
-      // was minted for, so an authorised session cannot be pointed at another.
-      if (authorization && authorization.resourceId !== documentId) return null
-
+      // Deliberately local. The caller has already checked it may open this
+      // document, and opening a transport is `connect` / `joinSession`, not
+      // this. Keeping them separate is what lets the join page show a
+      // document without publishing it to an org as a side effect.
       const created = store.createSession(documentId, content)
       const participant = createLocalParticipant()
       store.setLocalParticipantId(participant.id)
@@ -488,7 +467,7 @@ export function useCollaborativeSession(
 
       return created.id
     },
-    [createLocalParticipant, onRemoteContentChange, remoteAuthorization]
+    [createLocalParticipant, onRemoteContentChange]
   )
 
   useEffect(() => {

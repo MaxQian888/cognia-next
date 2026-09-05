@@ -75,13 +75,31 @@ jest.mock("@/lib/canvas/collaboration/websocket-provider", () => ({
   })),
 }))
 
+/**
+ * The plane. `null` from `resolveCanvasTransport` is the ordinary answer on an
+ * install with no collaboration server, and it must leave the local document
+ * working rather than fail.
+ */
+const mockResolveTransport = jest.fn()
+const mockPublishDocument = jest.fn()
+const mockResolveShareTarget = jest.fn()
+
+jest.mock("@/lib/canvas/collaboration/canvas-transport", () => ({
+  resolveCanvasTransport: (...args: unknown[]) => mockResolveTransport(...args),
+  publishCanvasDocument: (...args: unknown[]) => mockPublishDocument(...args),
+  resolveCanvasShareTarget: (...args: unknown[]) => mockResolveShareTarget(...args),
+}))
+
+const BINDING = {
+  orgId: "org_acme",
+  workspaceId: "ws-1",
+  documentId: "doc-1",
+  userId: "usr_ada",
+  client: {} as never,
+  openSocket: jest.fn(),
+}
+
 describe("useCollaborativeSession", () => {
-  const remoteAuthorization = {
-    token: "canvas-ticket",
-    subjectId: "user-1",
-    resourceId: "doc-456",
-    expiresAt: Date.now() + 60_000,
-  }
   const mockSession: CollaborativeSession = {
     id: "session-123",
     documentId: "doc-456",
@@ -116,11 +134,18 @@ describe("useCollaborativeSession", () => {
     mockProviderConnect.mockResolvedValue(undefined)
     mockGetConnectionState.mockReturnValue("connected")
     artifactDocument.current = { id: "doc-456", projectId: "ws-1" }
+    mockResolveTransport.mockResolvedValue(BINDING)
+    mockPublishDocument.mockResolvedValue({ id: "doc-1", latestSequence: 0 })
+    mockResolveShareTarget.mockResolvedValue({
+      orgId: "org_acme",
+      workspaceId: "ws-1",
+      documentId: "doc-456",
+    })
   })
 
   describe("initialization", () => {
     it("should initialize with default state", () => {
-      const { result } = renderHook(() => useCollaborativeSession({ remoteAuthorization }))
+      const { result } = renderHook(() => useCollaborativeSession())
 
       expect(result.current.session).toBeNull()
       expect(result.current.participants).toEqual([])
@@ -159,9 +184,7 @@ describe("useCollaborativeSession", () => {
     })
 
     it("should connect to websocket when url is provided", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -175,8 +198,6 @@ describe("useCollaborativeSession", () => {
       const onStateChange = jest.fn()
       const { result } = renderHook(() =>
         useCollaborativeSession({
-          websocketUrl: "ws://localhost:8080",
-          remoteAuthorization,
           onStateChange,
         })
       )
@@ -195,24 +216,69 @@ describe("useCollaborativeSession", () => {
       )
     })
 
-    it("should handle websocket connection failure gracefully", async () => {
+    it("reports a failed connection as an error, not as a clean disconnect", async () => {
+      // `connect` used to report this as "disconnected", which made a server
+      // that refused the socket indistinguishable from never having tried.
+      // The state feeds `recoveryReason`, so the difference is user-visible.
       mockProviderConnect.mockRejectedValue(new Error("Connection failed"))
 
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
+
+      await act(async () => {
+        await result.current.connect("doc-456", "content")
+      })
+
+      expect(result.current.connectionState).toBe("error")
+    })
+
+    it("stays local, and quiet, when this install has no plane", async () => {
+      // The ordinary case for a single-machine user. Not an error.
+      mockResolveTransport.mockResolvedValue(null)
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
       })
 
       expect(result.current.connectionState).toBe("disconnected")
+      expect(result.current.session).toEqual(mockSession)
+      expect(mockPublishDocument).not.toHaveBeenCalled()
+    })
+
+    it("does not open a socket for a document it could not publish", async () => {
+      // A viewer cannot create the row. Attaching anyway would open a socket
+      // against a document the server does not have.
+      mockPublishDocument.mockResolvedValue(null)
+      const { result } = renderHook(() => useCollaborativeSession())
+
+      await act(async () => {
+        await result.current.connect("doc-456", "content")
+      })
+
+      expect(mockProviderConnect).not.toHaveBeenCalled()
+    })
+
+    it("publishes the document before opening the socket", async () => {
+      const { result } = renderHook(() => useCollaborativeSession())
+
+      await act(async () => {
+        await result.current.connect("doc-456", "content")
+      })
+
+      expect(mockPublishDocument).toHaveBeenCalledWith(
+        BINDING,
+        expect.objectContaining({ title: expect.any(String), language: expect.any(String) })
+      )
+      expect(mockProviderConnect).toHaveBeenCalled()
+      // The opener syncs too: another device may already have edits on the
+      // plane, and Yjs merging both is right where picking one loses work.
+      expect(mockRequestSync).toHaveBeenCalled()
     })
   })
 
   describe("disconnect", () => {
     it("should clean up session and provider", async () => {
-      const { result } = renderHook(() => useCollaborativeSession({ remoteAuthorization }))
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -332,9 +398,7 @@ describe("useCollaborativeSession", () => {
 
   describe("updateSelection", () => {
     it("should broadcast selection changes when session is active", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -383,38 +447,40 @@ describe("useCollaborativeSession", () => {
   })
 
   describe("shareTarget", () => {
-    it("names the document, the workspace and the org, and nothing else", () => {
+    it("names the document, the workspace and the real org, and nothing else", async () => {
       // The old `shareSession` serialised the session, its owner, its
       // participants, its permission flags, the content and the operation log
       // into the URL. Permissions in a link are permissions the recipient can
       // edit.
       const { result } = renderHook(() => useCollaborativeSession())
-      act(() => {
-        void result.current.connect("doc-1", "content")
+      await act(async () => {
+        await result.current.connect("doc-1", "content")
       })
 
-      const target = result.current.shareTarget()
+      const target = await result.current.shareTarget()
+      // Not the literal string "personal", which is what this returned while
+      // there was no server to resolve a real organisation against.
       expect(target).toEqual({
-        orgId: "personal",
+        orgId: "org_acme",
         workspaceId: "ws-1",
         documentId: "doc-456",
       })
     })
 
-    it("returns null when there is no session", () => {
+    it("returns null when there is no session", async () => {
       const { result } = renderHook(() => useCollaborativeSession())
-      expect(result.current.shareTarget()).toBeNull()
+      await expect(result.current.shareTarget()).resolves.toBeNull()
     })
 
-    it("refuses to address a document that belongs to no workspace", () => {
-      // A recipient is checked against workspace membership, so a document
-      // with no workspace has nothing to check.
-      artifactDocument.current = { id: "doc-456", projectId: undefined }
+    it("returns null when this install has no plane to share onto", async () => {
+      // A recipient is checked against org AND workspace membership, so a link
+      // that can name neither is not a link worth handing out.
+      mockResolveShareTarget.mockResolvedValue(null)
       const { result } = renderHook(() => useCollaborativeSession())
-      act(() => {
-        void result.current.connect("doc-1", "content")
+      await act(async () => {
+        await result.current.connect("doc-1", "content")
       })
-      expect(result.current.shareTarget()).toBeNull()
+      await expect(result.current.shareTarget()).resolves.toBeNull()
     })
   })
 
@@ -434,32 +500,24 @@ describe("useCollaborativeSession", () => {
       expect(result.current.session).toEqual(mockSession)
     })
 
-    it("refuses a document the grant was not minted for", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({
-          remoteAuthorization: {
-            token: "t",
-            subjectId: "s",
-            resourceId: "doc-other",
-            expiresAt: Date.now() + 60_000,
-          },
-        })
-      )
+    it("opens no transport, so viewing a shared link does not publish it", async () => {
+      // The join page shows a document the caller already read locally.
+      // Publishing it to an org as a side effect of looking at it would be a
+      // write nobody asked for.
+      const { result } = renderHook(() => useCollaborativeSession())
 
-      let sessionId: string | null = "unset"
       await act(async () => {
-        sessionId = await result.current.openDocumentSession("doc-1", "hello")
+        await result.current.openDocumentSession("doc-1", "hello")
       })
 
-      expect(sessionId).toBeNull()
+      expect(mockResolveTransport).not.toHaveBeenCalled()
+      expect(mockPublishDocument).not.toHaveBeenCalled()
     })
   })
 
   describe("collaboration events", () => {
     it("should handle participant-joined event", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -485,9 +543,7 @@ describe("useCollaborativeSession", () => {
     })
 
     it("should handle participant-left event", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -528,9 +584,7 @@ describe("useCollaborativeSession", () => {
     })
 
     it("should handle connection state changes", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -551,9 +605,7 @@ describe("useCollaborativeSession", () => {
     })
 
     it("should handle disconnected event", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -574,9 +626,7 @@ describe("useCollaborativeSession", () => {
     })
 
     it("should handle error event", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")
@@ -611,9 +661,7 @@ describe("useCollaborativeSession", () => {
 
   describe("edge cases", () => {
     it("should not add duplicate participants", async () => {
-      const { result } = renderHook(() =>
-        useCollaborativeSession({ websocketUrl: "ws://localhost:8080", remoteAuthorization })
-      )
+      const { result } = renderHook(() => useCollaborativeSession())
 
       await act(async () => {
         await result.current.connect("doc-456", "content")

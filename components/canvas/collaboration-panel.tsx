@@ -128,7 +128,7 @@ export function CollaborationPanel({
    * no link this app produced ever decoded.
    */
   const handleCopyShareLink = useCallback(async () => {
-    const target = shareTarget()
+    const target = await shareTarget()
     if (!target) {
       setCopyError(t("shareLinkUnavailable"))
       return

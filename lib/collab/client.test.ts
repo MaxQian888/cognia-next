@@ -369,6 +369,145 @@ describe("CollabClient", () => {
     expect(messages).toEqual(["hello"])
   })
 
+  describe("Canvas documents", () => {
+    /** Answers grants, then whatever the caller queued. */
+    function canvasHarness(body: unknown = {}) {
+      const calls: Call[] = []
+      const client = new CollabClient({
+        baseUrl: "https://collab.test",
+        accessToken: async () => "logto-token",
+        fetchImpl: async (url, init) => {
+          calls.push({ url, init })
+          return url.endsWith("/grants")
+            ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+            : jsonResponse(body)
+        },
+        now: () => 0,
+      })
+      return { client, calls }
+    }
+
+    it("carries the grant rather than the access token, and never in the URL", async () => {
+      const { client, calls } = canvasHarness([])
+      await client.listCanvasDocuments(ORG, "proj 1")
+      const call = calls.at(-1)!
+      expect(call.url).toBe(
+        `https://collab.test/v1/orgs/${ORG}/workspaces/proj%201/canvas-documents`
+      )
+      expect(call.url).not.toContain("grant-1")
+      expect(grantHeader(call)).toBe("Bearer grant-1")
+    })
+
+    it("pulls updates from a caller-stated floor", async () => {
+      const { client, calls } = canvasHarness({ updates: [], latestSequence: 0 })
+      await client.pullCanvasUpdates(ORG, "cvd_1", 41)
+      expect(calls.at(-1)!.url).toBe(
+        `https://collab.test/v1/orgs/${ORG}/canvas-documents/cvd_1/updates?since=41`
+      )
+    })
+
+    it("never asks for a negative floor", async () => {
+      const { client, calls } = canvasHarness({ updates: [], latestSequence: 0 })
+      await client.pullCanvasUpdates(ORG, "cvd_1", -7)
+      expect(calls.at(-1)!.url).toContain("since=0")
+    })
+
+    it("sends the update and its operation id, which is what makes a replay safe", async () => {
+      const { client, calls } = canvasHarness({ sequence: 1 })
+      await client.pushCanvasUpdate(ORG, "cvd_1", { update: "AQE=", operationId: "op_1" })
+      const call = calls.at(-1)!
+      expect(call.init?.method).toBe("POST")
+      expect(JSON.parse(call.init?.body as string)).toEqual({
+        update: "AQE=",
+        operationId: "op_1",
+      })
+    })
+
+    it("escapes a document id rather than pasting it into the path", async () => {
+      const { client, calls } = canvasHarness({})
+      await client.getCanvasDocument(ORG, "cvd/../other")
+      expect(calls.at(-1)!.url).toContain("cvd%2F..%2Fother")
+    })
+
+    it("opens realtime canvas with a one-time subprotocol ticket", async () => {
+      const sockets: { url: string; protocols: readonly string[] | undefined }[] = []
+      const messages: string[] = []
+      const client = new CollabClient({
+        baseUrl: "https://collab.test",
+        accessToken: async () => "logto-token",
+        fetchImpl: async (url) =>
+          url.endsWith("/grants")
+            ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+            : jsonResponse({ ticket: "ct_one_time", expiresAt: 30_000 }),
+        now: () => 0,
+        openWebSocket: async (url, options) => {
+          sockets.push({ url, protocols: options.protocols })
+          options.onMessage?.("hello")
+          return {
+            id: "test",
+            kind: "browser",
+            send: async () => undefined,
+            close: async () => undefined,
+          }
+        },
+      })
+
+      await client.openCanvasStream(ORG, "cvd_1", { onMessage: (data) => messages.push(data) })
+      expect(sockets).toEqual([
+        {
+          url: `wss://collab.test/v1/orgs/${ORG}/canvas-documents/cvd_1/stream`,
+          protocols: ["cognia.canvas.v1", "ct_one_time"],
+        },
+      ])
+      // A ticket in the URL lands in proxy logs and browser history.
+      expect(sockets[0].url).not.toContain("ct_one_time")
+      expect(messages).toEqual(["hello"])
+    })
+
+    it("mints a new ticket for every socket it opens", async () => {
+      // The server's tickets are single use, so a reconnect that reused one
+      // would fail. This is why the provider takes a factory.
+      let issued = 0
+      const client = new CollabClient({
+        baseUrl: "https://collab.test",
+        accessToken: async () => "logto-token",
+        fetchImpl: async (url) => {
+          if (url.endsWith("/grants")) {
+            return jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+          }
+          issued += 1
+          return jsonResponse({ ticket: `ct_${issued}`, expiresAt: 30_000 })
+        },
+        now: () => 0,
+        openWebSocket: async () => ({
+          id: "test",
+          kind: "browser",
+          send: async () => undefined,
+          close: async () => undefined,
+        }),
+      })
+
+      await client.openCanvasStream(ORG, "cvd_1")
+      await client.openCanvasStream(ORG, "cvd_1")
+      expect(issued).toBe(2)
+    })
+
+    it("surfaces a refusal as a CollabError with its status", async () => {
+      const client = new CollabClient({
+        baseUrl: "https://collab.test",
+        accessToken: async () => "logto-token",
+        fetchImpl: async (url) =>
+          url.endsWith("/grants")
+            ? jsonResponse({ grant: "grant-1", userId: ADA, orgId: ORG, expiresAt: 1_000 })
+            : jsonResponse({ error: "forbidden" }, 403),
+        now: () => 0,
+      })
+      await expect(
+        client.pushCanvasUpdate(ORG, "cvd_1", { update: "AQE=", operationId: "op_1" })
+      ).rejects.toMatchObject({ status: 403 })
+    })
+  })
+
   it("keeps one-time attachment credentials in headers", async () => {
     const calls: Call[] = []
     const client = new CollabClient({
