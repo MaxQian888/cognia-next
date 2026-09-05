@@ -1,6 +1,13 @@
 import { createPixelBuffer, type PixelBuffer } from "@/lib/images"
 
-import { renderOperations, renderPipeline, resolveSaveEncoding } from "./render"
+import {
+  previewScaleFor,
+  renderOperations,
+  renderPipeline,
+  resolveSaveEncoding,
+  scaleOperations,
+  PREVIEW_MAX_LONG_EDGE,
+} from "./render"
 import type { LocalEntry } from "./editor-state"
 
 function grid(rows: number[][]): PixelBuffer {
@@ -132,5 +139,63 @@ describe("resolveSaveEncoding", () => {
     expect(
       resolveSaveEncoding({ buffer: opaque, operationCount: 0, baseMediaType: null })
     ).toMatchObject({ reuseBaseBytes: false })
+  })
+})
+
+describe("previewScaleFor", () => {
+  it("leaves an already-small image alone", () => {
+    expect(previewScaleFor({ width: 400, height: 300 })).toBe(1)
+  })
+
+  it("fits the long edge to the preview ceiling", () => {
+    expect(previewScaleFor({ width: 1800, height: 600 })).toBeCloseTo(
+      PREVIEW_MAX_LONG_EDGE / 1800,
+      6
+    )
+    expect(previewScaleFor({ width: 600, height: 1800 })).toBeCloseTo(
+      PREVIEW_MAX_LONG_EDGE / 1800,
+      6
+    )
+  })
+
+  it("honours an explicit ceiling", () => {
+    expect(previewScaleFor({ width: 400, height: 400 }, 200)).toBe(0.5)
+  })
+})
+
+describe("scaleOperations", () => {
+  const operations: LocalEntry[] = [
+    { kind: "crop", rect: { x: 100, y: 50, width: 400, height: 200 } },
+    { kind: "resize", width: 800, height: 400 },
+    { kind: "rotate", turns: 1 },
+    { kind: "flip", horizontal: true, vertical: false },
+    { kind: "adjust", adjustments: { brightness: 10 }, gestureId: "g" },
+  ]
+
+  it("returns a copy at factor 1 without touching anything", () => {
+    expect(scaleOperations(operations, 1)).toEqual(operations)
+  })
+
+  it("scales every geometric step by the same factor", () => {
+    // Scaling a crop but not the resize before it would select the wrong
+    // region, because the crop's coordinates are relative to that resize.
+    const scaled = scaleOperations(operations, 0.5)
+    expect(scaled[0]).toMatchObject({ rect: { x: 50, y: 25, width: 200, height: 100 } })
+    expect(scaled[1]).toMatchObject({ width: 400, height: 200 })
+  })
+
+  it("passes scale-free steps through unchanged", () => {
+    const scaled = scaleOperations(operations, 0.5)
+    expect(scaled[2]).toEqual(operations[2])
+    expect(scaled[3]).toEqual(operations[3])
+    expect(scaled[4]).toEqual(operations[4])
+  })
+
+  it("never scales a dimension to zero", () => {
+    const scaled = scaleOperations(
+      [{ kind: "crop", rect: { x: 0, y: 0, width: 3, height: 3 } }],
+      0.01
+    )
+    expect(scaled[0]).toMatchObject({ rect: { width: 1, height: 1 } })
   })
 })

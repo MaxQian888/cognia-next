@@ -66,6 +66,61 @@ export function renderPipeline(base: PixelBuffer, pipeline: RenderPipeline): Pix
   return renderOperations(base, pipeline.operations)
 }
 
+/**
+ * Longest edge of the buffer the live preview renders from.
+ *
+ * A canonical chat image is 1568px, so a tone adjustment over it touches ~2.5
+ * million pixels, which is far too slow to keep up with a slider being dragged.
+ * The preview works from a downscaled copy and the save re-renders at full
+ * resolution, so the user gets a responsive control and the stored result loses
+ * nothing.
+ */
+export const PREVIEW_MAX_LONG_EDGE = 900
+
+/**
+ * Rescale geometric steps for a preview of a different size.
+ *
+ * Every geometric operation has to move by the SAME factor or the pipeline
+ * stops composing: a crop's coordinates are relative to whatever the previous
+ * step produced, so scaling the crop but not the resize before it selects the
+ * wrong region. Rotation, flipping and tone adjustments are scale-free and pass
+ * through untouched.
+ */
+export function scaleOperations(operations: readonly LocalEntry[], factor: number): LocalEntry[] {
+  if (factor === 1) return [...operations]
+  return operations.map((operation) => {
+    switch (operation.kind) {
+      case "crop":
+        return {
+          ...operation,
+          rect: {
+            x: Math.round(operation.rect.x * factor),
+            y: Math.round(operation.rect.y * factor),
+            width: Math.max(1, Math.round(operation.rect.width * factor)),
+            height: Math.max(1, Math.round(operation.rect.height * factor)),
+          },
+        }
+      case "resize":
+        return {
+          ...operation,
+          width: Math.max(1, Math.round(operation.width * factor)),
+          height: Math.max(1, Math.round(operation.height * factor)),
+        }
+      default:
+        return operation
+    }
+  })
+}
+
+/** Factor that fits `size` inside `maxLongEdge`, never above 1. */
+export function previewScaleFor(
+  size: { width: number; height: number },
+  maxLongEdge: number = PREVIEW_MAX_LONG_EDGE
+): number {
+  const longEdge = Math.max(size.width, size.height)
+  return longEdge <= maxLongEdge ? 1 : maxLongEdge / longEdge
+}
+
 export interface SaveEncodingInput {
   /** The rendered result. */
   buffer: PixelBuffer
