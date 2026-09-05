@@ -252,3 +252,27 @@ describe("LarkAccessError", () => {
     expect(err.message).toContain("Acme")
   })
 })
+
+describe("withLarkAuthedApi — write verbs", () => {
+  it("binds PATCH, PUT and DELETE to the same identity as GET and POST", async () => {
+    const impl = jest.fn(async (req: { method: string; url: string; body?: string }) => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ code: 0, data: { echo: req.method, url: req.url, body: req.body } }),
+    }))
+    const out = await withLarkAuthedApi(
+      { adapterId: ADAPTER, httpImpl: impl as never },
+      async (api) => [
+        await api.patch!("/open-apis/task/v2/tasks/t1", { task: {} }),
+        await api.put!("/open-apis/bitable/v1/apps/a/tables/t/records/r", { fields: {} }),
+        await api.delete!("/open-apis/task/v2/tasks/t1"),
+      ]
+    )
+    expect(out).toEqual([
+      expect.objectContaining({ echo: "PATCH", body: JSON.stringify({ task: {} }) }),
+      expect.objectContaining({ echo: "PUT" }),
+      expect.objectContaining({ echo: "DELETE" }),
+    ])
+    expect((out as Array<{ body?: string }>)[2].body).toBeUndefined()
+  })
+})

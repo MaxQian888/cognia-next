@@ -53,6 +53,16 @@ describe("beginLarkOAuth", () => {
     expect(result.redirectUri).toBe(REDIRECT)
   })
 
+  it("merges extra scopes into the authorize URL without repeating the base set", async () => {
+    const { deps } = makeDeps()
+    const result = await beginLarkOAuth(
+      { adapterId: "lk-1", redirectUri: REDIRECT, extraScopes: "task:task:read im:message" },
+      deps
+    )
+    const scope = new URL(result.authorizeUrl).searchParams.get("scope") ?? ""
+    expect(scope.split(" ")).toEqual(["offline_access", "im:message", "task:task:read"])
+  })
+
   it("persists before returning, so a failed write never yields a dead link", async () => {
     const { deps } = makeDeps({
       setPending: jest.fn(async () => {

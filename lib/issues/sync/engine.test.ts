@@ -254,6 +254,33 @@ describe("reconcileBinding: field reconciliation", () => {
     expect((await getIssue(id))!.externalRefs?.[0].syncedAt).toBe(2_000)
   })
 
+  it("compares a coarse remote status by category, so a started issue stays started", async () => {
+    const id = await importOne()
+    const { moveIssue } = await import("@/lib/db/issues")
+    await moveIssue({ id, to: "in_progress", by: HUMAN })
+    const { provider, pushes } = fake({
+      pull: {
+        items: [remote({ status: "todo", coarseStatus: true, remoteUpdatedAt: 3_000 })],
+        notModified: false,
+      },
+    })
+    const T = Date.now() + 100_000
+    const outcome = await reconcileBinding(binding(), provider, { now: () => T })
+    expect(outcome.conflicts).toBe(0)
+    expect((await getIssue(id))!.status).toBe("in_progress")
+    // The local move is a status change in the same category, so nothing pushes either.
+    expect(pushes).toHaveLength(0)
+    // A remote close is a category change and still lands.
+    const closed = fake({
+      pull: {
+        items: [remote({ status: "done", coarseStatus: true, remoteUpdatedAt: T + 1 })],
+        notModified: false,
+      },
+    })
+    await reconcileBinding(binding(), closed.provider, { now: () => T + 2 })
+    expect((await getIssue(id))!.status).toBe("done")
+  })
+
   it("never pushes a field the provider does not accept", async () => {
     const id = await importOne()
     await updateIssue(id, { priority: "urgent" }, HUMAN)

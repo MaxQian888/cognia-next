@@ -4,6 +4,7 @@ import {
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
 import {
+  mergeLarkScopes,
   getTenantAccessToken,
   clearTokenCache,
   buildLarkOAuthUrl,
@@ -101,6 +102,15 @@ describe("getTenantAccessToken", () => {
     const body = JSON.parse(call.body) as { app_id: string; app_secret: string }
     expect(body.app_id).toBe("cli_abc")
     expect(body.app_secret).toBe("sec_xyz")
+  })
+})
+
+describe("mergeLarkScopes", () => {
+  it("joins groups, drops repeats and blanks, and keeps first-seen order", () => {
+    expect(
+      mergeLarkScopes("offline_access im:message", undefined, " task:task:read  im:message ")
+    ).toBe("offline_access im:message task:task:read")
+    expect(mergeLarkScopes()).toBe("")
   })
 })
 

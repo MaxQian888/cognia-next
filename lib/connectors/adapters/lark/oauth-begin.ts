@@ -21,7 +21,7 @@
 import { connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { computeCodeChallenge, generateCodeVerifier } from "./pkce"
 import { buildLarkOAuthState } from "./oauth-handler"
-import { buildLarkOAuthUrl, LARK_SENDAS_SCOPES } from "./auth"
+import { buildLarkOAuthUrl, LARK_SENDAS_SCOPES, mergeLarkScopes } from "./auth"
 import { setLarkOAuthPending } from "./oauth-pending"
 
 export interface BeginLarkOAuthInput {
@@ -33,6 +33,11 @@ export interface BeginLarkOAuthInput {
    * the failure to a place with less context.
    */
   redirectUri: string
+  /**
+   * Scopes to request beyond the send-as-user set, e.g. `LARK_TASK_SCOPES`
+   * when the account is being connected for the issue tracker.
+   */
+  extraScopes?: string
 }
 
 export interface BeginLarkOAuthResult {
@@ -99,7 +104,7 @@ export async function beginLarkOAuth(
       appId,
       redirectUri,
       state,
-      scope: LARK_SENDAS_SCOPES,
+      scope: mergeLarkScopes(LARK_SENDAS_SCOPES, input.extraScopes),
       codeChallenge,
     }),
     state,

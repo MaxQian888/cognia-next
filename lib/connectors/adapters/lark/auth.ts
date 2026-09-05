@@ -50,6 +50,29 @@ const LARK_USER_INFO_URL = "https://open.feishu.cn/open-apis/authen/v1/user_info
  */
 export const LARK_SENDAS_SCOPES = "offline_access im:message"
 
+/**
+ * Scopes the issue tracker's Lark Task sync needs on the USER identity
+ * (spec 2026-09-06 D10). Without them `withLarkAuthedApi` still reaches
+ * tasklists the bot is a member of through the tenant token, so these are
+ * requested only when the person connects an account for the tracker.
+ */
+export const LARK_TASK_SCOPES =
+  "task:task:read task:task:write task:tasklist:read task:section:read"
+
+/** Bitable read and write for the tracker's table binding. */
+export const LARK_BITABLE_SCOPES = "bitable:app"
+
+/** Merge scope strings, deduplicated, order preserved. */
+export function mergeLarkScopes(...groups: Array<string | undefined>): string {
+  const seen = new Set<string>()
+  for (const group of groups) {
+    for (const scope of (group ?? "").split(/\s+/)) {
+      if (scope) seen.add(scope)
+    }
+  }
+  return [...seen].join(" ")
+}
+
 // ---------------------------------------------------------------------------
 // Token cache
 // ---------------------------------------------------------------------------

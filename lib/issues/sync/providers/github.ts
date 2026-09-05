@@ -209,6 +209,7 @@ export function toRemoteIssue(
     title: row.title,
     description: row.body ?? "",
     status: githubStateToStatus(row.state, row.stateReason),
+    coarseStatus: true,
     assigneeLabel: row.assigneeLogins[0] ?? null,
     labels: row.labels.map((label) => label.name),
     cycleExternalId: iteration

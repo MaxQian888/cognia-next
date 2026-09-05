@@ -42,6 +42,16 @@ jest.mock("@/lib/db/labels", () => ({
 }))
 
 const mockSyncSchedule = jest.fn().mockResolvedValue({ action: "skipped", bindingCount: 0 })
+jest.mock("@/lib/issues/sync/registry", () => ({ registerIssueSyncProvider: jest.fn() }))
+jest.mock("@/lib/issues/sync/providers/github", () => ({
+  createGithubSyncProvider: () => ({ id: "github" }),
+}))
+jest.mock("@/lib/issues/sync/providers/lark-task", () => ({
+  createLarkTaskSyncProvider: () => ({ id: "lark-task" }),
+}))
+jest.mock("@/lib/issues/sync/providers/lark-bitable", () => ({
+  createLarkBitableSyncProvider: () => ({ id: "lark-bitable" }),
+}))
 jest.mock("@/lib/issues/github-sync-schedule", () => ({
   syncGithubIssueSchedule: (...args: unknown[]) => mockSyncSchedule(...args),
 }))

@@ -39,8 +39,8 @@ import { hasActiveIssueRun } from "@/lib/db/issue-runs"
 import { listLabels } from "@/lib/db/labels"
 import { getDb } from "@/lib/db/schema"
 import { appendIssueEvent } from "@/lib/db/issue-events"
-import type { Issue, IssueExternalRef, IssueSyncField } from "@/types/issues"
-import { externalKeyOf, ISSUE_SYNC_FIELDS, syncActorFor } from "@/types/issues"
+import type { Issue, IssueExternalRef, IssueStatus, IssueSyncField } from "@/types/issues"
+import { externalKeyOf, ISSUE_SYNC_FIELDS, statusCategoryOf, syncActorFor } from "@/types/issues"
 import type { LabelRow } from "@/types/labels"
 import {
   applyRemoteField,
@@ -64,6 +64,17 @@ import type {
 export interface ReconcileOptions {
   full?: boolean
   now?: () => number
+}
+
+/**
+ * What a remote that only knows open versus closed can tell apart. `todo` and
+ * `in_progress` are both "open" to it, so a coarse compare treats them as one.
+ */
+export function coarseStatusBucket(status: IssueStatus): "open" | "done" | "canceled" {
+  const category = statusCategoryOf(status)
+  if (category === "completed") return "done"
+  if (category === "canceled") return "canceled"
+  return "open"
 }
 
 /** Stable per (issue, patch) so a re-queued push deduplicates upstream. */
@@ -240,6 +251,16 @@ async function reconcileItem(
     const current = (await fresh(local.id)) ?? local
     const localValue = localFieldValue(current, field, context)
     if (!fieldValuesDiffer(localValue, remoteValue)) continue
+    if (
+      field === "status" &&
+      remote.coarseStatus &&
+      typeof localValue === "string" &&
+      typeof remoteValue === "string" &&
+      coarseStatusBucket(localValue as IssueStatus) ===
+        coarseStatusBucket(remoteValue as IssueStatus)
+    ) {
+      continue
+    }
 
     const localChangedAt = localClock.get(field)
     const canPush = provider.pushFields.includes(field) && Boolean(provider.push)

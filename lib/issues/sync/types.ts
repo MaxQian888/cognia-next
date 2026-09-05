@@ -47,6 +47,12 @@ export interface RemoteIssue {
   title: string
   description?: string
   status: IssueStatus
+  /**
+   * The remote only knows open versus closed (GitHub, a Lark task). The
+   * engine then compares `status` by category, so a local `in_progress` is
+   * not dragged back to `todo` on every pull of an open item.
+   */
+  coarseStatus?: boolean
   priority?: IssuePriority
   /** Display name of the remote assignee, when there is one. */
   assigneeLabel?: string | null

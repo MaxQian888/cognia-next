@@ -64,7 +64,17 @@ interface LarkEnvelope<T> {
 export interface LarkAuthedApi {
   get<T>(path: string): Promise<T>
   post<T>(path: string, body: unknown): Promise<T>
+  /**
+   * Task v2 and Bitable writes (issue tracker sync, spec 2026-09-06 D10).
+   * Optional on the type so the read-only fakes older callers build keep
+   * their shape. `withLarkAuthedApi` always provides all three.
+   */
+  patch?<T>(path: string, body: unknown): Promise<T>
+  put?<T>(path: string, body: unknown): Promise<T>
+  delete?<T>(path: string): Promise<T>
 }
+
+type LarkWriteMethod = "POST" | "PATCH" | "PUT" | "DELETE"
 
 export interface LarkAuthedApiAccount {
   adapterId: string
@@ -123,7 +133,7 @@ export async function withLarkAuthedApi<T>(
   const call = async <R>(
     path: string,
     authHeader: string,
-    init?: { method: "POST"; body: unknown }
+    init?: { method: LarkWriteMethod; body?: unknown }
   ): Promise<R> => {
     const resp = await httpImpl({
       url: `${LARK_API_BASE}${path}`,
@@ -132,7 +142,7 @@ export async function withLarkAuthedApi<T>(
         Authorization: authHeader,
         "Content-Type": "application/json; charset=utf-8",
       },
-      ...(init ? { body: JSON.stringify(init.body) } : {}),
+      ...(init && init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     })
     let parsed: LarkEnvelope<R> | null = null
     try {
@@ -153,6 +163,9 @@ export async function withLarkAuthedApi<T>(
   const bindApi = (authHeader: string): LarkAuthedApi => ({
     get: <R>(path: string) => call<R>(path, authHeader),
     post: <R>(path: string, body: unknown) => call<R>(path, authHeader, { method: "POST", body }),
+    patch: <R>(path: string, body: unknown) => call<R>(path, authHeader, { method: "PATCH", body }),
+    put: <R>(path: string, body: unknown) => call<R>(path, authHeader, { method: "PUT", body }),
+    delete: <R>(path: string) => call<R>(path, authHeader, { method: "DELETE" }),
   })
 
   const account: LarkAuthedApiAccount = { adapterId: opts.adapterId, displayName: row.displayName }
