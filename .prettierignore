@@ -28,6 +28,10 @@ generated/built-in-skills
 # esbuild owns this generated CommonJS bundle; formatting it would make the
 # committed artifact diverge from `pnpm plugin-convert:bundle`.
 crates/cognia-cli/assets/plugin-convert.cjs
+# The CLI's API command index is emitted one command per line by
+# `pnpm cli:api:gen`; reformatting it makes `pnpm cli:api:check` report drift
+# against the protocol contract it was generated from.
+cli/src/api/generated/command-index.ts
 # Same arrangement for the workflow-app embed bundle: esbuild writes it
 # (`pnpm workflow-app:embed:build`), so Prettier reformatting it would put the
 # committed file permanently out of step with the generator — and lint-staged
