@@ -53,6 +53,7 @@ export function materializeSteps(inputs: CreatePlanStepInput[]): PlanStep[] {
       params: input.params,
       attempts: 0,
       estimatedDurationMs: input.estimatedDurationMs,
+      ...(input.issueId ? { issueId: input.issueId } : {}),
     }
     return step
   })

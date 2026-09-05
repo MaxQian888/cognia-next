@@ -35,6 +35,8 @@ const VALID_SCOPES: &[&str] = &[
     "inbound:write",
     "memory:read",
     "memory:write",
+    "issues:read",
+    "issues:write",
     "workflow:run",
 ];
 

@@ -1680,7 +1680,13 @@
     "usageCost": "费用：${cost}",
     "usageInput": "输入：{n}",
     "usageOutput": "输出：{n}",
-    "usageReasoning": "推理：{n}"
+    "usageReasoning": "推理：{n}",
+    "saveAsIssueLabel": "存为事项",
+    "saveAsIssueTooltip": "把这条回复记为一个追踪事项",
+    "saveAsIssueDone": "已在追踪器中创建 {identifier}。",
+    "saveAsIssueOpen": "打开事项",
+    "saveAsIssueEmpty": "这条回复里没有可记录的内容。",
+    "saveAsIssueFailed": "创建失败：{reason}"
   },
   "messageDisplay": {
     "assistant": "助手",

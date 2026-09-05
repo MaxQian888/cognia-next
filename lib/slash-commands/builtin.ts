@@ -29,6 +29,7 @@ import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-block
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
 import { dispatchPlanSubcommand } from "./actions/plan"
+import { dispatchIssueSubcommand } from "./actions/issue"
 import { dispatchSquadSubcommand } from "./actions/squad"
 import { dispatchPetSubcommand } from "./actions/pet"
 import { dispatchLoopSubcommand } from "./actions/loop"
@@ -507,6 +508,20 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     argumentOptions: ["status", "new", "from-goal", "from-team", "to-team", "cancel"],
     handler: async (ctx) => {
       const result = await dispatchPlanSubcommand(ctx)
+      ctx.pushSystemMessage(result.system)
+    },
+  },
+  {
+    name: "issue",
+    description:
+      "Work the issue tracker from the composer: list, create, show, move, reprioritise, assign or comment on an issue.",
+    scope: "builtin",
+    category: "goal",
+    argumentHint:
+      "<list [status] [text] | new <title> [| body] [#KEY] [!priority] [@me] | show <ref> | status <ref> <status> | priority <ref> <p> | assign <ref> me|none|agent:<id>|team:<id> | comment <ref> <text>>",
+    argumentOptions: ["list", "new", "show", "status", "priority", "assign", "comment"],
+    handler: async (ctx) => {
+      const result = await dispatchIssueSubcommand(ctx)
       ctx.pushSystemMessage(result.system)
     },
   },

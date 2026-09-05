@@ -38,6 +38,7 @@ const INDEXED_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.team",
   "trigger.desktop.event",
   "trigger.pet.event",
+  "trigger.issue.event",
   "trigger.workflow.completed",
   "trigger.integration.event",
 ]
@@ -161,6 +162,14 @@ export interface TriggerMatchContext {
    */
   petEventKind?: string
   /**
+   * Issue trail event kind (trigger.issue.event): created / status_changed /
+   * assigned / commented / run_succeeded / ... matched against the node's
+   * `kinds` array param. A node without a `kinds` filter matches every kind.
+   */
+  issueEventKind?: string
+  /** Container of the issue (trigger.issue.event), matched against `issueProjectId`. */
+  issueProjectId?: string
+  /**
    * Platform system-event kind (trigger.connector.system) — reaction_added /
    * reaction_removed / poke / request / lifecycle, matched against the node's
    * `kinds` array param. A node without a `kinds` filter matches every kind.
@@ -257,10 +266,14 @@ function matches(entry: SubscribedTrigger, ctx: TriggerMatchContext): boolean {
   if (Array.isArray(p.kinds) && p.kinds.length > 0) {
     // Shared `kinds` filter shape — desktop and pet triggers each pass their
     // own ctx field, and entries are already partitioned per trigger kind.
-    const eventKind = ctx.desktopEventKind ?? ctx.petEventKind ?? ctx.connectorSystemKind
+    const eventKind =
+      ctx.desktopEventKind ?? ctx.petEventKind ?? ctx.connectorSystemKind ?? ctx.issueEventKind
     if (typeof eventKind !== "string" || !p.kinds.includes(eventKind)) {
       return false
     }
+  }
+  if (typeof p.issueProjectId === "string" && p.issueProjectId.length > 0) {
+    if (ctx.issueProjectId !== p.issueProjectId) return false
   }
   if (typeof p.commandContains === "string" && p.commandContains.length > 0) {
     if (typeof ctx.command !== "string" || !ctx.command.includes(p.commandContains)) return false

@@ -1530,6 +1530,9 @@ export function useClaudeChat() {
             content: effectiveContent,
             visibleMessageIds: next.map((message) => message.id),
             ...(session?.projectId ? { projectId: session.projectId } : {}),
+            ...(session?.issueId
+              ? { workItemRef: { kind: "issue" as const, id: session.issueId } }
+              : {}),
             // The user message lands in the SAME transaction as the submission.
             // Without this the row would still reach Dexie eventually, via the
             // debounced transcript writer — but a crash in between would leave a

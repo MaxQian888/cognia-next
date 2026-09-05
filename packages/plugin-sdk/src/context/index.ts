@@ -184,6 +184,13 @@ export type {
   PluginGitConflictResolution,
 } from "@/lib/plugin/api/git-api"
 export type { PluginGoalAPI, PluginGoalCreateInput } from "@/lib/plugin/api/goal-api"
+export type {
+  PluginIssuesAPI,
+  PluginIssueCreateInput,
+  PluginIssueQuery,
+  PluginIssueUpdatePatch,
+  PluginIssueEventOptions,
+} from "@/lib/plugin/api/issues-api"
 export type { PluginSubscriptionAPI, PluginUsageSnapshot } from "@/lib/plugin/api/subscription-api"
 export type {
   PluginTerminalAPI,

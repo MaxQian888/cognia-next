@@ -8,6 +8,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWikiArticle } from "@/lib/db/wiki-articles"
 import { createCharacter } from "@/lib/db/characters"
+import { createIssueProject } from "@/lib/db/issue-projects"
 import { listMcpAuditLog } from "@/lib/db/mcp-audit-log"
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import type { WorkflowMcpDeploymentDescriptor, WorkflowMcpHost } from "../handlers/workflow"
@@ -421,6 +422,70 @@ describe("buildMcpServer — immutable workflow deployments", () => {
     expect(retained.structuredContent).toEqual({ runId: "run-1", status: "pending" })
 
     refresh.stop()
+    await client.close()
+  })
+})
+
+describe("buildMcpServer — issue tracker tools (spec 2026-09-06 D9)", () => {
+  it.each([
+    ["issues_list", {}],
+    ["issues_get", { ref: "MERC-1" }],
+    ["issues_create", { title: "x" }],
+    ["issues_update", { ref: "MERC-1", status: "done" }],
+    ["issues_comment", { ref: "MERC-1", body: "hi" }],
+  ])("registers %s and denies it when the scope is OFF", async (toolName, args) => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: [] }))
+    const result = await client.callTool({ name: toolName, arguments: args })
+    expect(result.isError).toBe(true)
+    await client.close()
+  })
+
+  it("read scope does not grant writes", async () => {
+    const { client } = await makeWiredPair(settings({ enabledScopes: ["issues:read"] }))
+    const denied = await client.callTool({ name: "issues_create", arguments: { title: "x" } })
+    expect(denied.isError).toBe(true)
+    const allowed = await client.callTool({ name: "issues_list", arguments: {} })
+    expect(allowed.isError).not.toBe(true)
+    await client.close()
+  })
+
+  it("creates, reads back and comments end-to-end when both scopes are ON", async () => {
+    const container = await createIssueProject({
+      projectId: "w-bridge",
+      name: "Bridge",
+      key: "BRG",
+    })
+    const { client } = await makeWiredPair(
+      settings({ enabledScopes: ["issues:read", "issues:write"] })
+    )
+    const created = await client.callTool({
+      name: "issues_create",
+      arguments: { title: "Filed from MCP", issueProjectId: container.id, labels: ["mcp"] },
+    })
+    expect(created.isError).not.toBe(true)
+    const createdPayload = created.structuredContent as {
+      ok: boolean
+      issue: { id: string; identifier: string; createdBy: { id?: string } }
+    }
+    expect(createdPayload.ok).toBe(true)
+    expect(createdPayload.issue.identifier).toBe("BRG-1")
+    expect(createdPayload.issue.createdBy.id).toBe("mcp")
+
+    const commented = await client.callTool({
+      name: "issues_comment",
+      arguments: { ref: "BRG-1", body: "from the bridge" },
+    })
+    expect((commented.structuredContent as { ok: boolean }).ok).toBe(true)
+
+    const read = await client.callTool({ name: "issues_get", arguments: { ref: "brg-1" } })
+    const readPayload = read.structuredContent as {
+      ok: boolean
+      issue: { id: string }
+      events: Array<{ kind: string }>
+    }
+    expect(readPayload.ok).toBe(true)
+    expect(readPayload.issue.id).toBe(createdPayload.issue.id)
+    expect(readPayload.events.map((e) => e.kind)).toContain("commented")
     await client.close()
   })
 })

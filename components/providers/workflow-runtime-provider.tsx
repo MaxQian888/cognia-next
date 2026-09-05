@@ -14,6 +14,10 @@ import {
   initPetEventTrigger,
   disposePetEventTrigger,
 } from "@/lib/workflow/runtime/pet-event-trigger"
+import {
+  disposeIssueEventTrigger,
+  initIssueEventTrigger,
+} from "@/lib/workflow/runtime/issue-event-trigger"
 import { installApprovalNotificationActions } from "@/lib/workflow/runtime/approval-notify"
 import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
@@ -133,6 +137,18 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
         log.info?.("workflow runtime: pet-event trigger initialised")
       } catch (err) {
         log.warn?.("workflow runtime: initPetEventTrigger failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Issue trail events (trigger.issue.event) ride the in-renderer issue
+      // event bus. Not Tauri-gated: the tracker runs on web and mobile too.
+      try {
+        initIssueEventTrigger()
+        disposers.push(() => disposeIssueEventTrigger())
+        log.info?.("workflow runtime: issue-event trigger initialised")
+      } catch (err) {
+        log.warn?.("workflow runtime: initIssueEventTrigger failed", {
           error: err instanceof Error ? err.message : String(err),
         })
       }

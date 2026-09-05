@@ -215,6 +215,9 @@ export async function acceptWorkSubmission(
     sourceKind: intent.source.kind,
     sourceId: intent.source.sourceId,
     ...(intent.source.triggerId ? { triggerId: intent.source.triggerId } : {}),
+    ...(intent.workItemRef
+      ? { workItemKind: intent.workItemRef.kind, workItemId: intent.workItemRef.id }
+      : {}),
     availabilityPolicy: intent.availabilityPolicy,
     dispatchState: blocked ? "blocked" : "pending",
     // A live caller still has to freeze its final SendOptions and claim the row
@@ -309,6 +312,22 @@ export async function acceptWorkSubmission(
       }
     )
   })
+
+  // Tell the work item after the commit, never inside it (spec 2026-09-06
+  // D9). The tracker is the only reader today, and a deleted issue is not a
+  // reason to refuse the turn.
+  if (committed.workItemKind === "issue" && committed.workItemId) {
+    const issueId = committed.workItemId
+    void import("@/lib/issues/work-item-link")
+      .then(({ recordWorkStarted }) =>
+        recordWorkStarted({
+          issueId,
+          submissionId: committed.id,
+          source: committed.sourceKind,
+        })
+      )
+      .catch(() => {})
+  }
 
   return receiptFor(committed)
 }
@@ -423,6 +442,9 @@ export async function settleWorkSubmission(
   deps: WorkSubmissionServiceDeps = {}
 ): Promise<boolean> {
   const now = input.now ?? deps.now?.() ?? Date.now()
+  // Captured inside the transaction, told after it: the issue trail is not
+  // part of the settlement write and must never hold it open.
+  let linkedIssue: { issueId: string; source: string } | null = null
 
   const sealed = await withDbReopenRetry(() => {
     const db = getDb()
@@ -439,6 +461,9 @@ export async function settleWorkSubmission(
       async (): Promise<boolean> => {
         const row = await db.workSubmissions.get(input.submissionId)
         if (!row || row.dispatchState === "settled") return false
+        if (row.workItemKind === "issue" && row.workItemId) {
+          linkedIssue = { issueId: row.workItemId, source: row.sourceKind }
+        }
 
         await input.writeTranscript?.()
         await db.workSubmissions.put({
@@ -474,6 +499,19 @@ export async function settleWorkSubmission(
     )
   })
 
+  if (sealed && linkedIssue) {
+    const { issueId, source } = linkedIssue
+    void import("@/lib/issues/work-item-link")
+      .then(({ recordWorkSettled }) =>
+        recordWorkSettled({
+          issueId,
+          submissionId: input.submissionId,
+          source,
+          outcome: input.outcome,
+        })
+      )
+      .catch(() => {})
+  }
   return sealed
 }
 

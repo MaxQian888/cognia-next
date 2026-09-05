@@ -46,6 +46,7 @@
     "sites": "站点",
     "mobile": "移动端",
     "eval": "评测",
-    "other": "其他"
+    "other": "其他",
+    "issues": "事项"
   }
 }

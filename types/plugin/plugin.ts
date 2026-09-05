@@ -2470,6 +2470,8 @@ export interface PluginHostContextAPI {
   hooks: import("@/lib/plugin/api/hooks-api").PluginHooksAPI
   /** ADR-0045 plan hub — read/author/approve/run `AgentPlan`s. */
   plans: import("@/lib/plugin/api/plan-api").PluginPlanAPI
+  /** Issue tracker (spec 2026-09-06 D9): read, write, subscribe, register a sync source. */
+  issues: import("@/lib/plugin/api/issues-api").PluginIssuesAPI
   memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
   team: import("@/lib/plugin/api/team-api").PluginTeamAPI
   subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI

@@ -46,6 +46,7 @@
     "sites": "Sites",
     "mobile": "Mobile",
     "eval": "Evaluation",
-    "other": "Other"
+    "other": "Other",
+    "issues": "Issues"
   }
 }

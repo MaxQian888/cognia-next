@@ -157,6 +157,20 @@ describe("IssueDetailPanel", () => {
     expect(screen.getByText("priority.high")).toBeInTheDocument()
   })
 
+  it("links back to the conversation a local issue was filed from", () => {
+    render(
+      <IssueDetailPanel
+        item={item({ filedFrom: { kind: "chat", sessionId: "ses_a", messageId: "msg_1" } })}
+      />
+    )
+    expect(screen.getByTestId("issue-detail-open-conversation")).toHaveAttribute(
+      "href",
+      "/?session=ses_a&message=msg_1"
+    )
+    render(<IssueDetailPanel item={item({ filedFrom: { kind: "browser", sourceHost: "x" } })} />)
+    expect(screen.getAllByTestId("issue-detail-open-conversation")).toHaveLength(1)
+  })
+
   it("marks an unassigned federated issue explicitly (read-only rows keep the text)", () => {
     render(<IssueDetailPanel item={item({ kind: "github" })} />)
     expect(screen.getByTestId("issue-detail-assignee-none")).toHaveTextContent("actor.unassigned")

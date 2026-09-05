@@ -45,6 +45,12 @@ describe("linearAgentTurnSteps", () => {
 })
 
 describe("materializeSteps", () => {
+  it("carries a step's issue binding onto the materialized step", () => {
+    const steps = materializeSteps([input({ issueId: "iss_1" }), input()])
+    expect(steps[0].issueId).toBe("iss_1")
+    expect("issueId" in steps[1]).toBe(false)
+  })
+
   it("assigns ids, 0-based order, pending status, and zero attempts", () => {
     const steps = materializeSteps([input({ title: "a" }), input({ title: "b" })])
     expect(steps).toHaveLength(2)

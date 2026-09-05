@@ -39,7 +39,12 @@ import type {
   UpdatePlanInput,
 } from "@/types/agent/plan"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import { DEFAULT_PLAN_CONFIG, computePlanCounts, isTerminalPlanStatus } from "@/types/agent/plan"
+import {
+  DEFAULT_PLAN_CONFIG,
+  computePlanCounts,
+  isTerminalPlanStatus,
+  isTerminalStepStatus,
+} from "@/types/agent/plan"
 import {
   appendPlanEvent,
   createPlan,
@@ -329,6 +334,24 @@ class PlanRuntime {
       completedSteps: applied.completedSteps,
       currentStepId: applied.currentStepId,
     })
+    // A step bound to a tracker issue tells the issue how it ended (spec
+    // 2026-09-06 D9). Off the write path and best-effort: the plan is the
+    // source of truth, the trail entry is a projection of it.
+    const step = applied.steps.find((candidate) => candidate.id === stepId)
+    if (step?.issueId && isTerminalStepStatus(status)) {
+      void import("@/lib/issues/work-item-link")
+        .then(({ recordWorkSettled }) =>
+          recordWorkSettled({
+            issueId: step.issueId!,
+            submissionId: `plan:${planId}:${stepId}`,
+            source: "plan",
+            outcome: status,
+          })
+        )
+        .catch(() => {
+          // The issue may be gone. The plan does not care.
+        })
+    }
     return (await getPlan(planId)) ?? null
   }
 

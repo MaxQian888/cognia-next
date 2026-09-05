@@ -31,6 +31,7 @@ import type {
   IssuePriority,
   IssueStatus,
   IssueStatusCategory,
+  IssueOrigin,
 } from "@/types/issues"
 
 /** Single exhaustive runtime/type authority for every federated source. */
@@ -144,6 +145,8 @@ export interface UnifiedIssueItem {
   estimate?: number
   cycleId?: string
   externalRefs?: readonly IssueExternalRef[]
+  /** Where the row was filed from (`Issue.origin`). Local source only. */
+  filedFrom?: IssueOrigin
 }
 
 /** What the board asks each source for. */

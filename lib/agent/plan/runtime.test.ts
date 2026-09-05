@@ -10,6 +10,11 @@ import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
 // other export keeps its real implementation (the db layer may use them). The
 // SWC-compiled `export function isTauri` is non-configurable, so `spyOn` can't
 // redefine it — a module mock is the only reliable seam.
+const mockRecordWorkSettled = jest.fn(async (_input: unknown) => true)
+jest.mock("@/lib/issues/work-item-link", () => ({
+  recordWorkSettled: (input: unknown) => mockRecordWorkSettled(input),
+}))
+
 jest.mock("@/lib/platform/detect", () => {
   const actual = jest.requireActual("@/lib/platform/detect")
   return { ...actual, isTauri: jest.fn(() => false) }
@@ -229,6 +234,35 @@ describe("updatePlanDraft", () => {
 })
 
 describe("setStepStatus", () => {
+  it("tells a bound tracker issue how a step ended, and only on terminal statuses", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(
+      createInput({
+        config: { requireApproval: false },
+        steps: [
+          { title: "fix", kind: "agent_turn", issueId: "iss_1" },
+          { title: "verify", kind: "agent_turn" },
+        ],
+      })
+    )
+    expect(plan.steps[0].issueId).toBe("iss_1")
+    mockRecordWorkSettled.mockClear()
+    await rt.setStepStatus(plan.id, plan.steps[0].id, "running")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockRecordWorkSettled).not.toHaveBeenCalled()
+    await rt.setStepStatus(plan.id, plan.steps[0].id, "failed", { error: "boom" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockRecordWorkSettled).toHaveBeenCalledWith({
+      issueId: "iss_1",
+      submissionId: `plan:${plan.id}:${plan.steps[0].id}`,
+      source: "plan",
+      outcome: "failed",
+    })
+    await rt.setStepStatus(plan.id, plan.steps[1].id, "completed")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(mockRecordWorkSettled).toHaveBeenCalledTimes(1)
+  })
+
   it("writes one step's status and updates the cursor + counts", async () => {
     const rt = getPlanRuntime()
     const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))

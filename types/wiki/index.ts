@@ -111,6 +111,18 @@ export type BridgeScope =
    */
   | "memory:write"
   /**
+   * Read the issue tracker (`issues_list` / `issues_get`): issues, their
+   * activity trail, projects and cycles of the active workspace. Default OFF.
+   */
+  | "issues:read"
+  /**
+   * Write the issue tracker (`issues_create` / `issues_update` /
+   * `issues_comment`). Default OFF. Every write goes through the board's own
+   * gate (a running issue cannot be moved) and lands in the trail with an
+   * `mcp` actor.
+   */
+  | "issues:write"
+  /**
    * Discover and execute immutable workflow deployments through External
    * Bridge MCP lifecycle and dynamically typed tools. Default OFF.
    */
@@ -147,6 +159,8 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "inbound:write",
   "memory:read",
   "memory:write",
+  "issues:read",
+  "issues:write",
   "workflow:run",
   "usage:read",
 ] as const

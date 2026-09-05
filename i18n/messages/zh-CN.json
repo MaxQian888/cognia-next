@@ -7100,6 +7100,12 @@
       "regenerateTooltip": "重新生成",
       "rerunTemplateLabel": "重跑这条消息",
       "rerunTemplateTooltip": "换个参数重跑",
+      "saveAsIssueDone": "已在追踪器中创建 {identifier}。",
+      "saveAsIssueEmpty": "这条回复里没有可记录的内容。",
+      "saveAsIssueFailed": "创建失败：{reason}",
+      "saveAsIssueLabel": "存为事项",
+      "saveAsIssueOpen": "打开事项",
+      "saveAsIssueTooltip": "把这条回复记为一个追踪事项",
       "saveAsMemoryDone": "已把“{title}”存为待审记忆草稿。",
       "saveAsMemoryEmpty": "这条回复里没有可保存的内容。",
       "saveAsMemoryFailed": "保存失败：{reason}",
@@ -14269,7 +14275,9 @@
       "sync_conflict_resolved": "解决了一次同步冲突",
       "synced_in": "应用了来自 {provider} 的更改",
       "title_changed": "重命名了这个议题",
-      "unassigned": "移除了负责人"
+      "unassigned": "移除了负责人",
+      "work_settled": "处理此事项的 Agent 回合已结束：{to}",
+      "work_started": "一次 Agent 回合开始处理此事项"
     },
     "activitySide": {
       "local": "本地",
@@ -14404,6 +14412,7 @@
       "empty": "选择一个议题查看详情",
       "labels": "标签",
       "mobileReadOnly": "移动端为只读",
+      "openConversation": "打开来源对话",
       "openInGithub": "在 GitHub 中打开",
       "openInProIde": "在 Pro IDE 中打开 {path}",
       "priority": "优先级",
@@ -34213,6 +34222,8 @@
         "inbound:write": "⚠ 允许外部代理提交经验、技能草稿与笔记。不会自动生效 —— 提交内容作为待审、不可信草稿进入审阅队列，由你接受或丢弃。默认关闭。",
         "inbox:connectors:read": "⚠ 只读收件箱自省 — 适配器、会话、草稿、审计。元数据可能包含会话句柄与近期消息片段。默认关闭。",
         "inbox:connectors:send": "⚠ 允许外部 Agent 向你的 IM 收件箱发送 AI 回复。与应用内聊天走同一管线（PII 门控、策略评估、出站队列）。默认关闭。",
+        "issues:read": "⚠ 允许外部代理列出并读取你的事项追踪器：当前工作区的事项、活动记录、项目与迭代。默认关闭。",
+        "issues:write": "⚠ 允许外部代理创建、编辑、移动、指派和评论事项。每次写入都经过看板自己的门禁，并以外部代理身份记录在事项上。默认关闭。",
         "mcp:computer-use": "⚠ 允许外部 Agent 操控本机（鼠标 / 键盘 / 截图）。遵循 设置 → 自动化 → 权限策略；每次调用按权限层级弹出授权确认。",
         "memory:read": "⚠ 允许外部代理搜索、列出助手对你的长期记忆 —— 蒸馏后的个人事实，敏感级别与孪生检索相同。默认关闭。",
         "memory:write": "⚠ 允许外部代理存储、更新、遗忘长期记忆。写入经 PII 筛查、标记为外部来源，且永远无法更改助手的工作指令。默认关闭。",
@@ -46115,6 +46126,138 @@
           "placeholder": "repository"
         }
       },
+      "issueAssign": {
+        "assigneeId": {
+          "hint": "Agent 填角色 id，小队填 team id。",
+          "label": "被指派者 id"
+        },
+        "assigneeKind": {
+          "label": "指派给",
+          "options": {
+            "agent": "某个 Agent",
+            "human": "我",
+            "none": "无人（取消指派）",
+            "team": "某个小队"
+          }
+        },
+        "assigneeLabel": {
+          "label": "显示名"
+        }
+      },
+      "issueComment": {
+        "body": {
+          "hint": "表达式会在写入前解析。",
+          "label": "评论"
+        }
+      },
+      "issueCommon": {
+        "cycleId": {
+          "label": "迭代 id"
+        },
+        "dueDate": {
+          "hint": "Unix 毫秒时间戳。",
+          "label": "截止日期"
+        },
+        "estimate": {
+          "label": "估点"
+        },
+        "issue": {
+          "hint": "行 id 或 MERC-12 这样的编号。",
+          "label": "事项",
+          "placeholder": "MERC-12"
+        },
+        "issueProjectId": {
+          "hint": "可选。按 id 选择容器。",
+          "label": "项目 id"
+        },
+        "labels": {
+          "hint": "逗号分隔的名称。不存在的标签会被创建。",
+          "label": "标签"
+        },
+        "parentId": {
+          "label": "父事项 id"
+        },
+        "priority": {
+          "default": "默认",
+          "label": "优先级"
+        },
+        "projectKey": {
+          "hint": "可选。按 key 选择容器。",
+          "label": "项目 key",
+          "placeholder": "MERC"
+        },
+        "status": {
+          "default": "默认",
+          "label": "状态"
+        }
+      },
+      "issueCreate": {
+        "description": {
+          "label": "描述"
+        },
+        "title": {
+          "label": "标题"
+        }
+      },
+      "issueEventTrigger": {
+        "cooldownMs": {
+          "hint": "同一工作流两次触发之间的最短间隔。",
+          "label": "冷却（毫秒）"
+        },
+        "intro": "当事项的活动记录新增一条时触发。",
+        "issueProjectId": {
+          "hint": "可选。仅限该容器内的事项。"
+        },
+        "kinds": {
+          "hint": "全部不勾选则任何种类都触发。",
+          "label": "事件",
+          "options": {
+            "assigned": "已指派",
+            "commented": "已评论",
+            "created": "已创建",
+            "run_failed": "运行失败",
+            "run_started": "运行开始",
+            "run_succeeded": "运行成功",
+            "status_changed": "状态变更"
+          }
+        }
+      },
+      "issueLabel": {
+        "add": {
+          "hint": "逗号分隔的名称。不存在的标签会被创建。",
+          "label": "添加标签"
+        },
+        "remove": {
+          "hint": "逗号分隔的名称。只移除已存在的标签。",
+          "label": "移除标签"
+        }
+      },
+      "issueList": {
+        "limit": {
+          "label": "数量上限"
+        },
+        "statuses": {
+          "hint": "全部不勾选则列出所有状态。",
+          "label": "状态"
+        },
+        "text": {
+          "hint": "在编号、标题和描述中做子串匹配。",
+          "label": "文本"
+        }
+      },
+      "issueUpdate": {
+        "cycleId": {
+          "hint": "填写迭代 id 会把事项规划进该迭代。"
+        },
+        "description": {
+          "label": "新描述"
+        },
+        "intro": "只修改填写的字段，每个字段对应一次看板动作。",
+        "title": {
+          "label": "新标题"
+        },
+        "unchanged": "保持不变"
+      },
       "join": {
         "aggregate": {
           "hint": "把汇聚的分支输出一步归约。",
@@ -48426,6 +48569,36 @@
             "label": "请求人工输入"
           }
         },
+        "issue": {
+          "assign": {
+            "description": "把事项指派给人、Agent 或小队，或取消指派。",
+            "label": "指派事项"
+          },
+          "comment": {
+            "description": "在事项的活动记录中追加一条评论。",
+            "label": "评论事项"
+          },
+          "create": {
+            "description": "在当前工作区的某个项目中创建一个追踪事项。",
+            "label": "创建事项"
+          },
+          "get": {
+            "description": "按 id 或 MERC-12 这样的编号读取一个事项。",
+            "label": "读取事项"
+          },
+          "label": {
+            "description": "按名称为事项添加或移除标签。",
+            "label": "标记事项"
+          },
+          "list": {
+            "description": "按项目、状态、迭代或文本筛选列出事项。",
+            "label": "列出事项"
+          },
+          "update": {
+            "description": "修改事项的标题、描述、状态、优先级、截止日期、估点或迭代。",
+            "label": "更新事项"
+          }
+        },
         "mcp": {
           "invokeTool": {
             "description": "调用已配置的 MCP 服务器上的工具。",
@@ -49004,6 +49177,12 @@
             "label": "Integration 事件触发"
           }
         },
+        "issue": {
+          "event": {
+            "description": "当事项被创建、状态变更、被指派、被评论或其运行结束时触发。",
+            "label": "事项事件触发"
+          }
+        },
         "manual": {
           "description": "在编辑器中点击「运行」按钮时触发。",
           "label": "手动运行"
@@ -49314,6 +49493,7 @@
         "files-git": "文件与源代码管理",
         "goals": "目标",
         "human": "人工介入",
+        "issues": "事项",
         "memory": "记忆与数字分身",
         "mobile": "移动端",
         "other": "其他",

@@ -238,6 +238,13 @@ export type IssueOrigin =
        */
       sourceHost: string
     }
+  | {
+      /** Filed from a chat session: `/issue new`, or "Save as issue" on a reply. */
+      kind: "chat"
+      sessionId: string
+      /** The message the issue was made from, when there was one. */
+      messageId?: string
+    }
 
 /** Link from a local issue to its GitHub counterpart. */
 export interface IssueGithubRef {
@@ -427,6 +434,9 @@ export type IssueEventKind =
   | "cycle_changed"
   | "external_linked"
   | "external_unlinked"
+  /** A durable work submission (a chat turn, a plan step) bound to this issue. */
+  | "work_started"
+  | "work_settled"
   | "synced_in"
   | "sync_conflict"
   | "sync_conflict_resolved"
@@ -466,6 +476,12 @@ export type IssueEventPayload =
   | { kind: "estimate_changed"; from?: number; to?: number; by: IssueActor }
   | { kind: "cycle_changed"; from?: string; to?: string; by: IssueActor }
   | { kind: "external_linked"; ref: IssueExternalRef; by: IssueActor }
+  /**
+   * ADR-0123 work submissions and plan steps that name this issue as their
+   * `workItemRef`. `source` is the submission's source kind (`chat`, `plan`).
+   */
+  | { kind: "work_started"; submissionId: string; source: string; by: IssueActor }
+  | { kind: "work_settled"; submissionId: string; source: string; to: string }
   | { kind: "external_unlinked"; ref: IssueExternalRef; by: IssueActor }
   /** A remote change was applied to a local field by the sync engine. */
   | { kind: "synced_in"; provider: string; field: IssueSyncField; by: IssueActor }

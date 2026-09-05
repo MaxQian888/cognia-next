@@ -119,6 +119,11 @@ export interface PlanStep {
   attempts?: number
   /** Tool-call ids associated with this step (chat-render cross-link). */
   toolCallIds?: string[]
+  /**
+   * Tracker issue this step is doing the work for (spec 2026-09-06 D9). The
+   * runtime writes the step's terminal status to the issue's trail.
+   */
+  issueId?: string
   startedAt?: number
   completedAt?: number
   estimatedDurationMs?: number
@@ -267,6 +272,8 @@ export interface CreatePlanStepInput {
   dependsOn?: number[]
   params?: PlanStepParams
   estimatedDurationMs?: number
+  /** Tracker issue this step is for. Carried onto the materialized step. */
+  issueId?: string
 }
 
 export interface CreatePlanInput {

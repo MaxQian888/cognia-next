@@ -173,6 +173,16 @@ import {
   OutputConfig,
   AnswerConfig,
 } from "./forms"
+import {
+  IssueAssignConfig,
+  IssueCommentConfig,
+  IssueCreateConfig,
+  IssueEventTriggerConfig,
+  IssueLabelConfig,
+  IssueListConfig,
+  IssueRefConfig,
+  IssueUpdateConfig,
+} from "./forms/issue-forms"
 
 export type NodeConfigComponent = ComponentType<{
   params: Record<string, unknown>
@@ -195,6 +205,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "trigger.team": TeamTriggerConfig,
   "trigger.desktop.event": DesktopEventTriggerConfig,
   "trigger.pet.event": PetEventTriggerConfig,
+  "trigger.issue.event": IssueEventTriggerConfig,
   // Actions: characters
   "action.character.send": CharacterSendConfig,
   "action.character.create": CharacterCreateConfig,
@@ -232,6 +243,13 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.goal.template.upsert": GoalTemplateUpsertConfig,
   "action.goal.template.favorite": GoalTemplateFavoriteConfig,
   "action.goal.template.delete": GoalTemplateDeleteConfig,
+  "action.issue.create": IssueCreateConfig,
+  "action.issue.get": IssueRefConfig,
+  "action.issue.list": IssueListConfig,
+  "action.issue.update": IssueUpdateConfig,
+  "action.issue.assign": IssueAssignConfig,
+  "action.issue.comment": IssueCommentConfig,
+  "action.issue.label": IssueLabelConfig,
   "action.plan.create": PlanCreateConfig,
   "action.plan.get": PlanTransitionConfig,
   "action.plan.list": PlanListConfig,

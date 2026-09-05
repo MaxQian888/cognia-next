@@ -119,7 +119,8 @@
     "updated": "更新于",
     "title": "标题",
     "editLabels": "编辑标签",
-    "mobileReadOnly": "移动端为只读"
+    "mobileReadOnly": "移动端为只读",
+    "openConversation": "打开来源对话"
   },
   "activity": {
     "created": "创建了这个议题",
@@ -150,7 +151,9 @@
     "external_unlinked": "移除了外部关联",
     "synced_in": "应用了来自 {provider} 的更改",
     "sync_conflict": "同步冲突后保留了 {field} 的{winner}值",
-    "sync_conflict_resolved": "解决了一次同步冲突"
+    "sync_conflict_resolved": "解决了一次同步冲突",
+    "work_started": "一次 Agent 回合开始处理此事项",
+    "work_settled": "处理此事项的 Agent 回合已结束：{to}"
   },
   "create": {
     "trigger": "新建议题",

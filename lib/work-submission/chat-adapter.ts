@@ -39,7 +39,7 @@ import {
   listWorkSubmissions,
 } from "@/lib/db/work-submissions"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
-import type { WorkAttachmentRefV1 } from "@cognia/agent-config-types/work-submission"
+import type { WorkAttachmentRefV1, WorkItemRefV1 } from "@cognia/agent-config-types/work-submission"
 
 import {
   acceptWorkSubmission,
@@ -70,6 +70,8 @@ export interface AcceptChatTurnInput extends ChatTurnIdentity {
   visibleMessageIds: string[]
   attachments?: WorkAttachmentRefV1[]
   projectId?: string
+  /** The tracker issue this turn is doing the work for, when the session has one. */
+  workItemRef?: WorkItemRefV1
   targetAvailable?: boolean
   writeTranscript?: () => Promise<void>
   now?: number
@@ -127,6 +129,7 @@ export async function acceptChatTurn(
           contractVersion: 1,
           idempotencyKey: chatIdempotencyKey(input.sessionId, input.messageId),
           source: { kind: "chat", sourceId: input.sessionId },
+          ...(input.workItemRef ? { workItemRef: input.workItemRef } : {}),
           scope: {
             accountId: scope.accountId,
             runtimeTargetId: scope.runtimeTargetId,

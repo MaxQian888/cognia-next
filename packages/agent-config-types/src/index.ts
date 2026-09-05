@@ -2084,6 +2084,12 @@ export interface ChatSession {
    * `lib/db/project-scope.ts`.
    */
   projectId?: string
+  /**
+   * Tracker issue this conversation was opened for (`/issue chat`). Every
+   * turn's work submission then names it as its `workItemRef`, so the issue's
+   * trail shows the agent work done for it (spec 2026-09-06 D9).
+   */
+  issueId?: string
   /** Durable Local/managed-worktree binding reused by subsequent turns. */
   executionContext?: import("@/types/execution-context").SessionExecutionContext
   title: string

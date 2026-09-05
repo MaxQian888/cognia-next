@@ -27,6 +27,12 @@
       "require": "./dist/team.cjs",
       "default": "./dist/team.js"
     },
+    "./api/issues": {
+      "types": "./dist/issues.d.ts",
+      "import": "./dist/issues.js",
+      "require": "./dist/issues.cjs",
+      "default": "./dist/issues.js"
+    },
     "./api/effort-surface": {
       "types": "./dist/effort-surface.d.ts",
       "import": "./dist/effort-surface.js",

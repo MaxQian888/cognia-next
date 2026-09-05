@@ -163,6 +163,7 @@ import { createGitAPI } from "../api/git-api"
 import { createGoalAPI } from "../api/goal-api"
 import { createHooksAPI } from "../api/hooks-api"
 import { createPlanAPI } from "../api/plan-api"
+import { createIssuesAPI } from "../api/issues-api"
 import { createMemoryAPI } from "../api/memory-api"
 import { createTeamAPI } from "../api/team-api"
 import { createSubscriptionAPI } from "../api/subscription-api"
@@ -433,6 +434,7 @@ export function createFullPluginContext(
     goals: createGoalAPI(pluginId),
     hooks: createHooksAPI(pluginId),
     plans: createPlanAPI(pluginId),
+    issues: createIssuesAPI(pluginId),
     memory: createMemoryAPI(pluginId),
     team: createTeamAPI(pluginId),
     subscription: createSubscriptionAPI(pluginId),

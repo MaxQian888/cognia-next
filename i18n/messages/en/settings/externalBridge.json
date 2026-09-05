@@ -138,7 +138,9 @@
     "usage:read": "Lets external agents read your own spend, session efficiency metrics, and the local optimizer's findings. Read-only: it cannot change a setting or apply a fix, and session ids are pseudonymized. Default OFF.",
     "wiki:cognia": "Public Cognia code wiki — safe to expose.",
     "wiki:user-repo": "Wiki for user-supplied repos. Phase 3 — disabled in Phase 1.",
-    "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF."
+    "workflow:run": "⚠ Lists and runs active immutable workflow deployments, reads their durable events, and can cancel runs. Default OFF.",
+    "issues:read": "⚠ Lets external agents list and read your issue tracker: issues, their activity trail, projects and cycles of the active workspace. Default OFF.",
+    "issues:write": "⚠ Lets external agents create, edit, move, assign and comment on issues. Every write goes through the board's own gate and is recorded on the issue with an external-agent actor. Default OFF."
   },
   "scopes": {
     "description": "Each scope is opt-in. Default install ships with only the public-code wiki scopes enabled.",

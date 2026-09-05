@@ -15,6 +15,14 @@ jest.mock("@/hooks/data/use-dexie-first-query", () => ({
     error: null,
   }),
 }))
+jest.mock("next/link", () => ({
+  __esModule: true,
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}))
 jest.mock("@/lib/db/issue-events", () => ({ listIssueEvents: jest.fn() }))
 jest.mock("@/lib/db/issue-runs", () => ({ listIssueRuns: jest.fn() }))
 jest.mock("./issue-mobile-actions", () => ({
@@ -115,6 +123,16 @@ describe("IssueDetailSheet", () => {
     renderSheet()
     expect(screen.getByTestId("actions-stub")).toHaveTextContent("i1")
     expect(screen.queryByText("detail.mobileReadOnly")).not.toBeInTheDocument()
+  })
+
+  it("links back to the conversation an issue was filed from", () => {
+    renderSheet({
+      item: item({ filedFrom: { kind: "chat", sessionId: "ses_a", messageId: "msg_1" } }),
+    })
+    expect(screen.getByTestId("issues-mobile-detail-conversation")).toHaveAttribute(
+      "href",
+      "/?session=ses_a&message=msg_1"
+    )
   })
 
   it("keeps a federated row read-only and says so", () => {

@@ -26,6 +26,7 @@ import type {
   WorkAttachmentRefV1,
   WorkAvailabilityPolicyV1,
   WorkDispatchStateV1,
+  WorkItemRefV1,
   WorkSourceKind,
   WorkSpecAuthorityV1,
   WorkTerminalOutcomeV1,
@@ -57,6 +58,13 @@ export interface WorkSubmissionRow {
   sourceKind: WorkSourceKind
   sourceId: string
   triggerId?: string
+  /**
+   * The work item this submission was raised for (`intent.workItemRef`),
+   * kept on the row so settlement can tell the item how it ended. Today the
+   * tracker is the only reader (`lib/issues/work-item-link.ts`).
+   */
+  workItemKind?: WorkItemRefV1["kind"]
+  workItemId?: string
   availabilityPolicy: WorkAvailabilityPolicyV1
   dispatchState: WorkDispatchStateV1
   /**

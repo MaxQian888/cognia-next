@@ -569,6 +569,36 @@
         "description": "Runs RAG over a twin's vector store and returns the top-K chunks.",
         "label": "Twin RAG"
       }
+    },
+    "issue": {
+      "create": {
+        "description": "Create a tracker issue in a project of the active workspace.",
+        "label": "Create issue"
+      },
+      "get": {
+        "description": "Read one tracker issue by id or identifier such as MERC-12.",
+        "label": "Get issue"
+      },
+      "list": {
+        "description": "List tracker issues filtered by project, status, cycle or text.",
+        "label": "List issues"
+      },
+      "update": {
+        "description": "Change an issue's title, description, status, priority, due date, estimate or cycle.",
+        "label": "Update issue"
+      },
+      "assign": {
+        "description": "Assign a tracker issue to a person, an agent or a squad, or unassign it.",
+        "label": "Assign issue"
+      },
+      "comment": {
+        "description": "Append a comment to a tracker issue's activity trail.",
+        "label": "Comment on issue"
+      },
+      "label": {
+        "description": "Add or remove labels on a tracker issue by name.",
+        "label": "Label issue"
+      }
     }
   },
   "ai": {
@@ -842,6 +872,12 @@
       "completed": {
         "description": "Fires when another workflow's run finishes (succeeded or failed), receiving its output as the trigger payload.",
         "label": "On workflow completed"
+      }
+    },
+    "issue": {
+      "event": {
+        "description": "Fires when a tracker issue is created, changes status, is assigned, commented on, or a run on it settles.",
+        "label": "On issue event"
       }
     }
   }

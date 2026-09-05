@@ -66,6 +66,13 @@ import {
   memoryUpdate,
   memoryForget,
 } from "../handlers/memory"
+import {
+  issuesComment,
+  issuesCreate,
+  issuesGet,
+  issuesList,
+  issuesUpdate,
+} from "../handlers/issues"
 import { spawnTask } from "../handlers/spawn-task"
 import { optimizationFindings, sessionHealth, usageQuery } from "../handlers/usage"
 import {
@@ -133,6 +140,7 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerConnectorTools(server, opts.settingsGetter)
   registerInboundTools(server, opts.settingsGetter)
   registerMemoryTools(server, opts.settingsGetter)
+  registerIssuesTools(server, opts.settingsGetter)
   registerUsageTools(server, opts.settingsGetter)
   registerWorkflowLifecycleTools(
     server,
@@ -1476,6 +1484,173 @@ function registerUsageTools(server: McpServer, settingsGetter: SettingsGetter) {
 // memory_search / memory_list / memory_store / memory_update / memory_forget
 // (long-term memory, ADR-0069)
 // ─────────────────────────────────────────────────────────────────────────────
+
+function registerIssuesTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const statusSchema = z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
+  const prioritySchema = z.enum(["urgent", "high", "medium", "low", "none"])
+  const assigneeSchema = z
+    .object({
+      kind: z.enum(["human", "agent", "team"]),
+      id: z.string().optional().describe("Required for agent and team"),
+      label: z.string().optional(),
+    })
+    .nullable()
+
+  // issues_list
+  server.registerTool(
+    "issues_list",
+    {
+      title: "List Cognia tracker issues",
+      description:
+        "List issues of the active workspace, filtered by project key, status, cycle or a text needle. Default OFF; gate via Settings → External Bridge → issues:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        projectKey: z.string().optional().describe("Project key such as MERC"),
+        issueProjectId: z.string().optional(),
+        statuses: z.array(statusSchema).optional(),
+        cycleId: z.string().optional(),
+        text: z.string().optional().describe("Substring over identifier, title, description"),
+        limit: z.number().int().min(1).max(200).optional().describe("Page size (default 50)"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "issues_list",
+        scope: "issues:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "issues_list"),
+        body: () => issuesList(args),
+      })
+  )
+
+  // issues_get
+  server.registerTool(
+    "issues_get",
+    {
+      title: "Read one Cognia tracker issue",
+      description:
+        "Read an issue by row id or printed identifier (MERC-12), with its newest activity entries.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ref: z.string().describe("Row id or identifier such as MERC-12"),
+        events: z.number().int().min(0).max(100).optional().describe("Trail entries (default 20)"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "issues_get",
+        scope: "issues:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "issues_get"),
+        body: () => issuesGet(args),
+      })
+  )
+
+  // issues_create
+  server.registerTool(
+    "issues_create",
+    {
+      title: "Create a Cognia tracker issue",
+      description:
+        "File an issue into a project of the active workspace. The identifier is allocated by the tracker. Default OFF; gate via issues:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        title: z.string().describe("Issue title"),
+        description: z.string().optional(),
+        projectKey: z.string().optional().describe("Project key such as MERC"),
+        issueProjectId: z.string().optional(),
+        status: statusSchema.optional(),
+        priority: prioritySchema.optional(),
+        labels: z.array(z.string()).optional().describe("Label names, created when missing"),
+        parentId: z.string().optional(),
+        cycleId: z.string().optional(),
+        dueDate: z.number().optional().describe("Unix epoch ms"),
+        estimate: z.number().min(0).optional().describe("Points"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "issues_create",
+        scope: "issues:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "issues_create"),
+        body: () => issuesCreate(args),
+      })
+  )
+
+  // issues_update
+  server.registerTool(
+    "issues_update",
+    {
+      title: "Update a Cognia tracker issue",
+      description:
+        "Change title, description, status, priority, assignee, due date, estimate or cycle. Every field goes through the board's own gate: an issue an agent is running on cannot be moved.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ref: z.string().describe("Row id or identifier such as MERC-12"),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        status: statusSchema.optional(),
+        priority: prioritySchema.optional(),
+        assignee: assigneeSchema.optional().describe("null unassigns"),
+        dueDate: z.number().nullable().optional().describe("Unix epoch ms, null clears"),
+        estimate: z.number().min(0).nullable().optional().describe("Points, null clears"),
+        cycleId: z.string().nullable().optional().describe("null unplans"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "issues_update",
+        scope: "issues:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "issues_update"),
+        body: () => issuesUpdate(args),
+      })
+  )
+
+  // issues_comment
+  server.registerTool(
+    "issues_comment",
+    {
+      title: "Comment on a Cognia tracker issue",
+      description:
+        "Append a comment to an issue's activity trail, attributed to the external agent.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        ref: z.string().describe("Row id or identifier such as MERC-12"),
+        body: z.string().describe("Comment text"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "issues_comment",
+        scope: "issues:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "issues_comment"),
+        body: () => issuesComment(args),
+      })
+  )
+}
 
 function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) {
   const memoryTypeSchema = z.enum(["semantic", "episodic", "procedural"])

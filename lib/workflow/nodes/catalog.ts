@@ -116,6 +116,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Workflow",
     keywords: ["workflow", "chain", "completed", "finished", "pipeline", "then", "after"],
   },
+  "trigger.issue.event": {
+    label: "On issue event",
+    description:
+      "Fires when a tracker issue is created, changes status, is assigned, commented on, or a run on it settles.",
+    iconName: "CircleDot",
+    keywords: ["issue", "tracker", "event", "created", "status", "assigned", "comment", "run"],
+  },
   "trigger.pet.event": {
     label: "On pet event",
     description:
@@ -368,6 +375,49 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
       "Posts a message into an agent team's shared chat/blackboard, optionally addressed to a specific teammate or attached to a task.",
     iconName: "MessageSquare",
     keywords: ["team", "message", "blackboard", "chat", "broadcast", "agents"],
+  },
+  "action.issue.create": {
+    label: "Create issue",
+    description: "Create a tracker issue in a project of the active workspace.",
+    iconName: "CircleDot",
+    keywords: ["issue", "tracker", "create", "file", "ticket"],
+  },
+  "action.issue.get": {
+    label: "Get issue",
+    description: "Read one tracker issue by id or identifier such as MERC-12.",
+    iconName: "CircleDot",
+    keywords: ["issue", "tracker", "get", "read", "identifier"],
+  },
+  "action.issue.list": {
+    label: "List issues",
+    description: "List tracker issues filtered by project, status, cycle or text.",
+    iconName: "ListTodo",
+    keywords: ["issue", "tracker", "list", "search", "filter"],
+  },
+  "action.issue.update": {
+    label: "Update issue",
+    description:
+      "Change an issue's title, description, status, priority, due date, estimate or cycle.",
+    iconName: "CircleDot",
+    keywords: ["issue", "tracker", "update", "status", "priority", "edit"],
+  },
+  "action.issue.assign": {
+    label: "Assign issue",
+    description: "Assign a tracker issue to a person, an agent or a squad, or unassign it.",
+    iconName: "UserRoundCheck",
+    keywords: ["issue", "tracker", "assign", "assignee", "agent", "squad"],
+  },
+  "action.issue.comment": {
+    label: "Comment on issue",
+    description: "Append a comment to a tracker issue's activity trail.",
+    iconName: "MessageSquareText",
+    keywords: ["issue", "tracker", "comment", "note", "activity"],
+  },
+  "action.issue.label": {
+    label: "Label issue",
+    description: "Add or remove labels on a tracker issue by name.",
+    iconName: "Tag",
+    keywords: ["issue", "tracker", "label", "tag"],
   },
   "action.plan.create": {
     label: "Create plan",

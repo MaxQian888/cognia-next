@@ -7100,6 +7100,12 @@
       "regenerateTooltip": "Regenerate",
       "rerunTemplateLabel": "Re-run this message",
       "rerunTemplateTooltip": "Re-run with different values",
+      "saveAsIssueDone": "Filed {identifier} in the tracker.",
+      "saveAsIssueEmpty": "There is nothing readable in this reply to file.",
+      "saveAsIssueFailed": "Could not file it: {reason}",
+      "saveAsIssueLabel": "Save as issue",
+      "saveAsIssueOpen": "Open issue",
+      "saveAsIssueTooltip": "File this reply as a tracker issue",
       "saveAsMemoryDone": "Saved “{title}” as a pending memory draft.",
       "saveAsMemoryEmpty": "There is nothing readable in this reply to save.",
       "saveAsMemoryFailed": "Could not save it: {reason}",
@@ -14269,7 +14275,9 @@
       "sync_conflict_resolved": "resolved a sync conflict",
       "synced_in": "applied a change from {provider}",
       "title_changed": "renamed this issue",
-      "unassigned": "removed the assignee"
+      "unassigned": "removed the assignee",
+      "work_settled": "an agent turn on this issue finished: {to}",
+      "work_started": "an agent turn started on this issue"
     },
     "activitySide": {
       "local": "local",
@@ -14404,6 +14412,7 @@
       "empty": "Select an issue to see its details",
       "labels": "Labels",
       "mobileReadOnly": "Read-only on mobile",
+      "openConversation": "Open the conversation it came from",
       "openInGithub": "Open in GitHub",
       "openInProIde": "Open {path} in Pro IDE",
       "priority": "Priority",
@@ -34213,6 +34222,8 @@
         "inbound:write": "⚠ Lets external agents contribute lessons, skill drafts, and notes. Nothing is applied automatically — submissions land in a review queue as pending, untrusted drafts for you to accept or discard. Default OFF.",
         "inbox:connectors:read": "⚠ Read-only inbox introspection — adapters, conversations, drafts, audit. Metadata may include conversation handles and recent message snippets. Default OFF.",
         "inbox:connectors:send": "⚠ Lets external agents enqueue AI replies to your IM inbox. Goes through the same pipeline as in-app chat (PII gate, policy, outbound queue). Default OFF.",
+        "issues:read": "⚠ Lets external agents list and read your issue tracker: issues, their activity trail, projects and cycles of the active workspace. Default OFF.",
+        "issues:write": "⚠ Lets external agents create, edit, move, assign and comment on issues. Every write goes through the board's own gate and is recorded on the issue with an external-agent actor. Default OFF.",
         "mcp:computer-use": "⚠ Drives the host computer (mouse / keyboard / screenshot) from external coding agents. Honours Settings → Automation → Permissions; per-call tier surfaces the consent overlay.",
         "memory:read": "⚠ Lets external agents search and list what the assistant remembers about you — distilled personal facts, same sensitivity tier as twin retrieval. Default OFF.",
         "memory:write": "⚠ Lets external agents store, update, and forget long-term memories. Writes are PII-screened, tagged as external, and can never change the assistant's working instructions. Default OFF.",
@@ -46115,6 +46126,138 @@
           "placeholder": "repository"
         }
       },
+      "issueAssign": {
+        "assigneeId": {
+          "hint": "Character id for an agent, team id for a squad.",
+          "label": "Assignee id"
+        },
+        "assigneeKind": {
+          "label": "Assign to",
+          "options": {
+            "agent": "An agent",
+            "human": "Me",
+            "none": "Nobody (unassign)",
+            "team": "A squad"
+          }
+        },
+        "assigneeLabel": {
+          "label": "Display name"
+        }
+      },
+      "issueComment": {
+        "body": {
+          "hint": "Expressions are resolved before it is written.",
+          "label": "Comment"
+        }
+      },
+      "issueCommon": {
+        "cycleId": {
+          "label": "Cycle id"
+        },
+        "dueDate": {
+          "hint": "Unix epoch milliseconds.",
+          "label": "Due date"
+        },
+        "estimate": {
+          "label": "Estimate (points)"
+        },
+        "issue": {
+          "hint": "Row id or identifier such as MERC-12.",
+          "label": "Issue",
+          "placeholder": "MERC-12"
+        },
+        "issueProjectId": {
+          "hint": "Optional. Picks the container by id.",
+          "label": "Project id"
+        },
+        "labels": {
+          "hint": "Comma separated names. Missing labels are created.",
+          "label": "Labels"
+        },
+        "parentId": {
+          "label": "Parent issue id"
+        },
+        "priority": {
+          "default": "Default",
+          "label": "Priority"
+        },
+        "projectKey": {
+          "hint": "Optional. Picks the container by key.",
+          "label": "Project key",
+          "placeholder": "MERC"
+        },
+        "status": {
+          "default": "Default",
+          "label": "Status"
+        }
+      },
+      "issueCreate": {
+        "description": {
+          "label": "Description"
+        },
+        "title": {
+          "label": "Title"
+        }
+      },
+      "issueEventTrigger": {
+        "cooldownMs": {
+          "hint": "Minimum time between fires for the same workflow.",
+          "label": "Cooldown (ms)"
+        },
+        "intro": "Fires when a tracker issue's activity trail gains an entry.",
+        "issueProjectId": {
+          "hint": "Optional. Only issues in this container."
+        },
+        "kinds": {
+          "hint": "Leave all off to fire on every kind.",
+          "label": "Events",
+          "options": {
+            "assigned": "Assigned",
+            "commented": "Commented",
+            "created": "Created",
+            "run_failed": "Run failed",
+            "run_started": "Run started",
+            "run_succeeded": "Run succeeded",
+            "status_changed": "Status changed"
+          }
+        }
+      },
+      "issueLabel": {
+        "add": {
+          "hint": "Comma separated names. Missing labels are created.",
+          "label": "Add labels"
+        },
+        "remove": {
+          "hint": "Comma separated names. Only existing labels are removed.",
+          "label": "Remove labels"
+        }
+      },
+      "issueList": {
+        "limit": {
+          "label": "Limit"
+        },
+        "statuses": {
+          "hint": "Leave all off to list every status.",
+          "label": "Statuses"
+        },
+        "text": {
+          "hint": "Substring over identifier, title and description.",
+          "label": "Text"
+        }
+      },
+      "issueUpdate": {
+        "cycleId": {
+          "hint": "A cycle id plans the issue into it."
+        },
+        "description": {
+          "label": "New description"
+        },
+        "intro": "Only the fields you fill in are changed. Each becomes one board action.",
+        "title": {
+          "label": "New title"
+        },
+        "unchanged": "Unchanged"
+      },
       "join": {
         "aggregate": {
           "hint": "Reduce the joined branch outputs in one step.",
@@ -48426,6 +48569,36 @@
             "label": "Request human input"
           }
         },
+        "issue": {
+          "assign": {
+            "description": "Assign a tracker issue to a person, an agent or a squad, or unassign it.",
+            "label": "Assign issue"
+          },
+          "comment": {
+            "description": "Append a comment to a tracker issue's activity trail.",
+            "label": "Comment on issue"
+          },
+          "create": {
+            "description": "Create a tracker issue in a project of the active workspace.",
+            "label": "Create issue"
+          },
+          "get": {
+            "description": "Read one tracker issue by id or identifier such as MERC-12.",
+            "label": "Get issue"
+          },
+          "label": {
+            "description": "Add or remove labels on a tracker issue by name.",
+            "label": "Label issue"
+          },
+          "list": {
+            "description": "List tracker issues filtered by project, status, cycle or text.",
+            "label": "List issues"
+          },
+          "update": {
+            "description": "Change an issue's title, description, status, priority, due date, estimate or cycle.",
+            "label": "Update issue"
+          }
+        },
         "mcp": {
           "invokeTool": {
             "description": "Calls a tool on a configured MCP server.",
@@ -49004,6 +49177,12 @@
             "label": "On integration event"
           }
         },
+        "issue": {
+          "event": {
+            "description": "Fires when a tracker issue is created, changes status, is assigned, commented on, or a run on it settles.",
+            "label": "On issue event"
+          }
+        },
         "manual": {
           "description": "Fires when you click Run in the editor.",
           "label": "Run manually"
@@ -49314,6 +49493,7 @@
         "files-git": "Files & source control",
         "goals": "Goals",
         "human": "Human in the loop",
+        "issues": "Issues",
         "memory": "Memory & twin",
         "mobile": "Mobile",
         "other": "Other",

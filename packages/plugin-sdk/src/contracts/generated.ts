@@ -86,6 +86,8 @@ export const CANONICAL_PLUGIN_PERMISSION_IDS = [
   "git:write",
   "goal:read",
   "goal:write",
+  "issue:read",
+  "issue:write",
   "plan:read",
   "plan:write",
   "memory:read",
@@ -1151,6 +1153,36 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
     kind: "none",
   },
   "ctx.goals.updateObjective": {
+    kind: "none",
+  },
+  "ctx.issues.assign": {
+    kind: "none",
+  },
+  "ctx.issues.comment": {
+    kind: "none",
+  },
+  "ctx.issues.create": {
+    kind: "none",
+  },
+  "ctx.issues.get": {
+    kind: "none",
+  },
+  "ctx.issues.label": {
+    kind: "none",
+  },
+  "ctx.issues.list": {
+    kind: "none",
+  },
+  "ctx.issues.listEvents": {
+    kind: "none",
+  },
+  "ctx.issues.onEvent": {
+    kind: "returned-disposer",
+  },
+  "ctx.issues.registerSyncProvider": {
+    kind: "returned-disposer",
+  },
+  "ctx.issues.update": {
     kind: "none",
   },
   "ctx.i18n.formatDate": {

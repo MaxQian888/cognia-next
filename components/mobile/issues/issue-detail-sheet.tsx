@@ -17,11 +17,13 @@
  * off for it and the read-only badge says so.
  */
 
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 
 import { IssuePriorityIcon, IssueStatusIcon } from "@/components/issues/issue-glyphs"
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useDexieFirstQuery } from "@/hooks/data/use-dexie-first-query"
 import { listIssueEvents } from "@/lib/db/issue-events"
@@ -182,6 +184,17 @@ export function IssueDetailSheet({
                       </Badge>
                     ))}
                   </span>
+                </Row>
+              ) : null}
+              {item.filedFrom?.kind === "chat" ? (
+                <Row label={t("detail.created")}>
+                  <Link
+                    href={`/${buildSessionHref(item.filedFrom.sessionId, item.filedFrom.messageId)}`}
+                    className="text-primary underline-offset-4 hover:underline"
+                    data-testid="issues-mobile-detail-conversation"
+                  >
+                    {t("detail.openConversation")}
+                  </Link>
                 </Row>
               ) : null}
               {(item.externalRefs ?? []).length > 0 ? (

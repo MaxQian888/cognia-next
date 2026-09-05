@@ -569,6 +569,36 @@
         "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。",
         "label": "数字分身 RAG"
       }
+    },
+    "issue": {
+      "create": {
+        "description": "在当前工作区的某个项目中创建一个追踪事项。",
+        "label": "创建事项"
+      },
+      "get": {
+        "description": "按 id 或 MERC-12 这样的编号读取一个事项。",
+        "label": "读取事项"
+      },
+      "list": {
+        "description": "按项目、状态、迭代或文本筛选列出事项。",
+        "label": "列出事项"
+      },
+      "update": {
+        "description": "修改事项的标题、描述、状态、优先级、截止日期、估点或迭代。",
+        "label": "更新事项"
+      },
+      "assign": {
+        "description": "把事项指派给人、Agent 或小队，或取消指派。",
+        "label": "指派事项"
+      },
+      "comment": {
+        "description": "在事项的活动记录中追加一条评论。",
+        "label": "评论事项"
+      },
+      "label": {
+        "description": "按名称为事项添加或移除标签。",
+        "label": "标记事项"
+      }
     }
   },
   "ai": {
@@ -842,6 +872,12 @@
       "completed": {
         "description": "当另一个工作流的运行结束（成功或失败）时触发，并把其输出作为触发载荷。",
         "label": "工作流完成时"
+      }
+    },
+    "issue": {
+      "event": {
+        "description": "当事项被创建、状态变更、被指派、被评论或其运行结束时触发。",
+        "label": "事项事件触发"
       }
     }
   }

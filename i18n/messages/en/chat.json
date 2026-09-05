@@ -1680,7 +1680,13 @@
     "usageCost": "Cost: ${cost}",
     "usageInput": "Input: {n}",
     "usageOutput": "Output: {n}",
-    "usageReasoning": "Reasoning: {n}"
+    "usageReasoning": "Reasoning: {n}",
+    "saveAsIssueLabel": "Save as issue",
+    "saveAsIssueTooltip": "File this reply as a tracker issue",
+    "saveAsIssueDone": "Filed {identifier} in the tracker.",
+    "saveAsIssueOpen": "Open issue",
+    "saveAsIssueEmpty": "There is nothing readable in this reply to file.",
+    "saveAsIssueFailed": "Could not file it: {reason}"
   },
   "messageDisplay": {
     "assistant": "Assistant",

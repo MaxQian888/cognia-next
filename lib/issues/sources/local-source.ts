@@ -64,6 +64,7 @@ export function toUnifiedIssue(issue: Issue): UnifiedIssueItem {
     ...(issue.estimate !== undefined ? { estimate: issue.estimate } : {}),
     ...(issue.cycleId ? { cycleId: issue.cycleId } : {}),
     ...(issue.externalRefs?.length ? { externalRefs: issue.externalRefs } : {}),
+    ...(issue.origin ? { filedFrom: issue.origin } : {}),
   }
 }
 

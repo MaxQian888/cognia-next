@@ -3554,5 +3554,137 @@
       "hint": "The source workflow to watch. Empty fires for every workflow that finishes (this workflow itself is always excluded).",
       "label": "Source workflow (optional)"
     }
+  },
+  "issueCommon": {
+    "issue": {
+      "label": "Issue",
+      "hint": "Row id or identifier such as MERC-12.",
+      "placeholder": "MERC-12"
+    },
+    "projectKey": {
+      "label": "Project key",
+      "hint": "Optional. Picks the container by key.",
+      "placeholder": "MERC"
+    },
+    "issueProjectId": {
+      "label": "Project id",
+      "hint": "Optional. Picks the container by id."
+    },
+    "status": {
+      "label": "Status",
+      "default": "Default"
+    },
+    "priority": {
+      "label": "Priority",
+      "default": "Default"
+    },
+    "labels": {
+      "label": "Labels",
+      "hint": "Comma separated names. Missing labels are created."
+    },
+    "estimate": {
+      "label": "Estimate (points)"
+    },
+    "dueDate": {
+      "label": "Due date",
+      "hint": "Unix epoch milliseconds."
+    },
+    "parentId": {
+      "label": "Parent issue id"
+    },
+    "cycleId": {
+      "label": "Cycle id"
+    }
+  },
+  "issueCreate": {
+    "title": {
+      "label": "Title"
+    },
+    "description": {
+      "label": "Description"
+    }
+  },
+  "issueList": {
+    "statuses": {
+      "label": "Statuses",
+      "hint": "Leave all off to list every status."
+    },
+    "text": {
+      "label": "Text",
+      "hint": "Substring over identifier, title and description."
+    },
+    "limit": {
+      "label": "Limit"
+    }
+  },
+  "issueUpdate": {
+    "intro": "Only the fields you fill in are changed. Each becomes one board action.",
+    "title": {
+      "label": "New title"
+    },
+    "description": {
+      "label": "New description"
+    },
+    "unchanged": "Unchanged",
+    "cycleId": {
+      "hint": "A cycle id plans the issue into it."
+    }
+  },
+  "issueAssign": {
+    "assigneeKind": {
+      "label": "Assign to",
+      "options": {
+        "none": "Nobody (unassign)",
+        "human": "Me",
+        "agent": "An agent",
+        "team": "A squad"
+      }
+    },
+    "assigneeId": {
+      "label": "Assignee id",
+      "hint": "Character id for an agent, team id for a squad."
+    },
+    "assigneeLabel": {
+      "label": "Display name"
+    }
+  },
+  "issueComment": {
+    "body": {
+      "label": "Comment",
+      "hint": "Expressions are resolved before it is written."
+    }
+  },
+  "issueLabel": {
+    "add": {
+      "label": "Add labels",
+      "hint": "Comma separated names. Missing labels are created."
+    },
+    "remove": {
+      "label": "Remove labels",
+      "hint": "Comma separated names. Only existing labels are removed."
+    }
+  },
+  "issueEventTrigger": {
+    "intro": "Fires when a tracker issue's activity trail gains an entry.",
+    "kinds": {
+      "label": "Events",
+      "hint": "Leave all off to fire on every kind.",
+      "options": {
+        "created": "Created",
+        "status_changed": "Status changed",
+        "assigned": "Assigned",
+        "commented": "Commented",
+        "run_started": "Run started",
+        "run_succeeded": "Run succeeded",
+        "run_failed": "Run failed"
+      }
+    },
+    "issueProjectId": {
+      "hint": "Optional. Only issues in this container."
+    },
+    "cooldownMs": {
+      "label": "Cooldown (ms)",
+      "hint": "Minimum time between fires for the same workflow."
+    }
   }
 }

@@ -13,6 +13,7 @@ export type MessageActionCommandId =
   | "bringBack"
   | "rerunTemplate"
   | "saveAsMemory"
+  | "saveAsIssue"
   | "delete"
 
 export interface MessageActionCommandContext {
@@ -34,6 +35,12 @@ export interface MessageActionCommandContext {
    * nothing has ever called.
    */
   canSaveAsMemory?: boolean
+  /**
+   * The turn's content can be filed as a tracker issue (spec 2026-09-06 D9).
+   * Assistant turns only, for the same reason as `canSaveAsMemory`: what a
+   * reply found that still has to be done is the thing with no path.
+   */
+  canSaveAsIssue?: boolean
   canDelete?: boolean
   streaming?: boolean
 }
@@ -78,6 +85,9 @@ export function resolveMessageActionCommands(
   }
   if (context.role === "assistant" && context.canSaveAsMemory && context.hasContent) {
     commands.push({ id: "saveAsMemory", disabled: context.streaming })
+  }
+  if (context.role === "assistant" && context.canSaveAsIssue && context.hasContent) {
+    commands.push({ id: "saveAsIssue", disabled: context.streaming })
   }
   if (context.canDelete) commands.push({ id: "delete", destructive: true })
   return commands

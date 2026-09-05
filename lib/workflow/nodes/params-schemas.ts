@@ -506,6 +506,74 @@ const PlanStatus = z.enum([
   "cancelled",
 ])
 
+// ── Issue tracker (spec 2026-09-06 D9) ───────────────────────────────────
+const IssueStatusParam = z.enum(["backlog", "todo", "in_progress", "in_review", "done", "canceled"])
+const IssuePriorityParam = z.enum(["urgent", "high", "medium", "low", "none"])
+const IssueRefParams = z.object({
+  /** Row id or printed identifier (MERC-12). */
+  issue: requiredString("required"),
+})
+const IssueCreateParams = z.object({
+  title: requiredString("required"),
+  description: optionalString,
+  projectId: optionalString,
+  issueProjectId: optionalString,
+  projectKey: optionalString,
+  status: IssueStatusParam.optional(),
+  priority: IssuePriorityParam.optional(),
+  labels: z.union([z.array(z.string()), z.string()]).optional(),
+  parentId: optionalString,
+  cycleId: optionalString,
+  dueDate: numberRange(0).optional(),
+  estimate: numberRange(0).optional(),
+})
+const IssueListParams = z.object({
+  projectId: optionalString,
+  issueProjectId: optionalString,
+  projectKey: optionalString,
+  statuses: z.array(IssueStatusParam).optional(),
+  cycleId: optionalString,
+  parentId: optionalString,
+  text: optionalString,
+  limit: numberRange(1, 500).optional(),
+})
+const IssueUpdateParams = IssueRefParams.extend({
+  title: optionalString,
+  description: optionalString,
+  status: IssueStatusParam.optional(),
+  priority: IssuePriorityParam.optional(),
+  dueDate: z.union([numberRange(0), z.null()]).optional(),
+  estimate: z.union([numberRange(0), z.null()]).optional(),
+  cycleId: z.union([z.string(), z.null()]).optional(),
+})
+const IssueAssignParams = IssueRefParams.extend({
+  /** "none" unassigns. */
+  assigneeKind: z.enum(["human", "agent", "team", "none"]),
+  assigneeId: optionalString,
+  assigneeLabel: optionalString,
+})
+const IssueCommentParams = IssueRefParams.extend({
+  body: requiredString("required"),
+})
+const IssueLabelParams = IssueRefParams.extend({
+  add: z.union([z.array(z.string()), z.string()]).optional(),
+  remove: z.union([z.array(z.string()), z.string()]).optional(),
+})
+const ISSUE_TRIGGER_KINDS = [
+  "created",
+  "status_changed",
+  "assigned",
+  "commented",
+  "run_started",
+  "run_succeeded",
+  "run_failed",
+] as const
+const IssueEventTriggerParams = z.object({
+  // Unscoped = every trail kind.
+  kinds: z.array(z.enum(ISSUE_TRIGGER_KINDS)).optional(),
+  issueProjectId: optionalString,
+})
+
 const PlanCreateStepInputParams = z.object({
   title: requiredString("required"),
   description: optionalString,
@@ -1869,6 +1937,7 @@ export const PARAMS_SCHEMAS = {
   "trigger.goal.completed": GoalCompletedTriggerParams,
   "trigger.workflow.completed": WorkflowCompletedTriggerParams,
   "trigger.pet.event": PetEventTriggerParams,
+  "trigger.issue.event": IssueEventTriggerParams,
   "action.pet.interact": PetInteractActionParams,
   "trigger.webhook": WebhookTriggerParams,
   "trigger.integration.event": IntegrationEventTriggerParams,
@@ -1923,6 +1992,13 @@ export const PARAMS_SCHEMAS = {
   "action.plan.delete": PlanIdParams,
   "action.plan.run": PlanIdParams,
   "action.plan.setStepStatus": PlanSetStepStatusParams,
+  "action.issue.create": IssueCreateParams,
+  "action.issue.get": IssueRefParams,
+  "action.issue.list": IssueListParams,
+  "action.issue.update": IssueUpdateParams,
+  "action.issue.assign": IssueAssignParams,
+  "action.issue.comment": IssueCommentParams,
+  "action.issue.label": IssueLabelParams,
   "action.scheduler.task.create": SchedulerTaskCreateParams,
   "action.scheduler.task.get": SchedulerTaskIdParams,
   "action.scheduler.task.list": SchedulerTaskListParams,

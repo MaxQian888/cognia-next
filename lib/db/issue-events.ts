@@ -16,6 +16,7 @@
  * hook — same rule `lib/db/goals.ts` and `lib/db/plans.ts` follow.
  */
 
+import { emitIssueEvent } from "@/lib/issues/event-bus"
 import type { IssueEvent, IssueEventPayload } from "@/types/issues"
 import { getDb } from "./schema"
 
@@ -75,6 +76,7 @@ export async function appendIssueEvent(input: AppendIssueEventInput): Promise<Is
     payload: input.payload,
   }
   await getDb().issueEvents.add(event)
+  emitIssueEvent(event)
   return event
 }
 
@@ -91,6 +93,7 @@ export async function appendIssueEvents(
     payload: input.payload,
   }))
   await getDb().issueEvents.bulkAdd(events)
+  for (const event of events) emitIssueEvent(event)
   return events
 }
 

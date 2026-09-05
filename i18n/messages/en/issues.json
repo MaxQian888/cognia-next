@@ -119,7 +119,8 @@
     "updated": "Updated",
     "title": "Title",
     "editLabels": "Edit labels",
-    "mobileReadOnly": "Read-only on mobile"
+    "mobileReadOnly": "Read-only on mobile",
+    "openConversation": "Open the conversation it came from"
   },
   "activity": {
     "created": "created this issue",
@@ -150,7 +151,9 @@
     "external_unlinked": "removed an external link",
     "synced_in": "applied a change from {provider}",
     "sync_conflict": "kept the {winner} value of {field} after a sync conflict",
-    "sync_conflict_resolved": "resolved a sync conflict"
+    "sync_conflict_resolved": "resolved a sync conflict",
+    "work_started": "an agent turn started on this issue",
+    "work_settled": "an agent turn on this issue finished: {to}"
   },
   "create": {
     "trigger": "New issue",

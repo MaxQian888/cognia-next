@@ -42,6 +42,7 @@ type SessionSeed = Partial<
     | "teamId"
     | "squadId"
     | "projectId"
+    | "issueId"
     | "executionContext"
     | "sdkSessionId"
   >

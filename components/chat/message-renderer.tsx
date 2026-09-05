@@ -110,6 +110,7 @@ import {
   ImageIcon,
   PencilIcon,
   BrainIcon,
+  CircleDotIcon,
   RefreshCcwIcon,
   Repeat2Icon,
   Share2Icon,
@@ -148,6 +149,8 @@ import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-b
 import { SessionPeerOriginBadge } from "@/components/chat/session-peer-origin-badge"
 import { dispatchComposerAppend } from "@/components/chat/composer"
 import { saveMessageAsMemory } from "@/lib/chat/save-message-as-memory"
+import { saveMessageAsIssue } from "@/lib/chat/save-message-as-issue"
+import { useRouter } from "next/navigation"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useAsideTarget } from "@/components/context-workbench/aside-target"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -251,6 +254,7 @@ function MessageRendererInner({
   // ...and likewise for tool-result cards.
   usePluginToolRendererRevision()
   const t = useTranslations("chat.message")
+  const router = useRouter()
   // Agent invocation-flow display mode (simplified / standard / detailed).
   const fallbackMessageDisplay = useMessageDisplay()
   const display = messageDisplay ?? fallbackMessageDisplay
@@ -372,6 +376,7 @@ function MessageRendererInner({
         canBringBack: Boolean(handBackTargetId),
         canRerunTemplate: Boolean(templateRun && branchSessionId),
         canSaveAsMemory: Boolean(branchSessionId),
+        canSaveAsIssue: Boolean(branchSessionId),
         streaming: isStreaming,
       }),
     [
@@ -547,6 +552,34 @@ function MessageRendererInner({
       )
     }
   }, [branchSessionId, message.parts, t])
+
+  const handleSaveAsIssue = useCallback(async () => {
+    if (!branchSessionId) return
+    try {
+      const { activeProjectId } = useProjectStore.getState()
+      const issue = await saveMessageAsIssue({
+        parts: message.parts,
+        sessionId: branchSessionId,
+        messageId: message.id,
+        ...(activeProjectId ? { projectId: activeProjectId } : {}),
+      })
+      if (!issue) {
+        toast.error(t("saveAsIssueEmpty"))
+        return
+      }
+      toast.success(t("saveAsIssueDone", { identifier: issue.identifier }), {
+        action: {
+          label: t("saveAsIssueOpen"),
+          onClick: () => router.push(`/issues?id=${encodeURIComponent(issue.id)}`),
+        },
+      })
+    } catch (err) {
+      // "Create a project first" is a real answer the user has to see.
+      toast.error(
+        t("saveAsIssueFailed", { reason: err instanceof Error ? err.message : String(err) })
+      )
+    }
+  }, [branchSessionId, message.id, message.parts, router, t])
 
   const handleQuote = useCallback(() => {
     if (!branchSessionId) return
@@ -893,6 +926,18 @@ function MessageRendererInner({
                   disabled={actionCommand("saveAsMemory")?.disabled}
                 >
                   <BrainIcon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              {hasActionCommand("saveAsIssue") && (
+                <MessageAction
+                  tooltip={t("saveAsIssueTooltip")}
+                  label={t("saveAsIssueLabel")}
+                  onClick={() => void handleSaveAsIssue()}
+                  disabled={actionCommand("saveAsIssue")?.disabled}
+                  data-testid="message-save-as-issue"
+                >
+                  <CircleDotIcon className="size-3.5" />
                 </MessageAction>
               )}
 

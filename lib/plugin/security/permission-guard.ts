@@ -106,6 +106,7 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   git: ["git:read", "git:write"],
   goal: ["goal:read", "goal:write"],
   plan: ["plan:read", "plan:write"],
+  issue: ["issue:read", "issue:write"],
   memory: ["memory:read", "memory:write"],
   team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
@@ -213,6 +214,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "plan:read": "Read your agent plans, their steps, and their progress",
   "plan:write":
     "Create, edit, approve, run, pause, and replan agent plans (a plan can dispatch teammates, tools, and sub-workflows)",
+  "issue:read": "Read your issue tracker: issues, their activity trail, cycles and projects",
+  "issue:write":
+    "Create, edit, move, assign, label and comment on issues, and register an external sync source",
   "memory:read": "Search and list what the assistant remembers about you",
   "memory:write":
     "Store, update, and forget long-term memories (PII-screened; can never change working instructions)",

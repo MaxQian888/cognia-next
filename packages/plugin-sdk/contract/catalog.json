@@ -99,6 +99,8 @@
     "git:write",
     "goal:read",
     "goal:write",
+    "issue:read",
+    "issue:write",
     "plan:read",
     "plan:write",
     "memory:read",
@@ -5929,6 +5931,145 @@
           "requiredPermissions": ["goal:write"],
           "consentTier": "policy",
           "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "issues",
+      "authorPath": "ctx.issues",
+      "type": "PluginIssuesAPI",
+      "stability": "stable",
+      "introducedIn": "0.1.0",
+      "runtimes": ["frontend", "hybrid"],
+      "platforms": ["desktop", "web", "mobile"],
+      "transport": "direct",
+      "factory": "context.issues",
+      "enforcement": "shadow",
+      "dataClassification": "internal",
+      "timeoutMs": null,
+      "retry": "never",
+      "errorPolicy": "preserve",
+      "lifecycle": "plugin",
+      "methods": [
+        {
+          "id": "issues.assign",
+          "name": "assign",
+          "requiredPermissions": ["issue:write"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.comment",
+          "name": "comment",
+          "requiredPermissions": ["issue:write"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.create",
+          "name": "create",
+          "requiredPermissions": ["issue:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.get",
+          "name": "get",
+          "requiredPermissions": ["issue:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.label",
+          "name": "label",
+          "requiredPermissions": ["issue:write"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.list",
+          "name": "list",
+          "requiredPermissions": ["issue:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.listEvents",
+          "name": "listEvents",
+          "requiredPermissions": ["issue:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "issues.onEvent",
+          "name": "onEvent",
+          "requiredPermissions": ["issue:read"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "issues.registerSyncProvider",
+          "name": "registerSyncProvider",
+          "requiredPermissions": ["issue:write"],
+          "consentTier": "policy",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "issues.update",
+          "name": "update",
+          "requiredPermissions": ["issue:write"],
+          "consentTier": "policy",
+          "risk": "medium",
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {

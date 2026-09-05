@@ -74,6 +74,13 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   memory_store: "memory:write",
   memory_update: "memory:write",
   memory_forget: "memory:write",
+  // Issue tracker (spec 2026-09-06 D9). Read/write split like memory; writes
+  // go through the board's own gate with an `mcp` actor on the trail.
+  issues_list: "issues:read",
+  issues_get: "issues:read",
+  issues_create: "issues:write",
+  issues_update: "issues:write",
+  issues_comment: "issues:write",
   workflow_list: "workflow:run",
   workflow_status: "workflow:run",
   workflow_events: "workflow:run",

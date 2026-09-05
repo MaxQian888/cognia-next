@@ -18,6 +18,7 @@ import {
   CircleSlashIcon,
   ExternalLinkIcon,
   FileCodeIcon,
+  MessageSquareTextIcon,
   MessageSquarePlusIcon,
   PlayIcon,
   Share2Icon,
@@ -31,7 +32,10 @@ import { toast } from "sonner"
 
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
+import Link from "next/link"
+
 import { Button } from "@/components/ui/button"
+import { buildSessionHref } from "@/lib/chat/message-permalink"
 import { collectFileReferences } from "@/lib/issues/editor-links"
 import { publishRunToCollab } from "@/lib/collab/publish"
 import { Separator } from "@/components/ui/separator"
@@ -432,6 +436,20 @@ export function IssueDetailPanel({
         ) : null}
 
         <OpenInProIde item={item} references={fileReferences} />
+
+        {/* Filed from a chat: the conversation is the issue's provenance, so the
+            board can jump back to it (spec 2026-09-06 D9). */}
+        {item.filedFrom?.kind === "chat" ? (
+          <Button asChild size="sm" variant="ghost" className="w-fit">
+            <Link
+              href={`/${buildSessionHref(item.filedFrom.sessionId, item.filedFrom.messageId)}`}
+              data-testid="issue-detail-open-conversation"
+            >
+              <MessageSquareTextIcon className="size-3.5" />
+              {t("detail.openConversation")}
+            </Link>
+          </Button>
+        ) : null}
 
         {item.kind !== "local" ? (
           <a

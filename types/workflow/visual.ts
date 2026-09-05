@@ -92,6 +92,16 @@ export type WorkflowNodeKind =
   // User-placeable plan lifecycle actions (ADR-0045). These expose the
   // AgentPlan runtime and DB readers without going through the synthesized
   // per-step dispatch node below.
+  // Issue tracker (spec 2026-09-06 D9): the same operations the /issue
+  // command, ctx.issues and the External Bridge expose, through
+  // `lib/issues/service.ts`.
+  | "action.issue.create"
+  | "action.issue.get"
+  | "action.issue.list"
+  | "action.issue.update"
+  | "action.issue.assign"
+  | "action.issue.comment"
+  | "action.issue.label"
   | "action.plan.create"
   | "action.plan.get"
   | "action.plan.list"
@@ -245,6 +255,7 @@ export type WorkflowNodeKind =
   // Desktop-pet lifecycle trigger (levelUp/evolved/achievementUnlocked/unwell)
   // + nurture action. Runner lives in `lib/workflow/runtime/pet-event-trigger.ts`.
   | "trigger.pet.event"
+  | "trigger.issue.event"
   | "action.pet.interact"
   // Chained workflows (ADR-0081): fires when another workflow's run reaches a
   // terminal status (succeeded/failed). Emitted by the orchestrator through
@@ -370,6 +381,13 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.team.task.dispatch",
   "action.team.task.review",
   "action.team.reconcile",
+  "action.issue.create",
+  "action.issue.get",
+  "action.issue.list",
+  "action.issue.update",
+  "action.issue.assign",
+  "action.issue.comment",
+  "action.issue.label",
   "action.plan.create",
   "action.plan.get",
   "action.plan.list",
@@ -476,6 +494,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.terminal.waitForExit",
   "trigger.terminal.command",
   "trigger.pet.event",
+  "trigger.issue.event",
   "action.pet.interact",
   "trigger.workflow.completed",
   "ai.prompt",

@@ -3554,5 +3554,137 @@
       "hint": "要监听的来源工作流。留空表示任何工作流完成都会触发（始终排除本工作流自身）。",
       "label": "来源工作流（可选）"
     }
+  },
+  "issueCommon": {
+    "issue": {
+      "label": "事项",
+      "hint": "行 id 或 MERC-12 这样的编号。",
+      "placeholder": "MERC-12"
+    },
+    "projectKey": {
+      "label": "项目 key",
+      "hint": "可选。按 key 选择容器。",
+      "placeholder": "MERC"
+    },
+    "issueProjectId": {
+      "label": "项目 id",
+      "hint": "可选。按 id 选择容器。"
+    },
+    "status": {
+      "label": "状态",
+      "default": "默认"
+    },
+    "priority": {
+      "label": "优先级",
+      "default": "默认"
+    },
+    "labels": {
+      "label": "标签",
+      "hint": "逗号分隔的名称。不存在的标签会被创建。"
+    },
+    "estimate": {
+      "label": "估点"
+    },
+    "dueDate": {
+      "label": "截止日期",
+      "hint": "Unix 毫秒时间戳。"
+    },
+    "parentId": {
+      "label": "父事项 id"
+    },
+    "cycleId": {
+      "label": "迭代 id"
+    }
+  },
+  "issueCreate": {
+    "title": {
+      "label": "标题"
+    },
+    "description": {
+      "label": "描述"
+    }
+  },
+  "issueList": {
+    "statuses": {
+      "label": "状态",
+      "hint": "全部不勾选则列出所有状态。"
+    },
+    "text": {
+      "label": "文本",
+      "hint": "在编号、标题和描述中做子串匹配。"
+    },
+    "limit": {
+      "label": "数量上限"
+    }
+  },
+  "issueUpdate": {
+    "intro": "只修改填写的字段，每个字段对应一次看板动作。",
+    "title": {
+      "label": "新标题"
+    },
+    "description": {
+      "label": "新描述"
+    },
+    "unchanged": "保持不变",
+    "cycleId": {
+      "hint": "填写迭代 id 会把事项规划进该迭代。"
+    }
+  },
+  "issueAssign": {
+    "assigneeKind": {
+      "label": "指派给",
+      "options": {
+        "none": "无人（取消指派）",
+        "human": "我",
+        "agent": "某个 Agent",
+        "team": "某个小队"
+      }
+    },
+    "assigneeId": {
+      "label": "被指派者 id",
+      "hint": "Agent 填角色 id，小队填 team id。"
+    },
+    "assigneeLabel": {
+      "label": "显示名"
+    }
+  },
+  "issueComment": {
+    "body": {
+      "label": "评论",
+      "hint": "表达式会在写入前解析。"
+    }
+  },
+  "issueLabel": {
+    "add": {
+      "label": "添加标签",
+      "hint": "逗号分隔的名称。不存在的标签会被创建。"
+    },
+    "remove": {
+      "label": "移除标签",
+      "hint": "逗号分隔的名称。只移除已存在的标签。"
+    }
+  },
+  "issueEventTrigger": {
+    "intro": "当事项的活动记录新增一条时触发。",
+    "kinds": {
+      "label": "事件",
+      "hint": "全部不勾选则任何种类都触发。",
+      "options": {
+        "created": "已创建",
+        "status_changed": "状态变更",
+        "assigned": "已指派",
+        "commented": "已评论",
+        "run_started": "运行开始",
+        "run_succeeded": "运行成功",
+        "run_failed": "运行失败"
+      }
+    },
+    "issueProjectId": {
+      "hint": "可选。仅限该容器内的事项。"
+    },
+    "cooldownMs": {
+      "label": "冷却（毫秒）",
+      "hint": "同一工作流两次触发之间的最短间隔。"
+    }
   }
 }

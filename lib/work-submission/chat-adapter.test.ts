@@ -80,6 +80,14 @@ describe("acceptChatTurn", () => {
     })
   }, 30_000)
 
+  it("carries the session's issue onto the submission row (spec 2026-09-06 D9)", async () => {
+    await acceptChatTurn({ ...turn, workItemRef: { kind: "issue", id: "iss_1" } }, deps())
+    expect(await getWorkSubmission("work:run-1")).toMatchObject({
+      workItemKind: "issue",
+      workItemId: "iss_1",
+    })
+  }, 30_000)
+
   it("runs the transcript write inside the acceptance transaction", async () => {
     const writeTranscript = jest.fn(async () => {})
     await acceptChatTurn({ ...turn, writeTranscript }, deps())

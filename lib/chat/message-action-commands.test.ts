@@ -84,6 +84,27 @@ describe("rerunTemplate", () => {
   })
 })
 
+describe("saveAsIssue", () => {
+  const base = { role: "assistant" as const, hasContent: true, hasSession: true }
+  const ids = (over = {}) => resolveMessageActionCommands({ ...base, ...over }).map((c) => c.id)
+
+  it("is offered on an assistant turn with content, never on the user's own", () => {
+    expect(ids({ canSaveAsIssue: true })).toContain("saveAsIssue")
+    expect(ids()).not.toContain("saveAsIssue")
+    expect(ids({ role: "user", canSaveAsIssue: true })).not.toContain("saveAsIssue")
+    expect(ids({ hasContent: false, canSaveAsIssue: true })).not.toContain("saveAsIssue")
+  })
+
+  it("is disabled mid-stream", () => {
+    const command = resolveMessageActionCommands({
+      ...base,
+      canSaveAsIssue: true,
+      streaming: true,
+    }).find((c) => c.id === "saveAsIssue")
+    expect(command?.disabled).toBe(true)
+  })
+})
+
 describe("saveAsMemory", () => {
   const base = { role: "assistant" as const, hasContent: true, hasSession: true }
   const ids = (over = {}) => resolveMessageActionCommands({ ...base, ...over }).map((c) => c.id)

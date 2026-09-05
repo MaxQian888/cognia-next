@@ -40,6 +40,7 @@ Contract `1.2.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.fs` | 18 | `filesystem:write`, `filesystem:read` | frontend, hybrid, python | sensitive |
 | `ctx.git` | 33 | `git:read`, `git:write` | frontend, hybrid, python | internal |
 | `ctx.goals` | 17 | `goal:write`, `goal:read` | frontend, hybrid | internal |
+| `ctx.issues` | 10 | `issue:write`, `issue:read` | frontend, hybrid | internal |
 | `ctx.i18n` | 10 | None | frontend, hybrid, python | internal |
 | `ctx.import` | 5 | None | frontend, hybrid | internal |
 | `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid | sensitive |
@@ -581,6 +582,21 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `goals.toggleSubgoal` | `goal:read` | medium | No |
 | `goals.updateConfig` | `goal:write` | high | No |
 | `goals.updateObjective` | `goal:write` | high | No |
+
+## `ctx.issues`
+
+| Method | Permissions | Risk | Idempotent |
+| --- | --- | --- | --- |
+| `issues.assign` | `issue:write` | medium | No |
+| `issues.comment` | `issue:write` | medium | No |
+| `issues.create` | `issue:write` | high | No |
+| `issues.get` | `issue:read` | low | Yes |
+| `issues.label` | `issue:write` | medium | No |
+| `issues.list` | `issue:read` | low | Yes |
+| `issues.listEvents` | `issue:read` | low | Yes |
+| `issues.onEvent` | `issue:read` | low | No |
+| `issues.registerSyncProvider` | `issue:write` | high | No |
+| `issues.update` | `issue:write` | medium | No |
 
 ## `ctx.i18n`
 

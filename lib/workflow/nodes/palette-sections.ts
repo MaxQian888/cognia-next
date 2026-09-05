@@ -19,6 +19,7 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 export const PALETTE_SECTIONS = [
   "agents",
   "plans",
+  "issues",
   "goals",
   "memory",
   "skills-tools",
@@ -46,6 +47,7 @@ const ACTION_SEGMENT_SECTION: Record<string, PaletteSection> = {
   team: "agents",
   character: "agents",
   plan: "plans",
+  issue: "issues",
   goal: "goals",
   memory: "memory",
   twin: "memory",
