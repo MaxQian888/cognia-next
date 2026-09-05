@@ -15,7 +15,9 @@
 import { DEV_TOKEN_HEADER, detectDesktop } from "../handoff/client"
 
 export const BRIDGE_ROUTE_TICKET_PATH = "/api/dev/gateway/route-ticket"
+export const BRIDGE_ROUTE_TICKET_REVOKE_PATH = "/api/dev/gateway/route-ticket/revoke"
 export const RPC_ROUTE_TICKET_COMMAND = "gateway_mint_route_ticket"
+export const RPC_ROUTE_TICKET_REVOKE_COMMAND = "gateway_revoke_route_ticket"
 export const SERVER_URL_ENV = "COGNIA_SERVER_URL"
 export const SERVICE_TOKEN_ENV = "COGNIA_SERVICE_TOKEN"
 
@@ -212,4 +214,87 @@ export function describeMintFailure(attempts: MintTicketOutcome[]): string {
     .filter((attempt): attempt is Extract<MintTicketOutcome, { ok: false }> => !attempt.ok)
     .map((attempt) => `${attempt.via}: ${attempt.message}`)
     .join("\n  ")
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Revocation
+// ────────────────────────────────────────────────────────────────────────────
+
+export type RevokeTicketOutcome =
+  | { ok: true; via: "bridge" | "rpc"; revoked: boolean }
+  | { ok: false; via: "bridge" | "rpc"; reason: MintTicketFailureReason; message: string }
+
+/**
+ * Revoke the ticket minted for this launch, on the leg that minted it.
+ *
+ * A ticket outlives its agent only by its TTL, but "expires later" is not
+ * "gone": until then the secret stamped into a dead process's environment
+ * still routes. Revoking on exit makes the session's credential die with
+ * the session. Failure is reported, never thrown: the launch is already over.
+ */
+export async function revokeRouteTicket(
+  ticketId: string,
+  via: "bridge" | "rpc",
+  deps: MintTicketDeps = {}
+): Promise<RevokeTicketOutcome> {
+  const doFetch = deps.fetch ?? fetch
+  if (via === "bridge") {
+    const detect = deps.detect ?? detectDesktop
+    const endpoint = await detect(deps.fetch ? { fetch: deps.fetch } : {})
+    if (!endpoint) {
+      return {
+        ok: false,
+        via,
+        reason: "no-desktop",
+        message: "the Cognia desktop app is no longer running",
+      }
+    }
+    let res: Response
+    try {
+      res = await doFetch(`${endpoint.baseUrl}${BRIDGE_ROUTE_TICKET_REVOKE_PATH}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", [DEV_TOKEN_HEADER]: endpoint.devToken },
+        body: JSON.stringify({ ticketId }),
+      })
+    } catch (error) {
+      return { ok: false, via, reason: "network", message: (error as Error).message }
+    }
+    const body = await readBody(res)
+    if (!res.ok) {
+      const message =
+        typeof body.error === "string" ? body.error : `bridge answered HTTP ${res.status}`
+      return { ok: false, via, reason: res.status === 404 ? "unavailable" : "rejected", message }
+    }
+    return { ok: true, via, revoked: body.revoked === true }
+  }
+
+  const env = deps.env ?? process.env
+  const serverUrl = env[SERVER_URL_ENV]
+  const serviceToken = env[SERVICE_TOKEN_ENV]
+  if (!serverUrl || !serviceToken) {
+    return { ok: false, via, reason: "no-server", message: "no headless server configured" }
+  }
+  let res: Response
+  try {
+    res = await doFetch(
+      `${serverUrl.replace(/\/$/, "")}/internal/_rpc/${RPC_ROUTE_TICKET_REVOKE_COMMAND}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${serviceToken}` },
+        body: JSON.stringify({ ticketId }),
+      }
+    )
+  } catch (error) {
+    return { ok: false, via, reason: "network", message: (error as Error).message }
+  }
+  const body = await readBody(res)
+  if (!res.ok) {
+    const code = typeof body.code === "string" ? body.code : undefined
+    const message =
+      typeof body.message === "string" ? body.message : `server answered HTTP ${res.status}`
+    const reason: MintTicketFailureReason =
+      res.status === 404 || code === "unknown_command" ? "unavailable" : "rejected"
+    return { ok: false, via, reason, message }
+  }
+  return { ok: true, via, revoked: body.revoked === true }
 }

@@ -181,3 +181,82 @@ describe("connectGateway", () => {
     await conn.shutdown()
   })
 })
+
+describe("connectGateway ticket lifecycle", () => {
+  const minted = {
+    outcome: {
+      ok: true as const,
+      via: "rpc" as const,
+      ticket: {
+        endpoint: "http://127.0.0.1:47823/v1",
+        ticketId: "rt_9",
+        secret: "sk-cognia-rt-9",
+        modelBindings: {},
+        expiresAtMs: 1,
+      },
+    },
+    attempts: [],
+  }
+
+  it("revokes the ticket on shutdown, on the leg that minted it", async () => {
+    const revoked: Array<[string, string]> = []
+    const conn = await connectGateway(
+      {},
+      {
+        env: {},
+        probe: async (baseUrl) => ({ running: true, baseUrl }),
+        ticketRequest,
+        mintTicket: async () => minted,
+        revokeTicket: async (ticketId, via) => {
+          revoked.push([ticketId, via])
+          return { ok: true, via, revoked: true }
+        },
+      }
+    )
+    expect(conn.ticketVia).toBe("rpc")
+    await conn.shutdown()
+    expect(revoked).toEqual([["rt_9", "rpc"]])
+  })
+
+  it("reports, and does not throw, when the revoke fails", async () => {
+    const warnings: string[] = []
+    const conn = await connectGateway(
+      {},
+      {
+        env: {},
+        probe: async (baseUrl) => ({ running: true, baseUrl }),
+        ticketRequest,
+        mintTicket: async () => minted,
+        revokeTicket: async (_id, via) => ({
+          ok: false,
+          via,
+          reason: "network",
+          message: "connection reset",
+        }),
+        warn: (message) => warnings.push(message),
+      }
+    )
+    await expect(conn.shutdown()).resolves.toBeUndefined()
+    expect(warnings).toEqual([
+      expect.stringContaining("rt_9 was not revoked (rpc: connection reset)"),
+    ])
+  })
+
+  it("honours an explicit gateway url passed by the command", async () => {
+    let probed: string | undefined
+    const conn = await connectGateway(
+      {},
+      {
+        env: { COGNIA_GATEWAY_URL: "http://127.0.0.1:1" },
+        gatewayUrl: "http://localhost:4444/",
+        probe: async (baseUrl) => {
+          probed = baseUrl
+          return { running: true, baseUrl }
+        },
+        gatewayApiKey: "k",
+      }
+    )
+    expect(probed).toBe("http://localhost:4444")
+    expect(conn.baseUrl).toBe("http://localhost:4444")
+  })
+})

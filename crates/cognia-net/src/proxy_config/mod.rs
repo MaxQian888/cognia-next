@@ -550,6 +550,141 @@ pub fn apply_current(config: ProxyConfig) -> Result<(), ProxyError> {
     Ok(())
 }
 
+/// Proxy variables a server process is conventionally configured with, in
+/// the order they are consulted. The first non-empty one wins.
+pub const PROXY_ENVIRONMENT_VARIABLES: [&str; 6] = [
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+];
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = &input[index + 1..index + 3];
+            if let Ok(value) = u8::from_str_radix(hex, 16) {
+                out.push(value);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+impl ProxyConfig {
+    /// Build a Manual policy from conventional proxy variables, the way a
+    /// headless `cognia-server` (or any container) is configured.
+    ///
+    /// `Ok(None)` when no proxy variable is set. `Err` when one is set but
+    /// cannot be dialled: a server whose proxy is misconfigured must fail at
+    /// startup, not silently dial direct through a firewall that then drops
+    /// every upstream call. `NO_PROXY` / `no_proxy` become the bypass list on
+    /// top of the loopback set, so the gateway listener and every other
+    /// local service keep dialling direct.
+    pub fn from_environment(
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Result<Option<ProxyConfig>, ProxyError> {
+        let Some((variable, raw)) = PROXY_ENVIRONMENT_VARIABLES.iter().find_map(|name| {
+            lookup(name)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .map(|value| (*name, value))
+        }) else {
+            return Ok(None);
+        };
+        let invalid = |detail: String| {
+            ProxyError::new(
+                ProxyErrorCode::ProxyInvalidConfig,
+                format!("{variable} is not a usable proxy URL: {detail}"),
+            )
+        };
+        let parsed = raw
+            .parse::<reqwest::Url>()
+            .map_err(|error| invalid(error.to_string()))?;
+        let protocol = match parsed.scheme() {
+            "http" => ProxyProtocol::Http,
+            "https" => ProxyProtocol::Https,
+            "socks5" | "socks5h" | "socks" => ProxyProtocol::Socks5,
+            other => {
+                return Err(invalid(format!(
+                    "scheme \"{other}\" is not supported (use http, https, socks5 or socks5h)"
+                )))
+            }
+        };
+        let host = parsed
+            .host_str()
+            .map(|host| {
+                host.trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .to_string()
+            })
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| invalid("no host".to_string()))?;
+        let port = parsed.port().unwrap_or(match protocol {
+            ProxyProtocol::Http => 80,
+            ProxyProtocol::Https => 443,
+            ProxyProtocol::Socks5 => 1080,
+        });
+        let username = Some(percent_decode(parsed.username())).filter(|value| !value.is_empty());
+        let password = parsed
+            .password()
+            .map(percent_decode)
+            .filter(|value| !value.is_empty());
+        let mut config = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol,
+            host,
+            port,
+            username,
+            password,
+            ..ProxyConfig::default()
+        };
+        for name in ["NO_PROXY", "no_proxy"] {
+            let Some(value) = lookup(name) else { continue };
+            for entry in value.split(',') {
+                let entry = entry.trim();
+                if entry.is_empty() || entry == "*" {
+                    continue;
+                }
+                if !config
+                    .bypass
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(entry))
+                {
+                    config.bypass.push(entry.to_string());
+                }
+            }
+            break;
+        }
+        config.validate()?;
+        Ok(Some(config))
+    }
+}
+
+/// Publish the process environment's proxy (if any) as the runtime policy.
+///
+/// For hosts with no renderer to hand a policy down: the variables are read
+/// once, the ambient copies are removed so nothing routes on them by
+/// accident, and the result becomes the explicit Ready policy (Manual when a
+/// proxy was named, Off otherwise). Managed clients then route on purpose.
+/// Returns the applied config so the caller can log the route.
+pub fn apply_from_environment() -> Result<ProxyConfig, ProxyError> {
+    let config =
+        ProxyConfig::from_environment(|name| std::env::var(name).ok())?.unwrap_or_default();
+    clear_inherited_proxy_environment();
+    apply_current(config.clone())?;
+    Ok(config)
+}
+
 pub fn block_current(error: ProxyError) {
     *slot().write().expect("proxy config lock poisoned") = ProxyRuntimeState::Blocked(error);
 }
@@ -1283,5 +1418,84 @@ mod tests {
             .await
             .unwrap()
             .starts_with("GET /off HTTP/1.1"));
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    fn lookup<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value.to_string())
+        }
+    }
+
+    #[test]
+    fn no_variable_means_no_policy() {
+        assert!(ProxyConfig::from_environment(lookup(&[]))
+            .unwrap()
+            .is_none());
+        assert!(
+            ProxyConfig::from_environment(lookup(&[("HTTPS_PROXY", "  ")]))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn https_proxy_wins_and_no_proxy_extends_the_loopback_bypass() {
+        let config = ProxyConfig::from_environment(lookup(&[
+            ("HTTP_PROXY", "http://other:1"),
+            ("HTTPS_PROXY", "http://us%40er:p%3Ass@proxy.corp:3128"),
+            ("no_proxy", ".corp.internal, 10.0.0.0/8,localhost"),
+        ]))
+        .unwrap()
+        .expect("a policy");
+        assert_eq!(config.mode, ProxyMode::Manual);
+        assert_eq!(config.protocol, ProxyProtocol::Http);
+        assert_eq!(config.host, "proxy.corp");
+        assert_eq!(config.port, 3128);
+        assert_eq!(config.username.as_deref(), Some("us@er"));
+        assert_eq!(config.password.as_deref(), Some("p:ss"));
+        assert_eq!(
+            config.bypass,
+            vec![
+                "localhost",
+                "127.0.0.1",
+                "::1",
+                ".corp.internal",
+                "10.0.0.0/8"
+            ]
+        );
+        assert!(config.should_bypass("http://127.0.0.1:47823/v1/models"));
+        assert!(config.should_bypass("https://llm.corp.internal/v1"));
+        assert!(!config.should_bypass("https://api.anthropic.com/v1/messages"));
+    }
+
+    #[test]
+    fn socks_schemes_and_default_ports() {
+        let socks = ProxyConfig::from_environment(lookup(&[("ALL_PROXY", "socks5h://[::1]")]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(socks.protocol, ProxyProtocol::Socks5);
+        assert_eq!(socks.host, "::1");
+        assert_eq!(socks.port, 1080);
+        let https = ProxyConfig::from_environment(lookup(&[("https_proxy", "https://p")]))
+            .unwrap()
+            .unwrap();
+        assert_eq!((https.protocol, https.port), (ProxyProtocol::Https, 443));
+    }
+
+    #[test]
+    fn a_proxy_that_cannot_be_dialled_is_an_error_naming_the_variable() {
+        let error =
+            ProxyConfig::from_environment(lookup(&[("HTTPS_PROXY", "ftp://p:21")])).unwrap_err();
+        assert_eq!(error.code, ProxyErrorCode::ProxyInvalidConfig);
+        assert!(error.message.contains("HTTPS_PROXY"), "{}", error.message);
+        assert!(ProxyConfig::from_environment(lookup(&[("HTTP_PROXY", "not a url")])).is_err());
     }
 }

@@ -16,6 +16,9 @@ import https from "node:https"
 import { randomBytes } from "node:crypto"
 import { URL } from "node:url"
 
+import { shouldBypass } from "@/lib/network/proxy-config"
+import { createTunnelAgent, formatAuthority, type ProxyEndpoint } from "./egress-tunnel"
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -31,9 +34,20 @@ export interface ProxyConfig {
   openaiApiKey?: string
   /** When true, log each proxied request to stderr for debugging. */
   verbose?: boolean
+  /**
+   * Outbound proxy for the upstream hop (`egress-proxy.ts`). Hosts in
+   * `bypass` dial direct. Absent: every upstream dials direct.
+   */
+  egress?: { endpoint: ProxyEndpoint; bypass: string[] } | null
   /** Injectable fetch for the `/v1/models` upstream listing (tests). */
-  fetch?: typeof fetch
+  fetch?: JsonFetch
 }
+
+/** The slice of `fetch` the models listing needs. Real `fetch` satisfies it. */
+export type JsonFetch = (
+  url: string,
+  init: { headers: Record<string, string> }
+) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>
 
 export interface ProxyServer {
   /** The URL clients should set as base URL (e.g. http://127.0.0.1:54321). */
@@ -82,7 +96,7 @@ async function listUpstreamModels(
   config: ProxyConfig,
   anthropicBase: string,
   openaiBase: string,
-  fetchImpl: typeof fetch
+  fetchImpl: JsonFetch
 ): Promise<{ data: ModelRow[]; errors: string[] }> {
   const data: ModelRow[] = []
   const errors: string[] = []
@@ -129,6 +143,79 @@ async function listUpstreamModels(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Egress
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Picks the agent an upstream URL dials through: the tunnel, or none (direct). */
+interface EgressAgents {
+  agentFor: (url: URL) => http.Agent | undefined
+  describe: (url: URL) => string
+  destroy: () => void
+}
+
+function createEgressAgents(egress: ProxyConfig["egress"]): EgressAgents {
+  if (!egress) {
+    return { agentFor: () => undefined, describe: () => "direct", destroy: () => {} }
+  }
+  const { endpoint, bypass } = egress
+  const label = `proxy ${endpoint.protocol}://${formatAuthority(endpoint.host, endpoint.port)}`
+  // One pooled agent per target scheme, created on first use.
+  const agents = new Map<"http:" | "https:", http.Agent>()
+  const routed = (url: URL) => !shouldBypass(url.href, bypass)
+  return {
+    agentFor: (url) => {
+      if (!routed(url)) return undefined
+      const scheme = url.protocol === "https:" ? "https:" : "http:"
+      let agent = agents.get(scheme)
+      if (!agent) {
+        agent = createTunnelAgent(endpoint, scheme === "https:")
+        agents.set(scheme, agent)
+      }
+      return agent
+    },
+    describe: (url) => (routed(url) ? label : "direct (bypass)"),
+    destroy: () => {
+      for (const agent of agents.values()) agent.destroy()
+      agents.clear()
+    },
+  }
+}
+
+/**
+ * A `fetch`-shaped GET over `http(s).request` so the models listing takes the
+ * same egress route as the chat traffic. Global `fetch` (undici) would ignore
+ * the tunnel agent and dial the upstream direct.
+ */
+function agentJsonFetch(agentFor: (url: URL) => http.Agent | undefined): JsonFetch {
+  return (rawUrl, init) =>
+    new Promise((resolve, reject) => {
+      const url = new URL(rawUrl)
+      const transport = url.protocol === "https:" ? https : http
+      const req = transport.request(
+        url,
+        { method: "GET", headers: init.headers, agent: agentFor(url) },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on("data", (chunk: Buffer) => chunks.push(chunk))
+          res.on("end", () => {
+            const status = res.statusCode ?? 0
+            const text = Buffer.concat(chunks).toString("utf8")
+            resolve({
+              ok: status >= 200 && status < 300,
+              status,
+              json: async () => JSON.parse(text) as unknown,
+            })
+          })
+          res.on("error", reject)
+        }
+      )
+      req.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => req.destroy(new Error("timed out")))
+      req.on("error", reject)
+      req.end()
+    })
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Implementation
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -143,6 +230,8 @@ export async function startProxyServer(config: ProxyConfig): Promise<ProxyServer
   const anthropicBase = config.anthropicBaseUrl ?? "https://api.anthropic.com"
   const openaiBase = config.openaiBaseUrl ?? "https://api.openai.com"
   const verbose = config.verbose ?? false
+  const egress = createEgressAgents(config.egress)
+  const modelsFetch: JsonFetch = config.fetch ?? agentJsonFetch(egress.agentFor)
 
   // Track active responses for graceful shutdown
   const activeResponses = new Set<http.ServerResponse>()
@@ -163,7 +252,7 @@ export async function startProxyServer(config: ProxyConfig): Promise<ProxyServer
 
     // Models list — proxied from the configured upstreams.
     if (req.method === "GET" && pathname === "/v1/models") {
-      void listUpstreamModels(config, anthropicBase, openaiBase, config.fetch ?? fetch).then(
+      void listUpstreamModels(config, anthropicBase, openaiBase, modelsFetch).then(
         ({ data, errors }) => {
           if (data.length === 0 && errors.length > 0) {
             res.writeHead(502, { "content-type": "application/json" })
@@ -233,12 +322,15 @@ export async function startProxyServer(config: ProxyConfig): Promise<ProxyServer
 
     // Preserve query parameters when forwarding
     const fullPath = pathname + url.search
+    const upstreamUrl = new URL(fullPath, upstreamBase)
     proxyRequest(req, res, {
       upstreamBase,
       upstreamKey,
       upstreamAuthScheme,
       path: fullPath,
       verbose,
+      agent: egress.agentFor(upstreamUrl),
+      route: egress.describe(upstreamUrl),
     })
   })
 
@@ -258,6 +350,7 @@ export async function startProxyServer(config: ProxyConfig): Promise<ProxyServer
         apiKey: ephemeralKey,
         port,
         shutdown: async () => {
+          egress.destroy()
           return new Promise<void>((res) => {
             server.close(() => res())
             // Graceful drain: wait for in-flight to finish (max 5s)
@@ -294,6 +387,10 @@ interface ProxyTarget {
   upstreamAuthScheme: "x-api-key" | "bearer"
   path: string
   verbose?: boolean
+  /** Tunnel agent for the upstream hop. Absent: dial direct. */
+  agent?: http.Agent
+  /** How the hop is routed, for the verbose log. */
+  route?: string
 }
 
 function proxyRequest(
@@ -327,7 +424,7 @@ function proxyRequest(
 
   if (target.verbose) {
     process.stderr.write(
-      `[cognia-x] → ${clientReq.method} ${target.path} → ${upstreamUrl.origin}\n`
+      `[cognia-x] → ${clientReq.method} ${target.path} → ${upstreamUrl.origin} (${target.route ?? "direct"})\n`
     )
   }
 
@@ -336,6 +433,7 @@ function proxyRequest(
     {
       method: clientReq.method,
       headers: upstreamHeaders,
+      ...(target.agent ? { agent: target.agent } : {}),
     },
     (proxyRes) => {
       if (target.verbose) {

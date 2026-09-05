@@ -229,7 +229,97 @@ struct AppState {
     tickets: Arc<RouteTicketRegistry>,
     /// Session → credential leases backing ticket affinity (R4).
     leases: Arc<CredentialLeaseMap>,
-    http: reqwest::Client,
+    /// Upstream HTTP clients, one per live proxy route.
+    http: Arc<UpstreamClients>,
+}
+
+/// Upstream HTTP clients bound to the live network-proxy policy.
+///
+/// The gateway used to build ONE `reqwest::Client` at startup and reuse it
+/// for every upstream call. That client took whatever proxy variables the
+/// process had at that instant and kept them: on the desktop the policy is
+/// handed down by the renderer later, so a gateway started early either
+/// dialled direct past the user's proxy or inherited the deliberate
+/// `127.0.0.1:9` black hole and never recovered. The bypass list was never
+/// consulted at all.
+///
+/// Now every upstream URL resolves through `cognia_net::proxy_config` at
+/// request time, exactly like every other outbound call on the host, and
+/// the client for each distinct route is pooled so keep-alive and TLS
+/// session reuse survive. While the policy is not initialized yet the
+/// env-driven fallback client is used, which is the old behaviour.
+pub(crate) struct UpstreamClients {
+    connect_timeout: Duration,
+    fallback: reqwest::Client,
+    cache: parking_lot::Mutex<std::collections::HashMap<u64, reqwest::Client>>,
+}
+
+/// Distinct pooled clients to keep before the pool is cleared. A host has a
+/// handful of routes at most (direct, the proxy, a bypassed local server).
+const UPSTREAM_CLIENT_CACHE_CAP: usize = 8;
+
+impl UpstreamClients {
+    pub(crate) fn new(connect_timeout: Duration) -> Self {
+        let fallback = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self {
+            connect_timeout,
+            fallback,
+            cache: parking_lot::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// The client that dials `url` under the current policy.
+    pub(crate) fn client_for(&self, url: &str) -> reqwest::Client {
+        let Ok(policy) = cognia_net::proxy_config::current() else {
+            return self.fallback.clone();
+        };
+        let Some(key) = route_cache_key(&policy, url) else {
+            return self.fallback.clone();
+        };
+        if let Some(client) = self.cache.lock().get(&key) {
+            return client.clone();
+        }
+        let builder = reqwest::Client::builder().connect_timeout(self.connect_timeout);
+        let client = match policy.apply_reqwest_policy(builder, url) {
+            Ok((builder, _route)) => builder.build().unwrap_or_else(|_| self.fallback.clone()),
+            Err(_) => return self.fallback.clone(),
+        };
+        let mut cache = self.cache.lock();
+        if cache.len() >= UPSTREAM_CLIENT_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(key, client.clone());
+        client
+    }
+
+    pub(crate) fn post(&self, url: &str) -> reqwest::RequestBuilder {
+        self.client_for(url).post(url)
+    }
+
+    #[cfg(test)]
+    fn pooled(&self) -> usize {
+        self.cache.lock().len()
+    }
+}
+
+/// One key per (route, proxy credential): a changed password must not keep
+/// serving a client built with the old one. The credentialed URL is hashed,
+/// never stored.
+fn route_cache_key(policy: &cognia_net::proxy_config::ProxyConfig, url: &str) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let route = policy.route_for(url).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match route {
+        cognia_net::proxy_config::ProxyRouteSummary::Direct { .. } => "direct".hash(&mut hasher),
+        cognia_net::proxy_config::ProxyRouteSummary::Proxy { .. } => {
+            "proxy".hash(&mut hasher);
+            policy.credentialed_proxy_url().ok()?.hash(&mut hasher);
+        }
+    }
+    Some(hasher.finish())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -281,10 +371,9 @@ pub async fn spawn_server(
         })?
         .port();
 
-    let http = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(connect_timeout_secs.max(1) as u64))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let http = Arc::new(UpstreamClients::new(Duration::from_secs(
+        connect_timeout_secs.max(1) as u64,
+    )));
 
     // Clone the key handle for the periodic quota-flush task before the
     // original moves into `AppState`.
@@ -3365,6 +3454,49 @@ mod tests {
     #[test]
     fn body_limit_fits_chat_histories() {
         assert_eq!(BODY_LIMIT_BYTES, 16 * 1024 * 1024);
+    }
+
+    #[test]
+    fn upstream_clients_follow_the_live_proxy_policy() {
+        use cognia_net::proxy_config::{apply_current, ProxyConfig, ProxyMode, ProxyProtocol};
+        let clients = UpstreamClients::new(Duration::from_secs(1));
+
+        // Policy Off: every upstream is one direct route, pooled once.
+        apply_current(ProxyConfig::default()).unwrap();
+        let _ = clients.client_for("https://api.anthropic.com/v1/messages");
+        let _ = clients.client_for("https://api.openai.com/v1/chat/completions");
+        assert_eq!(clients.pooled(), 1);
+
+        // A manual proxy is a second route. A bypassed local upstream stays on
+        // the direct one. Loopback is bypassed so concurrently running tests
+        // that dial their own mock upstreams are unaffected.
+        apply_current(ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "proxy.corp".into(),
+            port: 3128,
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        let _ = clients.client_for("https://api.anthropic.com/v1/messages");
+        let _ = clients.client_for("http://127.0.0.1:11434/v1/chat/completions");
+        assert_eq!(clients.pooled(), 2);
+
+        // A changed credential must not reuse the client built without it.
+        apply_current(ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "proxy.corp".into(),
+            port: 3128,
+            username: Some("u".into()),
+            password: Some("p".into()),
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+        let _ = clients.client_for("https://api.anthropic.com/v1/messages");
+        assert_eq!(clients.pooled(), 3);
+
+        apply_current(ProxyConfig::default()).unwrap();
     }
 
     #[test]

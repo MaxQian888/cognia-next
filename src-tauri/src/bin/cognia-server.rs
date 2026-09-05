@@ -600,11 +600,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !app_lib::init_structured_tracing() {
         log::warn!("headless structured tracing subscriber was not installed");
     }
-    // Headless deployments do not consume desktop Dexie settings. Publish an
-    // explicit direct policy so shared outbound clients disable ambient proxy
-    // variables without binding to renderer initialization.
-    app_lib::clear_inherited_proxy_environment();
-    app_lib::apply_current_proxy_config(Default::default())?;
+    // Headless deployments do not consume desktop Dexie settings. The policy
+    // comes from the container's HTTPS_PROXY / NO_PROXY, the way every other
+    // server process is configured, and is published as the explicit runtime
+    // policy: managed outbound clients (the LLM gateway's upstream hop
+    // included) then route through it on purpose, with the loopback set and
+    // NO_PROXY bypassed, instead of inheriting ambient variables. A proxy
+    // that cannot be dialled fails startup here rather than every request.
+    let proxy_policy = app_lib::apply_proxy_policy_from_environment()?;
+    if proxy_policy.is_active() {
+        log::info!(
+            "outbound proxy from environment: {:?}://{}:{} (bypass: {})",
+            proxy_policy.protocol,
+            proxy_policy.host,
+            proxy_policy.port,
+            proxy_policy.bypass.join(",")
+        );
+    }
     let cli = Cli::parse();
 
     if let CliCommand::DesktopHost { endpoint } = &cli.command {

@@ -739,6 +739,21 @@ export const externalBackendConfigSchema = z
   .object({
     model: z.string().min(1).optional(),
     piExtensionPolicy: z.enum(["isolated", "global", "trusted-project"]).optional(),
+    /**
+     * `cognia-agent x` launch defaults for this backend. Each is the
+     * persisted form of the matching flag (`--gateway`, `--proxy`,
+     * `--proxy-bypass`, `--profile`, `--shared-home`) and the flag wins.
+     */
+    /** Gateway listener to route through (loopback unless `--allow-remote-gateway`). */
+    gateway: z.string().url().optional(),
+    /** Egress proxy URL (`http`, `https`, `socks5`, `socks5h`) or the literal `off`. */
+    proxy: z.string().min(1).optional(),
+    /** Hosts, domain suffixes (`.corp`) and CIDRs that dial direct. */
+    proxyBypass: z.array(z.string().min(1)).optional(),
+    /** Isolated home profile name. Default `default`. */
+    profile: z.string().min(1).optional(),
+    /** Launch in the user's own agent home instead of an isolated profile. */
+    sharedHome: z.boolean().optional(),
   })
   .strict()
 

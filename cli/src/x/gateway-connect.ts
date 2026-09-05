@@ -16,8 +16,10 @@
 
 import {
   mintRouteTicket,
+  revokeRouteTicket,
   describeMintFailure,
   type MintRouteTicketResult,
+  type RevokeTicketOutcome,
   type TicketMintRequest,
 } from "./mint-ticket"
 import { startProxyServer, type ProxyConfig, type ProxyServer } from "./proxy-server"
@@ -45,6 +47,8 @@ export interface GatewayConnection {
   /** Frozen family bindings when a ticket was minted. */
   modelBindings?: Record<string, string>
   ticketId?: string
+  /** Which leg minted the ticket. `shutdown` revokes it on the same leg. */
+  ticketVia?: "bridge" | "rpc"
 }
 
 export interface GatewayProbeResult {
@@ -67,6 +71,10 @@ export interface GatewayConnectDeps {
   probe?: (baseUrl: string) => Promise<GatewayProbeResult>
   /** Injectable ticket minter for testing. */
   mintTicket?: (request: TicketMintRequest) => Promise<MintRouteTicketResult>
+  /** Injectable ticket revoker for testing. */
+  revokeTicket?: (ticketId: string, via: "bridge" | "rpc") => Promise<RevokeTicketOutcome>
+  /** Where a failed revoke is reported. Default: stderr. */
+  warn?: (message: string) => void
   /** Injectable proxy factory for testing. */
   startProxy?: typeof startProxyServer
   env?: Record<string, string | undefined>
@@ -205,13 +213,27 @@ export async function connectGateway(
       const mint = deps.mintTicket ?? mintRouteTicket
       const result = await mint(deps.ticketRequest)
       if (result.outcome.ok) {
+        const { ticketId } = result.outcome.ticket
+        const via = result.outcome.via
+        const revoke = deps.revokeTicket ?? revokeRouteTicket
+        const warn = deps.warn ?? ((message: string) => process.stderr.write(`${message}\n`))
         return {
           baseUrl,
           apiKey: result.outcome.ticket.secret,
-          shutdown: async () => {},
+          // The credential dies with the session. A revoke that fails is
+          // reported, not thrown: the ticket still expires on its TTL.
+          shutdown: async () => {
+            const outcome = await revoke(ticketId, via)
+            if (!outcome.ok) {
+              warn(
+                `[cognia-x] route ticket ${ticketId} was not revoked (${outcome.via}: ${outcome.message}); it expires on its own`
+              )
+            }
+          },
           mode: "desktop-gateway-ticket",
           modelBindings: result.outcome.ticket.modelBindings,
-          ticketId: result.outcome.ticket.ticketId,
+          ticketId,
+          ticketVia: via,
         }
       }
       throw new GatewayCredentialError(baseUrl, describeMintFailure(result.attempts))

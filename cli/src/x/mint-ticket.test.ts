@@ -1,6 +1,9 @@
 import {
   BRIDGE_ROUTE_TICKET_PATH,
+  BRIDGE_ROUTE_TICKET_REVOKE_PATH,
+  RPC_ROUTE_TICKET_REVOKE_COMMAND,
   describeMintFailure,
+  revokeRouteTicket,
   mintRouteTicket,
   mintRouteTicketViaBridge,
   mintRouteTicketViaRpc,
@@ -118,5 +121,60 @@ describe("mintRouteTicket", () => {
     const hint = describeMintFailure(result.attempts)
     expect(hint).toContain("bridge: the Cognia desktop app is not running")
     expect(hint).toContain("rpc: no headless server configured")
+  })
+})
+
+describe("revokeRouteTicket", () => {
+  it("posts the ticket id to the bridge revoke route with the dev token", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const outcome = await revokeRouteTicket("rt_1", "bridge", {
+      detect: async () => ({ baseUrl: "http://127.0.0.1:4242", devToken: "tok" }),
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init! })
+        return jsonResponse(200, { ok: true, ticketId: "rt_1", revoked: true })
+      },
+    })
+    expect(outcome).toEqual({ ok: true, via: "bridge", revoked: true })
+    expect(calls[0]!.url).toBe(`http://127.0.0.1:4242${BRIDGE_ROUTE_TICKET_REVOKE_PATH}`)
+    expect((calls[0]!.init.headers as Record<string, string>)["X-Cognia-Dev-Token"]).toBe("tok")
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ ticketId: "rt_1" })
+  })
+
+  it("reports a bridge that vanished or lacks the route, without throwing", async () => {
+    await expect(
+      revokeRouteTicket("rt_1", "bridge", { detect: async () => null })
+    ).resolves.toMatchObject({ ok: false, via: "bridge", reason: "no-desktop" })
+    await expect(
+      revokeRouteTicket("rt_1", "bridge", {
+        detect: async () => ({ baseUrl: "http://127.0.0.1:4242", devToken: "tok" }),
+        fetch: async () => jsonResponse(404, { error: "no such route" }),
+      })
+    ).resolves.toMatchObject({ ok: false, via: "bridge", reason: "unavailable" })
+    await expect(
+      revokeRouteTicket("rt_1", "bridge", {
+        detect: async () => ({ baseUrl: "http://127.0.0.1:4242", devToken: "tok" }),
+        fetch: async () => {
+          throw new Error("ECONNRESET")
+        },
+      })
+    ).resolves.toMatchObject({ ok: false, via: "bridge", reason: "network" })
+  })
+
+  it("calls the headless rpc arm with the service token", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const outcome = await revokeRouteTicket("rt_2", "rpc", {
+      env: { COGNIA_SERVER_URL: "http://srv:8080/", COGNIA_SERVICE_TOKEN: "svc" },
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init! })
+        return jsonResponse(200, { ticketId: "rt_2", revoked: false })
+      },
+    })
+    expect(outcome).toEqual({ ok: true, via: "rpc", revoked: false })
+    expect(calls[0]!.url).toBe(`http://srv:8080/internal/_rpc/${RPC_ROUTE_TICKET_REVOKE_COMMAND}`)
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer svc")
+    await expect(revokeRouteTicket("rt_2", "rpc", { env: {} })).resolves.toMatchObject({
+      ok: false,
+      reason: "no-server",
+    })
   })
 })

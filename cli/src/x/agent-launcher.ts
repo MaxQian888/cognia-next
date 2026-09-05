@@ -12,6 +12,7 @@ import { constants as osConstants } from "node:os"
 
 import { writeTemporaryCodexHome, type TemporaryCodexHome } from "./codex-config"
 import type { SupportedAgent } from "./detect-cli"
+import type { ChildProxyEnv } from "./egress-proxy"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -48,6 +49,13 @@ export interface AgentLaunchConfig {
    * overrides (see `codex-config.ts`). Off unless the user asks.
    */
   codexHomeFallback?: boolean
+  /**
+   * The agent's home for this launch (`launch-home.ts`): `CLAUDE_CONFIG_DIR`
+   * or `CODEX_HOME` for an isolated profile, empty for a shared home.
+   */
+  homeEnv?: Record<string, string>
+  /** Outbound proxy for the agent's own traffic (`egress-proxy.ts`). */
+  proxyEnv?: ChildProxyEnv
 }
 
 export interface AgentLaunchDeps {
@@ -197,6 +205,61 @@ function buildCodexConfig(config: AgentLaunchConfig): AgentEnvConfig {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Child environment
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Variables the agent must NOT inherit from the shell that ran `cognia-agent x`.
+ *
+ * Every one of these either carries a real upstream credential or reroutes
+ * the agent's API calls past the gateway. An inherited `CLAUDE_CODE_OAUTH_TOKEN`
+ * makes Claude Code prefer the user's own subscription over the gateway
+ * credential, so a launch meant to be isolated would spend, and could get
+ * rate-limited or banned on, the user's own account. `CLAUDE_CODE_USE_*`
+ * silently swap the transport for Bedrock/Vertex/Foundry. The `_BASE_URL`
+ * pair would point past the gateway entirely.
+ *
+ * The launcher sets back exactly what the gateway route needs.
+ */
+export const AMBIENT_CREDENTIAL_ENV: readonly string[] = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "OPENAI_ORGANIZATION",
+  "OPENAI_PROJECT",
+  "COGNIA_GATEWAY_KEY",
+]
+
+/**
+ * The environment the agent subprocess receives. Pure so the launch's exact
+ * environment is unit-testable without spawning anything:
+ *
+ *   1. start from the parent environment,
+ *   2. drop every ambient credential and routing override,
+ *   3. drop what the proxy plan says must not be inherited,
+ *   4. add the proxy plan, the home, then the agent's gateway route (which
+ *      wins over everything).
+ */
+export function buildChildEnv(
+  config: AgentLaunchConfig,
+  agentEnv: Record<string, string>,
+  parentEnv: Record<string, string | undefined> = process.env
+): Record<string, string | undefined> {
+  const merged: Record<string, string | undefined> = { ...parentEnv }
+  for (const name of AMBIENT_CREDENTIAL_ENV) delete merged[name]
+  for (const name of config.proxyEnv?.unset ?? []) delete merged[name]
+  Object.assign(merged, config.proxyEnv?.set ?? {}, config.homeEnv ?? {}, agentEnv)
+  return merged
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Launcher
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -228,10 +291,10 @@ export async function launchAgent(
     agentConfig.env.CODEX_HOME = codexHome.dir
   }
 
-  const mergedEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...agentConfig.env,
-  }
+  // `ProcessEnv` is a plain string dictionary at runtime. The Bun-flavoured
+  // typing the CLI builds against adds required keys that a child env need
+  // not carry, hence the cast.
+  const mergedEnv = buildChildEnv(config, agentConfig.env) as NodeJS.ProcessEnv
 
   const options: SpawnOptions = {
     cwd: config.cwd,

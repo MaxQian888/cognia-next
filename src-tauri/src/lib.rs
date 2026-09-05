@@ -140,7 +140,9 @@ mod project_environment;
 pub use cognia_agent_state::provider_profiles;
 mod proxy_config;
 pub use cognia_net::proxy_config::{
-    apply_current as apply_current_proxy_config, clear_inherited_proxy_environment,
+    apply_current as apply_current_proxy_config,
+    apply_from_environment as apply_proxy_policy_from_environment,
+    clear_inherited_proxy_environment,
 };
 mod recorder_window;
 /// ADR-0102 §4 — diagnostics-first safe mode. Owns `RecoveryStateV1`, its

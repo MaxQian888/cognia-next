@@ -3,7 +3,13 @@
  */
 
 import { parseArgv } from "./args"
-import { executionFingerprintFor, ticketRequestFor, xCommand } from "./x-command"
+import {
+  executionFingerprintFor,
+  findBaseUrl,
+  ticketRequestFor,
+  xCommand,
+  type XCommandDeps,
+} from "./x-command"
 import { GatewayCredentialError } from "../x/gateway-connect"
 import type { ResolvedConfig } from "../config/schema"
 import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
@@ -499,5 +505,219 @@ describe("xCommand", () => {
     const b = ticketRequestFor("claude", "m", "/w")
     expect(a.sessionId).not.toBe(b.sessionId)
     expect(a.executionFingerprint).toBe(b.executionFingerprint)
+  })
+})
+
+describe("xCommand launch isolation, gateway and proxy", () => {
+  type LaunchConfig = Parameters<typeof import("../x/agent-launcher").launchAgent>[0]
+  type ConnectDeps = Parameters<typeof import("../x/gateway-connect").connectGateway>[1]
+
+  function harness(argv: string[], overrides: Partial<XCommandDeps> = {}) {
+    const { sink, lines, errors } = createOutput()
+    let launchConfig: LaunchConfig | undefined
+    let connectDeps: ConnectDeps | undefined
+    let proxyConfig: import("../x/proxy-server").ProxyConfig | undefined
+    let shutdowns = 0
+    const run = () =>
+      xCommand(parseArgv(argv), {
+        out: sink,
+        env: {},
+        detect: async () => ({ installed: true, path: "/usr/bin/claude" }),
+        loadConfig: () => ({ ...MOCK_CONFIG, cliHome: "/home/u/.cognia" }),
+        selectModel: async () => "m",
+        connect: async (cfg, deps) => {
+          connectDeps = deps
+          proxyConfig = typeof cfg === "function" ? cfg() : cfg
+          return {
+            baseUrl: "http://127.0.0.1:47823",
+            apiKey: "sk-cognia-rt-1",
+            shutdown: async () => {
+              shutdowns += 1
+            },
+            mode: "desktop-gateway-ticket" as const,
+          }
+        },
+        launchHome: (input) => ({
+          mode: "isolated",
+          profile: input.profile ?? "default",
+          dir: `/home/u/.cognia/x/${input.agent}/${input.profile ?? "default"}`,
+          env: {
+            CLAUDE_CONFIG_DIR: `/home/u/.cognia/x/${input.agent}/${input.profile ?? "default"}`,
+          },
+        }),
+        launch: async (cfg) => {
+          launchConfig = cfg
+          return 0
+        },
+        ...overrides,
+      })
+    return {
+      run,
+      lines,
+      errors,
+      get launchConfig() {
+        return launchConfig
+      },
+      get connectDeps() {
+        return connectDeps
+      },
+      get proxyConfig() {
+        return proxyConfig
+      },
+      get shutdowns() {
+        return shutdowns
+      },
+    }
+  }
+
+  it("isolates the launch by default and prints where", async () => {
+    const h = harness(["x", "claude", "--model", "m"])
+    expect(await h.run()).toBe(0)
+    expect(h.launchConfig!.homeEnv).toEqual({
+      CLAUDE_CONFIG_DIR: "/home/u/.cognia/x/claude/default",
+    })
+    expect(h.lines.join("")).toContain('isolated profile "default"')
+    expect(h.lines.join("")).toContain("Egress proxy: direct (no proxy configured)")
+  })
+
+  it("passes --profile and --shared-home to the home resolver", async () => {
+    const inputs: Array<Parameters<typeof import("../x/launch-home").resolveLaunchHome>[0]> = []
+    const h = harness(["x", "claude", "--model", "m", "--profile", "work", "--shared-home"], {
+      launchHome: (input) => {
+        inputs.push(input)
+        return { mode: "shared", dir: "/home/u/.claude", env: {} }
+      },
+    })
+    await h.run()
+    expect(inputs[0]).toMatchObject({
+      agent: "claude",
+      cliHome: "/home/u/.cognia",
+      profile: "work",
+      shared: true,
+      gatewayBaseUrl: "http://127.0.0.1:47823",
+      model: "m",
+    })
+    expect(h.launchConfig!.homeEnv).toEqual({})
+    expect(h.lines.join("")).toContain("shared with your own agent")
+  })
+
+  it("rejects a bad profile before launching and still shuts the gateway down", async () => {
+    const { LaunchProfileError } = await import("../x/launch-home")
+    let launched = false
+    const h = harness(["x", "claude", "--model", "m", "--profile", "../x"], {
+      launchHome: () => {
+        throw new LaunchProfileError("../x")
+      },
+      launch: async () => {
+        launched = true
+        return 0
+      },
+    })
+    expect(await h.run()).toBe(2)
+    expect(launched).toBe(false)
+    expect(h.shutdowns).toBe(1)
+    expect(h.errors.join("")).toContain('profile "../x"')
+  })
+
+  it("routes --gateway (and the config gateway) into the connection", async () => {
+    const flag = harness(["x", "claude", "--model", "m", "--gateway", "http://127.0.0.1:5555"])
+    await flag.run()
+    expect(flag.connectDeps!.gatewayUrl).toBe("http://127.0.0.1:5555")
+
+    const configured = harness(["x", "claude", "--model", "m"], {
+      loadConfig: () => ({
+        ...MOCK_CONFIG,
+        agentBackends: { claude: { model: "m", gateway: "http://localhost:6666" } },
+      }),
+    })
+    await configured.run()
+    expect(configured.connectDeps!.gatewayUrl).toBe("http://localhost:6666")
+  })
+
+  it("hands --proxy to the local proxy's upstream hop and to the agent's environment", async () => {
+    const h = harness([
+      "x",
+      "claude",
+      "--model",
+      "m",
+      "--proxy",
+      "socks5://user:pw@127.0.0.1:1080",
+      "--proxy-bypass",
+      ".corp",
+    ])
+    await h.run()
+    expect(h.proxyConfig!.egress).toEqual({
+      endpoint: {
+        protocol: "socks5",
+        host: "127.0.0.1",
+        port: 1080,
+        username: "user",
+        password: "pw",
+      },
+      bypass: ["localhost", "127.0.0.1", "::1", ".corp"],
+    })
+    expect(h.launchConfig!.proxyEnv).toEqual({
+      set: {
+        HTTPS_PROXY: "socks5://user:pw@127.0.0.1:1080",
+        https_proxy: "socks5://user:pw@127.0.0.1:1080",
+        HTTP_PROXY: "socks5://user:pw@127.0.0.1:1080",
+        http_proxy: "socks5://user:pw@127.0.0.1:1080",
+        ALL_PROXY: "socks5://user:pw@127.0.0.1:1080",
+        all_proxy: "socks5://user:pw@127.0.0.1:1080",
+        NO_PROXY: "localhost,127.0.0.1,::1,.corp",
+        no_proxy: "localhost,127.0.0.1,::1,.corp",
+      },
+      unset: [],
+    })
+    // The banner never shows the password.
+    expect(h.lines.join("")).not.toContain("pw@")
+    expect(h.lines.join("")).toContain("socks5://127.0.0.1:1080 via --proxy")
+  })
+
+  it("reads the proxy from config and lets --proxy off override an inherited one", async () => {
+    const configured = harness(["x", "claude", "--model", "m"], {
+      env: { HTTPS_PROXY: "http://shell:1" },
+      loadConfig: () => ({
+        ...MOCK_CONFIG,
+        agentBackends: {
+          claude: { model: "m", proxy: "http://cfg:3128", proxyBypass: ["10.0.0.0/8"] },
+        },
+      }),
+    })
+    await configured.run()
+    expect(configured.proxyConfig!.egress).toMatchObject({
+      endpoint: { protocol: "http", host: "cfg", port: 3128 },
+      bypass: ["localhost", "127.0.0.1", "::1", "10.0.0.0/8"],
+    })
+
+    const off = harness(["x", "claude", "--model", "m", "--proxy", "off"], {
+      env: { HTTPS_PROXY: "http://shell:1" },
+    })
+    await off.run()
+    expect(off.proxyConfig!.egress).toBeNull()
+    expect(off.launchConfig!.proxyEnv!.unset).toContain("HTTPS_PROXY")
+  })
+
+  it("stops on an unusable proxy value before touching the gateway", async () => {
+    let connected = false
+    const h = harness(["x", "claude", "--model", "m", "--proxy", "ftp://nope:21"], {
+      connect: async () => {
+        connected = true
+        throw new Error("unreachable")
+      },
+    })
+    expect(await h.run()).toBe(2)
+    expect(connected).toBe(false)
+    expect(h.errors.join("")).toContain("--proxy: ")
+  })
+
+  it("dials a configured provider baseURL from the fallback proxy", () => {
+    expect(
+      findBaseUrl(
+        { relay: { protocol: "anthropic", baseURL: "https://relay.example/anthropic" } },
+        "anthropic"
+      )
+    ).toBe("https://relay.example/anthropic")
+    expect(findBaseUrl({ relay: { protocol: "anthropic" } }, "anthropic")).toBeUndefined()
   })
 })

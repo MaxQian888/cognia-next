@@ -48,6 +48,12 @@ export const BOOLEAN_FLAGS = new Set([
   "confirm",
   // `x --verbose` — log proxy requests for debugging.
   "verbose",
+  // `x --shared-home` / `--allow-remote-gateway` / `--codex-home-fallback`:
+  // launch switches that must never swallow the next token (`--shared-home
+  // --model x` would otherwise read `--model` as the home).
+  "shared-home",
+  "allow-remote-gateway",
+  "codex-home-fallback",
   // `security scan --authorized` — the operator's assertion that they are
   // cleared to attack the target. Must never swallow the next token, or
   // `--authorized --target x` would consume the target as its value.

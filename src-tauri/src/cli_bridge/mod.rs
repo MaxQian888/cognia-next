@@ -28,6 +28,8 @@
 //!   companion command, through `remote_execution::execute`
 //! - `POST /api/dev/gateway/route-ticket` — mint a gateway route ticket for
 //!   `cognia-agent x`
+//! - `POST /api/dev/gateway/route-ticket/revoke` — revoke the route ticket a
+//!   `cognia-agent x` launch minted, so the credential dies with the session.
 //!
 //! # Discovery
 //!

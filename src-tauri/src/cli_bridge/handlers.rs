@@ -1612,10 +1612,43 @@ pub async fn gateway_route_ticket(
     }
 }
 
+/// `POST /api/dev/gateway/route-ticket/revoke` body.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteTicketRevokeRequest {
+    pub ticket_id: String,
+}
+
+/// `POST /api/dev/gateway/route-ticket/revoke` — revoke a route ticket by
+/// id. `cognia-agent x` calls this when its agent exits so the secret it
+/// stamped into that process's environment stops routing immediately
+/// instead of on the ticket's TTL. Idempotent: an unknown or already
+/// revoked id answers `revoked: false`, never an error.
+pub async fn gateway_route_ticket_revoke(
+    State(state): State<SharedState>,
+    Json(request): Json<RouteTicketRevokeRequest>,
+) -> Response {
+    let ticket_id = request.ticket_id.trim().to_string();
+    if ticket_id.is_empty() {
+        return err_response(StatusCode::BAD_REQUEST, "ticketId is required");
+    }
+    let gateway = state.app_handle.state::<crate::gateway::GatewayState>();
+    let revoked = gateway.revoke_route_ticket(&ticket_id);
+    Json(json!({ "ok": true, "ticketId": ticket_id, "revoked": revoked })).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn route_ticket_revoke_request_reads_camel_case_and_nothing_else() {
+        let request: RouteTicketRevokeRequest =
+            serde_json::from_value(json!({ "ticketId": "rt_1" })).unwrap();
+        assert_eq!(request.ticket_id, "rt_1");
+        assert!(serde_json::from_value::<RouteTicketRevokeRequest>(json!({})).is_err());
+    }
 
     #[test]
     fn acp_ticket_payload_uses_single_use_ticket_shape() {

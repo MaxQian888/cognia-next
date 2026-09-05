@@ -431,3 +431,172 @@ describe("proxy-server", () => {
     }
   })
 })
+
+// ────────────────────────────────────────────────────────────────────────────
+// Egress proxy (in-process CONNECT proxy, nothing leaves the machine)
+// ────────────────────────────────────────────────────────────────────────────
+
+import net from "node:net"
+
+/** Minimal HTTP CONNECT proxy that records every authority it tunnels. */
+function startConnectProxy(): Promise<{
+  port: number
+  connects: string[]
+  close: () => Promise<void>
+}> {
+  const connects: string[] = []
+  const server = net.createServer((client) => {
+    let head = ""
+    const onData = (chunk: Buffer) => {
+      head += chunk.toString("latin1")
+      const end = head.indexOf("\r\n\r\n")
+      if (end === -1) return
+      client.off("data", onData)
+      const authority = head.split("\r\n")[0]!.split(" ")[1]!
+      connects.push(authority)
+      const [host, port] = authority.split(":")
+      const upstream = net.connect({ host: host!, port: Number(port) }, () => {
+        client.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+        const surplus = head.slice(end + 4)
+        if (surplus) upstream.write(Buffer.from(surplus, "latin1"))
+        client.pipe(upstream)
+        upstream.pipe(client)
+      })
+      upstream.on("error", () => client.destroy())
+      client.on("error", () => upstream.destroy())
+    }
+    client.on("data", onData)
+    client.on("error", () => {})
+  })
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      resolve({
+        port: (server.address() as net.AddressInfo).port,
+        connects,
+        close: () => new Promise<void>((done) => server.close(() => done())),
+      })
+    })
+  })
+}
+
+function startUpstream(
+  handler: http.RequestListener
+): Promise<{ port: number; close: () => Promise<void> }> {
+  const server = http.createServer(handler)
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      resolve({
+        port: (server.address() as net.AddressInfo).port,
+        close: () =>
+          new Promise<void>((done) => {
+            server.closeAllConnections()
+            server.close(() => done())
+          }),
+      })
+    })
+  })
+}
+
+describe("proxy-server egress", () => {
+  let proxy: Awaited<ReturnType<typeof startProxyServer>> | undefined
+  const cleanups: Array<() => Promise<void>> = []
+
+  afterEach(async () => {
+    if (proxy) {
+      await proxy.shutdown()
+      proxy = undefined
+    }
+    while (cleanups.length) await cleanups.pop()!()
+  })
+
+  it("dials the upstream through the egress proxy, including /v1/models", async () => {
+    const seen: string[] = []
+    const upstream = await startUpstream((req, res) => {
+      seen.push(`${req.method} ${req.url}`)
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end(
+        req.url === "/v1/models"
+          ? JSON.stringify({ data: [{ id: "claude-x", created: 1 }] })
+          : JSON.stringify({ id: "msg_1" })
+      )
+    })
+    const tunnel = await startConnectProxy()
+    cleanups.push(upstream.close, tunnel.close)
+
+    proxy = await startProxyServer({
+      // A non-loopback name so the bypass list does not exempt it. It still
+      // resolves locally because the CONNECT proxy dials by authority.
+      anthropicBaseUrl: `http://127.0.0.1:${upstream.port}`,
+      anthropicApiKey: "sk-ant-real",
+      egress: {
+        endpoint: { protocol: "http", host: "127.0.0.1", port: tunnel.port },
+        // Loopback deliberately NOT bypassed here so the local upstream is routed.
+        bypass: [],
+      },
+    })
+
+    const chat = await httpRequest(`${proxy.baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": proxy.apiKey },
+      body: "{}",
+    })
+    expect(chat.status).toBe(200)
+    const models = await httpRequest(`${proxy.baseUrl}/v1/models`)
+    expect(models.status).toBe(200)
+    expect(JSON.parse(models.body).data[0].id).toBe("claude-x")
+
+    expect(seen).toEqual(["POST /v1/messages", "GET /v1/models"])
+    expect(tunnel.connects.length).toBeGreaterThanOrEqual(1)
+    expect(new Set(tunnel.connects)).toEqual(new Set([`127.0.0.1:${upstream.port}`]))
+  })
+
+  it("dials a bypassed upstream direct", async () => {
+    const upstream = await startUpstream((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" })
+      res.end("{}")
+    })
+    const tunnel = await startConnectProxy()
+    cleanups.push(upstream.close, tunnel.close)
+
+    proxy = await startProxyServer({
+      openaiBaseUrl: `http://127.0.0.1:${upstream.port}`,
+      openaiApiKey: "sk-openai-real",
+      egress: {
+        endpoint: { protocol: "http", host: "127.0.0.1", port: tunnel.port },
+        bypass: ["127.0.0.1"],
+      },
+    })
+    const res = await httpRequest(`${proxy.baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${proxy.apiKey}` },
+      body: "{}",
+    })
+    expect(res.status).toBe(200)
+    expect(tunnel.connects).toEqual([])
+  })
+
+  it("answers 502 when the egress proxy is unreachable, without dialling direct", async () => {
+    let direct = 0
+    const upstream = await startUpstream((_req, res) => {
+      direct += 1
+      res.end("{}")
+    })
+    const dead = await startConnectProxy()
+    await dead.close()
+    cleanups.push(upstream.close)
+
+    proxy = await startProxyServer({
+      anthropicBaseUrl: `http://127.0.0.1:${upstream.port}`,
+      anthropicApiKey: "sk-ant-real",
+      egress: { endpoint: { protocol: "http", host: "127.0.0.1", port: dead.port }, bypass: [] },
+    })
+    const res = await httpRequest(`${proxy.baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": proxy.apiKey },
+      body: "{}",
+    })
+    expect(res.status).toBe(502)
+    expect(JSON.parse(res.body).error.message).toContain("could not reach proxy")
+    expect(direct).toBe(0)
+  })
+})

@@ -136,6 +136,10 @@ pub fn build_router(state: SharedState) -> Router {
         .route(
             "/api/dev/gateway/route-ticket",
             post(handlers::gateway_route_ticket),
+        )
+        .route(
+            "/api/dev/gateway/route-ticket/revoke",
+            post(handlers::gateway_route_ticket_revoke),
         );
 
     #[cfg(all(feature = "agent-debug", desktop))]
@@ -204,7 +208,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    const DOCUMENTED_DEV_ROUTES: [&str; 21] = [
+    const DOCUMENTED_DEV_ROUTES: [&str; 22] = [
         "/api/dev/health",
         "/api/dev/plugins/installed",
         "/api/dev/plugins/install",
@@ -226,6 +230,7 @@ mod tests {
         "/api/dev/provider-operations/manifest",
         "/api/dev/provider-operations/execute",
         "/api/dev/gateway/route-ticket",
+        "/api/dev/gateway/route-ticket/revoke",
     ];
 
     #[test]

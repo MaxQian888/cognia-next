@@ -3,7 +3,13 @@
  */
 
 import type { SpawnOptions } from "node:child_process"
-import { buildAgentConfig, codexProviderOverrides, launchAgent } from "./agent-launcher"
+import {
+  AMBIENT_CREDENTIAL_ENV,
+  buildAgentConfig,
+  buildChildEnv,
+  codexProviderOverrides,
+  launchAgent,
+} from "./agent-launcher"
 
 describe("buildAgentConfig", () => {
   it("builds claude config with correct env and args", () => {
@@ -314,5 +320,112 @@ describe("launchAgent", () => {
       { spawnAgent: async () => 42 }
     )
     expect(exitCode).toBe(42)
+  })
+})
+
+describe("buildChildEnv", () => {
+  const base = {
+    agent: "claude" as const,
+    gatewayBaseUrl: "http://127.0.0.1:47823",
+    gatewayApiKey: "sk-cognia-rt-1",
+    cwd: "/tmp",
+  }
+
+  it("strips every ambient credential and routing override from the parent", () => {
+    const parent = {
+      PATH: "/bin",
+      ANTHROPIC_API_KEY: "sk-ant-users-own",
+      ANTHROPIC_BASE_URL: "https://somewhere.else",
+      CLAUDE_CODE_OAUTH_TOKEN: "oauth-users-own",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      OPENAI_API_KEY: "sk-openai-users-own",
+      OPENAI_BASE_URL: "https://elsewhere",
+      COGNIA_GATEWAY_KEY: "stale-key",
+    }
+    const env = buildChildEnv(base, buildAgentConfig(base).env, parent)
+    for (const name of AMBIENT_CREDENTIAL_ENV) {
+      if (
+        name === "ANTHROPIC_API_KEY" ||
+        name === "ANTHROPIC_AUTH_TOKEN" ||
+        name === "ANTHROPIC_BASE_URL"
+      )
+        continue
+      expect(env[name]).toBeUndefined()
+    }
+    // The gateway route is the only credential left, and it is ours.
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-cognia-rt-1")
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("sk-cognia-rt-1")
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:47823")
+    expect(env.PATH).toBe("/bin")
+  })
+
+  it("does the same for codex, keeping only the gateway key under its own name", () => {
+    const codex = { ...base, agent: "codex" as const }
+    const env = buildChildEnv(codex, buildAgentConfig(codex).env, {
+      OPENAI_API_KEY: "sk-openai-users-own",
+      COGNIA_GATEWAY_KEY: "stale",
+    })
+    expect(env.OPENAI_API_KEY).toBeUndefined()
+    expect(env.COGNIA_GATEWAY_KEY).toBe("sk-cognia-rt-1")
+    expect(env.OPENAI_BASE_URL).toBe("http://127.0.0.1:47823/v1")
+  })
+
+  it("applies the proxy plan and the isolated home, with the agent route on top", () => {
+    const env = buildChildEnv(
+      {
+        ...base,
+        homeEnv: { CLAUDE_CONFIG_DIR: "/home/u/.cognia/x/claude/default" },
+        proxyEnv: {
+          set: { HTTPS_PROXY: "http://p:8080", NO_PROXY: "localhost,127.0.0.1,::1" },
+          unset: [],
+        },
+      },
+      buildAgentConfig(base).env,
+      { HTTPS_PROXY: "http://shell-proxy:1", CLAUDE_CONFIG_DIR: "/home/u/.claude" }
+    )
+    expect(env.HTTPS_PROXY).toBe("http://p:8080")
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1,::1")
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/home/u/.cognia/x/claude/default")
+  })
+
+  it("removes what the proxy plan says must not be inherited", () => {
+    const env = buildChildEnv(
+      { ...base, proxyEnv: { set: {}, unset: ["HTTPS_PROXY", "https_proxy"] } },
+      buildAgentConfig(base).env,
+      { HTTPS_PROXY: "http://shell-proxy:1", https_proxy: "http://shell-proxy:1", HOME: "/h" }
+    )
+    expect(env.HTTPS_PROXY).toBeUndefined()
+    expect(env.https_proxy).toBeUndefined()
+    expect(env.HOME).toBe("/h")
+  })
+
+  it("leaves a shared home alone", () => {
+    const env = buildChildEnv({ ...base, homeEnv: {} }, buildAgentConfig(base).env, {
+      CLAUDE_CONFIG_DIR: "/home/u/.claude",
+    })
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/home/u/.claude")
+  })
+
+  it("is what launchAgent actually spawns with", async () => {
+    let spawned: NodeJS.ProcessEnv | undefined
+    const previous = process.env.CLAUDE_CODE_OAUTH_TOKEN
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "must-not-leak"
+    try {
+      await launchAgent(
+        { ...base, homeEnv: { CLAUDE_CONFIG_DIR: "/iso" } },
+        {
+          spawnAgent: async (_cmd, _args, opts) => {
+            spawned = opts.env
+            return 0
+          },
+        }
+      )
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = previous
+    }
+    expect(spawned?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    expect(spawned?.CLAUDE_CONFIG_DIR).toBe("/iso")
+    expect(spawned?.ANTHROPIC_API_KEY).toBe("sk-cognia-rt-1")
   })
 })
