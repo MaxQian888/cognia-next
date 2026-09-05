@@ -326,6 +326,7 @@ describe("sendSpecFromResolved", () => {
 describe("runtime capability tables", () => {
   it("only claude-agent-sdk offers native subagents; ai-sdk never steers", () => {
     expect(RUNTIME_CAPABILITIES["claude-agent-sdk"]).toContain("subagents.native")
+    expect(RUNTIME_CAPABILITIES["ai-sdk"]).toContain("session.resume")
     expect(RUNTIME_CAPABILITIES["ai-sdk"]).not.toContain("subagents.native")
 
     // Steering is served by the claude rail and the external rail, and by

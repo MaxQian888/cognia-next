@@ -105,3 +105,28 @@ test("resolveForToolCall splits on background and pipe operators", () => {
   assert.equal(resolveForToolCall(rs, "Bash", { command: "sleep 1 & git push" }), "deny")
   assert.equal(resolveForToolCall(rs, "Bash", { command: "cat x | git push" }), "deny")
 })
+
+test("known first-party process aliases share Bash deny rules", () => {
+  const rules = { Bash: { "git push*": "deny" } }
+  assert.equal(
+    resolveForToolCall(rules, "mcp__cognia-tools__start_process", {
+      program: "git",
+      args: ["push"],
+    }),
+    "deny"
+  )
+  assert.equal(
+    resolveForToolCall(rules, "mcp__cognia-tools__shell_execute_advanced", {
+      command: "git",
+      args: ["push"],
+    }),
+    "deny"
+  )
+  assert.equal(
+    resolveForToolCall(rules, "mcp__third-party__start_process", {
+      program: "git",
+      args: ["push"],
+    }),
+    "ask"
+  )
+})

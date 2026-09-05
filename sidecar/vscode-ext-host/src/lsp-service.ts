@@ -73,6 +73,7 @@ export interface LspStartParams {
   command: string
   args?: string[]
   env?: Record<string, string>
+  inheritEnv?: boolean
   cwd?: string
   transport?: "stdio" | "socket"
   endpoint?: string
@@ -282,6 +283,7 @@ export class LspService {
       command: params.command,
       args: params.args,
       env: params.env,
+      inheritEnv: params.inheritEnv,
       cwd: params.cwd,
       transport: params.transport ?? "stdio",
       endpoint: params.endpoint,

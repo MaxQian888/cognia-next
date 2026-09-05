@@ -30,6 +30,7 @@ export const CONTROL_METHODS = new Set([
   "setMcpPermissionModeOverride",
   "setMcpServers",
   "setModel",
+  "setPermissionMode",
   "steer",
   "stopTask",
   "supportedAgents",
@@ -67,6 +68,7 @@ export const CONTROL_METHOD_CAPABILITIES = {
   setMcpPermissionModeOverride: "mcp.dynamic",
   setMcpServers: "mcp.dynamic",
   setModel: "set-model",
+  setPermissionMode: "permissions.set-mode",
   steer: "steer",
   stopTask: "tasks.background",
   supportedAgents: "subagents.manage",
@@ -102,6 +104,8 @@ export function controlMethodCapability(method) {
 export function controlArgs(method, params) {
   const p = params ?? {}
   switch (method) {
+    case "setPermissionMode":
+      return [p.mode]
     case "setModel":
       return [p.model]
     case "reconnectMcpServer":
@@ -154,6 +158,12 @@ export function controlParamError(method, params) {
   const p = params ?? {}
   const str = (v) => typeof v === "string" && v.length > 0
   switch (method) {
+    case "setPermissionMode":
+      return ["default", "plan", "acceptEdits", "bypassPermissions", "dontAsk", "auto"].includes(
+        p.mode
+      )
+        ? null
+        : "invalid_permission_mode"
     case "setModel":
       // `undefined` is meaningful here — the SDK reads it as "back to default".
       return p.model === undefined || str(p.model) ? null : "invalid_model"

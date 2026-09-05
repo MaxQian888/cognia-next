@@ -138,6 +138,7 @@ export const RUNTIME_CAPABILITIES: Record<AgentRuntimeAdapterId, readonly AgentC
     "startup.prewarm",
   ],
   "ai-sdk": [
+    "session.resume",
     "streaming",
     "session.multi-turn",
     "tools.ordinary",

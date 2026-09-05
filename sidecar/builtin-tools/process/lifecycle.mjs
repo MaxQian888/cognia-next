@@ -16,7 +16,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText } from "../safety.mjs"
-import { execFileAsync } from "../shared/exec.mjs"
+import { execFileAsync, sandboxedProcessTarget, sandboxedProcessEnv } from "../shared/exec.mjs"
 import { headTruncate } from "../shared/truncate.mjs"
 import { isProgramAllowed, trackedPids, MAX_OUTPUT_BYTES } from "./inventory.mjs"
 
@@ -53,6 +53,8 @@ async function execStartProcess(args, ctx = {}) {
     if (!isProgramAllowed(args.program)) {
       return toolError(`program not on allowlist: ${args.program}`)
     }
+    const cwd = args.cwd ?? ctx.cwd
+    const target = sandboxedProcessTarget(args.program, args.args, cwd, ctx.builtinProcessSandbox)
     if (args.detached) {
       // Preferred path: a supervised background job. `detached` here means
       // "return immediately" (the tool's documented contract), NOT "outlive
@@ -60,10 +62,13 @@ async function execStartProcess(args, ctx = {}) {
       if (bgShells) {
         const entry = await bgShells.spawnBackground({
           command: [args.program, ...args.args].join(" "),
-          shell: args.program,
-          shellArgs: args.args,
-          cwd: args.cwd,
+          shell: target.command,
+          shellArgs: target.args,
+          cwd,
           label: args.program,
+          ...(ctx.builtinProcessSandbox
+            ? { env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox) }
+            : {}),
         })
         // Record the pid here too. This is the path that actually runs in every
         // production wiring (`collectCogniaToolDefs` always supplies bgShells),
@@ -83,6 +88,8 @@ async function execStartProcess(args, ctx = {}) {
       }
       // Fallback (no supervisor, e.g. the standalone tool bridge): the legacy
       // fire-and-forget spawn. Output is lost and the child is unsupervised.
+      if (ctx.builtinProcessSandbox)
+        return toolError("Background process supervisor is unavailable", "start_process")
       const { spawn } = await import("node:child_process")
       const child = spawn(args.program, args.args, {
         cwd: args.cwd,
@@ -96,8 +103,11 @@ async function execStartProcess(args, ctx = {}) {
     }
     // Synchronous-ish: capture output up to timeout.
     try {
-      const { stdout, stderr } = await execFileAsync(args.program, args.args, {
-        cwd: args.cwd,
+      const { stdout, stderr } = await execFileAsync(target.command, target.args, {
+        cwd,
+        ...(ctx.builtinProcessSandbox
+          ? { env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox) }
+          : {}),
         timeout: args.timeoutSecs * 1000,
         maxBuffer: MAX_OUTPUT_BYTES,
         windowsHide: true,

@@ -230,6 +230,10 @@ const BASH_TOOLS = new Set(["bash", "Bash"])
  */
 const PATH_KEYS = [
   "file_path",
+  "filePath",
+  "target",
+  "target_path",
+  "workdir",
   "path",
   "notebook_path",
   "source",
@@ -254,7 +258,9 @@ const PATH_ARRAY_KEYS = ["paths"]
 /** Reduce a namespaced tool name (`mcp__server__name`) to its bare `name`. */
 export function bareToolName(toolName) {
   const parts = String(toolName).split("__")
-  return parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
+  return parts.length >= 3 && parts[0] === "mcp" && parts[1] === "cognia-tools"
+    ? parts.slice(2).join("__")
+    : String(toolName)
 }
 
 /** Pull the file/dir path targets from a tool-call input. */
@@ -263,7 +269,8 @@ function collectPathTargets(bare, obj) {
     // Default workdir is the cwd (inside the root) — only an explicit,
     // out-of-tree workdir is a target worth checking. The command string is
     // deliberately NOT parsed; see the module header.
-    const wd = typeof obj.workdir === "string" && obj.workdir.trim() ? obj.workdir : null
+    const directory = obj.workdir ?? obj.cwd
+    const wd = typeof directory === "string" && directory.trim() ? directory : null
     return wd ? [wd] : []
   }
   const out = []
@@ -276,7 +283,40 @@ function collectPathTargets(bare, obj) {
     if (!Array.isArray(arr)) continue
     for (const v of arr) if (typeof v === "string" && v.trim()) out.push(v)
   }
+  for (const key of ["edits", "files", "operations"]) {
+    if (Array.isArray(obj[key])) {
+      for (const entry of obj[key]) {
+        if (entry && typeof entry === "object") out.push(...collectPathTargets(bare, entry))
+      }
+    }
+  }
   return out
+}
+
+/** Enforce the host-owned scope immediately before a native tool body runs. */
+export function assertToolCallWithinRoots(policy, toolName, input, cwd) {
+  if (!policy) return
+  const sandboxAliases = {
+    "mcp__cognia-plugin-tools__sandbox_write": "write",
+    "mcp__cognia-plugin-tools__sandbox_edit": "edit",
+    "mcp__cognia-plugin-tools__sandbox_text_editor": input?.command === "view" ? "read" : "edit",
+    "mcp__cognia-plugin-tools__sandbox_bash": "bash",
+  }
+  const bare = sandboxAliases[toolName] ?? bareToolName(toolName)
+  if (!WRITE_TOOLS.has(bare) && !READ_TOOLS.has(bare) && !BASH_TOOLS.has(bare)) return
+  const write = WRITE_TOOLS.has(bare) || BASH_TOOLS.has(bare)
+  for (const target of collectPathTargets(bare, input && typeof input === "object" ? input : {})) {
+    const verdict = classifyPathForConfinement(
+      cwd,
+      policy.writableRoots ?? [],
+      target,
+      write ? "write" : "read"
+    )
+    if (verdict !== "allow")
+      throw new Error(
+        `workspace sandbox refused ${toolName}: ${target} is outside sandbox.policy.writableRoots or is protected. Add the required directory to sandbox.policy.writableRoots and retry; approval cannot widen this fixed scope.`
+      )
+  }
 }
 
 /** Verdict rank for composing confinement + ruleset decisions. */

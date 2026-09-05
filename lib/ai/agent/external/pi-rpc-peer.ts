@@ -160,6 +160,40 @@ export class PiFrameDecoder {
   }
 }
 
+/**
+ * Is this text a whole frame that merely lost its terminator?
+ *
+ * Parse is the only honest test. A length check cannot tell a complete 63k
+ * frame from a truncated one, and a bracket count cannot either once a string
+ * payload contains braces.
+ */
+export function isCompleteFrame(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as Record<string, unknown>).type === "string"
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Enough of a broken frame to recognise it, and no more.
+ *
+ * A truncated frame is the only evidence of what the agent was in the middle
+ * of saying, so an error that quotes none of it leaves nothing to act on. It
+ * is also agent output, which can be long and can carry anything, so this
+ * takes the head and says how much it left behind.
+ */
+export function frameHint(residue: string, limit = 160): string {
+  const head = residue.slice(0, limit).replace(/\s+/gu, " ").trim()
+  return residue.length > limit ? `${head}…` : head
+}
+
 // ============================================================================
 // Peer
 // ============================================================================
@@ -331,9 +365,19 @@ export class PiRpcPeer {
   }
 
   /**
-   * Report end-of-stream. Any residue is a truncated frame — surfaced as a
-   * protocol error, because a half-written frame means the process died
-   * mid-send rather than closing cleanly.
+   * Report end-of-stream.
+   *
+   * Whatever is left in the decoder is a frame that never got its newline, and
+   * there are two very different reasons for that. The process died halfway
+   * through writing, which is a protocol error worth reporting. Or the process
+   * finished the frame and exited without a trailing newline, which is what a
+   * lot of programs do on their last line and is not an error at all.
+   *
+   * Telling them apart is a `JSON.parse`. Reporting the truncation without
+   * trying threw away complete final frames and, because the report is
+   * terminal, failed the whole turn over the last message of it: a 63k-char
+   * reply was discarded and the user was told the stream "ended mid-frame",
+   * which described the newline and not one word of what they had lost.
    */
   endOfStream(): void {
     if (this.closed) return
@@ -341,14 +385,20 @@ export class PiRpcPeer {
     try {
       residue = this.decoder.flushResidue()
     } catch {
-      // An over-limit residue is already a lost cause; the reject below is the
+      // An over-limit residue is already a lost cause; the report below is the
       // signal that matters.
     }
-    if (residue !== null && residue.trim() !== "") {
-      this.opts.onProtocolError?.(
-        new PiFrameError(`Pi RPC stream ended mid-frame (${residue.length} chars discarded)`)
-      )
+    if (residue === null || residue.trim() === "") return
+    if (isCompleteFrame(residue)) {
+      // A whole frame, delivered exactly as if the newline had arrived.
+      this.route(residue)
+      return
     }
+    this.opts.onProtocolError?.(
+      new PiFrameError(
+        `Pi RPC stream ended mid-frame (${residue.length} chars discarded): ${frameHint(residue)}`
+      )
+    )
   }
 
   /** Reject every in-flight command. Call on disconnect so callers don't hang. */

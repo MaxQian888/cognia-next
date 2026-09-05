@@ -143,6 +143,17 @@ const INFORMATIONAL_UI_METHODS = new Set([
   "set_editor_text",
 ])
 
+/** Pi UI bookkeeping remains available to audit consumers, without activity text. */
+export type PiDiagnosticProgressEvent = Extract<ExternalAgentEvent, { type: "progress" }> & {
+  piDiagnostic: PiEvent
+}
+
+export function isPiDiagnosticProgressEvent(
+  event: ExternalAgentEvent
+): event is PiDiagnosticProgressEvent {
+  return event.type === "progress" && "piDiagnostic" in event
+}
+
 /**
  * Map one Pi event onto zero or more canonical events.
  *
@@ -272,7 +283,17 @@ export function mapPiEvent(event: PiEvent, ctx: PiEventMapContext): ExternalAgen
     default: {
       const message = PROGRESS_EVENTS[event.type]
       if (!message) return []
-      return [{ ...base, type: "progress", progress: -1, message }]
+      return [
+        {
+          ...base,
+          type: "progress",
+          progress: -1,
+          message,
+          ...(event.type === "turn_end" || event.type === "agent_end"
+            ? { piDiagnostic: event }
+            : {}),
+        },
+      ]
     }
   }
 }
@@ -344,7 +365,15 @@ function mapExtensionUiRequest(
       asString(event.title) ??
       asString(event.text) ??
       `pi.${method}`
-    return [{ ...base, type: "progress", progress: -1, message: text }]
+    return [
+      {
+        ...base,
+        type: "progress",
+        progress: -1,
+        message: text,
+        ...(method !== "notify" ? { piDiagnostic: event } : {}),
+      },
+    ]
   }
 
   // Dialog methods block the extension until answered. Most are the extension
@@ -355,6 +384,7 @@ function mapExtensionUiRequest(
   // which carries a versioned marker. That is a permission decision about
   // Pi's own `bash`/`write`/`edit`, and it belongs in the tool approval dialog
   // with its allow/deny/allow-always affordances, not in a generic form.
+  if (!["confirm", "select", "input", "editor"].includes(method)) return []
   const id = asString(event.id)
   if (!id) return []
 

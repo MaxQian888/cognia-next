@@ -828,7 +828,7 @@ describe("CodexAppServerAdapter", () => {
       expect(resume.params).toMatchObject({
         threadId: "thr_res",
         cwd: "/repo",
-        approvalPolicy: "on-request",
+        approvalPolicy: "untrusted",
         developerInstructions: "You are helpful.",
         config: {
           mcp_servers: {
@@ -840,7 +840,7 @@ describe("CodexAppServerAdapter", () => {
       // The next turn must not re-send the system prompt as a text prepend.
       const it = iterator(adapter, session.id, userMessage("continue"))
       const first = it.next()
-      feed("turn/completed", { threadId: "thr_res", turn: { id: "t1", status: "completed" } })
+      feed("turn/completed", { threadId: "thr_res", turn: { id: "turn_1", status: "completed" } })
       let r = await first
       while (!r.done) r = await it.next()
       const turn = lastWritten((m) => m.method === "turn/start")!
@@ -949,7 +949,7 @@ describe("CodexAppServerAdapter", () => {
       expect(lastWritten((message) => message.method === "turn/start")).toBeDefined()
       feed("turn/completed", {
         threadId: session.id,
-        turn: { id: "turn_compact", status: "completed" },
+        turn: { id: "turn_1", status: "completed" },
       })
       await compaction
 
@@ -1046,17 +1046,27 @@ describe("CodexAppServerAdapter", () => {
       expect(decision?.result).toEqual({ decision: "decline" })
     })
 
-    it("auto-accepts file changes in acceptEdits mode", async () => {
+    it("requires user approval for escalated file changes in acceptEdits mode", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession({ permissionMode: "acceptEdits" })
       const it = iterator(adapter, session.id, userMessage("edit"))
       const first = it.next()
-      feedServerRequest(61, "item/fileChange/requestApproval", { threadId: "thr_1", itemId: "fc2" })
-      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
-      let r = await first
-      while (!r.done) r = await it.next()
-      const decision = lastWritten((m) => m.id === 61 && m.result !== undefined)
-      expect(decision?.result).toEqual({ decision: "accept" })
+      feedServerRequest(61, "item/fileChange/requestApproval", {
+        threadId: session.id,
+        itemId: "fc2",
+        grantRoot: "/outside",
+      })
+      const request = await first
+      expect(request.value?.type).toBe("permission_request")
+      expect(lastWritten((m) => m.id === 61 && m.result !== undefined)).toBeUndefined()
+      await adapter.respondToPermission(session.id, { requestId: "fc2", granted: false })
+      feed("turn/completed", { threadId: session.id, turn: { id: "turn_1", status: "completed" } })
+      let result = await it.next()
+      while (!result.done) result = await it.next()
+      expect(lastWritten((m) => m.id === 61 && m.result !== undefined)?.result).toEqual({
+        decision: "decline",
+      })
+      await adapter.disconnect()
     })
 
     it("surfaces item/tool/requestUserInput as an interactive permission_request and forwards answers", async () => {
@@ -1561,6 +1571,647 @@ describe("CodexAppServerAdapter", () => {
       const interrupt = lastWritten((m) => m.method === "turn/interrupt")
       expect(interrupt).toBeDefined()
       expect((interrupt!.params as Record<string, unknown>).turnId).toBe("turn_1")
+    })
+  })
+
+  describe("native turn ownership regressions", () => {
+    function holdAdmission() {
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      native.sendToExternalAgent.mockImplementationOnce(
+        async (_agentId: string, message: string) => {
+          writes.push(message)
+        }
+      )
+    }
+    function admit(id: unknown, turnId: string) {
+      stdoutCb?.({
+        agentId: "proc-1",
+        data: JSON.stringify({ id, result: { turn: { id: turnId } } }),
+      })
+    }
+    async function flush() {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    it("interrupts a cancelled admission at turn/started without waiting for its reply", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      holdAdmission()
+      const it = iterator(adapter, session.id, userMessage("fixture"))
+      const first = it.next()
+      await adapter.cancel(session.id)
+      const start = lastWritten((m) => m.method === "turn/start")!
+      feed("turn/started", { threadId: session.id, turn: { id: "pending" } })
+      await flush()
+      expect(lastWritten((m) => m.method === "turn/interrupt")?.params).toEqual({
+        threadId: session.id,
+        turnId: "pending",
+      })
+      feed("turn/completed", {
+        threadId: session.id,
+        turn: { id: "pending", status: "interrupted" },
+      })
+      admit(start.id, "pending")
+      let result = await first
+      while (!result.done) result = await it.next()
+      await flush()
+      expect(
+        writes.map((m) => JSON.parse(m)).filter((m) => m.method === "turn/interrupt")
+      ).toHaveLength(1)
+      await adapter.disconnect()
+    })
+
+    it("ignores old completion both before and after the new turn is identified", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      holdAdmission()
+      const it = iterator(adapter, session.id, userMessage("fixture"))
+      const first = it.next()
+      let settled = false
+      void first.then(() => {
+        settled = true
+      })
+      const start = lastWritten((m) => m.method === "turn/start")!
+      feed("turn/completed", { threadId: session.id, turn: { id: "old", status: "completed" } })
+      await flush()
+      expect(settled).toBe(false)
+      admit(start.id, "new")
+      await flush()
+      feed("turn/completed", { threadId: session.id, turn: { id: "old", status: "completed" } })
+      await flush()
+      expect(settled).toBe(false)
+      feed("turn/completed", { threadId: session.id, turn: { id: "new", status: "completed" } })
+      let result = await first
+      while (!result.done) result = await it.next()
+      await adapter.disconnect()
+    })
+
+    it("releases closed admission without resurrecting state after resume", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      holdAdmission()
+      const it = iterator(adapter, session.id, userMessage("fixture"))
+      const first = it.next()
+      const start = lastWritten((m) => m.method === "turn/start")!
+      await adapter.closeSession(session.id)
+      let result = await first
+      while (!result.done) result = await it.next()
+      responders["thread/resume"] = () => ({ thread: { id: session.id } })
+      await adapter.resumeSession(session.id)
+      admit(start.id, "closed-turn")
+      await flush()
+      expect(lastWritten((m) => m.method === "turn/interrupt")?.params).toEqual({
+        threadId: session.id,
+        turnId: "closed-turn",
+      })
+      await expect(adapter.steerTurn(session.id, "stale")).rejects.toThrow("No active turn")
+      const next = iterator(adapter, session.id, userMessage("next"))
+      const nextFirst = next.next()
+      await flush()
+      feed("turn/completed", { threadId: session.id, turn: { id: "turn_1", status: "completed" } })
+      result = await nextFirst
+      while (!result.done) result = await next.next()
+      await adapter.disconnect()
+    })
+
+    it.each([
+      ["close", false],
+      ["delete", false],
+      ["thread/closed", false],
+      ["thread/deleted", false],
+      ["close", true],
+      ["delete", true],
+      ["thread/closed", true],
+      ["thread/deleted", true],
+    ] as const)(
+      "revokes %s admission before late notifications (old reply first: %s)",
+      async (termination, oldReplyFirst) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession()
+        holdAdmission()
+        const old = iterator(adapter, session.id, userMessage("A"))
+        const oldFirst = old.next()
+        const admissionA = lastWritten((m) => m.method === "turn/start")!
+        if (termination === "close") await adapter.closeSession(session.id)
+        else if (termination === "delete") await adapter.deleteSession(session.id)
+        else feed(termination, { threadId: session.id })
+        let oldResult = await oldFirst
+        while (!oldResult.done) oldResult = await old.next()
+        expect(adapter.getSession(session.id)).toBeUndefined()
+        responders["thread/resume"] = () => ({ thread: { id: session.id } })
+        await adapter.resumeSession(session.id)
+        holdAdmission()
+        const current = iterator(adapter, session.id, userMessage("B"))
+        const currentFirst = current.next()
+        let settled = false
+        void currentFirst.then(() => {
+          settled = true
+        })
+        const admissionB = lastWritten((m) => m.method === "turn/start")!
+        if (oldReplyFirst) {
+          admit(admissionA.id, "A")
+          await flush()
+        }
+        feed("turn/started", { threadId: session.id, turn: { id: "A" } })
+        feed("turn/completed", { threadId: session.id, turn: { id: "A", status: "completed" } })
+        await flush()
+        expect(settled).toBe(false)
+        await expect(adapter.steerTurn(session.id, "must not target A")).rejects.toThrow(
+          "No active turn"
+        )
+        admit(admissionB.id, "B")
+        await flush()
+        if (!oldReplyFirst) {
+          admit(admissionA.id, "A")
+          await flush()
+        }
+        // Also reject stale notifications once B is active and A is identified.
+        feed("turn/started", { threadId: session.id, turn: { id: "A" } })
+        feed("turn/completed", { threadId: session.id, turn: { id: "A", status: "completed" } })
+        await flush()
+        expect(settled).toBe(false)
+        await adapter.steerTurn(session.id, "B remains active")
+        expect(lastWritten((m) => m.method === "turn/steer")?.params).toMatchObject({
+          expectedTurnId: "B",
+        })
+        expect(lastWritten((m) => m.method === "turn/interrupt")?.params).toEqual({
+          threadId: session.id,
+          turnId: "A",
+        })
+        feed("turn/completed", { threadId: session.id, turn: { id: "B", status: "completed" } })
+        let result = await currentFirst
+        while (!result.done) result = await current.next()
+        await adapter.disconnect()
+      }
+    )
+
+    it("retains unidentified revoked admission protection after its request rejects", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      holdAdmission()
+      const old = iterator(adapter, session.id, userMessage("A"))
+      const oldFirst = old.next()
+      const admissionA = lastWritten((m) => m.method === "turn/start")!
+      await adapter.closeSession(session.id)
+      let oldResult = await oldFirst
+      while (!oldResult.done) oldResult = await old.next()
+      responders["thread/resume"] = () => ({ thread: { id: session.id } })
+      await adapter.resumeSession(session.id)
+      stdoutCb?.({
+        agentId: "proc-1",
+        data: JSON.stringify({
+          id: admissionA.id,
+          error: { code: -32000, message: "Unknown admission outcome" },
+        }),
+      })
+      await flush()
+      holdAdmission()
+      const current = iterator(adapter, session.id, userMessage("B"))
+      const first = current.next()
+      let settled = false
+      void first.then(() => {
+        settled = true
+      })
+      const admissionB = lastWritten((m) => m.method === "turn/start")!
+      feed("turn/started", { threadId: session.id, turn: { id: "A" } })
+      feed("turn/completed", { threadId: session.id, turn: { id: "A", status: "completed" } })
+      await flush()
+      expect(settled).toBe(false)
+      await expect(adapter.steerTurn(session.id, "stale")).rejects.toThrow("No active turn")
+      admit(admissionB.id, "B")
+      await flush()
+      await adapter.steerTurn(session.id, "current")
+      expect(lastWritten((m) => m.method === "turn/steer")?.params).toMatchObject({
+        expectedTurnId: "B",
+      })
+      feed("turn/completed", { threadId: session.id, turn: { id: "B", status: "completed" } })
+      let result = await first
+      while (!result.done) result = await current.next()
+      await adapter.disconnect()
+    })
+
+    it.each([
+      "item/commandExecution/requestApproval",
+      "item/tool/requestUserInput",
+      "mcpServer/elicitation/request",
+    ])("rejects cross-session responses for %s without consuming the request", async (method) => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const params =
+        method === "item/tool/requestUserInput"
+          ? {
+              threadId: session.id,
+              itemId: "owned",
+              questions: [{ id: "q", question: "Pick", options: [{ label: "Yes" }] }],
+            }
+          : method === "mcpServer/elicitation/request"
+            ? {
+                threadId: session.id,
+                requestId: "owned",
+                serverName: "local",
+                mode: "form",
+                message: "Pick",
+                requestedSchema: { type: "object", properties: { name: { type: "string" } } },
+              }
+            : { threadId: session.id, itemId: "owned", command: "pwd" }
+      feedServerRequest(901, method, params)
+      await flush()
+      // MCP elicitation uses its JSON-RPC id as the UI request id.
+      const requestId = method === "mcpServer/elicitation/request" ? "mcp_elicitation_901" : "owned"
+      await expect(
+        adapter.respondToPermission("other-session", { requestId, granted: true })
+      ).rejects.toThrow("different session")
+      expect(lastWritten((m) => m.id === 901 && m.result !== undefined)).toBeUndefined()
+      await adapter.respondToPermission(session.id, { requestId, granted: false })
+      await flush()
+      expect(lastWritten((m) => m.id === 901 && m.result !== undefined)).toBeDefined()
+      await adapter.disconnect()
+    })
+  })
+
+  describe("native permission boundaries", () => {
+    const cases = [
+      ["default", "read-only", "readOnly", "untrusted"],
+      ["plan", "read-only", "readOnly", "never"],
+      ["dontAsk", "read-only", "readOnly", "never"],
+      ["acceptEdits", "workspace-write", "workspaceWrite", "untrusted"],
+      ["bypassPermissions", "danger-full-access", "dangerFullAccess", "never"],
+    ] as const
+
+    it.each(cases)(
+      "enforces %s on start, resume, and the next turn despite permissive metadata",
+      async (permissionMode, sandbox, type, approvalPolicy) => {
+        responders["thread/resume"] = () => ({ thread: { id: "resumed" } })
+        const adapter = await connectedAdapter()
+        const metadata = {
+          sandboxMode: "dangerFullAccess",
+          networkAccess: true,
+          writableRoots: ["/"],
+          codexOptions: {
+            sandboxMode: "dangerFullAccess",
+            networkAccess: true,
+            writableRoots: ["/"],
+          },
+        }
+        const session = await adapter.createSession({ permissionMode, metadata })
+        expect(lastWritten((message) => message.method === "thread/start")?.params).toMatchObject({
+          sandbox,
+          approvalPolicy,
+          approvalsReviewer: "user",
+        })
+        const resumed = await adapter.resumeSession("resumed", { permissionMode, metadata })
+        expect(lastWritten((message) => message.method === "thread/resume")?.params).toMatchObject({
+          sandbox,
+          approvalPolicy,
+          approvalsReviewer: "user",
+        })
+        for (const current of [session, resumed]) {
+          const it = iterator(adapter, current.id, userMessage("offline policy fixture"))
+          const first = it.next()
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          const params = lastWritten((message) => message.method === "turn/start")
+            ?.params as Record<string, unknown>
+          expect(params).toMatchObject({ approvalPolicy, approvalsReviewer: "user" })
+          expect(params.sandboxPolicy).toEqual(
+            type === "dangerFullAccess"
+              ? { type }
+              : type === "readOnly"
+                ? { type, networkAccess: false }
+                : {
+                    type,
+                    networkAccess: false,
+                    writableRoots: [],
+                    excludeTmpdirEnvVar: true,
+                    excludeSlashTmp: true,
+                  }
+          )
+          feed("turn/completed", {
+            threadId: current.id,
+            turn: { id: "turn_1", status: "completed" },
+          })
+          let result = await first
+          while (!result.done) result = await it.next()
+        }
+        await adapter.disconnect()
+      }
+    )
+
+    it("does not inherit a native sandbox when no metadata was supplied", async () => {
+      const adapter = await connectedAdapter()
+      await adapter.createSession()
+      expect(lastWritten((message) => message.method === "thread/start")?.params).toMatchObject({
+        sandbox: "read-only",
+        approvalPolicy: "untrusted",
+        approvalsReviewer: "user",
+      })
+      await adapter.disconnect()
+    })
+
+    it.each(["default", "plan", "dontAsk", "acceptEdits"] as const)(
+      "removes bypass privileges on the next %s turn",
+      async (mode) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession({
+          permissionMode: "bypassPermissions",
+          metadata: { sandboxMode: "dangerFullAccess", networkAccess: true, writableRoots: ["/"] },
+        })
+        await adapter.setSessionMode(session.id, mode)
+        const it = iterator(adapter, session.id, userMessage("offline policy fixture"))
+        const first = it.next()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(lastWritten((message) => message.method === "turn/start")?.params).toMatchObject({
+          approvalPolicy: mode === "default" || mode === "acceptEdits" ? "untrusted" : "never",
+          approvalsReviewer: "user",
+          sandboxPolicy: {
+            type: mode === "acceptEdits" ? "workspaceWrite" : "readOnly",
+            networkAccess: false,
+          },
+        })
+        feed("turn/completed", {
+          threadId: session.id,
+          turn: { id: "turn_1", status: "completed" },
+        })
+        let result = await first
+        while (!result.done) result = await it.next()
+        await adapter.disconnect()
+      }
+    )
+
+    it("rejects an option that exceeds the permission mode and reports the effective sandbox", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ metadata: { sandboxMode: "dangerFullAccess" } })
+      expect(
+        adapter.getConfigOptions(session.id)?.find((option) => option.id === "sandboxMode")
+          ?.currentValue
+      ).toBe("readOnly")
+      await expect(
+        adapter.setConfigOption(session.id, "sandboxMode", "dangerFullAccess")
+      ).rejects.toThrow("permission mode")
+      await adapter.disconnect()
+    })
+  })
+
+  describe("sandbox control truthfulness", () => {
+    it.each([
+      ["default", "readOnly", ["readOnly"]],
+      ["plan", "readOnly", ["readOnly"]],
+      ["dontAsk", "readOnly", ["readOnly"]],
+      ["acceptEdits", "workspaceWrite", ["readOnly", "workspaceWrite"]],
+      ["bypassPermissions", "dangerFullAccess", ["dangerFullAccess"]],
+    ] as const)(
+      "shows the effective %s sandbox and only permitted choices",
+      async (permissionMode, currentValue, values) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession({
+          permissionMode,
+          metadata: { sandboxMode: "dangerFullAccess" },
+        })
+        const option = adapter
+          .getConfigOptions(session.id)
+          ?.find((entry) => entry.id === "sandboxMode")
+        expect(option).toMatchObject({ currentValue, options: values.map((value) => ({ value })) })
+        expect(option?.options).toHaveLength(values.length)
+        await adapter.disconnect()
+      }
+    )
+
+    it.each([
+      ["default", "dangerFullAccess", "bypassPermissions"],
+      ["plan", "workspaceWrite", "acceptEdits"],
+      ["dontAsk", "workspaceWrite", "acceptEdits"],
+      ["acceptEdits", "dangerFullAccess", "bypassPermissions"],
+      ["bypassPermissions", "readOnly", "default"],
+    ] as const)(
+      "rejects %s → %s with an actionable mode instruction",
+      async (permissionMode, value, requiredMode) => {
+        const adapter = await connectedAdapter()
+        const session = await adapter.createSession({ permissionMode })
+        const before = adapter.getConfigOptions(session.id)
+        await expect(adapter.setConfigOption(session.id, "sandboxMode", value)).rejects.toThrow(
+          `Switch permission mode to ${requiredMode}`
+        )
+        expect(adapter.getConfigOptions(session.id)).toEqual(before)
+        expect(adapter.getSession(session.id)?.metadata?.sandboxMode).toBeUndefined()
+        await adapter.disconnect()
+      }
+    )
+
+    it("round-trips both advertised acceptEdits choices", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession({ permissionMode: "acceptEdits" })
+      for (const value of ["readOnly", "workspaceWrite"]) {
+        const options = await adapter.setConfigOption(session.id, "sandboxMode", value)
+        expect(options.find((entry) => entry.id === "sandboxMode")?.currentValue).toBe(value)
+        expect(adapter.getSession(session.id)?.metadata?.sandboxMode).toBe(value)
+      }
+      await adapter.disconnect()
+    })
+
+    it("publishes the new ceiling to mounted consumers immediately after a mode change", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("offline UI fixture"))
+      let next = it.next()
+      for (const [mode, currentValue, values] of [
+        ["acceptEdits", "workspaceWrite", ["readOnly", "workspaceWrite"]],
+        ["bypassPermissions", "dangerFullAccess", ["dangerFullAccess"]],
+        ["default", "readOnly", ["readOnly"]],
+        ["plan", "readOnly", ["readOnly"]],
+        ["dontAsk", "readOnly", ["readOnly"]],
+      ] as const) {
+        await adapter.setSessionMode(session.id, mode)
+        const event = (await next).value
+        expect(event?.type).toBe("config_options_update")
+        if (event?.type === "config_options_update") {
+          expect(event.configOptions.find((entry) => entry.id === "sandboxMode")).toMatchObject({
+            currentValue,
+            options: values.map((value) => ({ value })),
+          })
+        }
+        next = it.next()
+      }
+      feed("turn/completed", { threadId: session.id, turn: { id: "turn_1", status: "completed" } })
+      let result = await next
+      while (!result.done) result = await it.next()
+      await adapter.disconnect()
+    })
+  })
+
+  describe("native 0.150.1 regressions", () => {
+    it("loads all model catalog pages", async () => {
+      responders["model/list"] = ({ params }) =>
+        (params as { cursor?: string }).cursor
+          ? { data: [{ id: "second", displayName: "Second" }], nextCursor: null }
+          : { data: [{ id: "first", displayName: "First" }], nextCursor: "page-two" }
+      const adapter = await connectedAdapter()
+      expect(await adapter.listModels()).toEqual([
+        { id: "first", name: "First" },
+        { id: "second", name: "Second" },
+      ])
+      expect(lastWritten((message) => message.method === "model/list")?.params).toEqual({
+        includeHidden: false,
+        cursor: "page-two",
+      })
+      await adapter.disconnect()
+    })
+
+    it("rejects invalid sandbox options without changing session metadata", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      await expect(
+        adapter.setConfigOption(session.id, "sandboxMode", "workspace-write")
+      ).rejects.toThrow("Invalid value")
+      expect(adapter.getSession(session.id)?.metadata?.sandboxMode).toBeUndefined()
+      await adapter.disconnect()
+    })
+
+    it("interrupts delayed admission even after an aborted iterator closes", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      native.sendToExternalAgent.mockImplementationOnce(
+        async (_agentId: string, message: string) => {
+          writes.push(message)
+        }
+      )
+      const controller = new AbortController()
+      const it = adapter
+        .prompt(session.id, userMessage("local fixture"), { signal: controller.signal })
+        [Symbol.asyncIterator]()
+      const first = it.next()
+      controller.abort()
+      expect((await first).done).toBe(true)
+      await expect(iterator(adapter, session.id, userMessage("overlap")).next()).rejects.toThrow(
+        "already in progress"
+      )
+      const start = lastWritten((message) => message.method === "turn/start")!
+      stdoutCb?.({
+        agentId: "proc-1",
+        data: JSON.stringify({ id: start.id, result: { turn: { id: "delayed" } } }),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(lastWritten((message) => message.method === "turn/interrupt")?.params).toEqual({
+        threadId: session.id,
+        turnId: "delayed",
+      })
+      await adapter.disconnect()
+    })
+
+    it("hydrates the default thread.turns resume response", async () => {
+      responders["thread/resume"] = () => ({
+        thread: {
+          id: "saved",
+          turns: [
+            {
+              items: [
+                { id: "u", type: "userMessage", content: [{ type: "text", text: "saved input" }] },
+                { id: "a", type: "agentMessage", text: "saved answer" },
+              ],
+            },
+          ],
+        },
+        initialTurnsPage: null,
+      })
+      const adapter = await connectedAdapter()
+      const session = await adapter.resumeSession("saved")
+      expect(session.messages?.map((message) => message.content)).toEqual([
+        [{ type: "text", text: "saved input" }],
+        [{ type: "text", text: "saved answer" }],
+      ])
+      await adapter.disconnect()
+    })
+
+    it("gates resume overrides against managed requirements", async () => {
+      responders["configRequirements/read"] = () => ({
+        requirements: {
+          allowedSandboxModes: ["read-only"],
+        },
+      })
+      const adapter = await connectedAdapter()
+      await expect(
+        adapter.resumeSession("saved", { permissionMode: "bypassPermissions" })
+      ).rejects.toMatchObject({ reasonCode: "managed_policy_refused" })
+      expect(lastWritten((message) => message.method === "thread/resume")).toBeUndefined()
+      await adapter.disconnect()
+    })
+
+    it("routes distinct approval callbacks on the same command item independently", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      for (const [id, approvalId] of [
+        [301, "callback-a"],
+        [302, "callback-b"],
+      ] as const) {
+        feedServerRequest(id, "item/commandExecution/requestApproval", {
+          threadId: session.id,
+          turnId: "turn_1",
+          itemId: "parent-command",
+          approvalId,
+          command: "pwd",
+        })
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await adapter.respondToPermission(session.id, { requestId: "callback-a", granted: true })
+      await adapter.respondToPermission(session.id, { requestId: "callback-b", granted: false })
+      await Promise.resolve()
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(lastWritten((message) => message.id === 301)?.result).toEqual({ decision: "accept" })
+      expect(lastWritten((message) => message.id === 302)?.result).toEqual({ decision: "decline" })
+      await adapter.disconnect()
+    })
+
+    it("remembers cancellation before turn/start acknowledges the turn", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const native = jest.requireMock("@/lib/native/external-agent") as {
+        sendToExternalAgent: jest.Mock
+      }
+      native.sendToExternalAgent.mockImplementationOnce(
+        async (_agentId: string, message: string) => {
+          writes.push(message)
+        }
+      )
+      const it = iterator(adapter, session.id, userMessage("local fixture"))
+      const first = it.next()
+      await adapter.cancel(session.id)
+      const start = lastWritten((message) => message.method === "turn/start")!
+      stdoutCb?.({
+        agentId: "proc-1",
+        data: JSON.stringify({ id: start.id, result: { turn: { id: "delayed" } } }),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(lastWritten((message) => message.method === "turn/interrupt")?.params).toEqual({
+        threadId: session.id,
+        turnId: "delayed",
+      })
+      feed("turn/completed", {
+        threadId: session.id,
+        turn: { id: "delayed", status: "interrupted" },
+      })
+      let result = await first
+      while (!result.done) result = await it.next()
+      await adapter.disconnect()
+    })
+
+    it("does not resurrect a completed turn from a late start response", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      responders["turn/start"] = () => {
+        feed("turn/completed", {
+          threadId: session.id,
+          turn: { id: "turn_1", status: "completed" },
+        })
+        return { turn: { id: "turn_1" } }
+      }
+      for await (const event of adapter.prompt(session.id, userMessage("local fixture"))) void event
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await expect(adapter.steerTurn(session.id, "stale")).rejects.toThrow("No active turn")
+      await adapter.disconnect()
     })
   })
 
@@ -2121,6 +2772,7 @@ describe("CodexAppServerAdapter", () => {
     it("sends effort, summary, and sandboxPolicy on turn/start from session options", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession({
+        permissionMode: "acceptEdits",
         metadata: {
           codexOptions: {
             sandboxMode: "workspaceWrite",
@@ -2147,8 +2799,14 @@ describe("CodexAppServerAdapter", () => {
       expect(turn.params).toMatchObject({
         effort: "high",
         summary: "detailed",
-        sandboxPolicy: { type: "workspaceWrite", networkAccess: true, writableRoots: ["/extra"] },
-        approvalPolicy: "on-request",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          networkAccess: false,
+          writableRoots: [],
+          excludeTmpdirEnvVar: true,
+          excludeSlashTmp: true,
+        },
+        approvalPolicy: "untrusted",
       })
     })
 
@@ -2165,6 +2823,7 @@ describe("CodexAppServerAdapter", () => {
       const turn = lastWritten((m) => m.method === "turn/start")!
       expect((turn.params as { sandboxPolicy?: unknown }).sandboxPolicy).toEqual({
         type: "readOnly",
+        networkAccess: false,
       })
     })
 
@@ -2175,7 +2834,10 @@ describe("CodexAppServerAdapter", () => {
         ["workspaceWrite", "workspace-write"],
         ["dangerFullAccess", "danger-full-access"],
       ] as const) {
-        await adapter.createSession({ metadata: { codexOptions: { sandboxMode: configured } } })
+        await adapter.createSession({
+          permissionMode: configured === "dangerFullAccess" ? "bypassPermissions" : "acceptEdits",
+          metadata: { codexOptions: { sandboxMode: configured } },
+        })
         const started = lastWritten((m) => m.method === "thread/start")!
         expect((started.params as { sandbox?: unknown }).sandbox).toBe(wire)
       }
@@ -2300,7 +2962,7 @@ describe("CodexAppServerAdapter", () => {
         ["low", "medium", "high"]
       )
       const sandbox = options.find((o) => o.id === "sandboxMode")!
-      expect(sandbox.currentValue).toBe("workspaceWrite")
+      expect(sandbox.currentValue).toBe("readOnly")
 
       const updated = await adapter.setConfigOption(session.id, "reasoningEffort", "high")
       expect(updated.find((o) => o.id === "reasoningEffort")?.currentValue).toBe("high")

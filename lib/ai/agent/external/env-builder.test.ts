@@ -320,3 +320,23 @@ describe("buildAgentEnv — non-codex presets", () => {
     expect(mGetActive).not.toHaveBeenCalled()
   })
 })
+
+describe("buildAgentEnv — explicit Codex ACP", () => {
+  it("resolves the Codex account and retains explicit caller credentials", async () => {
+    mGetActive.mockResolvedValueOnce(snapshot([["CODEX_ACCESS_TOKEN", "mock-vault-token"]]))
+    const env = await buildAgentEnv(codexConfig({ metadata: { preset: "codex-acp" } }), {
+      CODEX_ACCESS_TOKEN: "mock-caller-token",
+      CUSTOM_VAR: "keep",
+    })
+    expect(mGetActive).toHaveBeenCalledWith("codex")
+    expect(env).toEqual({ CODEX_ACCESS_TOKEN: "mock-caller-token", CUSTOM_VAR: "keep" })
+  })
+  it("leaves the caller environment untouched without an adopted account", async () => {
+    mGetActive.mockResolvedValueOnce({ activeAccountId: undefined, env: [] })
+    expect(
+      await buildAgentEnv(codexConfig({ metadata: { preset: "codex-acp" } }), {
+        CODEX_HOME: "/mock/codex",
+      })
+    ).toEqual({ CODEX_HOME: "/mock/codex" })
+  })
+})

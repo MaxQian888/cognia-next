@@ -1,3 +1,4 @@
+import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 // Anthropic dispatch: thin wrapper around `@anthropic-ai/claude-agent-sdk`'s
 // `query()` plus the in-process MCP servers (cognia-tools + a2ui-bridge).
 //
@@ -31,7 +32,11 @@ import { sessionEndedFromResult } from "./result-terminal.mjs"
 import { createProviderStreamLogger } from "./provider-stream-log.mjs"
 import { foldSystemPrompt, thinkingFromBudget } from "./system-prompt.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
-import { classifyToolCallConfinement, combineVerdict } from "../builtin-tools/confinement.mjs"
+import {
+  classifyToolCallConfinement,
+  combineVerdict,
+  assertToolCallWithinRoots,
+} from "../builtin-tools/confinement.mjs"
 import {
   makeServerAlwaysLoad,
   alwaysLoadToolSet,
@@ -44,8 +49,7 @@ import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
-import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
-import { createHostBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
+import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
@@ -70,9 +74,7 @@ const ASK_USER_TOOL_NAME = "ask_user"
  * through the generic tool-approval modal in any permission mode.
  */
 function isAskUserTool(toolName) {
-  const parts = String(toolName).split("__")
-  const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-  return bare === ASK_USER_TOOL_NAME
+  return toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${ASK_USER_TOOL_NAME}`
 }
 
 /**
@@ -275,15 +277,18 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // Background shells (bash run_in_background). Host-backed when a `host_rpc`
   // channel is available — see the note in `ai-sdk.mjs` — otherwise the
   // in-process registry.
-  const bgShells = hostRpc
-    ? createHostBgShellRegistry({ hostRpc, sessionId })
-    : createBgShellRegistry()
+  const bgShells = createSessionBgShellRegistry({
+    hostRpc,
+    sessionId,
+    backgroundProcessHost: sendOptions.backgroundProcessHost,
+  })
   // Used only when the coreFiles-on-Anthropic escape hatch is enabled; native
   // Claude sessions otherwise keep using the Agent SDK's own structured tasks.
   const taskStore = createSessionTaskStore()
 
   const builtinServer = buildCogniaToolsServer({
     enabled: builtinEnabled,
+    builtinProcessSandbox: sendOptions.builtinProcessSandbox,
     alwaysLoad: serverAlwaysLoad(BUILTIN_SERVER_NAME),
     lspResolver,
     codeGraphResolver: codeGraph.codeGraphResolver,
@@ -535,6 +540,21 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
     ),
 
     canUseTool: (toolName, input, ctx) => {
+      if (ctx?.signal?.aborted)
+        return Promise.resolve({ behavior: "deny", message: "tool call interrupted" })
+      if (resolveForToolCall(sendOptions.permissionRuleset, toolName, input) === "deny") {
+        return Promise.resolve({ behavior: "deny", message: "denied by permission ruleset" })
+      }
+      try {
+        assertToolCallWithinRoots(
+          sendOptions.builtinProcessSandbox,
+          toolName,
+          input,
+          sendOptions.cwd
+        )
+      } catch (error) {
+        return Promise.resolve({ behavior: "deny", message: String(error?.message ?? error) })
+      }
       // The `ask_user` elicitation tool is the user interaction itself: the
       // renderer's AskUserDialog blocks until the user answers, so it must
       // never surface the generic tool-approval modal. Each call is inherently
@@ -578,9 +598,6 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       const suppressList = Array.isArray(sendOptions.suppressApprovalForTools)
         ? sendOptions.suppressApprovalForTools
         : null
-      if (!doomed && suppressList && suppressList.includes(toolName)) {
-        return Promise.resolve({ behavior: "allow", updatedInput: input })
-      }
       // OpenCode-style static ruleset short-circuit (Layer A), composed with the
       // workspace-confinement verdict (ADR-0028 lite). Only EXPLICIT allow/deny
       // rules act here; a confinement "ask" (mutator escaping the workspace roots)
@@ -622,13 +639,40 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
               : "denied by permission ruleset",
         })
       }
+      if (!doomed && confinementVerdict !== "ask" && suppressList?.includes(toolName)) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
+      if (
+        !doomed &&
+        confinementVerdict !== "ask" &&
+        sendOptions.permissionMode === "acceptEdits" &&
+        ["directory_create", "file_copy", "file_move", "file_rename"].some(
+          (name) => toolName === `mcp__${BUILTIN_SERVER_NAME}__${name}`
+        )
+      ) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
+      if (
+        !doomed &&
+        sendOptions.permissionMode === "acceptEdits" &&
+        ["sandbox_write", "sandbox_edit", "sandbox_text_editor"].some(
+          (name) => toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${name}`
+        )
+      ) {
+        return Promise.resolve({ behavior: "allow", updatedInput: input })
+      }
       // Session-global "Allow always" grant (parity with the ai-sdk gate). An
       // explicit name-level grant beats a confinement "ask" but not the "deny"
       // handled above; the doom guard still suspends the silent short-circuit.
       const alwaysAllow = Array.isArray(sendOptions.alwaysAllowTools)
         ? sendOptions.alwaysAllowTools
         : null
-      if (!doomed && alwaysAllow && alwaysAllow.includes(toolName)) {
+      if (
+        !doomed &&
+        confinementVerdict !== "ask" &&
+        alwaysAllow &&
+        alwaysAllow.includes(toolName)
+      ) {
         return Promise.resolve({ behavior: "allow", updatedInput: input })
       }
       // The silent ALLOW short-circuit is what the doom guard exists to
@@ -976,6 +1020,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       // Close the code-graph store + file watcher.
       codeGraph.dispose()
       // Kill any background shells the agent left running this session.
+      disposeTerminalRepls(sessionId)
       void bgShells.killAll()
     }
   })()

@@ -1,3 +1,4 @@
+import cogniaPiExtension from "../../../../sidecar/pi-extension/cognia-pi-extension"
 import {
   PI_BUILTIN_TOOLS,
   PI_PERMISSION_MARKER,
@@ -298,5 +299,126 @@ describe("native-tool approval marker", () => {
       tool: "write",
       mode: "unknown",
     })
+  })
+})
+
+describe("bundled native tool approval blocking", () => {
+  type Api = Parameters<typeof cogniaPiExtension>[0]
+  type Handler = Parameters<Api["on"]>[1]
+  type Context = Parameters<Handler>[1]
+
+  function gate(confirm: Context["ui"]["confirm"]) {
+    const handlers = new Map<string, Handler>()
+    const previous = process.env.COGNIA_TOOLHOST_PI_POLICY
+    process.env.COGNIA_TOOLHOST_PI_POLICY = encodePiToolPolicy(resolvePiToolPolicy("default"))
+    try {
+      cogniaPiExtension({
+        on: (event, handler) => {
+          handlers.set(event, handler)
+        },
+        registerTool: jest.fn(),
+      })
+    } finally {
+      if (previous === undefined) delete process.env.COGNIA_TOOLHOST_PI_POLICY
+      else process.env.COGNIA_TOOLHOST_PI_POLICY = previous
+    }
+    const controller = new AbortController()
+    const ctx = {
+      hasUI: true,
+      signal: controller.signal,
+      ui: { confirm, notify: jest.fn(), setStatus: jest.fn() },
+    }
+    return {
+      controller,
+      call: (toolName: string) =>
+        Promise.resolve(handlers.get("tool_call")!({ toolName } as never, ctx)),
+    }
+  }
+
+  it("keeps the hook and following read blocked until the user answers", async () => {
+    let answer!: (value: boolean) => void
+    const confirm = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          answer = resolve
+        })
+    )
+    const { call } = gate(confirm)
+    const completed = jest.fn()
+    const bash = call("bash").then(completed)
+    const read = call("read").then(completed)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(completed).not.toHaveBeenCalled()
+    answer(true)
+    await Promise.all([bash, read])
+    expect(completed.mock.calls).toEqual([[undefined], [undefined]])
+  })
+
+  it("blocks a turn that was already cancelled without opening a dialog", async () => {
+    const confirm = jest.fn(async () => true)
+    const { call, controller } = gate(confirm)
+    controller.abort()
+    await expect(call("bash")).resolves.toMatchObject({ block: true })
+    await expect(call("read")).resolves.toMatchObject({ block: true })
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it("blocks a failed approval and allows the next request to ask again", async () => {
+    const confirm = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("UI failed"))
+      .mockResolvedValueOnce(false)
+    const { call } = gate(confirm)
+    await expect(call("bash")).resolves.toMatchObject({
+      block: true,
+      reason: expect.stringContaining("UI failed"),
+    })
+    await expect(call("write")).resolves.toMatchObject({
+      block: true,
+      reason: "Denied by the user",
+    })
+    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not allow a late yes or a queued read after cancellation", async () => {
+    let answer!: (value: boolean) => void
+    const { call, controller } = gate(
+      () =>
+        new Promise<boolean>((resolve) => {
+          answer = resolve
+        })
+    )
+    const bash = call("bash")
+    const read = call("read")
+    await Promise.resolve()
+    controller.abort()
+    answer(true)
+    await expect(bash).resolves.toMatchObject({ block: true })
+    await expect(read).resolves.toMatchObject({ block: true })
+  })
+
+  it("passes the turn signal to pi and never opens a queued approval after abort", async () => {
+    const confirm = jest.fn<
+      ReturnType<Context["ui"]["confirm"]>,
+      Parameters<Context["ui"]["confirm"]>
+    >()
+    confirm.mockImplementation(
+      (_title, _message, options) =>
+        new Promise<boolean>((resolve) => {
+          options?.signal?.addEventListener("abort", () => resolve(false), { once: true })
+        })
+    )
+    const { call, controller } = gate(confirm)
+    const first = call("bash")
+    const queued = call("write")
+    await Promise.resolve()
+    const passedSignal = confirm.mock.calls[0]?.[2]?.signal
+    controller.abort()
+    // Check the actual RPC cancellation contract before awaiting the hook.
+    expect(passedSignal).toBe(controller.signal)
+    await expect(first).resolves.toMatchObject({ block: true })
+    await expect(queued).resolves.toMatchObject({ block: true })
+    expect(confirm).toHaveBeenCalledTimes(1)
   })
 })

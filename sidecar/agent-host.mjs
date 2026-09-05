@@ -501,28 +501,44 @@ const VALID_PERMISSION_MODES = new Set([
   "dontAsk",
   "auto",
 ])
-async function handleSetMode(msg) {
+/** A mode is effective only after the owning runtime confirms it. */
+export async function routeSetMode(sessionsMap, msg, timeoutMs = 6000) {
   const { sessionId, mode } = msg
-  const s = sessions.get(sessionId)
-  if (!s) {
-    log("warn", `set_mode: no session ${sessionId}`)
-    return
-  }
-  if (!VALID_PERMISSION_MODES.has(mode)) {
-    log("warn", `set_mode: invalid mode ${mode}`)
-    return
-  }
-  // Mutate the shared sendOptions ref so the ai-sdk gate (which reads
-  // sendOptions.permissionMode live) and any later resolve see the new mode.
-  if (s.sendOptions) s.sendOptions.permissionMode = mode
-  // Anthropic only: drive the live SDK query so its native enforcement updates.
-  if (typeof s.q?.setPermissionMode === "function") {
-    try {
-      await s.q.setPermissionMode(mode)
-    } catch (err) {
-      log("error", `set_mode failed: ${err?.message ?? err}`)
-    }
-  }
+  const session = sessionsMap.get(sessionId)
+  if (!session) return { ok: false, error: "no_active_session" }
+  if (!VALID_PERMISSION_MODES.has(mode)) return { ok: false, error: "invalid_permission_mode" }
+  const prior = session.modeTransition ?? Promise.resolve()
+  const transition = prior
+    .catch(() => {})
+    .then(async () => {
+      if (sessionsMap.get(sessionId) !== session) return { ok: false, error: "no_active_session" }
+      if ((session.sendOptions?.provider ?? "anthropic") === "anthropic") {
+        if (typeof session.q?.setPermissionMode !== "function")
+          return { ok: false, error: "unsupported_provider" }
+        const outcome = await runControlWithTimeout(
+          session.q.setPermissionMode,
+          session.q,
+          [mode],
+          timeoutMs
+        )
+        if (!outcome.ok) {
+          // A timed-out SDK may apply the mode later. Retire that runtime so its
+          // uncertain permissions cannot govern a subsequent tool call.
+          if (outcome.error === "control timed out") routeClose(sessionsMap, { sessionId })
+          return outcome
+        }
+      }
+      if (sessionsMap.get(sessionId) !== session) return { ok: false, error: "no_active_session" }
+      if (session.sendOptions) session.sendOptions.permissionMode = mode
+      return { ok: true, result: { mode } }
+    })
+  session.modeTransition = transition
+  return transition
+}
+
+async function handleSetMode(msg) {
+  const outcome = await routeSetMode(sessions, msg)
+  if (!outcome.ok) log("error", `set_mode failed: ${outcome.error}`)
 }
 
 // Sidecar-side backstop deadline for a live-SDK control method. Deliberately a
@@ -674,6 +690,10 @@ async function handleControl(msg) {
     // only how this particular request settles.
     if (rejection.capability) emit(capabilityError(sessionId, rejection.capability, method))
     respond({ ok: false, error: rejection.error })
+    return
+  }
+  if (method === "setPermissionMode") {
+    respond(await routeSetMode(sessions, { sessionId, mode: params?.mode }))
     return
   }
   if (method === "steer") {

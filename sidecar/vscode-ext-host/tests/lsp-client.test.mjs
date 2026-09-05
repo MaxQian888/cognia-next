@@ -709,3 +709,25 @@ test("onStateChange + onLog fire through the normal lifecycle", async () => {
   await client.stop()
   assert.deepEqual(states, ["starting", "running"], "unsubscribed listener stays quiet")
 })
+
+test("sandbox LSP clients do not re-inherit the parent environment", async () => {
+  const saved = process.env.COGNIA_LSP_ENV_TEST
+  process.env.COGNIA_LSP_ENV_TEST = "ambient-secret"
+  const script = `let buffer='';process.stdin.on('data',chunk=>{buffer+=chunk;for(;;){const end=buffer.indexOf('\\r\\n\\r\\n');if(end<0)return;const length=Number(/Content-Length: (\\d+)/i.exec(buffer.slice(0,end))[1]);if(buffer.length<end+4+length)return;const message=JSON.parse(buffer.slice(end+4,end+4+length));buffer=buffer.slice(end+4+length);if(message.method==='exit')process.exit(0);if(message.id!==undefined){const result=message.method==='initialize'?{capabilities:{experimental:{ambient:process.env.COGNIA_LSP_ENV_TEST??null}}}:null;const text=JSON.stringify({jsonrpc:'2.0',id:message.id,result});process.stdout.write('Content-Length: '+Buffer.byteLength(text)+'\\r\\n\\r\\n'+text)}}})`
+  const client = new CogniaLspClient({
+    serverId: "env-test",
+    command: process.execPath,
+    args: ["-e", script],
+    inheritEnv: false,
+    env: { PATH: process.env.PATH ?? "" },
+    startupTimeout: 1000,
+  })
+  try {
+    await client.start()
+    assert.equal(client.getServerCapabilities().experimental.ambient, null)
+  } finally {
+    await client.stop()
+    if (saved === undefined) delete process.env.COGNIA_LSP_ENV_TEST
+    else process.env.COGNIA_LSP_ENV_TEST = saved
+  }
+})

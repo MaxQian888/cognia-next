@@ -209,14 +209,14 @@ describe("canonicalEventFromCaptureEvent", () => {
     ).toMatchObject({ kind: "tool-result", toolCallId: "call-1", result: "ok" })
   })
 
-  it("omits the legacy-only tool summary event", () => {
+  it("preserves tool summaries in the canonical log", () => {
     expect(
       canonicalEventFromCaptureEvent({
         type: "tool-summary",
         summary: "done",
         toolCallIds: ["call-1"],
       })
-    ).toBeNull()
+    ).toEqual({ kind: "tool-summary", summary: "done", toolCallIds: ["call-1"] })
   })
 
   it("round-trips a retry through both projections without loss", () => {

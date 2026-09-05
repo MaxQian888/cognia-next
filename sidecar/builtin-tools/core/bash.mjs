@@ -1,3 +1,4 @@
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../shared/exec.mjs"
 // Core `bash` tool — free-form shell execution for the ai-sdk path.
 //
 // Deliberately DIFFERENT from `shell_execute_advanced` (allowlist-gated,
@@ -159,7 +160,7 @@ function bashSpillPath() {
   return `${os.tmpdir()}/cognia-bash-${process.pid}-${Date.now()}-${rand}.log`
 }
 
-export function createBashTool({ cwd, bgShells, shell }) {
+export function createBashTool({ cwd, bgShells, shell, builtinProcessSandbox }) {
   // The shell descriptor the tool drives. Defaults to the host's preferred shell
   // (PowerShell on Windows when present); injectable so tests pin a deterministic
   // shell regardless of what the runner machine happens to have on PATH.
@@ -205,8 +206,15 @@ export function createBashTool({ cwd, bgShells, shell }) {
         )
       }
       const workdir = resolveToolPath(cwd, args.workdir ?? ".")
-      const { isWin, shell, shellArgs, env } = resolveShellInvocation(args.command, descriptor)
+      const {
+        isWin,
+        shell,
+        shellArgs,
+        env: shellEnv,
+      } = resolveShellInvocation(args.command, descriptor)
+      const env = sandboxedProcessEnv(shellEnv, builtinProcessSandbox)
 
+      const target = sandboxedProcessTarget(shell, shellArgs, workdir, builtinProcessSandbox)
       // Background mode: spawn, register, and return a handle immediately.
       if (args.run_in_background) {
         if (!bgShells) {
@@ -218,8 +226,8 @@ export function createBashTool({ cwd, bgShells, shell }) {
         // in-process fallback returns synchronously and awaits harmlessly.
         const entry = await bgShells.spawnBackground({
           command: args.command,
-          shell,
-          shellArgs,
+          shell: target.command,
+          shellArgs: target.args,
           cwd: workdir,
           isWin,
           env,
@@ -238,7 +246,7 @@ export function createBashTool({ cwd, bgShells, shell }) {
       const tmpPath = bashSpillPath()
 
       const result = await new Promise((resolve) => {
-        const child = spawn(shell, shellArgs, {
+        const child = spawn(target.command, target.args, {
           cwd: workdir,
           env,
           windowsHide: true,

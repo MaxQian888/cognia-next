@@ -59,6 +59,7 @@ jest.mock("@/lib/utils", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+import { JsonRpcPeer } from "./json-rpc-peer"
 import { isTauri } from "@/lib/utils"
 import {
   acpTerminalCreate,
@@ -2723,5 +2724,273 @@ describe("AcpClientAdapter — network transports", () => {
         }
       ).connectViaNetwork(networkConfig("sse"))
     ).rejects.toThrow("SSE connection failed: Proxy stream failed: dns error")
+  })
+})
+
+describe("AcpClientAdapter — offline ACP contracts", () => {
+  function transport(a: AcpClientAdapter, result: unknown = {}) {
+    const frames: Array<{ id?: number; method: string; params: Record<string, unknown> }> = []
+    const peer = new JsonRpcPeer({
+      writeRaw: async (data) => {
+        const frame = JSON.parse(data)
+        frames.push(frame)
+        if (frame.id !== undefined) {
+          queueMicrotask(() =>
+            peer.ingest(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }))
+          )
+        }
+      },
+    })
+    ;(a as unknown as { peer: JsonRpcPeer }).peer = peer
+    return frames
+  }
+
+  it("returns a selected reject option and validates session and offered IDs", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const pending = callPermission(a, { sessionId: "s", options: [ALLOW, REJECT] }, undefined, 91)
+    await expect(
+      a.respondToPermission("other", { requestId: "91", granted: true, optionId: "allow" })
+    ).rejects.toThrow(/session/i)
+    await expect(
+      a.respondToPermission("s", { requestId: "91", granted: true, optionId: "invented" })
+    ).rejects.toThrow(/option/i)
+    await a.respondToPermission("s", { requestId: "91", granted: false, optionId: "reject" })
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "selected", optionId: "reject" } })
+  })
+
+  it("resolves boolean approval to an offered option and never selects an absent option", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const pending = callPermission(a, { sessionId: "s", options: [ALLOW] }, undefined, 92)
+    await a.respondToPermission("s", { requestId: "92", granted: true })
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "selected", optionId: "allow" } })
+    seedSession(a, "s", "bypassPermissions")
+    await expect(callPermission(a, { sessionId: "s", options: [] })).resolves.toEqual({
+      outcome: { outcome: "cancelled" },
+    })
+  })
+
+  it("uses advertised grouped model and mode options through the local JSON-RPC transport", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const options = [
+      {
+        id: "model-choice",
+        type: "select",
+        category: "model",
+        name: "Model",
+        currentValue: "m1",
+        options: [
+          {
+            group: "Models",
+            options: [
+              { value: "m1", name: "One" },
+              { value: "m2", name: "Two" },
+            ],
+          },
+        ],
+      },
+      {
+        id: "mode-choice",
+        type: "select",
+        category: "mode",
+        name: "Mode",
+        currentValue: "default",
+        options: [
+          { value: "default", name: "Default" },
+          { value: "plan", name: "Plan" },
+        ],
+      },
+    ]
+    handleUpdate(a, "s", { sessionUpdate: "config_option_update", configOptions: options })
+    const frames = transport(a, {
+      configOptions: options.map((o) => ({
+        ...o,
+        currentValue: o.category === "model" ? "m2" : "plan",
+      })),
+    })
+    expect(a.getSessionModels("s")).toEqual({
+      currentModelId: "m1",
+      availableModels: [
+        { modelId: "m1", name: "One" },
+        { modelId: "m2", name: "Two" },
+      ],
+    })
+    await a.setSessionModel("s", "m2")
+    await a.setSessionMode("s", "plan")
+    expect(frames.map((f) => [f.method, f.params])).toEqual([
+      ["session/set_config_option", { sessionId: "s", configId: "model-choice", value: "m2" }],
+      ["session/set_config_option", { sessionId: "s", configId: "mode-choice", value: "plan" }],
+    ])
+    expect(a.getSessionModels("s")?.currentModelId).toBe("m2")
+    await expect(a.setSessionModel("s", "missing")).rejects.toThrow(/Invalid value/)
+    expect(frames).toHaveLength(2)
+  })
+
+  it("retains tool patches until a status-only completion and all output blocks", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    handleUpdate(a, "s", {
+      sessionUpdate: "tool_call",
+      toolCallId: "t",
+      title: "Read",
+      kind: "read",
+      status: "pending",
+      rawInput: { path: "a" },
+    })
+    handleUpdate(a, "s", {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "t",
+      content: [
+        { type: "content", content: { type: "text", text: "one" } },
+        { type: "content", content: { type: "text", text: "two" } },
+      ],
+    })
+    expect(
+      handleUpdate(a, "s", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t",
+        status: "completed",
+      })
+    ).toMatchObject({
+      type: "tool_result",
+      result: "one\ntwo",
+      title: "Read",
+      rawInput: { path: "a" },
+      isError: false,
+    })
+    expect(
+      handleUpdate(a, "s", {
+        sessionUpdate: "tool_call",
+        toolCallId: "done",
+        title: "Done",
+        status: "failed",
+        rawOutput: { error: "failed" },
+      })
+    ).toMatchObject({ type: "tool_result", isError: true, result: { error: "failed" } })
+  })
+
+  it("preserves rich output and isolates tool IDs across sessions", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    seedSession(a, "other", "default")
+    const content = [
+      { type: "diff", path: "/a", oldText: "old", newText: "new" },
+      { type: "terminal", terminalId: "terminal-1" },
+    ]
+    handleUpdate(a, "s", {
+      sessionUpdate: "tool_call",
+      toolCallId: "t",
+      title: "Edit",
+      status: "pending",
+      content,
+    })
+    handleUpdate(a, "other", {
+      sessionUpdate: "tool_call",
+      toolCallId: "t",
+      title: "Other",
+      status: "pending",
+    })
+    expect(
+      handleUpdate(a, "s", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t",
+        status: "completed",
+      })
+    ).toMatchObject({ type: "tool_result", result: { content }, title: "Edit" })
+    expect(
+      handleUpdate(a, "other", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t",
+        status: "completed",
+      })
+    ).toMatchObject({ type: "tool_result", result: "", title: "Other" })
+    // Completed calls cannot leak their old payload into a reused tool id.
+    expect(
+      handleUpdate(a, "s", {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t",
+        status: "completed",
+      })
+    ).toMatchObject({ result: "" })
+    await a.closeSession("s")
+  })
+
+  it("rejects a denied allow option while leaving the request available for cancellation", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const pending = callPermission(a, { sessionId: "s", options: [ALLOW] }, undefined, 94)
+    await expect(
+      a.respondToPermission("s", { requestId: "94", granted: false, optionId: "allow" })
+    ).rejects.toThrow(/conflicts/)
+    await a.respondToPermission("s", { requestId: "94", granted: false })
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+    const noAllow = callPermission(a, { sessionId: "s", options: [REJECT] }, undefined, 95)
+    await a.respondToPermission("s", { requestId: "95", granted: true })
+    await expect(noAllow).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+  })
+
+  it("sends reasoning only via an advertised option and accepts the returned full option state", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const option = {
+      id: "effort",
+      name: "Reasoning",
+      category: "thought_level",
+      type: "select",
+      currentValue: "low",
+      options: [
+        { name: "Low", value: "low" },
+        { name: "High", value: "high" },
+      ],
+    }
+    handleUpdate(a, "s", { sessionUpdate: "config_option_update", configOptions: [option] })
+    const frames = transport(a, { configOptions: [{ ...option, currentValue: "high" }] })
+    await a.setConfigOption("s", "effort", "high")
+    expect(frames[0]).toMatchObject({
+      method: "session/set_config_option",
+      params: { sessionId: "s", configId: "effort", value: "high" },
+    })
+    expect(a.getConfigOptions("s")?.[0].currentValue).toBe("high")
+    await expect(a.setConfigOption("s", "extraSkillRoots", "path")).rejects.toThrow(
+      /Unknown config option/
+    )
+    expect(frames).toHaveLength(1)
+  })
+
+  it("honors legacy current mode even when unrelated config options exist", async () => {
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    ;(a as unknown as { _config: ExternalAgentConfig })._config = stdioConfig()
+    transport(a, {
+      sessionId: "s",
+      modes: { currentModeId: "plan", availableModes: [{ id: "plan", name: "Plan" }] },
+      configOptions: [],
+    })
+    expect((await a.createSession({ cwd: "/tmp" })).permissionMode).toBe("plan")
+  })
+
+  it("cancels permissions without prematurely closing the turn", async () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s", "default")
+    const session = (a as unknown as { _sessions: Map<string, { status: string }> })._sessions.get(
+      "s"
+    )!
+    session.status = "executing"
+    const frames = transport(a)
+    const pending = callPermission(a, { sessionId: "s", options: [ALLOW] }, undefined, 93)
+    await a.cancel("s")
+    expect(frames).toEqual([
+      { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: "s" } },
+    ])
+    await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+    expect(session.status).toBe("executing")
+    expect(
+      handleUpdate(a, "s", {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "late" },
+      })
+    ).toMatchObject({ type: "message_delta", delta: { text: "late" } })
   })
 })

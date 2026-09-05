@@ -1,3 +1,4 @@
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "./shared/exec.mjs"
 // terminal-repl-tool — agent-facing interactive REPL MCP tool.
 //
 // Wave 1 (orthogonal to dock-relay). Where `terminal_dock_*` ride
@@ -28,6 +29,8 @@
 //   * max 8 concurrent sessions per agent (back-pressure against runaways)
 
 import fs from "node:fs"
+import path from "node:path"
+import { createRequire } from "node:module"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
@@ -54,6 +57,29 @@ const sessions = new Map()
  */
 let cachedNodePty = undefined
 let nodePtyLoadError = null
+
+/** Repair the executable bit lost by some package archives before native spawn. */
+export function prepareNodePtyHelper(
+  packageRoot,
+  platform = process.platform,
+  arch = process.arch
+) {
+  if (platform === "win32") return
+  for (const directory of ["build/Release", "build/Debug", `prebuilds/${platform}-${arch}`]) {
+    const helper = path.join(packageRoot, directory, "spawn-helper")
+    if (!fs.existsSync(helper)) continue
+    const mode = fs.statSync(helper).mode
+    if ((mode & 0o111) !== 0o111) {
+      try {
+        fs.chmodSync(helper, mode | 0o111)
+      } catch (error) {
+        throw new Error(
+          `PTY helper is not executable: ${helper}. Reinstall node-pty or restore its executable permission. ${error.message}`
+        )
+      }
+    }
+  }
+}
 
 export function isBunPtyRuntime(runtime) {
   return typeof runtime?.Terminal === "function" && typeof runtime?.spawn === "function"
@@ -116,6 +142,8 @@ async function loadNodePty() {
     return { mod: cachedNodePty, error: null }
   }
   try {
+    const require = createRequire(import.meta.url)
+    prepareNodePtyHelper(path.dirname(require.resolve("node-pty/package.json")))
     cachedNodePty = await import("node-pty")
     nodePtyLoadError = null
   } catch (err) {
@@ -206,7 +234,7 @@ const ownerAgentIdParam = z
   .describe("Caller identity — must match the agentId that spawned the session.")
 const sessionIdParam = z.string().min(1).describe("The sessionId returned by terminal_repl_spawn.")
 
-async function execSpawn(args) {
+async function execSpawn(args, ctx = {}) {
   reapIdleSessions()
   if (!fs.existsSync(args.cwd)) {
     return toolError(`cwd does not exist: ${args.cwd}`, "terminal_repl_spawn")
@@ -229,12 +257,18 @@ async function execSpawn(args) {
   /** @type {any} */
   let pty
   try {
-    pty = mod.spawn(args.shell, args.args ?? [], {
+    const target = sandboxedProcessTarget(
+      args.shell,
+      args.args ?? [],
+      args.cwd,
+      ctx.builtinProcessSandbox
+    )
+    pty = mod.spawn(target.command, target.args, {
       name: "xterm-color",
       cols: args.cols,
       rows: args.rows,
       cwd: args.cwd,
-      env: { ...process.env, ...(args.env ?? {}) },
+      env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox, args.env),
     })
   } catch (err) {
     return toolError(
@@ -409,6 +443,28 @@ export const terminalReplTools = Object.freeze([
   terminal_repl_read,
   terminal_repl_kill,
 ])
+
+/** Bind terminal ownership and confinement to the host session, not model input. */
+export function createTerminalReplTools(ctx = {}) {
+  const handlers = [execSpawn, execWrite, execRead, execKill]
+  return terminalReplTools.map((definition, index) => ({
+    ...definition,
+    handler: (args) =>
+      handlers[index](ctx.sessionId ? { ...args, agentId: ctx.sessionId } : args, ctx),
+  }))
+}
+
+export function disposeTerminalRepls(agentId) {
+  for (const [id, session] of sessions) {
+    if (session.agentId !== agentId) continue
+    try {
+      session.pty.kill()
+    } catch {
+      /* already exited */
+    }
+    sessions.delete(id)
+  }
+}
 
 // Test-only helpers — used by `terminal-repl-tool.test.mjs`.
 export const __testExports = {

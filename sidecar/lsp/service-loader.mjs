@@ -12,12 +12,23 @@
 // hard crash.
 
 import { fileURLToPath } from "node:url"
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { createLspResolver } from "./resolver.mjs"
+import {
+  execFileAsync,
+  sandboxedProcessTarget,
+  sandboxedProcessEnv,
+} from "../builtin-tools/shared/exec.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const LSP_SERVICE_PATH = path.resolve(HERE, "../vscode-ext-host/dist/lsp-service.js")
-const LSP_INSTALLER_PATH = path.resolve(HERE, "../vscode-ext-host/dist/lsp-installer.js")
+// Bundling moves this module from lsp/ into the sidecar root. The packaged
+// extension host sits beside that bundle; source runs retain the sibling tree.
+const LSP_HOST_DIR = existsSync(path.join(HERE, "vscode-ext-host"))
+  ? path.join(HERE, "vscode-ext-host")
+  : path.resolve(HERE, "../vscode-ext-host")
+const LSP_SERVICE_PATH = path.join(LSP_HOST_DIR, "dist/lsp-service.js")
+const LSP_INSTALLER_PATH = path.join(LSP_HOST_DIR, "dist/lsp-installer.js")
 
 /**
  * Hard ceiling for a binary resolution inside an agent turn. The npm install
@@ -63,7 +74,26 @@ async function makeInstallerEnsureCommand(opts) {
     const mod = await import(pathToImportUrl(LSP_INSTALLER_PATH))
     const createLspInstaller = mod.createLspInstaller ?? mod.default?.createLspInstaller
     if (typeof createLspInstaller !== "function") return null
-    installer = createLspInstaller()
+    installer = createLspInstaller(
+      opts.builtinProcessSandbox
+        ? {
+            runNpm: async (args, runOptions) => {
+              if (opts.builtinProcessSandbox.network !== true)
+                throw new Error("LSP installation requires network permission")
+              const scope = {
+                ...opts.builtinProcessSandbox,
+                writableRoots: [...opts.builtinProcessSandbox.writableRoots, opts.installDir],
+              }
+              const target = sandboxedProcessTarget("npm", args, runOptions.cwd, scope)
+              await execFileAsync(target.command, target.args, {
+                cwd: runOptions.cwd,
+                timeout: runOptions.timeoutMs,
+                env: sandboxedProcessEnv(process.env, scope),
+              })
+            },
+          }
+        : {}
+    )
   } catch {
     return null
   }
@@ -124,6 +154,7 @@ export async function createSessionLspResolver(opts) {
     servers: opts.servers,
     ensureCommand,
     logger: opts.logger,
+    builtinProcessSandbox: opts.builtinProcessSandbox,
   })
   resolverRef = resolver
   return resolver

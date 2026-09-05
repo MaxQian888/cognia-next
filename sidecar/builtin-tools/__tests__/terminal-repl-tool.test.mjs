@@ -13,6 +13,8 @@ import os from "node:os"
 
 import {
   terminalReplTools,
+  createTerminalReplTools,
+  disposeTerminalRepls,
   __testExports,
   __setNodePtyForTesting,
   createBunPtyModule,
@@ -365,4 +367,36 @@ test("terminalReplTools exports exactly 4 tool descriptors", () => {
   assert.equal(terminalReplTools.length, 4)
   // The SDK's `tool(name, ...)` wraps each into an opaque descriptor —
   // we don't introspect its shape here, just confirm we registered 4.
+})
+
+test("session-bound PTYs use sandbox argv, prevent forged ownership, and dispose on close", async () => {
+  const fake = makeFakePty()
+  __setNodePtyForTesting(fake)
+  const tools = createTerminalReplTools({
+    sessionId: "owner1",
+    builtinProcessSandbox: {
+      launcher: process.execPath,
+      writableRoots: [tmpdir],
+      readableRoots: [],
+      network: false,
+    },
+  })
+  const result = await tools[0].handler({
+    agentId: "forged",
+    shell: "/bin/sh",
+    args: ["-i"],
+    cwd: tmpdir,
+    cols: 80,
+    rows: 24,
+  })
+  const { sessionId } = JSON.parse(result.content[0].text)
+  assert.equal(fake.__ptys[0].shell, process.execPath)
+  assert.deepEqual(fake.__ptys[0].args.slice(-3), ["--", "/bin/sh", "-i"])
+  assert.equal(sessions.get(sessionId).agentId, "owner1")
+  const other = createTerminalReplTools({ sessionId: "owner2" })
+  const denied = await other[1].handler({ agentId: "owner1", sessionId, data: "echo unsafe\n" })
+  assert.equal(denied.isError, true)
+  disposeTerminalRepls("owner1")
+  assert.equal(fake.__ptys[0].killed, true)
+  assert.equal(sessions.has(sessionId), false)
 })

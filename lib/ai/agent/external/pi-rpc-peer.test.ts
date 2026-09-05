@@ -2,6 +2,8 @@ import {
   PiFrameDecoder,
   PiFrameError,
   PiRpcPeer,
+  frameHint,
+  isCompleteFrame,
   PI_MAX_FRAME_BYTES,
   PI_MAX_BUFFER_BYTES,
   type PiEventFrame,
@@ -322,6 +324,43 @@ describe("PiRpcPeer", () => {
     expect(errors[0].message).toMatch(/ended mid-frame/)
   })
 
+  it("quotes enough of the broken frame to recognise what was lost", () => {
+    const { peer, errors } = makePeer({})
+    peer.ingest('{"type":"message_update","content":"the answer began like thi')
+    peer.endOfStream()
+    // A length alone says nothing. The head of the frame is the only evidence
+    // of what the agent was in the middle of saying.
+    expect(errors[0].message).toContain("message_update")
+  })
+
+  it("delivers a final frame that only lacked its newline", () => {
+    const events: PiEventFrame[] = []
+    const { peer, errors } = makePeer({ onEvent: (e) => void events.push(e) })
+    // A program writing its last line without a terminator is ordinary. The
+    // frame is whole, so discarding it lost a real message and failed the turn
+    // over a missing byte.
+    peer.ingest(JSON.stringify({ type: "agent_settled", reason: "done" }))
+    peer.endOfStream()
+    expect(errors).toHaveLength(0)
+    expect(events).toEqual([{ type: "agent_settled", reason: "done" }])
+  })
+
+  it("still answers a pending command from an unterminated final response", async () => {
+    const { peer } = makePeer({})
+    const promise = peer.sendCommand("get_state")
+    peer.ingest(
+      JSON.stringify({
+        type: "response",
+        command: "get_state",
+        id: "cognia-1",
+        success: true,
+        data: { ok: true },
+      })
+    )
+    peer.endOfStream()
+    await expect(promise).resolves.toEqual({ ok: true })
+  })
+
   it("stays quiet when the stream ends on a frame boundary", () => {
     const { peer, errors } = makePeer({})
     peer.ingest(JSON.stringify({ type: "agent_settled" }) + "\n")
@@ -341,5 +380,34 @@ describe("PiRpcPeer", () => {
     // peer must convert it rather than unwinding a stdout handler.
     expect(() => peer.ingest("x".repeat(PI_MAX_BUFFER_BYTES + 1))).not.toThrow()
     expect(errors).toHaveLength(1)
+  })
+})
+
+describe("isCompleteFrame", () => {
+  it("accepts a whole frame with no terminator", () => {
+    expect(isCompleteFrame('{"type":"agent_settled"}')).toBe(true)
+  })
+  it("rejects a truncated one", () => {
+    expect(isCompleteFrame('{"type":"agent_set')).toBe(false)
+  })
+  it("rejects valid JSON that is not a frame", () => {
+    // Parsing is not enough. A bare array or a typeless object would be routed
+    // as a frame and then fail deeper, where the cause is harder to see.
+    expect(isCompleteFrame("[1,2,3]")).toBe(false)
+    expect(isCompleteFrame('{"id":"x"}')).toBe(false)
+  })
+})
+
+describe("frameHint", () => {
+  it("keeps the head and marks what it dropped", () => {
+    const hint = frameHint("x".repeat(400))
+    expect(hint.length).toBeLessThanOrEqual(161)
+    expect(hint.endsWith("…")).toBe(true)
+  })
+  it("collapses whitespace so a pretty-printed frame stays one line", () => {
+    expect(frameHint('{\n  "type": "a"\n}')).toBe('{ "type": "a" }')
+  })
+  it("leaves a short frame whole", () => {
+    expect(frameHint('{"type":"a"}')).toBe('{"type":"a"}')
   })
 })

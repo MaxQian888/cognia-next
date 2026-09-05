@@ -135,10 +135,14 @@ test("start() constructs a CogniaLspClient with the right options and transition
     serverId: "eslint",
     command: "/x/eslint-server",
     args: ["--stdio"],
+    inheritEnv: false,
+    env: { PATH: "/bin" },
     workspaceFolders: [{ uri: "file:///tmp/w", name: "w" }],
   })
   assert.equal(result.state, "running")
   assert.equal(created.length, 1)
+  assert.equal(created[0].opts.inheritEnv, false)
+  assert.deepEqual(created[0].opts.env, { PATH: "/bin" })
   assert.deepEqual(created[0].opts.workspaceFolders, [{ uri: "file:///tmp/w", name: "w" }])
 })
 

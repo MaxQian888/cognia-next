@@ -27,13 +27,14 @@ import net from "node:net"
 // Pi supplies these at load time; the package is not a Cognia dependency, so
 // the types are declared structurally rather than imported.
 interface PiUi {
-  confirm(title: string, message?: string): Promise<boolean>
+  confirm(title: string, message?: string, options?: { signal?: AbortSignal }): Promise<boolean>
   notify(message: string, level?: "info" | "warning" | "error"): void
   setStatus(key: string, text: string): void
 }
 interface PiCtx {
   ui: PiUi
   hasUI?: boolean
+  signal?: AbortSignal
 }
 interface PiToolCallEvent {
   toolName: string
@@ -294,14 +295,19 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
    */
   pi.on("tool_call", async (event: never, ctx: PiCtx) => {
     const call = event as unknown as PiToolCallEvent
+    // Capture the current turn signal: ctx may expose a live getter whose value
+    // changes when an aborted turn unwinds and another turn starts.
+    const signal = ctx.signal
+    const cancelled = { block: true, reason: "Cognia tool call cancelled" }
     try {
+      if (signal?.aborted) return cancelled
       const decision = policy.decisions[call.toolName] ?? policy.fallback
 
       if (decision === "allow") {
         // Wait behind any approval the user has not answered. Awaiting the
         // chain rather than joining it, so allowed calls never delay each other.
         await approvals
-        return undefined
+        return signal?.aborted ? cancelled : undefined
       }
       if (decision === "deny") {
         return { block: true, reason: `Blocked by Cognia (${policy.mode} mode)` }
@@ -318,15 +324,18 @@ export default function cogniaPiExtension(pi: PiExtensionApi): void {
       // the parity test pins the two together. The marker never reaches the
       // user — the mapper rebuilds a clean title — and `message` stays
       // human-readable so an unrecognised version degrades to a real question.
-      const approved = await behindApprovals(() =>
-        ctx.ui.confirm(
+      const approved = await behindApprovals(async () => {
+        if (signal?.aborted) return false
+        return ctx.ui.confirm(
           `${COGNIA_PERMISSION_MARKER} ${JSON.stringify(
             markerPayload(call.toolName, policy.mode, call.input)
           )}`,
-          describeCall(call.toolName, call.input)
+          describeCall(call.toolName, call.input),
+          { signal }
         )
-      )
-      return approved ? undefined : { block: true, reason: "Denied by the user" }
+      })
+      if (signal?.aborted) return cancelled
+      return approved === true ? undefined : { block: true, reason: "Denied by the user" }
     } catch (error) {
       return { block: true, reason: `Cognia permission check failed: ${String(error)}` }
     }

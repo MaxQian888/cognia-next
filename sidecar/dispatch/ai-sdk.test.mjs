@@ -610,7 +610,8 @@ test("maybeCompact: a DISTINCT summary provider keeps its own id, not the turn's
     (a) => a.maxOutputTokens === 64 && a.instructions?.[0]?.content === "SUMMARIZE"
   )
   assert.ok(summaryCall, "summary call happened")
-  assert.equal(summaryCall.model.provider, "openai.chat")
+  assert.equal(summaryCall.model.provider, "deepseek.chat")
+  assert.equal(summaryCall.model.modelId, "deepseek-chat")
 })
 
 test("maybeCompact: sliding-window strategy compacts WITHOUT an LLM summary call", async () => {
@@ -2590,4 +2591,110 @@ test("an interrupted tool-call leg does not corrupt the next turn's request", as
     sent.some((m) => m.role === "tool"),
     false
   )
+})
+
+test("fresh dispatch restores durable tool history and emits its next complete snapshot", async () => {
+  const { events, emit } = captureEmit()
+  const { calls, fn } = capturingStream([
+    { type: "text-delta", id: "1", text: "continued" },
+    { type: "finish", finishReason: "stop" },
+  ])
+  const history = [
+    { role: "system", content: "old policy" },
+    { role: "user", content: "ORIGINAL_REQUEST" },
+    {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: "same-id", toolName: "read", input: { path: "a.ts" } },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "same-id",
+          toolName: "read",
+          output: { type: "text", value: "saved file" },
+        },
+      ],
+    },
+  ]
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "restored",
+    firstPrompt: "FOLLOWUP_REQUEST",
+    sendOptions: {
+      model: "gpt-x",
+      providerCredentials: { apiKey: "k", protocol: "openai" },
+      initialConversation: history,
+      systemPrompt: "current policy",
+    },
+    emit,
+    log: () => {},
+    streamText: fn,
+  })
+  await waitForTurnsFactory(events)(1)
+  session.closeInput()
+  const sent = calls[0].messages
+  assert.ok(sent.some((message) => message.content === "ORIGINAL_REQUEST"))
+  assert.ok(sent.some((message) => message.content === "FOLLOWUP_REQUEST"))
+  assert.ok(
+    sent.some((message) => message.role === "tool" && message.content[0].toolCallId === "same-id")
+  )
+  assert.ok(!JSON.stringify(calls[0]).includes("old policy"))
+  assert.ok(JSON.stringify(calls[0]).includes("current policy"))
+  const snapshot = events.find((event) => event.type === "session_ended").conversationSnapshot
+  assert.ok(snapshot.some((message) => message.content === "ORIGINAL_REQUEST"))
+  assert.ok(snapshot.some((message) => message.content === "continued"))
+})
+
+test("AI SDK 7 responseMessages preserves tool calls/results in durable history", async () => {
+  const { events, emit } = captureEmit()
+  const { fn } = capturingStream([
+    { type: "text-delta", id: "1", text: "fixed" },
+    { type: "finish", finishReason: "stop" },
+  ])
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "persisted-call",
+          toolName: "read",
+          input: { path: "a.ts" },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "persisted-call",
+          toolName: "read",
+          output: { type: "text", value: "source" },
+        },
+      ],
+    },
+    { role: "assistant", content: [{ type: "text", text: "fixed" }] },
+  ]
+  const session = dispatchAiSdk({
+    provider: "openai",
+    sessionId: "sdk7-history",
+    firstPrompt: "fix",
+    sendOptions: { model: "gpt-x", providerCredentials: { apiKey: "k", protocol: "openai" } },
+    emit,
+    log: () => {},
+    streamText: (...args) => ({
+      ...fn(...args),
+      response: Promise.resolve({ id: "metadata-only" }),
+      responseMessages: Promise.resolve(messages),
+    }),
+  })
+  await waitForTurnsFactory(events)(1)
+  session.closeInput()
+  const snapshot = events.find((event) => event.type === "session_ended").conversationSnapshot
+  assert.deepEqual(snapshot.slice(1), messages)
 })

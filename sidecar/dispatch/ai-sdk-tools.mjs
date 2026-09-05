@@ -36,7 +36,10 @@ import {
 const ASK_USER_TOOL_NAME = "ask_user"
 import { awaitPluginToolResponse } from "../builtin-tools/plugin-tools.mjs"
 import { resolveForToolCall } from "./permission-resolver.mjs"
-import { classifyToolCallConfinement } from "../builtin-tools/confinement.mjs"
+import {
+  classifyToolCallConfinement,
+  assertToolCallWithinRoots,
+} from "../builtin-tools/confinement.mjs"
 import { createDoomLoopGuard } from "./doom-loop.mjs"
 import { markAiSdkToolSource } from "./ai-sdk-tool-search.mjs"
 
@@ -62,7 +65,7 @@ const TOOL_RESULT_PII_ERROR = "Tool result blocked by the PII redaction gate"
  * Anthropic SDK's native `acceptEdits` and the ACP client's edit auto-approval
  * (`lib/ai/agent/external/acp-client.ts`) so the AI-SDK path stops prompting for
  * every edit. DELIBERATELY excludes exec/process/git-mutation tools (bash,
- * shell, start_process, git_commit, …) and directory/rename/move ops — those
+ * shell, start_process, git_commit, …) — those
  * still route through the normal approval policy. Read-only tools are already
  * auto-approved upstream, so they aren't listed here. */
 const ACCEPT_EDITS_TOOL_NAMES = new Set([
@@ -73,6 +76,10 @@ const ACCEPT_EDITS_TOOL_NAMES = new Set([
   "NotebookEdit",
   "file_append",
   "file_binary_write",
+  "directory_create",
+  "file_copy",
+  "file_move",
+  "file_rename",
 ])
 
 // Per-tool execution deadline for READ-ONLY built-ins on the ai-sdk path. The
@@ -206,17 +213,20 @@ export function createToolPermissionGate({
    *   never answers.
    */
   return async function gate(toolName, input, signal) {
+    if (signal?.aborted) throw new Error(`denied: tool call interrupted: ${toolName}`)
+    // Explicit policy decisions precede every mode and remembered grant.
+    const ruleVerdict = resolveForToolCall(ruleset, toolName, input)
+    if (ruleVerdict === "deny") throw new Error(`denied by permission ruleset: ${toolName}`)
+
+    assertToolCallWithinRoots(sendOptions?.builtinProcessSandbox, toolName, input, sendOptions?.cwd)
+
     // The `ask_user` elicitation tool is the user interaction itself: the
     // renderer's AskUserDialog blocks until the user answers, so it must never
     // be routed through the generic tool-approval modal — in ANY mode. Each
     // call is inherently human-gated (no runaway loop without a human answer),
     // so allow it unconditionally, ahead of the doom-loop guard. The plan-mode
     // branch below also permits it; this generalises that to every mode.
-    {
-      const parts = String(toolName).split("__")
-      const bareName = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
-      if (bareName === ASK_USER_TOOL_NAME) return input
-    }
+    if (toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${ASK_USER_TOOL_NAME}`) return input
 
     // Read the permission mode LIVE (not closed-over): a `claude_set_mode`
     // control message mutates `sendOptions.permissionMode` on the running
@@ -268,7 +278,7 @@ export function createToolPermissionGate({
         (server === SERVER_NAME &&
           (READ_ONLY_TOOL_NAMES.has(bare) || bare === EXIT_PLAN_TOOL_NAME)) ||
         (server === PLUGIN_TOOLS_SERVER_NAME && PLAN_ALLOWED_PLUGIN_TOOLS.has(bare)) ||
-        bare === ASK_USER_TOOL_NAME
+        toolName === `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${ASK_USER_TOOL_NAME}`
       if (!allowed) {
         throw new Error(`plan mode: tool "${toolName}" is not permitted (read-only tools only)`)
       }
@@ -289,8 +299,8 @@ export function createToolPermissionGate({
         const server = parts.length >= 3 ? parts[1] : null
         const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
         if (server === SERVER_NAME && READ_ONLY_TOOL_NAMES.has(bare)) return input
-        if (suppress && suppress.includes(toolName)) return input
-        if (alwaysAllow && alwaysAllow.includes(toolName)) return input
+        if (confVerdict !== "ask" && suppress && suppress.includes(toolName)) return input
+        if (confVerdict !== "ask" && alwaysAllow && alwaysAllow.includes(toolName)) return input
         if (ruleset) {
           let verdict
           try {
@@ -328,14 +338,18 @@ export function createToolPermissionGate({
       const bare = parts.length >= 3 ? parts.slice(2).join("__") : String(toolName)
       // A confinement "ask" (edit escaping the workspace roots) overrides the
       // acceptEdits auto-approval and falls through to the prompt.
-      if (server === SERVER_NAME && ACCEPT_EDITS_TOOL_NAMES.has(bare) && confVerdict !== "ask") {
+      const editable =
+        (server === SERVER_NAME && ACCEPT_EDITS_TOOL_NAMES.has(bare)) ||
+        (server === PLUGIN_TOOLS_SERVER_NAME &&
+          ["sandbox_write", "sandbox_edit", "sandbox_text_editor"].includes(bare))
+      if (editable && confVerdict !== "ask") {
         return input
       }
     }
 
     if (!doomed) {
-      if (suppress && suppress.includes(toolName)) return input
-      if (alwaysAllow && alwaysAllow.includes(toolName)) return input
+      if (confVerdict !== "ask" && suppress && suppress.includes(toolName)) return input
+      if (confVerdict !== "ask" && alwaysAllow && alwaysAllow.includes(toolName)) return input
     }
 
     if (ruleset && !doomed) {
@@ -578,7 +592,7 @@ function hasNoLeakingPiiToolOutput(output) {
   return hasNoLeakingPiiDeep(output)
 }
 
-function assertModelSafeToolOutput(output) {
+export function assertModelSafeToolOutput(output) {
   // Embedded textual resources cross the provider boundary as base64 file
   // parts. Decode them before scanning; otherwise the encoded bytes look like
   // an opaque safe token while the model decodes the original PII.
@@ -879,6 +893,7 @@ export function buildAiSdkTools({
 
   for (const def of collectCogniaToolDefs({
     enabled: sendOptions.builtinTools,
+    builtinProcessSandbox: sendOptions.builtinProcessSandbox,
     lspResolver,
     codeGraphResolver,
     readTracker,

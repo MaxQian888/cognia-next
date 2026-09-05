@@ -199,3 +199,31 @@ test("dispose stops every started server", async () => {
   await resolver.dispose()
   assert.equal(service.calls.stop.length, 1)
 })
+
+test("project LSP commands are sandboxed with a clean environment", async () => {
+  const { root, file } = tsProject()
+  const service = makeFakeService()
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: () => "/project/custom-server",
+    builtinProcessSandbox: {
+      launcher: process.execPath,
+      writableRoots: [root],
+      readableRoots: [],
+      network: false,
+    },
+  })
+  try {
+    await resolver.touchFile(file)
+    const start = service.calls.start[0]
+    assert.equal(start.command, process.execPath)
+    assert.deepEqual(start.args.slice(-3), ["--", "/project/custom-server", "--stdio"])
+    assert.equal(start.inheritEnv, false)
+    assert.equal(start.args.includes("--network"), false)
+  } finally {
+    await resolver.dispose()
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})

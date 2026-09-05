@@ -25,6 +25,7 @@ import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
  */
 export type ExternalAgentPresetId =
   | "codex"
+  | "codex-acp"
   | "codex-app-server"
   | "claude-code"
   | "gemini-cli"
@@ -278,6 +279,11 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   ExternalAgentPresetConfig | null
 > = {
   codex: buildPresetConfig("codex"),
+  "codex-acp": {
+    ...buildPresetConfig("codex-acp"),
+    name: "Codex (ACP)",
+    description: "Run the Codex ACP adapter explicitly, without native app-server selection.",
+  },
   "codex-app-server": buildPresetConfig("codex-app-server"),
   "claude-code": buildPresetConfig("claude-code"),
   "gemini-cli": buildPresetConfig("gemini-cli"),
@@ -528,6 +534,7 @@ export function createAgentFromPreset(
         }
       : overrides?.network,
     defaultPermissionMode: overrides?.defaultPermissionMode || preset.defaultPermissionMode,
+    ...(overrides?.codexOptions !== undefined ? { codexOptions: overrides.codexOptions } : {}),
     tags: [...preset.tags, ...(overrides?.tags || [])],
     timeout: overrides?.timeout || 30000,
     metadata: {

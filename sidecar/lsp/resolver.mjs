@@ -1,3 +1,4 @@
+import { sandboxedProcessTarget, sandboxedProcessEnv } from "../builtin-tools/shared/exec.mjs"
 // Agent-side LSP resolver.
 //
 // This is the thin layer that turns "the agent touched a file" into the
@@ -113,12 +114,21 @@ export function createLspResolver(args) {
     }
     const folderUri = pathToFileURL(root.endsWith(path.sep) ? root : root + path.sep).href
     try {
+      const target = sandboxedProcessTarget(
+        resolved,
+        spawn.args ?? [],
+        root,
+        args.builtinProcessSandbox
+      )
       await service.start({
         ownerId: OWNER,
         serverId,
-        command: resolved,
-        args: spawn.args ?? [],
-        env: spawn.env,
+        command: target.command,
+        args: target.args,
+        env: args.builtinProcessSandbox
+          ? sandboxedProcessEnv(process.env, args.builtinProcessSandbox, spawn.env)
+          : spawn.env,
+        ...(args.builtinProcessSandbox ? { inheritEnv: false } : {}),
         cwd: root,
         transport: "stdio",
         workspaceFolders: [{ uri: folderUri, name: path.basename(root) || root }],

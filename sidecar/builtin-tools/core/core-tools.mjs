@@ -84,13 +84,24 @@ export function createCoreTools({
   readTracker,
   lspResolver,
   bgShells,
+  builtinProcessSandbox,
   taskStore,
   hostRpc,
   sessionId,
   model,
   provider,
 } = {}) {
-  const ctx = { cwd, readTracker, lspResolver, bgShells, hostRpc, sessionId, model, provider }
+  const ctx = {
+    cwd,
+    readTracker,
+    lspResolver,
+    bgShells,
+    builtinProcessSandbox,
+    hostRpc,
+    sessionId,
+    model,
+    provider,
+  }
   const tools = [
     createGrepTool(ctx),
     createGlobTool(ctx),

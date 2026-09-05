@@ -299,6 +299,14 @@ function codexMcpTitle(item: CodexThreadItem): string | undefined {
   return appName || undefined
 }
 
+interface PendingTurnStart {
+  cancelled: boolean
+  completed: boolean
+  interrupted: boolean
+  turnId?: string
+  completions: Map<string, Record<string, unknown>>
+}
+
 interface PendingCompaction {
   resolve: () => void
   reject: (error: Error) => void
@@ -409,6 +417,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private sessionListeners = new Map<string, Set<(event: ExternalAgentEvent) => void>>()
   // Active turn id per session, for `turn/interrupt`.
   private activeTurns = new Map<string, string>()
+  // Admission and completion notifications can race the turn/start reply.
+  private startingTurns = new Map<string, PendingTurnStart>()
+  // Keep revoked admissions until their replies identify the native turns.
+  // Otherwise a late A notification could claim a new B admission after resume.
+  private revokedTurnStarts = new Map<string, Set<PendingTurnStart>>()
+  private revokedTurnIds = new Map<string, Set<string>>()
   // Latest token usage per session, folded into the `done` event.
   private lastTokenUsage = new Map<string, ExternalAgentTokenUsage>()
   // agentMessage / reasoning item ids that already streamed deltas, so a
@@ -724,6 +738,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     this._sessions.clear()
     this.sessionListeners.clear()
     this.activeTurns.clear()
+    this.startingTurns.clear()
+    this.revokedTurnStarts.clear()
+    this.revokedTurnIds.clear()
     this.lastTokenUsage.clear()
     this.streamedItems.clear()
     this.sentSystemPrompt.clear()
@@ -770,6 +787,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     const metadata = this.buildSessionMetadata(options)
     const params: Record<string, unknown> = {
+      approvalsReviewer: "user",
       approvalPolicy: this.approvalPolicyFor(
         (options?.permissionMode || "default") as AcpPermissionMode
       ),
@@ -868,25 +886,19 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   /**
-   * The effective sandbox mode for a session: what the user configured, unless
-   * the permission mode overrides it.
-   *
-   * `bypassPermissions` forces full access. Approval policy and sandbox are
-   * independent knobs on the Codex side, and setting only
-   * {@link approvalPolicyFor}'s `never` produced the worst of both: Codex
-   * stopped asking AND kept the `workspaceWrite` sandbox, so anything reaching
-   * outside the workspace (or the network) failed outright instead of
-   * prompting. "No guardrails" has to mean the same thing on an external agent
-   * as it does on the built-in one, or the mode is a different feature
-   * depending on who is answering.
+   * Permission modes cap native autonomy; metadata may only narrow that cap.
+   * Omitting sandbox inherits config.toml, which may grant full access before
+   * any approval callback reaches Cognia. Only explicit bypass may do that.
    */
   private sandboxModeFor(
     metadata: Record<string, unknown> | undefined,
     permissionMode?: AcpPermissionMode
-  ): CodexSandboxMode | undefined {
+  ): CodexSandboxMode {
     if (permissionMode === "bypassPermissions") return "dangerFullAccess"
-    const mode = readString(metadata?.sandboxMode)
-    return mode && mode in SANDBOX_MODE_WIRE ? (mode as CodexSandboxMode) : undefined
+    if (permissionMode === "acceptEdits" && metadata?.sandboxMode !== "readOnly") {
+      return "workspaceWrite"
+    }
+    return "readOnly"
   }
 
   /**
@@ -908,41 +920,66 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   private sandboxPolicyFrom(
     metadata: Record<string, unknown> | undefined,
     permissionMode?: AcpPermissionMode
-  ): CodexSandboxPolicy | undefined {
+  ): CodexSandboxPolicy {
     const mode = this.sandboxModeFor(metadata, permissionMode)
     if (mode === "dangerFullAccess") return { type: "dangerFullAccess" }
-    if (mode === "readOnly") {
-      const policy: CodexSandboxPolicy = { type: "readOnly" }
-      if (typeof metadata?.networkAccess === "boolean")
-        policy.networkAccess = metadata.networkAccess
-      return policy
+    if (mode === "readOnly") return { type: "readOnly", networkAccess: false }
+    // acceptEdits authorizes the workspace, not extra roots, temp directories,
+    // or network access inherited from the user's native Codex configuration.
+    return {
+      type: "workspaceWrite",
+      writableRoots: [],
+      networkAccess: false,
+      excludeTmpdirEnvVar: true,
+      excludeSlashTmp: true,
     }
-    if (mode === "workspaceWrite") {
-      const policy: CodexSandboxPolicy = { type: "workspaceWrite" }
-      if (typeof metadata?.networkAccess === "boolean")
-        policy.networkAccess = metadata.networkAccess
-      if (Array.isArray(metadata?.writableRoots) && metadata.writableRoots.length > 0) {
-        policy.writableRoots = metadata.writableRoots.filter(
-          (root): root is string => typeof root === "string"
-        )
-      }
-      return policy
+  }
+
+  private rememberRevokedTurn(sessionId: string, turnId: string): void {
+    const ids = this.revokedTurnIds.get(sessionId) ?? new Set<string>()
+    ids.add(turnId)
+    this.revokedTurnIds.set(sessionId, ids)
+  }
+
+  /** Revoke local ownership before any asynchronous provider cleanup. */
+  private async revokeSessionAdmission(sessionId: string): Promise<void> {
+    const starting = this.startingTurns.get(sessionId)
+    const turnId = this.activeTurns.get(sessionId) ?? starting?.turnId
+    if (starting) {
+      starting.cancelled = true
+      starting.completions.clear()
+      const revoked = this.revokedTurnStarts.get(sessionId) ?? new Set<PendingTurnStart>()
+      revoked.add(starting)
+      this.revokedTurnStarts.set(sessionId, revoked)
     }
-    return undefined
+    if (turnId) this.rememberRevokedTurn(sessionId, turnId)
+    this.startingTurns.delete(sessionId)
+    this.activeTurns.delete(sessionId)
+    this.lastTokenUsage.delete(sessionId)
+    this.sentSystemPrompt.delete(sessionId)
+    this._sessions.delete(sessionId)
+    this.emit(sessionId, {
+      type: "done",
+      sessionId,
+      timestamp: new Date(),
+      success: false,
+      stopReason: "cancelled",
+    })
+    if (turnId && !starting?.completed && !starting?.interrupted) {
+      if (starting) starting.interrupted = true
+      await this.interruptTurn(sessionId, turnId)
+    }
   }
 
   async closeSession(sessionId: string): Promise<void> {
     if (!this._sessions.has(sessionId)) return
+    await this.revokeSessionAdmission(sessionId)
     // Best-effort unsubscribe so the server can release the thread.
     try {
       await this.peer?.sendRequest("thread/unsubscribe", { threadId: sessionId }, 5000)
     } catch {
       // The server may not be subscribed; local cleanup is what matters.
     }
-    this.activeTurns.delete(sessionId)
-    this.lastTokenUsage.delete(sessionId)
-    this.sentSystemPrompt.delete(sessionId)
-    this._sessions.delete(sessionId)
   }
 
   // --------------------------------------------------------------------------
@@ -1029,6 +1066,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const metadata = this.buildSessionMetadata(options)
     const params: Record<string, unknown> = {
       threadId: sessionId,
+      approvalsReviewer: "user",
       approvalPolicy: this.approvalPolicyFor(
         (options?.permissionMode || "default") as AcpPermissionMode
       ),
@@ -1047,8 +1085,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const config = withCodexMcpServers(undefined, options?.mcpServers)
     if (config) params.config = config
 
+    if (this.configRequirementsRead) await this.awaitConfigRequirements()
+    assertCodexRequestAllowed(
+      { sandbox, approvalPolicy: readString(params.approvalPolicy) },
+      this.status.configRequirements
+    )
+
     const result = await this.callSessionExtension<{
-      thread?: { id?: string }
+      thread?: { id?: string; turns?: Array<{ items?: CodexThreadItem[] }> }
       model?: string
       reasoningEffort?: string
       initialTurnsPage?: { data?: Array<{ items?: CodexThreadItem[] }> }
@@ -1061,7 +1105,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (result?.reasoningEffort && metadata.reasoningEffort === undefined) {
       metadata.reasoningEffort = result.reasoningEffort
     }
-    const messages = hydrateMessagesFromTurns(result?.initialTurnsPage?.data)
+    // 0.150.1 populates thread.turns by default; initialTurnsPage is opt-in.
+    const messages = hydrateMessagesFromTurns(
+      result?.initialTurnsPage?.data ?? result?.thread?.turns
+    )
     const session: ExternalAgentSession = {
       id: threadId,
       agentId: this._config!.id,
@@ -1109,9 +1156,8 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
+    await this.revokeSessionAdmission(sessionId)
     await this.callOptional("thread/delete", { threadId: sessionId })
-    this._sessions.delete(sessionId)
-    this.activeTurns.delete(sessionId)
   }
 
   // Codex-specific thread housekeeping, reached via getCodexAppServerAdapter().
@@ -1226,6 +1272,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const session = this._sessions.get(sessionId)
     if (!session) throw new Error(`Session not found: ${sessionId}`)
 
+    if (this.startingTurns.has(sessionId) || this.activeTurns.has(sessionId)) {
+      throw new Error("Codex turn is already in progress")
+    }
     this.updateSession(sessionId, { status: "executing" })
     ;(session.messages ?? (session.messages = [])).push(message)
 
@@ -1289,58 +1338,110 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       if (error && !sawDone) throw error
     } finally {
       this.removeSessionListener(sessionId, listener)
-      this.updateSession(sessionId, { status: "idle" })
+      if (this._sessions.get(sessionId) === session)
+        this.updateSession(sessionId, { status: "idle" })
     }
   }
 
   private async startTurn(sessionId: string, input: CodexUserInput[]): Promise<void> {
     if (!this.peer) throw new Error("Not connected to Codex app-server")
-    const session = this._sessions.get(sessionId)
-    const params: Record<string, unknown> = {
-      threadId: sessionId,
-      input,
-      approvalPolicy: this.approvalPolicyFor(session?.permissionMode),
+    const starting: PendingTurnStart = {
+      cancelled: false,
+      completed: false,
+      interrupted: false,
+      turnId: undefined,
+      completions: new Map<string, Record<string, unknown>>(),
     }
-    const cwd =
-      (typeof session?.metadata?.cwd === "string" ? session.metadata.cwd : undefined) ||
-      this._config?.process?.cwd
-    if (cwd) params.cwd = cwd
-    const model = session?.metadata?.selectedModel
-    if (typeof model === "string") params.model = model
-    // The composer's thinking level can name a tier this model doesn't publish
-    // (the app ladder reaches `max`; Codex models typically stop at `high`), so
-    // fold it onto the nearest supported one rather than letting the server
-    // reject the turn.
-    const effort = this.clampEffortToSupported(
-      readString(session?.metadata?.reasoningEffort),
-      readString(session?.metadata?.selectedModel)
-    )
-    if (effort) params.effort = effort
-    const summary = readString(session?.metadata?.reasoningSummary)
-    if (summary) params.summary = summary
-    // Read from the LIVE session, so a mid-session `/mode bypassPermissions`
-    // (which only mutates `session.permissionMode` via `setSessionMode`) relaxes
-    // the sandbox on the very next turn instead of waiting for a reconnect.
-    const sandboxPolicy = this.sandboxPolicyFrom(session?.metadata, session?.permissionMode)
-    if (sandboxPolicy) params.sandboxPolicy = sandboxPolicy
+    const peer = this.peer
+    let requestSent = false
+    this.startingTurns.set(sessionId, starting)
+    try {
+      const session = this._sessions.get(sessionId)
+      const params: Record<string, unknown> = {
+        threadId: sessionId,
+        input,
+        approvalsReviewer: "user",
+        approvalPolicy: this.approvalPolicyFor(session?.permissionMode),
+      }
+      const cwd =
+        (typeof session?.metadata?.cwd === "string" ? session.metadata.cwd : undefined) ||
+        this._config?.process?.cwd
+      if (cwd) params.cwd = cwd
+      const model = session?.metadata?.selectedModel
+      if (typeof model === "string") params.model = model
+      // The composer's thinking level can name a tier this model doesn't publish
+      // (the app ladder reaches `max`; Codex models typically stop at `high`), so
+      // fold it onto the nearest supported one rather than letting the server
+      // reject the turn.
+      const effort = this.clampEffortToSupported(
+        readString(session?.metadata?.reasoningEffort),
+        readString(session?.metadata?.selectedModel)
+      )
+      if (effort) params.effort = effort
+      const summary = readString(session?.metadata?.reasoningSummary)
+      if (summary) params.summary = summary
+      // Read from the LIVE session, so a mid-session `/mode bypassPermissions`
+      // (which only mutates `session.permissionMode` via `setSessionMode`) relaxes
+      // the sandbox on the very next turn instead of waiting for a reconnect.
+      const sandboxPolicy = this.sandboxPolicyFrom(session?.metadata, session?.permissionMode)
+      if (sandboxPolicy) params.sandboxPolicy = sandboxPolicy
 
-    // Same managed-policy gate as `thread/start`. The sandbox arrives here as
-    // the tagged `SandboxPolicy` union, so compare on its wire mode.
-    // Guarded rather than awaited unconditionally: an `await` on an
-    // already-settled read still costs a microtask, which reorders the send
-    // relative to callers that drive this synchronously.
-    if (this.configRequirementsRead) await this.awaitConfigRequirements()
-    assertCodexRequestAllowed(
-      {
-        sandbox: toWireSandboxMode(sandboxPolicy?.type),
-        approvalPolicy: readString(params.approvalPolicy),
-      },
-      this.status.configRequirements
-    )
+      // Same managed-policy gate as `thread/start`. The sandbox arrives here as
+      // the tagged `SandboxPolicy` union, so compare on its wire mode.
+      // Guarded rather than awaited unconditionally: an `await` on an
+      // already-settled read still costs a microtask, which reorders the send
+      // relative to callers that drive this synchronously.
+      if (this.configRequirementsRead) await this.awaitConfigRequirements()
+      assertCodexRequestAllowed(
+        {
+          sandbox: toWireSandboxMode(sandboxPolicy?.type),
+          approvalPolicy: readString(params.approvalPolicy),
+        },
+        this.status.configRequirements
+      )
 
-    const result = await this.peer.sendRequest<{ turn?: { id?: string } }>("turn/start", params)
-    const turnId = result?.turn?.id
-    if (turnId) this.activeTurns.set(sessionId, turnId)
+      if (this.startingTurns.get(sessionId) !== starting || this.peer !== peer) return
+      requestSent = true
+      const result = await peer.sendRequest<{ turn?: { id?: string } }>("turn/start", params)
+      const turnId = result?.turn?.id
+      if (!turnId) return
+      if (this.startingTurns.get(sessionId) !== starting) {
+        // Any termination invalidates ownership immediately. Retain the native
+        // identity so its late notifications cannot bind a resumed admission.
+        starting.turnId = turnId
+        if (starting.cancelled && this.peer === peer) this.rememberRevokedTurn(sessionId, turnId)
+        if (
+          starting.cancelled &&
+          !starting.completed &&
+          !starting.interrupted &&
+          this.peer === peer
+        ) {
+          starting.interrupted = true
+          await this.interruptTurn(sessionId, turnId)
+        }
+        return
+      }
+      if (!starting.completed) {
+        if (!starting.turnId) {
+          starting.turnId = turnId
+          this.activeTurns.set(sessionId, turnId)
+        }
+        const completion = starting.completions.get(turnId)
+        starting.completions.clear()
+        if (completion) this.handleNotification("turn/completed", completion)
+        if (starting.cancelled && !starting.completed && !starting.interrupted) {
+          starting.interrupted = true
+          await this.interruptTurn(sessionId, this.activeTurns.get(sessionId) ?? turnId)
+        }
+      }
+    } finally {
+      if (this.startingTurns.get(sessionId) === starting) this.startingTurns.delete(sessionId)
+      const revoked = this.revokedTurnStarts.get(sessionId)
+      // A failed/expired request does not prove the server never admitted it.
+      // Keep unidentified revoked admissions fenced until connection teardown.
+      if (!requestSent || starting.turnId || this.peer !== peer) revoked?.delete(starting)
+      if (revoked?.size === 0) this.revokedTurnStarts.delete(sessionId)
+    }
   }
 
   /**
@@ -1374,25 +1475,38 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async cancel(sessionId: string): Promise<void> {
     const session = this._sessions.get(sessionId)
     if (!session || session.status !== "executing") return
+    const starting = this.startingTurns.get(sessionId)
     const turnId = this.activeTurns.get(sessionId)
-    if (turnId && this.peer) {
-      try {
-        await this.peer.sendRequest("turn/interrupt", { threadId: sessionId, turnId }, 5000)
-      } catch (error) {
-        log.warn("turn/interrupt failed", { error })
-      }
+    // Preserve the cancellation until admission provides an interrupt target.
+    if (!turnId && starting && !starting.completed) {
+      starting.cancelled = true
+      return
+    }
+    if (turnId) {
+      if (starting) starting.interrupted = true
+      await this.interruptTurn(sessionId, turnId)
     }
     this.updateSession(sessionId, { status: "idle" })
   }
 
+  private async interruptTurn(sessionId: string, turnId: string): Promise<void> {
+    try {
+      await this.peer?.sendRequest("turn/interrupt", { threadId: sessionId, turnId }, 5000)
+    } catch (error) {
+      log.warn("turn/interrupt failed", { error })
+    }
+  }
+
   /**
-   * Codex auto-asks (`approvalPolicy: on-request`) for every mode except
-   * `bypassPermissions`, which runs unattended (`never`). The per-mode
-   * auto-accept / auto-decline logic is then applied client-side in
-   * {@link handleApproval}, so the request actually reaches Codex.
+   * `on-request` lets the model choose whether to ask; it is not a command gate.
+   * `untrusted` asks for commands outside Codex's trusted read set. Read-only
+   * additionally prevents default-mode edits before approval. Plan/dontAsk
+   * forbid escalation; native safe reads can still run without a callback.
    */
   private approvalPolicyFor(mode: AcpPermissionMode | undefined): string {
-    return mode === "bypassPermissions" ? "never" : "on-request"
+    return mode === "bypassPermissions" || mode === "plan" || mode === "dontAsk"
+      ? "never"
+      : "untrusted"
   }
 
   // --------------------------------------------------------------------------
@@ -1548,11 +1662,53 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }
       case "turn/started": {
         const turnId = readString(readObject(p.turn)?.id)
-        if (turnId) this.activeTurns.set(sessionId, turnId)
+        if (!turnId || !this._sessions.has(sessionId)) return
+        if (this.revokedTurnIds.get(sessionId)?.has(turnId)) return
+        const starting = this.startingTurns.get(sessionId)
+        const activeTurnId = this.activeTurns.get(sessionId)
+        if (activeTurnId && activeTurnId !== turnId) return
+        if (starting?.completed) return
+        // While revoked admission A is unidentified, a notification alone
+        // cannot establish whether it belongs to A or current admission B.
+        // B's correlated RPC reply will activate B and replay its completion.
+        if ([...(this.revokedTurnStarts.get(sessionId) ?? [])].some((revoked) => !revoked.turnId))
+          return
+        this.activeTurns.set(sessionId, turnId)
+        if (starting) {
+          starting.turnId = turnId
+          const completion = starting.completions.get(turnId)
+          starting.completions.clear()
+          if (completion) this.handleNotification("turn/completed", completion)
+          if (starting.cancelled && !starting.completed && !starting.interrupted) {
+            starting.interrupted = true
+            void this.interruptTurn(sessionId, turnId)
+          }
+        }
         return
       }
       case "turn/completed": {
         const turn = readObject(p.turn)
+        const turnId = readString(turn?.id)
+        if (!turnId || this.revokedTurnIds.get(sessionId)?.has(turnId)) return
+        const starting = this.startingTurns.get(sessionId)
+        const activeTurnId = this.activeTurns.get(sessionId)
+        if (!activeTurnId) {
+          // A completion may beat admission. Hold it until its identity can be
+          // checked instead of letting stale turn A finish a pending turn B.
+          if (starting && !starting.completed) {
+            starting.completions.set(turnId, {
+              threadId: sessionId,
+              turn: {
+                id: turnId,
+                status: turn?.status,
+                error: turn?.error,
+              },
+            })
+          }
+          return
+        }
+        if (turnId !== activeTurnId) return
+        if (starting) starting.completed = true
         const status = readString(turn?.status) ?? "completed"
         // Align failure signaling with the OpenCode/A2A adapters: a failed turn
         // emits a dedicated `error` event (not only `done{success:false}`), so
@@ -1741,14 +1897,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
             timestamp: new Date(),
             reason: "completed",
           })
-          this.activeTurns.delete(sessionId)
-          this._sessions.delete(sessionId)
         }
+        void this.revokeSessionAdmission(sessionId)
         return
       }
       case "thread/deleted": {
-        this._sessions.delete(sessionId)
-        this.activeTurns.delete(sessionId)
+        void this.revokeSessionAdmission(sessionId)
         return
       }
       case "thread/started":
@@ -2246,10 +2400,12 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     const sessionId = this.resolveSessionId(params)
     const session = sessionId ? this._sessions.get(sessionId) : undefined
     const itemId = readString(params.itemId) ?? `approval_${Date.now()}`
+    // zsh-exec-bridge and stdin callbacks can share one parent command item.
+    const requestId = readString(params.approvalId) ?? itemId
     const command = readString(params.command)
     const request: AcpPermissionRequest = {
-      id: itemId,
-      requestId: itemId,
+      id: requestId,
+      requestId,
       sessionId,
       toolCallId: itemId,
       title: kind === "command" ? command || "Run command" : "Apply file changes",
@@ -2284,7 +2440,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     // Surface to the UI and await `respondToPermission`.
     return new Promise<{ decision: string }>((resolve) => {
-      this.pendingApprovals.set(itemId, {
+      this.pendingApprovals.set(requestId, {
         resolve: (response) => resolve(response as { decision: string }),
         request,
         kind,
@@ -2473,16 +2629,18 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
    * Apply the permission mode without UI. Returns the decision string, or
    * `undefined` when the request must be surfaced to the user.
    * - `bypassPermissions` → accept everything (Codex won't even ask, but guard anyway)
-   * - `acceptEdits` → accept file changes; commands still prompt
+   * - `acceptEdits` → prompt for exceptions; native workspace edits need none
    * - `plan` / `dontAsk` → decline side effects (no pre-approval registry)
    * - `default` → prompt
    */
   private autoDecision(
     mode: AcpPermissionMode,
-    kind: "command" | "fileChange"
+    _kind: "command" | "fileChange"
   ): CodexCommandDecision | CodexFileChangeDecision | undefined {
     if (mode === "bypassPermissions") return "accept"
-    if (mode === "acceptEdits" && kind === "fileChange") return "accept"
+    // Workspace edits already run without approval in acceptEdits. A callback
+    // means Codex needs an exception (for example outside/protected paths),
+    // which must reach the user rather than inherit blanket edit approval.
     // Reuse the shared ordering: anything at or below `dontAsk` auto-declines.
     if (MODE_RANK[mode] <= MODE_RANK.dontAsk) return "decline"
     return undefined
@@ -2493,6 +2651,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     // wire reply ({answers} instead of {decision}).
     const userInput = this.pendingUserInputs.get(response.requestId)
     if (userInput) {
+      if (userInput.sessionId && userInput.sessionId !== _sessionId) {
+        throw new Error("Permission response belongs to a different session")
+      }
       this.pendingUserInputs.delete(response.requestId)
       if (userInput.timer) clearTimeout(userInput.timer)
       userInput.resolve({ answers: this.buildUserInputAnswers(userInput.questions, response) })
@@ -2508,6 +2669,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     const elicitation = this.pendingMcpElicitations.get(response.requestId)
     if (elicitation) {
+      if (elicitation.sessionId && elicitation.sessionId !== _sessionId) {
+        throw new Error("Permission response belongs to a different session")
+      }
       this.pendingMcpElicitations.delete(response.requestId)
       const content = response.granted
         ? buildMcpElicitationContent(elicitation.fields, response.answers)
@@ -2529,6 +2693,9 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
 
     const pending = this.pendingApprovals.get(response.requestId)
     if (!pending) return
+    if (pending.sessionId && pending.sessionId !== _sessionId) {
+      throw new Error("Permission response belongs to a different session")
+    }
     this.pendingApprovals.delete(response.requestId)
     pending.resolve(
       pending.kind === "permissionProfile"
@@ -2627,11 +2794,23 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       // `{ id, model, displayName, ... }`. We read `data` (with a `models`
       // fallback for any legacy/forked build) so the model picker is populated;
       // the previous `result.models` read always yielded an empty list.
-      const result = await this.peer.sendRequest<{
-        data?: Array<Record<string, unknown>>
-        models?: Array<Record<string, unknown>>
-      }>("model/list", { includeHidden: false })
-      this.modelCache = (result?.data ?? result?.models ?? []).map((m) => mapModelInfo(m))
+      const models: CodexModelInfo[] = []
+      const cursors = new Set<string>()
+      let cursor: string | undefined
+      do {
+        const result = await this.peer.sendRequest<{
+          data?: Array<Record<string, unknown>>
+          models?: Array<Record<string, unknown>>
+          nextCursor?: string | null
+        }>("model/list", { includeHidden: false, ...(cursor ? { cursor } : {}) })
+        models.push(...(result?.data ?? result?.models ?? []).map((m) => mapModelInfo(m)))
+        cursor = readString(result?.nextCursor)
+        if (cursor) {
+          if (cursors.has(cursor)) throw new Error("model/list repeated a pagination cursor")
+          cursors.add(cursor)
+        }
+      } while (cursor)
+      this.modelCache = models
       return this.modelCache.map((m) => ({ id: m.id, name: m.displayName }))
     } catch (error) {
       log.warn("model/list failed", { error })
@@ -2723,6 +2902,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
     if (!this._sessions.has(sessionId)) throw new Error(`Session not found: ${sessionId}`)
     this.updateSession(sessionId, { permissionMode: modeId })
+    this.emitConfigOptions(sessionId)
   }
 
   // --------------------------------------------------------------------------
@@ -2766,12 +2946,16 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       name: "Sandbox",
       category: "mode",
       type: "select",
-      currentValue: readString(session.metadata?.sandboxMode) ?? "workspaceWrite",
+      currentValue: this.sandboxModeFor(session.metadata, session.permissionMode),
       options: [
         { value: "readOnly", name: "Read only" },
         { value: "workspaceWrite", name: "Workspace write" },
         { value: "dangerFullAccess", name: "Full access" },
-      ],
+      ].filter(
+        (option) =>
+          this.sandboxModeFor({ sandboxMode: option.value }, session.permissionMode) ===
+          option.value
+      ),
     })
     return options
   }
@@ -2791,6 +2975,21 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
         metadata: { ...session.metadata, reasoningEffort: value },
       })
     } else if (configId === "sandboxMode") {
+      if (!Object.hasOwn(SANDBOX_MODE_WIRE, value)) {
+        throw new Error(`Invalid value for sandboxMode: ${value}`)
+      }
+      if (this.sandboxModeFor({ sandboxMode: value }, session.permissionMode) !== value) {
+        const requiredMode =
+          value === "dangerFullAccess"
+            ? "bypassPermissions"
+            : value === "workspaceWrite"
+              ? "acceptEdits"
+              : "default or acceptEdits"
+        throw new Error(
+          `Sandbox ${value} is unavailable in permission mode ${session.permissionMode}. ` +
+            `Switch permission mode to ${requiredMode} before selecting ${value}.`
+        )
+      }
       this.updateSession(sessionId, {
         metadata: { ...session.metadata, sandboxMode: value },
       })

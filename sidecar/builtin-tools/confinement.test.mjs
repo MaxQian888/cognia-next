@@ -148,11 +148,49 @@ test("combineVerdict picks the more-restrictive, null-safe", () => {
 test("bareToolName strips the mcp namespace", () => {
   assert.equal(bareToolName("mcp__cognia-tools__write"), "write")
   assert.equal(bareToolName("write"), "write")
-  assert.equal(bareToolName("mcp__server__a__b"), "a__b")
+  assert.equal(bareToolName("mcp__server__a__b"), "mcp__server__a__b")
 })
 
 test("assertNotSecretEscape throws on credential targets, passes otherwise", () => {
   const root = mkRoot()
   assert.throws(() => assertNotSecretEscape(root, path.join(os.homedir(), ".ssh", "x")))
   assert.doesNotThrow(() => assertNotSecretEscape(root, path.join(root, "ok.txt")))
+})
+
+test("executor scope rejects relocation destinations and nested edits outside writable roots", async () => {
+  const { assertToolCallWithinRoots } = await import("./confinement.mjs")
+  const policy = { writableRoots: ["/workspace"] }
+  assert.doesNotThrow(() =>
+    assertToolCallWithinRoots(policy, "directory_create", { path: "new" }, "/workspace")
+  )
+  assert.throws(
+    () =>
+      assertToolCallWithinRoots(
+        policy,
+        "file_move",
+        { source: "inside", destination: "/outside" },
+        "/workspace"
+      ),
+    /sandbox refused/
+  )
+  assert.throws(
+    () =>
+      assertToolCallWithinRoots(
+        policy,
+        "multi_edit",
+        { edits: [{ file_path: "/outside" }] },
+        "/workspace"
+      ),
+    /sandbox refused/
+  )
+  assert.throws(
+    () =>
+      assertToolCallWithinRoots(
+        { writableRoots: [] },
+        "directory_create",
+        { path: "new" },
+        "/workspace"
+      ),
+    /sandbox refused/
+  )
 })

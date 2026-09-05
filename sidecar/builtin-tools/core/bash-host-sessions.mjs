@@ -19,6 +19,8 @@
 // re-read a range. That is what makes `filter` mean "wait until this matches"
 // instead of "eat everything, then show what matched".
 
+import { createBgShellRegistry } from "./bash-sessions.mjs"
+
 import { HOST_RPC_TIMEOUT_MARGIN_MS } from "../../host-rpc.mjs"
 
 /** Cap on bytes pulled per host round-trip. */
@@ -243,4 +245,11 @@ function toListRow(job) {
     terminalStatus: job.status,
     droppedOutputBytes: job.droppedOutputBytes ?? 0,
   }
+}
+
+/** Choose an implemented host port; an RPC transport alone is not jobs readiness. */
+export function createSessionBgShellRegistry({ hostRpc, sessionId, backgroundProcessHost }) {
+  return hostRpc && backgroundProcessHost !== "sidecar"
+    ? createHostBgShellRegistry({ hostRpc, sessionId })
+    : createBgShellRegistry()
 }

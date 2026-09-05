@@ -4,7 +4,7 @@
 // to cognia's `core/rg.mjs` spawn conventions (node:child_process, byte cap,
 // timeout, no-binary → structured error).
 
-import { spawn } from "node:child_process"
+import { spawnInProcessSandbox as spawn } from "../shared/exec.mjs"
 import { detectAstGrep } from "./binary.mjs"
 
 export const DEFAULT_MAX_MATCHES = 100

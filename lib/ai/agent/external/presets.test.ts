@@ -1,3 +1,7 @@
+jest.mock("@/lib/native/external-agent", () => ({ checkExternalAgentCommandExists: jest.fn() }))
+import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
+import type { CodexAgentOptions } from "@/types/agent/external-agent"
+
 import {
   EXTERNAL_AGENT_PRESETS,
   BUILTIN_EXECUTABLE_PRESET_IDS,
@@ -5,6 +9,7 @@ import {
   getRunnablePresets,
   getPresetConfig,
   createAgentFromPreset,
+  resolvePreferredCodexExecutablePresetId,
   isFromPreset,
   getPresetDisplayInfo,
   registerPreset,
@@ -412,5 +417,59 @@ describe("runtime preset overlay", () => {
     __resetDynamicPresetsForTesting()
     expect(getPresetConfig("a")).toBeNull()
     expect(getPresetConfig("b")).toBeNull()
+  })
+})
+
+describe("explicit Codex ACP and native options", () => {
+  it("lists an explicit ACP preset with its own identity and the existing shim command", () => {
+    expect(getAvailablePresets()).toContain("codex-acp")
+    expect(getRunnablePresets()).toContain("codex-acp")
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("codex-acp")
+    const config = createAgentFromPreset("codex-acp")!
+    expect(config).toMatchObject({
+      name: "Codex (ACP)",
+      protocol: "acp",
+      transport: "stdio",
+      metadata: {
+        preset: "codex-acp",
+        ecosystemAdapterId: "codex",
+        ecosystemSurfaceId: "acp-stdio",
+        ecosystemSupportTier: "executable",
+      },
+    })
+    expect(config.process).toEqual(createAgentFromPreset("codex")!.process)
+    expect(isFromPreset(config)).toBe("codex-acp")
+  })
+
+  it.each(["codex-app-server", "codex", "codex-acp"])(
+    "preserves caller Codex options when materializing %s",
+    (id) => {
+      const codexOptions: CodexAgentOptions = {
+        sandboxMode: "workspaceWrite",
+        networkAccess: false,
+        writableRoots: ["/repo/output"],
+        extraSkillRoots: ["/repo/skills"],
+        defaultReasoningEffort: "high",
+        reasoningSummary: "concise",
+      }
+      const config = createAgentFromPreset(id, { codexOptions })!
+      expect(config.codexOptions).toEqual(codexOptions)
+      expect(config.codexOptions?.networkAccess).toBe(false)
+      expect(createAgentFromPreset(id)!.codexOptions).toBeUndefined()
+      expect(createAgentFromPreset(id, { codexOptions: {} })!.codexOptions).toEqual({})
+    }
+  )
+
+  it("keeps codex automatic native preference and its compatibility fallback", async () => {
+    const check = jest.mocked(checkExternalAgentCommandExists)
+    check.mockResolvedValueOnce(true)
+    expect(await resolvePreferredCodexExecutablePresetId()).toBe("codex-app-server")
+    check.mockResolvedValueOnce(false)
+    expect(await resolvePreferredCodexExecutablePresetId()).toBe("codex")
+    check.mockRejectedValueOnce(new Error("offline probe unavailable"))
+    expect(await resolvePreferredCodexExecutablePresetId()).toBe("codex")
+    check.mockClear()
+    expect(createAgentFromPreset("codex-acp")?.protocol).toBe("acp")
+    expect(check).not.toHaveBeenCalled()
   })
 })

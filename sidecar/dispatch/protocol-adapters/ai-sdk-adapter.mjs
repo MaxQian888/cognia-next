@@ -487,7 +487,24 @@ export function makeAiSdkAdapter(protocol) {
       // `event-adapter.mjs` consumes it. This is the one place the SDK's name
       // and the internal name have to meet.
       const result = await withTraceparent(req.traceparent, () => streamTextFn(streamArgs))
-      return { ...result, fullStream: result.stream ?? result.fullStream }
+      // SDK results expose lazy promise getters on their prototype. Spreading
+      // the instance drops history/usage; eager reads create unhandled rejected
+      // promises on interrupted streams. Preserve the adapter contract lazily.
+      return {
+        fullStream: result.stream ?? result.fullStream,
+        get responseMessages() {
+          return result.responseMessages
+        },
+        get response() {
+          return result.response
+        },
+        get usage() {
+          return result.usage
+        },
+        get steps() {
+          return result.steps
+        },
+      }
     },
   }
 }

@@ -469,8 +469,9 @@ export function findExternalAgentSurfaceByPresetId(presetId: string): {
   adapter: ExternalAgentEcosystemAdapterDefinition
   surface: ExternalAgentEcosystemSurfaceDefinition
 } | null {
+  const canonicalPresetId = presetId === "codex-acp" ? "codex" : presetId
   for (const adapter of listExternalAgentEcosystemAdapters()) {
-    const surface = adapter.surfaces.find((item) => item.presetId === presetId)
+    const surface = adapter.surfaces.find((item) => item.presetId === canonicalPresetId)
     if (surface) {
       return { adapter, surface }
     }

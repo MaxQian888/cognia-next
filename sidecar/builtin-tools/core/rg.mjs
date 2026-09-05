@@ -8,7 +8,7 @@
 // The result is cached for the process lifetime; `js-search.mjs` is the
 // fallback engine when this resolves to null.
 
-import { spawn } from "node:child_process"
+import { spawnInProcessSandbox as spawn } from "../shared/exec.mjs"
 import fs from "node:fs"
 import path from "node:path"
 

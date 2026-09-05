@@ -20,7 +20,6 @@ import {
   piHandshakeTimeoutMs,
   PI_EXTENSION_HANDSHAKE_TIMEOUT_MS,
   PI_EXTENSION_HANDSHAKE_TIMEOUT_GLOBAL_MS,
-  PiExtensionHandshakeError,
   parsePiModel,
   processToolFloor,
   type PiRpcHost,
@@ -1222,6 +1221,40 @@ describe("PiRpcClientAdapter — streaming", () => {
     expect(seen[0]).not.toHaveProperty("tokenUsage")
   })
 
+  it("releases the session after a rejected prompt so a corrected turn can run", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const rejected = adapter
+      .prompt("sess-1", message, { timeout: 1000 })
+      [Symbol.asyncIterator]()
+      .next()
+    replyTo(host, "prompt", null, { success: false, error: "prompt not accepted" })
+    await expect(rejected).rejects.toThrow("prompt not accepted")
+    const retry = (async () => {
+      const events: string[] = []
+      for await (const event of adapter.prompt("sess-1", message)) events.push(event.type)
+      return events
+    })()
+    replyTo(host, "prompt")
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await expect(retry).resolves.toEqual(["usage_update", "done"])
+  })
+
+  it.each([
+    { type: "url", url: "https://example.org/picture.png", mediaType: "image/png" },
+    { type: "base64", data: "", mediaType: "image/png" },
+  ])("rejects an unusable image source before sending a prompt", async (source) => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const invalid = { ...message, content: [{ type: "image", source }] } as ExternalAgentMessage
+    await expect(adapter.prompt("sess-1", invalid)[Symbol.asyncIterator]().next()).rejects.toThrow(
+      "require base64 image data"
+    )
+    expect(host.lastCommand("prompt")).toBeUndefined()
+  })
+
   it("streams text and completes only on agent_settled", async () => {
     const host = createFakeHost()
     const { iterator, agentId } = await startTurn(host)
@@ -1391,6 +1424,156 @@ describe("PiRpcClientAdapter — controls", () => {
     return adapter
   }
 
+  it("advertises and invokes native compaction, propagating its refusal", async () => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    await expect(adapter.supportsSteering()).resolves.toBe(true)
+    await expect(adapter.getCompactionCapability()).resolves.toEqual({
+      status: "supported",
+      routes: [{ kind: "native", supportsFocus: false }],
+    })
+    const compacting = adapter.compactSession("sess-1")
+    expect(host.lastCommand("compact")).toMatchObject({ type: "compact" })
+    replyTo(host, "compact")
+    await expect(compacting).resolves.toBeUndefined()
+    const rejected = adapter.compactSession("sess-1")
+    replyTo(host, "compact", null, { success: false, error: "already compacting" })
+    await expect(rejected).rejects.toThrow("already compacting")
+  })
+
+  it.each([true, false])(
+    "reads live model options with populated=%s out of order",
+    async (populated) => {
+      const host = createFakeHost()
+      const adapter = await session(host)
+      const models = adapter.getSessionModels("sess-1")
+      replyTo(
+        host,
+        "get_available_models",
+        populated
+          ? {
+              models: [
+                { id: "z-ai/glm-5.3-flash", provider: "commandcode", name: "GLM" },
+                { id: "bare" },
+                {},
+              ],
+            }
+          : {}
+      )
+      replyTo(
+        host,
+        "get_state",
+        populated ? { model: { provider: "commandcode", id: "z-ai/glm-5.3-flash" } } : {}
+      )
+      await expect(models).resolves.toEqual({
+        currentModelId: populated ? "commandcode/z-ai/glm-5.3-flash" : "",
+        availableModels: populated
+          ? [
+              { modelId: "commandcode/z-ai/glm-5.3-flash", name: "GLM" },
+              { modelId: "bare", name: "bare" },
+              { modelId: "", name: "" },
+            ]
+          : [],
+      })
+    }
+  )
+
+  it.each([true, false])("reads config options with populated=%s", async (populated) => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const options = adapter.getConfigOptions("sess-1")
+    replyTo(
+      host,
+      "get_available_models",
+      populated ? { models: [{ provider: "p", id: "m", name: "Model M" }, { id: "bare" }] } : {}
+    )
+    replyTo(host, "get_available_thinking_levels", populated ? { levels: ["off", "high"] } : {})
+    replyTo(
+      host,
+      "get_state",
+      populated ? { model: { provider: "p", id: "m" }, thinkingLevel: "high" } : {}
+    )
+    await expect(options).resolves.toEqual([
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: populated ? "p/m" : "",
+        options: populated
+          ? [
+              { value: "p/m", name: "Model M" },
+              { value: "bare", name: "bare" },
+            ]
+          : [],
+      },
+      {
+        id: "thinking",
+        name: "Thinking",
+        category: "thought_level",
+        type: "select",
+        currentValue: populated ? "high" : "off",
+        options: populated
+          ? [
+              { value: "off", name: "off" },
+              { value: "high", name: "high" },
+            ]
+          : [],
+      },
+    ])
+  })
+
+  it.each(["model", "thinking"])("refreshes config after changing %s", async (option) => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const changing = adapter.setConfigOption("sess-1", option, option === "model" ? "bare" : "high")
+    if (option === "thinking") {
+      replyTo(host, "get_available_thinking_levels", { levels: ["off", "high"] })
+      await new Promise((resolve) => setImmediate(resolve))
+      replyTo(host, "set_thinking_level")
+    } else {
+      expect(host.lastCommand("set_model")).toMatchObject({ modelId: "bare" })
+      expect(host.lastCommand("set_model")).not.toHaveProperty("provider")
+      replyTo(host, "set_model")
+    }
+    await new Promise((resolve) => setImmediate(resolve))
+    replyTo(host, "get_available_models", { models: [] })
+    replyTo(host, "get_available_thinking_levels", { levels: [] })
+    replyTo(host, "get_state", {})
+    await expect(changing).resolves.toHaveLength(2)
+    const count = host.sent.length
+    await expect(adapter.setConfigOption("sess-1", "unknown", "x")).rejects.toThrow(
+      "Unknown Pi config option"
+    )
+    expect(host.sent).toHaveLength(count)
+  })
+
+  it("does not send a thinking setting if the provider omits its levels", async () => {
+    const host = createFakeHost()
+    const adapter = await session(host)
+    const changing = adapter.setThinkingLevel("sess-1", "high")
+    replyTo(host, "get_available_thinking_levels", {})
+    await expect(changing).resolves.toBeUndefined()
+    expect(host.lastCommand("set_thinking_level")).toBeUndefined()
+  })
+
+  it("checks live health and reports a failed RPC without discarding the session", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await expect(adapter.healthCheck()).resolves.toBe(true)
+    await adapter.createSession({ cwd: "/w" })
+    const healthy = adapter.healthCheck()
+    replyTo(host, "get_state", {})
+    await expect(healthy).resolves.toBe(true)
+    const unhealthy = adapter.healthCheck()
+    replyTo(host, "get_state", null, { success: false, error: "unavailable" })
+    await expect(unhealthy).resolves.toBe(false)
+    expect(adapter.getSessions()).toHaveLength(1)
+    await adapter.disconnect()
+    await expect(adapter.healthCheck()).resolves.toBe(false)
+    await expect(adapter.cancel("gone")).resolves.toBeUndefined()
+  })
+
   it("maps steer and abort onto Pi's own commands", async () => {
     const host = createFakeHost()
     const adapter = await session(host)
@@ -1494,7 +1677,7 @@ describe("PiRpcClientAdapter — controls", () => {
 
 describe("PiRpcClientAdapter — elicitation", () => {
   /** Raise a Pi dialog on a live session and return its canonical request. */
-  async function openDialog(host: FakeHost) {
+  async function openDialog(host: FakeHost, dialog: Record<string, unknown> = {}) {
     const adapter = await connected(host)
     await adapter.createSession({ cwd: "/w" })
     const seen: ExternalAgentEvent[] = []
@@ -1520,6 +1703,7 @@ describe("PiRpcClientAdapter — elicitation", () => {
         method: "select",
         title: "Pick a branch",
         options: ["main", "dev"],
+        ...dialog,
       }) + "\n"
     )
     // The frame decodes synchronously, but the `for await` loop needs a real
@@ -1535,6 +1719,42 @@ describe("PiRpcClientAdapter — elicitation", () => {
    * and until `respondToElicitation` existed nothing could answer one, so the
    * extension stayed blocked for the whole turn.
    */
+  it("preserves a negative confirmation instead of approving the tool", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host, { method: "confirm" })
+    await adapter.respondToElicitation({
+      requestId: "dlg-1",
+      action: "accept",
+      content: { confirm: false },
+    })
+    const answer = host.lastFrame("extension_ui_response")
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+    expect(answer).toEqual({ type: "extension_ui_response", id: "dlg-1", confirmed: false })
+  })
+
+  it("cancels pending dialogs on abort and ignores late permission replies", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host)
+    await adapter.cancel("sess-1")
+    const answer = host.lastFrame("extension_ui_response")
+    const count = host.sent.length
+    await adapter.respondToPermission("sess-1", { requestId: "dlg-1", granted: true })
+    const lateWrites = host.sent.slice(count)
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+    expect(answer).toEqual({ type: "extension_ui_response", id: "dlg-1", cancelled: true })
+    expect(lateWrites).toEqual([])
+  })
+
+  it("ignores permission replies for an unknown request", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    await adapter.respondToPermission("sess-1", { requestId: "never-asked", granted: true })
+    expect(host.lastFrame("extension_ui_response")).toBeUndefined()
+  })
+
   it("answers a dialog through respondToElicitation", async () => {
     const host = createFakeHost()
     const { adapter, seen, iterator } = await openDialog(host)
@@ -1626,6 +1846,187 @@ describe("PiRpcClientAdapter — elicitation", () => {
 
     host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
     await iterator
+  })
+
+  it.each([
+    ["confirm", false, { confirmed: false }],
+    ["confirm", true, { confirmed: true }],
+    ["select", "dev", { value: "dev" }],
+    ["input", "", { value: "" }],
+    ["editor", "line 1\nline 2", { value: "line 1\nline 2" }],
+  ])("answers %s using its named field and exact wire type", async (method, value, payload) => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host, { method })
+    expect(host.lastFrame("extension_ui_response")).toBeUndefined()
+    await adapter.respondToElicitation({
+      requestId: "dlg-1",
+      action: "accept",
+      content: { unrelated: "Yes", [String(method)]: value },
+    })
+    expect(host.lastFrame("extension_ui_response")).toEqual({
+      type: "extension_ui_response",
+      id: "dlg-1",
+      ...payload,
+    })
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
+  it.each([
+    ["confirm", {}],
+    ["confirm", { confirm: "true" }],
+    ["select", { select: "not-an-option" }],
+    ["input", { input: 42 }],
+  ])("cancels invalid %s content instead of inventing an approval", async (method, content) => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host, { method })
+    await adapter.respondToElicitation({ requestId: "dlg-1", action: "accept", content })
+    expect(host.lastFrame("extension_ui_response")).toEqual({
+      type: "extension_ui_response",
+      id: "dlg-1",
+      cancelled: true,
+    })
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
+  it("keeps global-extension selects and Cognia confirmations independently blocked", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host, {
+      title: "Permission Required\nbash: echo hi",
+      options: ["Yes", "Yes, for this session", "No", "No, provide reason"],
+    })
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "native",
+        method: "confirm",
+        title: encodePiPermissionTitle({ tool: "bash", mode: "default" }),
+      }) + "\n"
+    )
+    expect(host.lastFrame("extension_ui_response")).toBeUndefined()
+    await adapter.respondToElicitation({
+      requestId: "dlg-1",
+      action: "accept",
+      content: { select: "Yes" },
+    })
+    expect(host.lastFrame("extension_ui_response")).toEqual({
+      type: "extension_ui_response",
+      id: "dlg-1",
+      value: "Yes",
+    })
+    expect(host.sent.filter((s) => s.message.includes('"id":"native"'))).toEqual([])
+    await adapter.respondToPermission("sess-1", { requestId: "native", granted: false })
+    expect(host.lastFrame("extension_ui_response")).toEqual({
+      type: "extension_ui_response",
+      id: "native",
+      cancelled: true,
+    })
+    const count = host.sent.length
+    await adapter.respondToPermission("sess-1", { requestId: "native", granted: true })
+    expect(host.sent).toHaveLength(count)
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
+  it("cannot answer another session's approval", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host)
+    await adapter.createSession({ cwd: "/other" })
+    await adapter.respondToPermission("sess-2", { requestId: "dlg-1", granted: true })
+    expect(host.lastFrame("extension_ui_response")).toBeUndefined()
+    await adapter.respondToElicitation({
+      requestId: "dlg-1",
+      action: "accept",
+      content: { select: "dev" },
+    })
+    expect(host.lastFrame("extension_ui_response")).toMatchObject({ value: "dev" })
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
+  it("ignores replies after Pi's advertised dialog timeout", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host, { timeout: 100 })
+    const clock = jest.spyOn(Date, "now").mockReturnValue(Date.now() + 101)
+    try {
+      await adapter.respondToElicitation({
+        requestId: "dlg-1",
+        action: "accept",
+        content: { select: "dev" },
+      })
+      expect(host.lastFrame("extension_ui_response")).toBeUndefined()
+    } finally {
+      clock.mockRestore()
+    }
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
+  it.each(["close", "exit", "settle"])("ignores late replies after %s", async (ending) => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host)
+    if (ending === "close") await adapter.closeSession("sess-1")
+    else if (ending === "exit") host.emitExit("agent-1:sess-1", 0)
+    else host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+    const count = host.sent.length
+    await adapter.respondToPermission("sess-1", { requestId: "dlg-1", granted: true })
+    await adapter.respondToElicitation({
+      requestId: "dlg-1",
+      action: "accept",
+      content: { select: "dev" },
+    })
+    expect(host.sent).toHaveLength(count)
+  })
+
+  it("handles a rejected cancellation write without an unhandled promise", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator } = await openDialog(host)
+    const invoke = host.invoke.bind(host)
+    host.invoke = async <T>(name: string, args: Record<string, unknown>): Promise<T> => {
+      if (
+        name === "send_to_external_agent" &&
+        String(args.message).includes("extension_ui_response")
+      ) {
+        throw new Error("broken pipe")
+      }
+      return invoke<T>(name, args)
+    }
+    await adapter.cancel("sess-1")
+    await new Promise((resolve) => setImmediate(resolve))
+    await expect(
+      adapter.respondToPermission("sess-1", { requestId: "dlg-1", granted: true })
+    ).resolves.toBeUndefined()
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
+  it("cancels requests arriving during abort without surfacing another prompt", async () => {
+    const host = createFakeHost()
+    const { adapter, iterator, seen } = await openDialog(host)
+    const aborting = adapter.cancel("sess-1")
+    host.emitStdout(
+      "agent-1:sess-1",
+      JSON.stringify({
+        type: "extension_ui_request",
+        id: "during-abort",
+        method: "input",
+        title: "Reason?",
+      }) + "\n"
+    )
+    await aborting
+    expect(host.lastFrame("extension_ui_response")).toEqual({
+      type: "extension_ui_response",
+      id: "during-abort",
+      cancelled: true,
+    })
+    const types = host.sent.map((s) => JSON.parse(s.message).type)
+    expect(types.indexOf("abort")).toBeLessThan(types.indexOf("extension_ui_response"))
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+    expect(seen.filter((event) => event.type === "elicitation_request")).toHaveLength(1)
   })
 
   it("ignores an answer to a dialog it does not know", async () => {
@@ -1821,5 +2222,126 @@ describe("session listing and the session-less catalog", () => {
         },
       ],
     })
+  })
+})
+
+describe("Pi session recovery and host defaults", () => {
+  it("recovers an exited session before sending the next prompt, only once", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/original", permissionMode: "plan" })
+    host.emitExit("agent-1:sess-1", 1)
+    const count = host.spawns.length
+    const message: ExternalAgentMessage = {
+      id: "recovery",
+      role: "user",
+      content: [{ type: "text", text: "continue" }],
+      timestamp: new Date(),
+    }
+    const turn = adapter.prompt("sess-1", message)[Symbol.asyncIterator]()
+    const next = turn.next()
+    // Attach rejection handling before waiting for the fixture's async handshake.
+    const outcome = next.then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error })
+    )
+    for (let i = 0; i < 30 && !host.lastCommand("prompt"); i++) await Promise.resolve()
+    expect(host.spawns).toHaveLength(count + 1)
+    expect(host.spawns.at(-1)?.args).toEqual(expect.arrayContaining(["--session-id", "sess-1"]))
+    expect(host.sent.filter((frame) => JSON.parse(frame.message).type === "prompt")).toHaveLength(1)
+    replyTo(host, "prompt")
+    await adapter.closeSession("sess-1")
+    expect(await outcome).not.toHaveProperty("error")
+  })
+
+  it("deduplicates concurrent recovery and retires old listeners", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/original", permissionMode: "plan" })
+    const other = await adapter.createSession({ cwd: "/other", permissionMode: "default" })
+    host.emitExit("agent-1:sess-1", 1)
+    const count = host.spawns.length
+    const [first, second] = await Promise.all([
+      adapter.resumeSession("sess-1"),
+      adapter.resumeSession("sess-1"),
+    ])
+    expect(first).toBe(second)
+    expect(host.spawns).toHaveLength(count + 1)
+    expect(first.permissionMode).toBe("plan")
+    expect(first.metadata?.cwd).toBe("/original")
+    await adapter.closeSession("sess-1")
+    await adapter.closeSession(other.id)
+  })
+
+  it("reuses a running session and respawns an exited one", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    const first = await adapter.createSession({ cwd: "/w" })
+    const count = host.spawns.length
+    await expect(adapter.resumeSession(first.id)).resolves.toBe(first)
+    expect(host.spawns).toHaveLength(count)
+    host.emitExit(`agent-1:${first.id}`, 1)
+    const resumed = await adapter.resumeSession(first.id)
+    expect(resumed.id).toBe(first.id)
+    expect(host.spawns).toHaveLength(count + 1)
+    await adapter.closeSession(first.id)
+    await expect(adapter.closeSession(first.id)).resolves.toBeUndefined()
+  })
+
+  it.each(["resume", "fork"])(
+    "can %s a persisted id before any session has been opened",
+    async (operation) => {
+      const host = createFakeHost()
+      const adapter = await connected(host)
+      const result =
+        operation === "resume"
+          ? await adapter.resumeSession("persisted")
+          : await adapter.forkSession("persisted")
+      expect(result.id).toBe(operation === "resume" ? "persisted" : "sess-1")
+      const spawn = host.spawns.at(-1)!
+      expect(spawn.args).toContain(operation === "resume" ? "--session-id" : "--fork")
+      expect(spawn.args).toContain("persisted")
+    }
+  )
+
+  it.each([undefined, { command: "pi", args: [] }])(
+    "supplies the native command and RPC mode for minimal process config %j",
+    async (processConfig) => {
+      const host = createFakeHost()
+      const adapter = new PiRpcClientAdapter({ host })
+      await expect(adapter.createSession()).rejects.toThrow("not connected")
+      const connecting = adapter.connect({ ...config, process: processConfig })
+      await Promise.resolve()
+      host.emitVersion(host.spawns[0].id, PI_CERTIFIED_VERSION)
+      await connecting
+      const session = await adapter.createSession()
+      expect(session.id).toBeTruthy()
+      expect(host.spawns.at(-1)).toMatchObject({
+        command: "pi",
+        args: expect.arrayContaining(["--mode", "rpc", "--session-id", session.id]),
+      })
+      await adapter.disconnect()
+    }
+  )
+
+  it("treats an absent listing as empty and sorts partial session records by available timestamps", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    host.setListedSessions(undefined)
+    await expect(adapter.listSessions()).resolves.toEqual([])
+    host.setListedSessions([
+      { id: "undated" },
+      { id: "created", createdAt: "2026-09-01T00:00:00Z" },
+      { id: "updated", updatedAt: "2026-09-02T00:00:00Z" },
+      { id: "also-undated" },
+    ])
+    const listed = await adapter.listSessions()
+    expect(listed.map((item) => item.sessionId)).toEqual([
+      "updated",
+      "created",
+      "undated",
+      "also-undated",
+    ])
+    expect(listed.at(-1)).toEqual({ sessionId: "also-undated" })
   })
 })

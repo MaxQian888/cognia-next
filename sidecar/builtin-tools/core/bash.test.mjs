@@ -376,3 +376,54 @@ test("bash_output / kill_shell / list_shells error without a registry", async ()
   assert.equal((await kill.handler({ shellId: "x" }, {})).isError, true)
   assert.equal((await list.handler({}, {})).isError, true)
 })
+
+test("bash fails closed without the configured sandbox launcher for foreground and background", async () => {
+  let spawned = false
+  const bash = createBashTool({
+    cwd: process.cwd(),
+    shell: legacyShell,
+    builtinProcessSandbox: {
+      launcher: "",
+      writableRoots: [process.cwd()],
+      readableRoots: [],
+      network: false,
+    },
+    bgShells: {
+      spawnBackground() {
+        spawned = true
+      },
+    },
+  })
+  for (const run_in_background of [false, true]) {
+    const result = await bash.handler({ command: "echo hello", run_in_background })
+    assert.equal(result.isError, true)
+    assert.match(textOf(result), /launcher is unavailable/)
+  }
+  assert.equal(spawned, false)
+})
+
+test("bash background jobs retain supervision and launch through the sandbox", async () => {
+  let request
+  const bash = createBashTool({
+    cwd: process.cwd(),
+    shell: legacyShell,
+    builtinProcessSandbox: {
+      launcher: process.execPath,
+      writableRoots: [process.cwd()],
+      readableRoots: [],
+      network: false,
+    },
+    bgShells: {
+      spawnBackground(input) {
+        request = input
+        return { id: "bg1" }
+      },
+    },
+  })
+  const result = await bash.handler({ command: "echo hello", run_in_background: true })
+  assert.notEqual(result.isError, true)
+  assert.equal(request.shell, process.execPath)
+  assert.ok(request.shellArgs.includes("--writable"))
+  assert.equal(request.shellArgs.includes("--network"), false)
+  assert.ok(request.shellArgs.includes("echo hello"))
+})

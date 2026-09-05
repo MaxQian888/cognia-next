@@ -79,10 +79,10 @@ function presetIdOf(config: ExternalAgentConfig): string | null {
 async function codexEnvOverlay(
   config: ExternalAgentConfig
 ): Promise<Record<string, string> | null> {
-  // Both the ACP shim (`codex`) and the native app-server (`codex-app-server`)
+  // The ACP presets (`codex`, `codex-acp`) and native app-server (`codex-app-server`)
   // preset reuse the same Codex credential env contract.
   const preset = presetIdOf(config)
-  if (preset !== "codex" && preset !== "codex-app-server") return null
+  if (preset !== "codex" && preset !== "codex-acp" && preset !== "codex-app-server") return null
 
   const settings = await loadCodexSettings()
 

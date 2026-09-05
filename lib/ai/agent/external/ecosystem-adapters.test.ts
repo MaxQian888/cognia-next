@@ -276,3 +276,38 @@ describe("resolveExternalAgentSurfaceFromMetadata", () => {
     ).toBeNull()
   })
 })
+
+it("resolves explicit Codex ACP to the canonical surface without duplicating ecosystem capabilities", () => {
+  const explicit = findExternalAgentSurfaceByPresetId("codex-acp")!
+  const legacy = findExternalAgentSurfaceByPresetId("codex")!
+  expect(explicit.adapter.id).toBe("codex")
+  expect(explicit.surface).toMatchObject({
+    id: "acp-stdio",
+    presetId: "codex",
+    protocol: "acp",
+    supportTier: "executable",
+    executionMode: "direct",
+  })
+  expect(explicit.surface).toBe(legacy.surface)
+  expect(explicit.adapter.surfaces.filter((surface) => surface.protocol === "acp")).toEqual([
+    legacy.surface,
+  ])
+  expect(legacy.surface.id).toBe("acp-stdio")
+  expect(findExternalAgentSurfaceByPresetId("codex-app-server")?.surface.protocol).toBe(
+    "codex-app-server"
+  )
+  expect(resolveExternalAgentSurfaceFromMetadata({ preset: "codex-acp" })?.surface).toBe(
+    legacy.surface
+  )
+  expect(
+    resolveExternalAgentSurfaceFromMetadata({
+      preset: "codex-acp",
+      ecosystemAdapterId: "codex",
+      ecosystemSurfaceId: "acp-stdio",
+    })?.surface
+  ).toBe(legacy.surface)
+  expect(findExternalAgentSurface("codex", "acp-stdio-explicit")).toBeNull()
+  expect(checkSurfaceExecutability("codex", "acp-stdio")).toEqual({ executable: true })
+  expect(checkSurfaceExecutability("codex", "official-cli").executable).toBe(false)
+  expect(findExternalAgentSurfaceByPresetId("official-cli")).toBeNull()
+})

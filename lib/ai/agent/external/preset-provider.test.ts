@@ -1,8 +1,9 @@
 import { providerIdForPreset } from "./preset-provider"
 
 describe("providerIdForPreset", () => {
-  it("maps both codex surfaces to the codex provider", () => {
+  it("maps all Codex preset ids to the Codex provider", () => {
     expect(providerIdForPreset("codex")).toBe("codex")
+    expect(providerIdForPreset("codex-acp")).toBe("codex")
     expect(providerIdForPreset("codex-app-server")).toBe("codex")
   })
 

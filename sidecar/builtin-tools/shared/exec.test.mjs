@@ -52,3 +52,56 @@ test("runCapped enforces maxBuffer", async () => {
     /maxBuffer/
   )
 })
+
+test("sandbox process target never grants the requested cwd additional write access", async () => {
+  const { sandboxedProcessTarget } = await import("./exec.mjs")
+  const scope = {
+    launcher: process.execPath,
+    writableRoots: [process.cwd()],
+    readableRoots: [],
+    network: false,
+  }
+  assert.throws(
+    () => sandboxedProcessTarget("sh", ["-c", "echo ok"], "/", scope),
+    /outside.*writable/
+  )
+  const target = sandboxedProcessTarget("sh", ["-c", "echo 'a b'"], process.cwd(), scope)
+  assert.equal(target.command, process.execPath)
+  assert.deepEqual(target.args.slice(-4), ["--", "sh", "-c", "echo 'a b'"])
+  assert.equal(target.args.includes("--network"), false)
+  assert.throws(
+    () => sandboxedProcessTarget("sh", [], process.cwd(), { ...scope, launcher: "" }),
+    /launcher.*unavailable/
+  )
+})
+
+test("shared-exec sandbox scope is isolated between concurrent tool sessions", async () => {
+  const { withProcessSandbox } = await import("./exec.mjs")
+  const denied = withProcessSandbox(
+    { launcher: "", writableRoots: [], readableRoots: [], network: false },
+    process.cwd(),
+    async () => {
+      await new Promise((resolve) => setImmediate(resolve))
+      return execFileAsync(process.execPath, ["-e", "console.log('must not run')"])
+    }
+  )
+  const allowed = execFileAsync(process.execPath, ["-e", "console.log('legacy')"])
+  await assert.rejects(denied, /launcher is unavailable/)
+  assert.match((await allowed).stdout, /legacy/)
+})
+
+test("sandbox process environment strips ambient credentials and injected loader options", async () => {
+  const { sandboxedProcessEnv } = await import("./exec.mjs")
+  const env = sandboxedProcessEnv(
+    {
+      PATH: "/bin",
+      OPENAI_API_KEY: "secret",
+      LD_PRELOAD: "evil",
+      NODE_OPTIONS: "--require evil",
+      PNPM_HOME: "/tools",
+    },
+    {},
+    { DYLD_INSERT_LIBRARIES: "evil", NODE_OPTIONS: "--require evil", CUSTOM_BUILD_MODE: "debug" }
+  )
+  assert.deepEqual(env, { PATH: "/bin", PNPM_HOME: "/tools", CUSTOM_BUILD_MODE: "debug" })
+})

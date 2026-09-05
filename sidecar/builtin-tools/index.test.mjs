@@ -124,3 +124,57 @@ test("plan tools acknowledge without side effects (the renderer owns the write)"
   const updated = body(await update.handler({ stepUpdates: [{ step: 0, status: "completed" }] }))
   assert.deepEqual(updated, { updated: true, stepUpdates: 1 })
 })
+
+test("collected native process tools all fail closed when the launcher is missing", async () => {
+  const definitions = collectCogniaToolDefs({
+    enabled: { coreFiles: true, process: true, shellAdvanced: true },
+    dispatchPath: "ai-sdk",
+    readTracker: {},
+    cwd: process.cwd(),
+    builtinProcessSandbox: {
+      launcher: "",
+      writableRoots: [process.cwd()],
+      readableRoots: [],
+      network: false,
+    },
+  })
+  for (const [name, input] of [
+    ["bash", { command: "echo hello" }],
+    [
+      "start_process",
+      { program: "git", args: ["status"], detached: false, cwd: process.cwd(), timeoutSecs: 30 },
+    ],
+    [
+      "shell_execute_advanced",
+      { command: "git", args: ["status"], cwd: process.cwd(), timeoutMs: 1000 },
+    ],
+  ]) {
+    const result = await definitions.find((tool) => tool.name === name).handler(input)
+    assert.equal(result.isError, true, name)
+    assert.match(result.content[0].text, /launcher is unavailable/, name)
+  }
+})
+
+test("native MCP tool output uses the provider PII gate", async () => {
+  const { wrapNativeToolResults } = await import("./index.mjs")
+  const [tool] = wrapNativeToolResults([
+    {
+      name: "read",
+      handler: async () => ({ content: [{ type: "text", text: "Email: alice@example.com" }] }),
+    },
+  ])
+  const result = await tool.handler({})
+  assert.equal(JSON.stringify(result).includes("alice@example.com"), false)
+})
+
+test("native process jobs expose their existing output and stop controls without core files", () => {
+  const tools = collectCogniaToolDefs({
+    enabled: { process: true },
+    dispatchPath: "anthropic",
+    bgShells: {},
+  })
+  const names = tools.map((tool) => tool.name)
+  for (const name of ["start_process", "bash_output", "kill_shell", "list_shells"])
+    assert.ok(names.includes(name), name)
+  assert.equal(new Set(names).size, names.length)
+})

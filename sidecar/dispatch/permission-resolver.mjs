@@ -476,12 +476,18 @@ function extractTarget(toolName, input) {
  * trip). Non-shell tools resolve their single target directly.
  */
 export function resolveForToolCall(ruleset, toolName, input) {
-  const target = extractTarget(toolName, input)
+  const canonical = [
+    "mcp__cognia-tools__start_process",
+    "mcp__cognia-tools__shell_execute_advanced",
+  ].includes(toolName)
+    ? toolName.slice("mcp__cognia-tools__".length)
+    : toolName
+  const target = extractTarget(canonical, input)
   const isShell =
     toolName === "Bash" ||
     CORE_BASH_NAMES.has(toolName) ||
-    toolName === "shell_execute_advanced" ||
-    toolName === "start_process"
+    canonical === "shell_execute_advanced" ||
+    canonical === "start_process"
 
   if (!isShell) {
     return resolveToolVerdict(ruleset, toolName, target) ?? "ask"
@@ -495,7 +501,7 @@ export function resolveForToolCall(ruleset, toolName, input) {
     // Core bash also honours rules keyed under its literal tool name; when
     // both a `Bash` rule and a tool-name rule match, the more severe wins.
     let v = resolveToolVerdict(ruleset, "Bash", t)
-    if (CORE_BASH_NAMES.has(toolName)) {
+    if (toolName !== "Bash") {
       const own = resolveToolVerdict(ruleset, toolName, t)
       if (own !== null && (v === null || VERDICT_RANK[own] > VERDICT_RANK[v])) v = own
     }
@@ -506,10 +512,7 @@ export function resolveForToolCall(ruleset, toolName, input) {
     const canonical = canonicalizeCommand(t)
     if (canonical && canonical !== t) {
       if (resolveToolVerdict(ruleset, "Bash", canonical) === "deny") return "deny"
-      if (
-        CORE_BASH_NAMES.has(toolName) &&
-        resolveToolVerdict(ruleset, toolName, canonical) === "deny"
-      ) {
+      if (toolName !== "Bash" && resolveToolVerdict(ruleset, toolName, canonical) === "deny") {
         return "deny"
       }
     }

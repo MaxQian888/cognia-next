@@ -1395,3 +1395,84 @@ test("gate settles a pending approval as denied when the step aborts", async () 
   await assert.rejects(() => p, /aborted/)
   assert.equal(pendingApprovals.size, 0)
 })
+
+test("permission denies override bypass, edit and suppression shortcuts", async () => {
+  for (const permissionMode of ["acceptEdits", "bypassPermissions", "dontAsk", "plan"]) {
+    const gate = createToolPermissionGate({
+      sendOptions: {
+        permissionMode,
+        permissionRuleset: { "mcp__cognia-tools__write": "deny" },
+        suppressApprovalForTools: ["mcp__cognia-tools__write"],
+      },
+    })
+    await assert.rejects(gate("mcp__cognia-tools__write", { path: "/workspace/file" }), /denied/)
+  }
+})
+test("acceptEdits includes workspace directory and relocation operations", async () => {
+  const gate = createToolPermissionGate({
+    sendOptions: {
+      permissionMode: "acceptEdits",
+      cwd: "/workspace",
+      confinement: { enabled: true, roots: ["/workspace"] },
+    },
+  })
+  for (const name of ["directory_create", "file_copy", "file_move", "file_rename"])
+    await gate(`mcp__cognia-tools__${name}`, {
+      path: "/workspace/new",
+      source: "/workspace/old",
+      destination: "/workspace/new",
+    })
+  await assert.rejects(
+    gate("mcp__cognia-tools__file_move", { source: "/workspace/old", destination: "/outside/new" }),
+    /approval|denied/i
+  )
+})
+
+test("acceptEdits permits first-party sandbox file tools while retaining explicit denies", async () => {
+  const gate = createToolPermissionGate({ sendOptions: { permissionMode: "acceptEdits" } })
+  for (const name of ["sandbox_write", "sandbox_edit", "sandbox_text_editor"])
+    await gate(`mcp__cognia-plugin-tools__${name}`, { path: "/workspace/file" })
+  await assert.rejects(
+    gate("mcp__third-party__sandbox_write", { path: "/workspace/file" }),
+    /denied/
+  )
+  const denied = createToolPermissionGate({
+    sendOptions: {
+      permissionMode: "acceptEdits",
+      permissionRuleset: { "mcp__cognia-plugin-tools__sandbox_write": "deny" },
+    },
+  })
+  await assert.rejects(
+    denied("mcp__cognia-plugin-tools__sandbox_write", { path: "/workspace/file" }),
+    /denied/
+  )
+})
+
+test("immutable sandbox roots reject outside writes before asking for unusable approval", async () => {
+  let prompts = 0
+  const gate = createToolPermissionGate({
+    emit: () => {
+      prompts++
+    },
+    pendingApprovals: new Map(),
+    sendOptions: {
+      permissionMode: "default",
+      cwd: "/workspace",
+      builtinProcessSandbox: {
+        launcher: "/launcher",
+        writableRoots: ["/workspace"],
+        readableRoots: [],
+        network: false,
+      },
+    },
+  })
+  await assert.rejects(
+    gate("mcp__cognia-tools__file_move", { source: "/workspace/a", destination: "/outside/b" }),
+    /sandbox.policy.writableRoots/
+  )
+  await assert.rejects(
+    gate("mcp__cognia-plugin-tools__sandbox_write", { path: "/outside/b" }),
+    /sandbox.policy.writableRoots/
+  )
+  assert.equal(prompts, 0)
+})

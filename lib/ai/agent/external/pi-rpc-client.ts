@@ -301,6 +301,7 @@ export interface PiRpcAdapterOptions {
 }
 
 interface PiProcess {
+  createOptions: SessionCreateOptions
   /** Host-level process id (what `spawn_external_agent` was given). */
   agentId: string
   /** Pi's own session id — the value passed to `--session-id`. */
@@ -316,6 +317,7 @@ interface PiProcess {
   /** Consumers waiting on `prompt()`. */
   queues: Set<EventQueue>
   busy: boolean
+  cancelling?: boolean
   lastUsedAt: number
   exited: boolean
   /** Resolves when the bundled extension reports itself ready. */
@@ -402,7 +404,15 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
    * canonical `respondToElicitation` carries only a request id); the method
    * decides which of Pi's three mutually exclusive response shapes to use.
    */
-  private readonly pendingDialogs = new Map<string, { sessionId: string; method?: string }>()
+  private readonly pendingDialogs = new Map<
+    string,
+    {
+      sessionId: string
+      method: string
+      options?: string[]
+      expiresAt?: number
+    }
+  >()
 
   constructor(options: PiRpcAdapterOptions = {}) {
     super()
@@ -558,9 +568,27 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
    * ever has to cross a device boundary.
    */
   async resumeSession(sessionId: string): Promise<ExternalAgentSession> {
+    const pending = this.sessionRestarts.get(sessionId)
+    if (pending) return pending
     const existing = this.processes.get(sessionId)
     if (existing && !existing.exited) return this.requireSession(sessionId)
-    return this.startSession(sessionId, this.lastCreateOptions ?? {})
+    const options = existing?.createOptions ?? this.lastCreateOptions ?? {}
+    const restart = (async () => {
+      // Retire the dead peer/listeners before reusing its host process id.
+      if (existing) await this.closeSession(sessionId)
+      try {
+        return await this.startSession(sessionId, options)
+      } catch (error) {
+        await this.closeSession(sessionId)
+        throw error
+      }
+    })()
+    this.sessionRestarts.set(sessionId, restart)
+    try {
+      return await restart
+    } finally {
+      this.sessionRestarts.delete(sessionId)
+    }
   }
 
   /** Branch an existing Pi session into a fresh one via `--fork`. */
@@ -573,6 +601,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   }
 
   private lastCreateOptions?: SessionCreateOptions
+  private sessionRestarts = new Map<string, Promise<ExternalAgentSession>>()
 
   private async startSession(
     piSessionId: string,
@@ -622,6 +651,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     })
 
     const record: PiProcess = {
+      createOptions: { ...options },
       agentId,
       piSessionId,
       peer,
@@ -687,6 +717,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
           if (payload.agentId !== agentId) return
           record.exited = true
           peer.endOfStream()
+          this.cancelPendingDialogs(piSessionId, record)
           peer.rejectAll(`Pi process exited (code ${payload.code})`)
           this.dispatchError(piSessionId, `Pi process exited with code ${payload.code}`)
           this.finishQueues(record)
@@ -855,19 +886,19 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     if (!record) return
     this.processes.delete(sessionId)
     this._sessions.delete(sessionId)
-    // Before the abort: a dialog left open holds the extension, and the
-    // extension holding is what would keep Pi from exiting cleanly.
-    this.cancelPendingDialogs(sessionId, record)
-
+    record.cancelling = true
     if (!record.exited) {
       // Ask Pi to stop cleanly first; a hard kill mid-tool-call can leave a
       // half-written file behind.
       try {
-        await Promise.race([record.peer.sendCommand("abort", {}, 5000), delay(5000)])
+        const aborted = record.peer.sendCommand("abort", {}, 5000)
+        this.cancelPendingDialogs(sessionId, record)
+        await Promise.race([aborted, delay(5000)])
       } catch {
         // Already gone, or refused — the kill below is the real guarantee.
       }
     }
+    this.cancelPendingDialogs(sessionId, record)
     record.peer.close("Session closed")
     for (const off of record.unlisten.splice(0)) off()
     this.finishQueues(record)
@@ -888,13 +919,17 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     message: ExternalAgentMessage,
     options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
+    if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+      throw new PiOutboundBlockedError()
+    }
+    // Recovery is only before a new turn. Never replay a prompt whose tool
+    // effects may already have reached the host before an unexpected exit.
+    if (this.processes.get(sessionId)?.exited || this.sessionRestarts.has(sessionId)) {
+      await this.resumeSession(sessionId)
+    }
     const record = this.requireProcess(sessionId)
     if (record.busy) {
       throw new Error(`Pi session ${sessionId} already has a turn in flight`)
-    }
-
-    if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
-      throw new PiOutboundBlockedError()
     }
     const prompt = messageToPiPrompt(message)
 
@@ -939,20 +974,29 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       // contract calls with only a `requestId` — can route the answer back, and
       // so closing the session can cancel whatever is still open instead of
       // leaving the extension parked forever.
-      if (canonical.type === "elicitation_request") {
+      if (canonical.type === "elicitation_request" || canonical.type === "permission_request") {
+        const method = String(event.method)
+        const timeout =
+          typeof event.timeout === "number" && Number.isFinite(event.timeout) && event.timeout > 0
+            ? event.timeout
+            : undefined
         this.pendingDialogs.set(canonical.request.id, {
           sessionId,
-          method: asDialogMethod(canonical.request.raw),
+          method,
+          options: Array.isArray(event.options)
+            ? event.options.filter((value): value is string => typeof value === "string")
+            : undefined,
+          expiresAt: timeout === undefined ? undefined : Date.now() + timeout,
         })
-      }
-      // A native-tool approval is the same blocking Pi dialog, just routed to
-      // the approval UI instead of a form. It has to be registered too, or
-      // `respondToPermission` cannot resolve which session owns it and closing
-      // the session leaves the extension parked.
-      if (canonical.type === "permission_request") {
-        this.pendingDialogs.set(canonical.request.id, { sessionId, method: "confirm" })
+        if (record.cancelling || record.exited) {
+          this.cancelPendingDialogs(sessionId, record)
+          continue
+        }
       }
       if (canonical.type === "done") {
+        // Pi can settle after a dialog times out or its extension aborts it.
+        // Its RPC protocol has no dialog-dismissed event; discard stale IDs here.
+        this.cancelPendingDialogs(sessionId, record)
         // `get_session_stats` is a round-trip, so it is only paid for once a
         // turn actually finishes — but it has to finish BEFORE `done` reaches
         // the consumer. `prompt()` returns on `done`, and `execute()` reads
@@ -1076,7 +1120,16 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   async cancel(sessionId: string): Promise<void> {
     const record = this.processes.get(sessionId)
     if (!record || record.exited) return
-    await record.peer.sendCommand("abort")
+    record.cancelling = true
+    // Send abort before releasing dialogs so a denied tool cannot start another
+    // turn in the gap. Do not await it: Pi waits for the blocked hook to unwind.
+    const aborted = record.peer.sendCommand("abort")
+    this.cancelPendingDialogs(sessionId, record)
+    try {
+      await aborted
+    } finally {
+      record.cancelling = false
+    }
   }
 
   /** Deliver a message into a live turn (Pi's `steer`). */
@@ -1234,14 +1287,13 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
   /**
    * Answer a dialog raised by the bundled extension.
    *
-   * Tool authorisation itself does NOT come through here — that is decided by
-   * the tool-host broker inside the extension. This is only for dialogs the
-   * extension surfaces to the user.
+   * Native tool approvals are blocking confirms. Projected Cognia tools are
+   * independently authorized by the tool-host broker.
    */
   async respondToPermission(sessionId: string, response: AcpPermissionResponse): Promise<void> {
     await this.answerDialog(sessionId, response.requestId, {
       granted: response.granted,
-      value: response.optionId,
+      value: response.granted,
     })
   }
 
@@ -1266,9 +1318,7 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     if (!pending) return
     await this.answerDialog(pending.sessionId, response.requestId, {
       granted: response.action === "accept",
-      // Every Pi dialog collects one value under a property named for the
-      // method (`piDialogSchema`), so the first entry is the answer.
-      value: firstElicitationValue(response.content),
+      value: response.content?.[pending.method],
     })
   }
 
@@ -1297,14 +1347,23 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     requestId: string,
     outcome: { granted: boolean; value?: unknown }
   ): Promise<void> | void {
-    const record = this.requireProcess(sessionId)
-    const method = this.pendingDialogs.get(requestId)?.method
+    const pending = this.pendingDialogs.get(requestId)
+    if (!pending || pending.sessionId !== sessionId) return
+    const record = this.processes.get(sessionId)
     this.pendingDialogs.delete(requestId)
+    if (!record || record.exited || record.cancelling) return
+    if (pending.expiresAt !== undefined && Date.now() >= pending.expiresAt) return
+    const { method } = pending
 
     // A dismissal is `cancelled`, never `confirmed: false`: the extension reads
     // the latter as a deliberate "no" to a `confirm` rather than "the user
     // walked away", and for a `select` it is not a valid answer at all.
-    if (!outcome.granted) {
+    const validValue =
+      method === "confirm"
+        ? typeof outcome.value === "boolean"
+        : typeof outcome.value === "string" &&
+          (method !== "select" || pending.options?.includes(outcome.value))
+    if (!outcome.granted || !validValue) {
       return record.peer.sendFrame({
         type: "extension_ui_response",
         id: requestId,
@@ -1317,13 +1376,13 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       return record.peer.sendFrame({
         type: "extension_ui_response",
         id: requestId,
-        confirmed: true,
+        confirmed: outcome.value,
       })
     }
     return record.peer.sendFrame({
       type: "extension_ui_response",
       id: requestId,
-      value: outcome.value === undefined ? "" : String(outcome.value),
+      value: outcome.value,
     })
   }
 
@@ -1340,10 +1399,14 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       this.pendingDialogs.delete(requestId)
       if (record.exited) continue
       try {
-        void record.peer.sendFrame({
-          type: "extension_ui_response",
-          id: requestId,
-          cancelled: true,
+        Promise.resolve(
+          record.peer.sendFrame({
+            type: "extension_ui_response",
+            id: requestId,
+            cancelled: true,
+          })
+        ).catch(() => {
+          // Cancellation must not produce an unhandled rejection after exit.
         })
       } catch {
         // The process may already be gone; the kill below is the guarantee.
@@ -1677,36 +1740,6 @@ export class PiResourceLimitError extends Error {
     super(`All ${limit} Pi processes on this host are busy`)
     this.name = "PiResourceLimitError"
   }
-}
-
-/**
- * The single value a Pi dialog collects, pulled out of the canonical
- * elicitation content map.
- *
- * `piDialogSchema` gives every dialog exactly one property, named for the Pi
- * method, so "the first value" is unambiguous here rather than a guess.
- */
-/**
- * The Pi dialog method behind a canonical elicitation request.
- *
- * `mapPiEvent` carries the untouched Pi event under `request.raw` precisely so
- * a responder can honour the original without the mapper having to model every
- * future dialog field.
- */
-function asDialogMethod(raw: unknown): string | undefined {
-  if (!raw || typeof raw !== "object") return undefined
-  const method = (raw as { method?: unknown }).method
-  return typeof method === "string" ? method : undefined
-}
-
-function firstElicitationValue(
-  content: Record<string, unknown> | null | undefined
-): unknown | undefined {
-  if (!content) return undefined
-  for (const value of Object.values(content)) {
-    if (value !== undefined) return value
-  }
-  return undefined
 }
 
 function qualifyModel(model: { id?: string; provider?: string }): string {

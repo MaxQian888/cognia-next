@@ -142,3 +142,23 @@ test("terminate_process reports a supervisor rejection rather than silently sign
   assert.equal(r.isError, true)
   assert.match(r.content[0].text, /owned by another session/)
 })
+
+test("start_process wraps supervised argv and refuses a missing sandbox", async () => {
+  const { bgShells, calls } = fakeSupervisor()
+  const builtinProcessSandbox = {
+    launcher: process.execPath,
+    writableRoots: [process.cwd()],
+    readableRoots: [],
+    network: false,
+  }
+  const args = { program: "git", args: ["status"], cwd: process.cwd(), detached: true }
+  await execStartProcess(args, { bgShells, builtinProcessSandbox })
+  assert.equal(calls[0].req.shell, process.execPath)
+  assert.deepEqual(calls[0].req.shellArgs.slice(-3), ["--", "git", "status"])
+  const result = await execStartProcess(args, {
+    bgShells,
+    builtinProcessSandbox: { ...builtinProcessSandbox, launcher: "" },
+  })
+  assert.equal(result.isError, true)
+  assert.equal(calls.length, 1)
+})

@@ -334,6 +334,40 @@ describe("openMcpClient", () => {
     ctors: recordingCtors().ctors,
   })
 
+  it("does not initialize a connection for an already aborted caller", async () => {
+    const loader = jest.fn(load(fakeClient()))
+    await expect(
+      openMcpClient(
+        srv("stdio", { command: "x" }),
+        { signal: AbortSignal.abort() },
+        { load: loader }
+      )
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(loader).not.toHaveBeenCalled()
+  })
+
+  it("closes setup resources without connecting if cancellation happened during setup", async () => {
+    const controller = new AbortController()
+    const client = fakeClient()
+    const closeGuard = jest.fn(async () => {})
+    await expect(
+      openMcpClient(
+        srv("http", { url: "https://offline.invalid/mcp" }),
+        { signal: controller.signal },
+        {
+          load: load(client),
+          createEgressGuard: async () => {
+            controller.abort()
+            return { fetch: jest.fn(), close: closeGuard }
+          },
+        }
+      )
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(client.connect).not.toHaveBeenCalled()
+    expect(client.close).toHaveBeenCalledTimes(1)
+    expect(closeGuard).toHaveBeenCalledTimes(1)
+  })
+
   it("connects and returns a closable client", async () => {
     const client = fakeClient()
     const opened = await openMcpClient(srv("stdio", { command: "x" }), {}, { load: load(client) })

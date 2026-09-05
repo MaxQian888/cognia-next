@@ -59,6 +59,7 @@ import type { AgentTool } from "@/lib/ai/agent"
 import { loggers } from "@cognia/logging"
 import {
   type ProtocolAdapter,
+  ProtocolAdapterRegistry,
   protocolAdapterRegistry,
   type SessionCreateOptions,
   type SessionListOptions,
@@ -297,6 +298,43 @@ export interface ExternalAgentLifecycleEvent {
  * Singleton manager for all external agent connections.
  * Provides a unified interface for connecting to, managing, and executing on external agents.
  */
+/**
+ * Register every protocol adapter the app ships with.
+ *
+ * Lives outside the manager so the set can be checked without building one.
+ * The manager owns a health-check timer and a process plane, so a test that had
+ * to instantiate it to see which protocols exist would be testing the wrong
+ * thing, and the invariant that matters here is a set: every protocol
+ * `SUPPORTED_EXTERNAL_AGENT_PROTOCOLS` advertises must have an adapter behind
+ * it. A protocol listed as supported with nothing registered is accepted when
+ * the user adds the agent and then throws `Unsupported protocol` at connect
+ * time, which is the worst place to find out.
+ */
+export function registerBuiltinProtocolAdapters(registry: ProtocolAdapterRegistry): void {
+  registry.register("acp", () => new AcpClientAdapter())
+  registry.register("codex-app-server", () => new CodexAppServerAdapter())
+  registry.register("opencode", () => new OpenCodeClientAdapter())
+  registry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
+  registry.register("a2a", () => new A2aClientAdapter())
+  registry.register(
+    "dsh-sdk",
+    () =>
+      new DshSdkClientAdapter({
+        createTransport: (config) =>
+          createDshRuntimeTransport(
+            config,
+            resolveDshLaunchFromConfig,
+            // The harness transport spawns the child in this process, so the
+            // question is whether THIS shell can, not whether some Host can.
+            runsExternalAgentProcessesLocally()
+          ),
+      })
+  )
+  // Pi's own RPC protocol, not ACP (ADR-0119).
+  registry.register("pi-rpc", () => new PiRpcClientAdapter())
+  // Future: registry.register("http", () => new HttpClientAdapter())
+}
+
 export class ExternalAgentManager {
   private static _instance: ExternalAgentManager | null = null
 
@@ -1174,34 +1212,7 @@ export class ExternalAgentManager {
    * Register default protocol adapters
    */
   private registerDefaultAdapters(): void {
-    protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
-    protocolAdapterRegistry.register("codex-app-server", () => new CodexAppServerAdapter())
-    protocolAdapterRegistry.register("opencode", () => new OpenCodeClientAdapter())
-    protocolAdapterRegistry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
-    protocolAdapterRegistry.register("a2a", () => new A2aClientAdapter())
-    // Must stay in set-equality with SUPPORTED_EXTERNAL_AGENT_PROTOCOLS in
-    // config-normalizer.ts; `dsh-sdk-client.test.ts` pins it.
-    protocolAdapterRegistry.register(
-      "dsh-sdk",
-      () =>
-        new DshSdkClientAdapter({
-          createTransport: (config) =>
-            createDshRuntimeTransport(
-              config,
-              resolveDshLaunchFromConfig,
-              // The harness transport spawns the child in this process, so the
-              // question is whether THIS shell can, not whether some Host can.
-              runsExternalAgentProcessesLocally()
-            ),
-        })
-    )
-    // Pi's own RPC protocol, not ACP (ADR-0119). Registered here rather than
-    // only declared in the protocol union — a protocol that is listed as
-    // supported but never registered makes `addAgent` throw
-    // `Unsupported protocol` at the point of use.
-    protocolAdapterRegistry.register("pi-rpc", () => new PiRpcClientAdapter())
-    // Future: Register more adapters
-    // protocolAdapterRegistry.register('http', () => new HttpClientAdapter());
+    registerBuiltinProtocolAdapters(protocolAdapterRegistry)
   }
 
   private normalizeErrorMessage(error: unknown): string {

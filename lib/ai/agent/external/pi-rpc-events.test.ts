@@ -1,4 +1,10 @@
-import { mapPiEvent, piResultToText, piStatsToTokenUsage, type PiEvent } from "./pi-rpc-events"
+import {
+  isPiDiagnosticProgressEvent,
+  mapPiEvent,
+  piResultToText,
+  piStatsToTokenUsage,
+  type PiEvent,
+} from "./pi-rpc-events"
 import { PI_PERMISSION_MARKER, encodePiPermissionTitle } from "./pi-permission"
 import type { ExternalAgentEvent } from "@/types/agent/external-agent"
 
@@ -330,6 +336,10 @@ describe("mapPiEvent — extension UI", () => {
     expect(request.message).toBe("pi.editor")
   })
 
+  it("does not manufacture an answerable dialog for an unsupported UI method", () => {
+    expect(types({ type: "extension_ui_request", id: "custom", method: "custom" })).toEqual([])
+  })
+
   it("drops a dialog with no id, which could never be answered", () => {
     expect(types({ type: "extension_ui_request", method: "confirm" })).toEqual([])
     expect(types({ type: "extension_ui_request", id: "x" })).toEqual([])
@@ -483,5 +493,78 @@ describe("a turn the provider refused", () => {
     )
 
     expect(events.map((event) => event.type)).toEqual(["message_end"])
+  })
+})
+
+describe("Pi protocol fallback payloads", () => {
+  it("marks bookkeeping for audit while leaving notifications and text unmarked", () => {
+    const frame = {
+      type: "extension_ui_request",
+      id: "w",
+      method: "setWidget",
+      widgetLines: ["bg", 7, "done"],
+    }
+    const [widget] = map(frame)
+    expect(widget).toMatchObject({ piDiagnostic: frame, message: "bg done" })
+    expect(isPiDiagnosticProgressEvent(widget)).toBe(true)
+    expect(isPiDiagnosticProgressEvent(map({ type: "agent_start" })[0])).toBe(false)
+    expect(
+      isPiDiagnosticProgressEvent(map(update({ type: "text_delta", delta: "answer" }))[0])
+    ).toBe(false)
+  })
+
+  it.each([
+    ["setStatus", { statusText: "status" }, "status"],
+    ["setTitle", { title: "title" }, "title"],
+    ["set_editor_text", { text: "editor" }, "editor"],
+    ["notify", {}, "pi.notify"],
+  ])("retains %s's method-specific payload", (method, fields, message) => {
+    expect(map({ type: "extension_ui_request", id: "u", method, ...fields })[0]).toMatchObject({
+      message,
+    })
+  })
+
+  it("handles incomplete usage without inventing tokens", () => {
+    expect(piStatsToTokenUsage({ tokens: {} })).toMatchObject({
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+    })
+  })
+
+  it("reports extension error fallback messages", () => {
+    expect(map({ type: "extension_error", message: "fallback" })[0]).toMatchObject({
+      error: "fallback",
+    })
+    expect(map({ type: "extension_error" })[0]).toMatchObject({ error: "Pi extension error" })
+  })
+
+  it("handles a tool result without a name or output and missing argument objects", () => {
+    expect(map({ type: "tool_execution_start", toolCallId: "x" })[0]).toMatchObject({
+      toolName: "unknown",
+    })
+    expect(map({ type: "tool_execution_end", toolCallId: "x" })[0]).toMatchObject({
+      result: "",
+      status: "completed",
+    })
+    expect(map(update({ type: "toolcall_end", toolCall: { id: "x" } }))[0]).toMatchObject({
+      input: {},
+    })
+    expect(map(update({ type: "toolcall_end" }))).toEqual([])
+    expect(map(update({ type: "toolcall_delta", toolCall: { id: "x" } }))).toEqual([])
+  })
+
+  it("filters malformed select options while preserving an empty-string input hint", () => {
+    const [mapped] = map({
+      type: "extension_ui_request",
+      id: "s",
+      method: "select",
+      options: [7, "Yes"],
+      placeholder: "",
+      prefill: "",
+    })
+    expect(mapped).toMatchObject({
+      request: { requestedSchema: { properties: { select: { type: "string", enum: ["Yes"] } } } },
+    })
   })
 })

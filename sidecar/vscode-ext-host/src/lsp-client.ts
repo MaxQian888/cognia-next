@@ -115,6 +115,8 @@ export interface LspClientOptions {
   args?: string[]
   /** Environment overrides. */
   env?: Record<string, string>
+  /** False for an already sanitized agent-tool environment. */
+  inheritEnv?: boolean
   /** Working directory for the child process. */
   cwd?: string
   /** Process stdio or a loopback TCP endpoint owned by the spawned server. */
@@ -438,7 +440,10 @@ export class CogniaLspClient {
     } else {
       const proc = childProcess.spawn(this.opts.command, this.opts.args ?? [], {
         cwd: this.opts.cwd,
-        env: { ...process.env, ...(this.opts.env ?? {}) },
+        env:
+          this.opts.inheritEnv === false
+            ? { ...this.opts.env }
+            : { ...process.env, ...(this.opts.env ?? {}) },
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       })

@@ -419,6 +419,7 @@ export async function openMcpClient(
   opts: OpenMcpOptions = {},
   deps: OpenMcpDeps = {}
 ): Promise<OpenedMcp> {
+  opts.signal?.throwIfAborted()
   const { client, transport, closeEgressGuard } = await createMcpConnection(server, opts, deps)
 
   let closed = false
@@ -431,7 +432,9 @@ export async function openMcpClient(
   const onAbort = () => void closeResources()
   if (opts.signal) opts.signal.addEventListener("abort", onAbort, { once: true })
   try {
+    opts.signal?.throwIfAborted()
     await client.connect(transport)
+    opts.signal?.throwIfAborted()
   } catch (err) {
     if (opts.signal) opts.signal.removeEventListener("abort", onAbort)
     await closeResources()

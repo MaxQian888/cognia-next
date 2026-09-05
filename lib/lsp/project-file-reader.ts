@@ -1,5 +1,5 @@
 /**
- * Tauri-backed reader for a project-local `.cognia/lsp.json`.
+ * Host-injectable reader for a project-local `.cognia/lsp.json`.
  *
  * Injected into `resolveLspServers` (`lib/lsp/resolve-config.ts`) as the
  * `readProjectFile` dependency. Kept out of the pure resolver so that module
@@ -23,13 +23,16 @@ function joinRoot(rootDir: string, rel: string): string {
 
 /**
  * Read `<rootDir>/.cognia/lsp.json`. Returns the parsed file, or `null` on any
- * failure (missing file, parse error, non-Tauri host).
+ * failure (missing file, parse error, or non-Tauri host without an injected reader).
  */
-export async function readProjectLspFile(rootDir: string): Promise<LspProjectFile | null> {
-  if (!isTauri()) return null
+export async function readProjectLspFile(
+  rootDir: string,
+  read?: (filePath: string) => Promise<string>
+): Promise<LspProjectFile | null> {
+  if (!read && !isTauri()) return null
   let raw: string
   try {
-    raw = await readTextFile(joinRoot(rootDir, PROJECT_LSP_CONFIG_RELPATH))
+    raw = await (read ?? readTextFile)(joinRoot(rootDir, PROJECT_LSP_CONFIG_RELPATH))
   } catch {
     return null
   }

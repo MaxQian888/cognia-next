@@ -58,3 +58,12 @@ describe("readProjectLspFile", () => {
     expect(mockRead.mock.calls[0][0]).toBe("C:\\code\\proj\\.cognia\\lsp.json")
   })
 })
+
+it("reads a Node-host project through an injected reader without Tauri", async () => {
+  mockRead.mockReset()
+  mockIsTauri.mockReturnValue(false)
+  const read = jest.fn().mockResolvedValue('{"servers":[]}')
+  expect(await readProjectLspFile("/proj", read)).toEqual({ servers: [] })
+  expect(read).toHaveBeenCalledWith("/proj/.cognia/lsp.json")
+  expect(mockRead).not.toHaveBeenCalled()
+})

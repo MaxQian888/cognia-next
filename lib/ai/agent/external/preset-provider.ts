@@ -13,6 +13,7 @@ import type { ProviderId } from "@/types/subscription"
 export function providerIdForPreset(preset: string | null | undefined): ProviderId | null {
   switch (preset) {
     case "codex":
+    case "codex-acp":
     case "codex-app-server":
       return "codex"
     case "claude-code":

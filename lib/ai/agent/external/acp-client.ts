@@ -563,6 +563,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // Tauri event unsubscribe functions
   private unsubscribeFunctions: Array<() => void> = []
 
+  private toolCallStates = new Map<
+    string,
+    Map<string, Extract<AcpSessionUpdate, { sessionUpdate: "tool_call_update" }>>
+  >()
+
   // Pending permission requests waiting for UI response
   private pendingPermissions: Map<
     string,
@@ -829,6 +834,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       await this.cleanupNativeSessionTerminals(sessionId)
     }
     this._sessions.clear()
+    this.toolCallStates.clear()
     this.terminalSessions.clear()
     await this.cleanupDynamicMcpConnections()
     this.dynamicMcpServerSessions.clear()
@@ -1573,8 +1579,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const sessionModes = result.modes
     const sessionConfigOptions = result.configOptions
 
-    // Derive mode from configOptions (preferred) or modes (legacy)
-    let initialMode: AcpPermissionMode = (options?.permissionMode || "default") as AcpPermissionMode
+    // Derive mode from configOptions (preferred) or modes (legacy).
+    let initialMode: AcpPermissionMode = (sessionModes?.currentModeId ||
+      options?.permissionMode ||
+      "default") as AcpPermissionMode
     if (sessionConfigOptions) {
       const modeOption = sessionConfigOptions.find(
         (opt) => opt.type === "select" && opt.category === "mode"
@@ -1582,8 +1590,6 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       if (modeOption) {
         initialMode = modeOption.currentValue as AcpPermissionMode
       }
-    } else if (sessionModes?.currentModeId) {
-      initialMode = sessionModes.currentModeId
     }
 
     const session: ExternalAgentSession = {
@@ -1649,6 +1655,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     this.cancelPendingElicitations(sessionId)
 
+    this.toolCallStates.delete(sessionId)
     this.turnMessageId.delete(sessionId)
     await this.cleanupDynamicMcpConnections(sessionId)
     await this.cleanupNativeSessionTerminals(sessionId)
@@ -1669,6 +1676,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         log.warn("session/delete failed", { sessionId, error })
       }
     }
+    this.toolCallStates.delete(sessionId)
     this.turnMessageId.delete(sessionId)
     await this.sessionCtxCleanup(sessionId)
   }
@@ -1932,48 +1940,47 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * This resolves the pending Promise created by handlePermissionRequest
    */
   async respondToPermission(_sessionId: string, response: AcpPermissionResponse): Promise<void> {
-    const pending = this.pendingPermissions.get(response.requestId)
-    if (pending) {
-      clearTimeout(pending.timeout)
-      pending.resolve({
-        outcome: {
-          outcome: response.granted ? "selected" : "cancelled",
-          optionId: response.optionId,
-        },
-      })
-      this.emitEvent({
-        type: "permission_response",
-        sessionId: pending.request.sessionId || _sessionId,
-        timestamp: new Date(),
-        response,
-      })
-      this.pendingPermissions.delete(response.requestId)
-      return
+    const match = this.pendingPermissions.has(response.requestId)
+      ? ([response.requestId, this.pendingPermissions.get(response.requestId)!] as const)
+      : [...this.pendingPermissions.entries()].find(
+          ([, entry]) =>
+            entry.request.id === response.requestId ||
+            entry.request.requestId === response.requestId
+        )
+    if (!match) return
+    const [requestId, pending] = match
+    if (pending.request.sessionId && pending.request.sessionId !== _sessionId) {
+      throw new Error("Permission response belongs to a different session")
     }
-
-    // Backward-compatible fallback for legacy request ID format
-    for (const [requestId, entry] of this.pendingPermissions.entries()) {
-      if (
-        entry.request.id === response.requestId ||
-        entry.request.requestId === response.requestId
-      ) {
-        clearTimeout(entry.timeout)
-        entry.resolve({
-          outcome: {
-            outcome: response.granted ? "selected" : "cancelled",
-            optionId: response.optionId,
-          },
-        })
-        this.emitEvent({
-          type: "permission_response",
-          sessionId: entry.request.sessionId || _sessionId,
-          timestamp: new Date(),
-          response,
-        })
-        this.pendingPermissions.delete(requestId)
-        return
-      }
+    const option =
+      response.optionId !== undefined
+        ? pending.request.options?.find((entry) => entry.optionId === response.optionId)
+        : response.granted
+          ? this.pickAllowPermissionOption(pending.request.options)
+          : undefined
+    if (response.optionId !== undefined && !option) {
+      throw new Error(`Unknown permission option: ${response.optionId}`)
     }
+    if (
+      option &&
+      this.normalizePermissionOptionKind(option.kind).startsWith("allow") &&
+      !response.granted
+    ) {
+      throw new Error("Permission option conflicts with denied response")
+    }
+    clearTimeout(pending.timeout)
+    this.pendingPermissions.delete(requestId)
+    pending.resolve({
+      outcome: option
+        ? { outcome: "selected", optionId: option.optionId }
+        : { outcome: "cancelled" },
+    })
+    this.emitEvent({
+      type: "permission_response",
+      sessionId: pending.request.sessionId || _sessionId,
+      timestamp: new Date(),
+      response,
+    })
   }
 
   async respondToElicitation(response: AcpElicitationResponse): Promise<void> {
@@ -2034,6 +2041,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   private sendPromptRequest(sessionId: string, params: AcpPromptParams): void {
     // Start a fresh message id for this turn so all `agent_message_chunk`s
     // share it (they coalesce into one assistant message).
+    this.toolCallStates.delete(sessionId)
     this.turnMessageId.set(sessionId, `msg_${++this.messageIdSeq}`)
     // Send as request but handle response asynchronously
     this.sendRequest<AcpPromptResult>(
@@ -2042,6 +2050,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     )
       .then((result) => {
         // Turn over — retire the per-turn message id.
+        this.toolCallStates.delete(sessionId)
         this.turnMessageId.delete(sessionId)
         // ACP carries no token accounting (only context-window occupancy via
         // `usage_update`, kept in session metadata); emit `done` without a
@@ -2055,6 +2064,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         })
       })
       .catch((error) => {
+        this.toolCallStates.delete(sessionId)
         this.turnMessageId.delete(sessionId)
         // Emit error event on failure
         this.emitEvent({
@@ -2086,6 +2096,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/session-modes
    */
   async setSessionMode(sessionId: string, modeId: AcpPermissionMode): Promise<void> {
+    const modeOption = this.getConfigOptions(sessionId)?.find(
+      (option) => option.type === "select" && option.category === "mode"
+    )
+    if (modeOption) {
+      await this.setConfigOption(sessionId, modeOption.id, modeId)
+      return
+    }
     await this.sendRequest("session/set_mode", { sessionId, modeId } as unknown as Record<
       string,
       unknown
@@ -2103,6 +2120,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       throw new Error(`Session not found: ${sessionId}`)
     }
 
+    const modelOption = this.getConfigOptions(sessionId)?.find(
+      (option) => option.type === "select" && option.category === "model"
+    )
+    if (modelOption) {
+      await this.setConfigOption(sessionId, modelOption.id, modelId)
+      return
+    }
     const models = session.metadata?.models as AcpSessionModelState | undefined
     if (!models?.availableModels?.length) {
       throw new Error("Agent does not support model selection")
@@ -2139,6 +2163,21 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    */
   getSessionModels(sessionId: string): AcpSessionModelState | undefined {
     const session = this._sessions.get(sessionId)
+    const option = this.getConfigOptions(sessionId)?.find(
+      (entry) => entry.type === "select" && entry.category === "model"
+    )
+    if (option?.type === "select") {
+      return {
+        currentModelId: option.currentValue,
+        availableModels: option.options
+          .flatMap((entry) => ("group" in entry ? entry.options : [entry]))
+          .map((entry) => ({
+            modelId: entry.value,
+            name: entry.name,
+            description: entry.description,
+          })),
+      }
+    }
     return session?.metadata?.models as AcpSessionModelState | undefined
   }
 
@@ -3089,10 +3128,10 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     // Check if permission mode allows auto-approval
     if (session?.permissionMode === "bypassPermissions") {
-      if (request.options?.length && !allowOption) {
+      if (!allowOption) {
         return { outcome: { outcome: "cancelled" } }
       }
-      return { outcome: { outcome: "selected", optionId: allowOption?.optionId } }
+      return { outcome: { outcome: "selected", optionId: allowOption.optionId } }
     }
 
     // Auto-approve in acceptEdits mode for file reads and edits/writes — the
@@ -3401,6 +3440,19 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "tool_call": {
+        const states = this.toolCallStates.get(sessionId) ?? new Map()
+        this.toolCallStates.set(sessionId, states)
+        states.set(update.toolCallId, { ...update, sessionUpdate: "tool_call_update" })
+        if (
+          update.status === "completed" ||
+          update.status === "failed" ||
+          update.status === "error"
+        ) {
+          return this.handleSessionUpdate(sessionId, timestamp, {
+            ...update,
+            sessionUpdate: "tool_call_update",
+          })
+        }
         const previewToolNames = this.featureProfile?.preview.previewToolNames.advertised === true
         return {
           type: "tool_use_start",
@@ -3420,29 +3472,34 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "tool_call_update": {
-        // Extract text content from the union type
-        const extractToolCallText = (): string => {
-          if (!update.content?.length) return ""
-          const first = update.content[0]
-          if (first.type === "content" && first.content?.type === "text") {
-            return first.content.text
-          }
-          if (first.type === "diff") return `Diff: ${first.path}`
-          if (first.type === "terminal") return `Terminal: ${first.terminalId}`
-          return ""
-        }
+        const states = this.toolCallStates.get(sessionId) ?? new Map()
+        this.toolCallStates.set(sessionId, states)
+        update = { ...states.get(update.toolCallId), ...update }
+        states.set(update.toolCallId, update)
+        const content = update.content ?? []
+        const text = content.flatMap((block) =>
+          block.type === "content" && block.content.type === "text" ? [block.content.text] : []
+        )
+        // Keep rich blocks intact; a string projection would discard diffs/images/terminals.
+        const result =
+          content.length > text.length
+            ? { content }
+            : text.length
+              ? text.join("\n")
+              : (update.rawOutput ?? "")
 
         if (
           update.status === "completed" ||
           update.status === "error" ||
           update.status === "failed"
         ) {
+          states.delete(update.toolCallId)
           return {
             type: "tool_result",
             sessionId,
             timestamp,
             toolUseId: update.toolCallId,
-            result: extractToolCallText(),
+            result,
             isError: update.status === "error" || update.status === "failed",
             toolName: update.title,
             title: update.title,
@@ -4042,6 +4099,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this._connectionStatus = "disconnected"
 
     // Reject all pending requests
+    this.toolCallStates.clear()
     this.peer?.rejectAll(`Process exited with code ${code}`)
     this.cancelPendingElicitations()
 

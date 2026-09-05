@@ -290,3 +290,35 @@ test("list surfaces a host failure instead of reporting zero shells", async () =
   const reg = createHostBgShellRegistry({ hostRpc, sessionId: "s1" })
   await assert.rejects(() => reg.list(), /host gone/)
 })
+
+test("explicit sidecar host uses local jobs despite an RPC object", async () => {
+  const { createSessionBgShellRegistry } = await import("./bash-host-sessions.mjs")
+  const registry = createSessionBgShellRegistry({
+    hostRpc: {
+      call() {
+        throw new Error("CLI has no jobs RPC")
+      },
+    },
+    sessionId: "cli",
+    backgroundProcessHost: "sidecar",
+  })
+  try {
+    const entry = await registry.spawnBackground({
+      command: "fixture",
+      shell: process.execPath,
+      shellArgs: ["-e", "console.log('LOCAL_BACKGROUND_READY')"],
+    })
+    assert.equal(typeof entry.pid, "number")
+    let output = ""
+    for (let i = 0; i < 100; i++) {
+      const result = await registry.waitForOutput(entry.id, { waitMs: 50 })
+      output += result.data ?? ""
+      if (result.status === "exited") break
+    }
+    assert.match(output, /LOCAL_BACKGROUND_READY/)
+    assert.deepEqual(await registry.killByPid(2147483647), { matched: false })
+    assert.equal((await registry.killByPid(entry.pid)).matched, true)
+  } finally {
+    registry.killAll()
+  }
+})

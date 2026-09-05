@@ -55,6 +55,7 @@ export function createBgShellRegistry() {
       // it; undefined (legacy callers / tests) inherits the parent process env.
       ...(env ? { env } : {}),
       windowsHide: true,
+      detached: process.platform !== "win32",
       windowsVerbatimArguments: Boolean(isWin),
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -63,6 +64,7 @@ export function createBgShellRegistry() {
       id,
       command,
       child,
+      pid: child.pid,
       buffer: "",
       cursor: 0,
       status: "running",
@@ -167,12 +169,24 @@ export function createBgShellRegistry() {
     })
   }
 
+  function signalEntry(entry, signal = "SIGTERM") {
+    if (process.platform !== "win32" && entry.child.pid) process.kill(-entry.child.pid, signal)
+    else entry.child.kill(signal)
+  }
+
+  function killByPid(pid) {
+    const entry = [...shells.values()].find((candidate) => candidate.pid === pid)
+    if (!entry) return { matched: false }
+    kill(entry.id)
+    return { matched: true, ok: true, jobId: entry.id }
+  }
+
   function kill(id, signal) {
     const entry = shells.get(id)
     if (!entry) return { ok: false, reason: "not_found" }
     if (entry.status !== "exited") {
       try {
-        entry.child.kill(signal || undefined)
+        signalEntry(entry, signal)
       } catch {
         // Already gone — idempotent.
       }
@@ -184,7 +198,7 @@ export function createBgShellRegistry() {
     for (const entry of shells.values()) {
       if (entry.status !== "exited") {
         try {
-          entry.child.kill()
+          signalEntry(entry)
         } catch {
           // best effort
         }
@@ -206,5 +220,5 @@ export function createBgShellRegistry() {
     }))
   }
 
-  return { spawnBackground, read, waitForOutput, kill, killAll, list }
+  return { spawnBackground, read, waitForOutput, kill, killByPid, killAll, list }
 }

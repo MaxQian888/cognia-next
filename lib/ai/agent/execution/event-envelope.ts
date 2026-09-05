@@ -213,7 +213,7 @@ export function canonicalEventFromCaptureEvent(
         ...(event.message !== undefined ? { message: event.message } : {}),
       }
     case "tool-summary":
-      return null
+      return { kind: "tool-summary", summary: event.summary, toolCallIds: event.toolCallIds }
   }
 }
 

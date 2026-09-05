@@ -16,15 +16,19 @@ import { createSessionLspResolver } from "../lsp/service-loader.mjs"
  *   dispose: () => void,
  * }}
  */
-export function makeLazyLspResolver({ sendOptions, log }) {
+export function makeLazyLspResolver(
+  { sendOptions, log },
+  createResolver = createSessionLspResolver
+) {
   const lspConfig = sendOptions.lsp
   const lspEnabled = !!(lspConfig && lspConfig.enabled && sendOptions.cwd)
   let lspResolverPromise = null
 
   const getLspResolver = () => {
     if (!lspResolverPromise) {
-      lspResolverPromise = createSessionLspResolver({
+      lspResolverPromise = createResolver({
         cwd: sendOptions.cwd,
+        builtinProcessSandbox: sendOptions.builtinProcessSandbox,
         servers: lspConfig?.servers ?? [],
         installDir: lspConfig?.installDir,
         allowInstall: lspConfig?.autoInstall !== false,
@@ -45,12 +49,19 @@ export function makeLazyLspResolver({ sendOptions, log }) {
     ? {
         async request(file, method, payload) {
           const r = await getLspResolver()
-          if (!r) throw new Error("LSP host unavailable")
+          if (!r)
+            throw new Error(
+              "LSP host unavailable. Rebuild the vscode-ext-host bundle or reinstall cognia-agent, then retry."
+            )
           return r.request(file, method, payload)
         },
         async getDiagnostics(file, opts) {
           const r = await getLspResolver()
-          return r ? r.getDiagnostics(file, opts) : []
+          if (!r)
+            throw new Error(
+              "LSP host unavailable. Rebuild the vscode-ext-host bundle or reinstall cognia-agent, then retry."
+            )
+          return r.getDiagnostics(file, opts)
         },
       }
     : null

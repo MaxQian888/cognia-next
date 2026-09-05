@@ -17,6 +17,8 @@
  */
 import nodeHttp from "node:http"
 import nodeDns from "node:dns"
+import nodePath from "node:path"
+import { pathToFileURL } from "node:url"
 import { spawn } from "node:child_process"
 import { Agent } from "undici"
 
@@ -627,17 +629,17 @@ function readStdin() {
   })
 }
 
-// Entry point — skipped when imported by tests or by a role in the Bun
-// multi-call executable. In a standalone bundle import.meta.url and argv[1]
-// can both resolve inside /$bunfs, which otherwise makes this helper steal the
-// role's stdin and terminate the whole sidecar after handling the first frame.
-export function isMcpOauthHelperEntry({ role, importUrl, argvPath }) {
-  if (role) return false
-  return importUrl === `file://${argvPath}` || argvPath?.endsWith("mcp-oauth-helper.mjs")
+// Only the separately shipped helper owns this one-shot stdin protocol.
+// Bundling collapses import.meta.url onto the host entry, so URL equality alone
+// also starts this helper inside claude-host.mjs. A spawned helper may inherit
+// COGNIA_ROLE from its parent; its own filename and URL, not that role, identify it.
+export function isMcpOauthHelperEntry({ importUrl, argvPath }) {
+  if (typeof argvPath !== "string" || nodePath.basename(argvPath) !== "mcp-oauth-helper.mjs")
+    return false
+  return importUrl === pathToFileURL(nodePath.resolve(argvPath)).href
 }
 
 const isMain = isMcpOauthHelperEntry({
-  role: process.env.COGNIA_ROLE,
   importUrl: import.meta.url,
   argvPath: process.argv[1],
 })

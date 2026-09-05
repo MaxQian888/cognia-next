@@ -77,7 +77,7 @@ export const processTools = [
  * Emission order is identical to `processTools` — see PROCESS_TOOL_NAMES.
  */
 export function createProcessTools(ctx = {}) {
-  if (!ctx.bgShells) return processTools
+  if (!ctx.bgShells && !ctx.builtinProcessSandbox) return processTools
   return assertOrder([
     listProcessesTool,
     getProcessTool,

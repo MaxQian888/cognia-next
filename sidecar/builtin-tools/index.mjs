@@ -17,20 +17,23 @@ import { fileExtrasTools } from "./file-ops/index.mjs"
 import { gitTools } from "./git/index.mjs"
 import { processTools, createProcessTools } from "./process/index.mjs"
 import { environmentTools } from "./environment.mjs"
-import { shellAdvancedTools } from "./shell-advanced.mjs"
-import { terminalReplTools } from "./terminal-repl-tool.mjs"
+import { shellAdvancedTools, createShellAdvancedTools } from "./shell-advanced.mjs"
+import { terminalReplTools, createTerminalReplTools } from "./terminal-repl-tool.mjs"
 import { astGrepTools, createAstGrepTools } from "./ast-grep/index.mjs"
 import { clonedepsTools } from "./clonedeps/index.mjs"
 import { webcloneTools } from "./webclone/index.mjs"
 import { createLspTools } from "./lsp.mjs"
 import { createCodeGraphTools } from "./code/tools.mjs"
+import { createBashOutputTool, createKillShellTool, createListShellsTool } from "./core/bash.mjs"
 import { createCoreTools } from "./core/core-tools.mjs"
 import { createMonitorTools } from "./core/monitor.mjs"
 import { createExitPlanTool } from "./exit-plan.mjs"
 import { createPlanTools } from "./plan-tools.mjs"
 import { codeModeToolDefs } from "./run-code/index.mjs"
 import { isProgrammaticReadOnly } from "./run-code/eligibility.mjs"
-import { bareToolName } from "./confinement.mjs"
+import { bareToolName, assertToolCallWithinRoots } from "./confinement.mjs"
+import { toolError } from "./safety.mjs"
+import { withProcessSandbox } from "./shared/exec.mjs"
 import { parseToolArgs, toolInputJsonSchema } from "./tool-args.mjs"
 import {
   DEFAULT_BUILTIN_TOOL_TIMEOUT_MS,
@@ -155,6 +158,7 @@ export function collectCogniaToolDefs({
   cwd,
   dispatchPath,
   bgShells,
+  builtinProcessSandbox,
   hostRpc,
   sessionId,
   model,
@@ -178,7 +182,12 @@ export function collectCogniaToolDefs({
     // variants; swap them in HERE so each keeps its registration position
     // (see the map entries). `astGrep` needs the session cwd — without it the
     // ast-grep child inherited the sidecar's cwd and rewrote the wrong tree.
-    if (category === "process") tools.push(...createProcessTools({ bgShells }))
+    if (category === "process")
+      tools.push(...createProcessTools({ bgShells, builtinProcessSandbox, cwd }))
+    else if (category === "terminalRepl")
+      tools.push(...createTerminalReplTools({ builtinProcessSandbox, sessionId }))
+    else if (category === "shellAdvanced")
+      tools.push(...createShellAdvancedTools({ builtinProcessSandbox }))
     else if (category === "astGrep") tools.push(...createAstGrepTools({ cwd }))
     else tools.push(...toolList)
   }
@@ -203,6 +212,13 @@ export function collectCogniaToolDefs({
     enabled.coreFiles &&
     readTracker &&
     (dispatchPath !== "anthropic" || enabled.coreFilesOnAnthropic === true)
+  if (enabled.process && bgShells && !coreWanted) {
+    tools.push(
+      createBashOutputTool({ bgShells }),
+      createKillShellTool({ bgShells }),
+      createListShellsTool({ bgShells })
+    )
+  }
   if (coreWanted) {
     tools.push(
       ...createCoreTools({
@@ -210,6 +226,7 @@ export function collectCogniaToolDefs({
         readTracker,
         lspResolver,
         bgShells,
+        builtinProcessSandbox,
         taskStore,
         hostRpc,
         sessionId,
@@ -247,7 +264,22 @@ export function collectCogniaToolDefs({
   // assembled native surface, because the code broker dispatches back into
   // exactly these defs — a tool the user disabled is not in `tools`, so it is
   // not reachable from generated code either.
-  return applyToolPresentation(tools, toolPresentation)
+  const confined = builtinProcessSandbox
+    ? tools.map((definition) => ({
+        ...definition,
+        handler: async (input, ...rest) => {
+          try {
+            assertToolCallWithinRoots(builtinProcessSandbox, definition.name, input, cwd)
+          } catch (error) {
+            return toolError(error, definition.name)
+          }
+          return withProcessSandbox(builtinProcessSandbox, cwd, () =>
+            definition.handler(input, ...rest)
+          )
+        },
+      }))
+    : tools
+  return applyToolPresentation(confined, toolPresentation)
 }
 
 /**
@@ -316,6 +348,7 @@ export function buildCogniaToolsServer({
   cwd,
   dispatchPath,
   bgShells,
+  builtinProcessSandbox,
   hostRpc,
   sessionId,
   model,
@@ -335,6 +368,7 @@ export function buildCogniaToolsServer({
     cwd,
     dispatchPath,
     bgShells,
+    builtinProcessSandbox,
     hostRpc,
     sessionId,
     model,
@@ -361,9 +395,21 @@ export function buildCogniaToolsServer({
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
-    tools: capped,
+    tools: wrapNativeToolResults(capped),
     ...(alwaysLoad ? { alwaysLoad: true } : {}),
   })
+}
+
+/** Native MCP results cross the same PII gate as AI SDK results. The lazy
+ * import reuses the existing implementation without an initialization cycle. */
+export function wrapNativeToolResults(definitions) {
+  return definitions.map((definition) => ({
+    ...definition,
+    handler: async (...args) => {
+      const { assertModelSafeToolOutput } = await import("../dispatch/ai-sdk-tools.mjs")
+      return assertModelSafeToolOutput(await definition.handler(...args))
+    },
+  }))
 }
 
 /**

@@ -8,10 +8,11 @@
 // The result is cached for the process lifetime; callers return a clean
 // structured error when this resolves to null (never crash).
 
-import { spawn } from "node:child_process"
+import { spawnInProcessSandbox as spawn } from "../shared/exec.mjs"
 import { createRequire } from "node:module"
 import fs from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 /** @type {string | null | undefined} undefined = not probed yet */
 let cachedPath
@@ -31,8 +32,8 @@ function exeName(base) {
  * resolve its binary the same way esbuild / @vscode/ripgrep do.
  * @returns {string | undefined}
  */
-function platformPackage() {
-  const key = `${process.platform}-${process.arch}`
+function platformPackage(platform, arch) {
+  const key = `${platform}-${arch}`
   /** @type {Record<string, string>} */
   const map = {
     "darwin-arm64": "@ast-grep/cli-darwin-arm64",
@@ -52,18 +53,27 @@ function platformPackage() {
  * `node_modules/.bin` shim next to the main package.
  * @returns {string | null}
  */
-function npmBinaryPath() {
-  const require = createRequire(import.meta.url)
-  const pkg = platformPackage()
+export function npmBinaryPath(platform = process.platform, arch = process.arch) {
+  let require = createRequire(import.meta.url)
+  try {
+    require = createRequire(require.resolve("@ast-grep/cli/package.json"))
+  } catch {
+    // The standalone layout carries a staged binary instead.
+  }
+  const pkg = platformPackage(platform, arch)
   if (pkg) {
     try {
       const pkgJson = require.resolve(`${pkg}/package.json`)
-      const candidate = path.join(path.dirname(pkgJson), exeName("ast-grep"))
+      const candidate = path.join(
+        path.dirname(pkgJson),
+        platform === "win32" ? "ast-grep.exe" : "ast-grep"
+      )
       if (fs.existsSync(candidate)) return candidate
     } catch {
       /* platform package not installed — fall through */
     }
   }
+  if (platform !== process.platform || arch !== process.arch) return null
   // `.bin` shim adjacent to the resolvable main package.
   try {
     const mainPkg = require.resolve("@ast-grep/cli/package.json")
@@ -75,6 +85,24 @@ function npmBinaryPath() {
     }
   } catch {
     /* not installed — expected when running from a packaged build */
+  }
+  return null
+}
+
+/** Locate the staged binary without searching the caller's working directory. */
+export function stagedBinaryPath(moduleUrl = import.meta.url, executablePath = process.execPath) {
+  const dirs = [path.dirname(fileURLToPath(moduleUrl)), path.dirname(executablePath)]
+  for (const base of dirs) {
+    let dir = base
+    for (let depth = 0; depth < 3; depth++) {
+      for (const candidate of [
+        path.join(dir, exeName("ast-grep")),
+        path.join(dir, "sidecar", exeName("ast-grep")),
+      ]) {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+      }
+      dir = path.dirname(dir)
+    }
   }
   return null
 }
@@ -155,7 +183,11 @@ export async function detectAstGrep() {
     return cachedPath
   }
 
-  cachedPath = npmBinaryPath() ?? (await pathLookup("ast-grep")) ?? (await pathLookup("sg"))
+  cachedPath =
+    stagedBinaryPath() ??
+    npmBinaryPath() ??
+    (await pathLookup("ast-grep")) ??
+    (await pathLookup("sg"))
   if (!cachedPath) {
     for (const candidate of knownLocations()) {
       if (fs.existsSync(candidate)) {

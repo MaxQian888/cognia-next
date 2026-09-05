@@ -622,3 +622,37 @@ test("empty tools object behaves like no tools (historical hasTools check)", asy
   })
   assert.equal(captured.tools, undefined)
 })
+
+test("start preserves SDK prototype getters without eagerly reading rejecting promises", async () => {
+  let reads = 0
+  const messages = [{ role: "tool", content: [] }]
+  class SdkResult {
+    get stream() {
+      return (async function* () {})()
+    }
+    get responseMessages() {
+      reads += 1
+      return Promise.resolve(messages)
+    }
+    get response() {
+      return Promise.resolve({ id: "metadata" })
+    }
+    get usage() {
+      return Promise.resolve({ inputTokens: 12 })
+    }
+    get steps() {
+      return Promise.resolve([{}])
+    }
+  }
+  const result = await makeAiSdkAdapter("openai").start({
+    model: "gpt-x",
+    messages: [],
+    credentials: { apiKey: "k" },
+    streamTextFn: () => new SdkResult(),
+  })
+  assert.equal(reads, 0)
+  assert.deepEqual(await result.responseMessages, messages)
+  assert.equal(reads, 1)
+  assert.deepEqual(await result.usage, { inputTokens: 12 })
+  assert.equal((await result.steps).length, 1)
+})

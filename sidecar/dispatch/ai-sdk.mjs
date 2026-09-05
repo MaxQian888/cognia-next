@@ -1,3 +1,4 @@
+import { disposeTerminalRepls } from "../builtin-tools/terminal-repl-tool.mjs"
 // AI SDK dispatcher: runs a turn against `streamText()` from the `ai` package
 // using `@ai-sdk/<provider>`'s client builder.
 //
@@ -18,8 +19,7 @@ import { extractHttpErrorMeta } from "./http-error-meta.mjs"
 import { makeLazyLspResolver } from "./lsp-resolver-factory.mjs"
 import { makeLazyCodeGraphResolver } from "./codegraph-resolver-factory.mjs"
 import { createReadTracker } from "../builtin-tools/core/read-tracker.mjs"
-import { createBgShellRegistry } from "../builtin-tools/core/bash-sessions.mjs"
-import { createHostBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
+import { createSessionBgShellRegistry } from "../builtin-tools/core/bash-host-sessions.mjs"
 import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { resolveAdapter } from "./protocol-adapters/registry.mjs"
 import { buildModel } from "./protocol-adapters/ai-sdk-adapter.mjs"
@@ -558,9 +558,11 @@ export function dispatchAiSdk({
   // in-process registry only when no host channel exists (e.g. the standalone
   // tool bridge), where session-scoped, in-memory shells are all that is
   // possible anyway.
-  const bgShells = hostRpc
-    ? createHostBgShellRegistry({ hostRpc, sessionId })
-    : createBgShellRegistry()
+  const bgShells = createSessionBgShellRegistry({
+    hostRpc,
+    sessionId,
+    backgroundProcessHost: sendOptions.backgroundProcessHost,
+  })
   // Per-session structured task graph (TaskCreate/Get/List/Update). Unlike the
   // legacy TodoWrite payload, ids and dependency edges persist across turns.
   const taskStore = createSessionTaskStore()
@@ -691,6 +693,14 @@ export function dispatchAiSdk({
     }
   } else if (systemParts.length > 0) {
     conversation.push({ role: "system", content: systemParts.join("\n\n") })
+  }
+
+  if (Array.isArray(sendOptions.initialConversation)) {
+    // Keep the freshly resolved system policy while restoring provider message
+    // objects verbatim, including concurrent tool call ids and result outputs.
+    conversation.push(
+      ...sendOptions.initialConversation.filter((message) => message.role !== "system")
+    )
   }
 
   function pushUserToConversation(content) {
@@ -1405,8 +1415,16 @@ export function dispatchAiSdk({
         // rejecting promise → an unhandled rejection that crashes the sidecar.
         let respMessages = null
         try {
-          const resp = await result.response
-          if (resp && Array.isArray(resp.messages)) respMessages = resp.messages
+          // AI SDK 7 moved model messages out of response metadata. Read the
+          // dedicated getter once; older adapters retain response.messages.
+          const messagePromise = result.responseMessages
+          if (messagePromise !== undefined) {
+            const messages = await messagePromise
+            if (Array.isArray(messages)) respMessages = messages
+          } else {
+            const resp = await result.response
+            if (resp && Array.isArray(resp.messages)) respMessages = resp.messages
+          }
         } catch {
           respMessages = null
         }
@@ -1527,7 +1545,7 @@ export function dispatchAiSdk({
           ...extractHttpErrorMeta(turnError),
         })
       } else {
-        emit({ type: "session_ended", sessionId })
+        emit({ type: "session_ended", sessionId, conversationSnapshot: conversation })
       }
     } catch (err) {
       // An aborted turn (user interrupt) is a clean stop, not a failure —
@@ -1535,7 +1553,7 @@ export function dispatchAiSdk({
       if (cancelled || err?.name === "AbortError" || err?.name === "TimeoutError") {
         const partialUsage = finishUsageSnapshot()
         if (partialUsage) flushAdapter(adapter.finish({ usage: partialUsage }))
-        emit({ type: "session_ended", sessionId })
+        emit({ type: "session_ended", sessionId, conversationSnapshot: conversation })
       } else {
         emit({
           type: "session_ended",
@@ -1573,6 +1591,7 @@ export function dispatchAiSdk({
     .finally(() => {
       // Session loop ended (input closed or fatal error) — kill any background
       // shells the agent left running so none outlive the session.
+      disposeTerminalRepls(sessionId)
       void bgShells.killAll()
       // Signal the host to retire this multi-turn session entry. Per-turn
       // `session_ended` events keep the session alive (so context accumulates);

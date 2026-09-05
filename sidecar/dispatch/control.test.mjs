@@ -37,7 +37,6 @@ test("isControlMethod accepts only allowlisted methods", () => {
   for (const m of [
     "close",
     "interrupt",
-    "setPermissionMode",
     // Both carry `exposure: "not-exposed"` in the manifest, with a reason.
     "streamInput",
     "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET",

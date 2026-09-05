@@ -83,3 +83,52 @@ test("resolveCodeGraphRoot falls back to cwd when no marker is found", async () 
   const got = resolveCodeGraphRoot(root)
   assert.ok(typeof got === "string" && got.length > 0)
 })
+
+test("sandboxed graph indexing keeps its database inside a nested authorized workspace", async () => {
+  const parent = await fsp.mkdtemp(path.join(os.tmpdir(), "cg-scoped-"))
+  const cwd = path.join(parent, "workspace")
+  await fsp.mkdir(cwd)
+  await fsp.writeFile(path.join(parent, "package.json"), "{}")
+  await fsp.writeFile(path.join(cwd, "a.ts"), "export const answer = 42")
+  const resolver = makeLazyCodeGraphResolver({
+    sendOptions: {
+      cwd,
+      builtinTools: { codeGraph: true },
+      builtinProcessSandbox: { writableRoots: [cwd] },
+    },
+    log,
+  })
+  try {
+    await resolver.codeGraphResolver.syncStale()
+    assert.equal(resolver.codeGraphResolver.status().root, cwd)
+    assert.equal(fs.existsSync(path.join(parent, ".cognia")), false)
+  } finally {
+    resolver.dispose()
+    await fsp.rm(parent, { recursive: true, force: true })
+  }
+})
+
+test("sandboxed graph indexing rejects a cache symlink outside writable roots", async () => {
+  const parent = await fsp.mkdtemp(path.join(os.tmpdir(), "cg-symlink-"))
+  const cwd = path.join(parent, "workspace")
+  const outside = path.join(parent, "outside")
+  await fsp.mkdir(cwd)
+  await fsp.mkdir(outside)
+  await fsp.writeFile(path.join(cwd, "package.json"), "{}")
+  await fsp.symlink(outside, path.join(cwd, ".cognia"), "dir")
+  const resolver = makeLazyCodeGraphResolver({
+    sendOptions: {
+      cwd,
+      builtinTools: { codeGraph: true },
+      builtinProcessSandbox: { writableRoots: [cwd] },
+    },
+    log,
+  })
+  try {
+    assert.throws(() => resolver.codeGraphResolver.syncStale(), /outside authorized writable roots/)
+    assert.deepEqual(await fsp.readdir(outside), [])
+  } finally {
+    resolver.dispose()
+    await fsp.rm(parent, { recursive: true, force: true })
+  }
+})

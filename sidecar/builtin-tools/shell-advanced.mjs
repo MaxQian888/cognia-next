@@ -15,7 +15,7 @@ import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, validateShellCommand } from "./safety.mjs"
-import { execFileAsync } from "./shared/exec.mjs"
+import { execFileAsync, sandboxedProcessTarget, sandboxedProcessEnv } from "./shared/exec.mjs"
 import { headTruncate } from "./shared/truncate.mjs"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.
@@ -48,7 +48,7 @@ const shellExecuteAdvancedShape = {
     .describe("Hard timeout in ms. Clamped to 5 minutes."),
 }
 
-async function execShellExecuteAdvanced(args) {
+async function execShellExecuteAdvanced(args, ctx = {}) {
   try {
     const validation = validateShellCommand(args.command, args.args)
     if (!validation.safe) return toolError(validation.reason, "shell_execute_advanced")
@@ -63,6 +63,12 @@ async function execShellExecuteAdvanced(args) {
       return toolError(`cwd is not a directory: ${args.cwd}`, "shell_execute_advanced")
     }
 
+    const target = sandboxedProcessTarget(
+      args.command,
+      args.args,
+      args.cwd,
+      ctx.builtinProcessSandbox
+    )
     const timeoutMs = Math.min(MAX_TIMEOUT_MS, Math.max(1000, args.timeoutMs))
     const start = Date.now()
     let stdout = ""
@@ -71,8 +77,11 @@ async function execShellExecuteAdvanced(args) {
     let timedOut = false
     let error
     try {
-      const result = await execFileAsync(args.command, args.args, {
+      const result = await execFileAsync(target.command, target.args, {
         cwd: args.cwd,
+        ...(ctx.builtinProcessSandbox
+          ? { env: sandboxedProcessEnv(process.env, ctx.builtinProcessSandbox) }
+          : {}),
         timeout: timeoutMs,
         maxBuffer: MAX_CAPTURE_BYTES,
         windowsHide: true,
@@ -122,6 +131,9 @@ export const shellExecuteAdvancedTool = tool(
 )
 
 export const shellAdvancedTools = [shellExecuteAdvancedTool]
+export function createShellAdvancedTools(ctx) {
+  return [{ ...shellExecuteAdvancedTool, handler: (args) => execShellExecuteAdvanced(args, ctx) }]
+}
 
 export const __testExports = {
   execShellExecuteAdvanced,
