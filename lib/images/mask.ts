@@ -141,16 +141,6 @@ export function isMaskEmpty(mask: PixelBuffer): boolean {
   return true
 }
 
-/** Fraction of the frame the mask selects, for the UI to warn on tiny areas. */
-export function maskCoverageRatio(mask: PixelBuffer): number {
-  let selected = 0
-  const total = mask.width * mask.height
-  for (let i = 0; i < mask.data.length; i += 4) {
-    if (mask.data[i] >= 128) selected += 1
-  }
-  return total === 0 ? 0 : selected / total
-}
-
 /**
  * Invert the in-app mask into the shape the provider expects: the selected
  * region becomes fully transparent, everything else stays opaque black.

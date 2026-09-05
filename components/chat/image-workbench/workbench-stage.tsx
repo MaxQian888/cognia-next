@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 
-import { clampCropRect, type CropRect } from "@/lib/images"
+import { clampCropRect, displayPointToSource, type CropRect } from "@/lib/images"
 import type { MaskStroke, MaskPoint } from "@/lib/images"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
@@ -130,9 +130,14 @@ export function WorkbenchStage({
     (event: React.PointerEvent): MaskPoint | null => {
       const box = displayBox ?? measure()
       if (!box || !size || box.width === 0) return null
-      const x = ((event.clientX - box.left) / box.width) * size.width
-      const y = ((event.clientY - box.top) / box.height) * size.height
-      return { x, y }
+      // The offset is subtracted here, the scaling happens in the engine. That
+      // arithmetic has a test of its own, and the brush needs exactly the same
+      // conversion the crop does.
+      return displayPointToSource(
+        { x: event.clientX - box.left, y: event.clientY - box.top },
+        { width: box.width, height: box.height },
+        size
+      )
     },
     [displayBox, measure, size]
   )

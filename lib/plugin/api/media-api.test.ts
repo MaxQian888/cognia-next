@@ -1023,3 +1023,100 @@ describe("permission gate", () => {
     expect(() => api.ai.removeBackground({} as ImageData)).toThrow(/ai:chat/)
   })
 })
+
+/**
+ * The delegation to `lib/images`.
+ *
+ * These are the plugin-visible half of a user-facing fix: `ImageAdjustmentOptions`
+ * advertised eleven adjustments and applied four, and its contrast curve
+ * inverted the image past roughly plus or minus 40. The engine has its own
+ * tests. These assert that a plugin calling `api.image.*` actually reaches it.
+ */
+describe("image processing delegates to the shared engine", () => {
+  const testPluginId = "delegation-plugin"
+
+  function solid(width: number, height: number, rgba: number[]): ImageData {
+    const data = new Uint8ClampedArray(width * height * 4)
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = rgba[0]
+      data[i + 1] = rgba[1]
+      data[i + 2] = rgba[2]
+      data[i + 3] = rgba[3]
+    }
+    return new ImageData(data, width, height)
+  }
+
+  const api = () => createMediaAPI(testPluginId, {} as never)
+
+  /** A hard edge, so the spatial adjustments have something to act on. */
+  function edged(width: number, height: number): ImageData {
+    const data = new Uint8ClampedArray(width * height * 4)
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const at = (y * width + x) * 4
+        const value = x < width / 2 ? 200 : 60
+        data[at] = value
+        data[at + 1] = value - 20
+        data[at + 2] = value - 40
+        data[at + 3] = 255
+      }
+    }
+    return new ImageData(data, width, height)
+  }
+
+  it("applies every adjustment it advertises, not just the four that used to work", () => {
+    // A flat field is invisible to blur and sharpen, which act on differences.
+    const image = edged(8, 4)
+    const restored: Array<[string, Record<string, number>]> = [
+      ["exposure", { exposure: 60 }],
+      ["gamma", { gamma: 2.2 }],
+      ["vibrance", { vibrance: 80 }],
+      ["temperature", { temperature: 60 }],
+      ["tint", { tint: 60 }],
+      ["blur", { blur: 100 }],
+      ["sharpen", { sharpen: 100 }],
+    ]
+    for (const [name, adjustments] of restored) {
+      const result = api().image.adjust(image, adjustments)
+      const changed = [...result.data].some((value, index) => value !== image.data[index])
+      expect([name, changed]).toEqual([name, true])
+    }
+  })
+
+  it("keeps contrast on the right side of mid grey instead of inverting", () => {
+    // The old curve produced a negative factor past about plus or minus 40:
+    // a dark pixel came out white and a light one came out black.
+    const dark = api().image.adjust(solid(1, 1, [80, 80, 80, 255]), { contrast: 50 })
+    const light = api().image.adjust(solid(1, 1, [180, 180, 180, 255]), { contrast: 50 })
+    expect(dark.data[0]).toBeLessThan(80)
+    expect(light.data[0]).toBeGreaterThan(180)
+  })
+
+  it("resizes into the requested box, preserving the aspect ratio by default", () => {
+    const resized = api().image.resize(solid(80, 40, [10, 10, 10, 255]), 40, 40)
+    expect([resized.width, resized.height]).toEqual([40, 20])
+  })
+
+  it("takes the exact size when the caller opts out of aspect preservation", () => {
+    const resized = api().image.resize(solid(80, 40, [10, 10, 10, 255]), 40, 40, false)
+    expect([resized.width, resized.height]).toEqual([40, 40])
+  })
+
+  it("transforms through the engine, cropping to the requested region", () => {
+    const transformed = api().image.transform(solid(8, 8, [10, 20, 30, 255]), {
+      cropRegion: { x: 0, y: 0, width: 4, height: 2 },
+    })
+    expect([transformed.width, transformed.height]).toEqual([4, 2])
+  })
+
+  it("returns a detached result rather than mutating the caller's pixels", () => {
+    const image = solid(2, 2, [120, 120, 120, 255])
+    api().image.adjust(image, { brightness: 60 })
+    expect(image.data[0]).toBe(120)
+  })
+
+  it("leaves an all-neutral adjustment set alone", () => {
+    const image = solid(2, 2, [33, 44, 55, 255])
+    expect([...api().image.adjust(image, {}).data]).toEqual([...image.data])
+  })
+})

@@ -213,3 +213,59 @@ describe("unsharpMask", () => {
     expect(pixel(sharpened, 3, 0)[0]).toBeGreaterThan(180)
   })
 })
+
+describe("spatial adjustments through applyAdjustments", () => {
+  // `boxBlur` and `unsharpMask` are covered directly above. These pin the
+  // WIRING: that the slider values reach them at all, which is what was
+  // missing for seven of the eleven controls before the engine existed.
+  /** A hard vertical edge down the middle, which a blur has to soften. */
+  function splitField(width: number, height: number): PixelBuffer {
+    const buffer = createPixelBuffer(width, height)
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const at = (y * width + x) * 4
+        const value = x < width / 2 ? 255 : 0
+        buffer.data[at] = value
+        buffer.data[at + 1] = value
+        buffer.data[at + 2] = value
+        buffer.data[at + 3] = 255
+      }
+    }
+    return buffer
+  }
+
+  it("routes the blur slider through the pixel radius mapping", () => {
+    const source = splitField(40, 4)
+    expect(pixel(applyAdjustments(source, {}), 21, 2)[0]).toBe(0)
+
+    const gentle = applyAdjustments(source, { blur: 20 })
+    const strong = applyAdjustments(source, { blur: 100 })
+    expect(strong.data.length).toBe(source.data.length)
+    // A larger slider value has to reach further past the edge.
+    expect(pixel(strong, 26, 2)[0]).toBeGreaterThan(pixel(gentle, 26, 2)[0])
+    expect(pixel(strong, 20, 2)[0]).toBeLessThan(255)
+  })
+
+  it("routes the sharpen slider through the unsharp mask", () => {
+    const source = createPixelBuffer(6, 1)
+    for (let x = 0; x < 6; x += 1) {
+      const at = x * 4
+      const value = x < 3 ? 80 : 180
+      source.data[at] = value
+      source.data[at + 1] = value
+      source.data[at + 2] = value
+      source.data[at + 3] = 255
+    }
+    const sharpened = applyAdjustments(source, { sharpen: 100 })
+    expect(pixel(sharpened, 2, 0)[0]).toBeLessThan(80)
+    expect(pixel(sharpened, 3, 0)[0]).toBeGreaterThan(180)
+  })
+
+  it("blurs before sharpening, so the blur is still visible in the result", () => {
+    // Sharpening first would simply be thrown away by the blur that follows.
+    const source = splitField(40, 4)
+    const both = applyAdjustments(source, { blur: 60, sharpen: 60 })
+    expect(pixel(both, 22, 2)[0]).toBeGreaterThan(0)
+    expect(pixel(both, 18, 2)[0]).toBeLessThan(255)
+  })
+})

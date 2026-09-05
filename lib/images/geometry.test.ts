@@ -1,7 +1,7 @@
 import {
   applyAspectToRect,
   clampCropRect,
-  displayRectToSource,
+  displayPointToSource,
   isFullFrame,
   largestRectForAspect,
   resolveResize,
@@ -168,31 +168,34 @@ describe("resolveResize", () => {
   })
 })
 
-describe("displayRectToSource", () => {
-  it("scales a rect drawn on a shrunken preview back to source pixels", () => {
-    const rect = displayRectToSource(
-      { x: 20, y: 10, width: 100, height: 50 },
-      { width: 400, height: 300 },
-      { width: 800, height: 600 }
-    )
-    expect(rect).toEqual({ x: 40, y: 20, width: 200, height: 100 })
+describe("displayPointToSource", () => {
+  it("scales a pointer position on a shrunken preview back to source pixels", () => {
+    expect(
+      displayPointToSource(
+        { x: 20, y: 10 },
+        { width: 400, height: 300 },
+        { width: 800, height: 600 }
+      )
+    ).toEqual({ x: 40, y: 20 })
   })
 
-  it("clamps a rect drawn slightly past the preview edge", () => {
-    const rect = displayRectToSource(
-      { x: 390, y: 0, width: 40, height: 300 },
-      { width: 400, height: 300 },
+  it("is the identity when the preview is shown at source size", () => {
+    const point = displayPointToSource(
+      { x: 7, y: 9 },
+      { width: 800, height: 600 },
       { width: 800, height: 600 }
     )
-    expect(rect.x + rect.width).toBeLessThanOrEqual(800)
+    expect(point.x).toBeCloseTo(7, 6)
+    expect(point.y).toBeCloseTo(9, 6)
   })
 
   it("survives a zero-sized preview without dividing by zero", () => {
-    const rect = displayRectToSource(
-      { x: 0, y: 0, width: 10, height: 10 },
+    const point = displayPointToSource(
+      { x: 5, y: 5 },
       { width: 0, height: 0 },
       { width: 800, height: 600 }
     )
-    expect(Number.isFinite(rect.width)).toBe(true)
+    expect(Number.isFinite(point.x)).toBe(true)
+    expect(Number.isFinite(point.y)).toBe(true)
   })
 })

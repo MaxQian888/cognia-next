@@ -3,7 +3,6 @@ import {
   createPixelBuffer,
   hasTransparency,
   pixelCount,
-  pixelIndex,
   premultiply,
   unpremultiply,
   type PixelBuffer,
@@ -42,15 +41,6 @@ describe("clonePixelBuffer", () => {
     copy.data[0] = 99
     expect(original.data[0]).toBe(10)
     expect(copy.width).toBe(2)
-  })
-})
-
-describe("pixelIndex", () => {
-  it("addresses row-major RGBA", () => {
-    const buffer = createPixelBuffer(4, 4)
-    expect(pixelIndex(buffer, 0, 0)).toBe(0)
-    expect(pixelIndex(buffer, 1, 0)).toBe(4)
-    expect(pixelIndex(buffer, 0, 1)).toBe(16)
   })
 })
 

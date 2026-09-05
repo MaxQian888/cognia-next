@@ -1,8 +1,11 @@
 /**
- * The barrel is the engine's published surface. Two shells and the plugin Media
- * API import from it, so a rename that drops an export is a runtime `undefined`
- * in a `plugins/` bundle long before anyone notices in the app. Pinning the
- * name list turns that into a failing test in the module that caused it.
+ * The barrel is the engine's shared surface, imported by the chat workbench,
+ * its hook and the plugin Media API's delegation.
+ *
+ * Pinning the name list is what turns "this export lost its last caller" into
+ * a failing test in the module that caused it, rather than a slow accumulation
+ * of exports nothing uses. It is NOT protecting a published package boundary:
+ * nothing outside the app tree imports `lib/images`.
  */
 
 import * as engine from "./index"
@@ -13,7 +16,6 @@ const EXPECTED_EXPORTS = [
   "createPixelBuffer",
   "hasTransparency",
   "pixelCount",
-  "pixelIndex",
   "premultiply",
   "unpremultiply",
   // color
@@ -40,7 +42,7 @@ const EXPECTED_EXPORTS = [
   // geometry
   "applyAspectToRect",
   "clampCropRect",
-  "displayRectToSource",
+  "displayPointToSource",
   "isFullFrame",
   "largestRectForAspect",
   "resolveResize",
@@ -48,7 +50,6 @@ const EXPECTED_EXPORTS = [
   "MIN_CROP_EDGE",
   // mask
   "isMaskEmpty",
-  "maskCoverageRatio",
   "maskToProviderBuffer",
   "rasterizeCoverage",
   "rasterizeMask",
@@ -58,13 +59,11 @@ const EXPECTED_EXPORTS = [
   "canRasterize",
   "chooseEncodeFormat",
   "decodeBlobToPixelBuffer",
-  "decodeToPixelBuffer",
   "decodeUrlToPixelBuffer",
   "encodePixelBuffer",
   "encodeProviderMask",
   "fromImageData",
   "pixelBufferToBlob",
-  "pixelBufferToDataUrl",
   "pixelBufferToDataUrlSync",
   "toImageData",
   "ImageDecodeError",

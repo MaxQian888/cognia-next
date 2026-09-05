@@ -7,7 +7,6 @@ import {
   isDirty,
   operationsForSave,
   pipelineAt,
-  previousPipeline,
   referencedCheckpoints,
   releasedCheckpoints,
   INITIAL_EDITOR_STATE,
@@ -221,12 +220,6 @@ describe("pipelineAt", () => {
 
   it("clamps a negative cursor to the untouched image", () => {
     expect(pipelineAt(applyAll([crop()]), -3).operations).toEqual([])
-  })
-
-  it("previousPipeline shows one step back, and stays put at the start", () => {
-    const state = applyAll([crop(), rotate()])
-    expect(previousPipeline(state).operations.map((entry) => entry.kind)).toEqual(["crop"])
-    expect(previousPipeline(INITIAL_EDITOR_STATE).operations).toEqual([])
   })
 })
 

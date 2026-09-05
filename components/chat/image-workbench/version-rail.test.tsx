@@ -102,3 +102,29 @@ describe("railItemsFromLineages", () => {
     ])
   })
 })
+
+describe("versions a model produced", () => {
+  const withAi: VersionRailItem[] = [
+    ...items,
+    {
+      url: "cognia-media:c",
+      displayUrl: "blob:c",
+      lineageId: "cognia-media:a",
+      depth: 2,
+      operations: ["ai.region"],
+    },
+  ]
+
+  it("badges an AI version so it is distinguishable from a hand-made one", () => {
+    render(<VersionRail items={withAi} activeUrl={null} onSelect={() => {}} />)
+    const badges = screen.getAllByTestId("workbench-version-ai-badge")
+    expect(badges).toHaveLength(1)
+    expect(badges[0]).toHaveTextContent("AI")
+  })
+
+  it("names the model in the accessible label", () => {
+    render(<VersionRail items={withAi} activeUrl={null} onSelect={() => {}} />)
+    expect(screen.getByLabelText("Version made by a model: ai.region")).toBeInTheDocument()
+    expect(screen.getByLabelText("Version: crop, adjust")).toBeInTheDocument()
+  })
+})

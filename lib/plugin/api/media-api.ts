@@ -44,6 +44,7 @@ import {
   transformBuffer,
   type PixelBuffer,
 } from "@/lib/images"
+import { REMOVE_BACKGROUND_PROMPT } from "@/lib/chat/image-edit/prompts"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
@@ -1487,10 +1488,10 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
 
       removeBackground: async (imageData: ImageData): Promise<ImageData> => {
         return runImageAi(pluginId, "ai.removeBackground", () =>
-          executeProviderImageEdit(
-            "Remove the background from this image and keep the main subject cleanly isolated.",
-            imageData
-          )
+          // Imported rather than duplicated. The chat workbench's own
+          // background-removal button used to carry a byte-identical copy of
+          // this sentence, which agreed with this one only by coincidence.
+          executeProviderImageEdit(REMOVE_BACKGROUND_PROMPT, imageData)
         )
       },
 

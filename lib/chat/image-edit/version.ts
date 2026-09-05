@@ -253,11 +253,6 @@ function chainOrder(
   return ordered
 }
 
-/** The most recently edited entry of a lineage, or the origin when unedited. */
-export function latestImageVersion(lineage: ImageLineage): ImageLineageEntry | null {
-  return lineage.entries.at(-1) ?? lineage.origin
-}
-
 /** Find the lineage that contains `url`, if any. */
 export function lineageContaining(
   lineages: readonly ImageLineage[],

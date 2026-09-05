@@ -17,6 +17,7 @@ import {
   MAX_BRUSH_RADIUS,
   MIN_BRUSH_RADIUS,
   applyAspectToRect,
+  isFullFrame,
   largestRectForAspect,
   resolveResize,
   type CropRect,
@@ -61,6 +62,10 @@ export function TransformPanel({
   onLockAspectChange,
 }: TransformPanelProps) {
   const t = useTranslations("chat.imageWorkbench")
+
+  // Selecting the whole frame is not a crop. Letting it through would push an
+  // undo step that changes nothing and mark the image dirty.
+  const cropIsUseful = Boolean(cropRect && size && !isFullFrame(cropRect, size))
 
   // The size fields are a local draft committed by "Apply size", not a live
   // controlled value. Feeding every keystroke back through a parsed number
@@ -144,7 +149,7 @@ export function TransformPanel({
           <Button
             size="sm"
             variant="secondary"
-            disabled={!cropRect}
+            disabled={!cropIsUseful}
             onClick={() => cropRect && onApplyCrop(cropRect)}
           >
             {t("crop.apply")}
@@ -159,7 +164,10 @@ export function TransformPanel({
           </Button>
           {cropRect ? (
             <span className="text-xs tabular-nums text-white/60" data-testid="workbench-crop-size">
-              {Math.round(cropRect.width)} x {Math.round(cropRect.height)}
+              {t("crop.sizeReadout", {
+                width: Math.round(cropRect.width),
+                height: Math.round(cropRect.height),
+              })}
             </span>
           ) : null}
         </div>
@@ -176,7 +184,7 @@ export function TransformPanel({
             onChange={(event) => editDimension("width", event.target.value)}
             className="h-8 w-24"
           />
-          <span className="text-white/40">x</span>
+          <span className="text-white/40">{t("resize.separator")}</span>
           <Input
             aria-label={t("resize.height")}
             type="number"
@@ -457,13 +465,19 @@ export function AiPanel({
       </section>
 
       {error ? (
-        <p
+        <div
           role="alert"
           data-testid="workbench-ai-error"
           className={cn("text-xs", error.retryable ? "text-amber-300/90" : "text-red-300/90")}
         >
-          {error.message}
-        </p>
+          {/*
+            Translated from the code, with the provider's own words kept below
+            as detail. Rendering `error.message` alone put five hard-coded
+            English sentences in front of a user reading a Chinese UI.
+          */}
+          <p>{t(`ai.error.${error.code}`)}</p>
+          {error.message ? <p className="mt-0.5 text-white/45">{error.message}</p> : null}
+        </div>
       ) : null}
 
       <div className="flex items-center gap-2">

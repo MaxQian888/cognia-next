@@ -1,7 +1,6 @@
 import {
   groupImageLineages,
   isImagePart,
-  latestImageVersion,
   lineageContaining,
   newImageEditVersionId,
   readImageEditVersion,
@@ -227,24 +226,6 @@ describe("groupImageLineages", () => {
     const lineages = groupImageLineages([imagePart("cognia-media:a"), imagePart("cognia-media:a")])
     expect(lineages).toHaveLength(1)
     expect(lineages[0].entries).toHaveLength(1)
-  })
-})
-
-describe("latestImageVersion", () => {
-  it("returns the origin when nothing was edited", () => {
-    const [lineage] = groupImageLineages([imagePart("cognia-media:a")])
-    expect(latestImageVersion(lineage)?.url).toBe("cognia-media:a")
-  })
-
-  it("returns the last entry in chain order once edits exist", () => {
-    const [lineage] = groupImageLineages([
-      imagePart("cognia-media:a"),
-      withImageEditVersion(
-        imagePart("cognia-media:b"),
-        version({ lineageId: "cognia-media:a", versionId: "v1" })
-      ),
-    ])
-    expect(latestImageVersion(lineage)?.url).toBe("cognia-media:b")
   })
 })
 

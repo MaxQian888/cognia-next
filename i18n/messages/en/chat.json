@@ -1233,58 +1233,6 @@
     "toggle": "Toggle hook details"
   },
   "imageWorkbench": {
-    "dialogDescription": "View, edit and version this image without replacing the original.",
-    "previewAlt": "Edited image preview",
-    "compareOriginalAlt": "Original image",
-    "compareBadge": "Original",
-    "selectionOverlayAria": "Selected region",
-    "toolsLabel": "Editing tools",
-    "close": "Close",
-    "previous": "Previous image",
-    "next": "Next image",
-    "zoomIn": "Zoom in",
-    "zoomOut": "Zoom out",
-    "compare": "Compare with original",
-    "compareHint": "Hold to see the original",
-    "undo": "Undo",
-    "redo": "Redo",
-    "resetAll": "Discard all edits",
-    "download": "Download",
-    "viewHint": "{width} x {height} pixels",
-    "viewHintLoading": "Loading image",
-    "tools": {
-      "view": "View",
-      "transform": "Crop",
-      "adjust": "Adjust",
-      "ai": "AI"
-    },
-    "crop": {
-      "title": "Crop",
-      "apply": "Apply crop",
-      "clear": "Clear",
-      "aspect": {
-        "free": "Free",
-        "square": "1:1",
-        "landscape4x3": "4:3",
-        "portrait3x4": "3:4",
-        "landscape16x9": "16:9",
-        "portrait9x16": "9:16"
-      }
-    },
-    "resize": {
-      "title": "Resize",
-      "width": "Width",
-      "height": "Height",
-      "lockAspect": "Lock proportions",
-      "apply": "Apply size"
-    },
-    "transform": {
-      "title": "Rotate and flip",
-      "rotateLeft": "Rotate left",
-      "rotateRight": "Rotate right",
-      "flipHorizontal": "Flip horizontally",
-      "flipVertical": "Flip vertically"
-    },
     "adjust": {
       "exposure": "Exposure",
       "brightness": "Brightness",
@@ -1300,53 +1248,127 @@
       "reset": "Reset adjustments"
     },
     "ai": {
-      "provider": "Provider",
-      "modelLine": "Model: {model}",
-      "regionMode": "Edit a selected region",
-      "maskUnsupported": "{provider} cannot edit a selected region. Whole-image prompts still work.",
+      "billingNotice": "Each run is a billed request to the selected provider.",
       "brushAdd": "Add to selection",
-      "brushSubtract": "Remove from selection",
-      "brushSize": "Brush size",
       "brushHardness": "Brush hardness",
+      "brushSize": "Brush size",
+      "brushSubtract": "Remove from selection",
+      "cancel": "Cancel",
       "clearSelection": "Clear selection",
+      "error": {
+        "blocked": "The prompt was not sent, because it contains information that must not leave this device.",
+        "cancelled": "Edit cancelled.",
+        "empty-selection": "Nothing is selected. Paint over the area you want changed.",
+        "mask-unsupported": "This provider cannot edit a selected region.",
+        "no-output": "The provider returned no image. The selected model may not support editing.",
+        "provider": "The provider could not complete the edit.",
+        "unavailable": "The image-editing provider is not ready to run."
+      },
+      "generate": "Generate",
+      "maskUnsupported": "{provider} cannot edit a selected region. Whole-image prompts still work.",
+      "modelLine": "Model: {model}",
       "promptLabel": "Prompt",
       "promptPlaceholder": "Describe the change you want",
-      "billingNotice": "Each run is a billed request to the selected provider.",
-      "generate": "Generate",
-      "running": "Generating",
-      "retry": "Try again",
-      "cancel": "Cancel",
+      "provider": "Provider",
+      "regionMode": "Edit a selected region",
       "removeBackground": "Remove background",
+      "retry": "Try again",
+      "running": "Generating",
       "unavailable": {
         "no-provider": "No image-editing provider is set up yet. Add one in Settings to edit with AI.",
         "needs-auth": "The image-editing provider needs an API key before it can run.",
         "needs-config": "The image-editing provider needs a model or base URL before it can run."
       }
     },
-    "rail": {
-      "label": "Image versions",
-      "original": "Original",
-      "originalAria": "Original image",
-      "versionAria": "Version: {operations}",
-      "unsaved": "Unsaved"
+    "blocked": {
+      "cors": "This image is hosted elsewhere and its pixels cannot be read, so it can be viewed and downloaded but not edited.",
+      "unsupported": "This device cannot process images in the browser, so editing is unavailable.",
+      "decode": "This image could not be decoded for editing."
     },
-    "save": {
-      "save": "Save as version",
-      "saving": "Saving",
-      "blockedStreaming": "This turn is still streaming. You can save once it finishes.",
-      "blockedReadOnly": "This conversation is read-only, so a version cannot be saved here."
+    "close": "Close",
+    "compare": "Compare with original",
+    "compareBadge": "Original",
+    "compareHint": "Hold to see the original",
+    "compareOriginalAlt": "Original image",
+    "crop": {
+      "apply": "Apply crop",
+      "aspect": {
+        "free": "Free",
+        "square": "1:1",
+        "landscape4x3": "4:3",
+        "portrait3x4": "3:4",
+        "landscape16x9": "16:9",
+        "portrait9x16": "9:16"
+      },
+      "clear": "Clear",
+      "sizeReadout": "{width} x {height}",
+      "title": "Crop"
     },
+    "dialogDescription": "View, edit and version this image without replacing the original.",
     "discard": {
       "title": "Discard edits",
       "body": "Closing now discards the edits you have not saved.",
       "confirm": "Discard",
       "cancel": "Keep editing"
     },
-    "blocked": {
-      "cors": "This image is hosted elsewhere and its pixels cannot be read, so it can be viewed and downloaded but not edited.",
-      "unsupported": "This device cannot process images in the browser, so editing is unavailable.",
-      "decode": "This image could not be decoded for editing."
-    }
+    "download": "Download",
+    "downloadAs": "Download as {format}",
+    "next": "Next image",
+    "previewAlt": "Edited image preview",
+    "previous": "Previous image",
+    "rail": {
+      "aiBadge": "AI",
+      "aiVersionAria": "Version made by a model: {operations}",
+      "label": "Image versions",
+      "original": "Original",
+      "originalAria": "Original image",
+      "unsaved": "Unsaved",
+      "versionAria": "Version: {operations}"
+    },
+    "redo": "Redo",
+    "resetAll": "Discard all edits",
+    "resize": {
+      "apply": "Apply size",
+      "height": "Height",
+      "lockAspect": "Lock proportions",
+      "separator": "x",
+      "title": "Resize",
+      "width": "Width"
+    },
+    "save": {
+      "blockedReadOnly": "This conversation is read-only, so a version cannot be saved here.",
+      "blockedStreaming": "This turn is still streaming. You can save once it finishes.",
+      "error": {
+        "locked": "This conversation is locked while it moves to another device, so a version cannot be saved.",
+        "message-missing": "That message is no longer in this conversation.",
+        "lineage-missing": "That image is no longer part of this message.",
+        "too-large": "The edited image is too large to store. Try cropping or reducing its size.",
+        "unknown": "The version could not be saved."
+      },
+      "save": "Save as version",
+      "saving": "Saving"
+    },
+    "selectionOverlayAria": "Selected region",
+    "tools": {
+      "view": "View",
+      "transform": "Crop",
+      "adjust": "Adjust",
+      "ai": "AI"
+    },
+    "toolsLabel": "Editing tools",
+    "transform": {
+      "title": "Rotate and flip",
+      "rotateLeft": "Rotate left",
+      "rotateRight": "Rotate right",
+      "flipHorizontal": "Flip horizontally",
+      "flipVertical": "Flip vertically"
+    },
+    "undo": "Undo",
+    "untitled": "Image",
+    "viewHint": "{width} x {height} pixels",
+    "viewHintLoading": "Loading image",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out"
   },
   "imported": {
     "diverged": "{source} moved on",

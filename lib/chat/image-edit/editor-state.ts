@@ -282,11 +282,6 @@ export function currentPipeline(state: EditorState): RenderPipeline {
   return pipelineAt(state, state.cursor)
 }
 
-/** The pipeline one step back, which is what the compare control shows. */
-export function previousPipeline(state: EditorState): RenderPipeline {
-  return pipelineAt(state, Math.max(0, state.cursor - 1))
-}
-
 const OPERATION_BY_KIND: Record<LocalEntry["kind"], ImageEditOperation> = {
   crop: "crop",
   resize: "resize",

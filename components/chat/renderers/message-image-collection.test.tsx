@@ -186,3 +186,132 @@ describe("without a provider", () => {
     expect(seen).toBeNull()
   })
 })
+
+/**
+ * The workbench half of the provider. The workbench itself is mocked to a prop
+ * recorder, because what matters here is the translation the provider performs:
+ * the renderer only ever knew the object URL it painted, and the workbench
+ * needs the message part's url to attach a version to the right lineage.
+ */
+jest.mock("@/components/chat/image-workbench/image-workbench", () => ({
+  ImageWorkbench: (props: Record<string, unknown>) => {
+    workbenchProps = props
+    return <div data-testid="mock-workbench" />
+  },
+}))
+
+const liveQueryValue: { current: unknown } = { current: null }
+jest.mock("dexie-react-hooks", () => ({
+  useLiveQuery: () => liveQueryValue.current,
+}))
+jest.mock("@/lib/db/schema", () => ({ getDb: () => ({ sessions: { get: jest.fn() } }) }))
+
+let workbenchProps: Record<string, unknown> = {}
+
+const IMAGE_EDIT = "cogniaImageEdit"
+const parts = [
+  { type: "file", url: "https://example.com/origin.png", mediaType: "image/png" },
+  {
+    type: "file",
+    url: "https://example.com/v1.webp",
+    mediaType: "image/webp",
+    [IMAGE_EDIT]: {
+      schemaVersion: 1,
+      lineageId: "https://example.com/origin.png",
+      versionId: "iev_1",
+      parentVersionId: null,
+      operations: ["crop"],
+      editedAt: 10,
+    },
+  },
+]
+
+function renderWithTarget(isStreaming = false) {
+  workbenchProps = {}
+  return render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <TooltipProvider>
+        <MessageImageCollectionProvider
+          target={{ sessionId: "s1", messageId: "m1", parts, isStreaming }}
+        >
+          <ImageBlock src="https://example.com/origin.png" alt="first" />
+          <ImageBlock src="https://example.com/v1.webp" alt="second" />
+        </MessageImageCollectionProvider>
+      </TooltipProvider>
+    </NextIntlClientProvider>
+  )
+}
+
+/**
+ * Every `ImageBlock` renders two controls named "View fullscreen": the picture
+ * itself and its hover toolbar button. So block N's picture is at index N * 2.
+ */
+function openImage(blockIndex: number) {
+  fireEvent.click(screen.getAllByRole("button", { name: "View fullscreen" })[blockIndex * 2])
+}
+
+function openFirstImage() {
+  openImage(0)
+}
+
+describe("MessageImageCollectionProvider with a message target", () => {
+  beforeEach(() => {
+    liveQueryValue.current = null
+  })
+
+  it("opens the workbench rather than the read-only lightbox", () => {
+    renderWithTarget()
+    openFirstImage()
+    expect(screen.getByTestId("mock-workbench")).toBeInTheDocument()
+    expect(workbenchProps.open).toBe(true)
+  })
+
+  it("addresses the version at the message part's url, not the painted one", () => {
+    renderWithTarget()
+    openFirstImage()
+    const source = workbenchProps.source as { lineageId: string; parentVersionId: string | null }
+    expect(source.lineageId).toBe("https://example.com/origin.png")
+    expect(source.parentVersionId).toBeNull()
+  })
+
+  it("parents a new edit on the version being edited", () => {
+    renderWithTarget()
+    openImage(1)
+    const source = workbenchProps.source as { parentVersionId: string | null }
+    expect(source.parentVersionId).toBe("iev_1")
+  })
+
+  it("builds the rail from the message's lineages", () => {
+    renderWithTarget()
+    openFirstImage()
+    const rail = workbenchProps.rail as Array<{ url: string; depth: number }>
+    expect(rail.map((row) => row.url)).toEqual([
+      "https://example.com/origin.png",
+      "https://example.com/v1.webp",
+    ])
+    expect(rail.map((row) => row.depth)).toEqual([0, 1])
+  })
+
+  it("allows saving on a settled, writable message", () => {
+    renderWithTarget()
+    openFirstImage()
+    expect(workbenchProps.saveBlockedReason).toBeNull()
+    expect(workbenchProps.target).toMatchObject({ canSave: true })
+  })
+
+  it("blocks saving while the turn is still streaming", () => {
+    renderWithTarget(true)
+    openFirstImage()
+    expect(workbenchProps.saveBlockedReason).toBe("streaming")
+    expect(workbenchProps.target).toMatchObject({ canSave: false })
+  })
+
+  it("blocks saving into a handoff-locked conversation", () => {
+    // The database refuses the write anyway. Checking here is what stops the
+    // button from looking live and spending a full re-encode before failing.
+    liveQueryValue.current = { ticketId: "t-1" }
+    renderWithTarget()
+    openFirstImage()
+    expect(workbenchProps.saveBlockedReason).toBe("read-only")
+  })
+})

@@ -32,11 +32,6 @@ export function clonePixelBuffer(buffer: PixelBuffer): PixelBuffer {
   }
 }
 
-/** Byte offset of `(x, y)` in the RGBA array. Callers must bounds-check. */
-export function pixelIndex(buffer: PixelBuffer, x: number, y: number): number {
-  return (y * buffer.width + x) * 4
-}
-
 /**
  * Whether any pixel is less than fully opaque.
  *

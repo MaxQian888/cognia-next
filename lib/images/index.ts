@@ -15,7 +15,6 @@ export {
   clonePixelBuffer,
   hasTransparency,
   pixelCount,
-  pixelIndex,
   premultiply,
   unpremultiply,
   type PixelBuffer,
@@ -49,7 +48,7 @@ export {
 export {
   applyAspectToRect,
   clampCropRect,
-  displayRectToSource,
+  displayPointToSource,
   isFullFrame,
   largestRectForAspect,
   resolveResize,
@@ -61,7 +60,6 @@ export {
 
 export {
   isMaskEmpty,
-  maskCoverageRatio,
   maskToProviderBuffer,
   rasterizeCoverage,
   rasterizeMask,
@@ -75,13 +73,11 @@ export {
   canRasterize,
   chooseEncodeFormat,
   decodeBlobToPixelBuffer,
-  decodeToPixelBuffer,
   decodeUrlToPixelBuffer,
   encodePixelBuffer,
   encodeProviderMask,
   fromImageData,
   pixelBufferToBlob,
-  pixelBufferToDataUrl,
   pixelBufferToDataUrlSync,
   toImageData,
   ImageDecodeError,

@@ -1,6 +1,9 @@
-import { render as rtlRender, screen } from "@testing-library/react"
+import { render as rtlRender, screen, waitFor } from "@testing-library/react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { ASPECT_PRESETS } from "@/lib/images"
+
+import { ADJUSTMENT_SLIDERS } from "./workbench-panels"
 import userEvent from "@testing-library/user-event"
 
 import type { ImageWorkbench as WorkbenchApi } from "@/hooks/chat/use-image-workbench"
@@ -39,6 +42,7 @@ function api(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
       cancel: jest.fn(),
     },
     save: { saving: false, error: null, run: jest.fn(async () => true) },
+    exportImage: { run: jest.fn(async () => new Blob(["x"], { type: "image/png" })) },
     ...overrides,
   } as WorkbenchApi
 }
@@ -69,7 +73,6 @@ function props(overrides: Partial<ImageWorkbenchProps> = {}): ImageWorkbenchProp
     canGoNext: false,
     onPrevious: jest.fn(),
     onNext: jest.fn(),
-    onDownload: jest.fn(),
     title: "photo.png",
     ...overrides,
   }
@@ -83,8 +86,13 @@ function render(ui: React.ReactElement) {
   return rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
 }
 
+jest.mock("@/lib/files/download", () => ({ downloadFromUrl: jest.fn(async () => undefined) }))
+
 beforeEach(() => {
   workbenchState.current = api()
+  // jsdom implements neither, and the download path uses both.
+  globalThis.URL.createObjectURL = jest.fn(() => "blob:export")
+  globalThis.URL.revokeObjectURL = jest.fn()
 })
 
 describe("ImageWorkbench", () => {
@@ -184,11 +192,26 @@ describe("ImageWorkbench", () => {
   })
 
   it("still offers a download for an image it cannot edit", async () => {
-    const onDownload = jest.fn()
     workbenchState.current = api({ blocked: "cors" })
-    render(<ImageWorkbench {...props({ onDownload })} />)
-    await userEvent.click(screen.getByRole("button", { name: "Download" }))
-    expect(onDownload).toHaveBeenCalled()
+    render(<ImageWorkbench {...props()} />)
+    await userEvent.click(screen.getByTestId("workbench-download"))
+    expect(await screen.findByText("Download as PNG")).toBeInTheDocument()
+  })
+
+  it("offers every format the engine can write, and downloads the current render", async () => {
+    const current = api({ isDirty: true })
+    workbenchState.current = current
+    render(<ImageWorkbench {...props()} />)
+
+    await userEvent.click(screen.getByTestId("workbench-download"))
+    for (const label of ["Download as PNG", "Download as JPEG", "Download as WEBP"]) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+
+    await userEvent.click(screen.getByText("Download as JPEG"))
+    expect(current.exportImage.run).toHaveBeenCalledWith("jpeg")
+    // The object URL it minted is released rather than pinned for the session.
+    await waitFor(() => expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith("blob:export"))
   })
 
   it("shows the AI panel's reason when no provider is configured", async () => {
@@ -206,12 +229,89 @@ describe("ImageWorkbench", () => {
     expect(onNext).toHaveBeenCalled()
   })
 
-  it("surfaces a save failure", () => {
+  it("translates a save failure and keeps the underlying message as detail", () => {
+    // The raw `Error.message` used to be the whole alert, which put an
+    // untranslated exception string in front of the user.
     workbenchState.current = api({
       isDirty: true,
-      save: { saving: false, error: "offline", run: jest.fn() },
+      save: {
+        saving: false,
+        error: { code: "locked", detail: "Session s1 is read-only" },
+        run: jest.fn(),
+      },
     })
     render(<ImageWorkbench {...props()} />)
-    expect(screen.getByTestId("workbench-save-error")).toHaveTextContent("offline")
+    const alert = screen.getByTestId("workbench-save-error")
+    expect(alert).toHaveTextContent("locked while it moves to another device")
+    expect(alert).toHaveTextContent("Session s1 is read-only")
+  })
+
+  it("has a translation for every save failure code", () => {
+    for (const code of [
+      "locked",
+      "message-missing",
+      "lineage-missing",
+      "too-large",
+      "unknown",
+    ] as const) {
+      workbenchState.current = api({
+        isDirty: true,
+        save: { saving: false, error: { code, detail: "d" }, run: jest.fn() },
+      })
+      const view = render(<ImageWorkbench {...props()} />)
+      expect(screen.getByTestId("workbench-save-error").textContent).not.toContain(
+        `save.error.${code}`
+      )
+      view.unmount()
+    }
+  })
+})
+
+/**
+ * Five key families are looked up through template literals, which
+ * `lint:i18n` cannot see through. Without this, adding an aspect preset or a
+ * block reason ships a raw key path to users with every gate green. Both
+ * locales, because the mock resolves against English only and a zh-CN gap
+ * would otherwise be invisible here.
+ */
+describe("dynamically-looked-up translation keys", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const en = require("@/i18n/messages/en/chat.json") as Record<string, never>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const zh = require("@/i18n/messages/zh-CN/chat.json") as Record<string, never>
+
+  function at(root: Record<string, never>, path: string): unknown {
+    return path
+      .split(".")
+      .reduce<unknown>(
+        (node, key) => (node as Record<string, unknown> | undefined)?.[key],
+        root.imageWorkbench
+      )
+  }
+
+  const FAMILIES: Array<[string, readonly string[]]> = [
+    ["tools", ["view", "transform", "adjust", "ai"]],
+    ["blocked", ["cors", "unsupported", "decode"]],
+    ["crop.aspect", ASPECT_PRESETS.map((preset) => preset.id)],
+    ["adjust", ADJUSTMENT_SLIDERS.map((slider) => slider.key as string)],
+    ["ai.unavailable", ["no-provider", "needs-auth", "needs-config"]],
+  ]
+
+  it.each(FAMILIES)("resolves every %s key in both locales", (prefix, keys) => {
+    for (const key of keys) {
+      expect(typeof at(en, `${prefix}.${key}`)).toBe("string")
+      expect(typeof at(zh, `${prefix}.${key}`)).toBe("string")
+    }
+  })
+
+  it("carries no key a source union does not produce", () => {
+    // The other direction: a preset removed from the engine should not leave a
+    // stale entry behind pretending to be covered.
+    const aspects = Object.keys(at(en, "crop.aspect") as Record<string, string>)
+    expect(aspects.sort()).toEqual(ASPECT_PRESETS.map((preset) => preset.id).sort())
+    const sliders = Object.keys(at(en, "adjust") as Record<string, string>).filter(
+      (key) => key !== "reset"
+    )
+    expect(sliders.sort()).toEqual(ADJUSTMENT_SLIDERS.map((slider) => slider.key).sort())
   })
 })

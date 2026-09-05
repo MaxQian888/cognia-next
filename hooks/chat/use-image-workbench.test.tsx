@@ -322,7 +322,7 @@ describe("save", () => {
     await act(async () => {
       expect(await result.current.save.run()).toBe(false)
     })
-    expect(result.current.save.error).toBe("offline")
+    expect(result.current.save.error).toEqual({ code: "unknown", detail: "offline" })
 
     await act(async () => {
       expect(await result.current.save.run()).toBe(true)
@@ -355,5 +355,200 @@ describe("disabled", () => {
     renderHook(() => useImageWorkbench({ source, target, enabled: false, deps }))
     expect(deps.decode).not.toHaveBeenCalled()
     expect(deps.capabilities).not.toHaveBeenCalled()
+  })
+})
+
+describe("editing on top of a model result", () => {
+  /** A decode that reports a different size for the AI output than the source. */
+  function chainedDeps() {
+    const decode = jest
+      .fn<Promise<PixelBuffer>, [string]>()
+      .mockResolvedValueOnce(opaque(40, 20))
+      .mockResolvedValue(opaque(30, 10))
+    return makeDeps({ decode })
+  }
+
+  it("renders and reports the checkpoint's size after a model run", async () => {
+    const deps = chainedDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.size).toEqual({ width: 40, height: 20 }))
+
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "p" })
+    })
+
+    await waitFor(() => expect(result.current.size).toEqual({ width: 30, height: 10 }))
+  })
+
+  it("sends the checkpoint, not the original, to a second model run", async () => {
+    // The second edit is on what the first one produced. Sending the original
+    // would silently discard the first result.
+    const deps = chainedDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "first" })
+    })
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "second" })
+    })
+
+    const sent = (deps.encode as jest.Mock).mock.calls.map((call) => (call[0] as PixelBuffer).width)
+    expect(sent).toEqual([40, 30])
+  })
+
+  it("replays a local step on top of the checkpoint", async () => {
+    const deps = chainedDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "p" })
+    })
+    await waitFor(() => expect(result.current.size).toEqual({ width: 30, height: 10 }))
+
+    act(() => result.current.apply({ kind: "rotate", turns: 1 }))
+    await waitFor(() => expect(result.current.size).toEqual({ width: 10, height: 30 }))
+  })
+
+  it("goes back to the original when the model step is undone", async () => {
+    const deps = chainedDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "p" })
+    })
+    await waitFor(() => expect(result.current.size).toEqual({ width: 30, height: 10 }))
+
+    act(() => result.current.undo())
+    await waitFor(() => expect(result.current.size).toEqual({ width: 40, height: 20 }))
+  })
+
+  it("stores the model's own bytes when nothing was done to them", async () => {
+    // Re-encoding identical pixels can only lose quality, so an untouched
+    // result keeps whatever the provider produced.
+    const deps = chainedDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "p" })
+    })
+    await act(async () => {
+      await result.current.save.run()
+    })
+
+    const saved = (deps.save as jest.Mock).mock.calls[0][0]
+    expect(saved.mediaType).toBe("image/png")
+    expect(saved.bytes).toEqual(new Uint8Array([3]))
+    expect(saved.attribution).toEqual({ providerId: "openai", modelId: "gpt-image-1" })
+  })
+
+  it("re-encodes once a local step touches the model result", async () => {
+    const deps = chainedDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    await act(async () => {
+      await result.current.ai.run({ kind: "prompt", prompt: "p" })
+    })
+    act(() => result.current.apply({ kind: "rotate", turns: 1 }))
+    await waitFor(() => expect(result.current.size).toEqual({ width: 10, height: 30 }))
+    await act(async () => {
+      await result.current.save.run()
+    })
+
+    const saved = (deps.save as jest.Mock).mock.calls[0][0]
+    expect(saved.mediaType).toBe("image/webp")
+    expect(saved.operations).toEqual(["ai.prompt", "rotate"])
+  })
+})
+
+describe("region edits", () => {
+  it("refuses a selection that erasing has emptied", async () => {
+    // A stroke list is not a selection. Painting and then erasing the same
+    // area leaves strokes behind and nothing selected.
+    const deps = makeDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+
+    await act(async () => {
+      await result.current.ai.runRegion("erase it", [
+        { mode: "add", radius: 6, hardness: 1, points: [{ x: 20, y: 10 }] },
+        { mode: "subtract", radius: 20, hardness: 1, points: [{ x: 20, y: 10 }] },
+      ])
+    })
+
+    expect(deps.maskToProvider).not.toHaveBeenCalled()
+    expect(deps.edit).not.toHaveBeenCalled()
+    expect(result.current.ai.error).toMatchObject({ code: "empty-selection", retryable: false })
+  })
+})
+
+describe("cancel", () => {
+  it("abandons an in-flight run without recording a step", async () => {
+    let release: (() => void) | null = null
+    const deps = makeDeps({
+      edit: jest.fn(
+        ({ signal }: { signal?: AbortSignal }) =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({
+                ok: false as const,
+                code: "cancelled" as const,
+                message: "Edit cancelled.",
+                retryable: true,
+              })
+            signal?.addEventListener("abort", () => release?.())
+          })
+      ),
+    })
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+
+    let pending: Promise<void> | null = null
+    await act(async () => {
+      pending = result.current.ai.run({ kind: "prompt", prompt: "p" })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.ai.running).toBe(true))
+
+    await act(async () => {
+      result.current.ai.cancel()
+      await pending
+    })
+
+    expect(result.current.ai.running).toBe(false)
+    expect(result.current.state.entries).toHaveLength(0)
+  })
+})
+
+describe("export", () => {
+  it("encodes the current render in the requested format", async () => {
+    const deps = makeDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    act(() => result.current.apply({ kind: "rotate", turns: 1 }))
+    await waitFor(() => expect(result.current.size).toEqual({ width: 20, height: 40 }))
+
+    await act(async () => {
+      await result.current.exportImage.run("jpeg")
+    })
+
+    const call = (deps.toBlob as jest.Mock).mock.calls.at(-1)!
+    // Full resolution, and rotated: the download is what is on screen.
+    expect(call[0]).toMatchObject({ width: 20, height: 40 })
+    expect(call[1]).toBe("jpeg")
+  })
+
+  it("returns null rather than throwing when encoding fails", async () => {
+    const deps = makeDeps()
+    const { result } = mount(deps)
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    ;(deps.toBlob as jest.Mock).mockRejectedValueOnce(new Error("no codec"))
+
+    let blob: Blob | null = null
+    await act(async () => {
+      blob = await result.current.exportImage.run("webp")
+    })
+    expect(blob).toBeNull()
   })
 })

@@ -39,6 +39,9 @@ import { getProviderOperationExecutor } from "@/lib/ai/operations"
 import { detectHostSurfaces } from "@/lib/ai/operations/host-surfaces"
 import { useSettingsStore } from "@/stores"
 
+import { REMOVE_BACKGROUND_PROMPT } from "./prompts"
+
+export { REMOVE_BACKGROUND_PROMPT } from "./prompts"
 import type { ImageEditOperation } from "./version"
 
 /** A provider and model pair the user can actually run an edit on. */
@@ -201,15 +204,6 @@ export type ImageEditIntent =
   /** Isolate the subject. A fixed prompt, so the user writes nothing. */
   | { kind: "remove-background" }
 
-/**
- * The prompt used for background removal.
- *
- * Shared verbatim with the plugin Media API's `ai.removeBackground`, so the
- * same button in two surfaces produces the same instruction.
- */
-export const REMOVE_BACKGROUND_PROMPT =
-  "Remove the background from this image and keep the main subject cleanly isolated."
-
 export type ImageEditErrorCode =
   /** A region edit was asked of a provider with no mask support. */
   | "mask-unsupported"
@@ -275,24 +269,19 @@ function promptForIntent(intent: ImageEditIntent): string {
   return intent.kind === "remove-background" ? REMOVE_BACKGROUND_PROMPT : intent.prompt
 }
 
-function base64Of(bytes: Uint8Array): string {
-  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64")
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
-
 /**
- * `bytesRef` for the operation contract.
+ * `bytesRef` for the operation contract, carrying the raw bytes only.
  *
- * Both `bytes` and `base64` are set. The in-process handler reads `bytes`, and
- * the base64 twin is what survives the structured-clone boundary when the same
- * request is forwarded to a host over the companion RPC.
+ * The contract also allows a `base64` twin, and setting it here would be pure
+ * cost. `dataContentOf` prefers `bytes` in-process, so nothing reads it, while
+ * the executor's PII gate walks the whole input: a base64 string of a 3MB
+ * frame is roughly another 500ms of synchronous main-thread scanning per edit,
+ * for a field only a cross-process hop would ever need. Whatever forwards this
+ * request to another process is where the twin belongs.
  */
 function bytesRef(payload: { bytes: Uint8Array; mediaType: string }) {
   return {
     bytes: new Uint8Array(payload.bytes),
-    base64: base64Of(payload.bytes),
     mimeType: payload.mediaType,
   }
 }
@@ -375,7 +364,16 @@ export async function runImageEdit(
 
   if (!result.ok) {
     const failure = result.failure as { code?: string; message?: string; retryable?: boolean }
-    const blocked = failure?.code === "pii-gate" || failure?.code === "blocked"
+    // `permission` is the operation plane's code for a PII-gate rejection
+    // (`executor.ts` step 5, and `toProviderDiagnosticFailure` for the
+    // handler's own gate). There is no distinct `pii-gate` code on the wire:
+    // keying on one would have made this branch permanently unreachable and
+    // reported a blocked prompt as "your provider needs configuring".
+    //
+    // The plane's other two `permission` failures are a missing scope and a
+    // provider-pinned handle mismatch. Neither can arise here: this call
+    // always passes `provider:invoke`, and `images.edit` is not pinned.
+    const blocked = failure?.code === "permission"
     const unavailable =
       result.availability === "needs-auth" ||
       result.availability === "needs-config" ||

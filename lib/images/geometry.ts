@@ -140,25 +140,25 @@ export function resolveResize(
 }
 
 /**
- * Map a rect expressed in displayed (zoomed, letterboxed) coordinates back to
- * source pixels.
+ * Map a point in displayed (letterboxed) coordinates back to source pixels.
  *
- * The crop overlay lives on top of an `object-contain` image, so its
- * coordinates are in CSS pixels of the displayed box and carry the letterbox
- * offset. Getting this wrong is the classic crop bug where the saved region is
- * offset from the one the user drew, so it lives here with a test rather than
- * inline in a pointer handler.
+ * The crop overlay and the mask brush both live on top of an `object-contain`
+ * image, so their coordinates are in CSS pixels of the displayed box and carry
+ * the letterbox offset. Getting this wrong is the classic crop bug where the
+ * saved region is offset from the one the user drew, so it lives here with a
+ * test rather than inline in a pointer handler.
+ *
+ * Points rather than rects, because that is what a pointer reports. A rect is
+ * built from two converted points, and converting the rect instead would mean
+ * a second copy of this arithmetic for the brush.
  */
-export function displayRectToSource(rect: CropRect, displayed: Size, source: Size): CropRect {
-  const scaleX = source.width / Math.max(1, displayed.width)
-  const scaleY = source.height / Math.max(1, displayed.height)
-  return clampCropRect(
-    {
-      x: rect.x * scaleX,
-      y: rect.y * scaleY,
-      width: rect.width * scaleX,
-      height: rect.height * scaleY,
-    },
-    source
-  )
+export function displayPointToSource(
+  point: { x: number; y: number },
+  displayed: Size,
+  source: Size
+): { x: number; y: number } {
+  return {
+    x: (point.x / Math.max(1, displayed.width)) * source.width,
+    y: (point.y / Math.max(1, displayed.height)) * source.height,
+  }
 }

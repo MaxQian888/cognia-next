@@ -12,7 +12,11 @@
 
 import { useTranslations } from "next-intl"
 
-import type { ImageLineage } from "@/lib/chat/image-edit/version"
+import {
+  AI_IMAGE_EDIT_OPERATIONS,
+  type ImageEditOperation,
+  type ImageLineage,
+} from "@/lib/chat/image-edit/version"
 import { isMediaRef } from "@/lib/db/message-media"
 import { useMediaUrl } from "@/hooks/chat/use-media-url"
 import { cn } from "@/lib/utils"
@@ -72,6 +76,11 @@ export function VersionRail({ items, activeUrl, onSelect, draftLabel }: VersionR
       {items.map((item) => {
         const active = item.url === activeUrl
         const isOriginal = item.depth === 0
+        // A version a model produced is worth distinguishing from one the user
+        // cropped: it is the one they may want to compare against or discard.
+        const byModel = item.operations.some((operation) =>
+          AI_IMAGE_EDIT_OPERATIONS.includes(operation as ImageEditOperation)
+        )
         return (
           <button
             key={item.url}
@@ -82,7 +91,9 @@ export function VersionRail({ items, activeUrl, onSelect, draftLabel }: VersionR
             aria-label={
               isOriginal
                 ? t("rail.originalAria")
-                : t("rail.versionAria", { operations: item.operations.join(", ") })
+                : byModel
+                  ? t("rail.aiVersionAria", { operations: item.operations.join(", ") })
+                  : t("rail.versionAria", { operations: item.operations.join(", ") })
             }
             onClick={() => onSelect(item.url)}
             className={cn(
@@ -96,6 +107,13 @@ export function VersionRail({ items, activeUrl, onSelect, draftLabel }: VersionR
             {isOriginal ? (
               <span className="absolute inset-x-0 bottom-0 bg-black/65 px-1 py-0.5 text-[10px] text-white/85">
                 {t("rail.original")}
+              </span>
+            ) : byModel ? (
+              <span
+                data-testid="workbench-version-ai-badge"
+                className="absolute inset-x-0 bottom-0 bg-black/65 px-1 py-0.5 text-[10px] text-white/85"
+              >
+                {t("rail.aiBadge")}
               </span>
             ) : null}
           </button>

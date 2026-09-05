@@ -1,7 +1,6 @@
 import { createPixelBuffer } from "./pixel-buffer"
 import {
   isMaskEmpty,
-  maskCoverageRatio,
   maskToProviderBuffer,
   rasterizeCoverage,
   rasterizeMask,
@@ -116,20 +115,6 @@ describe("isMaskEmpty", () => {
   it("is true for an untouched mask and false once anything is painted", () => {
     expect(isMaskEmpty(rasterizeMask([], SIZE))).toBe(true)
     expect(isMaskEmpty(rasterizeMask([stroke()], SIZE))).toBe(false)
-  })
-})
-
-describe("maskCoverageRatio", () => {
-  it("is zero for an empty mask and one for a fully painted one", () => {
-    expect(maskCoverageRatio(rasterizeMask([], SIZE))).toBe(0)
-    const full = rasterizeMask([stroke({ radius: MAX_BRUSH_RADIUS })], SIZE)
-    expect(maskCoverageRatio(full)).toBe(1)
-  })
-
-  it("reports a partial selection as a fraction between the two", () => {
-    const ratio = maskCoverageRatio(rasterizeMask([stroke({ radius: 8 })], SIZE))
-    expect(ratio).toBeGreaterThan(0)
-    expect(ratio).toBeLessThan(1)
   })
 })
 

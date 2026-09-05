@@ -10,11 +10,9 @@
 import {
   canRasterize,
   chooseEncodeFormat,
-  decodeToPixelBuffer,
   decodeUrlToPixelBuffer,
   encodePixelBuffer,
   fromImageData,
-  pixelBufferToDataUrl,
   toImageData,
   ImageDecodeError,
   IMAGE_ENCODE_FORMATS,
@@ -186,25 +184,6 @@ describe("chooseEncodeFormat", () => {
   })
 })
 
-describe("decodeToPixelBuffer", () => {
-  it("round-trips pixels through the decoder", async () => {
-    const source = opaque(3, 2)
-    const encoded = new TextEncoder().encode(encodePixels(source))
-    const decoded = await decodeToPixelBuffer(encoded, "image/png")
-    expect(decoded.width).toBe(3)
-    expect(decoded.height).toBe(2)
-    expect([...decoded.data]).toEqual([...source.data])
-  })
-
-  it("reports a runtime with no decoder as unsupported", async () => {
-    delete globalRef.createImageBitmap
-    delete globalRef.Image
-    await expect(decodeToPixelBuffer(new Uint8Array([1]), "image/png")).rejects.toBeInstanceOf(
-      ImageDecodeError
-    )
-  })
-})
-
 describe("encodePixelBuffer", () => {
   it("returns the bytes plus the media type", async () => {
     const result = await encodePixelBuffer(opaque(2, 2), { format: "png" })
@@ -224,13 +203,6 @@ describe("encodePixelBuffer", () => {
   it("falls back to png when the buffer carries alpha", async () => {
     const result = await encodePixelBuffer(createPixelBuffer(2, 2), { format: "jpeg" })
     expect(result.mediaType).toBe("image/png")
-  })
-})
-
-describe("pixelBufferToDataUrl", () => {
-  it("produces a data URL carrying the produced media type", async () => {
-    const url = await pixelBufferToDataUrl(opaque(1, 1), "png")
-    expect(url.startsWith("data:image/png;base64,")).toBe(true)
   })
 })
 
@@ -311,5 +283,46 @@ describe("encodeProviderMask", () => {
     const encoded = await encodeProviderMask(mask)
     const parsed = JSON.parse(new TextDecoder().decode(encoded.bytes)) as { d: number[] }
     expect(parsed.d[3]).toBe(0)
+  })
+})
+
+describe("pixelBufferToDataUrlSync, with a document", () => {
+  const originalDocument = (globalThis as { document?: unknown }).document
+
+  afterEach(() => {
+    if (originalDocument === undefined) delete (globalThis as { document?: unknown }).document
+    else (globalThis as { document?: unknown }).document = originalDocument
+  })
+
+  it("encodes through the DOM canvas, which is the plugin SDK's contract", async () => {
+    // The synchronous signature is published to plugin authors, so its actual
+    // encode path needs cover, not just its "no document" refusal.
+    let requested: [string, number | undefined] | null = null
+    ;(globalThis as { document?: unknown }).document = {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({ putImageData: () => {} }),
+        toDataURL: (type: string, quality?: number) => {
+          requested = [type, quality]
+          return `data:${type};base64,AAA`
+        },
+      }),
+    }
+    const { pixelBufferToDataUrlSync } = await import("./codec")
+    expect(pixelBufferToDataUrlSync(opaque(2, 2), "png")).toBe("data:image/png;base64,AAA")
+    // PNG is lossless, so passing a quality would be meaningless.
+    expect(requested).toEqual(["image/png", undefined])
+
+    expect(pixelBufferToDataUrlSync(opaque(2, 2), "jpeg", 0.5)).toContain("image/jpeg")
+    expect(requested).toEqual(["image/jpeg", 0.5])
+  })
+
+  it("refuses when the document has no 2D context", async () => {
+    ;(globalThis as { document?: unknown }).document = {
+      createElement: () => ({ getContext: () => null }),
+    }
+    const { pixelBufferToDataUrlSync } = await import("./codec")
+    expect(() => pixelBufferToDataUrlSync(opaque(1, 1))).toThrow(ImageDecodeError)
   })
 })

@@ -248,14 +248,17 @@ describe("runImageEdit", () => {
     expect(input.mask).toBeUndefined()
   })
 
-  it("carries both bytes and base64 so the request survives an RPC hop", async () => {
+  it("sends the raw bytes without a base64 twin", async () => {
+    // Nothing reads the twin in-process, and the executor's PII gate walks the
+    // whole input, so carrying it costs a second full scan of the frame on the
+    // click path for no delivery benefit.
     await runImageEdit(
       { image, intent: { kind: "prompt", prompt: "p" }, capability: openai },
       { execute }
     )
     const input = lastRequest?.input as { image: Record<string, unknown> }
     expect(input.image.bytes).toBeInstanceOf(Uint8Array)
-    expect(typeof input.image.base64).toBe("string")
+    expect(input.image).not.toHaveProperty("base64")
     expect(input.image.mimeType).toBe("image/png")
   })
 
@@ -320,14 +323,18 @@ describe("runImageEdit", () => {
             ok: false,
             operationId: "images.edit",
             availability: "needs-auth",
-            failure: { code: "auth", message: "no key" },
+            failure: { code: "authentication", message: "no key" },
           }) as ProviderOperationResult<unknown>,
       }
     )
     expect(outcome).toMatchObject({ ok: false, code: "unavailable", retryable: false })
   })
 
-  it("classifies a PII gate rejection as blocked", async () => {
+  it("classifies a PII gate rejection as blocked, not as a provider that needs setup", async () => {
+    // The operation plane reports a gate rejection as `permission` with
+    // availability `unavailable`. There is no `pii-gate` code on the wire, and
+    // keying on one made this branch unreachable: a blocked prompt was
+    // reported to the user as "your provider needs configuring".
     const outcome = await runImageEdit(
       { image, intent: { kind: "prompt", prompt: "p" }, capability: openai },
       {
@@ -335,8 +342,12 @@ describe("runImageEdit", () => {
           ({
             ok: false,
             operationId: "images.edit",
-            availability: "available",
-            failure: { code: "pii-gate", message: "redact first" },
+            availability: "unavailable",
+            failure: {
+              code: "permission",
+              retryable: false,
+              message: "outbound text did not pass the PII gate",
+            },
           }) as ProviderOperationResult<unknown>,
       }
     )
@@ -353,7 +364,7 @@ describe("runImageEdit", () => {
             operationId: "images.edit",
             providerId: "openai",
             availability: "available",
-            failure: { code: "upstream", message: "502" },
+            failure: { code: "network", message: "502" },
           }) as ProviderOperationResult<unknown>,
       }
     )

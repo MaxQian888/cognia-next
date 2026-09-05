@@ -152,15 +152,6 @@ function drawToBuffer(source: CanvasImageSource, width: number, height: number):
   }
 }
 
-/** Decode encoded image bytes into editable pixels. */
-export async function decodeToPixelBuffer(
-  bytes: Uint8Array,
-  mediaType: string
-): Promise<PixelBuffer> {
-  const blob = new Blob([bytes as BlobPart], { type: mediaType })
-  return decodeBlobToPixelBuffer(blob)
-}
-
 /** Decode a blob into editable pixels. */
 export async function decodeBlobToPixelBuffer(blob: Blob): Promise<PixelBuffer> {
   const bitmap = await decodeBitmap(blob)
@@ -258,25 +249,11 @@ export async function pixelBufferToBlob(
   return surface.toBlob(`image/${format}`, format === "png" ? undefined : quality)
 }
 
-/** Encode to a `data:` URL, which is what the preview `<img>` consumes. */
-export async function pixelBufferToDataUrl(
-  buffer: PixelBuffer,
-  format: ImageEncodeFormat = "png",
-  quality: number = DEFAULT_ENCODE_QUALITY
-): Promise<string> {
-  const blob = await pixelBufferToBlob(buffer, format, quality)
-  const bytes = new Uint8Array(await blob.arrayBuffer())
-  let binary = ""
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i])
-  return `data:${blob.type || `image/${format}`};base64,${btoa(binary)}`
-}
-
 /**
  * Synchronous `data:` URL encoding, DOM only.
  *
  * Exists because `PluginMediaAPI.image.toDataUrl` published a synchronous
- * signature, and that contract is mirrored into the generated plugin SDK. The
- * async path above is the one to reach for everywhere else: only
+ * signature, and that contract is mirrored into the generated plugin SDK. Only
  * `HTMLCanvasElement.toDataURL` can do this without a promise, so this throws
  * in a worker or any runtime with no `document`.
  */

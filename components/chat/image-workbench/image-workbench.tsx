@@ -39,10 +39,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useImageWorkbench, type ImageWorkbenchSource } from "@/hooks/chat/use-image-workbench"
-import type { CropRect, ImageAdjustments, MaskStroke } from "@/lib/images"
-import { NEUTRAL_ADJUSTMENTS } from "@/lib/images"
+import type { CropRect, ImageAdjustments, ImageEncodeFormat, MaskStroke } from "@/lib/images"
+import { IMAGE_ENCODE_FORMATS, NEUTRAL_ADJUSTMENTS } from "@/lib/images"
+import { downloadFromUrl } from "@/lib/files/download"
+import { loggers } from "@cognia/logging"
 import { cn } from "@/lib/utils"
 
 import { WorkbenchStage, type StageMode } from "./workbench-stage"
@@ -64,7 +72,6 @@ export interface ImageWorkbenchProps {
   canGoNext: boolean
   onPrevious: () => void
   onNext: () => void
-  onDownload: () => void
   title: string
 }
 
@@ -87,7 +94,6 @@ export function ImageWorkbench({
   canGoNext,
   onPrevious,
   onNext,
-  onDownload,
   title,
 }: ImageWorkbenchProps) {
   const t = useTranslations("chat.imageWorkbench")
@@ -136,6 +142,31 @@ export function ImageWorkbench({
     }
     void workbench.ai.run({ kind: "prompt", prompt })
   }, [prompt, regionMode, strokes, workbench])
+
+  /**
+   * Download what is on screen, in the format the user picked.
+   *
+   * Deliberately the current render rather than the source file: next to an
+   * editor, "download" means the picture you are looking at.
+   */
+  const download = useCallback(
+    async (format: ImageEncodeFormat) => {
+      const blob = await workbench.exportImage.run(format)
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      try {
+        const stem = title.replace(/\.[^./\\]+$/, "") || "image"
+        await downloadFromUrl(url, `${stem}.${format}`)
+      } catch (error) {
+        loggers.chat.warn("image workbench download failed", {
+          err: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    },
+    [title, workbench.exportImage]
+  )
 
   const requestClose = useCallback(() => {
     if (workbench.isDirty && !confirmingDiscard) {
@@ -239,14 +270,25 @@ export function ImageWorkbench({
               <RotateCcwIcon className="size-4" />
             </TooltipIconButton>
 
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-white hover:bg-white/15 hover:text-white"
-              onClick={onDownload}
-            >
-              {t("download")}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-white hover:bg-white/15 hover:text-white"
+                  data-testid="workbench-download"
+                >
+                  {t("download")}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {IMAGE_ENCODE_FORMATS.map((format) => (
+                  <DropdownMenuItem key={format} onSelect={() => void download(format)}>
+                    {t("downloadAs", { format: format.toUpperCase() })}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <Button
               size="sm"
@@ -425,13 +467,19 @@ export function ImageWorkbench({
             ) : null}
 
             {workbench.save.error ? (
-              <p
+              <div
                 role="alert"
                 className="text-xs text-red-300/90"
                 data-testid="workbench-save-error"
               >
-                {workbench.save.error}
-              </p>
+                {/*
+                  Translated from the code, with the underlying message kept as
+                  detail. Rendering the raw `Error.message` put an untranslated
+                  exception string in front of the user.
+                */}
+                <p>{t(`save.error.${workbench.save.error.code}`)}</p>
+                <p className="mt-0.5 text-white/45">{workbench.save.error.detail}</p>
+              </div>
             ) : null}
             {saveDisabledReason ? (
               <p className="text-xs text-white/55" data-testid="workbench-save-blocked">

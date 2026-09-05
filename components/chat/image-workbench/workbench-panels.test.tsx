@@ -48,6 +48,15 @@ describe("TransformPanel", () => {
     expect(rect.width / rect.height).toBeCloseTo(16 / 9, 1)
   })
 
+  it("refuses a crop that selects the whole frame", async () => {
+    // Not a crop. Applying it would push an undo step that changes nothing and
+    // mark the image dirty.
+    render(
+      <TransformPanel {...transformProps({ cropRect: { x: 0, y: 0, width: 800, height: 600 } })} />
+    )
+    expect(screen.getByRole("button", { name: "Apply crop" })).toBeDisabled()
+  })
+
   it("cannot apply a crop until one exists", async () => {
     const props = transformProps()
     const { rerender } = render(<TransformPanel {...props} />)
@@ -300,5 +309,57 @@ describe("AiPanel", () => {
     rerender(<AiPanel {...aiProps({ regionMode: true })} />)
     expect(screen.getByTestId("workbench-brush-controls")).toBeInTheDocument()
     expect(screen.getByRole("slider", { name: "Brush size" })).toBeInTheDocument()
+  })
+})
+
+describe("AiPanel error copy", () => {
+  const CODES = [
+    "mask-unsupported",
+    "unavailable",
+    "blocked",
+    "no-output",
+    "cancelled",
+    "provider",
+    "empty-selection",
+  ] as const
+
+  it("translates the failure and keeps the provider's own words as detail", () => {
+    // Rendering `error.message` alone put five hard-coded English sentences in
+    // front of a user reading a Chinese UI.
+    render(
+      <AiPanel
+        {...aiProps({
+          prompt: "p",
+          ai: aiState({
+            error: { code: "blocked", message: "outbound text did not pass", retryable: false },
+          }),
+        })}
+      />
+    )
+    const alert = screen.getByTestId("workbench-ai-error")
+    expect(alert).toHaveTextContent("must not leave this device")
+    expect(alert).toHaveTextContent("outbound text did not pass")
+  })
+
+  it("has a translation for every failure code the service can return", () => {
+    const catalogue = messages.chat.imageWorkbench.ai.error as Record<string, string>
+    for (const code of CODES) {
+      expect(typeof catalogue[code]).toBe("string")
+    }
+  })
+
+  it("never renders a raw key path", () => {
+    for (const code of CODES) {
+      const view = render(
+        <AiPanel
+          {...aiProps({
+            prompt: "p",
+            ai: aiState({ error: { code, message: "", retryable: false } }),
+          })}
+        />
+      )
+      expect(screen.getByTestId("workbench-ai-error").textContent).not.toContain(`ai.error.${code}`)
+      view.unmount()
+    }
   })
 })

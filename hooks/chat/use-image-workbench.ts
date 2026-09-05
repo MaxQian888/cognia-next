@@ -23,11 +23,13 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import {
   decodeUrlToPixelBuffer,
   encodeProviderMask,
+  isMaskEmpty,
   encodePixelBuffer,
   pixelBufferToBlob,
   rasterizeMask,
   resizeBuffer,
   ImageDecodeError,
+  type ImageEncodeFormat,
   type MaskStroke,
   type PixelBuffer,
 } from "@/lib/images"
@@ -47,6 +49,7 @@ import {
 import {
   previewScaleFor,
   renderOperations,
+  renderPipeline,
   resolveSaveEncoding,
   scaleOperations,
 } from "@/lib/chat/image-edit/render"
@@ -103,9 +106,24 @@ export interface ImageWorkbenchAiState {
   cancel: () => void
 }
 
+/**
+ * Why a save failed, in terms the UI can translate.
+ *
+ * A raw `Error.message` reached the alert before this existed, which put an
+ * untranslated English exception string in front of a Chinese user and
+ * occasionally leaked an internal identifier along with it.
+ */
+export type SaveErrorCode =
+  "locked" | "message-missing" | "lineage-missing" | "too-large" | "unknown"
+
+export interface ImageWorkbenchExportState {
+  /** Encode what is currently on screen, at full resolution. */
+  run: (format: ImageEncodeFormat) => Promise<Blob | null>
+}
+
 export interface ImageWorkbenchSaveState {
   saving: boolean
-  error: string | null
+  error: { code: SaveErrorCode; detail: string } | null
   run: () => Promise<boolean>
 }
 
@@ -129,6 +147,7 @@ export interface ImageWorkbench {
   jump: (cursor: number) => void
   ai: ImageWorkbenchAiState
   save: ImageWorkbenchSaveState
+  exportImage: ImageWorkbenchExportState
 }
 
 interface DecodedSource {
@@ -173,6 +192,23 @@ const EMPTY_CAPABILITIES: ImageEditCapabilities = {
   unavailable: null,
 }
 
+/** Classify a save failure without importing the error classes into the UI. */
+function saveErrorOf(error: unknown): { code: SaveErrorCode; detail: string } {
+  const detail = error instanceof Error ? error.message : String(error)
+  const named = error as { name?: string; code?: string }
+  if (named?.name === "SessionHandoffLockedError") return { code: "locked", detail }
+  if (named?.name === "ImageEditAppendError") {
+    if (named.code === "message-missing" || named.code === "session-mismatch") {
+      return { code: "message-missing", detail }
+    }
+    return { code: "lineage-missing", detail }
+  }
+  // `ingestImage` refuses anything over the 10 MiB chat-media ceiling, and it
+  // throws a plain Error, so the message is the only thing to match on.
+  if (/exceeds the .* limit/i.test(detail)) return { code: "too-large", detail }
+  return { code: "unknown", detail }
+}
+
 function blockReasonOf(error: unknown): WorkbenchBlockReason {
   return error instanceof ImageDecodeError && error.reason !== "decode" ? error.reason : "decode"
 }
@@ -205,14 +241,16 @@ export function useImageWorkbench({
   const [aiRunning, setAiRunning] = useState(false)
   const [aiError, setAiError] = useState<ImageWorkbenchAiState["error"]>(null)
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<ImageWorkbenchSaveState["error"]>(null)
 
   /**
    * AI results, keyed by checkpoint id. A ref rather than state because these
    * are megabytes each and nothing renders from the map directly: the reducer
    * names an id, and the render effect looks it up.
    */
-  const checkpointsRef = useRef(new Map<string, { full: PixelBuffer; mediaType: string }>())
+  const checkpointsRef = useRef(
+    new Map<string, { full: PixelBuffer; mediaType: string; bytes: Uint8Array }>()
+  )
   const abortRef = useRef<AbortController | null>(null)
   const previewUrlRef = useRef<string | null>(null)
   const originalUrlRef = useRef<string | null>(null)
@@ -289,7 +327,10 @@ export function useImageWorkbench({
         ? decoded
         : checkpointOf(checkpointsRef.current, pipeline.baseCheckpointId, decoded)
     const scale = base.scale
-    const rendered = renderOperations(base.preview, scaleOperations(pipeline.operations, scale))
+    const rendered = renderPipeline(base.preview, {
+      ...pipeline,
+      operations: scaleOperations(pipeline.operations, scale),
+    })
 
     deps
       .toBlob(rendered, "png")
@@ -337,23 +378,37 @@ export function useImageWorkbench({
   // Revoking on unmount rather than on every change: the effects above already
   // revoke the URL they are replacing, and doing it here too would revoke one
   // the <img> is still displaying.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const checkpoints = checkpointsRef.current
+    return () => {
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
       if (originalUrlRef.current) URL.revokeObjectURL(originalUrlRef.current)
       previewUrlRef.current = null
       originalUrlRef.current = null
-    },
-    []
-  )
+      // The cache is module-level, so an unmounted workbench would otherwise
+      // keep every frame a model produced for as long as the tab is open.
+      for (const id of checkpoints.keys()) checkpointCache.delete(id)
+      checkpoints.clear()
+    }
+  }, [])
 
   const apply = useCallback((entry: EditorEntry) => {
     dispatch({ type: "apply", entry })
   }, [])
 
-  /** Drop the bitmaps the reducer just made unreachable. */
+  /**
+   * Drop the bitmaps the reducer just made unreachable.
+   *
+   * Both maps, not just the per-hook one. `checkpointCache` holds a full frame
+   * AND its preview twin, so leaving entries behind there would defeat the
+   * five-checkpoint ceiling entirely and grow without bound for the life of
+   * the tab.
+   */
   const applyAndCollect = useCallback((previous: EditorState, next: EditorState) => {
-    for (const id of releasedCheckpoints(previous, next)) checkpointsRef.current.delete(id)
+    for (const id of releasedCheckpoints(previous, next)) {
+      checkpointsRef.current.delete(id)
+      checkpointCache.delete(id)
+    }
   }, [])
 
   const stateRef = useRef(state)
@@ -397,18 +452,28 @@ export function useImageWorkbench({
           return
         }
 
+        // The object URL exists only long enough to decode the bytes. The
+        // checkpoint is keyed by a minted id instead, because reusing a URL
+        // that is revoked three lines later as a lookup key reads like a live
+        // reference and is not one.
+        const checkpointId = `ck_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
         const url = URL.createObjectURL(
           new Blob([outcome.bytes as BlobPart], { type: outcome.mediaType })
         )
         try {
           const full = await deps.decode(url)
           const scale = previewScaleFor(full)
-          checkpointsRef.current.set(url, {
+          checkpointsRef.current.set(checkpointId, {
             full,
             mediaType: outcome.mediaType,
+            // The provider's own encoding is retained, not just its pixels.
+            // Saving an untouched model result re-encodes nothing, which is
+            // what `resolveSaveEncoding` decides and could not act on while
+            // only the decoded frame was kept.
+            bytes: outcome.bytes,
           })
           const checkpoint: DecodedSource = {
-            url,
+            url: checkpointId,
             full,
             preview:
               scale === 1
@@ -420,12 +485,12 @@ export function useImageWorkbench({
                   ),
             scale,
           }
-          checkpointCache.set(url, checkpoint)
+          checkpointCache.set(checkpointId, checkpoint)
           dispatch({
             type: "apply",
             entry: {
               kind: "ai",
-              checkpointId: url,
+              checkpointId,
               operation: outcome.operation,
               ...(outcome.providerId ? { providerId: outcome.providerId } : {}),
               ...(outcome.modelId ? { modelId: outcome.modelId } : {}),
@@ -451,6 +516,17 @@ export function useImageWorkbench({
           : checkpointOf(checkpointsRef.current, pipeline.baseCheckpointId, decoded)
       const rendered = renderOperations(base.full, pipeline.operations)
       const mask = rasterizeMask(strokes, { width: rendered.width, height: rendered.height })
+      // Strokes are not a selection. A user who paints and then erases the same
+      // area has a non-empty stroke list and an empty mask, and sending that
+      // asks the provider to edit nothing.
+      if (isMaskEmpty(mask)) {
+        setAiError({
+          code: "empty-selection",
+          message: "Nothing is selected.",
+          retryable: false,
+        })
+        return
+      }
       const payload = await deps.maskToProvider(mask)
       await runAi({ kind: "region", prompt, mask: payload })
     },
@@ -483,9 +559,10 @@ export function useImageWorkbench({
         operationCount: pipeline.operations.length,
         baseMediaType: checkpoint?.mediaType ?? null,
       })
-      const payload = encoding.reuseBaseBytes
-        ? await deps.encode(rendered, { format: "png" })
-        : await deps.encode(rendered, { format: encoding.format })
+      const payload =
+        encoding.reuseBaseBytes && checkpoint
+          ? { bytes: checkpoint.bytes, mediaType: checkpoint.mediaType }
+          : await deps.encode(rendered, { format: encoding.format })
 
       saveVersionIdRef.current ??= newImageEditVersionId()
       await deps.save({
@@ -504,12 +581,37 @@ export function useImageWorkbench({
       saveVersionIdRef.current = null
       return true
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : String(error))
+      setSaveError(saveErrorOf(error))
       return false
     } finally {
       setSaving(false)
     }
   }, [decoded, deps, pipeline, source, state, target])
+
+  /**
+   * What the download menu writes.
+   *
+   * Renders the CURRENT state at full resolution rather than handing back the
+   * source file, because "download" next to an editor means the picture on
+   * screen. The format is the user's, except that a transparent result is
+   * always PNG, which `chooseEncodeFormat` decides.
+   */
+  const runExport = useCallback(
+    async (format: ImageEncodeFormat): Promise<Blob | null> => {
+      if (!decoded) return null
+      const base =
+        pipeline.baseCheckpointId === null
+          ? decoded
+          : checkpointOf(checkpointsRef.current, pipeline.baseCheckpointId, decoded)
+      const rendered = renderOperations(base.full, pipeline.operations)
+      try {
+        return await deps.toBlob(rendered, format)
+      } catch {
+        return null
+      }
+    },
+    [decoded, deps, pipeline]
+  )
 
   return {
     status: blocked ? "error" : decoded ? "ready" : "loading",
@@ -537,6 +639,7 @@ export function useImageWorkbench({
       cancel,
     },
     save: { saving, error: saveError, run: runSave },
+    exportImage: { run: runExport },
   }
 }
 
@@ -550,7 +653,7 @@ export function useImageWorkbench({
 const checkpointCache = new Map<string, DecodedSource>()
 
 function checkpointOf(
-  checkpoints: Map<string, { full: PixelBuffer; mediaType: string }>,
+  checkpoints: Map<string, { full: PixelBuffer; mediaType: string; bytes: Uint8Array }>,
   id: string,
   fallback: DecodedSource
 ): DecodedSource {

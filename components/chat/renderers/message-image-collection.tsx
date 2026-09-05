@@ -32,18 +32,17 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useTranslations } from "next-intl"
 
 import {
   groupImageLineages,
   lineageContaining,
   readImageEditVersion,
 } from "@/lib/chat/image-edit/version"
-import { downloadFromUrl } from "@/lib/files/download"
 import { getDb } from "@/lib/db/schema"
 import { useMediaUrl } from "@/hooks/chat/use-media-url"
 import { ImageWorkbench } from "@/components/chat/image-workbench/image-workbench"
 import { railItemsFromLineages } from "@/components/chat/image-workbench/version-rail"
-import { loggers } from "@cognia/logging"
 
 import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox"
 
@@ -168,6 +167,7 @@ function MessageImageWorkbench({
   onActiveIndexChange,
   onOpenChange,
 }: MessageImageWorkbenchProps) {
+  const t = useTranslations("chat.imageWorkbench")
   const safeIndex = Math.min(Math.max(activeIndex, 0), Math.max(items.length - 1, 0))
   const activeItem = items[safeIndex]
 
@@ -228,19 +228,6 @@ function MessageImageWorkbench({
     [entriesRef, onActiveIndexChange]
   )
 
-  const handleDownload = useCallback(async () => {
-    if (!activeItem) return
-    const url = canonical.status === "ready" && canonical.url ? canonical.url : activeItem.src
-    const filename = activeItem.filename || activeItem.title || "image"
-    try {
-      await downloadFromUrl(url, filename, { fetchAsBlob: true })
-    } catch (error) {
-      loggers.chat.warn("image download failed", {
-        err: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }, [activeItem, canonical.status, canonical.url])
-
   if (!activeItem) return null
 
   const saveBlockedReason = target.isStreaming
@@ -266,8 +253,7 @@ function MessageImageWorkbench({
       canGoNext={safeIndex < items.length - 1}
       onPrevious={() => onActiveIndexChange(safeIndex - 1)}
       onNext={() => onActiveIndexChange(safeIndex + 1)}
-      onDownload={() => void handleDownload()}
-      title={activeItem.filename || activeItem.title || activeItem.alt || "Image"}
+      title={activeItem.filename || activeItem.title || activeItem.alt || t("untitled")}
     />
   )
 }
