@@ -18,6 +18,9 @@ const mockEncodeSnapshot = jest.fn()
 const mockApplySnapshot = jest.fn()
 const mockGetSession = jest.fn()
 const mockSetLocalParticipantId = jest.fn()
+/** The document update bus. Returns its own unsubscribe, like the real one. */
+const mockOnLocalUpdate = jest.fn()
+const mockUnsubscribeLocalUpdate = jest.fn()
 
 /**
  * `shareTarget` asks the artifact store which workspace owns the document,
@@ -49,6 +52,7 @@ jest.mock("@/lib/canvas/collaboration/crdt-store", () => ({
     applySnapshot: (...args: unknown[]) => mockApplySnapshot(...args),
     getSession: (...args: unknown[]) => mockGetSession(...args),
     setLocalParticipantId: (...args: unknown[]) => mockSetLocalParticipantId(...args),
+    onLocalUpdate: (...args: unknown[]) => mockOnLocalUpdate(...args),
   },
 }))
 
@@ -132,6 +136,7 @@ describe("useCollaborativeSession", () => {
     mockEncodeSnapshot.mockReturnValue("AQE=")
     mockGetSession.mockReturnValue(mockSession)
     mockProviderConnect.mockResolvedValue(undefined)
+    mockOnLocalUpdate.mockReturnValue(mockUnsubscribeLocalUpdate)
     mockGetConnectionState.mockReturnValue("connected")
     artifactDocument.current = { id: "doc-456", projectId: "ws-1" }
     mockResolveTransport.mockResolvedValue(BINDING)
@@ -256,6 +261,37 @@ describe("useCollaborativeSession", () => {
       })
 
       expect(mockProviderConnect).not.toHaveBeenCalled()
+    })
+
+    it("broadcasts every local change through the document bus", async () => {
+      // The CRDT could receive and never send: the only producer of an
+      // operation was `updateContent`, which had no callers. Subscribing to
+      // the document rather than to one call site means an editor binding, an
+      // AI apply and a plugin write all leave the same way.
+      const { result } = renderHook(() => useCollaborativeSession())
+
+      await act(async () => {
+        await result.current.connect("doc-456", "content")
+      })
+
+      expect(mockOnLocalUpdate).toHaveBeenCalledWith("session-123", expect.any(Function))
+      const forward = mockOnLocalUpdate.mock.calls[0][1] as (op: unknown) => void
+      const operation = { id: "op-1", update: "AQE=", origin: "p-self", timestamp: 1 }
+      forward(operation)
+      expect(mockBroadcastOperation).toHaveBeenCalledWith(operation)
+    })
+
+    it("stops broadcasting once the session is closed", async () => {
+      const { result } = renderHook(() => useCollaborativeSession())
+
+      await act(async () => {
+        await result.current.connect("doc-456", "content")
+      })
+      act(() => {
+        result.current.disconnect()
+      })
+
+      expect(mockUnsubscribeLocalUpdate).toHaveBeenCalled()
     })
 
     it("publishes the document before opening the socket", async () => {

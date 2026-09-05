@@ -25,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useCollaborativeSession } from "@/hooks/canvas"
+import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { UseCollaborativeSessionReturn } from "@/hooks/canvas"
 import { getConnectionStatusColor } from "@/lib/canvas/utils"
 import type { Participant, CanvasCollaborationSessionState } from "@/types/canvas/collaboration"
@@ -56,6 +57,7 @@ export function CollaborationPanel({
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const [joinSessionId, setJoinSessionId] = useState("")
+  const showAvatars = useCanvasSettingsStore((s) => s.settings.collaboration.showAvatars)
 
   const sessionApi = useCollaborativeSession({
     participantName: t("anonymousParticipant"),
@@ -358,7 +360,11 @@ export function CollaborationPanel({
                   </p>
                 ) : (
                   effectiveParticipants.map((participant) => (
-                    <ParticipantItem key={participant.id} participant={participant} />
+                    <ParticipantItem
+                      key={participant.id}
+                      participant={participant}
+                      showAvatar={showAvatars}
+                    />
                   ))
                 )}
               </div>
@@ -372,9 +378,11 @@ export function CollaborationPanel({
 
 interface ParticipantItemProps {
   participant: Participant
+  /** `collaboration.showAvatars`. The row still lists the person either way. */
+  showAvatar: boolean
 }
 
-function ParticipantItem({ participant }: ParticipantItemProps) {
+function ParticipantItem({ participant, showAvatar }: ParticipantItemProps) {
   const t = useTranslations("canvas")
   const initials = participant.name
     .split(" ")
@@ -385,14 +393,24 @@ function ParticipantItem({ participant }: ParticipantItemProps) {
 
   return (
     <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-      <Avatar className="h-8 w-8">
-        <AvatarFallback
+      {showAvatar ? (
+        <Avatar className="h-8 w-8">
+          <AvatarFallback
+            style={{ backgroundColor: participant.color }}
+            className="text-white text-xs"
+          >
+            {initials}
+          </AvatarFallback>
+        </Avatar>
+      ) : (
+        // The person is still listed, and still keeps their colour: turning
+        // avatars off asks for a quieter list, not for anonymous rows.
+        <span
+          aria-hidden
+          className="size-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: participant.color }}
-          className="text-white text-xs"
-        >
-          {initials}
-        </AvatarFallback>
-      </Avatar>
+        />
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{participant.name}</p>
         <p className="text-xs text-muted-foreground">

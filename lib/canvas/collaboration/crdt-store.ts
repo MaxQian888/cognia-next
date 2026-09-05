@@ -45,6 +45,18 @@ import { loggers } from "@cognia/logging"
 /** The one key every Canvas document's text lives under inside its `Y.Doc`. */
 export const CANVAS_TEXT_KEY = "content"
 
+/**
+ * The transaction origin every update that arrived from a peer is applied
+ * under.
+ *
+ * `onLocalUpdate` treats anything else as local, deliberately. Listing the
+ * local origins instead would mean every new way of mutating the document (an
+ * editor binding, an AI apply, a plugin write) had to remember to add itself,
+ * and the failure mode of forgetting is an edit that never reaches anybody.
+ * Inverting it makes the default correct: whatever this device did, it says.
+ */
+export const CANVAS_REMOTE_ORIGIN = "cognia:canvas:remote"
+
 function persistSessionMetadata(label: string, session: CollaborativeSession): void {
   canvasSessionsDb.upsertSession(session).catch((err) => {
     loggers.canvas.warn(`crdt-store ${label} persist failed`, {
@@ -105,6 +117,10 @@ export class CanvasCRDTStore {
   private sessions: Map<string, CollaborativeSession> = new Map()
   private localParticipantId: string | null = null
   private listeners: Map<string, Set<(update: CollaborationUpdate) => void>> = new Map()
+  /** Per document, the callbacks watching for updates this device produced. */
+  private localUpdateListeners: Map<string, Set<(operation: CRDTOperation) => void>> = new Map()
+  /** Watchers of the session set itself, for surfaces outside the hook that owns it. */
+  private sessionListeners: Set<() => void> = new Set()
 
   setLocalParticipantId(id: string): void {
     this.localParticipantId = id
@@ -112,6 +128,11 @@ export class CanvasCRDTStore {
 
   private localId(): string {
     return this.localParticipantId || "local"
+  }
+
+  /** Who this device is in a session, for a surface that has to find itself. */
+  getLocalParticipantId(): string | null {
+    return this.localParticipantId
   }
 
   /** The `Y.Doc` for a session's document, for an editor binding to attach to. */
@@ -143,8 +164,79 @@ export class CanvasCRDTStore {
       record.content = text.toString()
       record.version += 1
     })
+    // One place that notices this device changed the document, whoever changed
+    // it. Before this, only `applyLocalUpdate` produced an operation to
+    // broadcast, and it had no callers: an editor binding, an AI apply or a
+    // plugin write reached the `Y.Doc` and stopped there.
+    doc.on("update", (update: Uint8Array, origin: unknown) => {
+      if (origin === CANVAS_REMOTE_ORIGIN) return
+      const listeners = this.localUpdateListeners.get(documentId)
+      if (!listeners?.size) return
+      const operation: CRDTOperation = {
+        id: `op-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        update: toBase64(update),
+        origin: this.localId(),
+        timestamp: Date.now(),
+      }
+      for (const listener of listeners) listener(operation)
+    })
     this.documents.set(documentId, record)
     return record
+  }
+
+  /**
+   * Watch the session set.
+   *
+   * A session is created by whichever surface called `connect`, which today is
+   * the collaboration panel. The editor lives in a different component and has
+   * no way to be told. Rather than lift the session into a second state
+   * container next to this one, the registry says when it changed and callers
+   * read it back with `sessionIdForDocument`.
+   */
+  onSessionsChanged(listener: () => void): () => void {
+    this.sessionListeners.add(listener)
+    return () => {
+      this.sessionListeners.delete(listener)
+    }
+  }
+
+  private notifySessionsChanged(): void {
+    for (const listener of this.sessionListeners) listener()
+  }
+
+  /**
+   * The open session for a document, by id.
+   *
+   * A string rather than the session object, because this is what a
+   * `useSyncExternalStore` snapshot compares: returning the object would
+   * re-render on every mutation Yjs makes to its participant list.
+   */
+  sessionIdForDocument(documentId: string): string | null {
+    for (const session of this.sessions.values()) {
+      if (session.documentId === documentId && session.isActive) return session.id
+    }
+    return null
+  }
+
+  /**
+   * Watch for updates this device produced, whatever produced them.
+   *
+   * The payload is the incremental update Yjs emitted for that transaction,
+   * not a diff against a state vector, so a burst of keystrokes is a burst of
+   * small frames rather than one growing snapshot.
+   */
+  onLocalUpdate(sessionId: string, listener: (operation: CRDTOperation) => void): () => void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return () => {}
+    const documentId = session.documentId
+    const listeners = this.localUpdateListeners.get(documentId) ?? new Set()
+    listeners.add(listener)
+    this.localUpdateListeners.set(documentId, listeners)
+    return () => {
+      const current = this.localUpdateListeners.get(documentId)
+      current?.delete(listener)
+      if (current && current.size === 0) this.localUpdateListeners.delete(documentId)
+    }
   }
 
   createSession(documentId: string, content: string): CollaborativeSession {
@@ -170,6 +262,7 @@ export class CanvasCRDTStore {
     this.sessions.set(sessionId, session)
 
     persistSessionMetadata("createSession", session)
+    this.notifySessionsChanged()
 
     return session
   }
@@ -280,7 +373,10 @@ export class CanvasCRDTStore {
     if (!record) return
 
     try {
-      Y.applyUpdate(record.doc, fromBase64(operation.update), operation.origin)
+      // The sentinel, not the peer's id: it is what `onLocalUpdate` filters on,
+      // and relaying a peer's update straight back to them is how a room of
+      // three starts echoing.
+      Y.applyUpdate(record.doc, fromBase64(operation.update), CANVAS_REMOTE_ORIGIN)
     } catch (err) {
       loggers.canvas.warn("crdt remote update rejected", {
         sessionId,
@@ -320,7 +416,7 @@ export class CanvasCRDTStore {
     const record = this.documents.get(session.documentId)
     if (!record) return false
     try {
-      Y.applyUpdate(record.doc, fromBase64(snapshot), "remote-snapshot")
+      Y.applyUpdate(record.doc, fromBase64(snapshot), CANVAS_REMOTE_ORIGIN)
       return true
     } catch (err) {
       loggers.canvas.warn("crdt snapshot rejected", { sessionId, error: String(err) })
@@ -396,7 +492,9 @@ export class CanvasCRDTStore {
       this.documents.get(session.documentId)?.doc.destroy()
       this.documents.delete(session.documentId)
       this.listeners.delete(sessionId)
+      this.localUpdateListeners.delete(session.documentId)
       persistSessionClose(sessionId)
+      this.notifySessionsChanged()
     }
   }
 

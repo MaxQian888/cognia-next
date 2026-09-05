@@ -615,3 +615,108 @@ describe("CanvasCRDTStore Dexie persistence", () => {
     await flushMicrotasks()
   })
 })
+
+describe("the document update bus", () => {
+  it("reports what this device changed, whatever changed it", () => {
+    // The CRDT could receive and never send. `applyLocalUpdate` was the only
+    // producer of an operation and it had no callers, so an editor binding or
+    // an AI apply reached the `Y.Doc` and stopped there.
+    const store = new CanvasCRDTStore()
+    const session = store.createSession("doc-1", "hello")
+    const seen: string[] = []
+    store.onLocalUpdate(session.id, (operation) => seen.push(operation.update))
+
+    // Straight into the shared text, the way a binding does it.
+    store.getYText(session.id)!.insert(5, " world")
+
+    expect(seen).toHaveLength(1)
+    expect(store.getDocumentContent(session.id)).toBe("hello world")
+  })
+
+  it("does not echo a peer's update back to them", () => {
+    // Relaying what a peer just sent is how a room of three starts echoing.
+    const opener = new CanvasCRDTStore()
+    const openerSession = opener.createSession("doc-1", "hello")
+
+    const peer = new CanvasCRDTStore()
+    const peerSession = peer.createSession("doc-1", "")
+    peer.applySnapshot(peerSession.id, opener.encodeSnapshot(openerSession.id)!)
+    peer.getYText(peerSession.id)!.insert(5, "!")
+    const fromPeer = {
+      id: "op-1",
+      update: peer.encodeSnapshot(peerSession.id)!,
+      origin: "p-peer",
+      timestamp: 1,
+    }
+
+    const seen: unknown[] = []
+    opener.onLocalUpdate(openerSession.id, (operation) => seen.push(operation))
+    opener.applyRemoteUpdate(openerSession.id, fromPeer)
+
+    expect(seen).toEqual([])
+    expect(opener.getDocumentContent(openerSession.id)).toBe("hello!")
+  })
+
+  it("does not echo a snapshot back either", () => {
+    const opener = new CanvasCRDTStore()
+    const openerSession = opener.createSession("doc-1", "hello")
+    const peer = new CanvasCRDTStore()
+    const peerSession = peer.createSession("doc-1", "")
+    peer.applySnapshot(peerSession.id, opener.encodeSnapshot(openerSession.id)!)
+    peer.getYText(peerSession.id)!.insert(0, "> ")
+
+    const seen: unknown[] = []
+    opener.onLocalUpdate(openerSession.id, (operation) => seen.push(operation))
+    opener.applySnapshot(openerSession.id, peer.encodeSnapshot(peerSession.id)!)
+
+    expect(seen).toEqual([])
+  })
+
+  it("stops reporting once the listener is disposed", () => {
+    const store = new CanvasCRDTStore()
+    const session = store.createSession("doc-1", "hello")
+    const seen: unknown[] = []
+    const dispose = store.onLocalUpdate(session.id, (operation) => seen.push(operation))
+    dispose()
+    store.getYText(session.id)!.insert(0, "x")
+    expect(seen).toEqual([])
+  })
+
+  it("hands back a no-op disposer for a session that does not exist", () => {
+    const store = new CanvasCRDTStore()
+    expect(() => store.onLocalUpdate("nope", () => {})()).not.toThrow()
+  })
+})
+
+describe("the session registry", () => {
+  it("tells a watcher when a session opens and closes", () => {
+    // The editor and the collaboration panel are siblings. Without this the
+    // editor has no way to learn a session appeared.
+    const store = new CanvasCRDTStore()
+    const changes: number[] = []
+    store.onSessionsChanged(() => changes.push(changes.length))
+
+    const session = store.createSession("doc-1", "hello")
+    expect(changes).toHaveLength(1)
+    store.closeSession(session.id)
+    expect(changes).toHaveLength(2)
+  })
+
+  it("finds the open session for a document, and forgets a closed one", () => {
+    const store = new CanvasCRDTStore()
+    const session = store.createSession("doc-1", "hello")
+    expect(store.sessionIdForDocument("doc-1")).toBe(session.id)
+    expect(store.sessionIdForDocument("doc-other")).toBeNull()
+    store.closeSession(session.id)
+    expect(store.sessionIdForDocument("doc-1")).toBeNull()
+  })
+
+  it("stops notifying a disposed watcher", () => {
+    const store = new CanvasCRDTStore()
+    const changes: number[] = []
+    const dispose = store.onSessionsChanged(() => changes.push(1))
+    dispose()
+    store.createSession("doc-1", "hello")
+    expect(changes).toEqual([])
+  })
+})

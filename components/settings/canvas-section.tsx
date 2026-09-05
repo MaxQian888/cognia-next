@@ -631,15 +631,6 @@ function CollaborationTab({ settings }: SectionProps) {
         checked={c.enabled}
         onChange={(v) => set({ collaboration: { ...c, enabled: v } })}
       />
-      <Row label={t("signallingServerUrl")}>
-        <Input
-          value={c.serverUrl}
-          // i18n-exempt: a literal websocket URL example, not prose
-          placeholder="ws://localhost:8787"
-          className="max-w-md text-xs"
-          onChange={(e) => set({ collaboration: { ...c, serverUrl: e.target.value } })}
-        />
-      </Row>
       <Toggle
         label={t("showCursors")}
         checked={c.showCursors}
@@ -668,15 +659,6 @@ function CollaborationTab({ settings }: SectionProps) {
         step={1000}
         unit="ms"
         onChange={(n) => set({ collaboration: { ...c, presenceTimeout: n } })}
-      />
-      <SliderRow
-        label={t("syncInterval")}
-        value={c.syncInterval}
-        min={50}
-        max={1000}
-        step={10}
-        unit="ms"
-        onChange={(n) => set({ collaboration: { ...c, syncInterval: n } })}
       />
     </div>
   )

@@ -195,6 +195,41 @@ describe("LightCodeEditor", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it("mounts caller extensions and reconfigures them live", async () => {
+    // The seam the Canvas collaborative binding attaches through. It has to
+    // reconfigure rather than remount, because rebuilding the view when a
+    // session opens would throw away the cursor mid-edit.
+    const { EditorView } = await import("@codemirror/view")
+    const marker = jest.fn()
+    const extension = EditorView.updateListener.of(() => marker())
+
+    const { rerender } = render(
+      <LightCodeEditor value="hello" onChange={() => {}} language="markdown" />
+    )
+    await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull())
+    const contentBefore = document.querySelector(".cm-content")
+
+    rerender(
+      <LightCodeEditor
+        value="hello"
+        onChange={() => {}}
+        language="markdown"
+        extensions={[extension]}
+      />
+    )
+    await waitFor(() => expect(marker).toHaveBeenCalled())
+    // Same view, not a fresh one.
+    expect(document.querySelector(".cm-content")).toBe(contentBefore)
+  })
+
+  it("is unaffected when a caller passes no extensions", async () => {
+    // Every existing caller. The compartment holds an empty array and
+    // contributes nothing.
+    render(<LightCodeEditor value="hello" onChange={() => {}} language="markdown" />)
+    await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull())
+    expect(screen.getByText("hello")).toBeInTheDocument()
+  })
+
   it("mounts with bracket auto-close disabled", async () => {
     render(
       <LightCodeEditor value="x" onChange={() => {}} language="plaintext" closeBrackets={false} />

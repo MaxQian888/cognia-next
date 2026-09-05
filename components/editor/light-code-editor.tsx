@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { EditorState, Compartment } from "@codemirror/state"
+import { EditorState, Compartment, type Extension } from "@codemirror/state"
 import {
   EditorView,
   keymap,
@@ -95,6 +95,18 @@ export interface LightCodeEditorProps {
   tabSize?: number
   /** Soft-wrap long lines (default true). Reconfigures live. */
   wordWrap?: boolean
+  /**
+   * Extra CodeMirror extensions, mounted in their own compartment.
+   *
+   * The one seam a caller has into the editor's own configuration, added for
+   * the Canvas collaborative binding (`yCollab`). It rides a `Compartment` so
+   * it can be reconfigured when a collaborative session opens or closes,
+   * rather than needing the whole view to be rebuilt.
+   *
+   * Callers that pass nothing are unaffected: the compartment holds an empty
+   * array and contributes no behaviour.
+   */
+  extensions?: Extension[]
   className?: string
   "aria-label"?: string
   "data-testid"?: string
@@ -164,6 +176,7 @@ export function LightCodeEditor({
   lineHeight = 1.6,
   tabSize = 2,
   wordWrap = true,
+  extensions: extraExtensions,
   className,
   ...rest
 }: LightCodeEditorProps) {
@@ -196,6 +209,13 @@ export function LightCodeEditor({
   const lineNumberCompartment = useMemo(() => new Compartment(), [])
   const wrapCompartment = useMemo(() => new Compartment(), [])
   const tabCompartment = useMemo(() => new Compartment(), [])
+  const extraCompartment = useMemo(() => new Compartment(), [])
+  // Read by the mount-once effect. Depending on the array directly would
+  // rebuild the whole view every time a caller passed a fresh literal.
+  const extraExtensionsRef = useRef(extraExtensions)
+  useEffect(() => {
+    extraExtensionsRef.current = extraExtensions
+  }, [extraExtensions])
 
   // Diagnostics only mount for languages with an in-browser producer — no empty
   // lint gutter on plaintext/markdown/etc. (The external LSP seam is a future
@@ -259,6 +279,10 @@ export function LightCodeEditor({
         tabCompartment.of([EditorState.tabSize.of(tabSize), indentUnit.of(" ".repeat(tabSize))]),
         languageCompartment.of([]),
         lintCompartment.of([]),
+        // Last of the caller-facing compartments, so a caller extension can
+        // override a keymap or a theme this component set rather than being
+        // silently outranked by it.
+        extraCompartment.of(extraExtensionsRef.current ?? []),
         readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
         // Mobile keyboards: no autocapitalize/autocorrect inside code.
         EditorView.contentAttributes.of({
@@ -340,6 +364,15 @@ export function LightCodeEditor({
       effects: lineNumberCompartment.reconfigure(lineNumberExtension(showLineNumbers)),
     })
   }, [showLineNumbers, lineNumberCompartment])
+
+  // Live caller extensions. This is what lets a collaborative session attach
+  // to an editor that is already open, and detach when it closes, without the
+  // view being torn down and the cursor lost.
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: extraCompartment.reconfigure(extraExtensions ?? []),
+    })
+  }, [extraExtensions, extraCompartment])
 
   // Live soft-wrap toggle.
   useEffect(() => {

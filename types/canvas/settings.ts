@@ -1,7 +1,9 @@
 /**
- * Canvas Settings Types — editor configuration & preferences.
- * Ported from D:\Project\Cognia\types\canvas\settings.ts with two
- * cognia-next addition: collaboration.serverUrl.
+ * Canvas Settings Types: editor configuration and preferences.
+ *
+ * Every field here has a runtime consumer. Where one did not, it was removed
+ * rather than left showing a control that decides nothing, and the reason is
+ * recorded next to the block it left.
  */
 
 export interface CanvasEditorSettings {
@@ -75,20 +77,35 @@ export interface CanvasVersionSettings {
   showVersionTimestamps: boolean
 }
 
+/**
+ * What Canvas collaboration can actually be told to do.
+ *
+ * Two fields were removed rather than left inert, on the same reasoning as the
+ * execution block below:
+ *
+ * - `serverUrl`: a websocket URL for a "signalling server". Nothing read it.
+ *   Where the collaboration plane lives is `lib/collab/connection.ts`, set
+ *   once per account in Settings, and the Canvas socket is opened by
+ *   `CollabClient.openCanvasStream` against it. A second, Canvas-only address
+ *   would be a second answer to one question, and typing one here changed
+ *   nothing at all.
+ * - `syncInterval` (50-1000ms): the cadence of a polling model this system
+ *   does not have. Yjs pushes each transaction as it happens and the server
+ *   relays it, so there is no interval to tune. Rebinding the name to the
+ *   local save debounce would have been relabelling, not wiring.
+ *
+ * The rest all have a reader: `enabled` gates the binding,
+ * `showCursors` / `showSelections` / `cursorSmoothing` are the presence
+ * stylesheet, `presenceTimeout` is the awareness protocol's idle cutoff, and
+ * `showAvatars` is the participant list.
+ */
 export interface CanvasCollaborationSettings {
   enabled: boolean
-  /**
-   * cognia-next addition. WebSocket URL for the CRDT signalling server.
-   * Empty string ⇒ never connect; useful while collaboration UI ships
-   * disabled by default.
-   */
-  serverUrl: string
   showCursors: boolean
   showAvatars: boolean
   showSelections: boolean
   cursorSmoothing: boolean
   presenceTimeout: number
-  syncInterval: number
 }
 
 /**
@@ -195,13 +212,11 @@ export const DEFAULT_CANVAS_SETTINGS: CanvasSettings = {
   },
   collaboration: {
     enabled: false,
-    serverUrl: "",
     showCursors: true,
     showAvatars: true,
     showSelections: true,
     cursorSmoothing: true,
     presenceTimeout: 60000,
-    syncInterval: 100,
   },
   execution: {
     maxExecutionTime: 30000,

@@ -133,6 +133,8 @@ export function useCollaborativeSession(
     return participantIdRef.current
   }, [])
   const sessionIdRef = useRef<string | null>(null)
+  /** Detaches the document update bus, so a closed session stops broadcasting. */
+  const localUpdateUnsubscribeRef = useRef<(() => void) | null>(null)
 
   const createLocalParticipant = useCallback(
     (): Participant => ({
@@ -285,6 +287,14 @@ export function useCollaborativeSession(
 
         setConnectionState("connecting")
         await provider.connect(sessionId, participant)
+        // One subscription per session, covering every way this device can
+        // change the document. Before this the CRDT could receive and never
+        // send: the only producer of an operation was `updateContent`, and
+        // nothing called it.
+        localUpdateUnsubscribeRef.current?.()
+        localUpdateUnsubscribeRef.current = storeRef.current.onLocalUpdate(sessionId, (operation) =>
+          provider.broadcastOperation(operation)
+        )
         if (options.sync) provider.requestSync()
       } catch (error) {
         log.error("Failed to open the Canvas transport", error as Error)
@@ -320,6 +330,8 @@ export function useCollaborativeSession(
   )
 
   const disconnect = useCallback(() => {
+    localUpdateUnsubscribeRef.current?.()
+    localUpdateUnsubscribeRef.current = null
     if (providerRef.current) {
       providerRef.current.disconnect()
       providerRef.current = null
@@ -350,9 +362,11 @@ export function useCollaborativeSession(
         origin: getParticipantId(),
       })
 
-      if (providerRef.current) {
-        providerRef.current.broadcastOperation(operation)
-      }
+      // Deliberately not broadcast here. `attachTransport` subscribes to the
+      // document's update bus, so every change this device makes leaves once,
+      // whether it came from this call, an editor binding, an AI apply or a
+      // plugin write. Broadcasting here as well would send this one twice.
+      void operation
     },
     [getParticipantId]
   )

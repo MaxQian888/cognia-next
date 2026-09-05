@@ -46,6 +46,7 @@ import { cn } from "@/lib/utils"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { CanvasDocument } from "@/types/artifact/artifact"
 import { useCanvasMonacoSetup } from "@/hooks/canvas/use-canvas-monaco-setup"
+import { useCanvasCollaborativeEditor } from "@/hooks/canvas/use-canvas-collaborative-editor"
 import {
   useCanvasDocumentSummaries,
   type CanvasDocumentSummary,
@@ -203,9 +204,27 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
     cancel: cancelCommit,
   } = useDebouncedCallback(commitEditorContent, CANVAS_EDIT_COMMIT_DEBOUNCE_MS)
 
+  // Same flag the collaboration panel is behind, so the editor cannot be bound
+  // to a session the rest of the UI does not admit exists.
+  const collaborationEnabled = useCanvasFeatureFlag("canvas.collaboration.v1")
+  const collaborative = useCanvasCollaborativeEditor({
+    documentId: activeId,
+    enabled: collaborationEnabled,
+  })
+
+  const collaborativeRef = useRef(false)
+  useEffect(() => {
+    collaborativeRef.current = collaborative.active
+  }, [collaborative.active])
+
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
       if (!activeId) return
+      // While a session is bound the editor's buffer belongs to the shared
+      // document, and the projection in `use-canvas-collaborative-editor`
+      // is what writes it back. Committing from here as well would give the
+      // store two debounced writers racing to save the same characters.
+      if (collaborativeRef.current) return
       pendingValueRef.current = value ?? ""
       commitEdit(value ?? "")
     },
@@ -258,6 +277,10 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const suggestions = useCanvasSuggestions()
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null)
   const editorContainerRef = useRef<HTMLDivElement | null>(null)
+  // Undoes the Yjs binding. Run before the model goes away: a binding that
+  // outlives its model keeps writing into an editor nobody can see, which
+  // reads as a document that quietly stops accepting remote edits.
+  const monacoBindingRef = useRef<(() => void) | null>(null)
   // Mobile renders the CodeMirror light editor instead of Monaco (no LSP
   // workbench, no worker assets); every editorRef consumer below falls back
   // to whole-document semantics when the Monaco ref is absent.
@@ -286,6 +309,13 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   useEffect(() => {
     if (!editorMounted) editorRef.current = null
   }, [editorMounted])
+
+  useEffect(() => {
+    return () => {
+      monacoBindingRef.current?.()
+      monacoBindingRef.current = null
+    }
+  }, [activeId, editorMounted])
 
   // Outline → editor navigation: the outline panel (a sibling in the right rail)
   // dispatches `canvas-goto-line`; reveal + focus the line in Monaco. Mirrors the
@@ -719,6 +749,12 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
             onMount={(editor, monaco) => {
               editorRef.current = editor
               monacoSetup.onMount(editor, monaco)
+              // Attaching here rather than in an effect: the model only exists
+              // once Monaco has mounted, and a binding without one silently
+              // does nothing.
+              void collaborative.bindMonaco(editor).then((teardown) => {
+                monacoBindingRef.current = teardown
+              })
               editor.onDidChangeCursorSelection?.((event) => {
                 const model = editor.getModel()
                 if (!model) return
@@ -753,6 +789,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
       value={activeDoc.content}
       language={editorLanguageFromMonacoId(activeDoc.language)}
       onChange={(v) => handleEditorChange(v)}
+      extensions={collaborative.codeMirrorExtensions}
       aria-label={activeDoc.title}
       className="px-2"
       fontSize={editorSettings.fontSize}
