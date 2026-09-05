@@ -503,20 +503,84 @@ roster.
 
 Off by default behind `COLLAB_CANVAS_ENABLED`.
 
+## Amendment, 2026-09-05: the editors reach the document, and comments move with it
+
+The amendment above listed editor bindings and comment anchors as open. Both
+have landed.
+
+### The CRDT could receive and never send
+
+`applyLocalUpdate` was the only thing that produced an operation to broadcast,
+and it had no production caller. Every real edit went from the editor to the
+artifact store and stopped, so the `Y.Doc` moved only when a peer moved it. Two
+people on one document would have watched each other's changes arrive and none
+of their own leave.
+
+Monaco and CodeMirror write into the `Y.Text` now, and a document-level update
+bus notices. Watching the document rather than any one call site is the point:
+an AI apply, a model-tool write and a plugin write all leave the same way,
+without any of them knowing collaboration exists. The bus filters on a remote
+sentinel rather than on a list of local origins, because listing the local ones
+would mean every new mutation path had to remember to add itself, and the
+failure mode of forgetting is an edit nobody receives.
+
+While a binding is live the `Y.Text` owns the characters and the store's
+`content` is a debounced projection of it, so the preview, the export, the AI
+actions, the outline and the version history keep reading one field and none of
+them learn what a CRDT is.
+
+The editor finds its session by subscribing to the registry rather than by
+holding one. The session belongs to the collaboration panel, a sibling
+component, and lifting it into a second state container beside `crdtStore`
+would have been two places a session lives.
+
+### Comments name characters, not indices
+
+A comment was pinned with absolute offsets and a revision, and
+`isContextCommentAnchorStale` greyed the whole thread out when the revision
+moved. That is the only honest thing to do with an offset, since one line added
+at the top invalidates every offset below it, but it means a comment goes stale
+for edits that had nothing to do with it.
+
+A Yjs relative position survives insertions, deletions and concurrent edits by
+other people. The ends stick outwards, so typing against either boundary lands
+outside the comment: it was written about the characters that were there, not
+about whatever is appended to them.
+
+Deleting the commented span collapses both ends onto each other rather than
+failing to resolve, so a range that collapses where it used to cover something
+is read as deleted text. Reporting that empty position would render the comment
+as being about wherever the collapse landed, which is the top of the document.
+
+All of it is additive. The stored offsets stay and are what a device with no
+live document reads, and the panel resolves for display only, through a prop
+every other resource leaves unset.
+
+### Settings that decide something, and two that did not
+
+Four collaboration settings gained readers: `showCursors`, `showSelections` and
+`cursorSmoothing` are the stylesheet the remote decorations are drawn with, and
+`presenceTimeout` is the awareness protocol's own idle cutoff. `showAvatars` is
+the participant list. Hiding a decoration in CSS rather than withholding
+awareness is deliberate, so turning a setting back on shows where the peer is
+now rather than nothing until they next type.
+
+Two were removed on the same reasoning as the execution block. `serverUrl`
+named a signalling server nothing read, and where the plane lives is already
+`lib/collab/connection.ts`. `syncInterval` was the cadence of a polling model
+this system does not have, and rebinding the name to the local save debounce
+would have been relabelling rather than wiring.
+
 ### What is deliberately still open
 
-- **Editor bindings.** Monaco, CodeMirror and the comment anchors are not yet
-  bound to the shared Yjs document, and comments still carry their anchor as an
-  opaque string the server stores without interpreting. The column is there and
-  the type is Yjs-relative, but nothing computes one yet.
 - **The offline replay queue is in memory.** Frames a down socket refuses are
   queued and flushed on reconnect, which covers a blip but not a reload. A
   durable queue is an additive Dexie table and is not in this cut.
+- **Comment anchors do not reach the server yet.** `canvas_comments.anchor`
+  holds a Yjs relative position and the client computes one, but Canvas
+  comments still live in the local `contextComments` table. Syncing them
+  through the plane's comment routes is the remaining half.
 - **Rich Markdown editing** is not shipped. The plan named Milkdown. The reuse
   path is CodeMirror 6 decorations over `@codemirror/lang-markdown`, which is
   already a dependency and, unlike a ProseMirror round-trip, cannot lose an
   unsupported construct because the buffer never stops being Markdown.
-- **The collaboration settings block (8 fields) is still inert.** The transport
-  exists now, so these are wiring rather than blocked work: presence settings
-  should drive cursor and avatar rendering, and the reconnect fields should
-  reach the provider's own budget instead of its defaults.
