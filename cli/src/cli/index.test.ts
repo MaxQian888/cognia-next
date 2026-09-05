@@ -197,3 +197,122 @@ describe("main", () => {
     expect(chat).toHaveBeenCalled() // chat still wins; -p only shortcuts non-commands
   })
 })
+
+describe("the API plane and derived commands", () => {
+  it("dispatches api to its own command with the raw argv", async () => {
+    const s = sink()
+    const seen: Array<{ subcommand?: string; argv?: string[] }> = []
+    await main(["api", "list", "--format", "raw"], {
+      out: s.out,
+      api: async (args, deps) => {
+        seen.push({ subcommand: args.subcommand, argv: deps?.argv })
+        return 0
+      },
+    })
+    // The raw argv has to reach `api call`, which re-parses it once the
+    // command's own boolean fields are known.
+    expect(seen[0].subcommand).toBe("list")
+    expect(seen[0].argv).toEqual(["api", "list", "--format", "raw"])
+  })
+
+  it("dispatches host to its own command", async () => {
+    const s = sink()
+    let called = false
+    await main(["host", "list"], {
+      out: s.out,
+      host: async () => {
+        called = true
+        return 0
+      },
+    })
+    expect(called).toBe(true)
+  })
+
+  it("lets api print its own help instead of the global block", async () => {
+    const s = sink()
+    let called = false
+    expect(
+      await main(["api", "--help"], {
+        out: s.out,
+        api: async () => {
+          called = true
+          return 0
+        },
+      })
+    ).toBe(0)
+    expect(called).toBe(true)
+    expect(s.stdout()).not.toMatch(/standalone Cognia coding agent/)
+  })
+
+  it("lets host print its own help instead of the global block", async () => {
+    const s = sink()
+    let called = false
+    await main(["host", "--help"], {
+      out: s.out,
+      host: async () => {
+        called = true
+        return 0
+      },
+    })
+    expect(called).toBe(true)
+  })
+
+  it("describes a derived command under --help rather than printing usage", async () => {
+    const s = sink()
+    expect(
+      await main(["adapter", "update-policy", "--help", "--format", "raw"], { out: s.out })
+    ).toBe(0)
+    const described = JSON.parse(s.stdout()) as Record<string, unknown>
+    expect(described.command).toBe("adapter_update_policy")
+  })
+
+  it("still prints the global help for an older command that does not own one", async () => {
+    const s = sink()
+    expect(await main(["run", "--help"], { out: s.out })).toBe(0)
+    expect(s.stdout()).toMatch(/standalone Cognia coding agent/)
+  })
+
+  it("still prints the global help for a bare --help", async () => {
+    const s = sink()
+    expect(await main(["--help"], { out: s.out })).toBe(0)
+    expect(s.stdout()).toMatch(/standalone Cognia coding agent/)
+  })
+
+  it("routes a derived command through the api plane", async () => {
+    const s = sink()
+    // Point the CLI home at a directory that does not exist and clear the
+    // endpoint variables, so the run is hermetic: it gets as far as host
+    // resolution and stops there, whatever the developer has configured.
+    const saved = {
+      home: process.env.COGNIA_HOME,
+      endpoint: process.env.COGNIA_ENDPOINT,
+      serverUrl: process.env.COGNIA_SERVER_URL,
+      profile: process.env.COGNIA_PROFILE,
+    }
+    process.env.COGNIA_HOME = "/nonexistent-cognia-home-for-tests"
+    delete process.env.COGNIA_ENDPOINT
+    delete process.env.COGNIA_SERVER_URL
+    delete process.env.COGNIA_PROFILE
+    try {
+      const code = await main(["adapter", "update-policy", "--id", "x"], { out: s.out })
+      expect(code).toBe(1)
+      expect(s.stderr()).toMatch(/Cause: no-host/)
+    } finally {
+      for (const [key, value] of [
+        ["COGNIA_HOME", saved.home],
+        ["COGNIA_ENDPOINT", saved.endpoint],
+        ["COGNIA_SERVER_URL", saved.serverUrl],
+        ["COGNIA_PROFILE", saved.profile],
+      ] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+
+  it("still rejects a name that is neither a command nor a derived one", async () => {
+    const s = sink()
+    expect(await main(["definitely-not-a-command"], { out: s.out })).toBe(2)
+    expect(s.stderr()).toMatch(/unknown command/)
+  })
+})

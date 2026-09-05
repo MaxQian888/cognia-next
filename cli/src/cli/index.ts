@@ -176,6 +176,14 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
     return 0
   }
   if (args.help) {
+    // The API plane and the derived resource commands print their own help,
+    // which for a derived command is a description of that command's fields.
+    // Every older command still reaches the global block, because most of them
+    // never learned to handle `--help` themselves.
+    if (args.command === "api") return (deps.api ?? defaultApi)(args, { out, argv })
+    if (args.command === "host") return (deps.host ?? defaultHost)(args, { out })
+    const derivedHelp = matchDerived(args)
+    if (derivedHelp) return dispatchDerived(args, derivedHelp, { out, argv })
     out.write(HELP)
     return 0
   }
