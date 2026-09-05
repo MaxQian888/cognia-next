@@ -11,7 +11,7 @@
  * `components/canvas/canvas-side-panels.tsx`.
  */
 
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import dynamic from "next/dynamic"
 import type { editor as MonacoEditor } from "monaco-editor"
 import { useTranslations } from "next-intl"
@@ -59,6 +59,7 @@ import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import { RenameDialog } from "./rename-dialog"
+import { CanvasDeleteDocumentDialog } from "./canvas-delete-document-dialog"
 import type { FormatAction } from "@/components/document/document-format-toolbar"
 import { FORMAT_ACTION_MAP } from "@/lib/canvas/constants"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
@@ -110,14 +111,49 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   const create = useArtifactStore((s) => s.createCanvasDocument)
   const remove = useArtifactStore((s) => s.deleteCanvasDocument)
   const saveVersion = useArtifactStore((s) => s.saveCanvasVersion)
+  const getCanvasVersions = useArtifactStore((s) => s.getCanvasVersions)
   const proposeCanvasReview = useArtifactStore((s) => s.proposeCanvasReview)
   const previewMode = useCanvasLayoutStore((s) => s.previewMode)
+  // The tab strip lists OPEN documents, not every document in the workspace.
+  // Closing removes a tab and nothing else; deleting is the confirmed action
+  // below. Before this split the X did both.
+  const openDocIds = useCanvasLayoutStore((s) => s.openDocIds)
+  const openDocument = useCanvasLayoutStore((s) => s.openDocument)
+  const closeDocument = useCanvasLayoutStore((s) => s.closeDocument)
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null)
   const pendingReview = useArtifactStore((s) =>
     activeId ? (s.pendingReviews[activeId] ?? null) : null
   )
 
   const activeDoc = useArtifactStore((s) =>
     activeId ? ((s.canvasDocuments[activeId] as CanvasDocument | undefined) ?? null) : null
+  )
+
+  // Every path that focuses a document (the rail, `revealCanvasDocument`, the
+  // `canvas_open` tool, a plugin) goes through `activeCanvasId`, so opening the
+  // tab here covers all of them without each having to remember to.
+  useEffect(() => {
+    if (activeId) openDocument(activeId)
+  }, [activeId, openDocument])
+
+  // Tabs, in tab order, restricted to documents this workspace still has. The
+  // active one is always included: it is open by definition, and the effect
+  // above lands a beat later on first activation.
+  const openDocuments = useMemo(() => {
+    const byId = new Map(documents.map((doc) => [doc.id, doc]))
+    const ordered = openDocIds.map((id) => byId.get(id)).filter((doc) => doc !== undefined)
+    if (activeId && byId.has(activeId) && !ordered.some((doc) => doc.id === activeId)) {
+      ordered.push(byId.get(activeId)!)
+    }
+    return ordered
+  }, [documents, openDocIds, activeId])
+
+  const handleCloseDocument = useCallback(
+    (id: string) => {
+      const next = closeDocument(id)
+      if (activeId === id) setActive(next)
+    },
+    [activeId, closeDocument, setActive]
   )
   // The last content this component put INTO the store. Anything else arriving
   // on `activeDoc.content` came from outside (AI action, review accept, version
@@ -670,19 +706,11 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
   return (
     <div className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>
       <CanvasToolbar
-        documents={documents}
+        documents={openDocuments}
         activeDocumentId={activeId}
         running={actions.running}
         onSelectDocument={setActive}
-        onCloseDocument={(id) => {
-          // Closing a tab removes the document from the workspace (canvas has no
-          // separate "open vs all" state) and moves focus to a sibling.
-          if (activeId === id) {
-            const next = documents.find((d) => d.id !== id)
-            setActive(next?.id ?? null)
-          }
-          remove(id)
-        }}
+        onCloseDocument={handleCloseDocument}
         onCreateDocument={onCreate}
         onRenameDocument={(id, title) => updateDoc(id, { title, updatedAt: new Date() })}
         onDuplicateDocument={(id) => {
@@ -698,10 +726,7 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
           })
           setActive(dupId)
         }}
-        onDeleteDocument={(id) => {
-          remove(id)
-          if (activeId === id) setActive(null)
-        }}
+        onDeleteDocument={setDeleteCandidateId}
         onSaveVersion={() => activeDoc && saveVersion(activeDoc.id, "manual")}
         previewable={previewable}
         reviewing={reviewing}
@@ -755,6 +780,21 @@ export function CanvasPanel({ className }: CanvasPanelProps) {
           onCreateDocument={onCreate}
         />
       )}
+
+      <CanvasDeleteDocumentDialog
+        open={deleteCandidateId !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeleteCandidateId(null)
+        }}
+        documentTitle={
+          documents.find((doc) => doc.id === deleteCandidateId)?.title ?? t("untitledDefault")
+        }
+        versionCount={deleteCandidateId ? getCanvasVersions(deleteCandidateId).length : 0}
+        onConfirm={() => {
+          if (deleteCandidateId) remove(deleteCandidateId)
+          setDeleteCandidateId(null)
+        }}
+      />
     </div>
   )
 }

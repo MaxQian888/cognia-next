@@ -19,6 +19,8 @@ import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { getPluginRateLimiter, RateLimitError } from "@/lib/plugin/security/rate-limiter"
 import { loggers } from "@cognia/logging"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { disposeCanvasDocument } from "@/lib/canvas/document-disposal"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useChatStore } from "@/stores/chat"
 import { registerProjectBucketPurger } from "@/lib/project/project-bucket-purge"
@@ -998,9 +1000,16 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const artifacts = Object.fromEntries(
             Object.entries(state.artifacts).filter(([, a]) => a.projectId !== projectId)
           )
+          const purgedCanvasIds = Object.entries(state.canvasDocuments)
+            .filter(([, d]) => d.projectId === projectId)
+            .map(([id]) => id)
           const canvasDocuments = Object.fromEntries(
             Object.entries(state.canvasDocuments).filter(([, d]) => d.projectId !== projectId)
           )
+          // Tabs pointing at a purged workspace's documents would come back the
+          // next time that id was reused, and render as ghost rows until then.
+          useCanvasLayoutStore.getState().closeDocuments(purgedCanvasIds)
+          for (const id of purgedCanvasIds) disposeCanvasDocument(id)
           // Keep reviews whose target (artifact OR canvas document) survives the
           // purge — canvas reviews share this map, keyed by document id.
           const pendingReviews = Object.fromEntries(
@@ -1903,9 +1912,26 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
         }
       },
 
+      /**
+       * Destroy a document and everything that points at it. This is the
+       * irreversible half of the close/delete split: closing a tab only calls
+       * `useCanvasLayoutStore.closeDocument`, and the confirm dialog in front of
+       * this action is what tells the two apart for the user.
+       *
+       * The cascade is deliberately wider than the map entry. Versions ride on
+       * the document row, so they go with it; the layout store holds a pin and
+       * a tab that would otherwise outlive the document and render as a ghost
+       * row; everything owned by another store (comments today, the
+       * collaboration session next) lets go through
+       * `lib/canvas/document-disposal.ts`. The Dexie side of the same cascade
+       * (`canvasVersions` / `contextComments` / `canvasSessions`) is driven by
+       * `lib/canvas/dexie-bridge.ts`, which derives deletes from "in the mirror,
+       * absent from memory".
+       */
       deleteCanvasDocument: (id) => {
         let didDelete = false
         let activeCleared = false
+        let nextActiveId: string | null = null
         set((state) => {
           if (!state.canvasDocuments[id]) return state
           didDelete = true
@@ -1919,9 +1945,20 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           }
         })
         if (didDelete) {
+          const layout = useCanvasLayoutStore.getState()
+          nextActiveId = layout.closeDocument(id)
+          layout.unpinDocument(id)
+          disposeCanvasDocument(id)
+          if (activeCleared && nextActiveId && get().canvasDocuments[nextActiveId]) {
+            // Deleting the focused document lands on its neighbour rather than
+            // on the empty state, the same way closing it does.
+            set({ activeCanvasId: nextActiveId })
+          }
           getPluginEventHooks().dispatchCanvasDelete(id)
+          // Only when focus actually moved: a delete of a background document
+          // must not tell plugins the active document changed.
           if (activeCleared) {
-            getPluginEventHooks().dispatchCanvasSwitch(null)
+            getPluginEventHooks().dispatchCanvasSwitch(get().activeCanvasId)
           }
         }
       },
@@ -2355,6 +2392,11 @@ export const useArtifactStore = create<ArtifactState & ArtifactActions>()(
           const pendingReviews = Object.fromEntries(
             Object.entries(state.pendingReviews).filter(([id]) => artifacts[id])
           )
+          const clearedCanvasIds = Object.entries(state.canvasDocuments)
+            .filter(([, d]) => d.sessionId === sessionId)
+            .map(([id]) => id)
+          useCanvasLayoutStore.getState().closeDocuments(clearedCanvasIds)
+          for (const id of clearedCanvasIds) disposeCanvasDocument(id)
           const canvasDocuments = Object.fromEntries(
             Object.entries(state.canvasDocuments).filter(([, d]) => d.sessionId !== sessionId)
           )

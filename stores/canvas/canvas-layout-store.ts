@@ -2,9 +2,17 @@
  * Canvas Layout Store — persisted shell sizing for the Canvas guild.
  *
  * Owns: panel sizes (percent), per-rail collapsed flags, the active
- * right-rail tab, and runtime-only mobile sheet open flags. The
- * `<CanvasShell />` component calls `setSizes` on every drag tick;
- * persistence is debounced internally so localStorage isn't thrashed.
+ * right-rail tab, the set of OPEN documents (the tab strip), and runtime-only
+ * mobile sheet open flags. The `<CanvasShell />` component calls `setSizes` on
+ * every drag tick; persistence is debounced internally so localStorage isn't
+ * thrashed.
+ *
+ * `openDocIds` is why closing a tab is no longer a delete. Canvas used to have
+ * no "open vs all" state at all, so the tab strip's X called
+ * `deleteCanvasDocument` and destroyed the document, its versions and its
+ * comments. Openness is a per-user layout preference, so it lives here rather
+ * than on the document row: two people sharing a document do not share a tab
+ * strip.
  */
 
 import { create } from "zustand"
@@ -41,6 +49,12 @@ export interface CanvasLayoutState {
   layoutVersion: number
   /** Pinned document IDs — persisted as string[] and hydrated back to Set. */
   pinnedDocIds: Set<string>
+  /**
+   * Documents open in the tab strip, in tab order. A document can exist in the
+   * workspace without being open; closing removes it from here and touches
+   * nothing else.
+   */
+  openDocIds: string[]
 
   setSizes: (sizes: number[]) => void
   toggleLeft: () => void
@@ -56,6 +70,21 @@ export interface CanvasLayoutState {
   pinDocument: (id: string) => void
   unpinDocument: (id: string) => void
   isPinned: (id: string) => boolean
+  /** Append to the tab strip if absent. Idempotent. */
+  openDocument: (id: string) => void
+  /**
+   * Remove from the tab strip. Returns the id that should take focus when the
+   * closed tab was the active one (the next tab, else the previous, else
+   * `null`), so the caller does not have to re-derive tab order.
+   */
+  closeDocument: (id: string) => string | null
+  /**
+   * Drop several tabs at once, for the bulk paths that remove the documents
+   * behind them (a purged workspace, a cleared conversation). Passing no ids
+   * clears the strip.
+   */
+  closeDocuments: (ids?: string[]) => void
+  isOpen: (id: string) => boolean
 }
 
 interface PersistedCanvasLayoutState {
@@ -69,6 +98,7 @@ interface PersistedCanvasLayoutState {
   previewMode: CanvasPreviewMode
   layoutVersion: number
   pinnedDocIds: string[]
+  openDocIds: string[]
 }
 
 export const CANVAS_LAYOUT_DEFAULTS = {
@@ -82,6 +112,7 @@ export const CANVAS_LAYOUT_DEFAULTS = {
   previewMode: "split" as CanvasPreviewMode,
   layoutVersion: 0,
   pinnedDocIds: new Set<string>(),
+  openDocIds: [] as string[],
 }
 
 export const CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS = 150
@@ -160,6 +191,28 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
           return { pinnedDocIds: next }
         }),
       isPinned: (id) => get().pinnedDocIds.has(id),
+      openDocument: (id) =>
+        set((state) =>
+          state.openDocIds.includes(id) ? state : { openDocIds: [...state.openDocIds, id] }
+        ),
+      closeDocument: (id) => {
+        const { openDocIds } = get()
+        const index = openDocIds.indexOf(id)
+        if (index === -1) return null
+        const next = openDocIds.filter((docId) => docId !== id)
+        set({ openDocIds: next })
+        // Focus the tab that slid into this slot, else the one before it. This
+        // is the VS Code behaviour and the reason `closeDocument` returns an id
+        // instead of leaving the caller to guess from a list it already lost.
+        return next[index] ?? next[index - 1] ?? null
+      },
+      closeDocuments: (ids) =>
+        set((state) =>
+          ids === undefined
+            ? { openDocIds: [] }
+            : { openDocIds: state.openDocIds.filter((docId) => !ids.includes(docId)) }
+        ),
+      isOpen: (id) => get().openDocIds.includes(id),
     }),
     {
       name: "cognia-canvas-layout",
@@ -183,6 +236,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
         previewMode: state.previewMode,
         layoutVersion: state.layoutVersion,
         pinnedDocIds: [...state.pinnedDocIds],
+        openDocIds: [...state.openDocIds],
       }),
       merge: (persisted: unknown, current: CanvasLayoutState) => {
         const p = persisted as PersistedCanvasLayoutState
@@ -190,6 +244,7 @@ export const useCanvasLayoutStore = create<CanvasLayoutState>()(
           ...current,
           ...p,
           pinnedDocIds: new Set(p.pinnedDocIds ?? []),
+          openDocIds: [...(p.openDocIds ?? [])],
         } as CanvasLayoutState
       },
     }

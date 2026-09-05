@@ -65,6 +65,7 @@ import { LANGUAGE_OPTIONS } from "@/lib/canvas/constants"
 import { getFileExtension } from "@/lib/canvas/utils"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { RenameDialog } from "./rename-dialog"
+import { CanvasDeleteDocumentDialog } from "./canvas-delete-document-dialog"
 
 type SortField = "updatedAt" | "title" | "language"
 type SortOrder = "asc" | "desc"
@@ -128,6 +129,7 @@ export function CanvasDocumentRail() {
   const create = useArtifactStore((s) => s.createCanvasDocument)
   const updateDoc = useArtifactStore((s) => s.updateCanvasDocument)
   const remove = useArtifactStore((s) => s.deleteCanvasDocument)
+  const getCanvasVersions = useArtifactStore((s) => s.getCanvasVersions)
 
   const pinnedDocIds = useCanvasLayoutStore((s) => s.pinnedDocIds)
   const pinDocument = useCanvasLayoutStore((s) => s.pinDocument)
@@ -139,6 +141,9 @@ export function CanvasDocumentRail() {
   const [langFilter, setLangFilter] = useState<string>("all")
   const [sortField, setSortField] = useState<SortField>("updatedAt")
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
+  // Deleting a document destroys its versions and comments, so it asks first.
+  // Closing (the tab strip's X in `CanvasPanel`) is the non-destructive verb.
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameDocId, setRenameDocId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
@@ -261,8 +266,7 @@ export function CanvasDocumentRail() {
                     })}
                     onClick={(ev) => {
                       ev.stopPropagation()
-                      if (activeId === doc.id) setActive(null)
-                      remove(doc.id)
+                      setDeleteCandidateId(doc.id)
                     }}
                     className="size-5 shrink-0 opacity-0 transition group-hover:opacity-70 hover:opacity-100"
                   >
@@ -317,10 +321,7 @@ export function CanvasDocumentRail() {
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
-              onClick={() => {
-                remove(doc.id)
-                if (activeId === doc.id) setActive(null)
-              }}
+              onClick={() => setDeleteCandidateId(doc.id)}
               className="text-destructive focus:text-destructive"
             >
               <Trash2 className="mr-2 size-3.5" />
@@ -531,6 +532,20 @@ export function CanvasDocumentRail() {
         onOpenChange={setRenameDialogOpen}
         currentTitle={renameValue}
         onRename={handleConfirmRename}
+      />
+      <CanvasDeleteDocumentDialog
+        open={deleteCandidateId !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeleteCandidateId(null)
+        }}
+        documentTitle={
+          documents.find((doc) => doc.id === deleteCandidateId)?.title ?? t("untitledDefault")
+        }
+        versionCount={deleteCandidateId ? getCanvasVersions(deleteCandidateId).length : 0}
+        onConfirm={() => {
+          if (deleteCandidateId) remove(deleteCandidateId)
+          setDeleteCandidateId(null)
+        }}
       />
     </aside>
   )

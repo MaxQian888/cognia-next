@@ -15,6 +15,7 @@ import { create } from "zustand"
 import { nanoid } from "nanoid"
 import type { CanvasComment, LineRange } from "@/types/canvas/collaboration"
 import * as canvasCommentsDb from "@/lib/db/canvas-comments"
+import { registerCanvasDocumentDisposer } from "@/lib/canvas/document-disposal"
 import { loggers } from "@cognia/logging"
 
 interface CommentState {
@@ -319,3 +320,13 @@ if (typeof window !== "undefined") {
 export const __TESTING__ = { LEGACY_KEY, LEGACY_MIGRATED_KEY, reviveLegacyComment }
 
 export default useCommentStore
+
+// A deleted document's threads must not survive it in memory. Registered here
+// rather than imported by the artifact store, so deleting a document does not
+// require every consumer of that store to load this one (and run the legacy
+// localStorage migration below). `lib/canvas/dexie-bridge.ts` already imports
+// this module at boot, which is what guarantees the disposer is registered by
+// the time a delete can happen.
+registerCanvasDocumentDisposer("canvas-comments", (documentId) => {
+  useCommentStore.getState().clearDocumentComments(documentId)
+})

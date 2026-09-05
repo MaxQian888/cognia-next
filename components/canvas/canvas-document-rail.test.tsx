@@ -110,6 +110,9 @@ describe("CanvasDocumentRail", () => {
     const user = userEvent.setup()
     renderWithProviders(<CanvasDocumentRail />)
     await user.click(screen.getByRole("button", { name: /Delete document/i }))
+    // The control now raises a confirmation instead of destroying on the click;
+    // the destructive half is covered in "delete is confirmed" below.
+    await user.click(screen.getByTestId("canvas-delete-document-confirm"))
     expect(Object.values(useArtifactStore.getState().canvasDocuments)).toHaveLength(0)
   })
 
@@ -306,5 +309,84 @@ describe("CanvasDocumentRail — workspace isolation", () => {
 
     expect(screen.getByText("BetaDoc")).toBeInTheDocument()
     expect(screen.queryByText("AlphaDoc")).not.toBeInTheDocument()
+  })
+})
+
+describe("CanvasDocumentRail — delete is confirmed, close is not delete", () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    resetStores()
+  })
+
+  function seed(title: string) {
+    let id = ""
+    act(() => {
+      id = useArtifactStore.getState().createCanvasDocument({
+        title,
+        content: title,
+        language: "markdown",
+        type: "text",
+      })
+    })
+    return id
+  }
+
+  it("asks before destroying a document, and keeps it on cancel", async () => {
+    const user = userEvent.setup()
+    const id = seed("Precious")
+    renderWithProviders(<CanvasDocumentRail />)
+
+    await user.click(screen.getByRole("button", { name: /Delete document Precious/i }))
+
+    expect(screen.getByTestId("canvas-delete-document-dialog")).toBeInTheDocument()
+    // Nothing gone yet: the prompt is the whole point.
+    expect(useArtifactStore.getState().canvasDocuments[id]).toBeDefined()
+
+    await user.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(useArtifactStore.getState().canvasDocuments[id]).toBeDefined()
+  })
+
+  it("destroys the document on confirm", async () => {
+    const user = userEvent.setup()
+    const id = seed("Doomed")
+    renderWithProviders(<CanvasDocumentRail />)
+
+    await user.click(screen.getByRole("button", { name: /Delete document Doomed/i }))
+    await user.click(screen.getByTestId("canvas-delete-document-confirm"))
+
+    expect(useArtifactStore.getState().canvasDocuments[id]).toBeUndefined()
+  })
+
+  it("names the saved versions it is about to destroy", async () => {
+    const user = userEvent.setup()
+    const id = seed("Versioned")
+    act(() => {
+      useArtifactStore.getState().saveCanvasVersion(id, "v1")
+      useArtifactStore.getState().saveCanvasVersion(id, "v2")
+    })
+
+    renderWithProviders(<CanvasDocumentRail />)
+    await user.click(screen.getByRole("button", { name: /Delete document Versioned/i }))
+
+    expect(screen.getByTestId("canvas-delete-document-dialog")).toHaveTextContent(
+      /2 saved versions/i
+    )
+  })
+
+  it("drops the document's tab and pin when it is deleted", async () => {
+    const user = userEvent.setup()
+    const id = seed("Linked")
+    act(() => {
+      useCanvasLayoutStore.getState().openDocument(id)
+      useCanvasLayoutStore.getState().pinDocument(id)
+    })
+
+    renderWithProviders(<CanvasDocumentRail />)
+    await user.click(screen.getByRole("button", { name: /Delete document Linked/i }))
+    await user.click(screen.getByTestId("canvas-delete-document-confirm"))
+
+    // A layout reference that outlives its document renders as a ghost row.
+    expect(useCanvasLayoutStore.getState().openDocIds).not.toContain(id)
+    expect(useCanvasLayoutStore.getState().isPinned(id)).toBe(false)
   })
 })

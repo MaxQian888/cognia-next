@@ -57,6 +57,11 @@ import {
   useArtifactStore,
 } from "./artifact-store"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import {
+  registerCanvasDocumentDisposer,
+  unregisterCanvasDocumentDisposer,
+} from "@/lib/canvas/document-disposal"
 import { purgeProjectBuckets } from "@/lib/project/project-bucket-purge"
 
 const initial = {
@@ -897,6 +902,87 @@ describe("canvas documents", () => {
 
   it("compareVersions returns null when versions are missing", () => {
     expect(useArtifactStore.getState().compareVersions("missing", "x", "y")).toBeNull()
+  })
+})
+
+describe("deleteCanvasDocument cascade", () => {
+  it("lets go of the layout references that would otherwise outlive the document", () => {
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Linked",
+      content: "x",
+      language: "markdown",
+      type: "text",
+    })
+    useCanvasLayoutStore.getState().openDocument(id)
+    useCanvasLayoutStore.getState().pinDocument(id)
+
+    useArtifactStore.getState().deleteCanvasDocument(id)
+
+    // A pin or a tab pointing at a deleted document renders as a ghost row.
+    expect(useCanvasLayoutStore.getState().openDocIds).not.toContain(id)
+    expect(useCanvasLayoutStore.getState().isPinned(id)).toBe(false)
+  })
+
+  it("calls the cross-store disposers", () => {
+    const disposer = jest.fn()
+    registerCanvasDocumentDisposer("test-owner", disposer)
+    const id = useArtifactStore.getState().createCanvasDocument({
+      title: "Owned",
+      content: "x",
+      language: "markdown",
+      type: "text",
+    })
+
+    useArtifactStore.getState().deleteCanvasDocument(id)
+
+    expect(disposer).toHaveBeenCalledWith(id)
+    unregisterCanvasDocumentDisposer("test-owner")
+  })
+
+  it("moves focus to the neighbouring tab instead of the empty state", () => {
+    const first = useArtifactStore.getState().createCanvasDocument({
+      title: "First",
+      content: "a",
+      language: "markdown",
+      type: "text",
+    })
+    const second = useArtifactStore.getState().createCanvasDocument({
+      title: "Second",
+      content: "b",
+      language: "markdown",
+      type: "text",
+    })
+    useCanvasLayoutStore.getState().openDocument(first)
+    useCanvasLayoutStore.getState().openDocument(second)
+    useArtifactStore.getState().setActiveCanvas(second)
+
+    useArtifactStore.getState().deleteCanvasDocument(second)
+
+    expect(useArtifactStore.getState().activeCanvasId).toBe(first)
+  })
+
+  it("does not announce a focus change when a background document is deleted", () => {
+    const active = useArtifactStore.getState().createCanvasDocument({
+      title: "Active",
+      content: "a",
+      language: "markdown",
+      type: "text",
+    })
+    const background = useArtifactStore.getState().createCanvasDocument({
+      title: "Background",
+      content: "b",
+      language: "markdown",
+      type: "text",
+    })
+    useCanvasLayoutStore.getState().openDocument(active)
+    useCanvasLayoutStore.getState().openDocument(background)
+    useArtifactStore.getState().setActiveCanvas(active)
+    mockHooksManager.dispatchCanvasSwitch.mockClear()
+
+    useArtifactStore.getState().deleteCanvasDocument(background)
+
+    expect(useArtifactStore.getState().activeCanvasId).toBe(active)
+    expect(mockHooksManager.dispatchCanvasSwitch).not.toHaveBeenCalled()
   })
 })
 

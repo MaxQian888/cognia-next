@@ -2249,6 +2249,7 @@
     },
     "kind": {
       "agentTurn": "对话",
+      "bot": "Bot",
       "chat": "对话",
       "connector": "连接器",
       "delegation": "委派",
@@ -2261,8 +2262,7 @@
       "subagent": "子智能体",
       "team": "团队",
       "workflow": "工作流",
-      "workflowStep": "工作流步骤",
-      "bot": "Bot"
+      "workflowStep": "工作流步骤"
     },
     "live": "进行中",
     "loadMore": "加载更多",
@@ -4868,6 +4868,7 @@
     },
     "clearOutput": "清空输出",
     "close": "关闭",
+    "closeDocumentAria": "关闭 {name}",
     "codeExecution": "代码执行",
     "codeType": "代码",
     "collabFallbackMessage": "实时协作不可用。你仍然可以本地编辑，但不会同步到其他参与者。",
@@ -4900,6 +4901,9 @@
     "degradedLocal": "降级 — 仅本地",
     "delete": "删除",
     "deleteAria": "删除文档 {name}",
+    "deleteDocumentConfirm": "“{name}” 及其评论将被永久删除，且无法恢复。如果只是想从标签栏移除，请改用“关闭”。",
+    "deleteDocumentConfirmTitle": "删除这份文档？",
+    "deleteDocumentConfirmWithVersions": "“{name}”、其评论以及 {count, plural, other {# 个已保存版本}} 将被永久删除，且无法恢复。如果只是想从标签栏移除，请改用“关闭”。",
     "deleteVersion": "删除版本",
     "deleteVersionConfirm": "确定要删除此版本吗？此操作不可撤销。",
     "descriptionOptional": "描述（可选）",
@@ -11405,6 +11409,7 @@
     },
     "kind": {
       "agentTurn": "对话",
+      "bot": "Bot",
       "chat": "对话",
       "connector": "连接器",
       "delegation": "委派",
@@ -11416,8 +11421,7 @@
       "subagent": "子代理",
       "team": "团队",
       "workflow": "工作流",
-      "workflowStep": "工作流步骤",
-      "bot": "Bot"
+      "workflowStep": "工作流步骤"
     },
     "runningCount": "{count, plural, =0 {空闲} other {# 个运行中}}",
     "sort": {

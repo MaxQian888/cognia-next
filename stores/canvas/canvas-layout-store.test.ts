@@ -311,3 +311,113 @@ describe("useCanvasLayoutStore", () => {
     })
   })
 })
+
+describe("open documents (the tab strip)", () => {
+  beforeEach(() => {
+    act(() => {
+      useCanvasLayoutStore.getState().closeDocuments()
+    })
+  })
+
+  it("appends in open order and is idempotent", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+      result.current.openDocument("b")
+      result.current.openDocument("a")
+    })
+    expect(result.current.openDocIds).toEqual(["a", "b"])
+    expect(result.current.isOpen("a")).toBe(true)
+    expect(result.current.isOpen("c")).toBe(false)
+  })
+
+  it("closing returns the tab that slides into the slot", () => {
+    // The caller has just lost the list it would need to derive focus from, so
+    // the store answers instead of leaving it to guess.
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+      result.current.openDocument("b")
+      result.current.openDocument("c")
+    })
+
+    let next: string | null = null
+    act(() => {
+      next = result.current.closeDocument("b")
+    })
+    expect(next).toBe("c")
+    expect(result.current.openDocIds).toEqual(["a", "c"])
+  })
+
+  it("closing the last tab falls back to the one before it", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+      result.current.openDocument("b")
+    })
+
+    let next: string | null = null
+    act(() => {
+      next = result.current.closeDocument("b")
+    })
+    expect(next).toBe("a")
+  })
+
+  it("closing the only tab answers null", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+    })
+
+    let next: string | null = "unset"
+    act(() => {
+      next = result.current.closeDocument("a")
+    })
+    expect(next).toBeNull()
+    expect(result.current.openDocIds).toEqual([])
+  })
+
+  it("closing a document that is not open changes nothing", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+    })
+
+    let next: string | null = "unset"
+    act(() => {
+      next = result.current.closeDocument("ghost")
+    })
+    expect(next).toBeNull()
+    expect(result.current.openDocIds).toEqual(["a"])
+  })
+
+  it("closes several tabs at once for a purged workspace", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+      result.current.openDocument("b")
+      result.current.openDocument("c")
+      result.current.closeDocuments(["a", "c"])
+    })
+    expect(result.current.openDocIds).toEqual(["b"])
+  })
+
+  it("clears the whole strip when no ids are named", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+      result.current.openDocument("b")
+      result.current.closeDocuments()
+    })
+    expect(result.current.openDocIds).toEqual([])
+  })
+
+  it("persists the tab strip across reloads", () => {
+    const { result } = renderHook(() => useCanvasLayoutStore())
+    act(() => {
+      result.current.openDocument("a")
+      result.current.openDocument("b")
+    })
+    expect(readPersisted()?.state.openDocIds).toEqual(["a", "b"])
+  })
+})

@@ -14,6 +14,7 @@ import { CanvasPanel } from "./canvas-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { CANVAS_EDIT_COMMIT_DEBOUNCE_MS } from "@/lib/canvas/constants"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 
 // Capture the most recent ResizeObserver callback so we can fire ticks at will.
 // Monaco's container resize handler is set up in an effect; the observer is
@@ -187,6 +188,7 @@ function resetStore() {
     const docs = Object.keys(useArtifactStore.getState().canvasDocuments)
     docs.forEach((id) => useArtifactStore.getState().deleteCanvasDocument(id))
     useArtifactStore.getState().setActiveCanvas(null)
+    useCanvasLayoutStore.getState().closeDocuments()
   })
 }
 
@@ -478,31 +480,86 @@ describe("CanvasPanel", () => {
       expect(screen.queryByTestId("canvas-export-trigger")).not.toBeInTheDocument()
     })
 
-    it("closing a tab removes the document from the store", () => {
-      let idA = ""
-      let idB = ""
-      act(() => {
-        idA = useArtifactStore.getState().createCanvasDocument({
-          title: "Alpha",
-          content: "a",
-          language: "markdown",
-          type: "text",
+    describe("close is not delete", () => {
+      function seedTwoOpen() {
+        let idA = ""
+        let idB = ""
+        act(() => {
+          idA = useArtifactStore.getState().createCanvasDocument({
+            title: "Alpha",
+            content: "a",
+            language: "markdown",
+            type: "text",
+          })
+          idB = useArtifactStore.getState().createCanvasDocument({
+            title: "Beta",
+            content: "b",
+            language: "markdown",
+            type: "text",
+          })
+          // Both are open in the tab strip; Beta has focus.
+          useCanvasLayoutStore.getState().openDocument(idA)
+          useCanvasLayoutStore.getState().openDocument(idB)
+          useArtifactStore.getState().setActiveCanvas(idB)
         })
-        idB = useArtifactStore.getState().createCanvasDocument({
-          title: "Beta",
-          content: "b",
-          language: "markdown",
-          type: "text",
+        return { idA, idB }
+      }
+
+      it("closing a tab keeps the document and only drops the tab", () => {
+        // This used to call `deleteCanvasDocument`: the X destroyed the
+        // document, its versions and its comments with no prompt and no undo.
+        const { idA, idB } = seedTwoOpen()
+        renderWithProviders(<CanvasPanel />)
+
+        act(() => {
+          fireEvent.click(screen.getByRole("button", { name: /Close Alpha/i }))
         })
-        useArtifactStore.getState().setActiveCanvas(idB)
+
+        expect(useArtifactStore.getState().canvasDocuments[idA]).toBeDefined()
+        expect(useArtifactStore.getState().canvasDocuments[idB]).toBeDefined()
+        expect(useCanvasLayoutStore.getState().openDocIds).toEqual([idB])
+        expect(screen.queryByRole("button", { name: /Close Alpha/i })).not.toBeInTheDocument()
       })
-      renderWithProviders(<CanvasPanel />)
-      // Tabs (with close buttons) render when >1 document exists.
-      act(() => {
-        fireEvent.click(screen.getByRole("button", { name: /Close Alpha/i }))
+
+      it("closing the focused tab moves focus to a neighbour", () => {
+        const { idA, idB } = seedTwoOpen()
+        renderWithProviders(<CanvasPanel />)
+
+        act(() => {
+          fireEvent.click(screen.getByRole("button", { name: /Close Beta/i }))
+        })
+
+        expect(useArtifactStore.getState().activeCanvasId).toBe(idA)
+        expect(useArtifactStore.getState().canvasDocuments[idB]).toBeDefined()
       })
-      expect(useArtifactStore.getState().canvasDocuments[idA]).toBeUndefined()
-      expect(useArtifactStore.getState().canvasDocuments[idB]).toBeDefined()
+
+      it("re-focusing a closed document reopens its tab", () => {
+        const { idA, idB } = seedTwoOpen()
+        renderWithProviders(<CanvasPanel />)
+
+        act(() => {
+          fireEvent.click(screen.getByRole("button", { name: /Close Alpha/i }))
+        })
+        expect(useCanvasLayoutStore.getState().openDocIds).toEqual([idB])
+
+        act(() => {
+          useArtifactStore.getState().setActiveCanvas(idA)
+        })
+        expect(useCanvasLayoutStore.getState().openDocIds).toContain(idA)
+      })
+
+      it("does not raise the delete prompt for a plain close", () => {
+        // The X and the menu's Delete are different verbs now; only the second
+        // one may put a destructive dialog on screen.
+        seedTwoOpen()
+        renderWithProviders(<CanvasPanel />)
+
+        act(() => {
+          fireEvent.click(screen.getByRole("button", { name: /Close Alpha/i }))
+        })
+
+        expect(screen.queryByTestId("canvas-delete-document-dialog")).not.toBeInTheDocument()
+      })
     })
 
     it("moves the language selector out of the editor toolbar into Inspect", () => {
